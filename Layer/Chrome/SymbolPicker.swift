@@ -88,13 +88,13 @@ struct SymbolPicker: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.label)
+                    .foregroundStyle(.secondary)
                 TextField("Search symbols", text: $search)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
             .padding(10)
-            .background(Theme.segmentTrack, in: .rect(cornerRadius: 10))
+            .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 10))
             .padding(12)
 
             ScrollView {
@@ -102,13 +102,13 @@ struct SymbolPicker: View {
                     if categories.isEmpty {
                         Text("No symbols match “\(search)”.")
                             .font(.system(size: 13))
-                            .foregroundStyle(Theme.label)
+                            .foregroundStyle(.secondary)
                             .padding(.vertical, 20)
                     }
                     ForEach(categories) { category in
                         Text(category.name)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.label)
+                            .foregroundStyle(.secondary)
                             .padding(.top, 6)
                         LazyVGrid(columns: columns, spacing: 6) {
                             ForEach(category.symbols, id: \.self) { name in
@@ -130,7 +130,7 @@ struct SymbolPicker: View {
                 .padding(.bottom, 16)
             }
         }
-        .foregroundStyle(Theme.ink)
+        .foregroundStyle(.primary)
         // The size of its popover. In a narrow window it is a sheet instead, and fills it.
         .frame(idealWidth: 340, maxWidth: .infinity, idealHeight: 480, maxHeight: .infinity)
     }

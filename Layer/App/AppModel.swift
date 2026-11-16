@@ -86,6 +86,10 @@ final class AppModel {
                 inkSelectionBounds = nil
             }
             if selection != oldValue { isEditingText = false }
+            // The format panel is for the selection: with nothing selected it goes.
+            if selection == nil, isInspectorOpen {
+                withAnimation(.smooth(duration: 0.3)) { isInspectorOpen = false }
+            }
         }
     }
 
@@ -412,10 +416,34 @@ final class AppModel {
                 try? await Task.sleep(until: due)
                 if Task.isCancelled { return }
             }
-            self?.previewRefresh = nil
-            self?.refreshPreview()
-            if let self { images.keepDecoded(store.content.imageIDs) }
+            await self?.refreshPreviewInBackground()
+            guard let self, !Task.isCancelled else { return }
+            previewRefresh = nil
+            images.keepDecoded(store.content.imageIDs)
+            // Changed while it was being drawn: wait for the next pause.
+            if needsPreview { schedulePreview() }
         }
+    }
+
+    /// What the board's picture shows, so that a board changed and changed back, or
+    /// touched without changing, isn't drawn again.
+    private struct PreviewedBoard: Equatable {
+        var content: DesignContent
+        var strokes: Int
+        var inkBounds: CGRect
+    }
+    @ObservationIgnored private var previewedBoard: PreviewedBoard?
+
+    private var board: PreviewedBoard {
+        let file = document.current
+        return PreviewedBoard(content: file.content, strokes: file.drawing.strokes.count, inkBounds: file.drawing.bounds)
+    }
+
+    private var needsPreview: Bool {
+        guard document.current.preview != nil else { return true }
+        // Until a picture has been drawn here, the one the file came with stands until a change.
+        guard let previewedBoard else { return isPreviewStale }
+        return previewedBoard != board
     }
 
     /// Redraws the board's picture now. Done before a design closes or the app leaves the
@@ -423,9 +451,28 @@ final class AppModel {
     func refreshPreview() {
         previewRefresh?.cancel()
         previewRefresh = nil
-        guard isPreviewStale || document.current.preview == nil else { return }
+        guard needsPreview else { return }
         isPreviewStale = false
+        previewedBoard = board
         let picture = BoardSnapshot.thumbnail(of: self)
+        document.update { $0.preview = picture }
+    }
+
+    /// Redraws the board's picture while the board is left alone. Only its views are drawn
+    /// on the main thread; the ink and the JPEG are done on another.
+    private func refreshPreviewInBackground() async {
+        guard needsPreview, !isClosed else { return }
+        let shown = board
+        isPreviewStale = false
+        guard let parts = BoardSnapshot.thumbnailParts(of: self) else {
+            previewedBoard = shown
+            document.update { $0.preview = nil }
+            return
+        }
+        let picture = await Task.detached(priority: .utility) { parts.thumbnail() }.value
+        // Changed meanwhile: the next pause draws it again.
+        guard !isClosed, !Task.isCancelled, board == shown else { return }
+        previewedBoard = shown
         document.update { $0.preview = picture }
     }
 
@@ -757,6 +804,23 @@ final class AppModel {
         }
     }
 
+    /// Reads the selected drawing as a sketch, told what `prompt` says of it, and puts what
+    /// it means in its place. The drawing stays if it can't be read as anything.
+    func convertSelection(prompt: String) {
+        guard case .ink(let keys) = selection, let strokes = ink?.inkStrokes(keys), !strokes.isEmpty else { return }
+        selection = nil
+        let zoom = viewport.scale
+        let conversion = Task { [weak self] () -> Void in
+            guard let self else { return }
+            await convert(onScreen(strokes, zoom: zoom), zoom: zoom, drawing: keys, prompt: prompt)
+        }
+        conversions.append(conversion)
+        Task { [weak self] in
+            await conversion.value
+            self?.conversions.removeAll { $0 == conversion }
+        }
+    }
+
     /// Throws away all Magic Pen ink that hasn't become anything.
     func discardSketch() {
         settle?.cancel()
@@ -788,11 +852,14 @@ final class AppModel {
     }
 
     /// Reads one sketch, given at its on-screen size, and puts what it means on the canvas.
-    private func convert(_ group: [SketchStroke], zoom: CGFloat) async {
+    /// A Magic Pen sketch is read on its own; `drawing` is set instead for ordinary ink
+    /// that was selected and asked to be read, with the `prompt` typed for it.
+    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: Set<Double>? = nil, prompt: String? = nil) async {
         let keys = Set(group.map(\.key))
-        defer { inFlight.subtract(keys) }
+        let isDrawing = drawing != nil
+        defer { if !isDrawing { inFlight.subtract(keys) } }
         guard let observation = SketchAnalyzer.observe(group) else {
-            reject(keys)
+            if !isDrawing { reject(keys) }
             return
         }
 
@@ -810,7 +877,7 @@ final class AppModel {
         } else {
             .openCanvas
         }
-        let request = SketchRequest(observation: observation, placement: placement, strokes: group.map(\.points))
+        let request = SketchRequest(observation: observation, placement: placement, strokes: group.map(\.points), prompt: prompt)
 
         var band: CGRect?
         if let host, !observation.form.isEnclosure, request.candidates != [.scratchOut] {
@@ -832,15 +899,20 @@ final class AppModel {
         withAnimation(.smooth(duration: 0.45)) {
             effects.removeAll { $0.id == effect.id }
             var converted = false
+            var added: DesignStore.ElementRef?
             switch reading {
             case .screen:
-                store.addScreen(from: bounds)
+                let screen = store.addScreen(from: bounds)
                 converted = true
+                if isDrawing { selection = .screen(screen.id) }
             case .element(let kind):
                 if let host {
-                    converted = store.addElement(kind, from: bounds, to: host.id) != nil
+                    if let element = store.addElement(kind, from: bounds, to: host.id) {
+                        converted = true
+                        added = .init(host: .screen(host.id), element: element.id)
+                    }
                 } else if !kind.belongsOnScreens || kind == .text {
-                    store.addFloating(kind, from: bounds)
+                    added = store.addFloating(kind, from: bounds)
                     converted = true
                 }
             case .scratchOut:
@@ -852,10 +924,18 @@ final class AppModel {
             case .unknown:
                 break
             }
+            // Words the prompt gave for the element go on it, and a drawing read on request
+            // ends with what it became selected.
+            if let added, isDrawing {
+                if let label = prompt.flatMap(SketchPrompt.label(in:)), store.resolve(added)?.element.kind.hasText == true {
+                    store.update(added) { $0.text = label }
+                }
+                selection = .element(added)
+            }
             if converted {
-                ink?.removeSketch(keys)
+                if let drawing { ink?.deleteInk(drawing) } else { ink?.removeSketch(keys) }
                 if reading != .scratchOut { suggestTitleIfNeeded() }
-            } else {
+            } else if !isDrawing {
                 reject(keys)
             }
         }

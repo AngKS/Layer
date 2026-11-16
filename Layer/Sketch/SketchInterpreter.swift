@@ -20,6 +20,11 @@ struct SketchRequest: Sendable {
     var observation: SketchObservation
     var placement: SketchPlacement
     var strokes: [[CGPoint]]
+    /// Set when someone asked for this drawing to be read, with what they typed about it,
+    /// which may be nothing. Nil for a Magic Pen sketch read on its own.
+    var prompt: String? = nil
+
+    var isAsked: Bool { prompt != nil }
 
     /// The sketch drawn dark on white, fitted into a square of `side` pixels.
     func renderImage(side: Int = 384) -> CGImage? {
@@ -115,6 +120,23 @@ extension SketchRequest {
             }
         }
     }
+}
+
+extension SketchRequest {
+    /// What the sketch could mean when someone asks for it to be read: what its shape
+    /// suggests first, then anything else that belongs where it was drawn, since they want
+    /// it to become something.
+    var askedCandidates: [SketchReading] {
+        let shaped = candidates.filter { $0 != .scratchOut }
+        let rest: [SketchReading] = switch placement {
+        case .openCanvas: [.element(.text), .element(.stickyNote), .screen]
+        case .onScreen: [ElementKind.title, .body, .image, .button, .textField, .divider, .toggle, .avatar].map(SketchReading.element)
+        }
+        return shaped + rest.filter { !shaped.contains($0) }
+    }
+
+    /// The readings an interpreter chooses among.
+    var options: [SketchReading] { isAsked ? askedCandidates : candidates }
 }
 
 /// What a sketch turned out to mean.
@@ -258,11 +280,56 @@ enum SketchPrompt {
                 sentences.append("On the screen so far, top to bottom: \(names.joined(separator: ", ")).")
             }
         }
-        let options = request.candidates.map(name(for:))
+        let options = request.options.map(name(for:))
         if options.count > 1 {
             sentences.append("It could be: \(options.dropLast().joined(separator: ", ")) or \(options[options.count - 1]).")
         }
+        if let prompt = request.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+            sentences.append("The designer says of it: “\(prompt)”. Go by what they say.")
+        }
         return sentences.joined(separator: " ")
+    }
+
+    /// The reading a prompt names outright, such as “a sign up button”, if it is one of
+    /// `options`. Longer names are looked for first, so “text field” isn't read as text.
+    static func reading(namedIn prompt: String, among options: [SketchReading]) -> SketchReading? {
+        let words: [(String, [SketchReading])] = [
+            ("text field", [.element(.textField)]), ("textfield", [.element(.textField)]),
+            ("input", [.element(.textField)]), ("search", [.element(.textField)]), ("field", [.element(.textField)]),
+            ("sticky", [.element(.stickyNote)]), ("note", [.element(.stickyNote)]),
+            ("button", [.element(.button)]), ("cta", [.element(.button)]),
+            ("image", [.element(.image)]), ("photo", [.element(.image)]), ("picture", [.element(.image)]),
+            ("heading", [.element(.title)]), ("header", [.element(.title)]), ("title", [.element(.title)]),
+            ("divider", [.element(.divider)]), ("separator", [.element(.divider)]),
+            ("toggle", [.element(.toggle)]), ("switch", [.element(.toggle)]),
+            ("avatar", [.element(.avatar)]), ("profile", [.element(.avatar)]),
+            ("screen", [.screen]), ("phone", [.screen]),
+            ("paragraph", [.element(.body)]), ("description", [.element(.body)]), ("body", [.element(.body)]),
+            ("label", [.element(.text), .element(.body)]), ("text", [.element(.text), .element(.body)]),
+        ]
+        let lowered = prompt.lowercased()
+        for (word, readings) in words where lowered.range(of: "\\b\(word)\\b", options: .regularExpression) != nil {
+            if let reading = readings.first(where: options.contains) { return reading }
+        }
+        return nil
+    }
+
+    /// The words a prompt gives for the element to show: what is in quotation marks, or
+    /// what follows “saying”, “says”, “that reads” or “labelled”.
+    static func label(in prompt: String) -> String? {
+        let patterns = [
+            #"[\"“”']([^\"“”']+)[\"“”']"#,
+            #"(?i)\b(?:saying|says|reads|labell?ed|called|named)\s+(.+)$"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: prompt, range: NSRange(prompt.startIndex..., in: prompt)),
+                  let range = Range(match.range(at: 1), in: prompt)
+            else { continue }
+            let label = prompt[range].trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !label.isEmpty { return label }
+        }
+        return nil
     }
 
     /// What is on a board, in a sentence or two, for naming it.

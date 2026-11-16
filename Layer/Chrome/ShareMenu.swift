@@ -92,12 +92,45 @@ enum BoardSnapshot {
     /// sits on a card of canvas that is never very wide or very tall, whatever shape the
     /// design is, so that designs line up in a grid. Nil for a board with nothing on it.
     static func thumbnail(of model: AppModel) -> Data? {
-        image(of: model, longestSide: 640, aspect: 0.8...1.25)?.jpegData(compressionQuality: 0.8)
+        thumbnailParts(of: model)?.thumbnail()
+    }
+
+    /// The part of a thumbnail that has to be drawn on the main thread, the board's SwiftUI
+    /// views. The ink and the JPEG can be done after, on any thread.
+    static func thumbnailParts(of model: AppModel) -> Parts? {
+        // The browser shows a thumbnail at most a few hundred pixels across.
+        parts(of: model, longestSide: 480, aspect: 0.8...1.25)
+    }
+
+    /// A board drawn but not yet put together with its ink.
+    struct Parts: @unchecked Sendable {
+        let design: UIImage
+        let drawing: PKDrawing?
+        let area: CGRect
+        let scale: CGFloat
+
+        func image() -> UIImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = scale
+            format.opaque = true
+            return UIGraphicsImageRenderer(size: area.size, format: format).image { _ in
+                design.draw(in: CGRect(origin: .zero, size: area.size))
+                drawing?.image(from: area, scale: scale).draw(in: CGRect(origin: .zero, size: area.size))
+            }
+        }
+
+        func thumbnail() -> Data? {
+            image().jpegData(compressionQuality: 0.8)
+        }
     }
 
     /// A picture no more than `longestSide` pixels along its longer side. `aspect` limits
     /// its width over its height, by adding canvas around the board.
     static func image(of model: AppModel, longestSide: CGFloat = 4096, aspect: ClosedRange<CGFloat>? = nil) -> UIImage? {
+        parts(of: model, longestSide: longestSide, aspect: aspect)?.image()
+    }
+
+    private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
         let drawing = model.document.current.drawing
         let ink = drawing.strokes.isEmpty ? nil : drawing.bounds
         let design = model.store.contentBounds
@@ -126,15 +159,7 @@ enum BoardSnapshot {
         let renderer = ImageRenderer(content: board)
         renderer.scale = scale
         guard let design = renderer.uiImage else { return nil }
-
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        return UIGraphicsImageRenderer(size: area.size, format: format).image { _ in
-            design.draw(in: CGRect(origin: .zero, size: area.size))
-            if ink != nil {
-                drawing.image(from: area, scale: scale).draw(in: CGRect(origin: .zero, size: area.size))
-            }
-        }
+        return Parts(design: design, drawing: ink == nil ? nil : drawing, area: area, scale: scale)
     }
 
     /// Writes the snapshot as a PNG named after the board, for sharing.

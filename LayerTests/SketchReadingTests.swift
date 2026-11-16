@@ -340,3 +340,59 @@ struct SketchPromptTests {
         #expect(image.height == 128)
     }
 }
+
+@Suite("Reading a drawing on request")
+@MainActor
+struct AskedReadingTests {
+    private let calls = CallCounter()
+
+    private func engine(answering answer: SketchReading, readiness: ProviderReadiness = .ready) -> SketchEngine {
+        let calls = calls
+        return SketchEngine(provider: SketchProvider(
+            id: "stub", name: "Stub", symbol: "sparkle", needsAPIKey: false,
+            readiness: { readiness },
+            makeInterpreter: { _ in StubInterpreter(answer: answer, calls: calls) }
+        ))
+    }
+
+    private func asked(_ prompt: String) throws -> SketchRequest {
+        let pill = CGRect(x: 28, y: 738, width: 337, height: 60)
+        var sketch = try request([SketchSamples.box(pill, radius: 30)], local: pill)
+        sketch.prompt = prompt
+        return sketch
+    }
+
+    @Test func whatThePromptNamesIsWhatItBecomesWithoutAskingTheModel() async throws {
+        let reading = await engine(answering: .element(.button)).read(try asked("an avatar of the user"))
+        #expect(reading == .element(.avatar))
+        #expect(await calls.count == 0)
+    }
+
+    @Test func aPromptThatNamesNothingIsLeftToTheModel() async throws {
+        let reading = await engine(answering: .element(.image)).read(try asked("the hero for the sign up page"))
+        #expect(reading == .element(.image))
+        #expect(await calls.count == 1)
+    }
+
+    @Test func withoutTheModelTheShapeDecides() async throws {
+        let reading = await engine(answering: .element(.image), readiness: .unavailable("Off")).read(try asked(""))
+        #expect(reading == .element(.button))
+    }
+
+    @Test func aRequestedReadingCanBeAnythingThatBelongsWhereItWasDrawn() throws {
+        let sketch = try asked("")
+        #expect(sketch.options.first == .element(.button), "what the shape suggests comes first")
+        #expect(sketch.options.contains(.element(.avatar)))
+        #expect(!sketch.options.contains(.screen))
+    }
+
+    @Test func thePromptsNamesAndWordsAreFound() {
+        let options = [ElementKind.button, .textField, .body, .title].map(SketchReading.element)
+        #expect(SketchPrompt.reading(namedIn: "email text field", among: options) == .element(.textField))
+        #expect(SketchPrompt.reading(namedIn: "Sign up button", among: options) == .element(.button))
+        #expect(SketchPrompt.reading(namedIn: "something nice", among: options) == nil)
+        #expect(SketchPrompt.label(in: "a button saying Sign up") == "Sign up")
+        #expect(SketchPrompt.label(in: "title “Welcome back”") == "Welcome back")
+        #expect(SketchPrompt.label(in: "a big picture") == nil)
+    }
+}

@@ -90,6 +90,7 @@ final class SketchEngine {
     }
 
     func read(_ request: SketchRequest) async -> SketchReading {
+        if request.isAsked { return await readAsked(request) }
         let fallback = rules.reading(for: request)
         guard rules.isCloseCall(request) else { return fallback }
 
@@ -102,6 +103,31 @@ final class SketchEngine {
             let elapsed = ContinuousClock.now - started
             log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: reading), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
             let isPossible = request.candidates.contains(reading)
+            record(answered: isPossible)
+            return isPossible ? reading : fallback
+        } catch {
+            log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            record(answered: false)
+            return fallback
+        }
+    }
+
+    /// Reads a drawing someone asked to have read. What their prompt names outright is
+    /// what it becomes. Otherwise the model chooses, told the prompt; failing that, the
+    /// shape decides, and failing that the likeliest thing for where it was drawn.
+    private func readAsked(_ request: SketchRequest) async -> SketchReading {
+        let options = request.options
+        if let prompt = request.prompt, let named = SketchPrompt.reading(namedIn: prompt, among: options) {
+            return named
+        }
+        let shaped = rules.reading(for: request)
+        let fallback = options.contains(shaped) ? shaped : options.first ?? .unknown
+        guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
+
+        let interpreter = provider.makeInterpreter(nil)
+        do {
+            let reading = try await withTimeout(Self.readLimit) { try await interpreter.read(request) }
+            let isPossible = options.contains(reading)
             record(answered: isPossible)
             return isPossible ? reading : fallback
         } catch {

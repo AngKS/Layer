@@ -28,11 +28,11 @@ struct ZoomControl: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                     Text("\(percent)%")
-                        .font(.system(size: 13, weight: .medium).monospacedDigit())
+                        .font(.system(size: 17, weight: .medium).monospacedDigit())
                 }
-                .foregroundStyle(Theme.ink)
-                .frame(minWidth: 52)
-                .frame(height: 36)
+                .foregroundStyle(.primary)
+                .frame(minWidth: 60)
+                .frame(height: 44)
                 .contentShape(.rect)
             }
             .accessibilityLabel("Zoom")
@@ -46,9 +46,9 @@ struct ZoomControl: View {
     private func step(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .frame(width: 36, height: 36)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
         .accessibilityLabel(label)
@@ -65,14 +65,13 @@ private struct ControlCapsule: ViewModifier {
             content
         } else {
             content
-                .padding(axis == .horizontal ? .horizontal : .vertical, 3)
-                .background(Theme.chrome, in: .capsule)
-                .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
+                .padding(axis == .horizontal ? .horizontal : .vertical, 4)
+                .glassEffect(.regular, in: .capsule)
         }
     }
 }
 
-/// In a narrow window: undo, redo and the zoom as one control at the bottom left, which
+/// Undo, redo and the zoom as one control at the bottom left, at any window width, which
 /// leaves the other corner for the pencil palette.
 struct ViewControls: View {
     var body: some View {
@@ -97,12 +96,11 @@ struct PaletteToggle: View {
             set(collapsed: !isCollapsed)
         } label: {
             Image(systemName: isCollapsed ? "pencil.tip" : "chevron.down")
-                .font(.system(size: isCollapsed ? 22 : 13, weight: isCollapsed ? .regular : .semibold))
-                .foregroundStyle(Theme.ink)
-                .frame(width: isCollapsed ? 56 : 42, height: isCollapsed ? 56 : 42)
-                .background(Theme.chrome, in: .circle)
-                .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
+                .font(.system(size: isCollapsed ? 22 : 18, weight: .regular))
+                .foregroundStyle(.primary)
+                .frame(width: isCollapsed ? 56 : 44, height: isCollapsed ? 56 : 44)
                 .contentShape(.circle)
+                .glassEffect(.regular, in: .circle)
         }
         .buttonStyle(.plain)
         // A flick down or aside puts the palette away, as it would the floating one; a flick up brings it back.
@@ -120,9 +118,8 @@ struct PaletteToggle: View {
 
 /// Undo and redo, for when the pencil palette and its own undo buttons are away. Each
 /// is only there while it has something to do: undo once there is a step to take back,
-/// redo once one has been taken back, and nothing at all on an untouched design. On its
-/// own it sits at the bottom right, undo above redo; as part of a larger control it lies
-/// flat and brings a divider to set it off from what follows.
+/// redo once one has been taken back, and nothing at all on an untouched design. As part
+/// of a larger control it lies flat and brings a divider to set it off from what follows.
 struct UndoControl: View {
     @Environment(\.undoManager) private var undoManager
     @State private var canUndo = false
@@ -145,8 +142,8 @@ struct UndoControl: View {
                     }
                     if isBare {
                         Rectangle()
-                            .fill(Theme.dividerLine)
-                            .frame(width: axis == .horizontal ? 1 : 18, height: axis == .horizontal ? 18 : 1)
+                            .fill(.separator)
+                            .frame(width: axis == .horizontal ? 1 : 22, height: axis == .horizontal ? 22 : 1)
                             .padding(axis == .horizontal ? .horizontal : .vertical, 3)
                     }
                 }
@@ -176,9 +173,9 @@ struct UndoControl: View {
             withAnimation(.smooth(duration: 0.3)) { action() }
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .frame(width: axis == .vertical ? 42 : 36, height: axis == .vertical ? 38 : 36)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
         .accessibilityLabel(label)
