@@ -353,6 +353,22 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Image of Board"].exists)
     }
 
+    func testImagesComeFromImagePlaygroundPhotosOrFiles() {
+        openNewDesign()
+        control("Add Image").tap()
+        XCTAssertTrue(app.buttons["Photos"].waitForExistence(timeout: 5), "the paperclip should offer Photos")
+        XCTAssertTrue(app.buttons["Files"].exists, "the paperclip should offer Files")
+        // Image Playground is offered only where Apple Intelligence can run it, which the
+        // Simulator can't.
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Add Image menu"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        app.buttons["Files"].tap()
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10) || app.buttons["Cancel"].waitForExistence(timeout: 5), "Files should open to pick an image")
+    }
+
     func testDrawingsAreSelectedAndMoved() {
         openNewDesign()
 
@@ -397,7 +413,7 @@ final class SketchFlowUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
-            "Designs", "Board title", "Layers", "Draw", "Text", "Frames", "Sticky note", "Symbols", "Attach image",
+            "Designs", "Board title", "Layers", "Draw", "Text", "Frames", "Sticky note", "Symbols", "Add Image",
             "Share", "Format", "Zoom out", "Zoom", "Zoom in", "Magic Pen",
         ]
         for label in controls {

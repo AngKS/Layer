@@ -14,6 +14,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case nothingToExport
     case invalidColour(String)
     case invalidBlueprint
+    case imagePlaygroundUnavailable
+    case notAnImage
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -26,6 +28,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .nothingToExport: "There's nothing on that design to export yet."
         case .invalidColour(let text): "“\(text)” isn't a colour Layer knows. Use a name such as blue, or a hex code such as #0A84FF."
         case .invalidBlueprint: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
+        case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
+        case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         }
     }
 }

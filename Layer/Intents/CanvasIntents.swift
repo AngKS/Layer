@@ -216,13 +216,14 @@ struct LayerShortcuts: AppShortcutsProvider {
             systemImageName: "chevron.left.forwardslash.chevron.right"
         )
         AppShortcut(
-            intent: DescribeDesignIntent(),
+            intent: GenerateImageIntent(),
             phrases: [
-                "What's in my \(.applicationName) design",
-                "Describe my \(.applicationName) design",
+                "Make an image in \(.applicationName)",
+                "Make a \(\.$style) in \(.applicationName)",
+                "Open Image Playground in \(.applicationName)",
             ],
-            shortTitle: "Describe Design",
-            systemImageName: "text.bubble"
+            shortTitle: "Make Image",
+            systemImageName: "apple.image.playground"
         )
         AppShortcut(
             intent: ExportDesignImageIntent(),

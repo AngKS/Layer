@@ -130,6 +130,7 @@ struct CanvasScreen: View {
         // What is on the canvas, for Siri and Apple Intelligence: see `OnscreenContext`.
         .appEntityUIElements { [model] context in model.onscreenEntities(context) }
         .appEntityIdentifier(model.designEntityIdentifier)
+        .background { Color.clear.modifier(ImagePlaygroundPresenter()) }
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
             set: { if !$0 { model.keptVersionsNotice = nil } }

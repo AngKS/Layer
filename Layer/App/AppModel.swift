@@ -148,6 +148,8 @@ final class AppModel {
 
     /// Whether the selected element's text is being typed into.
     var isEditingText = false
+    /// An image being made in Image Playground, while its sheet is up. See `ImagePlaygroundSupport`.
+    var imagePlaygroundRequest: ImagePlaygroundRequest?
     /// Whether sketches convert on their own once the pen has rested for a moment.
     /// Remembered between launches.
     var convertsAutomatically = AppModel.savedConvertsAutomatically {
@@ -266,7 +268,6 @@ final class AppModel {
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
         }
-        OpenDesigns.shared.opened(self)
     }
 
     // MARK: The file

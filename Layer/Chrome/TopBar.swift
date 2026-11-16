@@ -1,3 +1,5 @@
+import ImagePlayground
+import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -138,6 +140,7 @@ private struct ToolsBar: View {
     @Environment(AppModel.self) private var model
     @State private var isPickingSymbol = false
     @State private var isAttaching = false
+    @State private var isPickingPhoto = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -171,13 +174,16 @@ private struct ToolsBar: View {
                         withAnimation(.smooth(duration: 0.3)) { model.addSymbol(name) }
                     }
                 }
-                ToolButton(symbol: "paperclip", label: "Attach image") {
-                    isAttaching = true
+                Menu {
+                    ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
+                } label: {
+                    ToolIcon(symbol: "paperclip")
                 }
+                .accessibilityLabel("Add Image")
             }
         }
         .buttonStyle(.plain)
-        .modifier(ImageAttaching(isAttaching: $isAttaching))
+        .modifier(ImageAttaching(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto))
     }
 }
 
@@ -186,6 +192,7 @@ private struct ToolsMenu: View {
     @Environment(AppModel.self) private var model
     @State private var isPickingSymbol = false
     @State private var isAttaching = false
+    @State private var isPickingPhoto = false
 
     var body: some View {
         @Bindable var model = model
@@ -206,7 +213,9 @@ private struct ToolsMenu: View {
                 withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
             }
             Button("Symbols", systemImage: "square.on.circle") { isPickingSymbol = true }
-            Button("Attach Image", systemImage: "paperclip") { isAttaching = true }
+            Menu("Add Image", systemImage: "paperclip") {
+                ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
+            }
         } label: {
             ToolIcon(symbol: "ellipsis")
         }
@@ -217,7 +226,7 @@ private struct ToolsMenu: View {
                 withAnimation(.smooth(duration: 0.3)) { model.addSymbol(name) }
             }
         }
-        .modifier(ImageAttaching(isAttaching: $isAttaching))
+        .modifier(ImageAttaching(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto))
     }
 }
 
@@ -234,10 +243,32 @@ private struct FrameChoices: View {
     }
 }
 
-/// Picking an image file and adding it to the board, wherever the button for it is.
+/// The places an image can come from: made in Image Playground, picked from Photos, or
+/// picked from a file.
+private struct ImageSources: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.supportsImagePlayground) private var supportsImagePlayground
+    @Binding var isAttaching: Bool
+    @Binding var isPickingPhoto: Bool
+
+    var body: some View {
+        if supportsImagePlayground {
+            Button("Image Playground", systemImage: "apple.image.playground") {
+                model.makeImageWithPlayground()
+            }
+        }
+        Button("Photos", systemImage: "photo.on.rectangle") { isPickingPhoto = true }
+        Button("Files", systemImage: "folder") { isAttaching = true }
+    }
+}
+
+/// Picking an image from Photos or from a file and adding it to the board, wherever the
+/// button for it is.
 private struct ImageAttaching: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var isAttaching: Bool
+    @Binding var isPickingPhoto: Bool
+    @State private var photo: PhotosPickerItem?
     @State private var hasFailed = false
 
     func body(content: Content) -> some View {
@@ -245,7 +276,13 @@ private struct ImageAttaching: ViewModifier {
             .fileImporter(isPresented: $isAttaching, allowedContentTypes: [.png, .jpeg, .heic]) { result in
                 attach(result)
             }
-            .alert("That file couldn't be added as an image.", isPresented: $hasFailed) {
+            .photosPicker(isPresented: $isPickingPhoto, selection: $photo, matching: .images, preferredItemEncoding: .compatible)
+            .onChange(of: photo) { _, item in
+                guard let item else { return }
+                photo = nil
+                Task { await attach(item) }
+            }
+            .alert("That image couldn't be added.", isPresented: $hasFailed) {
                 Button("OK", role: .cancel) {}
             }
     }
@@ -256,6 +293,15 @@ private struct ImageAttaching: ViewModifier {
         let isScoped = url.startAccessingSecurityScopedResource()
         defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url), let prepared = ImageImport.prepare(data) else {
+            hasFailed = true
+            return
+        }
+        withAnimation(.smooth(duration: 0.3)) { model.addImage(prepared) }
+    }
+
+    /// The picker hands over the photo's data; nothing in Photos needs permission to read.
+    private func attach(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self), let prepared = ImageImport.prepare(data) else {
             hasFailed = true
             return
         }

@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
+import UIKit
 @testable import Layer
 
 // What Siri and Shortcuts rely on: reading a written screen, laying it out, finding
@@ -213,5 +214,77 @@ struct DesignActionTests {
         #expect(element?.screenName == "Checkout")
         #expect(element.flatMap { EntityKey.parseElement($0.id)?.design } == "local:Shop.layer")
         #expect(DesignDescriber.describe(snapshot).contains("Checkout (iPhone): button “Buy now”"))
+    }
+}
+
+@Suite("Image Playground")
+@MainActor
+struct ImagePlaygroundTests {
+    private func modelWithScreen() -> (AppModel, DesignScreen) {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.store.setTitle("Wander")
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let blueprint = ScreenBlueprint.parse("title: Plan your trip\nbody: Beaches, cities and mountains\nbutton: Get started\ntext field")!
+        model.store.setElements(blueprint.layout(on: screen.device), on: screen.id, replacing: true)
+        model.store.updateScreen(screen.id) { $0.name = "Welcome" }
+        return (model, model.store.screen(screen.id)!)
+    }
+
+    /// A small square picture, as Image Playground hands one back.
+    private func picture(width: Int = 64, height: Int = 32) throws -> ImageImport.Prepared {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        let data = try #require(image.pngData())
+        return try #require(ImageImport.prepare(data))
+    }
+
+    @Test func conceptsTakeThePromptAndTheScreensOwnWords() {
+        let (model, screen) = modelWithScreen()
+        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen.id), prompt: "  a lighthouse  ")
+        let concepts = model.imageConcepts(for: request)
+        #expect(concepts.prompt == "a lighthouse")
+        // Placeholder words, such as an untouched text field's, are left out.
+        #expect(concepts.context == "Plan your trip. Beaches, cities and mountains. Get started")
+        #expect(concepts.title == "Wander – Welcome")
+    }
+
+    @Test func aNewImageGoesBelowWhatIsOnTheScreenAndIsSelected() throws {
+        let (model, screen) = modelWithScreen()
+        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen.id))
+        model.imagePlaygroundRequest = request
+        let ref = try #require(model.placeGeneratedImage(try picture(), for: request))
+        let placed = try #require(model.store.resolve(ref)?.element)
+        #expect(placed.kind == .image)
+        #expect(placed.imageID != nil)
+        #expect(model.document.current.images[placed.imageID!.uuidString] != nil)
+        // Its shape follows the picture's, 2:1 here.
+        #expect(placed.frame.width == screen.size.width - 40)
+        #expect(placed.frame.height == (placed.frame.width / 2).rounded())
+        let lowestBefore = screen.elements.map(\.frame.maxY).max() ?? 0
+        #expect(placed.frame.minY >= lowestBefore)
+        #expect(model.selection == .element(ref))
+        #expect(model.imagePlaygroundRequest == nil)
+    }
+
+    @Test func aNewPictureForAnImageKeepsItsPlaceAndUndoes() throws {
+        let (model, screen) = modelWithScreen()
+        var image = DesignStore.newElement(.image)
+        image.frame = CGRect(x: 30, y: 400, width: 200, height: 120)
+        let ref = model.store.setElements([image], on: screen.id, replacing: false)[0]
+
+        let request = ImagePlaygroundRequest(target: .replace(ref), prompt: "mountains")
+        #expect(model.imageSize(for: request) == CGSize(width: 200, height: 120))
+        try #require(model.placeGeneratedImage(try picture(), for: request) == ref)
+        let replaced = try #require(model.store.resolve(ref)?.element)
+        #expect(replaced.imageID != nil)
+        #expect(replaced.frame == image.frame)
+
+        model.store.undoManager?.undo()
+        #expect(model.store.resolve(ref)?.element.imageID == nil)
     }
 }

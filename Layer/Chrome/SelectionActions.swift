@@ -1,3 +1,4 @@
+import ImagePlayground
 import SwiftUI
 
 /// The small bar that floats over whatever is selected, as in Freeform: the things that
@@ -5,6 +6,7 @@ import SwiftUI
 /// above, and steps out of the way while the selection is being dragged.
 struct SelectionActions: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.supportsImagePlayground) private var supportsImagePlayground
     @State private var size = CGSize(width: 220, height: 50)
 
     var body: some View {
@@ -32,6 +34,11 @@ struct SelectionActions: View {
                     }
                     .popover(isPresented: $model.isEditingText, arrowEdge: .bottom) {
                         TextEditor(ref: selected.ref)
+                    }
+                }
+                if supportsImagePlayground, let selected = model.selectedElement, selected.element.kind == .image {
+                    ToolButton(symbol: "apple.image.playground", label: "Make a new picture in Image Playground") {
+                        model.remakeImageWithPlayground(selected.ref)
                     }
                 }
                 ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
