@@ -25,3 +25,33 @@ final class DesignIndexerPerformanceTests: XCTestCase {
         }
     }
 }
+
+/// Saving a design re-encodes `drawing.data` every time, even when only the design's
+/// screens and elements changed and the ink was left untouched. That should be cheap.
+@MainActor
+final class DesignFilePerformanceTests: XCTestCase {
+    /// A drawing substantial enough that re-encoding it every save would show up.
+    private func heavyDrawing(strokeCount: Int = 60) -> PKDrawing {
+        let strokes = (0..<strokeCount).map { index in
+            let rect = CGRect(x: CGFloat(index % 10) * 40, y: CGFloat(index / 10) * 60, width: 320, height: 40)
+            let points = SketchSamples.wave(rect, humps: 6).enumerated().map { offset, point in
+                PKStrokePoint(location: point, timeOffset: Double(offset) * 0.008, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+            }
+            let path = PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSinceReferenceDate: Double(index)))
+            return PKStroke(ink: PKInk(.monoline, color: .black), path: path)
+        }
+        return PKDrawing(strokes: strokes)
+    }
+
+    func testSavingAgainAfterAnUnrelatedChangeLeavesTheInkAlone() throws {
+        var file = DesignFile(drawing: heavyDrawing())
+        var saved = try file.wrapper()
+
+        measure {
+            for index in 0..<30 {
+                file.content.title = "Board \(index)"
+                saved = try! file.wrapper(replacing: saved)
+            }
+        }
+    }
+}
