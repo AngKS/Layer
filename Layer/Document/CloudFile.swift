@@ -69,7 +69,20 @@ enum CloudFile {
     /// in Files and as the place new designs are saved. Does nothing without iCloud.
     static func prepareContainer() {
         DispatchQueue.global(qos: .utility).async {
-            _ = FileManager.default.url(forUbiquityContainerIdentifier: nil)
+            guard let container = FileManager.default.url(forUbiquityContainerIdentifier: nil) else { return }
+            settleConflicts(in: container.appendingPathComponent("Documents"))
+        }
+    }
+
+    /// Settles every design in Layer's iCloud folder that two devices saved at once, not
+    /// just the one that is open. A conflicted file left unresolved anywhere in the folder
+    /// can leave the document browser unable to make new designs. Off the main thread.
+    nonisolated static func settleConflicts(in folder: URL) {
+        guard let items = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil, options: [.skipsPackageDescendants, .skipsHiddenFiles]) else { return }
+        for case let url as URL in items where url.pathExtension == "layer" {
+            if NSFileVersion.unresolvedConflictVersionsOfItem(at: url)?.isEmpty == false {
+                _ = keepConflictingVersionsNow(of: url)
+            }
         }
     }
 
@@ -86,36 +99,40 @@ enum CloudFile {
     static func keepConflictingVersions(of url: URL) async -> [String] {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                let isScoped = url.startAccessingSecurityScopedResource()
-                defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
-
-                guard let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: url), !versions.isEmpty else {
-                    continuation.resume(returning: [])
-                    return
-                }
-                let folder = url.deletingLastPathComponent()
-                let name = url.deletingPathExtension().lastPathComponent
-                var copies: [String] = []
-                for version in versions {
-                    let copyName = copyName(for: name, savedOn: version.localizedNameOfSavingComputer)
-                    let destination = DesignFileName.unused(copyName, extension: url.pathExtension, in: folder) {
-                        FileManager.default.fileExists(atPath: $0.path)
-                    }
-                    var coordinationError: NSError?
-                    var isCopied = false
-                    NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: destination, options: .forReplacing, error: &coordinationError) { to in
-                        isCopied = (try? FileManager.default.copyItem(at: version.url, to: to)) != nil
-                    }
-                    // A version that couldn't be copied is left unresolved rather than thrown away.
-                    guard isCopied else { continue }
-                    version.isResolved = true
-                    copies.append(destination.deletingPathExtension().lastPathComponent)
-                }
-                if NSFileVersion.unresolvedConflictVersionsOfItem(at: url)?.isEmpty ?? true {
-                    try? NSFileVersion.removeOtherVersionsOfItem(at: url)
-                }
-                continuation.resume(returning: copies)
+                continuation.resume(returning: keepConflictingVersionsNow(of: url))
             }
         }
+    }
+
+    /// The work of `keepConflictingVersions(of:)`, done on the calling thread.
+    nonisolated static func keepConflictingVersionsNow(of url: URL) -> [String] {
+        let isScoped = url.startAccessingSecurityScopedResource()
+        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+
+        guard let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: url), !versions.isEmpty else {
+            return []
+        }
+        let folder = url.deletingLastPathComponent()
+        let name = url.deletingPathExtension().lastPathComponent
+        var copies: [String] = []
+        for version in versions {
+            let copyName = copyName(for: name, savedOn: version.localizedNameOfSavingComputer)
+            let destination = DesignFileName.unused(copyName, extension: url.pathExtension, in: folder) {
+                FileManager.default.fileExists(atPath: $0.path)
+            }
+            var coordinationError: NSError?
+            var isCopied = false
+            NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: destination, options: .forReplacing, error: &coordinationError) { to in
+                isCopied = (try? FileManager.default.copyItem(at: version.url, to: to)) != nil
+            }
+            // A version that couldn't be copied is left unresolved rather than thrown away.
+            guard isCopied else { continue }
+            version.isResolved = true
+            copies.append(destination.deletingPathExtension().lastPathComponent)
+        }
+        if NSFileVersion.unresolvedConflictVersionsOfItem(at: url)?.isEmpty ?? true {
+            try? NSFileVersion.removeOtherVersionsOfItem(at: url)
+        }
+        return copies
     }
 }

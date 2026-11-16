@@ -10,8 +10,7 @@ struct CanvasScreen: View {
         let accent = Theme.accent.color
         let isCompact = model.isCompactWidth
         let usesSheets = model.isCompactSizeClass
-        GeometryReader { proxy in
-            ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
                 // Its own view, so that scrolling redraws the grid and not this whole screen.
                 LiveCanvasGrid()
 
@@ -36,6 +35,7 @@ struct CanvasScreen: View {
                     // can be tucked away, and which a panel's sheet takes the place of.
                     hidesPalette: usesSheets && (model.isPaletteCollapsed || model.isLayersOpen || model.isInspectorOpen),
                     fingerDraws: model.fingerDraws,
+                    watchesPencil: model.needsPencilDetector,
                     topInset: model.topBarBottom, undoManager: undoManager
                 )
 
@@ -55,27 +55,40 @@ struct CanvasScreen: View {
                 SelectionActions()
                 PenCursor(pen: model.pen)
                 EdgeGlow(accent: accent, isActive: !model.effects.isEmpty)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The view's size, read without a GeometryReader wrapped round the whole canvas.
+        .onGeometryChange(for: CGSize.self, of: \.size) { model.canvasSize = $0 }
+        // Apple Pencil, or a pointer, hovering over the canvas outlines what it is over. Only
+        // with the palette away: while drawing, the pen's own cursor shows where it is.
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            guard !model.isHoveringList else { return }
+            var target: CanvasSelection?
+            if case .active(let point) = phase, model.tool == .select, point.y > model.topBarBottom,
+               !model.chromeFrames.values.contains(where: { $0.contains(point) }) {
+                target = model.hoverTarget(at: point)
             }
-            .onChange(of: proxy.size, initial: true) { _, size in
-                model.canvasSize = size
-            }
+            if model.hovered != target { model.hovered = target }
         }
         .ignoresSafeArea()
         .overlay(alignment: .top) {
             VStack(spacing: 12) {
                 TopBar()
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { model.topBarBottom = $0 }
+                    .reportsChromeFrame("top bar", to: model)
                 // The panels hang below the bar while the window can have them beside
                 // the canvas.
                 if !usesSheets {
                     HStack(alignment: .top, spacing: 12) {
                         if model.isLayersOpen {
                             LayersPanel(maxHeight: panelRoom)
+                                .reportsChromeFrame("layers", to: model)
                                 .transition(.move(edge: .leading).combined(with: .opacity))
                         }
                         Spacer(minLength: 0)
                         if model.isInspectorOpen {
                             StylePanel(maxHeight: panelRoom)
+                                .reportsChromeFrame("format", to: model)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
@@ -214,6 +227,25 @@ private struct LiveCanvasGrid: View {
 }
 
 /// Draws its content in canvas points, moved and scaled to where the viewport shows it.
+extension View {
+    /// Tells the model where this floating control is, so that a Pencil touch or hover
+    /// on it isn't taken for one on the canvas. `shapeOnly` is for controls laid out across
+    /// the whole view that only take touches where they draw: none is reported for them.
+    func reportsChromeFrame(_ name: String, to model: AppModel, shapeOnly: Bool = false) -> some View {
+        self
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                if !shapeOnly { model.chromeFrames[name] = frame }
+            }
+            .onDisappear { model.chromeFrames[name] = nil }
+    }
+}
+
+extension EnvironmentValues {
+    /// True while the canvas is part way through a zoom, when costly effects such as large
+    /// shadows are left out and come back once it settles.
+    @Entry var isCanvasZooming = false
+}
+
 private struct OnCanvas<Content: View>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
@@ -232,6 +264,7 @@ private struct OnCanvas<Content: View>: View {
                 // Capped at twice: beyond that the backing stores grow by the square of the zoom
             // and every change to the board takes longer to draw.
             .environment(\.displayScale, displayScale * min(max(model.settledScale, 1), 2))
+            .environment(\.isCanvasZooming, abs(model.zoomScale - model.settledScale) > 0.001)
                 .scaleEffect(viewport.scale, anchor: .topLeading)
                 .offset(x: -viewport.offset.x, y: -viewport.offset.y)
         }

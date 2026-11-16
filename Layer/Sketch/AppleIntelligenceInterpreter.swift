@@ -26,10 +26,8 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
 
     /// Loads the model ahead of the first sketch. Keep the returned session alive for as
     /// long as the model should stay warm.
-    static func warmUp() -> LanguageModelSession {
-        let session = LanguageModelSession(instructions: SketchPrompt.instructions)
-        session.prewarm()
-        return session
+    static func warmUp() {
+        Task { await WarmSessions.shared.fill() }
     }
 
     func read(_ request: SketchRequest) async throws -> SketchReading {
@@ -40,7 +38,8 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
             dependencies: []
         )
         // A fresh session per sketch: readings are independent, and the context stays small.
-        let session = LanguageModelSession(instructions: SketchPrompt.instructions)
+        // The first is the one warmed up when the design opened.
+        let session = await WarmSessions.shared.take(.sketch)
         let response = try await session.respond(
             to: SketchPrompt.describe(request),
             schema: schema,
@@ -51,8 +50,35 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
     }
 
     func suggestTitle(for board: String) async throws -> String {
-        let session = LanguageModelSession(instructions: SketchPrompt.titleInstructions)
+        let session = await WarmSessions.shared.take(.title)
         let response = try await session.respond(to: board, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 16))
         return response.content
+    }
+}
+
+/// Sessions loaded ahead of the first request of each kind. Warming one is per session,
+/// so the session that was warmed is the one handed out; each is used once, for one
+/// independent request, and the next design that opens warms another.
+actor WarmSessions {
+    enum Kind { case sketch, title }
+
+    static let shared = WarmSessions()
+    private var sessions: [Kind: LanguageModelSession] = [:]
+
+    func fill() {
+        for kind in [Kind.sketch, .title] where sessions[kind] == nil {
+            let session = Self.makeSession(kind)
+            session.prewarm()
+            sessions[kind] = session
+        }
+    }
+
+    /// The warmed session of this kind if there is one, or a new one.
+    func take(_ kind: Kind) -> LanguageModelSession {
+        sessions.removeValue(forKey: kind) ?? Self.makeSession(kind)
+    }
+
+    private static func makeSession(_ kind: Kind) -> LanguageModelSession {
+        LanguageModelSession(instructions: kind == .sketch ? SketchPrompt.instructions : SketchPrompt.titleInstructions)
     }
 }

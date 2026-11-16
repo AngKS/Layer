@@ -43,6 +43,8 @@ struct InkCanvas: UIViewRepresentable {
     let hidesPalette: Bool
     /// Whether a finger draws too, with the palette up, or is left for selecting and panning.
     let fingerDraws: Bool
+    /// Whether the Pencil detector has anything to do. See `AppModel.needsPencilDetector`.
+    let watchesPencil: Bool
     /// How far down the view the bar across the top reaches.
     let topInset: CGFloat
     let undoManager: UndoManager?
@@ -59,7 +61,6 @@ struct InkCanvas: UIViewRepresentable {
             container.addSubview(canvas)
         }
         container.addGestureRecognizer(context.coordinator.tap)
-        context.coordinator.hover.addTarget(context.coordinator, action: #selector(Coordinator.hovered(_:)))
         model.ink = context.coordinator
         return container
     }
@@ -70,6 +71,8 @@ struct InkCanvas: UIViewRepresentable {
         context.coordinator.setLocked(isLocked)
         context.coordinator.setHidesPalette(hidesPalette)
         context.coordinator.setFingerDraws(fingerDraws)
+        // Off when it has nothing to do, so it doesn't take part in every touch in the window.
+        context.coordinator.pencilDetector.isEnabled = watchesPencil
         context.coordinator.setTopInset(topInset)
     }
 
@@ -87,8 +90,6 @@ struct InkCanvas: UIViewRepresentable {
         /// Notices Apple Pencil touching the canvas, without taking part in anything.
         let pencilDetector = PencilDetector()
         private var fingerDraws = true
-        /// Apple Pencil, or a pointer, hovering over the window, for outlining what it is over.
-        let hover = UIHoverGestureRecognizer()
         private let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
         private var tool: AppModel.Tool?
         private var isFollowing = false
@@ -125,14 +126,9 @@ struct InkCanvas: UIViewRepresentable {
             documentCanvas.drawing = model.document.current.drawing
             documentCanvas.onMoveToWindow = { [weak self] in
                 guard let self else { return }
-                // On the window, so that hovering over elements, which are drawn above
-                // the canvas, counts too. It never stops other gestures.
-                if hover.view !== documentCanvas.window {
-                    hover.view?.removeGestureRecognizer(hover)
-            pencilDetector.view?.removeGestureRecognizer(pencilDetector)
-                    hover.cancelsTouchesInView = false
-                    documentCanvas.window?.addGestureRecognizer(hover)
-                    // Also on the window, to see the Pencil land on things drawn above the canvas.
+                // On the window, to see the Pencil land on things drawn above the canvas.
+                // Touches on the panels and bars are told apart in `AppModel.pencilTouched`.
+                if pencilDetector.view !== documentCanvas.window {
                     pencilDetector.view?.removeGestureRecognizer(pencilDetector)
                     documentCanvas.window?.addGestureRecognizer(pencilDetector)
                 }
@@ -185,6 +181,17 @@ struct InkCanvas: UIViewRepresentable {
             let isDrawing = tool == .draw
             let isMagicPen = palette.selectedToolItemIdentifier == MagicPen.identifier
             sketchCanvas.isUserInteractionEnabled = isDrawing && isMagicPen
+            // The Magic Pen's canvas is put away while it isn't in use and holds nothing, so
+            // PencilKit doesn't keep tiling and scrolling a second canvas the size of the board.
+            let showsSketch = (isDrawing && isMagicPen) || !sketchCanvas.drawing.strokes.isEmpty
+            if sketchCanvas.isHidden == showsSketch {
+                if showsSketch {
+                    // Catch up with where the canvas went while it was away.
+                    sketchCanvas.zoomScale = documentCanvas.zoomScale
+                    sketchCanvas.contentOffset = documentCanvas.contentOffset
+                }
+                sketchCanvas.isHidden = !showsSketch
+            }
             documentCanvas.isDrawingEnabled = isDrawing
             // With the palette up, a finger that doesn't draw taps to select. The Pencil's
             // taps are its own: dots and strokes.
@@ -226,7 +233,7 @@ struct InkCanvas: UIViewRepresentable {
             zoomAnimation?.stop()
             palette.removeObserver(self)
             palette.removeObserver(documentCanvas)
-            hover.view?.removeGestureRecognizer(hover)
+            pencilDetector.view?.removeGestureRecognizer(pencilDetector)
             for canvas in canvases {
                 palette.setVisible(false, forFirstResponder: canvas)
             }
@@ -356,7 +363,8 @@ struct InkCanvas: UIViewRepresentable {
             guard !isFollowing else { return }
             isFollowing = true
             defer { isFollowing = false }
-            for follower in canvases where follower !== leader {
+            // A hidden canvas doesn't follow: it catches up when it is shown.
+            for follower in canvases where follower !== leader && !follower.isHidden {
                 if follower.zoomScale != leader.zoomScale {
                     // The leader stretches past the limits while it rubber-bands; let the
                     // follower stretch with it. The limits are restored when zooming ends.
@@ -400,21 +408,6 @@ struct InkCanvas: UIViewRepresentable {
         @objc func penMoved(_ gesture: UIGestureRecognizer) {
             let isTracking = gesture.state == .began || gesture.state == .changed
             model.pen.location = isTracking ? gesture.location(in: sketchCanvas.superview) : nil
-        }
-
-        /// Outlines the element or screen under a hovering Apple Pencil. Only with the
-        /// palette away: while drawing, the pen's own cursor shows where it is.
-        @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {
-            guard let container = documentCanvas.superview else { return }
-            switch recognizer.state {
-            case .began, .changed:
-                let point = recognizer.location(in: container)
-                let isOverCanvas = container.bounds.contains(point) && point.y > model.topBarBottom
-                let target = tool == .select && isOverCanvas ? model.hoverTarget(at: point) : nil
-                if model.hovered != target, !model.isHoveringList { model.hovered = target }
-            default:
-                if !model.isHoveringList, model.hovered != nil { model.hovered = nil }
-            }
         }
 
         @objc func tapped(_ recognizer: UITapGestureRecognizer) {
@@ -517,11 +510,13 @@ struct InkCanvas: UIViewRepresentable {
         func removeSketch(_ keys: Set<Double>) {
             sketchCanvas.drawing.strokes.removeAll { keys.contains(Self.key(for: $0)) }
             model.sketchChanged(sketch())
+            refresh()
         }
 
         func clearSketch() {
             sketchCanvas.drawing = PKDrawing()
             model.sketchChanged([])
+            refresh()
         }
 
         /// Adds sketch strokes, in canvas points, as if the Magic Pen had drawn them. For
@@ -540,6 +535,7 @@ struct InkCanvas: UIViewRepresentable {
                 return PKStroke(ink: ink, path: path)
             }
             sketchCanvas.drawing.strokes.append(contentsOf: added)
+            refresh()
             model.sketchChanged(sketch())
         }
 

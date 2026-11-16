@@ -92,9 +92,20 @@ final class AppModel {
     /// The canvas area a selected drawing covers.
     private(set) var inkSelectionBounds: CGRect?
 
-    /// Which part of the canvas is showing. Kept current by the ink canvases, which own
-    /// the scrolling and zooming.
-    var viewport = Viewport()
+    /// Where the canvas has scrolled to and how far it is zoomed, tracked apart: panning
+    /// changes only the offset, so what depends on the zoom alone isn't redrawn by a pan.
+    /// Kept current by the ink canvases, which own the scrolling and zooming.
+    var scrollOffset = CGPoint.zero
+    var zoomScale: CGFloat = 1
+    /// Which part of the canvas is showing. Reading it depends on both the offset and the
+    /// zoom; read `zoomScale` alone where only the zoom matters.
+    var viewport: Viewport {
+        get { Viewport(offset: scrollOffset, scale: zoomScale) }
+        set {
+            if scrollOffset != newValue.offset { scrollOffset = newValue.offset }
+            if zoomScale != newValue.scale { zoomScale = newValue.scale }
+        }
+    }
     /// The zoom the canvas last came to rest at. Text is redrawn sharp for this zoom,
     /// rather than on every frame of a pinch.
     var settledScale: CGFloat = 1
@@ -181,6 +192,8 @@ final class AppModel {
     /// strokes are coming to complete them, and are not re-read as they are.
     @ObservationIgnored private var rejected: Set<Set<Double>> = []
     @ObservationIgnored private var settle: Task<Void, Never>?
+    /// Sketches being read, so that a design that closes can stop them.
+    @ObservationIgnored private var conversions: [Task<Void, Never>] = []
     @ObservationIgnored private var isPenDown = false
     @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
@@ -205,11 +218,24 @@ final class AppModel {
         if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
             fingerDraws = false
         }
+        // On a panel, the popover or the bars, the Pencil is pressing a control, scrubbing a
+        // field for instance, not landing on the canvas.
+        if chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
         // With the palette up, the Pencil is for drawing: landing on what a finger
         // selected lets go of it, rather than dragging it about.
         if tool == .draw, let rect = selectionViewRect, rect.insetBy(dx: -8, dy: -8).contains(viewPoint) {
             selection = nil
         }
+    }
+
+    /// Where the controls that float over the canvas are, in the view's points, by name.
+    /// Read when the Pencil touches down, not drawn from, so not observed.
+    @ObservationIgnored var chromeFrames: [String: CGRect] = [:]
+
+    /// Whether the Pencil detector has anything to do: notice a first Pencil, or let go of
+    /// what a finger selected when the Pencil lands on it.
+    var needsPencilDetector: Bool {
+        (fingerDraws && !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey)) || (tool == .draw && selection != nil)
     }
 
     private static let fingerDrawsKey = "fingerDraws"
@@ -263,6 +289,11 @@ final class AppModel {
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
         fileCheck?.cancel()
+        settle?.cancel()
+        adjustmentEnd?.cancel()
+        for conversion in conversions { conversion.cancel() }
+        conversions.removeAll()
+        // A rename under way finishes: stopping it halfway would leave the file misnamed.
     }
 
     /// Keeps the board's name and its file's name the same, so that the document browser
@@ -318,7 +349,18 @@ final class AppModel {
     /// Looks at where the design's file stands with iCloud, and settles any versions of
     /// it that other devices saved at the same time. Done when the design opens, when
     /// the app comes back to the screen, and whenever the system says the file changed.
+    /// Whether the app is on the screen. Nothing is checked on a schedule while it isn't.
+    @ObservationIgnored var isActive = true
+    /// How long to wait before looking again at a file that is still uploading. It doubles
+    /// each time, up to a minute, and starts again from three seconds on any other check.
+    @ObservationIgnored private var fileCheckDelay: Duration = .seconds(3)
+
     func checkFile() {
+        fileCheckDelay = .seconds(3)
+        scheduleFileCheck()
+    }
+
+    private func scheduleFileCheck() {
         guard let url = fileURL, !isClosed else { return }
         fileCheck?.cancel()
         fileCheck = Task { [weak self] in
@@ -332,12 +374,14 @@ final class AppModel {
                     : "This design was changed on other devices at the same time. Those versions are kept as \(names), beside this one."
             }
             if syncState != state { syncState = state }
-            // While something has still to go up, keep looking.
-            guard state.isInFlux else { return }
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
+            // While something has still to go up, keep looking, less often each time, and
+            // not at all while the app is away: coming back checks again.
+            guard state.isInFlux, isActive else { return }
+            try? await Task.sleep(for: fileCheckDelay)
+            guard !Task.isCancelled, isActive else { return }
+            fileCheckDelay = min(fileCheckDelay * 2, .seconds(60))
             fileCheck = nil
-            checkFile()
+            scheduleFileCheck()
         }
     }
 
@@ -370,6 +414,7 @@ final class AppModel {
             }
             self?.previewRefresh = nil
             self?.refreshPreview()
+            if let self { images.keepDecoded(store.content.imageIDs) }
         }
     }
 
@@ -703,7 +748,12 @@ final class AppModel {
         let zoom = viewport.scale
         for group in unreadGroups(zoom: zoom) {
             inFlight.formUnion(group.map(\.key))
-            Task { await convert(group, zoom: zoom) }
+            let conversion = Task { [weak self] () -> Void in await self?.convert(group, zoom: zoom) }
+            conversions.append(conversion)
+            Task { [weak self] in
+                await conversion.value
+                self?.conversions.removeAll { $0 == conversion }
+            }
         }
     }
 
@@ -773,6 +823,11 @@ final class AppModel {
         async let minimum: Void? = try? Task.sleep(for: .milliseconds(750))
         let reading = await engine.read(request)
         _ = await minimum
+        // Closed while the sketch was being read: nothing is put on a design that has gone.
+        guard !isClosed, !Task.isCancelled else {
+            effects.removeAll { $0.id == effect.id }
+            return
+        }
 
         withAnimation(.smooth(duration: 0.45)) {
             effects.removeAll { $0.id == effect.id }

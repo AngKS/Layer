@@ -10,9 +10,10 @@ struct ZoomControl: View {
 
     var body: some View {
         @Bindable var model = model
-        let percent = Int((model.viewport.scale * 100).rounded())
+        // The zoom alone: a pan doesn't redraw this.
+        let percent = Int((model.zoomScale * 100).rounded())
         HStack(spacing: 0) {
-            step("minus", label: "Zoom out") { model.ink?.zoom(to: model.viewport.scale / 1.25) }
+            step("minus", label: "Zoom out") { model.ink?.zoom(to: model.zoomScale / 1.25) }
             Menu {
                 Toggle("Lock Canvas", systemImage: "lock", isOn: $model.isCanvasLocked)
                 Button("Zoom to Fit Content", systemImage: "arrow.up.left.and.arrow.down.right") { model.ink?.zoomToFit() }
@@ -36,7 +37,7 @@ struct ZoomControl: View {
             }
             .accessibilityLabel("Zoom")
             .accessibilityValue(model.isCanvasLocked ? "\(percent) percent, canvas locked" : "\(percent) percent")
-            step("plus", label: "Zoom in") { model.ink?.zoom(to: model.viewport.scale * 1.25) }
+            step("plus", label: "Zoom in") { model.ink?.zoom(to: model.zoomScale * 1.25) }
         }
         .buttonStyle(.plain)
         .modifier(ControlCapsule(isBare: isBare, axis: .horizontal))

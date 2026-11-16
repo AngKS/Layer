@@ -25,7 +25,12 @@ final class DesignStore {
         }
     }
 
-    @ObservationIgnored var undoManager: UndoManager?
+    /// The document's undo manager, shared with PencilKit's ink. Its history is capped, so a
+    /// long sitting doesn't keep every earlier version of the design alive.
+    @ObservationIgnored var undoManager: UndoManager? {
+        didSet { undoManager?.levelsOfUndo = Self.undoLevels }
+    }
+    static let undoLevels = 50
     /// Called with the new content after every change, including undo and redo.
     @ObservationIgnored var onChange: ((DesignContent) -> Void)?
     /// The content as it was when the gradual edit in progress began.

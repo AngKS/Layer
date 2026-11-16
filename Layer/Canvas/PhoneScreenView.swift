@@ -3,6 +3,7 @@ import SwiftUI
 /// A device screen and its elements, laid out in the screen's logical points and then
 /// scaled to its size on the canvas.
 struct PhoneScreenView: View {
+    @Environment(\.isCanvasZooming) private var isZooming
     let screen: DesignScreen
     var showsName = true
 
@@ -14,7 +15,8 @@ struct PhoneScreenView: View {
             // zoom, and a wide one is the costliest thing on the canvas.
             RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
                 .fill(.white)
-                .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+                // Left out mid-zoom: a shadow is redrawn for every frame the scale changes.
+                .shadow(color: .black.opacity(isZooming ? 0 : 0.08), radius: isZooming ? 0 : 16, y: isZooming ? 0 : 8)
                 .overlay {
                     RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
                         .strokeBorder(.black.opacity(0.05), lineWidth: 0.5)

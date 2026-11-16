@@ -913,3 +913,63 @@ struct CloudFileTests {
         #expect(!SyncState.upToDate.isInFlux && !SyncState.local(canUseICloud: true).isInFlux)
     }
 }
+
+@Suite("Keeping resources in check")
+@MainActor
+struct ResourceTests {
+    @Test func theUndoHistoryIsCappedAtFiftySteps() {
+        let store = DesignStore(content: DesignContent())
+        let undo = UndoManager()
+        // Each edit its own step, as each user action is in the app's run loop.
+        undo.groupsByEvent = false
+        store.undoManager = undo
+        #expect(undo.levelsOfUndo == 50)
+        for index in 0..<70 { store.setTitle("Board \(index)") }
+        var steps = 0
+        while undo.canUndo { undo.undo(); steps += 1 }
+        #expect(steps == 50)
+    }
+
+    @Test func panningChangesTheOffsetAloneAndZoomingTheScaleAlone() {
+        let model = AppModel(document: LayerDocument())
+        model.viewport = Viewport(offset: CGPoint(x: 100, y: 200), scale: 1.5)
+        #expect(model.scrollOffset == CGPoint(x: 100, y: 200))
+        #expect(model.zoomScale == 1.5)
+        model.viewport = Viewport(offset: CGPoint(x: 140, y: 200), scale: 1.5)
+        #expect(model.zoomScale == 1.5)
+        #expect(model.viewport == Viewport(offset: CGPoint(x: 140, y: 200), scale: 1.5))
+    }
+
+    @Test func aRefusalOrARamblingAnswerDoesNotNameABoard() {
+        #expect(SketchEngine.isUsableTitle("Weekend in Salzburg"))
+        #expect(SketchEngine.isUsableTitle("Checkout"))
+        #expect(!SketchEngine.isUsableTitle("Sorry, I can't help with that."))
+        #expect(!SketchEngine.isUsableTitle("I cannot assist with this request"))
+        #expect(!SketchEngine.isUsableTitle("What is this board about?"))
+        #expect(!SketchEngine.isUsableTitle("A board for planning a weekend trip to the mountains"))
+        #expect(!SketchEngine.isUsableTitle(""))
+    }
+
+    @Test func picturesAreDecodedNoLargerThanTheyAreShownAndLetGoWhenNothingShowsThem() throws {
+        // A 3000 × 1000 picture, as PNG data.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let big = UIGraphicsImageRenderer(size: CGSize(width: 3000, height: 1000), format: format).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 3000, height: 1000))
+        }
+        let data = try #require(big.pngData())
+
+        let prepared = try #require(ImageImport.prepare(data))
+        #expect(max(prepared.image.size.width * prepared.image.scale, prepared.image.size.height * prepared.image.scale) <= ImageImport.longestSide)
+
+        let id = UUID()
+        let library = ImageLibrary([id.uuidString: data])
+        let decoded = try #require(library.image(id))
+        #expect(max(decoded.size.width, decoded.size.height) <= ImageLibrary.decodedLongestSide)
+
+        // Let go while nothing shows it; decoded again from its data when it is shown again.
+        library.keepDecoded([])
+        #expect(library.image(id) != nil)
+    }
+}

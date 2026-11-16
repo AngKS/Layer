@@ -27,7 +27,7 @@ final class SketchEngine {
     private(set) var isResting = false
 
     @ObservationIgnored private let rules = RuleInterpreter()
-    @ObservationIgnored private var warmSession: AnyObject?
+    @ObservationIgnored private var hasWarmedUp = false
     @ObservationIgnored private var failuresInARow = 0
     @ObservationIgnored private var restingUntil: ContinuousClock.Instant?
     @ObservationIgnored private var check: Task<Void, Never>?
@@ -64,8 +64,9 @@ final class SketchEngine {
         canBeTurnedOnInSettings = provider.id == SketchProvider.appleIntelligence.id && readiness != .ready
             && AppleIntelligenceInterpreter.isTurnedOff
         guard readiness == .ready else { return }
-        if provider.id == SketchProvider.appleIntelligence.id, warmSession == nil {
-            warmSession = AppleIntelligenceInterpreter.warmUp()
+        if provider.id == SketchProvider.appleIntelligence.id, !hasWarmedUp, !Self.isConserving {
+            hasWarmedUp = true
+            AppleIntelligenceInterpreter.warmUp()
         }
         checkThatProviderAnswers()
     }
@@ -92,7 +93,7 @@ final class SketchEngine {
         let fallback = rules.reading(for: request)
         guard rules.isCloseCall(request) else { return fallback }
 
-        guard readiness == .ready, !isStillResting() else { return fallback }
+        guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
 
         let interpreter = provider.makeInterpreter(nil)
         let started = ContinuousClock.now
@@ -119,7 +120,7 @@ final class SketchEngine {
     /// own words otherwise.
     func suggestTitle(for content: DesignContent) async -> String {
         let fallback = rules.title(for: content)
-        guard readiness == .ready, !isStillResting() else { return fallback }
+        guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
         let interpreter = provider.makeInterpreter(nil)
         let board = SketchPrompt.describe(board: content)
         guard let suggestion = try? await withTimeout(.seconds(5), { try await interpreter.suggestTitle(for: board) }) else {
@@ -130,7 +131,23 @@ final class SketchEngine {
         // Models sometimes add quotation marks, a full stop or a second line.
         let line = suggestion.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: " \"“”'.*#"))
-        return cleaned.isEmpty || cleaned.count > 48 ? fallback : cleaned
+        return Self.isUsableTitle(cleaned) ? cleaned : fallback
+    }
+
+    /// Whether a model's suggestion can name a board: short, and not a refusal or an
+    /// apology, which a model gives as ordinary text rather than as an error.
+    static func isUsableTitle(_ title: String) -> Bool {
+        guard !title.isEmpty, title.count <= 48, title.split(separator: " ").count <= 6 else { return false }
+        let lowered = title.lowercased()
+        let refusals = ["sorry", "i can't", "i cannot", "i can’t", "i'm unable", "i’m unable", "unable to", "as an ai", "i apologize", "can't help", "can’t help", "not able to"]
+        return !refusals.contains { lowered.contains($0) } && !title.hasSuffix("?")
+    }
+
+    /// Whether the iPad is hot or in Low Power Mode. The model is left alone then, and
+    /// the built-in rules decide: they are instant and cost next to nothing.
+    static var isConserving: Bool {
+        let info = ProcessInfo.processInfo
+        return info.isLowPowerModeEnabled || info.thermalState == .serious || info.thermalState == .critical
     }
 
     // MARK: How the provider is doing

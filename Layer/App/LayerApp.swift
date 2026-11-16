@@ -43,6 +43,7 @@ private struct DesignEditor: View {
             .onDisappear { model.close() }
             // The system saves a design as the app leaves the screen; its picture goes with it.
             .onChange(of: scenePhase) { _, phase in
+                model.isActive = phase == .active
                 if phase == .active {
                     // Things can change while the app is away: iCloud delivers other
                     // devices' edits, and Apple Intelligence gets turned on or finishes downloading.

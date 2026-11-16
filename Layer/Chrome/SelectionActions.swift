@@ -11,6 +11,7 @@ struct SelectionActions: View {
         if !model.isAdjusting, let rect = model.selectionViewRect {
             bar
                 .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
+                .reportsChromeFrame("selection actions", to: model)
                 .position(position(above: rect))
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
         }
