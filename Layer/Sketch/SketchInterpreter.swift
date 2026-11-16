@@ -23,6 +23,12 @@ struct SketchRequest: Sendable {
     /// Set when someone asked for this drawing to be read, with what they typed about it,
     /// which may be nothing. Nil for a Magic Pen sketch read on its own.
     var prompt: String? = nil
+    /// A handwritten word or phrase `HandwritingRecognizer` (PencilKit's on-device
+    /// `PKStrokeRecognizer`, Stage 2) read out of these strokes, if it found one — set by
+    /// `SketchEngine` before scoring, for shapes where that's even worth trying. Evidence
+    /// for `ComponentRule`'s text/title/body decision, and the label content once a kind
+    /// is chosen; nil otherwise, which never changes any existing score.
+    var recognizedText: String? = nil
 
     var isAsked: Bool { prompt != nil }
 

@@ -58,6 +58,62 @@ private func noisy(_ id: String, label: String, variant: SketchFixture.Variant, 
     return copy
 }
 
+/// Templates for `GlyphMatcher`, the $P point-cloud recognizer (`magic-pen-expansion.md`
+/// §3B). A handful of examples per glyph, reusing the same stroke generators as the fixture
+/// corpus, at varied sizes and positions so the matcher learns the shape, not one example's
+/// incidental scale or placement — $P normalises for scale and position itself, but seeing
+/// that variety in the templates is cheap insurance.
+enum GlyphTemplateGenerator {
+    static func all() -> [GlyphExample] {
+        var out: [GlyphExample] = []
+
+        func add(_ glyph: String, _ strokes: [[CGPoint]]) {
+            out.append(GlyphExample(glyph: glyph, strokes: strokes.map { $0.map { [$0.x, $0.y] } }))
+        }
+
+        // Circle: distinguishes a radio button or avatar from a checkbox once the outer
+        // outline itself fails to parse as a clean enclosure (see GlyphMatcher's use in
+        // ComponentRule as a fallback when jitter breaks `SketchAnalyzer`'s own check).
+        for (center, radius) in [(CGPoint(x: 0, y: 0), 15.0), (CGPoint(x: 50, y: 30), 22.0), (CGPoint(x: -20, y: 10), 10.0)] {
+            add("circle", [SketchSamples.circle(center: center, radius: radius)])
+        }
+
+        // Square: the sharp-cornered counterpart, for a checkbox.
+        for (rect, radius) in [
+            (CGRect(x: -14, y: -14, width: 28, height: 28), 3.0),
+            (CGRect(x: 10, y: 10, width: 24, height: 24), 2.0),
+            (CGRect(x: -16, y: 0, width: 32, height: 32), 4.0),
+        ] {
+            add("square", [SketchSamples.box(rect, radius: radius)])
+        }
+
+        // Tick: a checkbox's mark.
+        for rect in [CGRect(x: 0, y: 0, width: 30, height: 30), CGRect(x: 10, y: 10, width: 24, height: 24)] {
+            add("tick", [SketchSamples.tick(rect)])
+        }
+
+        // Cross: an image's mark, or a delete/close glyph.
+        for rect in [CGRect(x: 0, y: 0, width: 30, height: 30), CGRect(x: 10, y: 10, width: 22, height: 22)] {
+            add("cross", SketchSamples.cross(rect))
+        }
+
+        // Dot: a radio button's selected mark, or a page indicator.
+        for (center, radius) in [(CGPoint(x: 0, y: 0), 4.0), (CGPoint(x: 5, y: -5), 3.0)] {
+            add("dot", [SketchSamples.circle(center: center, radius: radius)])
+        }
+
+        // Plus: an add button or a stepper's increment, axis-aligned unlike the cross.
+        for half in [12.0, 16.0] {
+            add("plus", [
+                SketchSamples.straight(from: CGPoint(x: -half, y: 0), to: CGPoint(x: half, y: 0)),
+                SketchSamples.straight(from: CGPoint(x: 0, y: -half), to: CGPoint(x: 0, y: half)),
+            ])
+        }
+
+        return out
+    }
+}
+
 enum FixtureGenerator {
     /// Every fixture in the starter corpus: clean, jittered and noisy examples of every
     /// sketchable kind, and deliberately confusable pairs.

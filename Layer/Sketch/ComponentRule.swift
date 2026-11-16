@@ -63,15 +63,19 @@ extension SketchRequest {
             case .wave, .stackedLines:
                 return bounds.width >= max(bounds.height, 40) ? [ScoredReading(reading: .element(.text), score: 1)] : []
             default:
-                return []
+                // A recognised word turns otherwise-unreadable ink into text, on the open
+                // canvas same as on a screen.
+                return recognizedText != nil ? [ScoredReading(reading: .element(.text), score: 1)] : []
             }
         case .onScreen(let local, let existing, let size):
-            return Self.onScreenScoredReadings(form: observation.form, local: local, existing: existing, size: size)
+            return Self.onScreenScoredReadings(
+                form: observation.form, local: local, existing: existing, size: size, strokes: strokes, recognizedText: recognizedText
+            )
         }
     }
 
     private static func onScreenScoredReadings(
-        form: SketchObservation.Form, local: CGRect, existing: [ExistingElement], size: CGSize
+        form: SketchObservation.Form, local: CGRect, existing: [ExistingElement], size: CGSize, strokes: [[CGPoint]], recognizedText: String?
     ) -> [ScoredReading] {
         switch form {
         case .enclosure(let roundness, let inner):
@@ -93,10 +97,43 @@ extension SketchRequest {
             return [ScoredReading(reading: .element(.divider), score: 1)]
         case .wave, .scribble:
             guard local.width >= local.height else { return [] }
-            return squiggleScoredReadings(local: local, existing: existing, size: size)
+            let squiggle = squiggleScoredReadings(local: local, existing: existing, size: size, recognizedText: recognizedText)
+            // A confirmed word doesn't need rescuing from anything; only ask the glyph
+            // matcher when there's no handwriting evidence either way.
+            guard recognizedText == nil else { return squiggle }
+            return glyphRescuedSmallControl(local: local, size: size, strokes: strokes, otherwise: squiggle)
         case .scratch:
             return [ScoredReading(reading: .scratchOut, score: 1)]
         }
+    }
+
+    /// Stage 2 (`reports/Fast and slow sketch recognition.md`): `SketchAnalyzer`'s "ink all
+    /// the way round" enclosure check is strict, and a few points of jitter on a small
+    /// circle is enough to fail it outright, turning a radio button or a checkbox into a
+    /// `.scribble` the squiggle scoring reads as title or body with high confidence (see
+    /// the baseline and Stage 0–1 benchmarks). The $P glyph matcher normalises away exactly
+    /// that kind of noise, so for a shape small and square-bounded enough to plausibly be
+    /// a broken small control, it gets a second opinion: a confident circle or square match
+    /// competes against the squiggle reading it would otherwise have lost to outright.
+    private static func glyphRescuedSmallControl(
+        local: CGRect, size: CGSize, strokes: [[CGPoint]], otherwise squiggle: [ScoredReading]
+    ) -> [ScoredReading] {
+        guard local.width / size.width < SketchConventions.smallFraction, max(local.width, local.height) <= 60,
+              let match = GlyphMatcher.match(strokes), match.confidence > 0.5
+        else { return squiggle }
+        let rescued: [ScoredReading]
+        switch match.glyph {
+        case "circle", "dot":
+            // $P normalises away scale, so a small circle and a "dot" template are the
+            // same shape to it — both mean "round outline" here.
+            rescued = smallControlScoredReadings(local: local, size: size, roundness: 1, inner: .none)
+        case "square":
+            rescued = smallControlScoredReadings(local: local, size: size, roundness: 0.2, inner: .none)
+        default:
+            return squiggle
+        }
+        let weighted = rescued.map { ScoredReading(reading: $0.reading, score: $0.score * match.confidence) }
+        return (weighted + squiggle).sorted { $0.score > $1.score }
     }
 
     /// Image, button or textField: an outline wide enough to be considered at all. The old
@@ -179,13 +216,24 @@ extension SketchRequest {
     /// untitled screen, still pulls towards body — folded into the score instead of a
     /// separate "what's left" rule, so it can be outweighed by a decisively short width
     /// rather than always winning outright.
-    private static func squiggleScoredReadings(local: CGRect, existing: [ExistingElement], size: CGSize) -> [ScoredReading] {
+    private static func squiggleScoredReadings(local: CGRect, existing: [ExistingElement], size: CGSize, recognizedText: String?) -> [ScoredReading] {
         let widthFraction = Double(local.width / size.width)
         let shortBand = SketchConventions.shortBand
         let softness = Double(shortBand.upperBound - shortBand.lowerBound) / 4
+        // A real squiggle runs sideways — every title or body example is at least a couple
+        // of times wider than tall. A near-square blob is far more likely to be a small
+        // control `SketchAnalyzer`'s enclosure check failed on (a few points of jitter on
+        // a 24pt circle breaks its "ink all the way round" test easily), so confidence
+        // here is capped by how squiggle-shaped it actually is, leaving room for
+        // `glyphRescuedSmallControl`'s circle/square match to outscore it — unless
+        // PencilKit's handwriting recognizer (Stage 2) already read an actual word out of
+        // it, which settles "is this text" regardless of how the bounding box looks.
+        let ratio = Double(local.width / max(local.height, 1))
+        let squiggleShape = recognizedText != nil ? 1 : smoothGate(ratio - 1.8, softness: 0.35)
+
         guard widthFraction <= Double(shortBand.upperBound) + softness * 2 else {
             // Decisively long: body is the only thing this could be, as before.
-            return [ScoredReading(reading: .element(.body), score: 1)]
+            return [ScoredReading(reading: .element(.body), score: squiggleShape)]
         }
         var titleLean = smoothGate(Double(SketchConventions.shortFraction) - widthFraction, softness: softness)
         let hasTitle = existing.contains { $0.kind == .title }
@@ -195,8 +243,8 @@ extension SketchRequest {
             titleLean *= 0.5
         }
         return [
-            ScoredReading(reading: .element(.title), score: titleLean),
-            ScoredReading(reading: .element(.body), score: 1 - titleLean),
+            ScoredReading(reading: .element(.title), score: titleLean * squiggleShape),
+            ScoredReading(reading: .element(.body), score: (1 - titleLean) * squiggleShape),
         ].sorted { $0.score > $1.score }
     }
 }

@@ -33,21 +33,21 @@ struct SketchBenchmarkTests {
         #expect(Self.fixtures.count > 100, "expected the generated corpus (156 fixtures as of Step B); got \(Self.fixtures.count)")
     }
 
-    @Test func everyCleanFixtureReadsCorrectly() {
+    @Test func everyCleanFixtureReadsCorrectly() async {
         let clean = Self.fixtures.filter { $0.variant == .clean }
-        let cases = SketchBenchmarkRunner.runRulesOnly(clean)
+        let cases = await SketchBenchmarkRunner.runRulesOnly(clean)
         let wrong = cases.filter { $0.observed && $0.finalReading != $0.expected }
         #expect(wrong.isEmpty, "clean fixtures the rules misread: \(wrong.map { "\($0.fixture.id) -> \($0.finalReading)" })")
     }
 
-    @Test func aFinalReadingThatWasntEscalatedIsAlwaysOneOfTheCandidates() {
-        let cases = SketchBenchmarkRunner.runRulesOnly(Self.fixtures)
+    @Test func aFinalReadingThatWasntEscalatedIsAlwaysOneOfTheCandidates() async {
+        let cases = await SketchBenchmarkRunner.runRulesOnly(Self.fixtures)
         let impossible = cases.filter { $0.observed && !$0.candidates.isEmpty && !$0.candidates.contains($0.finalReading) }
         #expect(impossible.isEmpty, "the rules gave a reading outside the sketch's own candidates: \(impossible.map(\.fixture.id))")
     }
 
-    @Test func printsTheFullBenchmarkReport() {
-        let cases = SketchBenchmarkRunner.runRulesOnly(Self.fixtures)
+    @Test func printsTheFullBenchmarkReport() async {
+        let cases = await SketchBenchmarkRunner.runRulesOnly(Self.fixtures)
         let report = SketchBenchmarkMetrics.report(for: cases)
         print("=== Sketch benchmark: rules only (Simulator) ===")
         print("Total cases: \(report.totalCases)")
@@ -55,6 +55,9 @@ struct SketchBenchmarkTests {
         print("Candidate-set recall: \(String(format: "%.1f", report.candidateRecall * 100))%")
         print("Top-3 recall: \(String(format: "%.1f", report.top3Recall * 100))%")
         print("Escalation rate: \(String(format: "%.1f", report.escalationRate * 100))%")
+        if let handwriting = report.handwritingLatency {
+            print("Handwriting recognizer latency p50/p95: \(handwriting.p50 * 1000)ms / \(handwriting.p95 * 1000)ms")
+        }
         for kind in report.perKind {
             print("  \(kind.label): \(kind.correct)/\(kind.total) (\(String(format: "%.1f", kind.accuracy * 100))%)")
         }

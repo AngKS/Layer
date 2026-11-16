@@ -137,40 +137,53 @@ struct SketchBenchmarkCase: Sendable {
     var providerReading: SketchReading?
     var rulesLatency: Double // seconds
     var providerLatency: Double? // seconds
+    /// Set only for the fixtures `SketchEngine.mightBeHandwriting` would have tried:
+    /// PencilKit's `PKStrokeRecognizer` latency (Stage 2), independent of the rules'.
+    var handwritingLatency: Double?
     /// False when the strokes were too small to observe as a sketch at all.
     var observed: Bool
 }
 
 enum SketchBenchmarkRunner {
-    /// Runs every fixture through the rules alone. Always available: no model involved.
-    static func runRulesOnly(_ fixtures: [SketchFixture]) -> [SketchBenchmarkCase] {
+    /// Runs every fixture through the rules alone, plus PencilKit's handwriting recognizer
+    /// wherever `SketchEngine.read` would try it. No model involved either way.
+    static func runRulesOnly(_ fixtures: [SketchFixture]) async -> [SketchBenchmarkCase] {
         let rules = RuleInterpreter()
-        return fixtures.map { fixture in
-            guard let request = fixture.makeRequest() else {
-                return SketchBenchmarkCase(
+        var cases: [SketchBenchmarkCase] = []
+        for fixture in fixtures {
+            guard var request = fixture.makeRequest() else {
+                cases.append(SketchBenchmarkCase(
                     fixture: fixture, expected: fixture.expectedReading, candidates: [], top3: [], rulesReading: .unknown,
                     escalated: false, finalReading: .unknown, providerReading: nil,
-                    rulesLatency: 0, providerLatency: nil, observed: false
-                )
+                    rulesLatency: 0, providerLatency: nil, handwritingLatency: nil, observed: false
+                ))
+                continue
+            }
+            var handwritingLatency: Double?
+            if SketchEngine.mightBeHandwriting(request.observation.form) {
+                let start = ContinuousClock.now
+                request.recognizedText = await HandwritingRecognizer.recognize(request.strokes)
+                handwritingLatency = (ContinuousClock.now - start).secondsValue
             }
             let start = ContinuousClock.now
             let reading = rules.reading(for: request)
             let elapsed = (ContinuousClock.now - start).secondsValue
             let escalated = rules.isCloseCall(request)
             let scored = request.scoredReadings
-            return SketchBenchmarkCase(
+            cases.append(SketchBenchmarkCase(
                 fixture: fixture, expected: fixture.expectedReading, candidates: scored.map(\.reading),
                 top3: scored.prefix(3).map(\.reading), rulesReading: reading,
                 escalated: escalated, finalReading: reading, providerReading: nil,
-                rulesLatency: elapsed, providerLatency: nil, observed: true
-            )
+                rulesLatency: elapsed, providerLatency: nil, handwritingLatency: handwritingLatency, observed: true
+            ))
         }
+        return cases
     }
 
     /// Runs every escalated fixture through `provider` too, replacing the rules' answer
     /// with the provider's exactly when `SketchEngine.read` would: a possible answer wins.
     static func runWithProvider(_ fixtures: [SketchFixture], provider: any SketchInterpreter) async -> [SketchBenchmarkCase] {
-        var cases = runRulesOnly(fixtures)
+        var cases = await runRulesOnly(fixtures)
         for index in cases.indices where cases[index].escalated && cases[index].observed {
             guard let request = cases[index].fixture.makeRequest() else { continue }
             let start = ContinuousClock.now
@@ -221,6 +234,8 @@ struct SketchBenchmarkReport: Codable, Sendable {
     var system2Count: Int
     var rulesLatency: Latency
     var system2Latency: Latency?
+    /// nil when no fixture tried PencilKit's handwriting recognizer at all.
+    var handwritingLatency: Latency?
 }
 
 enum SketchBenchmarkMetrics {
@@ -239,6 +254,7 @@ enum SketchBenchmarkMetrics {
         var system2Total = 0
         var rulesLatencies: [Double] = []
         var system2Latencies: [Double] = []
+        var handwritingLatencies: [Double] = []
 
         for one in observedCases {
             let key = SketchPrompt.name(for: one.expected)
@@ -266,6 +282,7 @@ enum SketchBenchmarkMetrics {
             }
             rulesLatencies.append(one.rulesLatency)
             if let providerLatency = one.providerLatency { system2Latencies.append(providerLatency) }
+            if let handwritingLatency = one.handwritingLatency { handwritingLatencies.append(handwritingLatency) }
         }
 
         func percentile(_ values: [Double], _ fraction: Double) -> Double {
@@ -292,7 +309,8 @@ enum SketchBenchmarkMetrics {
             system2Accuracy: system2Total > 0 ? Double(system2Correct) / Double(system2Total) : nil,
             system2Count: system2Total,
             rulesLatency: .init(p50: percentile(rulesLatencies, 0.5), p95: percentile(rulesLatencies, 0.95)),
-            system2Latency: system2Latencies.isEmpty ? nil : .init(p50: percentile(system2Latencies, 0.5), p95: percentile(system2Latencies, 0.95))
+            system2Latency: system2Latencies.isEmpty ? nil : .init(p50: percentile(system2Latencies, 0.5), p95: percentile(system2Latencies, 0.95)),
+            handwritingLatency: handwritingLatencies.isEmpty ? nil : .init(p50: percentile(handwritingLatencies, 0.5), p95: percentile(handwritingLatencies, 0.95))
         )
     }
 }

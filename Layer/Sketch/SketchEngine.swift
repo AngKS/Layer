@@ -31,6 +31,11 @@ final class SketchEngine {
     /// soon after can be recognised as a correction. Stage 0 of
     /// `reports/Fast and slow sketch recognition.md`.
     @ObservationIgnored private(set) var lastLogID: UUID?
+    /// A word `HandwritingRecognizer` read out of the most recent `read(_:)`'s strokes, if
+    /// it tried and found one. Whoever creates the element this reading became can use it
+    /// as the element's text, the way a prompt's own wording already becomes a label in
+    /// `readAsked`. Stage 2.
+    @ObservationIgnored private(set) var lastRecognizedText: String?
 
     @ObservationIgnored private let rules = RuleInterpreter()
     @ObservationIgnored private var hasWarmedUp = false
@@ -95,9 +100,19 @@ final class SketchEngine {
         }
     }
 
-    func read(_ request: SketchRequest) async -> SketchReading {
+    func read(_ requested: SketchRequest) async -> SketchReading {
         lastLogID = nil
-        if request.isAsked { return await readAsked(request) }
+        lastRecognizedText = nil
+        if requested.isAsked { return await readAsked(requested) }
+        let request: SketchRequest
+        if Self.mightBeHandwriting(requested.observation.form) {
+            var withText = requested
+            withText.recognizedText = await HandwritingRecognizer.recognize(requested.strokes)
+            lastRecognizedText = withText.recognizedText
+            request = withText
+        } else {
+            request = requested
+        }
         let fallback = rules.reading(for: request)
         let escalated = rules.isCloseCall(request)
         guard escalated else {
@@ -134,6 +149,21 @@ final class SketchEngine {
     /// scored table and the confusable pairs it's measured against both live there, and an
     /// open-canvas reading (screen, sticky note, text) never has more than one candidate to
     /// log.
+    /// Whether this shape is even worth asking PencilKit's handwriting recognizer about.
+    /// Most sketches are clean geometric shapes with an obvious answer; trying to recognise
+    /// words out of every one of them would cost a model call nothing needs. A squiggle
+    /// might be a word; an enclosure with something unclassified inside it (`.other`, never
+    /// `.tick`/`.cross`/`.dot`) might have a word written inside it, such as a button's
+    /// label. Shared with `SketchBenchmarkRunner`, so the benchmark exercises the same
+    /// trigger `read(_:)` does rather than guessing at it separately.
+    nonisolated static func mightBeHandwriting(_ form: SketchObservation.Form) -> Bool {
+        switch form {
+        case .wave, .scribble: true
+        case .enclosure(_, .other): true
+        default: false
+        }
+    }
+
     private func log(_ request: SketchRequest, chosen: SketchReading, escalated: Bool, decidedBy: String) async -> UUID? {
         guard case .onScreen(_, let existing, let size) = request.placement else { return nil }
         let scored = request.scoredReadings

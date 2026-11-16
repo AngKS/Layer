@@ -907,6 +907,9 @@ final class AppModel {
         // reading became an element below, linking it here lets a deletion soon after be
         // recognised as a likely correction of this specific reading.
         let readingLogID = engine.lastLogID
+        // Stage 2: a word PencilKit's handwriting recognizer read out of these same
+        // strokes, such as "Sign in" inside a box, which becomes the element's label below.
+        let recognizedText = engine.lastRecognizedText
         _ = await minimum
         // Closed while the sketch was being read: nothing is put on a design that has gone.
         guard !isClosed, !Task.isCancelled else {
@@ -935,6 +938,9 @@ final class AppModel {
                 }
                 if let added, let readingLogID {
                     Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                }
+                if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
+                    store.update(added) { $0.text = recognizedText }
                 }
             case .scratchOut:
                 let crossedOut = scratchOutDeletes ? store.elements(scratchedOutBy: bounds) : []

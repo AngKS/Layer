@@ -13,6 +13,14 @@ import Foundation
 @main
 struct SketchBenchmarkHarness {
     static func main() async {
+        // No app bundle here, so GlyphMatcher can't find GlyphTemplates.json via
+        // Bundle.main the way the real app does; point it at the file directly, assuming
+        // run.sh's convention of running from the repo root.
+        let defaultTemplates = URL(fileURLWithPath: "Layer/Resources/GlyphTemplates.json")
+        if FileManager.default.fileExists(atPath: defaultTemplates.path) {
+            GlyphMatcher.templatesFileOverride = defaultTemplates
+        }
+
         let arguments = CommandLine.arguments
         guard arguments.count > 1 else {
             printUsage()
@@ -27,9 +35,17 @@ struct SketchBenchmarkHarness {
             let withModel = arguments.contains("--model")
             let outPath = outputPath(arguments)
             await run(fixturesDir: arguments[2], withModel: withModel, outPath: outPath)
+        case "glyphs":
+            guard arguments.count > 2 else { printUsage(); exit(1) }
+            writeGlyphTemplates(to: arguments[2])
+        case "glyphtest":
+            guard arguments.count > 2 else { printUsage(); exit(1) }
+            glyphTest(templatesPath: arguments[2])
         case "explain":
             guard arguments.count > 3 else { printUsage(); exit(1) }
             explain(fixturesDir: arguments[2], idSubstring: arguments[3])
+        case "handwritingtest":
+            await handwritingTest()
         case "healthcheck":
             await healthcheck()
         default:
@@ -89,7 +105,7 @@ struct SketchBenchmarkHarness {
         }
         print("Loaded \(fixtures.count) fixtures from \(fixturesDir)")
 
-        let rulesCases = SketchBenchmarkRunner.runRulesOnly(fixtures)
+        let rulesCases = await SketchBenchmarkRunner.runRulesOnly(fixtures)
         let rulesReport = SketchBenchmarkMetrics.report(for: rulesCases)
         print("\n=== Rules only ===")
         printSummary(rulesReport)
@@ -128,6 +144,9 @@ struct SketchBenchmarkHarness {
         if let system2Latency = report.system2Latency {
             print(String(format: "System 2 latency p50/p95: %.1fms / %.1fms", system2Latency.p50 * 1000, system2Latency.p95 * 1000))
         }
+        if let handwriting = report.handwritingLatency {
+            print(String(format: "Handwriting recognizer latency p50/p95: %.1fms / %.1fms", handwriting.p50 * 1000, handwriting.p95 * 1000))
+        }
         print("\nPer kind:")
         for kind in report.perKind {
             let label = kind.label.padding(toLength: 12, withPad: " ", startingAt: 0)
@@ -148,6 +167,71 @@ struct SketchBenchmarkHarness {
         }
     }
 
+    // MARK: glyphs
+
+    static func writeGlyphTemplates(to path: String) {
+        let examples = GlyphTemplateGenerator.all()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(examples) else {
+            print("Couldn't encode glyph templates")
+            exit(1)
+        }
+        try? data.write(to: URL(fileURLWithPath: path))
+        print("Wrote \(examples.count) glyph examples to \(path)")
+    }
+
+    // MARK: handwritingtest (debug)
+
+    /// A crude smoke test with letter-shaped (not geometric) strokes, to check
+    /// `PKStrokeRecognizer` can recognise *something* via this harness's synthetic
+    /// `PKStroke` construction, not just reliably return nil. Printed capital "HI": two
+    /// verticals and a crossbar, then one vertical — not realistic handwriting dynamics
+    /// (constant speed and pressure), so this is a mechanism check, not an accuracy one.
+    static func handwritingTest() async {
+        let h: [[CGPoint]] = [
+            [CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 40)],
+            [CGPoint(x: 20, y: 0), CGPoint(x: 20, y: 40)],
+            [CGPoint(x: 0, y: 20), CGPoint(x: 20, y: 20)],
+        ]
+        let i: [[CGPoint]] = [[CGPoint(x: 40, y: 0), CGPoint(x: 40, y: 40)]]
+        if let text = await HandwritingRecognizer.recognize(h + i) {
+            print("\"HI\"-shaped strokes recognised as: \"\(text)\"")
+        } else {
+            print("\"HI\"-shaped strokes: no text recognised")
+        }
+        if let text = await HandwritingRecognizer.recognize([SketchSamples.circle(center: CGPoint(x: 0, y: 0), radius: 15)]) {
+            print("circle-shaped stroke recognised as: \"\(text)\"")
+        } else {
+            print("circle-shaped stroke: no text recognised")
+        }
+    }
+
+    // MARK: glyphtest (debug)
+
+    static func glyphTest(templatesPath: String) {
+        GlyphMatcher.templatesFileOverride = URL(fileURLWithPath: templatesPath)
+        let cases: [(String, [[CGPoint]])] = [
+            ("fresh circle r18", [SketchSamples.circle(center: CGPoint(x: 100, y: 100), radius: 18)]),
+            ("fresh circle r9, jittered", [SketchSamples.circle(center: CGPoint(x: 0, y: 0), radius: 9)].seededJitter(amount: 3, seed: 42)),
+            ("fresh square r2", [SketchSamples.box(CGRect(x: 0, y: 0, width: 26, height: 26), radius: 2)]),
+            ("fresh square r2, jittered", [SketchSamples.box(CGRect(x: 0, y: 0, width: 26, height: 26), radius: 2)].seededJitter(amount: 3, seed: 7)),
+            ("fresh tick", [SketchSamples.tick(CGRect(x: 0, y: 0, width: 28, height: 28))]),
+            ("fresh cross", SketchSamples.cross(CGRect(x: 0, y: 0, width: 28, height: 28))),
+            ("fresh plus", [
+                SketchSamples.straight(from: CGPoint(x: -14, y: 0), to: CGPoint(x: 14, y: 0)),
+                SketchSamples.straight(from: CGPoint(x: 0, y: -14), to: CGPoint(x: 0, y: 14)),
+            ]),
+        ]
+        for (label, strokes) in cases {
+            if let result = GlyphMatcher.match(strokes) {
+                print("\(label): \(result.glyph) (confidence \(String(format: "%.2f", result.confidence)))")
+            } else {
+                print("\(label): no match")
+            }
+        }
+    }
+
     // MARK: explain (debug)
 
     static func explain(fixturesDir: String, idSubstring: String) {
@@ -159,6 +243,11 @@ struct SketchBenchmarkHarness {
             guard let request = fixture.makeRequest() else {
                 print("\(fixture.id): didn't observe")
                 continue
+            }
+            if let glyph = GlyphMatcher.match(fixture.strokePaths) {
+                print("  glyph: \(glyph.glyph) (\(glyph.confidence))")
+            } else {
+                print("  glyph: no match")
             }
             if case .enclosure(let roundness, let inner) = request.observation.form {
                 let ratio = request.observation.bounds.width / request.observation.bounds.height
