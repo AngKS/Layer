@@ -12,7 +12,8 @@ struct CanvasScreen: View {
         let usesSheets = model.isCompactSizeClass
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
-                CanvasGrid(viewport: model.viewport, settings: model.store.canvas)
+                // Its own view, so that scrolling redraws the grid and not this whole screen.
+                LiveCanvasGrid()
 
                 OnCanvas {
                     ForEach(model.store.screens) { screen in
@@ -34,6 +35,7 @@ struct CanvasScreen: View {
                     // In a compact window the palette is a bar across the bottom, which
                     // can be tucked away, and which a panel's sheet takes the place of.
                     hidesPalette: usesSheets && (model.isPaletteCollapsed || model.isLayersOpen || model.isInspectorOpen),
+                    fingerDraws: model.fingerDraws,
                     topInset: model.topBarBottom, undoManager: undoManager
                 )
 
@@ -49,6 +51,8 @@ struct CanvasScreen: View {
                 .allowsHitTesting(false)
 
                 SelectionLayer()
+                HoverOutline()
+                SelectionActions()
                 PenCursor(pen: model.pen)
                 EdgeGlow(accent: accent, isActive: !model.effects.isEmpty)
             }
@@ -93,12 +97,8 @@ struct CanvasScreen: View {
             PanelSheet(model: model) { StylePanel(isSheet: true) }
         }
         .overlay {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
-                    SelectionReadout()
-                    DeleteSelectionButton()
-                }
-                // Narrow, undo and redo join the zoom, which leaves the other corner free.
+            // Narrow, undo and redo join the zoom, which leaves the other corner free.
+            Group {
                 if isCompact { ViewControls() } else { ZoomControl() }
             }
             .modifier(BottomCorner(edge: .leading))
@@ -171,44 +171,45 @@ private struct PanelSheet<Content: View>: View {
     }
 }
 
-/// Pins a control into a bottom corner of the screen, and moves it out from under the
-/// pencil palette when the palette is parked over that corner: above a palette lying along
-/// the bottom or shrunk into the corner, inside one standing along the side.
+/// Pins a control into a bottom corner, the same distance in from the edges as the bar
+/// across the top. The pencil palette may sit over it; that is the palette's to decide.
 private struct BottomCorner: ViewModifier {
-    @Environment(AppModel.self) private var model
     let edge: HorizontalEdge
-    @State private var size = CGSize.zero
-
-    private struct Margins: Equatable {
-        var side: CGFloat = 24
-        var bottom: CGFloat = 44
-    }
 
     func body(content: Content) -> some View {
-        let margins = margins
         content
-            .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
-            .padding(edge == .leading ? .leading : .trailing, margins.side)
-            .padding(.bottom, margins.bottom)
-            .animation(.smooth(duration: 0.3), value: margins)
+            .padding(edge == .leading ? .leading : .trailing, 20)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge == .leading ? .bottomLeading : .bottomTrailing)
-            // Measured from the bottom of the screen, as the palette's place is.
-            .ignoresSafeArea(.container, edges: .bottom)
     }
+}
 
-    private var margins: Margins {
-        var margins = Margins()
-        let canvas = model.canvasSize
-        guard let palette = model.paletteFrame, size != .zero else { return margins }
-        let x = edge == .leading ? margins.side : canvas.width - margins.side - size.width
-        let corner = CGRect(x: x, y: canvas.height - margins.bottom - size.height, width: size.width, height: size.height)
-        guard palette.insetBy(dx: -10, dy: -10).intersects(corner) else { return margins }
-        if palette.width >= palette.height {
-            margins.bottom = canvas.height - palette.minY + 10
-        } else {
-            margins.side = edge == .leading ? palette.maxX + 10 : canvas.width - palette.minX + 10
+/// A soft outline round what Apple Pencil is hovering over, on the canvas or in the
+/// layers list, unless it is already selected.
+private struct HoverOutline: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let target = model.hovered, target != model.selection, let rect = model.viewRect(of: target) {
+            let outer = rect.insetBy(dx: -3, dy: -3)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Theme.accent.color.opacity(0.55), lineWidth: 1.5)
+                .background(Theme.accent.color.opacity(0.05), in: .rect(cornerRadius: 6, style: .continuous))
+                .frame(width: outer.width, height: outer.height)
+                .position(x: outer.midX, y: outer.midY)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+                .animation(.easeOut(duration: 0.12), value: target)
         }
-        return margins
+    }
+}
+
+/// The grid, following the viewport.
+private struct LiveCanvasGrid: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        CanvasGrid(viewport: model.viewport, settings: model.store.canvas)
     }
 }
 
@@ -228,7 +229,9 @@ private struct OnCanvas<Content: View>: View {
                 .fixedSize()
                 // Zoomed in, text and symbols are drawn with proportionally more pixels, so
                 // they stay sharp rather than being a magnified picture.
-                .environment(\.displayScale, displayScale * min(max(model.settledScale, 1), Viewport.zoomRange.upperBound))
+                // Capped at twice: beyond that the backing stores grow by the square of the zoom
+            // and every change to the board takes longer to draw.
+            .environment(\.displayScale, displayScale * min(max(model.settledScale, 1), 2))
                 .scaleEffect(viewport.scale, anchor: .topLeading)
                 .offset(x: -viewport.offset.x, y: -viewport.offset.y)
         }

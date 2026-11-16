@@ -234,6 +234,9 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var deviceID: String?
     /// In creation order; later elements sit on top.
     var elements: [DesignElement] = []
+    /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
+    /// still be edited.
+    var isLocked: Bool?
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }

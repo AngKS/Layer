@@ -68,7 +68,7 @@ struct LayersPanel: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(store.screens) { screen in
-                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection == .screen(screen.id)) {
+                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection == .screen(screen.id), target: .screen(screen.id)) {
                         select(.screen(screen.id))
                     }
                     // Topmost layer first, as layer lists usually read.
@@ -77,7 +77,7 @@ struct LayersPanel: View {
                     }
                 }
                 if !store.floating.isEmpty {
-                    group("Canvas", symbol: "square.dashed", isSelected: false, action: nil)
+                    group("Canvas", symbol: "square.dashed", isSelected: false, target: nil, action: nil)
                     ForEach(store.floating.reversed()) { floating in
                         layerRow(floating.element, ref: .init(host: .canvas, element: floating.id))
                     }
@@ -94,7 +94,7 @@ struct LayersPanel: View {
     }
 
     /// The heading for a screen's layers, or for the layers on the open canvas.
-    private func group(_ name: String, symbol: String, isSelected: Bool, action: (() -> Void)?) -> some View {
+    private func group(_ name: String, symbol: String, isSelected: Bool, target: CanvasSelection?, action: (() -> Void)?) -> some View {
         Button {
             action?()
         } label: {
@@ -109,10 +109,11 @@ struct LayersPanel: View {
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
+            .background(rowFill(isSelected: isSelected, target: target), in: .rect(cornerRadius: 10))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { hover(target, $0) }
         .disabled(action == nil)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -161,7 +162,8 @@ struct LayersPanel: View {
             Spacer().frame(width: 4)
         }
         .opacity(element.isHidden ? 0.5 : 1)
-        .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
+        .background(rowFill(isSelected: isSelected, target: .element(ref)), in: .rect(cornerRadius: 10))
+        .onHover { hover(.element(ref), $0) }
     }
 
     /// A lock or eye on a layer's row.
@@ -175,6 +177,26 @@ struct LayersPanel: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    /// A row is filled when its layer is selected, and tinted while it is hovered over,
+    /// here or on the canvas.
+    private func rowFill(isSelected: Bool, target: CanvasSelection?) -> Color {
+        if isSelected { return Theme.rowSelected }
+        if let target, model.hovered == target { return Theme.accent.color.opacity(0.10) }
+        return .clear
+    }
+
+    /// Hovering over a row outlines its layer on the canvas.
+    private func hover(_ target: CanvasSelection?, _ isInside: Bool) {
+        guard let target else { return }
+        if isInside {
+            model.isHoveringList = true
+            model.hovered = target
+        } else if model.hovered == target {
+            model.isHoveringList = false
+            model.hovered = nil
+        }
     }
 
     // MARK: Code

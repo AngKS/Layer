@@ -234,6 +234,7 @@ final class DesignStore {
         var copy = screen
         copy.id = UUID()
         copy.name = Self.copyName(for: screen.name, among: screens.map(\.name))
+        copy.isLocked = nil
         copy.origin.x = screen.canvasFrame.maxX + 60
         copy.elements = screen.elements.map { element in
             var element = element

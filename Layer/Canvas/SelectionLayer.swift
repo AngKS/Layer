@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The handles on the canvas for selecting and moving things, live whenever the pencil
-/// palette is away. Elements are tapped to select and dragged to
-/// move, anywhere on the canvas, and resized by their corner handles. A selected screen or
+/// The handles on the canvas for selecting and moving things. With the palette away,
+/// elements are tapped to select and dragged to move, anywhere on the canvas, and resized
+/// by their corner handles. With the palette up the Pencil draws everywhere, so only
+/// what a finger has selected takes touches here. A selected screen or
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
@@ -18,33 +19,55 @@ struct SelectionLayer: View {
     /// The lines the dragged element has snapped to, and the placement of their points.
     @State private var guides: [SnapGuide] = []
     @State private var guidePlacement = Placement(origin: .zero, scale: 1)
-    @State private var actionsSize = CGSize(width: 240, height: 44)
 
     var body: some View {
         let store = model.store
         let viewport = model.viewport
         ZStack(alignment: .topLeading) {
+            // What is selected and its size, for VoiceOver and automation rather than the eye.
+            if let summary = selectionSummary {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Selection")
+                    .accessibilityValue(summary)
+                    .accessibilityIdentifier("Selection")
+            }
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
-                    .gesture(moveScreen(screen))
+                    .gesture(moveScreen(screen), including: screen.isLocked == true ? .subviews : .all)
             }
             if let bounds = model.inkSelectionBounds {
                 dragArea(viewport.viewRect(for: bounds).insetBy(dx: -8, dy: -8))
                     .gesture(moveInk)
             }
 
-            ForEach(store.screens) { screen in
-                if store.canvas.showsFrameNames {
-                    dragArea(viewport.viewRect(for: screen.labelFrame))
-                        .onTapGesture { model.selection = .screen(screen.id) }
-                        .gesture(moveScreen(screen))
+            Group {
+                ForEach(store.screens) { screen in
+                    if store.canvas.showsFrameNames {
+                        dragArea(viewport.viewRect(for: screen.labelFrame))
+                            .onTapGesture { model.selection = .screen(screen.id) }
+                            .gesture(moveScreen(screen), including: screen.isLocked == true ? .subviews : .all)
+                    }
+                    ForEach(screen.elements.filter { !$0.isHidden }) { element in
+                        target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen)
+                    }
                 }
-                ForEach(screen.elements.filter { !$0.isHidden }) { element in
-                    target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen)
+                ForEach(store.floating.filter { !$0.element.isHidden }) { floating in
+                    target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil)
                 }
             }
-            ForEach(store.floating.filter { !$0.element.isHidden }) { floating in
-                target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil)
+            .allowsHitTesting(model.tool == .select)
+
+            // With the palette up, the selected element is moved by its own area.
+            if model.tool == .draw, let selected = model.selectedElement {
+                let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
+                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)))
+                    .gesture(
+                        adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true,
+                               apply: moveRule(for: selected.element, placement: selected.placement, on: screen)),
+                        isEnabled: !selected.element.isLocked
+                    )
             }
 
             if let screen = model.selectedScreen {
@@ -77,41 +100,20 @@ struct SelectionLayer: View {
                 }
             }
 
-            if !model.isAdjusting, screenDragOrigin == nil, let rect = selectionRect {
-                SelectionActions()
-                    .fixedSize()
-                    .onGeometryChange(for: CGSize.self, of: \.size) { actionsSize = $0 }
-                    .position(actionsPosition(over: rect))
-                    .transition(.opacity)
-            }
         }
-        .allowsHitTesting(model.tool == .select)
     }
 
-    /// Where the selection is in the view, for the actions above it.
-    private var selectionRect: CGRect? {
-        let viewport = model.viewport
+    private var selectionSummary: String? {
         if let selected = model.selectedElement {
-            return viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
+            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
         }
         if let screen = model.selectedScreen {
-            let frame = screen.canvasFrame
-            return viewport.viewRect(for: model.store.canvas.showsFrameNames ? frame.union(screen.labelFrame) : frame)
+            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
+        }
+        if case .ink(let strokes) = model.selection {
+            return strokes.count == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes.count) strokes"
         }
         return nil
-    }
-
-    /// Above the selection, or below it when it reaches the top of the view, and always
-    /// inside the view.
-    private func actionsPosition(over rect: CGRect) -> CGPoint {
-        let half = CGSize(width: actionsSize.width / 2, height: actionsSize.height / 2)
-        let top = model.topBarBottom + 10 + half.height
-        let bottom = model.canvasSize.height - 90 - half.height
-        var y = rect.minY - 18 - half.height
-        if y < top { y = rect.maxY + 18 + half.height }
-        y = min(max(y, top), max(top, bottom))
-        let x = min(max(rect.midX, half.width + 12), max(half.width + 12, model.canvasSize.width - half.width - 12))
-        return CGPoint(x: x, y: y)
     }
 
     // MARK: Pieces
@@ -126,7 +128,19 @@ struct SelectionLayer: View {
 
     /// `screen` is the screen the element is on, or nil on the open canvas.
     private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?) -> some View {
+        dragArea(model.viewport.viewRect(for: placement.canvasRect(for: element.frame)))
+            .onTapGesture { model.selection = .element(ref) }
+            .gesture(
+                adjust(ref, from: element.frame, placement: placement, findsNewHome: true, apply: moveRule(for: element, placement: placement, on: screen)),
+                isEnabled: !element.isLocked
+            )
+    }
+
+    /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
+    /// its neighbours, as the canvas is set up to do.
+    private func moveRule(for element: DesignElement, placement: Placement, on screen: DesignScreen?) -> (CGRect, CGSize) -> (CGRect, [SnapGuide]) {
         let canvas = model.store.canvas
+        let zoom = model.viewport.scale
         // What the element can line up with, in its own host's points.
         let others: [CGRect] = if let screen {
             screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.frame)
@@ -134,18 +148,16 @@ struct SelectionLayer: View {
             model.store.floating.filter { $0.id != element.id && !$0.element.isHidden }.map { placement.localRect(for: $0.canvasFrame) }
         }
         let container = screen.map { CGRect(origin: .zero, size: $0.size) }
-        return dragArea(model.viewport.viewRect(for: placement.canvasRect(for: element.frame)))
-            .onTapGesture { model.selection = .element(ref) }
-            .gesture(adjust(ref, from: element.frame, placement: placement, findsNewHome: true) { origin, translation in
-                let moved = ElementLayout.moved(origin, by: translation, snapsToCenter: false)
-                if canvas.snapsToGrid {
-                    return (ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement), [])
-                }
-                guard canvas.snapsToGuides else { return (moved, []) }
-                // Close enough is the same few points on the glass at any zoom.
-                let threshold = 6 / max(placement.scale * model.viewport.scale, 0.01)
-                return ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
-            }, isEnabled: !element.isLocked)
+        return { origin, translation in
+            let moved = ElementLayout.moved(origin, by: translation, snapsToCenter: false)
+            if canvas.snapsToGrid {
+                return (ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement), [])
+            }
+            guard canvas.snapsToGuides else { return (moved, []) }
+            // Close enough is the same few points on the glass at any zoom.
+            let threshold = 6 / max(placement.scale * zoom, 0.01)
+            return ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
+        }
     }
 
     private func handle(
@@ -230,6 +242,7 @@ struct SelectionLayer: View {
                     model.store.beginEdit()
                     model.selection = .screen(screen.id)
                     screenDragOrigin = screen.origin
+                    model.isAdjusting = true
                 }
                 guard let screenDragOrigin else { return }
                 let scale = model.viewport.scale
@@ -251,6 +264,7 @@ struct SelectionLayer: View {
             }
             .onEnded { _ in
                 screenDragOrigin = nil
+                model.isAdjusting = false
                 model.store.endEdit()
             }
     }
@@ -262,8 +276,10 @@ struct SelectionLayer: View {
                 let total = CGSize(width: value.translation.width / scale, height: value.translation.height / scale)
                 model.moveSelectedInk(by: CGSize(width: total.width - inkDragged.width, height: total.height - inkDragged.height))
                 inkDragged = total
+                model.isAdjusting = true
             }
             .onEnded { _ in
+                model.isAdjusting = false
                 model.finishMovingInk(movedBy: inkDragged)
                 inkDragged = .zero
             }

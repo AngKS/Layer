@@ -10,10 +10,15 @@ struct PhoneScreenView: View {
         let device = screen.device
         let size = device.size
         ZStack(alignment: .topLeading) {
+            // One soft shadow and a hairline edge. Shadows are redrawn on every frame of a
+            // zoom, and a wide one is the costliest thing on the canvas.
             RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
                 .fill(.white)
-                .shadow(color: .black.opacity(0.09), radius: 28, y: 12)
-                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+                .overlay {
+                    RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
+                        .strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
+                }
 
             statusBar(for: device)
 
@@ -104,7 +109,7 @@ struct ElementView: View {
                         .strokeBorder(element.resolvedBorderColor.color, lineWidth: element.resolvedBorderWidth)
                 }
             }
-            .shadow(color: .black.opacity(element.hasShadow ? 0.18 : 0), radius: element.hasShadow ? 10 : 0, y: element.hasShadow ? 5 : 0)
+            .modifier(ElementShadow(isOn: element.hasShadow))
             .opacity(element.resolvedOpacity)
     }
 
@@ -225,6 +230,20 @@ extension FontWeightChoice {
         case .medium: .medium
         case .semibold: .semibold
         case .bold: .bold
+        }
+    }
+}
+
+/// An element's own shadow, there only when it has one: shadows are redrawn on every frame
+/// of a zoom or pan, so elements without one shouldn't pay for an empty one.
+private struct ElementShadow: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content.shadow(color: .black.opacity(0.18), radius: 10, y: 5)
+        } else {
+            content
         }
     }
 }

@@ -100,8 +100,6 @@ final class AppModel {
     var settledScale: CGFloat = 1
     /// While locked, the canvas can't be panned or zoomed by touch.
     var isCanvasLocked = false
-    /// Where the pencil palette is showing in the view, if it is and can be found.
-    var paletteFrame: CGRect?
 
     var isLayersOpen = false {
         didSet { if isLayersOpen, fitsOnePanel { isInspectorOpen = false } }
@@ -187,6 +185,35 @@ final class AppModel {
     @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
 
+    /// Whether a finger draws while the palette is up. Once Apple Pencil has been seen,
+    /// it doesn't: the Pencil draws, and a finger selects, moves, pans and taps buttons.
+    /// Until then a finger draws, so that Layer works without a Pencil. Either way it can
+    /// be set in the format panel, after which it is left as set. Remembered between launches.
+    var fingerDraws = UserDefaults.standard.object(forKey: AppModel.fingerDrawsKey) == nil ? true : UserDefaults.standard.bool(forKey: AppModel.fingerDrawsKey) {
+        didSet { UserDefaults.standard.set(fingerDraws, forKey: AppModel.fingerDrawsKey) }
+    }
+
+    /// Set by hand in the format panel.
+    func setFingerDraws(_ draws: Bool) {
+        fingerDraws = draws
+        UserDefaults.standard.set(true, forKey: AppModel.fingerDrawsChosenKey)
+    }
+
+    /// Apple Pencil touched the canvas. The first time, a finger stops drawing, unless
+    /// that has been set by hand.
+    func pencilTouched(at viewPoint: CGPoint) {
+        if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
+            fingerDraws = false
+        }
+        // With the palette up, the Pencil is for drawing: landing on what a finger
+        // selected lets go of it, rather than dragging it about.
+        if tool == .draw, let rect = selectionViewRect, rect.insetBy(dx: -8, dy: -8).contains(viewPoint) {
+            selection = nil
+        }
+    }
+
+    private static let fingerDrawsKey = "fingerDraws"
+    private static let fingerDrawsChosenKey = "fingerDrawsChosen"
     private static let convertsAutomaticallyKey = "convertsAutomatically"
     private static var savedConvertsAutomatically: Bool {
         let defaults = UserDefaults.standard
@@ -241,8 +268,13 @@ final class AppModel {
     /// Keeps the board's name and its file's name the same, so that the document browser
     /// shows designs by name. A file renamed elsewhere, in Files for instance, names the
     /// board. A board that is named, by hand or by suggestion, names its file.
+    @ObservationIgnored private var matched: (url: URL, title: String?)?
+
     private func matchNameAndFile() {
         guard let url = fileURL, renaming == nil, !isClosed else { return }
+        // Most changes, a drag for instance, touch neither the name nor the file.
+        if let matched, matched.url == url, matched.title == store.title { return }
+        matched = (url, store.title)
         let onDisk = url.deletingPathExtension().lastPathComponent
         let known = document.current.fileName
         if known != onDisk {
@@ -319,13 +351,24 @@ final class AppModel {
         }
     }
 
-    /// The board changed: its picture for the document browser is redrawn once things settle.
+    @ObservationIgnored private var lastBoardChange = ContinuousClock.now
+    @ObservationIgnored private var isPreviewStale = false
+
+    /// The board changed: its picture for the document browser is redrawn once the board
+    /// has been left alone for a while. Drawing it takes the main thread for a moment,
+    /// which is not to happen while someone is drawing or dragging.
     private func schedulePreview() {
-        previewRefresh?.cancel()
-        guard !isClosed else { return }
+        isPreviewStale = true
+        lastBoardChange = .now
+        guard previewRefresh == nil, !isClosed else { return }
         previewRefresh = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard !Task.isCancelled else { return }
+            while true {
+                guard let due = self.map({ $0.lastBoardChange + .seconds(5) }) else { return }
+                if ContinuousClock.now >= due { break }
+                try? await Task.sleep(until: due)
+                if Task.isCancelled { return }
+            }
+            self?.previewRefresh = nil
             self?.refreshPreview()
         }
     }
@@ -335,6 +378,8 @@ final class AppModel {
     func refreshPreview() {
         previewRefresh?.cancel()
         previewRefresh = nil
+        guard isPreviewStale || document.current.preview == nil else { return }
+        isPreviewStale = false
         let picture = BoardSnapshot.thumbnail(of: self)
         document.update { $0.preview = picture }
     }
@@ -359,9 +404,12 @@ final class AppModel {
     /// A tap that landed on the canvas itself rather than on an element: it picks the
     /// drawing or screen there, or clears the selection.
     func canvasTapped(at viewPoint: CGPoint) {
-        guard tool == .select else { return }
         let point = viewport.canvasPoint(for: viewPoint)
-        if let keys = ink?.drawing(at: point, tolerance: 14 / viewport.scale) {
+        // With the palette up, a finger tap reaches here for elements too: their own
+        // handles stay out of the Pencil's way while it draws.
+        if tool == .draw, case .element(let ref)? = hoverTarget(at: viewPoint) {
+            selection = .element(ref)
+        } else if let keys = ink?.drawing(at: point, tolerance: 14 / viewport.scale) {
             selection = .ink(keys)
         } else if let screen = store.screen(at: point) {
             selection = .screen(screen.id)
@@ -370,16 +418,77 @@ final class AppModel {
         }
     }
 
-    /// Whether the selection can be moved, resized or deleted: it isn't a locked element.
-    var isSelectionLocked: Bool { selectedElement?.element.isLocked == true }
+    /// What Apple Pencil is hovering over: on the canvas, or in the layers list. It is
+    /// outlined softly, short of being selected.
+    var hovered: CanvasSelection?
+    /// True while the hover comes from the layers list rather than the canvas.
+    var isHoveringList = false
 
+    /// The topmost element or screen at a point in the view, for hover.
+    func hoverTarget(at viewPoint: CGPoint) -> CanvasSelection? {
+        let point = viewport.canvasPoint(for: viewPoint)
+        for floating in store.floating.reversed() where floating.canvasFrame.contains(point) {
+            return .element(.init(host: .canvas, element: floating.id))
+        }
+        for screen in store.screens.reversed() {
+            for element in screen.elements.reversed() where screen.placement.canvasRect(for: element.frame).contains(point) {
+                return .element(.init(host: .screen(screen.id), element: element.id))
+            }
+            if screen.canvasFrame.contains(point) || screen.labelFrame.contains(point) {
+                return .screen(screen.id)
+            }
+        }
+        return nil
+    }
+
+    /// Where something is, in the view's own points.
+    func viewRect(of target: CanvasSelection) -> CGRect? {
+        switch target {
+        case .element(let ref):
+            guard let found = store.resolve(ref) else { return nil }
+            return viewport.viewRect(for: found.placement.canvasRect(for: found.element.frame))
+        case .screen(let id):
+            return store.screen(id).map { viewport.viewRect(for: $0.canvasFrame) }
+        case .ink(let keys):
+            return ink?.bounds(of: keys).map { viewport.viewRect(for: $0) }
+        }
+    }
+
+    /// Whether what is selected is locked in place.
+    var isSelectionLocked: Bool {
+        switch selection {
+        case .element: selectedElement?.element.isLocked == true
+        case .screen: selectedScreen?.isLocked == true
+        case .ink, nil: false
+        }
+    }
+
+    func setSelectionLocked(_ locked: Bool) {
+        switch selection {
+        case .element(let ref): store.update(ref) { $0.isLocked = locked }
+        case .screen(let id): store.updateScreen(id) { $0.isLocked = locked ? true : nil }
+        case .ink, nil: break
+        }
+    }
+
+    var canDuplicateSelection: Bool {
+        switch selection {
+        case .element, .screen: true
+        case .ink, nil: false
+        }
+    }
+
+    /// Elements and screens can be locked; drawings can't.
+    var canLockSelection: Bool { canDuplicateSelection }
+
+    /// Copies what is selected and selects the copy.
     func duplicateSelection() {
         switch selection {
         case .element(let ref):
             if let copy = store.duplicate(ref) { selection = .element(copy) }
         case .screen(let id):
             if let copy = store.duplicateScreen(id) { selection = .screen(copy.id) }
-        default:
+        case .ink, nil:
             break
         }
     }
@@ -395,8 +504,7 @@ final class AppModel {
     }
 
     func toggleLockOfSelection() {
-        guard case .element(let ref) = selection else { return }
-        store.update(ref) { $0.isLocked.toggle() }
+        setSelectionLocked(!isSelectionLocked)
     }
 
     /// Hides or shows an element. Hiding one lets go of it, since it can't be touched.
@@ -409,9 +517,24 @@ final class AppModel {
         store.update(ref) { $0.isLocked.toggle() }
     }
 
+    /// Where what is selected is, in the view's own points.
+    var selectionViewRect: CGRect? {
+        switch selection {
+        case .element:
+            guard let selected = selectedElement else { return nil }
+            return viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
+        case .screen:
+            guard let screen = selectedScreen else { return nil }
+            return viewport.viewRect(for: screen.canvasFrame.union(screen.labelFrame))
+        case .ink:
+            return inkSelectionBounds.map { viewport.viewRect(for: $0) }
+        case nil:
+            return nil
+        }
+    }
+
     func deleteSelection() {
-        // A locked element stays put until it is unlocked.
-        if isSelectionLocked { return }
+        guard !isSelectionLocked else { return }
         switch selection {
         case .element(let ref): store.delete(ref)
         case .screen(let id): store.deleteScreen(id)

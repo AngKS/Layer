@@ -72,7 +72,8 @@ extension SketchRequest {
             case .enclosure where min(bounds.width, bounds.height) >= SketchConventions.noteSide:
                 // A box beside the screens is a note about them.
                 return [.element(.stickyNote)]
-            case .wave, .scribble, .stackedLines:
+            case .wave, .stackedLines:
+                // Only writing-like marks: a stray stroke beside the screens stays ink.
                 return bounds.width >= max(bounds.height, 40) ? [.element(.text)] : []
             default:
                 return []

@@ -26,6 +26,8 @@ struct ToolIcon: View {
             .frame(width: 40, height: 40)
             .background(isActive ? Theme.chromeActive : .clear, in: .circle)
             .contentShape(.circle)
+            .contentShape(.hoverEffect, .circle)
+            .hoverEffect(.highlight)
     }
 }
 

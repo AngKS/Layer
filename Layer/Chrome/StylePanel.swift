@@ -401,6 +401,7 @@ private struct MagicPenTab: View {
         PanelSection {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
             Toggle("Scratch Out to Delete", isOn: $model.scratchOutDeletes)
+            Toggle("Draw with Finger", isOn: Binding(get: { model.fingerDraws }, set: { model.setFingerDraws($0) }))
             HStack {
                 Text("New Screens")
                 Spacer(minLength: 8)

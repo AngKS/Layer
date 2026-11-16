@@ -109,6 +109,11 @@ struct RuleInterpreterTests {
         #expect(rules.reading(for: try request([wave])) == .element(.text))
     }
 
+    @Test func aStrayStrokeOnTheOpenCanvasIsLeftAsInk() throws {
+        let stroke = SketchSamples.straight(from: CGPoint(x: 380, y: 300), to: CGPoint(x: 460, y: 330))
+        #expect(rules.reading(for: try request([stroke])) == .unknown)
+    }
+
     @Test func aSmallSquiggleOnTheOpenCanvasIsLeftAsInk() throws {
         let wave = SketchSamples.wave(CGRect(x: 100, y: 100, width: 30, height: 20), humps: 2)
         #expect(rules.reading(for: try request([wave])) == .unknown)

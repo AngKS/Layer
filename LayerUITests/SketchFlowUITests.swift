@@ -60,12 +60,12 @@ final class SketchFlowUITests: XCTestCase {
         control("Draw").tap()
         XCTAssertTrue(waitForDisappearance(of: app.buttons["Magic Pen"]), "the palette should hide outside draw mode")
         point(onScreen((196, 132))).tap()
-        XCTAssertTrue(app.staticTexts["228 × 40"].waitForExistence(timeout: 5), "the title should be selected at its standard size")
-        XCTAssertTrue(app.staticTexts["Weight"].waitForExistence(timeout: 5), "the format panel should show the title's text settings")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'228 × 40\'", timeout: 5), "the title should be selected at its standard size")
+        XCTAssertTrue(control("Font size").waitForExistence(timeout: 5), "the format panel should show the title's text settings")
         let handle = onScreen((82.5 + 228, 112 + 40))
         stroke(CGPoint(x: handle.x + 6, y: handle.y + 6), CGPoint(x: handle.x + 6, y: handle.y + 30))
-        XCTAssertTrue(app.staticTexts.matching(labelBeginning("228 × ")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["228 × 40"].exists, "dragging the corner handle should have made the title taller")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '228 × '", timeout: 5))
+        XCTAssertNotEqual(selectionElement.value as? String, "228 × 40", "dragging the corner handle should have made the title taller")
 
         // Draw brings the palette back.
         control("Draw").tap()
@@ -142,7 +142,8 @@ final class SketchFlowUITests: XCTestCase {
         let field = app.textFields["Board name"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "tapping the name should offer to change it")
         XCTAssertTrue(app.buttons["Canvas"].exists && app.buttons["Magic Pen"].exists, "with the canvas settings below, in tabs")
-        field.tap()
+        // At the end of the name, so that deleting removes all of it.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).tap()
         let old = field.value as? String ?? ""
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + name + "\n")
         XCTAssertTrue(waitForDisappearance(of: field), "finishing the name should close the menu")
@@ -157,6 +158,67 @@ final class SketchFlowUITests: XCTestCase {
         listed.tap()
         XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 20))
         XCTAssertTrue(wait(for: control("Board title"), toHave: "value == '\(name)'"), "the reopened design should have kept its name")
+    }
+
+    func testTheSelectionPopoverLocksDuplicatesAndDeletes() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        control("Draw").tap()
+
+        // Selecting a frame brings up its actions.
+        let label = app.staticTexts["Screen 1"]
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(control("Lock").waitForExistence(timeout: 5), "a selected frame should offer to lock it")
+        XCTAssertTrue(control("Duplicate").exists)
+        XCTAssertTrue(control("Delete selection").exists)
+
+        // Locked, it stays put when dragged, and offers nothing but unlocking.
+        control("Lock").tap()
+        XCTAssertTrue(control("Unlock").waitForExistence(timeout: 5))
+        XCTAssertFalse(control("Delete selection").exists, "a locked frame can't be deleted")
+        let before = label.frame
+        stroke(CGPoint(x: before.midX, y: before.midY), CGPoint(x: before.midX + 120, y: before.midY))
+        XCTAssertEqual(label.frame.minX, before.minX, accuracy: 2, "a locked frame should not move")
+        control("Unlock").tap()
+        XCTAssertTrue(control("Lock").waitForExistence(timeout: 5))
+
+        // Duplicating makes a second frame, selected; deleting removes it again.
+        control("Duplicate").tap()
+        XCTAssertTrue(app.staticTexts["Screen 1 Copy"].waitForExistence(timeout: 5), "the copy should appear beside the frame")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1 Copy · 393'", timeout: 5), "the copy should be selected")
+        // The actions move over to the copy; let them arrive.
+        sleep(1)
+        control("Delete selection").tap()
+        XCTAssertTrue(waitForDisappearance(of: app.staticTexts["Screen 1 Copy"]))
+        XCTAssertTrue(label.exists)
+    }
+
+    func testWithAPencilAroundAFingerSelectsAndPansWhileThePaletteIsUp() {
+        // As once Apple Pencil has been seen: the Pencil draws and a finger doesn't.
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        control("Frames").tap()
+        app.buttons.matching(labelBeginning("iPhone")).firstMatch.tap()
+        let label = app.staticTexts["Screen 1"]
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        control("Draw").tap()
+        XCTAssertTrue(app.buttons["Magic Pen"].waitForExistence(timeout: 5), "the palette should be up")
+
+        // A finger tap on the frame selects it, palette and all.
+        point(CGPoint(x: 150, y: 650)).tap()
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(control("Delete selection").waitForExistence(timeout: 5), "a finger tap should select the frame")
+        XCTAssertTrue(app.buttons["Magic Pen"].exists, "the palette should stay up")
+
+        // A finger tap on empty canvas lets go; a finger drag across it pans rather than draws.
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: control("Delete selection")))
+        let before = label.frame
+        stroke(CGPoint(x: 150, y: 420), CGPoint(x: 230, y: 500))
+        sleep(1)
+        XCTAssertGreaterThan(label.frame.minX - before.minX, 40, "a finger should pan the canvas")
     }
 
     func testTheCanvasPansZoomsLocksAndFramesCanBeMoved() {
@@ -205,7 +267,7 @@ final class SketchFlowUITests: XCTestCase {
         // Tapping a frame selects it; dragging it then moves the frame, not the canvas.
         let middle = CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)
         point(middle).tap()
-        XCTAssertTrue(app.staticTexts.matching(labelBeginning("Screen 1 · 393")).firstMatch.waitForExistence(timeout: 5), "tapping a frame should select it")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1 · 393'", timeout: 5), "tapping a frame should select it")
         before = label.frame
         stroke(middle, CGPoint(x: middle.x - 150, y: middle.y + 40))
         XCTAssertEqual(label.frame.minX, before.minX - 150, accuracy: 4)
@@ -213,7 +275,7 @@ final class SketchFlowUITests: XCTestCase {
 
         // A frame can also be dragged by its name without selecting it first.
         point(CGPoint(x: 150, y: 650)).tap()
-        XCTAssertTrue(waitForDisappearance(of: app.staticTexts.matching(labelBeginning("Screen 1 · 393")).firstMatch), "tapping empty canvas should deselect")
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "tapping empty canvas should deselect")
         before = label.frame
         stroke(CGPoint(x: before.midX, y: before.midY), CGPoint(x: before.midX + 90, y: before.midY))
         XCTAssertEqual(label.frame.minX, before.minX + 90, accuracy: 4)
@@ -225,7 +287,7 @@ final class SketchFlowUITests: XCTestCase {
         // The frames menu adds a frame of another device, selected.
         control("Frames").tap()
         app.buttons.matching(labelBeginning("iPad")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts.matching(labelBeginning("Screen 2 · 820")).firstMatch.waitForExistence(timeout: 5), "an iPad frame should be added and selected")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 2 · 820'", timeout: 5), "an iPad frame should be added and selected")
     }
 
     func testThingsAreAddedFromTheBarAndStyledFromTheFormatPanel() {
@@ -244,7 +306,7 @@ final class SketchFlowUITests: XCTestCase {
         let heart = app.buttons["heart.fill"]
         XCTAssertTrue(heart.waitForExistence(timeout: 5))
         heart.tap()
-        XCTAssertTrue(app.staticTexts["44 × 44"].waitForExistence(timeout: 5), "the new symbol should be selected")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'44 × 44\'", timeout: 5), "the new symbol should be selected")
         XCTAssertFalse(app.buttons["Magic Pen"].exists, "adding something should put the pencil palette away")
         XCTAssertTrue(app.staticTexts["Symbol"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Canvas"].exists)
@@ -260,10 +322,10 @@ final class SketchFlowUITests: XCTestCase {
 
         // Typed text is added the same way, and restyled from the format panel.
         control("Text").tap()
-        XCTAssertTrue(app.staticTexts["200 × 24"].waitForExistence(timeout: 5), "new text should be selected")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5), "new text should be selected")
         point(CGPoint(x: 800, y: 600)).tap()
         point(center).tap()
-        XCTAssertTrue(app.staticTexts["200 × 24"].waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5))
         let weight = app.buttons.matching(labelBeginning("Weight")).firstMatch
         XCTAssertTrue(weight.waitForExistence(timeout: 5), "the format panel should offer the text's weight")
         weight.tap()
@@ -275,13 +337,13 @@ final class SketchFlowUITests: XCTestCase {
 
         // A sticky note stays on the canvas even over a frame, and can be deleted.
         control("Sticky note").tap()
-        XCTAssertTrue(app.staticTexts["150 × 150"].waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'150 × 150\'", timeout: 5))
         XCTAssertTrue(app.staticTexts["Sticky Note"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Canvas"].exists, "a sticky note belongs to the canvas, not the frame")
         // A new note opens ready to be typed in; that is put away before anything else can be tapped.
         point(open).tap()
-        if !app.staticTexts["150 × 150"].exists { point(center).tap() }
-        XCTAssertTrue(app.staticTexts["150 × 150"].waitForExistence(timeout: 5), "the note should still be selected")
+        if selectionElement.value as? String != "150 × 150" { point(center).tap() }
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'150 × 150\'", timeout: 5), "the note should still be selected")
         control("Delete selection").tap()
         XCTAssertTrue(waitForDisappearance(of: app.staticTexts["Sticky Note"]))
 
@@ -302,8 +364,8 @@ final class SketchFlowUITests: XCTestCase {
         // With the palette away, tapping it selects both strokes.
         control("Draw").tap()
         point(CGPoint(x: 260, y: 440)).tap()
-        let readout = app.staticTexts["Drawing · 2 strokes"]
-        XCTAssertTrue(readout.waitForExistence(timeout: 5), "tapping ink should select the drawing")
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
 
         // Dragging moves it: afterwards it is found at its new place and not at its old one.
         stroke(CGPoint(x: 260, y: 440), CGPoint(x: 560, y: 300))
@@ -449,6 +511,11 @@ final class SketchFlowUITests: XCTestCase {
 
     private func labelContaining(_ text: String) -> NSPredicate {
         NSPredicate(format: "label CONTAINS %@", text)
+    }
+
+    /// What is selected and its size, as the canvas tells VoiceOver: "228 × 40", "Drawing · 2 strokes".
+    private var selectionElement: XCUIElement {
+        app.descendants(matching: .any)["Selection"]
     }
 
     private func wait(for element: XCUIElement, toHave condition: String, timeout: TimeInterval = 8) -> Bool {
