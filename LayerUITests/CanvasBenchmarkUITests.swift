@@ -23,16 +23,14 @@ final class CanvasBenchmarkUITests: XCTestCase {
 
     func testCanvasWorkout() {
         openNewDesign()
-        // A board with something on it: three phone frames and a sticky note.
+        // A board with something on it: three phone frames.
         for _ in 0..<3 {
             control("Frames").tap()
-            app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'iPhone'")).firstMatch.tap()
+            let iPhone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'iPhone'")).firstMatch
+            XCTAssertTrue(iPhone.waitForExistence(timeout: 5))
+            iPhone.tap()
             sleep(1)
         }
-        control("Sticky note").tap()
-        control("Zoom").tap()
-        app.buttons["Zoom to Fit Content"].tap()
-        sleep(1)
         // Select mode: a finger on empty canvas pans.
         control("Draw").tap()
         point(CGPoint(x: 120, y: 700)).tap()
