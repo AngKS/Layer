@@ -61,6 +61,8 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(of: app.buttons["Magic Pen"]), "the palette should hide outside draw mode")
         point(onScreen((196, 132))).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'228 × 40\'", timeout: 5), "the title should be selected at its standard size")
+        XCTAssertTrue(control("Format").waitForExistence(timeout: 5), "with something selected the paintbrush is back")
+        control("Format").tap()
         XCTAssertTrue(control("Font size").waitForExistence(timeout: 5), "the format panel should show the title's text settings")
         let handle = onScreen((82.5 + 228, 112 + 40))
         stroke(CGPoint(x: handle.x + 6, y: handle.y + 6), CGPoint(x: handle.x + 6, y: handle.y + 30))
@@ -74,18 +76,24 @@ final class SketchFlowUITests: XCTestCase {
 
     func testPaletteInkIsOrdinaryInkSharesUndoAndIsSaved() throws {
         openNewDesign()
-        control("Format").tap()
+        XCTAssertFalse(control("Format").exists, "with nothing selected there is nothing to format")
         let discard = app.buttons["Discard Sketch"]
-        XCTAssertTrue(discard.waitForExistence(timeout: 5), "with nothing selected the format panel shows the canvas settings")
 
         // A Magic Pen sketch that means nothing can be discarded, or fades away on its own.
         stroke(CGPoint(x: 380, y: 300), CGPoint(x: 460, y: 330))
+        openMagicPenSettings()
         XCTAssertTrue(wait(for: discard, toHave: "isEnabled == true"))
         discard.tap()
+        XCTAssertTrue(waitForDisappearance(of: discard), "discarding should close the menu")
+        openMagicPenSettings()
         XCTAssertTrue(wait(for: discard, toHave: "isEnabled == false"))
+        closeMenu()
         stroke(CGPoint(x: 380, y: 300), CGPoint(x: 460, y: 330))
         convert()
+        sleep(2)
+        openMagicPenSettings()
         XCTAssertTrue(wait(for: discard, toHave: "isEnabled == false", timeout: 10), "an unreadable sketch should dissolve")
+        closeMenu()
 
         box(sketch)
         convert()
@@ -94,7 +102,9 @@ final class SketchFlowUITests: XCTestCase {
         // The palette's Pen draws ordinary ink: the same zigzag is not a sketch to convert.
         choosePaletteTool("Pen")
         zigzag()
+        openMagicPenSettings()
         XCTAssertFalse(app.buttons["Convert Sketch Now"].isEnabled, "ink from the Pen is not a Magic Pen sketch")
+        closeMenu()
         XCTAssertFalse(app.staticTexts["Title"].exists)
 
         // One undo history covers ink strokes and design changes alike.
@@ -225,7 +235,6 @@ final class SketchFlowUITests: XCTestCase {
         openNewDesign()
         box(sketch)
         convert()
-        control("Format").tap()
         let label = app.staticTexts["Screen 1"]
         XCTAssertTrue(label.waitForExistence(timeout: 10))
         XCTAssertEqual(zoom, "100 percent")
@@ -327,6 +336,7 @@ final class SketchFlowUITests: XCTestCase {
         point(center).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5))
         let weight = app.buttons.matching(labelBeginning("Weight")).firstMatch
+        if !weight.exists { control("Format").tap() }
         XCTAssertTrue(weight.waitForExistence(timeout: 5), "the format panel should offer the text's weight")
         weight.tap()
         app.buttons["Bold"].tap()
@@ -367,6 +377,31 @@ final class SketchFlowUITests: XCTestCase {
 
         app.buttons["Files"].tap()
         XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10) || app.buttons["Cancel"].waitForExistence(timeout: 5), "Files should open to pick an image")
+    }
+
+    func testASelectedDrawingBecomesWhatItsPromptSays() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+
+        // A wide box in ordinary ink near the bottom of the screen, selected.
+        choosePaletteTool("Pen")
+        box(CGRect(origin: onScreen((30, 730)), size: CGSize(width: 333 * screenScale, height: 56 * screenScale)))
+        control("Draw").tap()
+        point(onScreen((196, 730))).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Drawing'", timeout: 5), "tapping the ink should select it")
+
+        // Its popover takes a prompt, and the sparkle turns it into what the prompt names.
+        let prompt = app.textFields["Prompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5), "a selected drawing should offer a prompt")
+        XCTAssertTrue(control("Delete selection").exists)
+        prompt.tap()
+        // The full stop commits the last word on keyboards that compose text, such as Pinyin.
+        prompt.typeText("a button saying Go.")
+        control("Convert drawing").tap()
+        XCTAssertTrue(app.staticTexts["Go"].waitForExistence(timeout: 10), "the drawing should become a button labelled Go")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "NOT (value BEGINSWITH 'Drawing')", timeout: 5), "the button should be selected, not the ink")
     }
 
     func testDrawingsAreSelectedAndMoved() {
@@ -414,7 +449,7 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
             "Designs", "Board title", "Layers", "Draw", "Text", "Frames", "Sticky note", "Symbols", "Add Image",
-            "Share", "Format", "Zoom out", "Zoom", "Zoom in", "Magic Pen",
+            "Share", "Zoom out", "Zoom", "Zoom in", "Magic Pen",
         ]
         for label in controls {
             XCTAssertTrue(control(label).isHittable, "\(label) should be on screen and tappable")
@@ -495,12 +530,28 @@ final class SketchFlowUITests: XCTestCase {
         for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
     }
 
-    /// Reads the sketch on the canvas, from the Magic Pen settings in the format panel.
+    /// Reads the sketch on the canvas, from the Magic Pen tab of the board's menu, which
+    /// then closes.
     private func convert() {
         let button = app.buttons["Convert Sketch Now"]
-        if !button.exists { control("Format").tap() }
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "the format panel should offer to convert the sketch")
+        if !button.exists { openMagicPenSettings() }
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "the board menu should offer to convert the sketch")
         button.tap()
+        XCTAssertTrue(waitForDisappearance(of: button), "converting should close the menu")
+    }
+
+    /// Opens the board's menu at its Magic Pen tab.
+    private func openMagicPenSettings() {
+        control("Board title").tap()
+        let tab = app.segmentedControls.buttons["Magic Pen"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "the board menu should have a Magic Pen tab")
+        tab.tap()
+    }
+
+    /// Closes a popover, such as the board's menu, the way a tap outside it would.
+    private func closeMenu() {
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(of: app.segmentedControls.firstMatch))
     }
 
     // MARK: Finding things

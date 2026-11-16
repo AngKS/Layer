@@ -31,7 +31,7 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
     }
 
     func read(_ request: SketchRequest) async throws -> SketchReading {
-        let candidates = request.candidates
+        let candidates = request.options
         let names = candidates.map(SketchPrompt.name(for:))
         let schema = try GenerationSchema(
             root: DynamicGenerationSchema(name: "Meaning", description: "What the sketch stands for", anyOf: names),

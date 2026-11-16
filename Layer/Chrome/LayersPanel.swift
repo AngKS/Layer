@@ -28,7 +28,7 @@ struct LayersPanel: View {
             content
                 .frame(width: 300)
                 .frame(maxHeight: min(560, maxHeight), alignment: .top)
-                .background(Theme.panel, in: .rect(cornerRadius: 26, style: .continuous))
+                .background(.background, in: .rect(cornerRadius: 26, style: .continuous))
                 .clipShape(.rect(cornerRadius: 26, style: .continuous))
                 .shadow(color: .black.opacity(0.10), radius: 22, y: 8)
                 .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
@@ -41,7 +41,7 @@ struct LayersPanel: View {
             tab("Code", .code)
         }
         .padding(3)
-        .background(Theme.segmentTrack, in: .capsule)
+        .background(Color(uiColor: .tertiarySystemFill), in: .capsule)
     }
 
     private func tab(_ title: String, _ tab: AppModel.PanelTab) -> some View {
@@ -51,7 +51,7 @@ struct LayersPanel: View {
         } label: {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(isActive ? Color.white : .clear, in: .capsule)
@@ -106,7 +106,7 @@ struct LayersPanel: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
             }
-            .foregroundStyle(Theme.ink)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(rowFill(isSelected: isSelected, target: target), in: .rect(cornerRadius: 10))
@@ -128,11 +128,11 @@ struct LayersPanel: View {
                 HStack(spacing: 12) {
                     Image(systemName: element.symbol ?? element.kind.symbol)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.label)
+                        .foregroundStyle(.secondary)
                         .frame(width: 20)
                     Text(element.displayName)
                         .font(.system(size: 14))
-                        .foregroundStyle(Theme.ink)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                 }
@@ -171,7 +171,7 @@ struct LayersPanel: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(.primary)
                 .frame(width: 30, height: 36)
                 .contentShape(.rect)
         }
@@ -182,8 +182,8 @@ struct LayersPanel: View {
     /// A row is filled when its layer is selected, and tinted while it is hovered over,
     /// here or on the canvas.
     private func rowFill(isSelected: Bool, target: CanvasSelection?) -> Color {
-        if isSelected { return Theme.rowSelected }
-        if let target, model.hovered == target { return Theme.accent.color.opacity(0.10) }
+        if isSelected { return Color(uiColor: .secondarySystemFill) }
+        if let target, model.hovered == target { return Color.accentColor.opacity(0.10) }
         return .clear
     }
 
@@ -214,14 +214,14 @@ struct LayersPanel: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text")
-                            .foregroundStyle(Theme.label)
+                            .foregroundStyle(.secondary)
                         Text(SwiftUICodeGenerator.fileName(for: screen))
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Theme.label)
+                            .foregroundStyle(.secondary)
                     }
-                    .foregroundStyle(Theme.ink)
+                    .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -253,7 +253,7 @@ private struct CodeOptionsMenu: View {
         } label: {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(.primary)
                 .frame(width: 32, height: 32)
                 .contentShape(.rect)
         }
@@ -281,7 +281,7 @@ private struct CopyButton: View {
         } label: {
             Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
     }

@@ -111,17 +111,12 @@ struct CanvasScreen: View {
             PanelSheet(model: model) { StylePanel(isSheet: true) }
         }
         .overlay {
-            // Narrow, undo and redo join the zoom, which leaves the other corner free.
-            Group {
-                if isCompact { ViewControls() } else { ZoomControl() }
-            }
-            .modifier(BottomCorner(edge: .leading))
+            // Undo and redo join the zoom at any width, which leaves the other corner free.
+            ViewControls()
+                .modifier(BottomCorner(edge: .leading))
         }
         .overlay {
-            if !isCompact {
-                UndoControl()
-                    .modifier(BottomCorner(edge: .trailing))
-            } else if usesSheets, model.tool == .draw, !model.isLayersOpen, !model.isInspectorOpen {
+            if isCompact, usesSheets, model.tool == .draw, !model.isLayersOpen, !model.isInspectorOpen {
                 PaletteToggle()
                     .modifier(BottomCorner(edge: .trailing))
             }
@@ -185,7 +180,6 @@ private struct PanelSheet<Content: View>: View {
             .presentationDetents([.medium, .large], selection: $detent)
             .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             .presentationDragIndicator(.visible)
-            .presentationBackground(Theme.panel)
     }
 }
 

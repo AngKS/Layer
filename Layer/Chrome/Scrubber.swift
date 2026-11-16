@@ -2,8 +2,9 @@ import SwiftUI
 import UIKit
 
 /// Changes a whole-number field by sliding a ruler: a finger held on the field and dragged
-/// sideways, or an Apple Pencil Pro squeezed over the field and rolled. Each step is one
-/// unit, and on Pencil Pro each step is felt as a tick.
+/// sideways, or an Apple Pencil Pro squeezed once over the field, rolled, and squeezed
+/// again to keep the value. Each step is one unit, and on Pencil Pro each step is felt as
+/// a tick.
 @MainActor @Observable
 final class Scrubber {
     /// A field that can be scrubbed: where it is, and how to read and change its value.
@@ -39,6 +40,8 @@ final class Scrubber {
     @ObservationIgnored private var steps = 0
     @ObservationIgnored private var lastRoll: Angle?
     @ObservationIgnored private var rolled = Angle.zero
+    /// Whether a squeeze is under way, so that each squeeze acts once, as it starts.
+    @ObservationIgnored private var isSqueezing = false
 
     func begin(_ target: Target) {
         guard self.target == nil else { return }
@@ -70,14 +73,23 @@ final class Scrubber {
 
     // MARK: Apple Pencil
 
-    /// A squeeze over a field scrubs it until the squeeze ends.
+    /// A squeeze over a field brings up its ruler, and the pencil need not stay squeezed:
+    /// rolling the barrel then turns the value. The next squeeze keeps the value and puts
+    /// the ruler away.
     func squeeze(_ phase: PencilSqueezeGesturePhase) {
         switch phase {
         case .active(let value):
-            if target == nil, let hovered { begin(hovered) }
-            if let roll = value.hoverPose?.roll { rolled(to: roll) }
+            guard !isSqueezing else { return }
+            isSqueezing = true
+            if target != nil {
+                end()
+            } else if let hovered {
+                begin(hovered)
+                // Turning counts from where the barrel is now.
+                lastRoll = value.hoverPose?.roll
+            }
         case .ended, .failed:
-            end()
+            isSqueezing = false
         }
     }
 
@@ -137,18 +149,17 @@ struct ScrubberRuler: View {
                     // Ticks fade towards the ends of the ruler.
                     let fade = 1 - min(abs(x - middle) / middle, 1)
                     let tick = Path(CGRect(x: x - 0.5, y: size.height - height, width: 1, height: height))
-                    context.fill(tick, with: .color(Theme.ink.opacity((isMajor ? 0.7 : 0.35) * fade)))
+                    context.fill(tick, with: .color(Color.primary.opacity((isMajor ? 0.7 : 0.35) * fade)))
                 }
                 let needle = Path(roundedRect: CGRect(x: middle - 1, y: 0, width: 2, height: size.height), cornerRadius: 1)
-                context.fill(needle, with: .color(Theme.accent.color))
+                context.fill(needle, with: .color(Color.accentColor))
             }
             .frame(height: 18)
         }
-        .foregroundStyle(Theme.ink)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Theme.chrome, in: .capsule)
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .glassEffect(.regular, in: .capsule)
         .accessibilityHidden(true)
     }
 }

@@ -1,5 +1,6 @@
 import ImagePlayground
 import SwiftUI
+import UIKit
 
 /// The small bar that floats over whatever is selected, as in Freeform: the things that
 /// can be done to it. It sits above the selection, or below it when there is no room
@@ -8,6 +9,11 @@ struct SelectionActions: View {
     @Environment(AppModel.self) private var model
     @Environment(\.supportsImagePlayground) private var supportsImagePlayground
     @State private var size = CGSize(width: 220, height: 50)
+    /// What is typed about a selected drawing, to say what it should become.
+    @State private var prompt = ""
+    @FocusState private var isTypingPrompt: Bool
+    /// The top of the on-screen keyboard in the canvas's coordinates, while it is up.
+    @State private var keyboardTop: CGFloat?
 
     var body: some View {
         if !model.isAdjusting, let rect = model.selectionViewRect {
@@ -16,14 +22,37 @@ struct SelectionActions: View {
                 .reportsChromeFrame("selection actions", to: model)
                 .position(position(above: rect))
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .animation(.smooth(duration: 0.25), value: keyboardTop)
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                    keyboardTop = Self.keyboardTop(note)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    keyboardTop = nil
+                }
         }
+    }
+
+    /// Where the keyboard a notification is about begins, in the window, or nil when it
+    /// covers none of it, as a hardware keyboard's bar or a floating keyboard may not.
+    private static func keyboardTop(_ note: Notification) -> CGFloat? {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let window = UIApplication.shared.connectedScenes
+                  .compactMap({ $0 as? UIWindowScene })
+                  .flatMap(\.windows)
+                  .first(where: \.isKeyWindow)
+        else { return nil }
+        let local = window.convert(frame, from: window.screen.coordinateSpace)
+        guard local.minY < window.bounds.maxY, local.width >= window.bounds.width * 0.5 else { return nil }
+        return local.minY
     }
 
     private var bar: some View {
         @Bindable var model = model
         let isLocked = model.isSelectionLocked
         return ToolbarPill {
-            if isLocked {
+            if case .ink = model.selection {
+                drawingActions
+            } else if isLocked {
                 // Locked: nothing to do but unlock.
                 ToolButton(symbol: "lock.open", label: "Unlock") { model.setSelectionLocked(false) }
                     .keyboardShortcut("l", modifiers: .command)
@@ -71,6 +100,32 @@ struct SelectionActions: View {
             }
         }
         .animation(.smooth(duration: 0.2), value: isLocked)
+        .onChange(of: model.selection) { prompt = "" }
+    }
+
+    /// For a drawing: a line to say what it should be, the sparkle that has it read as a
+    /// sketch and turned into that, and deleting it.
+    @ViewBuilder private var drawingActions: some View {
+        TextField("What should this be?", text: $prompt)
+            .font(.system(size: 15))
+            .textFieldStyle(.plain)
+            .submitLabel(.go)
+            .focused($isTypingPrompt)
+            .onSubmit(convert)
+            .padding(.horizontal, 12)
+            .frame(width: 240, height: 44)
+            .accessibilityLabel("Prompt")
+        ToolButton(symbol: "sparkles", label: "Convert drawing") { convert() }
+        ToolButton(symbol: "trash", label: "Delete selection") {
+            withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
+        }
+        .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    private func convert() {
+        isTypingPrompt = false
+        model.convertSelection(prompt: prompt)
+        prompt = ""
     }
 
     /// Centred over the selection and clear of its handles, kept inside the view, below the
@@ -89,6 +144,10 @@ struct SelectionActions: View {
         let besideCanvas = !model.isCompactSizeClass
         let left: CGFloat = besideCanvas && model.isLayersOpen ? 20 + 300 + 12 : 12
         let right: CGFloat = view.width - (besideCanvas && model.isInspectorOpen ? 20 + 300 + 12 : 12)
+        // Above the keyboard while one is up, so that what is typed can be seen.
+        if let keyboardTop, y + size.height / 2 > keyboardTop - 12 {
+            y = max(keyboardTop - 12 - size.height / 2, top + size.height / 2)
+        }
         let half = size.width / 2
         let x = min(max(rect.midX, left + half), max(right - half, left + half))
         return CGPoint(x: x, y: y)

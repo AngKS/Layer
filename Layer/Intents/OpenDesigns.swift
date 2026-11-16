@@ -51,10 +51,14 @@ final class OpenDesigns {
         if let model = model(forDesign: id) { return model }
         guard let url = DesignLibrary.url(for: id) else { throw LayerIntentError.designNotFound }
         guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
-        try await DocumentBrowser.open(url)
-        for _ in 0..<80 {
-            if let model = model(forDesign: id) { return model }
-            try await Task.sleep(for: .milliseconds(100))
+        // A design still closing can keep the browser from taking the request, so it is
+        // asked again if the design hasn't opened after a few seconds.
+        for _ in 0..<3 {
+            try await DocumentBrowser.open(url)
+            for _ in 0..<30 {
+                if let model = model(forDesign: id) { return model }
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
         throw LayerIntentError.couldNotOpen
     }

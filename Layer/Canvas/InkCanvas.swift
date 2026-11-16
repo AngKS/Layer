@@ -473,6 +473,16 @@ struct InkCanvas: UIViewRepresentable {
             undoManager.endUndoGrouping()
         }
 
+        /// The strokes with these keys, as points on the canvas, for reading as a sketch.
+        func inkStrokes(_ keys: Set<Double>) -> [SketchStroke] {
+            documentCanvas.drawing.strokes.filter { keys.contains(Self.key(for: $0)) }.map { stroke in
+                SketchStroke(
+                    key: Self.key(for: stroke),
+                    points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
+                )
+            }
+        }
+
         func deleteInk(_ keys: Set<Double>) {
             var drawing = documentCanvas.drawing
             let removed = drawing.strokes.filter { keys.contains(Self.key(for: $0)) }

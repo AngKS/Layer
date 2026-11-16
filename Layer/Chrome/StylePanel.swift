@@ -18,16 +18,13 @@ struct StylePanel: View {
                     FrameSettings(screen: screen)
                 } else if case .ink = model.selection {
                     PanelHeader(symbol: "scribble", title: "Drawing") { model.deleteSelection() }
-                } else {
-                    NothingSelected()
                 }
             }
             .padding(.bottom, 12)
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDisabled(scrubber.target != nil)
-        .foregroundStyle(Theme.ink)
-        .tint(Theme.accent.color)
+        .foregroundStyle(.primary)
 
         // Fields and the ruler share one coordinate space, the panel's.
         let settings = scrolling
@@ -41,6 +38,9 @@ struct StylePanel: View {
                 scrubber.onBegin = { [model] in model.beginScrubbing() }
                 scrubber.onEnd = { [model] in model.endScrubbing() }
             }
+            // A ruler left up by the pencil goes with the panel or the selection it was for.
+            .onDisappear { scrubber.end() }
+            .onChange(of: model.selection) { scrubber.end() }
 
         if isSheet {
             settings
@@ -51,7 +51,7 @@ struct StylePanel: View {
                 .frame(width: 300)
                 .frame(maxHeight: min(620, maxHeight), alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(Theme.panel, in: .rect(cornerRadius: 26, style: .continuous))
+                .background(.background, in: .rect(cornerRadius: 26, style: .continuous))
                 .clipShape(.rect(cornerRadius: 26, style: .continuous))
                 .shadow(color: .black.opacity(0.10), radius: 22, y: 8)
                 .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
@@ -140,7 +140,7 @@ private struct ElementSettings: View {
                 TextField("Text", text: Binding(get: { element.text }, set: { text in change { $0.text = text } }), axis: .vertical)
                     .lineLimit(1...5)
                     .padding(10)
-                    .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
+                    .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 12))
                 HStack(spacing: 8) {
                     NumberField("pt", label: "Font size", value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }), range: 6...400)
                         .frame(width: 84)
@@ -220,23 +220,6 @@ private struct FrameSettings: View {
 }
 
 /// With nothing selected: the sketch in progress, and the way to the canvas's settings.
-private struct NothingSelected: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        PanelHeader(symbol: "square.dashed", title: "Canvas")
-
-        PanelSection {
-            Group {
-                Button("Convert Sketch Now", systemImage: "wand.and.sparkles") { model.convertNow() }
-                Button("Discard Sketch", systemImage: "eraser") { model.discardSketch() }
-            }
-            .disabled(!model.hasSketch)
-            .opacity(model.hasSketch ? 1 : 0.35)
-            Button("Canvas Settings", systemImage: "slider.horizontal.3") { model.openBoardMenu() }
-        }
-    }
-}
 
 // MARK: The board menu
 
@@ -271,14 +254,14 @@ struct BoardMenu: View {
                     .accessibilityLabel("Board name")
                 Image(systemName: sync.symbol)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Theme.label)
+                    .foregroundStyle(.secondary)
                     .help(sync.title)
                     .accessibilityLabel(sync.title)
                     .accessibilityValue(sync.detail ?? "")
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
-            .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
+            .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 12))
 
             Picker("Settings", selection: $tab) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
@@ -300,8 +283,7 @@ struct BoardMenu: View {
         }
         .frame(width: isSheet ? nil : 360, alignment: .top)
         .frame(maxWidth: isSheet ? .infinity : nil, maxHeight: isSheet ? .infinity : nil, alignment: .top)
-        .foregroundStyle(Theme.ink)
-        .tint(Theme.accent.color)
+        .foregroundStyle(.primary)
         .onAppear { draft = model.store.title ?? "" }
         .onDisappear(perform: rename)
     }
@@ -349,9 +331,9 @@ private struct CanvasTab: View {
                     } label: {
                         Circle()
                             .fill(colour.color)
-                            .overlay { Circle().strokeBorder(Theme.label.opacity(0.35), lineWidth: 1) }
+                            .overlay { Circle().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1) }
                             .padding(3)
-                            .overlay { Circle().strokeBorder(isChosen ? Theme.accent.color : .clear, lineWidth: 2) }
+                            .overlay { Circle().strokeBorder(isChosen ? Color.accentColor : .clear, lineWidth: 2) }
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
@@ -397,6 +379,22 @@ private struct MagicPenTab: View {
 
     var body: some View {
         @Bindable var model = model
+
+        // What is drawn with the Magic Pen and not yet read. Either closes the menu.
+        PanelSection {
+            Group {
+                Button("Convert Sketch Now", systemImage: "wand.and.sparkles") {
+                    model.isBoardMenuOpen = false
+                    model.convertNow()
+                }
+                Button("Discard Sketch", systemImage: "eraser") {
+                    model.isBoardMenuOpen = false
+                    model.discardSketch()
+                }
+            }
+            .disabled(!model.hasSketch)
+            .opacity(model.hasSketch ? 1 : 0.35)
+        }
 
         PanelSection {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
@@ -468,11 +466,11 @@ private struct PanelHeader: View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.label)
+                .foregroundStyle(.secondary)
                 .frame(width: 22)
             if let name {
                 // Unnamed, it goes by its kind's name, drawn as a name rather than a prompt.
-                TextField(placeholder, text: name, prompt: Text(placeholder).foregroundStyle(Theme.ink))
+                TextField(placeholder, text: name, prompt: Text(placeholder).foregroundStyle(.primary))
                     .font(.system(size: 17, weight: .bold))
                     .accessibilityLabel("Name")
             } else if let title {
@@ -508,7 +506,7 @@ private struct PanelSection<Content: View>: View {
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .top) {
-                Rectangle().fill(Theme.dividerLine).frame(height: 1)
+                Rectangle().fill(.separator).frame(height: 1)
             }
     }
 }
@@ -560,7 +558,7 @@ private struct NumberField: View {
         HStack(spacing: 6) {
             Text(unit)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.label)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             if isTyping {
                 TextField(
@@ -594,11 +592,11 @@ private struct NumberField: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .frame(maxWidth: .infinity)
-        .background(Theme.fieldFill, in: .rect(cornerRadius: 10))
+        .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 10))
         .contentShape(.rect(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Theme.accent.color, lineWidth: isScrubbing ? 1.5 : 0)
+                .strokeBorder(Color.accentColor, lineWidth: isScrubbing ? 1.5 : 0)
         }
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Scrubber.space)) }) { frame = $0 }
         // A pencil hovering here is what a squeeze would scrub.
@@ -661,7 +659,7 @@ private struct IconButton: View {
                 .opacity(isEnabled ? 1 : 0.35)
                 .frame(maxWidth: .infinity)
                 .frame(height: 32)
-                .background(isOn ? Theme.chromeActive : Theme.fieldFill, in: .rect(cornerRadius: 9))
+                .background(Color(uiColor: isOn ? .systemFill : .tertiarySystemFill), in: .rect(cornerRadius: 9))
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

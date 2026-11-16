@@ -8,27 +8,29 @@ struct ToolbarPill<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(spacing: 2) { content }
-            .padding(5)
-            .background(Theme.chrome, in: .capsule)
-            .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
-            .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
+        // Freeform's bars: 44 points tall, plain system glass.
+        HStack(spacing: 4) { content }
+            // Menus in the bar too, untinted, like everything else in it.
+            .buttonStyle(.plain)
+            .padding(.horizontal, 4)
+            .glassEffect(.regular, in: .capsule)
     }
 }
 
-/// A control's icon, on a grey disc when the control is on.
+/// A control's icon, on a grey capsule when the control is on. Sized as Freeform's:
+/// a 44-point-tall target with a glyph of about 22 points.
 struct ToolIcon: View {
     let symbol: String
     var isActive = false
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 16, weight: .medium))
-            .foregroundStyle(Theme.ink)
-            .frame(width: 40, height: 40)
-            .background(isActive ? Theme.chromeActive : .clear, in: .circle)
-            .contentShape(.circle)
-            .contentShape(.hoverEffect, .circle)
+            .font(.system(size: 20, weight: .regular))
+            .foregroundStyle(.primary)
+            .frame(width: 52, height: 44)
+            .background(isActive ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .capsule)
+            .contentShape(.capsule)
+            .contentShape(.hoverEffect, .capsule)
             .hoverEffect(.highlight)
     }
 }
@@ -90,33 +92,50 @@ private struct TitleBar: View {
     var isCutToFit = false
 
     var body: some View {
-        ToolbarPill {
-            ToolButton(symbol: "chevron.left", label: "Designs") {
+        HStack(spacing: 10) {
+            Button {
                 // The design goes back to the browser with its picture and its name up to date.
                 Task {
                     await model.prepareToClose()
                     dismiss()
                 }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+                    .contentShape(.hoverEffect, .circle)
+                    .hoverEffect(.highlight)
             }
-            @Bindable var model = model
+            .buttonStyle(.plain)
+            .glassEffect(.regular, in: .circle)
+            .accessibilityLabel("Designs")
+            ToolbarPill { title }
+        }
+    }
+
+    private var title: some View {
+        @Bindable var model = model
+        return Group {
             Button {
                 model.openBoardMenu()
             } label: {
                 HStack(spacing: 6) {
                     Text(model.store.title ?? "Untitled")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .frame(maxWidth: 220, alignment: .leading)
                         .fixedSize(horizontal: !isCutToFit, vertical: false)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.label)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(model.isBoardMenuOpen ? 180 : 0))
                         .animation(.snappy(duration: 0.2), value: model.isBoardMenuOpen)
                 }
-                .padding(.trailing, 14)
-                .frame(height: 40)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -128,7 +147,6 @@ private struct TitleBar: View {
                     .environment(model)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
-                    .presentationBackground(Theme.panel)
                     .preferredColorScheme(.light)
             }
         }
@@ -309,7 +327,7 @@ private struct ImageAttaching: ViewModifier {
     }
 }
 
-/// Top right: sharing, and the paintbrush that opens settings for the selection or the canvas.
+/// Top right: sharing, and, while something is selected, the paintbrush that opens its settings.
 private struct ActionsBar: View {
     @Environment(AppModel.self) private var model
     /// Whether the tools are here too, folded into a menu, for want of room for their own bar.
@@ -319,9 +337,14 @@ private struct ActionsBar: View {
         ToolbarPill {
             if holdsTools { ToolsMenu() }
             ShareMenu()
-            ToolButton(symbol: "paintbrush", label: "Format", isActive: model.isInspectorOpen) {
-                withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
+            // Only while there is something to format: the bar takes no room for it otherwise.
+            if model.selection != nil {
+                ToolButton(symbol: "paintbrush", label: "Format", isActive: model.isInspectorOpen) {
+                    withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
+        .animation(.smooth(duration: 0.25), value: model.selection != nil)
     }
 }
