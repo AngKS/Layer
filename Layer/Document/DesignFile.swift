@@ -1,4 +1,5 @@
 import Foundation
+import os
 import PencilKit
 import UniformTypeIdentifiers
 
@@ -129,7 +130,7 @@ struct DesignFile: Sendable {
         encoder.outputFormatting = .sortedKeys
         let manifest = Manifest(version: version, content: content, fileName: fileName)
         parts[DesignPackage.design] = Self.file(try encoder.encode(manifest), named: DesignPackage.design, onDisk: old[DesignPackage.design])
-        parts[DesignPackage.drawing] = Self.file(drawing.dataRepresentation(), named: DesignPackage.drawing, onDisk: old[DesignPackage.drawing])
+        parts[DesignPackage.drawing] = Self.file(Self.encoded(drawing), named: DesignPackage.drawing, onDisk: old[DesignPackage.drawing])
 
         let shown = Set(content.imageIDs.map(\.uuidString))
         let savedPictures = old[DesignPackage.images]?.fileWrappers ?? [:]
@@ -147,6 +148,19 @@ struct DesignFile: Sendable {
             parts[DesignPackage.quickLook] = Self.folder([DesignPackage.thumbnail: Self.file(preview, named: DesignPackage.thumbnail, onDisk: saved)], named: DesignPackage.quickLook)
         }
         return FileWrapper(directoryWithFileWrappers: parts)
+    }
+
+    /// The last drawing encoded to data, and what it encoded to. Most saves change only
+    /// the design's screens and elements, not its ink, so re-encoding the same drawing
+    /// every time would be wasted work; this lets a save reuse the bytes from the last
+    /// one when the ink hasn't changed since.
+    private static let encodedDrawingCache = OSAllocatedUnfairLock<(drawing: PKDrawing, data: Data)?>(initialState: nil)
+
+    private static func encoded(_ drawing: PKDrawing) -> Data {
+        if let cached = encodedDrawingCache.withLock({ $0 }), cached.drawing == drawing { return cached.data }
+        let data = drawing.dataRepresentation()
+        encodedDrawingCache.withLock { $0 = (drawing, data) }
+        return data
     }
 
     private static func file(_ data: Data, named name: String, onDisk saved: FileWrapper?) -> FileWrapper {
