@@ -102,6 +102,13 @@ struct InkCanvas: UIViewRepresentable {
         private var topInset: CGFloat = 0
         private var hidesPalette = false
         private var zoomAnimation: ZoomAnimation?
+        /// `SketchStroke`s already made for sketch strokes that haven't changed since, so
+        /// that drawing one more stroke doesn't re-interpolate every stroke already on the
+        /// canvas on every touch event, only the one still being drawn. Keyed by the
+        /// stroke, with how many points it had when it was last turned into one of these,
+        /// since `PKStroke` isn't equatable: a stroke only grows while it is being drawn,
+        /// so the same point count means the same points.
+        private var sketchStrokeCache: [Double: (pointCount: Int, result: SketchStroke)] = [:]
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -530,6 +537,7 @@ struct InkCanvas: UIViewRepresentable {
 
         func clearSketch() {
             sketchCanvas.drawing = PKDrawing()
+            sketchStrokeCache.removeAll()
             model.sketchChanged([])
             refresh()
         }
@@ -554,13 +562,26 @@ struct InkCanvas: UIViewRepresentable {
             model.sketchChanged(sketch())
         }
 
+        /// The Magic Pen's strokes, as points for reading. While one stroke is still being
+        /// drawn, this is asked for again on every touch event; the strokes already
+        /// finished haven't changed, so their points come from the cache rather than being
+        /// walked again.
         private func sketch() -> [SketchStroke] {
-            sketchCanvas.drawing.strokes.map { stroke in
-                SketchStroke(
-                    key: Self.key(for: stroke),
+            let result = sketchCanvas.drawing.strokes.map { stroke -> SketchStroke in
+                let key = Self.key(for: stroke)
+                let pointCount = stroke.path.count
+                if let cached = sketchStrokeCache[key], cached.pointCount == pointCount { return cached.result }
+                let sketchStroke = SketchStroke(
+                    key: key,
                     points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
                 )
+                sketchStrokeCache[key] = (pointCount, sketchStroke)
+                return sketchStroke
             }
+            // Strokes that are gone, converted or erased, don't linger in the cache.
+            let keys = Set(sketchCanvas.drawing.strokes.map(Self.key(for:)))
+            if sketchStrokeCache.count != keys.count { sketchStrokeCache = sketchStrokeCache.filter { keys.contains($0.key) } }
+            return result
         }
 
         private static func key(for stroke: PKStroke) -> Double {

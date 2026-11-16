@@ -55,3 +55,39 @@ final class DesignFilePerformanceTests: XCTestCase {
         }
     }
 }
+
+/// While a Magic Pen stroke is being drawn, `InkCanvas.Coordinator` is told the sketch
+/// changed on every touch event. Only the stroke still being drawn should have to be
+/// turned into points again; strokes already finished shouldn't be redone on every touch.
+@MainActor
+final class InkCanvasPerformanceTests: XCTestCase {
+    private func stroke(_ points: [CGPoint], key: Double) -> PKStroke {
+        let controlPoints = points.enumerated().map { index, point in
+            PKStrokePoint(location: point, timeOffset: Double(index) * 0.008, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+        }
+        let path = PKStrokePath(controlPoints: controlPoints, creationDate: Date(timeIntervalSinceReferenceDate: key))
+        return PKStroke(ink: PKInk(.monoline, color: .black), path: path)
+    }
+
+    func testDrawingOneStrokeDoesNotRedoTheStrokesAlreadyOnTheCanvas() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+
+        let finished = (0..<15).map { index in
+            stroke(SketchSamples.wave(CGRect(x: 0, y: CGFloat(index) * 50, width: 320, height: 30), humps: 5), key: Double(index))
+        }
+        let growingPoints = SketchSamples.wave(CGRect(x: 0, y: 900, width: 320, height: 30), humps: 5)
+        XCTAssertGreaterThan(growingPoints.count, 50, "the stroke needs enough points to make the workout worth measuring")
+
+        coordinator.sketchCanvas.drawing = PKDrawing(strokes: finished)
+        coordinator.canvasViewDrawingDidChange(coordinator.sketchCanvas)
+
+        measure {
+            for count in 2...growingPoints.count {
+                let growing = stroke(Array(growingPoints.prefix(count)), key: 1000)
+                coordinator.sketchCanvas.drawing = PKDrawing(strokes: finished + [growing])
+                coordinator.canvasViewDrawingDidChange(coordinator.sketchCanvas)
+            }
+        }
+    }
+}
