@@ -67,14 +67,8 @@ struct LayersPanel: View {
         let store = model.store
         return ScrollView {
             VStack(alignment: .leading, spacing: 4) {
-                if store.screens.isEmpty, store.floating.isEmpty {
-                    Text("Draw a tall rectangle with the Magic Pen, or add a frame, to start a screen.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.label)
-                        .padding(12)
-                }
                 ForEach(store.screens) { screen in
-                    group(screen.name, count: screen.elements.count, isSelected: model.selection == .screen(screen.id)) {
+                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection == .screen(screen.id)) {
                         select(.screen(screen.id))
                     }
                     // Topmost layer first, as layer lists usually read.
@@ -83,7 +77,7 @@ struct LayersPanel: View {
                     }
                 }
                 if !store.floating.isEmpty {
-                    group("Canvas", count: store.floating.count, isSelected: false, action: nil)
+                    group("Canvas", symbol: "square.dashed", isSelected: false, action: nil)
                     ForEach(store.floating.reversed()) { floating in
                         layerRow(floating.element, ref: .init(host: .canvas, element: floating.id))
                     }
@@ -100,19 +94,17 @@ struct LayersPanel: View {
     }
 
     /// The heading for a screen's layers, or for the layers on the open canvas.
-    private func group(_ name: String, count: Int, isSelected: Bool, action: (() -> Void)?) -> some View {
+    private func group(_ name: String, symbol: String, isSelected: Bool, action: (() -> Void)?) -> some View {
         Button {
             action?()
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 20)
                 Text(name)
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("\(count)")
-                    .font(.system(size: 12).monospacedDigit())
-                    .foregroundStyle(Theme.label)
             }
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 12)
@@ -151,28 +143,33 @@ struct LayersPanel: View {
             .accessibilityLabel(element.displayName)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            rowToggle(
-                element.isLocked ? "Unlock \(element.displayName)" : "Lock \(element.displayName)",
-                symbol: element.isLocked ? "lock.fill" : "lock.open",
-                isOn: element.isLocked
-            ) { model.toggleLock(ref) }
-            rowToggle(
-                element.isHidden ? "Show \(element.displayName)" : "Hide \(element.displayName)",
-                symbol: element.isHidden ? "eye.slash" : "eye",
-                isOn: element.isHidden
-            ) { model.toggleHidden(ref) }
-                .padding(.trailing, 4)
+            // A layer's lock and eye show when they are on, or when it is selected.
+            if isSelected || element.isLocked {
+                rowToggle(
+                    element.isLocked ? "Unlock \(element.displayName)" : "Lock \(element.displayName)",
+                    symbol: element.isLocked ? "lock.fill" : "lock.open",
+                    isOn: element.isLocked
+                ) { model.toggleLock(ref) }
+            }
+            if isSelected || element.isHidden {
+                rowToggle(
+                    element.isHidden ? "Show \(element.displayName)" : "Hide \(element.displayName)",
+                    symbol: element.isHidden ? "eye.slash" : "eye",
+                    isOn: element.isHidden
+                ) { model.toggleHidden(ref) }
+            }
+            Spacer().frame(width: 4)
         }
         .opacity(element.isHidden ? 0.5 : 1)
         .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
     }
 
-    /// A lock or eye on a layer's row: faint until it is on.
+    /// A lock or eye on a layer's row.
     private func rowToggle(_ label: String, symbol: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isOn ? Theme.ink : Theme.label.opacity(0.7))
+                .foregroundStyle(Theme.ink)
                 .frame(width: 30, height: 36)
                 .contentShape(.rect)
         }
@@ -213,13 +210,6 @@ struct LayersPanel: View {
             .padding(.vertical, 6)
 
             CodeView(source: source)
-        } else {
-            Text("Code appears here once there is a screen.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.label)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 20)
         }
     }
 }

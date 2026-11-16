@@ -14,7 +14,7 @@ Layer is a freeform canvas for iPad. Draw a tall rectangle and it becomes an iPh
 - **Add things directly.** Text, device frames (iPhone, iPhone Pro Max, iPhone SE, iPad), sticky notes, SF Symbols and images.
 - **Freeform-style objects.** A bar above the selection duplicates, locks and reorders it (⌘D, ⌘L, ⌘], ⌘[). Dragged things snap to smart guides or the grid. Layers can be named, hidden and locked.
 - **Format panel.** Position, size, fill, border, shadow, corner radius, opacity, alignment and type for the selection, plus arranging and aligning it on its screen.
-- **Board menu.** Tap the board's name to rename it. Below the name, tabs hold the canvas settings (background, grid, guides), the Magic Pen settings with a guide to the shapes it reads, the code options and iCloud status.
+- **Board menu.** Tap the board's name to rename it. Tabs below hold the canvas, Magic Pen and code settings; the icon in the name field shows where the file stands with iCloud.
 - **More Magic Pen shapes.** A small pill becomes a toggle and a small circle an avatar. Beside the screens, a box becomes a sticky note and a squiggle becomes text. Scratching back and forth over an element deletes it.
 - **SwiftUI code.** The Layers panel's Code tab shows each screen as SwiftUI, ready to copy or share. The code can be a stack or use exact positions, end with a `#Preview`, and use the title as a navigation title. Every screen can be shared as files at once.
 - **Documents and iCloud.** Designs are documents in Files and iCloud Drive. A design's file is named after its board, the document browser shows a thumbnail of each board, and versions edited on two devices at once are both kept.

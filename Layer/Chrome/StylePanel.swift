@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The paintbrush's panel: settings for whatever is selected. The canvas's own settings
-/// are in the menu under the board's name.
+/// The paintbrush's panel: settings for whatever is selected.
 struct StylePanel: View {
     @Environment(AppModel.self) private var model
     /// In a narrow window the panel fills a sheet rather than floating beside the canvas.
@@ -16,8 +15,8 @@ struct StylePanel: View {
                     ElementSettings(ref: selected.ref, element: selected.element)
                 } else if let screen = model.selectedScreen {
                     FrameSettings(screen: screen)
-                } else if case .ink(let strokes) = model.selection {
-                    DrawingSettings(strokeCount: strokes.count)
+                } else if case .ink = model.selection {
+                    PanelHeader(symbol: "scribble", title: "Drawing") { model.deleteSelection() }
                 } else {
                     NothingSelected()
                 }
@@ -53,39 +52,30 @@ private struct ElementSettings: View {
     let element: DesignElement
 
     var body: some View {
-        PanelHeader(title: element.kind.layerName, symbol: element.symbol ?? element.kind.symbol) {
-            withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
-        }
+        PanelHeader(
+            symbol: element.symbol ?? element.kind.symbol,
+            name: Binding(get: { element.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }),
+            placeholder: element.kind.layerName,
+            onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
+        )
 
-        PanelSection("Layer") {
-            PanelRow("Name") {
-                TextField(element.kind.layerName, text: Binding(get: { element.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }))
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .background(Theme.fieldFill, in: .rect(cornerRadius: 10))
-                    .accessibilityLabel("Layer name")
-            }
-            PanelRow("Position") {
+        PanelSection {
+            HStack(spacing: 8) {
                 NumberField("X", value: binding(\.frame.origin.x))
                 NumberField("Y", value: binding(\.frame.origin.y))
             }
-            .disabled(element.isLocked)
-            PanelRow("Size") {
+            HStack(spacing: 8) {
                 NumberField("W", value: binding(\.frame.size.width), minimum: 1)
                 NumberField("H", value: binding(\.frame.size.height), minimum: 1)
             }
-            .disabled(element.isLocked)
-            Toggle("Locked", isOn: Binding(get: { element.isLocked }, set: { locked in model.store.update(ref) { $0.isLocked = locked } }))
-            Toggle("Hidden", isOn: Binding(get: { element.isHidden }, set: { _ in model.toggleHidden(ref) }))
-        }
-
-        PanelSection("Arrange") {
-            HStack(spacing: 6) {
-                ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
-                    IconButton(arrangement.name, symbol: arrangement.symbol) { model.store.arrange(ref, arrangement) }
-                        .disabled(!model.store.canArrange(ref, arrangement))
+            HStack(spacing: 8) {
+                if element.hasCornerRadius {
+                    NumberField("R", label: "Corner radius", value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }), minimum: 0)
                 }
+                NumberField("%", label: "Opacity", value: Binding(
+                    get: { (element.resolvedOpacity * 100).rounded() },
+                    set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(min(max(percent, 5), 100)) / 100 } }
+                ))
             }
             if case .screen = ref.host {
                 HStack(spacing: 6) {
@@ -93,88 +83,58 @@ private struct ElementSettings: View {
                         IconButton(alignment.name, symbol: alignment.symbol) { model.store.align(ref, alignment) }
                     }
                 }
-                .disabled(element.isLocked)
             }
         }
+        .disabled(element.isLocked)
 
-        PanelSection("Style") {
+        PanelSection {
             if element.hasFill {
                 PanelRow("Fill") {
                     ColorField(label: "Fill colour", color: Binding(get: { element.tint }, set: { color in change { $0.tint = color } }))
                 }
             }
-            if element.hasCornerRadius {
-                PanelRow("Radius") {
-                    NumberField(
-                        "R",
-                        value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }),
-                        minimum: 0
-                    )
-                }
-            }
-            if element.kind == .toggle {
-                Toggle("On", isOn: Binding(get: { element.isOn }, set: { isOn in change { $0.isOn = isOn } }))
-            }
-            PanelRow("Opacity") {
-                Slider(
-                    value: Binding(get: { element.resolvedOpacity }, set: { opacity in change { $0.opacity = opacity >= 0.995 ? nil : opacity } }),
-                    in: 0.05...1
-                )
-                .accessibilityLabel("Opacity")
-                Text("\(Int((element.resolvedOpacity * 100).rounded()))%")
-                    .font(.system(size: 13).monospacedDigit())
-                    .frame(width: 42, alignment: .trailing)
-            }
             if element.hasBorder {
                 PanelRow("Border") {
-                    NumberField(
-                        "W",
-                        value: Binding(get: { element.resolvedBorderWidth }, set: { width in change { $0.borderWidth = width > 0 ? width : nil } }),
-                        minimum: 0
-                    )
-                    .frame(width: 84)
+                    NumberField("W", label: "Border width", value: Binding(get: { element.resolvedBorderWidth }, set: { width in change { $0.borderWidth = width > 0 ? width : nil } }), minimum: 0)
+                        .frame(width: 84)
                     ColorField(label: "Border colour", color: Binding(get: { element.resolvedBorderColor }, set: { color in change { $0.borderColor = color } }))
                 }
             }
             Toggle("Shadow", isOn: Binding(get: { element.hasShadow }, set: { shadow in change { $0.hasShadow = shadow } }))
+            if element.kind == .toggle {
+                Toggle("On", isOn: Binding(get: { element.isOn }, set: { isOn in change { $0.isOn = isOn } }))
+            }
         }
 
         if element.kind.hasText {
-            PanelSection("Text") {
+            PanelSection {
                 TextField("Text", text: Binding(get: { element.text }, set: { text in change { $0.text = text } }), axis: .vertical)
                     .lineLimit(1...5)
-                    .font(.system(size: 14))
                     .padding(10)
                     .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
-                PanelRow("Size") {
-                    NumberField(
-                        "pt",
-                        value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }),
-                        minimum: 6
-                    )
-                }
-                PanelRow("Weight") {
+                HStack(spacing: 8) {
+                    NumberField("pt", label: "Font size", value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }), minimum: 6)
+                        .frame(width: 84)
+                    Spacer(minLength: 0)
                     Picker("Weight", selection: Binding(get: { element.resolvedFontWeight }, set: { weight in change { $0.fontWeight = weight } })) {
                         ForEach(FontWeightChoice.allCases, id: \.self) { weight in
                             Text(weight.name).tag(weight)
                         }
                     }
                     .labelsHidden()
-                }
-                PanelRow("Colour") {
-                    ColorField(label: "Text colour", color: Binding(get: { element.resolvedTextColor }, set: { color in change { $0.textColor = color } }))
+                    .fixedSize()
+                    ColorPicker("Text colour", selection: Binding(get: { element.resolvedTextColor.color }, set: { color in change { $0.textColor = RGBColor(UIColor(color)) } }), supportsOpacity: false)
+                        .labelsHidden()
                 }
                 if element.hasTextAlignment {
-                    PanelRow("Align") {
-                        Picker("Text alignment", selection: Binding(get: { element.resolvedTextAlignment }, set: { alignment in change { $0.textAlignment = alignment } })) {
-                            ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
-                                Image(systemName: alignment.symbol)
-                                    .accessibilityLabel(alignment.name)
-                                    .tag(alignment)
-                            }
+                    Picker("Text alignment", selection: Binding(get: { element.resolvedTextAlignment }, set: { alignment in change { $0.textAlignment = alignment } })) {
+                        ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
+                            Image(systemName: alignment.symbol)
+                                .accessibilityLabel(alignment.name)
+                                .tag(alignment)
                         }
-                        .pickerStyle(.segmented)
                     }
+                    .pickerStyle(.segmented)
                 }
             }
         }
@@ -194,46 +154,28 @@ private struct FrameSettings: View {
     let screen: DesignScreen
 
     var body: some View {
-        PanelHeader(title: "Frame", symbol: "iphone") {
-            withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
-        }
+        PanelHeader(
+            symbol: "iphone",
+            name: Binding(get: { screen.name }, set: { name in change { $0.name = name } }),
+            placeholder: "Frame",
+            onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
+        )
 
-        PanelSection("Frame") {
-            PanelRow("Name") {
-                TextField("Name", text: Binding(get: { screen.name }, set: { name in change { $0.name = name } }))
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .background(Theme.fieldFill, in: .rect(cornerRadius: 10))
-            }
-            PanelRow("Device") {
-                Picker("Device", selection: Binding(get: { screen.device.id }, set: { id in change { $0.deviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
-                    ForEach(DeviceFrame.all) { device in
-                        Text(device.name).tag(device.id)
-                    }
+        PanelSection {
+            Picker("Device", selection: Binding(get: { screen.device.id }, set: { id in change { $0.deviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
+                ForEach(DeviceFrame.all) { device in
+                    Text("\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))").tag(device.id)
                 }
-                .labelsHidden()
             }
-            PanelRow("Size") {
-                Text("\(Int(screen.size.width)) × \(Int(screen.size.height))")
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(Theme.label)
-            }
-        }
-
-        PanelSection("Layer") {
-            PanelRow("Position") {
+            .labelsHidden()
+            HStack(spacing: 8) {
                 NumberField("X", value: Binding(get: { screen.origin.x }, set: { x in change { $0.origin.x = x } }))
                 NumberField("Y", value: Binding(get: { screen.origin.y }, set: { y in change { $0.origin.y = y } }))
             }
-            PanelRow("Scale") {
-                Slider(value: Binding(get: { screen.scale }, set: { scale in change { $0.scale = scale } }), in: 0.15...2)
-                    .accessibilityLabel("Scale")
-                Text("\(Int((screen.scale * 100).rounded()))%")
-                    .font(.system(size: 13).monospacedDigit())
-                    .frame(width: 42, alignment: .trailing)
-            }
-            Button("Duplicate Frame", systemImage: "plus.square.on.square") { model.duplicateSelection() }
+            NumberField("%", label: "Scale", value: Binding(
+                get: { (screen.scale * 100).rounded() },
+                set: { percent in change { $0.scale = min(max(percent, 15), 200) / 100 } }
+            ))
         }
     }
 
@@ -242,69 +184,33 @@ private struct FrameSettings: View {
     }
 }
 
-private struct DrawingSettings: View {
-    @Environment(AppModel.self) private var model
-    let strokeCount: Int
-
-    var body: some View {
-        PanelHeader(title: "Drawing", symbol: "scribble") {
-            model.deleteSelection()
-        }
-        PanelSection("Ink") {
-            Text(strokeCount == 1 ? "1 stroke. Drag it to move it." : "\(strokeCount) strokes. Drag them to move them.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.label)
-            Text("To restyle ink, pick a pen from the pencil palette.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.label)
-        }
-    }
-}
-
-// MARK: The canvas
-
-/// With nothing selected there is nothing to format; the canvas's own settings are under
-/// the board's name.
+/// With nothing selected: the sketch in progress, and the way to the canvas's settings.
 private struct NothingSelected: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Text("Format")
-            .font(.system(size: 17, weight: .bold))
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 6)
+        PanelHeader(symbol: "square.dashed", title: "Canvas")
 
-        PanelSection("Nothing Selected") {
-            Text("Select something on the canvas to change how it looks.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.label)
-            Button("Canvas Settings", systemImage: "slider.horizontal.3") {
-                model.openBoardMenu()
+        PanelSection {
+            Group {
+                Button("Convert Sketch Now", systemImage: "wand.and.sparkles") { model.convertNow() }
+                Button("Discard Sketch", systemImage: "eraser") { model.discardSketch() }
             }
-        }
-
-        // What is done to a sketch in progress stays at hand while drawing.
-        PanelSection("Magic Pen") {
-            Button("Convert Sketch Now") { model.convertNow() }
-                .disabled(!model.hasSketch)
-            Button("Discard Sketch") { model.discardSketch() }
-                .disabled(!model.hasSketch)
-            Text(model.engine.statusLine)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.label)
+            .disabled(!model.hasSketch)
+            .opacity(model.hasSketch ? 1 : 0.35)
+            Button("Canvas Settings", systemImage: "slider.horizontal.3") { model.openBoardMenu() }
         }
     }
 }
 
-/// What tapping the board's name opens: a field to rename the board, and below it the
-/// canvas's settings, a tab for each kind.
+// MARK: The board menu
+
+/// What tapping the board's name opens: its name, and the canvas's settings in tabs.
 struct BoardMenu: View {
     enum Tab: String, CaseIterable, Identifiable {
         case canvas = "Canvas"
         case magicPen = "Magic Pen"
         case code = "Code"
-        case iCloud = "iCloud"
 
         var id: Self { self }
     }
@@ -314,56 +220,66 @@ struct BoardMenu: View {
     var isSheet = false
     @State private var draft = ""
     @AppStorage("boardMenuTab") private var tab = Tab.canvas
-    @FocusState private var isNaming: Bool
 
     var body: some View {
+        let sync = model.syncState
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Name")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.label)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
                 TextField("Untitled", text: $draft)
                     .font(.system(size: 17, weight: .semibold))
                     .submitLabel(.done)
-                    .focused($isNaming)
                     .onSubmit {
                         rename()
                         model.isBoardMenuOpen = false
                     }
-                    .padding(.horizontal, 12)
-                    .frame(height: 42)
-                    .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
                     .accessibilityLabel("Board name")
+                Image(systemName: sync.symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.label)
+                    .help(sync.title)
+                    .accessibilityLabel(sync.title)
+                    .accessibilityValue(sync.detail ?? "")
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
 
             Picker("Settings", selection: $tab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 18)
-            .padding(.bottom, 8)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    CanvasSettingsTab(tab: tab)
-                }
-                .padding(.bottom, 12)
-            }
-            .scrollBounceBehavior(.basedOnSize)
         }
-        .frame(width: isSheet ? nil : 380, height: isSheet ? nil : 560, alignment: .top)
+        .padding([.horizontal, .top], 18)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        // A popover takes the height of the tab showing; a sheet scrolls.
+        if isSheet {
+            ScrollView { settings }
+                .scrollBounceBehavior(.basedOnSize)
+        } else {
+            settings
+        }
+        }
+        .frame(width: isSheet ? nil : 360, alignment: .top)
         .frame(maxWidth: isSheet ? .infinity : nil, maxHeight: isSheet ? .infinity : nil, alignment: .top)
         .foregroundStyle(Theme.ink)
         .tint(Theme.accent.color)
-        .background(Theme.panel)
         .onAppear { draft = model.store.title ?? "" }
         .onDisappear(perform: rename)
+    }
+
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch tab {
+            case .canvas: CanvasTab()
+            case .magicPen: MagicPenTab()
+            case .code: CodeTab()
+            }
+        }
+        .padding(.bottom, 12)
     }
 
     /// Names the board what was typed, once typing ends or the menu closes.
@@ -374,137 +290,143 @@ struct BoardMenu: View {
     }
 }
 
-/// One tab of the canvas's settings.
-private struct CanvasSettingsTab: View {
+/// A change to the canvas's settings, made as one undo step however quickly it repeats.
+@MainActor
+private func canvasBinding<Value>(_ model: AppModel, _ keyPath: WritableKeyPath<CanvasSettings, Value>) -> Binding<Value> {
+    Binding(
+        get: { model.store.canvas[keyPath: keyPath] },
+        set: { value in model.adjusting { model.store.updateCanvas { $0[keyPath: keyPath] = value } } }
+    )
+}
+
+private struct CanvasTab: View {
     @Environment(AppModel.self) private var model
-    let tab: BoardMenu.Tab
 
     var body: some View {
-        @Bindable var model = model
         let canvas = model.store.canvas
 
-        switch tab {
-        case .canvas:
-            PanelSection("Background") {
-                HStack(spacing: 8) {
-                    ForEach(CanvasSettings.backgrounds, id: \.self) { colour in
-                        let isChosen = canvas.resolvedBackground == colour
-                        Button {
-                            change { $0.background = colour == CanvasSettings.paper ? nil : colour }
-                        } label: {
-                            Circle()
-                                .fill(colour.color)
-                                .overlay { Circle().strokeBorder(Theme.label.opacity(0.35), lineWidth: 1) }
-                                .padding(3)
-                                .overlay { Circle().strokeBorder(isChosen ? Theme.accent.color : .clear, lineWidth: 2) }
-                                .frame(width: 32, height: 32)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Background \(colour.hex)")
-                        .accessibilityAddTraits(isChosen ? .isSelected : [])
+        PanelSection {
+            HStack(spacing: 8) {
+                ForEach(CanvasSettings.backgrounds, id: \.self) { colour in
+                    let isChosen = canvas.resolvedBackground == colour
+                    Button {
+                        model.store.updateCanvas { $0.background = colour == CanvasSettings.paper ? nil : colour }
+                    } label: {
+                        Circle()
+                            .fill(colour.color)
+                            .overlay { Circle().strokeBorder(Theme.label.opacity(0.35), lineWidth: 1) }
+                            .padding(3)
+                            .overlay { Circle().strokeBorder(isChosen ? Theme.accent.color : .clear, lineWidth: 2) }
+                            .frame(width: 32, height: 32)
                     }
-                    Spacer(minLength: 0)
-                    ColorPicker(
-                        "Background colour",
-                        selection: Binding(get: { canvas.resolvedBackground.color }, set: { colour in change { $0.background = RGBColor(UIColor(colour)) } }),
-                        supportsOpacity: false
-                    )
-                    .labelsHidden()
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Background \(colour.hex)")
+                    .accessibilityAddTraits(isChosen ? .isSelected : [])
                 }
+                Spacer(minLength: 0)
+                ColorPicker("Background colour", selection: Binding(
+                    get: { canvas.resolvedBackground.color },
+                    set: { colour in model.adjusting { model.store.updateCanvas { $0.background = RGBColor(UIColor(colour)) } } }
+                ), supportsOpacity: false)
+                .labelsHidden()
             }
+        }
 
-            PanelSection("Layout Guides") {
-                Toggle("Grid", isOn: Binding(get: { canvas.showsGrid }, set: { shows in change { $0.showsGrid = shows } }))
-                if canvas.showsGrid {
-                    Picker("Grid style", selection: Binding(get: { canvas.gridStyle }, set: { style in change { $0.gridStyle = style } })) {
-                        Text("Dots").tag(CanvasSettings.GridStyle.dots)
-                        Text("Lines").tag(CanvasSettings.GridStyle.lines)
-                    }
-                    .pickerStyle(.segmented)
-                    PanelRow("Spacing") {
-                        Slider(
-                            value: Binding(get: { canvas.gridSpacing }, set: { spacing in change { $0.gridSpacing = spacing } }),
-                            in: 8...64, step: 4
-                        )
+        PanelSection {
+            Toggle("Grid", isOn: canvasBinding(model, \.showsGrid))
+            if canvas.showsGrid {
+                Picker("Grid style", selection: canvasBinding(model, \.gridStyle)) {
+                    Text("Dots").tag(CanvasSettings.GridStyle.dots)
+                    Text("Lines").tag(CanvasSettings.GridStyle.lines)
+                }
+                .pickerStyle(.segmented)
+                PanelRow("Spacing") {
+                    Slider(value: canvasBinding(model, \.gridSpacing), in: 8...64, step: 4)
                         .accessibilityLabel("Grid spacing")
-                        Text("\(Int(canvas.gridSpacing))")
-                            .font(.system(size: 13).monospacedDigit())
-                            .frame(width: 28, alignment: .trailing)
-                    }
-                }
-                Toggle("Snap to Grid", isOn: Binding(get: { canvas.snapsToGrid }, set: { snaps in change { $0.snapsToGrid = snaps } }))
-                Toggle("Smart Guides", isOn: Binding(get: { canvas.snapsToGuides }, set: { snaps in change { $0.snapsToGuides = snaps } }))
-                Toggle("Show Spacing", isOn: Binding(get: { canvas.showsMeasurements }, set: { shows in change { $0.showsMeasurements = shows } }))
-                Toggle("Frame Names", isOn: Binding(get: { canvas.showsFrameNames }, set: { shows in change { $0.showsFrameNames = shows } }))
-            }
-
-        case .magicPen:
-            PanelSection("Magic Pen") {
-                Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
-                Toggle("Scratch Out to Delete", isOn: $model.scratchOutDeletes)
-                PanelRow("Screens") {
-                    Picker("Sketched screens", selection: Binding(get: { canvas.sketchDevice.id }, set: { id in change { $0.sketchDeviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
-                        ForEach(DeviceFrame.all) { device in
-                            Text(device.name).tag(device.id)
-                        }
-                    }
-                    .labelsHidden()
-                }
-                Text(model.engine.statusLine)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.label)
-                if model.engine.canBeTurnedOnInSettings {
-                    Button("Open Settings") {
-                        if let settings = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(settings)
-                        }
-                    }
-                }
-            }
-
-            PanelSection("What the Magic Pen Reads") {
-                MagicPenGuide()
-            }
-
-        case .code:
-            PanelSection("Code") {
-                PanelRow("Layout") {
-                    Picker("Code layout", selection: Binding(get: { canvas.code.layout }, set: { layout in change { $0.code.layout = layout } })) {
-                        ForEach(CodeSettings.Layout.allCases, id: \.self) { layout in
-                            Text(layout.name).tag(layout)
-                        }
-                    }
-                    .labelsHidden()
-                }
-                Toggle("Include Preview", isOn: Binding(get: { canvas.code.includesPreview }, set: { on in change { $0.code.includesPreview = on } }))
-                Toggle("Title as Navigation Title", isOn: Binding(get: { canvas.code.usesNavigationTitle }, set: { on in change { $0.code.usesNavigationTitle = on } }))
-            }
-
-        case .iCloud:
-            PanelSection("iCloud") {
-                Label(model.syncState.title, systemImage: model.syncState.symbol)
-                    .font(.system(size: 14))
-                if let detail = model.syncState.detail {
-                    Text(detail)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.label)
+                        .accessibilityValue("\(Int(canvas.gridSpacing)) points")
                 }
             }
         }
-    }
 
-    private func change(_ body: (inout CanvasSettings) -> Void) {
-        model.adjusting { model.store.updateCanvas(body) }
+        PanelSection {
+            Toggle("Snap to Grid", isOn: canvasBinding(model, \.snapsToGrid))
+            Toggle("Smart Guides", isOn: canvasBinding(model, \.snapsToGuides))
+            Toggle("Show Spacing", isOn: canvasBinding(model, \.showsMeasurements))
+            Toggle("Frame Names", isOn: canvasBinding(model, \.showsFrameNames))
+        }
+    }
+}
+
+private struct MagicPenTab: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+
+        PanelSection {
+            Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
+            Toggle("Scratch Out to Delete", isOn: $model.scratchOutDeletes)
+            HStack {
+                Text("New Screens")
+                Spacer(minLength: 8)
+                Picker("New Screens", selection: canvasBinding(model, \.sketchDeviceID)) {
+                    ForEach(DeviceFrame.all) { device in
+                        Text(device.name).tag(device == .iPhone ? String?.none : device.id)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            if model.engine.canBeTurnedOnInSettings {
+                Button("Turn On Apple Intelligence", systemImage: "apple.intelligence") {
+                    if let settings = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settings)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityValue(model.engine.statusLine)
+    }
+}
+
+private struct CodeTab: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        PanelSection {
+            Picker("Code layout", selection: canvasBinding(model, \.code.layout)) {
+                ForEach(CodeSettings.Layout.allCases, id: \.self) { Text($0.name).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Toggle("Include Preview", isOn: canvasBinding(model, \.code.includesPreview))
+            Toggle("Title as Navigation Title", isOn: canvasBinding(model, \.code.usesNavigationTitle))
+        }
     }
 }
 
 // MARK: Building blocks
 
-/// What is selected, with a way to delete it.
+/// The top of the panel: what is selected, its name when it can have one, and a way to delete it.
 private struct PanelHeader: View {
-    let title: String
     let symbol: String
-    let onDelete: () -> Void
+    var title: String?
+    var name: Binding<String>?
+    var placeholder = ""
+    var onDelete: (() -> Void)?
+
+    init(symbol: String, title: String, onDelete: (() -> Void)? = nil) {
+        self.symbol = symbol
+        self.title = title
+        self.onDelete = onDelete
+    }
+
+    init(symbol: String, name: Binding<String>, placeholder: String, onDelete: @escaping () -> Void) {
+        self.symbol = symbol
+        self.name = name
+        self.placeholder = placeholder
+        self.onDelete = onDelete
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -512,51 +434,50 @@ private struct PanelHeader: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.label)
                 .frame(width: 22)
-            Text(title)
-                .font(.system(size: 17, weight: .bold))
-            Spacer()
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 32, height: 32)
-                    .contentShape(.rect)
+            if let name {
+                // Unnamed, it goes by its kind's name, drawn as a name rather than a prompt.
+                TextField(placeholder, text: name, prompt: Text(placeholder).foregroundStyle(Theme.ink))
+                    .font(.system(size: 17, weight: .bold))
+                    .accessibilityLabel("Name")
+            } else if let title {
+                Text(title)
+                    .font(.system(size: 17, weight: .bold))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete")
+            Spacer(minLength: 0)
+            if let onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete")
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
-        .padding(.bottom, 4)
+        .padding(.bottom, 8)
     }
 }
 
+/// A group of related settings, set apart from the next by a line.
 private struct PanelSection<Content: View>: View {
-    let title: String
     @ViewBuilder var content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.label)
-            content
-        }
-        .font(.system(size: 14))
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Theme.dividerLine).frame(height: 1)
-        }
+        VStack(alignment: .leading, spacing: 10) { content }
+            .font(.system(size: 14))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Theme.dividerLine).frame(height: 1)
+            }
     }
 }
 
-/// A label on the left, its controls on the right.
+/// A control that needs naming: its name on the left.
 private struct PanelRow<Content: View>: View {
     let label: String
     @ViewBuilder var content: Content
@@ -569,21 +490,23 @@ private struct PanelRow<Content: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(label)
-                .foregroundStyle(Theme.label)
                 .frame(width: 64, alignment: .leading)
             content
         }
     }
 }
 
-/// A number that can be typed over. The change is made when typing ends.
+/// A number that can be typed over, with its unit inside the field. The change is made
+/// when typing ends.
 private struct NumberField: View {
     let unit: String
+    let label: String
     @Binding var value: CGFloat
     var minimum: CGFloat = -.infinity
 
-    init(_ unit: String, value: Binding<CGFloat>, minimum: CGFloat = -.infinity) {
+    init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, minimum: CGFloat = -.infinity) {
         self.unit = unit
+        self.label = label ?? unit
         _value = value
         self.minimum = minimum
     }
@@ -593,14 +516,15 @@ private struct NumberField: View {
             Text(unit)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.label)
+                .accessibilityHidden(true)
             TextField(
-                unit,
+                label,
                 value: Binding(get: { Double(value) }, set: { value = max(CGFloat($0), minimum) }),
                 format: .number.precision(.fractionLength(0...1))
             )
             .keyboardType(.numbersAndPunctuation)
             .font(.system(size: 14).monospacedDigit())
-            .accessibilityLabel(unit)
+            .accessibilityLabel(label)
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
@@ -609,7 +533,7 @@ private struct NumberField: View {
     }
 }
 
-/// A small square button with an icon, for rows of related actions.
+/// A square button with an icon, for a row of related actions.
 private struct IconButton: View {
     let label: String
     let symbol: String
@@ -636,56 +560,15 @@ private struct IconButton: View {
     }
 }
 
-/// The shapes the Magic Pen turns into things, as a cheat sheet.
-struct MagicPenGuide: View {
-    static let entries: [(symbol: String, shape: String, result: String)] = [
-        ("rectangle.portrait", "Tall rectangle", "Screen"),
-        ("photo", "Box with an X", "Image"),
-        ("capsule", "Wide pill", "Button"),
-        ("rectangle", "Wide box", "Text field"),
-        ("textformat", "Short squiggle", "Title"),
-        ("text.alignleft", "Long squiggle or lines", "Body text"),
-        ("minus", "Straight line", "Divider"),
-        ("switch.2", "Small pill", "Toggle"),
-        ("person.crop.circle", "Small circle", "Avatar"),
-        ("note.text", "Box beside the screens", "Sticky note"),
-        ("character.textbox", "Squiggle beside the screens", "Text"),
-        ("scribble", "Scratch back and forth", "Deletes what's under it"),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Self.entries, id: \.shape) { entry in
-                HStack(spacing: 10) {
-                    Image(systemName: entry.symbol)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.label)
-                        .frame(width: 20)
-                    Text(entry.shape)
-                    Spacer(minLength: 8)
-                    Text(entry.result)
-                        .foregroundStyle(Theme.label)
-                }
-                .font(.system(size: 13))
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-}
-
-/// A colour well with the colour's hex value beside it.
+/// A colour well, at the end of its row.
 private struct ColorField: View {
     let label: String
     @Binding var color: RGBColor
 
     var body: some View {
-        Text(color.hex)
-            .font(.system(size: 13, design: .monospaced))
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.fieldFill, in: .rect(cornerRadius: 10))
+        Spacer(minLength: 0)
         ColorPicker(label, selection: Binding(get: { color.color }, set: { color = RGBColor(UIColor($0)) }), supportsOpacity: false)
             .labelsHidden()
+            .accessibilityValue(color.hex)
     }
 }
