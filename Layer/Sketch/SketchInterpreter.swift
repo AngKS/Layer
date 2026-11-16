@@ -227,6 +227,11 @@ enum SketchPrompt {
         - progressBar: a long, very thin outline, often partly shaded in.
         - avatar: a circle too big to be a radio button, usually alone rather than in a column.
         - toggle: a small pill with a circle (its knob) nearer one end than the middle.
+
+        You're only asked about sketches the shape rules themselves found ambiguous, and \
+        you're given their own ranked, scored guesses — read those scores as real evidence \
+        of how the rules see it, not decoration. Answer with your choice, and a runner-up \
+        only if a second reading is genuinely plausible.
         """
 
     static let titleInstructions = """

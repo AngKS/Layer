@@ -1,0 +1,342 @@
+{
+  "rulesOnly" : {
+    "candidateRecall" : 0.8910256410256411,
+    "confusions" : [
+      {
+        "count" : 4,
+        "expected" : "radioButton",
+        "got" : "avatar"
+      },
+      {
+        "count" : 4,
+        "expected" : "divider",
+        "got" : "bodyText"
+      },
+      {
+        "count" : 3,
+        "expected" : "textField",
+        "got" : "button"
+      },
+      {
+        "count" : 2,
+        "expected" : "button",
+        "got" : "textField"
+      },
+      {
+        "count" : 2,
+        "expected" : "checkbox",
+        "got" : "avatar"
+      },
+      {
+        "count" : 2,
+        "expected" : "image",
+        "got" : "textField"
+      },
+      {
+        "count" : 2,
+        "expected" : "progressBar",
+        "got" : "bodyText"
+      },
+      {
+        "count" : 2,
+        "expected" : "toggle",
+        "got" : "textField"
+      },
+      {
+        "count" : 1,
+        "expected" : "radioButton",
+        "got" : "title"
+      }
+    ],
+    "escalationRate" : 0.14102564102564102,
+    "handwritingLatency" : {
+      "p50" : 0.000760583,
+      "p95" : 0.001194792
+    },
+    "overallAccuracy" : 0.8589743589743589,
+    "pairAccuracy" : {
+      "button-textField" : 0.25,
+      "checkbox-image" : 1,
+      "checkbox-radio" : 0.5,
+      "image-textField" : 0.5,
+      "radio-avatar" : 0.5,
+      "title-body" : 1,
+      "toggle-progress" : 0.5
+    },
+    "perKind" : [
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "avatar",
+        "total" : 10
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "bodyText",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.8,
+        "correct" : 8,
+        "label" : "button",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.8333333333333334,
+        "correct" : 10,
+        "label" : "checkbox",
+        "total" : 12
+      },
+      {
+        "accuracy" : 0.5,
+        "correct" : 4,
+        "label" : "divider",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.8333333333333334,
+        "correct" : 10,
+        "label" : "image",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "phoneScreen",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.8,
+        "correct" : 8,
+        "label" : "progressBar",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.5833333333333334,
+        "correct" : 7,
+        "label" : "radioButton",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "scratchOut",
+        "total" : 8
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "stickyNote",
+        "total" : 8
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "text",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.75,
+        "correct" : 9,
+        "label" : "textField",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "title",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.8,
+        "correct" : 8,
+        "label" : "toggle",
+        "total" : 10
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "unknown",
+        "total" : 8
+      }
+    ],
+    "rulesLatency" : {
+      "p50" : 1.67e-07,
+      "p95" : 1.958e-06
+    },
+    "system2Count" : 0,
+    "top3Recall" : 0.8910256410256411,
+    "totalCases" : 156
+  },
+  "withModel" : {
+    "candidateRecall" : 0.8910256410256411,
+    "confusions" : [
+      {
+        "count" : 4,
+        "expected" : "radioButton",
+        "got" : "avatar"
+      },
+      {
+        "count" : 4,
+        "expected" : "divider",
+        "got" : "bodyText"
+      },
+      {
+        "count" : 3,
+        "expected" : "textField",
+        "got" : "button"
+      },
+      {
+        "count" : 2,
+        "expected" : "checkbox",
+        "got" : "avatar"
+      },
+      {
+        "count" : 2,
+        "expected" : "image",
+        "got" : "textField"
+      },
+      {
+        "count" : 2,
+        "expected" : "progressBar",
+        "got" : "bodyText"
+      },
+      {
+        "count" : 2,
+        "expected" : "toggle",
+        "got" : "textField"
+      },
+      {
+        "count" : 1,
+        "expected" : "radioButton",
+        "got" : "title"
+      }
+    ],
+    "escalationRate" : 0.14102564102564102,
+    "handwritingLatency" : {
+      "p50" : 0.00074875,
+      "p95" : 0.001002042
+    },
+    "overallAccuracy" : 0.8717948717948718,
+    "pairAccuracy" : {
+      "button-textField" : 0.75,
+      "checkbox-image" : 1,
+      "checkbox-radio" : 0.5,
+      "image-textField" : 0.5,
+      "radio-avatar" : 0.5,
+      "title-body" : 1,
+      "toggle-progress" : 0.5
+    },
+    "perKind" : [
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "avatar",
+        "total" : 10
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "bodyText",
+        "total" : 10
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "button",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.8333333333333334,
+        "correct" : 10,
+        "label" : "checkbox",
+        "total" : 12
+      },
+      {
+        "accuracy" : 0.5,
+        "correct" : 4,
+        "label" : "divider",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.8333333333333334,
+        "correct" : 10,
+        "label" : "image",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "phoneScreen",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.8,
+        "correct" : 8,
+        "label" : "progressBar",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.5833333333333334,
+        "correct" : 7,
+        "label" : "radioButton",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "scratchOut",
+        "total" : 8
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "stickyNote",
+        "total" : 8
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "text",
+        "total" : 8
+      },
+      {
+        "accuracy" : 0.75,
+        "correct" : 9,
+        "label" : "textField",
+        "total" : 12
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 10,
+        "label" : "title",
+        "total" : 10
+      },
+      {
+        "accuracy" : 0.8,
+        "correct" : 8,
+        "label" : "toggle",
+        "total" : 10
+      },
+      {
+        "accuracy" : 1,
+        "correct" : 8,
+        "label" : "unknown",
+        "total" : 8
+      }
+    ],
+    "rulesLatency" : {
+      "p50" : 2.08e-07,
+      "p95" : 1.708e-06
+    },
+    "system2Accuracy" : 0.5454545454545454,
+    "system2Count" : 22,
+    "system2Latency" : {
+      "p50" : 0.651294459,
+      "p95" : 0.696599458
+    },
+    "top3Recall" : 0.8910256410256411,
+    "totalCases" : 156
+  }
+}

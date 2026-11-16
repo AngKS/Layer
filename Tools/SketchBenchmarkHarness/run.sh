@@ -23,6 +23,7 @@ swiftc \
     "$REPO_ROOT/Layer/Sketch/SketchInterpreter.swift" \
     "$REPO_ROOT/Layer/Sketch/GlyphMatcher.swift" \
     "$REPO_ROOT/Layer/Sketch/HandwritingRecognizer.swift" \
+    "$REPO_ROOT/Layer/Sketch/SketchContextTool.swift" \
     "$REPO_ROOT/Layer/Sketch/ComponentRule.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchReadingLog.swift" \
     "$REPO_ROOT/Layer/Sketch/RuleInterpreter.swift" \
