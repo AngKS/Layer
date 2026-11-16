@@ -1,0 +1,617 @@
+import CoreGraphics
+import Observation
+import os
+import PencilKit
+import SwiftUI
+
+/// Where the pen is, kept apart from `AppModel` so that tracking it redraws only the cursor.
+@MainActor @Observable
+final class PenTracker {
+    /// In the view's own points, not the canvas's.
+    var location: CGPoint?
+}
+
+/// A sketch that is being read: its strokes are re-traced in the accent colour meanwhile.
+struct RetraceEffect: Identifiable, Equatable {
+    let id = UUID()
+    var strokes: [[CGPoint]]
+    /// For sketches of text: a line across the screen at the sketch's height.
+    var band: CGRect?
+}
+
+/// A sketch that meant nothing, fading away.
+struct InkGhost: Identifiable, Equatable {
+    let id = UUID()
+    var strokes: [[CGPoint]]
+}
+
+/// What is selected on the canvas.
+enum CanvasSelection: Hashable, Sendable {
+    case element(DesignStore.ElementRef)
+    case screen(DesignScreen.ID)
+    /// A drawing: the ink strokes with these keys.
+    case ink(Set<Double>)
+}
+
+/// One open design's working state, and the path from Magic Pen sketches to elements.
+@MainActor @Observable
+final class AppModel {
+    enum Tool: Sendable {
+        /// The PencilKit palette is up; its selected tool decides what a stroke does.
+        case draw
+        /// The palette is away; touches select and move things, and pan the canvas.
+        case select
+    }
+
+    enum PanelTab: Sendable {
+        case layers, code
+    }
+
+    let document: LayerDocument
+    let store: DesignStore
+    let engine = SketchEngine()
+    let pen = PenTracker()
+    let images: ImageLibrary
+    /// Where the design is saved, when the system has said.
+    var fileURL: URL? {
+        didSet {
+            guard fileURL != oldValue else { return }
+            matchNameAndFile()
+            checkFile()
+        }
+    }
+    /// Where the design's file stands with iCloud.
+    private(set) var syncState = SyncState.local(canUseICloud: false)
+    /// Set when versions of the design from other devices were kept aside as copies, to
+    /// tell the person once.
+    var keptVersionsNotice: String?
+
+    var tool: Tool = .draw {
+        didSet {
+            guard tool != oldValue else { return }
+            if tool == .draw {
+                selection = nil
+                scheduleConversion()
+            } else {
+                settle?.cancel()
+            }
+        }
+    }
+
+    var selection: CanvasSelection? {
+        didSet {
+            if case .ink(let keys) = selection {
+                inkSelectionBounds = ink?.bounds(of: keys)
+            } else {
+                inkSelectionBounds = nil
+            }
+            if selection != oldValue { isEditingText = false }
+        }
+    }
+
+    /// The canvas area a selected drawing covers.
+    private(set) var inkSelectionBounds: CGRect?
+
+    /// Which part of the canvas is showing. Kept current by the ink canvases, which own
+    /// the scrolling and zooming.
+    var viewport = Viewport()
+    /// The zoom the canvas last came to rest at. Text is redrawn sharp for this zoom,
+    /// rather than on every frame of a pinch.
+    var settledScale: CGFloat = 1
+    /// While locked, the canvas can't be panned or zoomed by touch.
+    var isCanvasLocked = false
+    /// Where the pencil palette is showing in the view, if it is and can be found.
+    var paletteFrame: CGRect?
+
+    var isLayersOpen = false {
+        didSet { if isLayersOpen, fitsOnePanel { isInspectorOpen = false } }
+    }
+    var panelTab: PanelTab = .layers
+    /// Whether the paintbrush's panel of settings for the selection or the canvas is open.
+    var isInspectorOpen = false {
+        didSet { if isInspectorOpen, fitsOnePanel { isLayersOpen = false } }
+    }
+    /// Whether the selected element's text is being typed into.
+    var isEditingText = false
+    /// Whether sketches convert on their own once the pen has rested for a moment.
+    /// Remembered between launches.
+    var convertsAutomatically = AppModel.savedConvertsAutomatically {
+        didSet {
+            UserDefaults.standard.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
+            scheduleConversion()
+        }
+    }
+    /// The size of the view the canvas is shown in, which is the size of the window.
+    var canvasSize: CGSize = .zero {
+        didSet { if fitsOnePanel, isLayersOpen, isInspectorOpen { isLayersOpen = false } }
+    }
+    /// How far down the view the bar across the top reaches.
+    var topBarBottom: CGFloat = 0
+    /// Whether the window is too narrow for the controls to be spread along its edges.
+    /// The top bar decides, from whether its tools fit beside the board's name: when they
+    /// don't they fold into a menu, and undo, redo and zoom share one control.
+    var isCompactWidth = false
+    /// Whether the window is narrow enough that iPadOS lays it out like an iPhone. Sheets
+    /// then rise from the bottom edge, which is how the panels open, and the pencil
+    /// palette is a bar fixed across the bottom rather than one that floats.
+    var isCompactSizeClass = false {
+        didSet { if fitsOnePanel, isLayersOpen, isInspectorOpen { isLayersOpen = false } }
+    }
+    /// Whether there is only room for one panel at a time.
+    private var fitsOnePanel: Bool { isCompactSizeClass || (canvasSize.width > 0 && canvasSize.width < 680) }
+    /// Whether the fixed palette bar of a compact window has been tucked away, pen still
+    /// in hand. Remembered between launches, as the floating palette's place is.
+    var isPaletteCollapsed = UserDefaults.standard.bool(forKey: "isPaletteCollapsed") {
+        didSet { UserDefaults.standard.set(isPaletteCollapsed, forKey: "isPaletteCollapsed") }
+    }
+    /// True while an element is being dragged or resized, which shows the spacing guides.
+    var isAdjusting = false
+
+    private(set) var effects: [RetraceEffect] = []
+    private(set) var ghosts: [InkGhost] = []
+    /// True while there is Magic Pen ink on the canvas that hasn't become anything.
+    private(set) var hasSketch = false
+
+    @ObservationIgnored weak var ink: InkCanvas.Coordinator?
+    /// Magic Pen strokes, in canvas points.
+    @ObservationIgnored private var strokes: [SketchStroke] = []
+    @ObservationIgnored private var inFlight: Set<Double> = []
+    /// Stroke groups that were read and meant nothing. They linger briefly, in case more
+    /// strokes are coming to complete them, and are not re-read as they are.
+    @ObservationIgnored private var rejected: Set<Set<Double>> = []
+    @ObservationIgnored private var settle: Task<Void, Never>?
+    @ObservationIgnored private var isPenDown = false
+    @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
+    @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
+
+    private static let convertsAutomaticallyKey = "convertsAutomatically"
+    private static var savedConvertsAutomatically: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: convertsAutomaticallyKey) == nil || defaults.bool(forKey: convertsAutomaticallyKey)
+    }
+
+    init(document: LayerDocument) {
+        self.document = document
+        let file = document.current
+        store = DesignStore(content: file.content)
+        images = ImageLibrary(file.images)
+        store.onChange = { [weak self, document] content in
+            document.update { $0.content = content }
+            self?.dropSelectionOfMissingThings()
+            self?.matchNameAndFile()
+            self?.schedulePreview()
+        }
+    }
+
+    // MARK: The file
+
+    @ObservationIgnored private var renaming: Task<Void, Never>?
+    /// A name the file couldn't be given, so that it isn't tried again and again.
+    @ObservationIgnored private var refusedName: String?
+    @ObservationIgnored private var previewRefresh: Task<Void, Never>?
+    @ObservationIgnored private let fileLog = Logger(subsystem: "kahshin.Layer", category: "file")
+
+    /// Set once the design has closed. Whatever was still under way then, a name being
+    /// thought up or a picture due, is dropped rather than done to a file the document
+    /// browser has already listed.
+    @ObservationIgnored private var isClosed = false
+
+    /// Gets a design ready to go back to the document browser: its picture as the board
+    /// was left, its name decided, and its file given that name.
+    func prepareToClose() async {
+        refreshPreview()
+        // A name still being thought up is settled now, from the design's own words.
+        if titleSuggestion != nil, store.title == nil {
+            store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+        }
+        await settleFileName()
+        close()
+    }
+
+    func close() {
+        isClosed = true
+        titleSuggestion?.cancel()
+        previewRefresh?.cancel()
+        fileCheck?.cancel()
+    }
+
+    /// Keeps the board's name and its file's name the same, so that the document browser
+    /// shows designs by name. A file renamed elsewhere, in Files for instance, names the
+    /// board. A board that is named, by hand or by suggestion, names its file.
+    private func matchNameAndFile() {
+        guard let url = fileURL, renaming == nil, !isClosed else { return }
+        let onDisk = url.deletingPathExtension().lastPathComponent
+        let known = document.current.fileName
+        if known != onDisk {
+            document.update { $0.fileName = onDisk }
+            if known == nil, document.isNew {
+                // A design made just now has the name the system gives new ones.
+                DesignFileName.untitled = DesignFileName.withoutNumber(onDisk)
+            } else if known != nil || (store.title == nil && !DesignFileName.isUntitled(onDisk)) {
+                // Not the name it had when the app last looked, or a name somebody gave
+                // the file before its board had one: it was renamed elsewhere, and the
+                // board takes the name.
+                if store.title != onDisk { store.setTitle(onDisk, undoable: false) }
+            }
+        }
+
+        guard let title = store.title else { return }
+        let wanted = DesignFileName.fileName(for: title)
+        guard !wanted.isEmpty, wanted != onDisk, wanted != refusedName else { return }
+        renaming = Task { [weak self] in
+            let moved = try? await DesignFileName.rename(url, to: wanted)
+            guard let self else { return }
+            renaming = nil
+            guard let moved else {
+                // A folder that can't be written to, or a file some other service holds.
+                // The board keeps its name; the file keeps its own.
+                fileLog.error("Couldn't rename the design's file to match its board")
+                refusedName = wanted
+                return
+            }
+            let name = moved.deletingPathExtension().lastPathComponent
+            document.update { $0.fileName = name }
+            // The name was taken, so the file has a number on the end: the board takes it too.
+            if name != wanted, store.title == title { store.setTitle(name, undoable: false) }
+            fileURL = moved
+            matchNameAndFile()
+        }
+    }
+
+    @ObservationIgnored private var fileCheck: Task<Void, Never>?
+
+    /// Looks at where the design's file stands with iCloud, and settles any versions of
+    /// it that other devices saved at the same time. Done when the design opens, when
+    /// the app comes back to the screen, and whenever the system says the file changed.
+    func checkFile() {
+        guard let url = fileURL, !isClosed else { return }
+        fileCheck?.cancel()
+        fileCheck = Task { [weak self] in
+            let copies = await CloudFile.keepConflictingVersions(of: url)
+            let state = await Task.detached { CloudFile.syncState(of: url) }.value
+            guard let self, !Task.isCancelled, fileURL == url else { return }
+            if !copies.isEmpty {
+                let names = copies.map { "“\($0)”" }.formatted(.list(type: .and))
+                keptVersionsNotice = copies.count == 1
+                    ? "This design was changed on another device at the same time. That version is kept as \(names), beside this one."
+                    : "This design was changed on other devices at the same time. Those versions are kept as \(names), beside this one."
+            }
+            if syncState != state { syncState = state }
+            // While something has still to go up, keep looking.
+            guard state.isInFlux else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            fileCheck = nil
+            checkFile()
+        }
+    }
+
+    /// Waits, briefly, for the file to have been given the board's name. Done before a
+    /// design closes: a file renamed after the document browser has listed it stays
+    /// listed under its old name for a while.
+    func settleFileName() async {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while renaming != nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+
+    /// The board changed: its picture for the document browser is redrawn once things settle.
+    private func schedulePreview() {
+        previewRefresh?.cancel()
+        guard !isClosed else { return }
+        previewRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard !Task.isCancelled else { return }
+            self?.refreshPreview()
+        }
+    }
+
+    /// Redraws the board's picture now. Done before a design closes or the app leaves the
+    /// screen, so that the picture saved is of the board as it was left.
+    func refreshPreview() {
+        previewRefresh?.cancel()
+        previewRefresh = nil
+        let picture = BoardSnapshot.thumbnail(of: self)
+        document.update { $0.preview = picture }
+    }
+
+    /// True while any sketch is waiting to be read or being read.
+    var isBusy: Bool {
+        !effects.isEmpty || !inFlight.isEmpty || !unreadGroups(zoom: viewport.scale).isEmpty
+    }
+
+    // MARK: Selection
+
+    var selectedElement: (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
+        guard case .element(let ref) = selection, let found = store.resolve(ref) else { return nil }
+        return (ref, found.element, found.placement)
+    }
+
+    var selectedScreen: DesignScreen? {
+        guard case .screen(let id) = selection else { return nil }
+        return store.screen(id)
+    }
+
+    /// A tap that landed on the canvas itself rather than on an element: it picks the
+    /// drawing or screen there, or clears the selection.
+    func canvasTapped(at viewPoint: CGPoint) {
+        guard tool == .select else { return }
+        let point = viewport.canvasPoint(for: viewPoint)
+        if let keys = ink?.drawing(at: point, tolerance: 14 / viewport.scale) {
+            selection = .ink(keys)
+        } else if let screen = store.screen(at: point) {
+            selection = .screen(screen.id)
+        } else {
+            selection = nil
+        }
+    }
+
+    func deleteSelection() {
+        switch selection {
+        case .element(let ref): store.delete(ref)
+        case .screen(let id): store.deleteScreen(id)
+        case .ink(let keys): ink?.deleteInk(keys)
+        case nil: break
+        }
+        selection = nil
+    }
+
+    /// Moves the selected drawing. Call `finishMovingInk` when the drag ends, so the whole
+    /// move undoes as one step.
+    func moveSelectedInk(by delta: CGSize) {
+        guard case .ink(let keys) = selection else { return }
+        ink?.translateInk(keys, by: delta)
+        inkSelectionBounds = ink?.bounds(of: keys)
+    }
+
+    func finishMovingInk(movedBy total: CGSize) {
+        guard case .ink(let keys) = selection, total != .zero else { return }
+        ink?.registerUndo(ofMoving: keys, by: total)
+    }
+
+    /// Ink changed underneath the selection, by undo or redo: follow it, or let go of it.
+    func inkSelectionMayHaveMoved() {
+        guard case .ink(let keys) = selection else { return }
+        inkSelectionBounds = ink?.bounds(of: keys)
+        if inkSelectionBounds == nil { selection = nil }
+    }
+
+    private func dropSelectionOfMissingThings() {
+        switch selection {
+        case .element(let ref) where store.resolve(ref) == nil: selection = nil
+        case .screen(let id) where store.screen(id) == nil: selection = nil
+        default: break
+        }
+    }
+
+    /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
+    func adjusting(_ body: () -> Void) {
+        store.beginEdit()
+        body()
+        adjustmentEnd?.cancel()
+        adjustmentEnd = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            self?.store.endEdit()
+        }
+    }
+
+    // MARK: Adding things
+
+    /// The canvas point in the middle of the view.
+    private var middleOfView: CGPoint {
+        viewport.canvasPoint(for: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
+    }
+
+    /// Puts a new element in the middle of the view, selected and ready to be dragged.
+    @discardableResult
+    private func add(_ element: DesignElement) -> DesignStore.ElementRef {
+        let ref = store.place(element, centeredAt: middleOfView)
+        tool = .select
+        selection = .element(ref)
+        return ref
+    }
+
+    func addSymbol(_ name: String) {
+        add(DesignStore.newElement(.symbol, symbol: name))
+    }
+
+    /// Adds a piece of text and opens it for typing.
+    func addText() {
+        add(DesignStore.newElement(.text))
+        isEditingText = true
+        suggestTitleIfNeeded()
+    }
+
+    func addStickyNote() {
+        add(DesignStore.newElement(.stickyNote))
+        isEditingText = true
+    }
+
+    /// Adds a picture, drawn no wider than most of a phone screen.
+    func addImage(_ prepared: ImageImport.Prepared) {
+        let id = images.add(prepared)
+        document.update { $0.images[id.uuidString] = prepared.data }
+        var element = DesignStore.newElement(.image)
+        let width = min(prepared.image.size.width, 280)
+        element.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
+        element.imageID = id
+        add(element)
+    }
+
+    /// Adds a device frame in the middle of the view, sized to fit comfortably in it.
+    func addFrame(_ device: DeviceFrame) {
+        let room = (canvasSize.height - 220) / viewport.scale
+        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
+        let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
+        let middle = middleOfView
+        let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
+        let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
+        tool = .select
+        selection = .screen(screen.id)
+        suggestTitleIfNeeded()
+    }
+
+    /// Names the board once, the first time it has something on it worth naming.
+    private func suggestTitleIfNeeded() {
+        guard store.title == nil, titleSuggestion == nil else { return }
+        titleSuggestion = Task { [weak self] in
+            guard let self else { return }
+            let title = await engine.suggestTitle(for: store.content)
+            if store.title == nil, !isClosed { store.setTitle(title, undoable: false) }
+            titleSuggestion = nil
+        }
+    }
+
+    // MARK: Ink events
+
+    /// Ink drawn with PencilKit's own tools changed. It is part of the document.
+    func drawingChanged(_ drawing: PKDrawing) {
+        document.update { $0.drawing = drawing }
+        schedulePreview()
+    }
+
+    /// The Magic Pen's ink changed.
+    func sketchChanged(_ strokes: [SketchStroke]) {
+        self.strokes = strokes
+        hasSketch = !strokes.isEmpty
+        let present = Set(strokes.map(\.key))
+        rejected = rejected.filter { $0.isSubset(of: present) }
+        scheduleConversion()
+    }
+
+    func penDown() {
+        isPenDown = true
+        settle?.cancel()
+    }
+
+    func penUp() {
+        isPenDown = false
+        scheduleConversion()
+    }
+
+    // MARK: Conversion
+
+    /// Reads every sketch on the canvas that hasn't been read yet, without waiting for a pause.
+    func convertNow() {
+        settle?.cancel()
+        let zoom = viewport.scale
+        for group in unreadGroups(zoom: zoom) {
+            inFlight.formUnion(group.map(\.key))
+            Task { await convert(group, zoom: zoom) }
+        }
+    }
+
+    /// Throws away all Magic Pen ink that hasn't become anything.
+    func discardSketch() {
+        settle?.cancel()
+        ink?.clearSketch()
+    }
+
+    private func scheduleConversion() {
+        settle?.cancel()
+        guard convertsAutomatically, tool == .draw, !isPenDown, !unreadGroups(zoom: viewport.scale).isEmpty else { return }
+        settle = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled else { return }
+            self?.convertNow()
+        }
+    }
+
+    /// The sketch strokes as they appear on screen at a zoom. Sketches are read at this
+    /// size, so what a shape means doesn't depend on how far the canvas was zoomed when
+    /// it was drawn.
+    private func onScreen(_ strokes: [SketchStroke], zoom: CGFloat) -> [SketchStroke] {
+        strokes.map { stroke in
+            SketchStroke(key: stroke.key, points: stroke.points.map { CGPoint(x: $0.x * zoom, y: $0.y * zoom) })
+        }
+    }
+
+    private func unreadGroups(zoom: CGFloat) -> [[SketchStroke]] {
+        SketchAnalyzer.cluster(onScreen(strokes.filter { !inFlight.contains($0.key) }, zoom: zoom))
+            .filter { !rejected.contains(Set($0.map(\.key))) }
+    }
+
+    /// Reads one sketch, given at its on-screen size, and puts what it means on the canvas.
+    private func convert(_ group: [SketchStroke], zoom: CGFloat) async {
+        let keys = Set(group.map(\.key))
+        defer { inFlight.subtract(keys) }
+        guard let observation = SketchAnalyzer.observe(group) else {
+            reject(keys)
+            return
+        }
+
+        // Back to canvas points for everything that is placed or drawn.
+        let bounds = observation.bounds.applying(CGAffineTransform(scaleX: 1 / zoom, y: 1 / zoom))
+        let canvasStrokes = group.map { $0.points.map { CGPoint(x: $0.x / zoom, y: $0.y / zoom) } }
+
+        let host = store.screen(under: bounds)
+        let placement: SketchPlacement = if let host {
+            .onScreen(
+                local: host.localRect(for: bounds),
+                existing: host.elements.map { ExistingElement(kind: $0.kind, frame: $0.frame) },
+                size: host.size
+            )
+        } else {
+            .openCanvas
+        }
+        let request = SketchRequest(observation: observation, placement: placement, strokes: group.map(\.points))
+
+        var band: CGRect?
+        if let host, !observation.form.isEnclosure {
+            band = CGRect(x: host.canvasFrame.minX, y: bounds.midY, width: host.canvasFrame.width, height: 0)
+        }
+        let effect = RetraceEffect(strokes: canvasStrokes, band: band)
+        withAnimation(.easeOut(duration: 0.2)) { effects.append(effect) }
+
+        // Let the re-trace play out even when the reading comes back at once.
+        async let minimum: Void? = try? Task.sleep(for: .milliseconds(750))
+        let reading = await engine.read(request)
+        _ = await minimum
+
+        withAnimation(.smooth(duration: 0.45)) {
+            effects.removeAll { $0.id == effect.id }
+            var converted = false
+            switch reading {
+            case .screen:
+                store.addScreen(from: bounds)
+                converted = true
+            case .element(let kind):
+                if let host { converted = store.addElement(kind, from: bounds, to: host.id) != nil }
+            case .unknown:
+                break
+            }
+            if converted {
+                ink?.removeSketch(keys)
+                suggestTitleIfNeeded()
+            } else {
+                reject(keys)
+            }
+        }
+    }
+
+    // MARK: Sketches that meant nothing
+
+    private func reject(_ keys: Set<Double>) {
+        rejected.insert(keys)
+        Task { [weak self] in
+            // Long enough to add the strokes that would complete a half-drawn shape.
+            repeat { try? await Task.sleep(for: .seconds(4)) } while self?.isPenDown == true
+            self?.dissolve(keys)
+        }
+    }
+
+    /// Fades a rejected sketch away, unless it has changed since it was rejected.
+    private func dissolve(_ keys: Set<Double>) {
+        let groups = SketchAnalyzer.cluster(onScreen(strokes, zoom: viewport.scale))
+        guard rejected.contains(keys), groups.contains(where: { Set($0.map(\.key)) == keys }) else { return }
+        let ghost = InkGhost(strokes: strokes.filter { keys.contains($0.key) }.map(\.points))
+        ghosts.append(ghost)
+        ink?.removeSketch(keys)
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            self?.ghosts.removeAll { $0.id == ghost.id }
+        }
+    }
+}

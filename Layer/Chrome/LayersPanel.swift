@@ -1,0 +1,244 @@
+import SwiftUI
+import UIKit
+
+/// The panel that opens from the left: the design's layers, or its generated SwiftUI.
+struct LayersPanel: View {
+    @Environment(AppModel.self) private var model
+    /// The screen whose code is shown; the first screen until another is picked.
+    @State private var codeScreenID: DesignScreen.ID?
+    /// In a narrow window the panel fills a sheet rather than floating beside the canvas.
+    var isSheet = false
+    /// The room there is for the floating panel.
+    var maxHeight: CGFloat = 560
+
+    var body: some View {
+        let content = VStack(spacing: 0) {
+            tabs
+                .padding(12)
+            switch model.panelTab {
+            case .layers: layers
+            case .code: code
+            }
+        }
+        if isSheet {
+            content
+                .padding(.top, 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else {
+            content
+                .frame(width: 300)
+                .frame(maxHeight: min(560, maxHeight), alignment: .top)
+                .background(Theme.panel, in: .rect(cornerRadius: 26, style: .continuous))
+                .clipShape(.rect(cornerRadius: 26, style: .continuous))
+                .shadow(color: .black.opacity(0.10), radius: 22, y: 8)
+                .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
+        }
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            tab("Layers", .layers)
+            tab("Code", .code)
+        }
+        .padding(3)
+        .background(Theme.segmentTrack, in: .capsule)
+    }
+
+    private func tab(_ title: String, _ tab: AppModel.PanelTab) -> some View {
+        let isActive = model.panelTab == tab
+        return Button {
+            withAnimation(.snappy(duration: 0.2)) { model.panelTab = tab }
+        } label: {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(isActive ? Color.white : .clear, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    // MARK: Layers
+
+    private var layers: some View {
+        let store = model.store
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                if store.screens.isEmpty, store.floating.isEmpty {
+                    Text("Draw a tall rectangle with the Magic Pen, or add a frame, to start a screen.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.label)
+                        .padding(12)
+                }
+                ForEach(store.screens) { screen in
+                    group(screen.name, count: screen.elements.count, isSelected: model.selection == .screen(screen.id)) {
+                        select(.screen(screen.id))
+                    }
+                    // Topmost layer first, as layer lists usually read.
+                    ForEach(screen.elements.reversed()) { element in
+                        layerRow(element, ref: .init(host: .screen(screen.id), element: element.id))
+                    }
+                }
+                if !store.floating.isEmpty {
+                    group("Canvas", count: store.floating.count, isSelected: false, action: nil)
+                    ForEach(store.floating.reversed()) { floating in
+                        layerRow(floating.element, ref: .init(host: .canvas, element: floating.id))
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 14)
+        }
+    }
+
+    private func select(_ selection: CanvasSelection) {
+        model.tool = .select
+        model.selection = selection
+    }
+
+    /// The heading for a screen's layers, or for the layers on the open canvas.
+    private func group(_ name: String, count: Int, isSelected: Bool, action: (() -> Void)?) -> some View {
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+                Text(name)
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("\(count)")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(Theme.label)
+            }
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func layerRow(_ element: DesignElement, ref: DesignStore.ElementRef) -> some View {
+        let isSelected = model.selection == .element(ref)
+        return Button {
+            select(.element(ref))
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: element.symbol ?? element.kind.symbol)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.label)
+                    .frame(width: 20)
+                Text(element.kind.layerName)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.ink)
+                Spacer()
+                Circle()
+                    .fill(Theme.accent.color)
+                    .frame(width: 6, height: 6)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    // MARK: Code
+
+    @ViewBuilder
+    private var code: some View {
+        let screens = model.store.screens
+        if let screen = screens.first(where: { $0.id == codeScreenID }) ?? screens.first {
+            let source = SwiftUICodeGenerator.code(for: screen)
+            HStack {
+                Menu {
+                    ForEach(screens) { other in
+                        Button(SwiftUICodeGenerator.fileName(for: other)) { codeScreenID = other.id }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
+                            .foregroundStyle(Theme.label)
+                        Text(SwiftUICodeGenerator.fileName(for: screen))
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.label)
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                CopyButton(text: source)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            CodeView(source: source)
+        } else {
+            Text("Code appears here once there is a screen.")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.label)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 20)
+        }
+    }
+}
+
+private struct CopyButton: View {
+    let text: String
+    @State private var didCopy = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = text
+            didCopy = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                didCopy = false
+            }
+        } label: {
+            Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.ink)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Source code with line numbers and syntax colours. Long lines run off the edge and
+/// can be scrolled to.
+private struct CodeView: View {
+    let source: String
+
+    var body: some View {
+        let lines = source.components(separatedBy: "\n")
+        ScrollView([.vertical, .horizontal]) {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        Text("\(index + 1)")
+                            .foregroundStyle(Theme.codeLineNumber)
+                            .frame(width: 22, alignment: .trailing)
+                        Text(SwiftHighlighter.attributed(line))
+                    }
+                    .lineLimit(1)
+                }
+            }
+            .font(.system(size: 12.5, design: .monospaced))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 18)
+        }
+    }
+}
