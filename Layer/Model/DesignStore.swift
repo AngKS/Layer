@@ -190,7 +190,7 @@ final class DesignStore {
     }
 
     /// A new element of a kind, at its starting size and look, ready to be placed.
-    static func newElement(_ kind: ElementKind, symbol: String? = nil) -> DesignElement {
+    nonisolated static func newElement(_ kind: ElementKind, symbol: String? = nil) -> DesignElement {
         let tint: RGBColor = switch kind {
         case .stickyNote: Theme.stickyNote
         case .symbol: Theme.inkTint
@@ -337,6 +337,23 @@ final class DesignStore {
 
     func updateCanvas(_ body: (inout CanvasSettings) -> Void) {
         change { body(&$0.canvas) }
+    }
+
+    /// Puts the whole design back as it was, as one undo step. Siri's own undo of an action
+    /// it took uses this.
+    func restore(_ previous: DesignContent) {
+        change { $0 = previous }
+    }
+
+    /// Adds ready-made elements to a screen as one change, replacing what is there when
+    /// `replacing` is set. Returns where they now live.
+    @discardableResult
+    func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID, replacing: Bool) -> [ElementRef] {
+        guard let index = screens.firstIndex(where: { $0.id == screenID }) else { return [] }
+        change { content in
+            if replacing { content.screens[index].elements = elements } else { content.screens[index].elements += elements }
+        }
+        return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
     }
 
     /// Gives an element to whatever it now lies on: the screen under its centre, or the

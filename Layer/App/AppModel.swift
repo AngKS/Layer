@@ -56,10 +56,18 @@ final class AppModel {
     var fileURL: URL? {
         didSet {
             guard fileURL != oldValue else { return }
+            let previousID = designID
+            designID = fileURL.map(DesignLibrary.id(for:))
+            if let previousID, previousID != designID { DesignIndexer.forget(design: previousID) }
+            OpenDesigns.shared.opened(self)
+            DesignIndexer.designChanged(self)
             matchNameAndFile()
             checkFile()
         }
     }
+    /// How Siri, Shortcuts and Spotlight know this design: see `DesignLibrary`. Nil until
+    /// the system has said where the design is saved.
+    private(set) var designID: String?
     /// Where the design's file stands with iCloud.
     private(set) var syncState = SyncState.local(canUseICloud: false)
     /// Set when versions of the design from other devices were kept aside as copies, to
@@ -256,7 +264,9 @@ final class AppModel {
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
             self?.schedulePreview()
+            if let self { DesignIndexer.designChanged(self) }
         }
+        OpenDesigns.shared.opened(self)
     }
 
     // MARK: The file
@@ -286,6 +296,7 @@ final class AppModel {
 
     func close() {
         isClosed = true
+        OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
         fileCheck?.cancel()
@@ -350,7 +361,9 @@ final class AppModel {
     /// it that other devices saved at the same time. Done when the design opens, when
     /// the app comes back to the screen, and whenever the system says the file changed.
     /// Whether the app is on the screen. Nothing is checked on a schedule while it isn't.
-    @ObservationIgnored var isActive = true
+    @ObservationIgnored var isActive = true {
+        didSet { if isActive, !oldValue { OpenDesigns.shared.activated(self) } }
+    }
     /// How long to wait before looking again at a file that is still uploading. It doubles
     /// each time, up to a minute, and starts again from three seconds on any other check.
     @ObservationIgnored private var fileCheckDelay: Duration = .seconds(3)

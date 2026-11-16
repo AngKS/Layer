@@ -308,6 +308,11 @@ struct InkCanvas: UIViewRepresentable {
             animate(to: .centered(on: center, scale: clamped, in: viewSize))
         }
 
+        /// Glides to show one part of the canvas whole, zoomed in no further than actual size.
+        func glide(toShow area: CGRect) {
+            animate(to: .fitting(area, within: clearArea))
+        }
+
         /// Glides to show everything on the canvas, or its middle if there is nothing yet.
         func zoomToFit() {
             if let content = contentBounds {

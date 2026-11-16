@@ -176,4 +176,29 @@ struct DesignFile: Sendable {
         var drawing: PKDrawing
         var images: [String: Data]?
     }
+
+    /// Just the version and content of a version 1 file, without decoding its ink.
+    private struct SingleFileContent: Decodable {
+        var version: Int
+        var content: DesignContent
+    }
+
+    /// Reads only a design's screens, elements, title and canvas settings from its file,
+    /// leaving the ink and pictures where they are: what Siri, Shortcuts and Spotlight need.
+    /// Reads the disk, so not for the main thread.
+    nonisolated static func content(at url: URL) throws -> DesignContent {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        if isDirectory.boolValue {
+            let data = try Data(contentsOf: url.appendingPathComponent(DesignPackage.design))
+            let manifest = try JSONDecoder().decode(Manifest.self, from: data)
+            guard manifest.version <= currentVersion else { throw ReadError.newerVersion(manifest.version) }
+            return manifest.content
+        }
+        let old = try JSONDecoder().decode(SingleFileContent.self, from: Data(contentsOf: url))
+        guard old.version <= currentVersion else { throw ReadError.newerVersion(old.version) }
+        return old.content
+    }
 }

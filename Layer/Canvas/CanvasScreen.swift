@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 
 /// One design: an endless canvas with device screens, ink, and floating controls.
@@ -126,6 +127,9 @@ struct CanvasScreen: View {
             }
         }
         .background(model.store.canvas.resolvedBackground.color)
+        // What is on the canvas, for Siri and Apple Intelligence: see `OnscreenContext`.
+        .appEntityUIElements { [model] context in model.onscreenEntities(context) }
+        .appEntityIdentifier(model.designEntityIdentifier)
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
             set: { if !$0 { model.keptVersionsNotice = nil } }

@@ -4,6 +4,12 @@ import SwiftUI
 struct LayerApp: App {
     init() {
         CloudFile.prepareContainer()
+        DesignLibrary.prepare()
+        // Siri, Shortcuts and Spotlight learn what designs and screens there are.
+        Task { @MainActor in
+            await DesignIndexer.reindexLibrary()
+            LayerShortcuts.updateAppShortcutParameters()
+        }
     }
 
     var body: some Scene {
