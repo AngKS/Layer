@@ -86,18 +86,14 @@ extension SketchRequest {
 
         case .onScreen(let local, _, let size):
             switch observation.form {
+            case .enclosure(_, _) where local.width / max(local.height, 1) >= SketchConventions.progressRatio
+                && local.height <= SketchConventions.progressHeight:
+                // A long, thin outline is a progress bar, however it is filled in.
+                return [.element(.progress)]
+            case .enclosure(let roundness, let inner) where local.width / size.width < SketchConventions.smallFraction:
+                return Self.smallControl(local: local, size: size, roundness: roundness, inner: inner)
             case .enclosure(_, .cross):
                 return [.element(.image)]
-            case .enclosure(let roundness, _) where local.width / size.width < SketchConventions.smallFraction:
-                // Small outlines are controls: a round one an avatar, a pill a toggle.
-                let ratio = local.width / max(local.height, 1)
-                if roundness >= SketchConventions.circleRoundness, SketchConventions.roundRatio.contains(ratio) {
-                    return [.element(.avatar)]
-                }
-                if roundness >= SketchConventions.pillBand.lowerBound, SketchConventions.toggleRatio.contains(ratio) {
-                    return [.element(.toggle)]
-                }
-                return ratio <= SketchConventions.wideBand.upperBound ? [.element(.image)] : [.element(.textField)]
             case .enclosure(let roundness, _):
                 let ratio = local.width / max(local.height, 1)
                 var options: [SketchReading] = []
@@ -123,6 +119,29 @@ extension SketchRequest {
 }
 
 extension SketchRequest {
+    /// What a small outline on a screen could be. Tiny squares are checkboxes and tiny
+    /// circles radio buttons; a little larger, circles are avatars and pills toggles.
+    static func smallControl(local: CGRect, size: CGSize, roundness: Double, inner: SketchObservation.InnerMark) -> [SketchReading] {
+        let ratio = local.width / max(local.height, 1)
+        let fraction = local.width / size.width
+        let isRound = roundness >= SketchConventions.circleRoundness
+        if SketchConventions.roundRatio.contains(ratio), fraction < SketchConventions.tinyFraction {
+            if !isRound { return [.element(.checkbox)] }
+            // A dot in the middle selects a radio button; a very small empty circle is one too.
+            if inner == .dot || (inner == .none && fraction < SketchConventions.radioFraction) { return [.element(.radio)] }
+        }
+        if inner == .cross { return [.element(.image)] }
+        if isRound, SketchConventions.roundRatio.contains(ratio) {
+            return [.element(.avatar)]
+        }
+        if roundness >= SketchConventions.pillBand.lowerBound, SketchConventions.toggleRatio.contains(ratio) {
+            return [.element(.toggle)]
+        }
+        return ratio <= SketchConventions.wideBand.upperBound ? [.element(.image)] : [.element(.textField)]
+    }
+}
+
+extension SketchRequest {
     /// What the sketch could mean when someone asks for it to be read: what its shape
     /// suggests first, then anything else that belongs where it was drawn, since they want
     /// it to become something.
@@ -130,13 +149,33 @@ extension SketchRequest {
         let shaped = candidates.filter { $0 != .scratchOut }
         let rest: [SketchReading] = switch placement {
         case .openCanvas: [.element(.text), .element(.stickyNote), .screen]
-        case .onScreen: [ElementKind.title, .body, .image, .button, .textField, .divider, .toggle, .avatar].map(SketchReading.element)
+        case .onScreen: [ElementKind.title, .body, .image, .button, .textField, .divider, .toggle, .avatar, .checkbox, .radio, .progress].map(SketchReading.element)
         }
         return shaped + rest.filter { !shaped.contains($0) }
     }
 
     /// The readings an interpreter chooses among.
     var options: [SketchReading] { isAsked ? askedCandidates : candidates }
+}
+
+extension DesignElement {
+    /// Takes what the marks inside an outline say about the element drawn: which end a
+    /// toggle's knob is at, whether a checkbox is ticked or a radio button has its dot,
+    /// and how far a progress bar is shaded.
+    mutating func adoptMarks(of observation: SketchObservation) {
+        guard case .enclosure(_, let inner) = observation.form else { return }
+        switch kind {
+        case .toggle:
+            if let knob = observation.innerBounds { isOn = knob.midX >= 0.5 }
+        case .checkbox, .radio:
+            isOn = inner != .none
+        case .progress:
+            // To the nearest 5%; unshaded bars start half full.
+            if let shading = observation.innerBounds { value = (Double(min(max(shading.maxX, 0), 1)) * 20).rounded() / 20 }
+        default:
+            break
+        }
+    }
 }
 
 /// What a sketch turned out to mean.
@@ -211,6 +250,15 @@ enum SketchConventions {
     static let toggleRatio: ClosedRange<CGFloat> = 1.34...3
     /// The least an outline on the open canvas measures each way to be a sticky note.
     static let noteSide: CGFloat = 60
+    /// A square or circle narrower than this fraction of the screen is a checkbox or radio
+    /// button rather than an image or avatar (about 47 points on an iPhone).
+    static let tinyFraction: CGFloat = 0.12
+    /// An empty circle narrower than this is a radio button rather than an avatar.
+    static let radioFraction: CGFloat = 0.08
+    /// An outline at least this many times wider than tall, and no taller than
+    /// `progressHeight` screen points, is a progress bar.
+    static let progressRatio: CGFloat = 7
+    static let progressHeight: CGFloat = 28
 }
 
 /// The wording used to explain sketches and boards to a language model. Shared so that
@@ -231,6 +279,9 @@ enum SketchPrompt {
         - image: a large box, about as tall as it is wide or taller.
         - title: a short squiggle near the top. A screen has one title.
         - bodyText: a longer squiggle, or a squiggle below a title or an image.
+        - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
+        - radioButton: a tiny circle, often with a dot in it, usually one of a column of them.
+        - progressBar: a long, very thin outline, often partly shaded in.
         """
 
     static let titleInstructions = """
@@ -254,6 +305,9 @@ enum SketchPrompt {
         case .element(.stickyNote): "stickyNote"
         case .element(.toggle): "toggle"
         case .element(.avatar): "avatar"
+        case .element(.checkbox): "checkbox"
+        case .element(.radio): "radioButton"
+        case .element(.progress): "progressBar"
         case .scratchOut: "scratchOut"
         case .unknown: "unknown"
         }
@@ -294,6 +348,10 @@ enum SketchPrompt {
     /// `options`. Longer names are looked for first, so “text field” isn't read as text.
     static func reading(namedIn prompt: String, among options: [SketchReading]) -> SketchReading? {
         let words: [(String, [SketchReading])] = [
+            // Before "button" and "bar", which these contain.
+            ("checkbox", [.element(.checkbox)]), ("check box", [.element(.checkbox)]), ("tick box", [.element(.checkbox)]),
+            ("radio button", [.element(.radio)]), ("radio", [.element(.radio)]),
+            ("progress bar", [.element(.progress)]), ("progress", [.element(.progress)]), ("loading bar", [.element(.progress)]),
             ("text field", [.element(.textField)]), ("textfield", [.element(.textField)]),
             ("input", [.element(.textField)]), ("search", [.element(.textField)]), ("field", [.element(.textField)]),
             ("sticky", [.element(.stickyNote)]), ("note", [.element(.stickyNote)]),
@@ -373,6 +431,8 @@ enum SketchPrompt {
             let inside = switch inner {
             case .none: "empty inside"
             case .cross: "with an X drawn across the inside"
+            case .tick: "with a tick drawn inside"
+            case .dot: "with a dot in the middle"
             case .other: "with some marks inside"
             }
             return "a \(proportion) closed outline with \(corners), \(inside)"

@@ -167,14 +167,20 @@ struct ElementView: View {
             }
 
         case .button:
-            RoundedRectangle(cornerRadius: radius)
-                .fill(element.tint.color)
-                .overlay {
-                    label
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .padding(.horizontal, 16)
+            let shape = RoundedRectangle(cornerRadius: radius)
+            Group {
+                switch element.resolvedButtonLook {
+                case .filled: shape.fill(element.tint.color)
+                case .bordered: shape.strokeBorder(element.tint.color, lineWidth: 1.5)
+                case .plain: Color.clear
                 }
+            }
+            .overlay {
+                label
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .padding(.horizontal, 16)
+            }
 
         case .textField:
             RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -204,6 +210,43 @@ struct ElementView: View {
                         .multilineTextAlignment(textAlignment)
                         .padding(12)
                 }
+
+        case .checkbox:
+            let side = min(element.frame.width, element.frame.height)
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(element.isOn ? element.tint.color : .clear)
+                .strokeBorder(element.isOn ? element.tint.color : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
+                .overlay {
+                    if element.isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: side * 0.55, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+
+        case .radio:
+            let side = min(element.frame.width, element.frame.height)
+            Circle()
+                .strokeBorder(element.isOn ? element.tint.color : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
+                .overlay {
+                    if element.isOn {
+                        Circle()
+                            .fill(element.tint.color)
+                            .padding(side * 0.25)
+                    }
+                }
+
+        case .progress:
+            Capsule()
+                .fill(Theme.dividerLine)
+                .overlay(alignment: .leading) {
+                    GeometryReader { proxy in
+                        Capsule()
+                            .fill(element.tint.color)
+                            .frame(width: proxy.size.width * CGFloat(element.resolvedValue))
+                    }
+                }
+                .clipShape(.capsule)
 
         case .toggle:
             // Drawn rather than a live `Toggle`, so that it scales with its frame.

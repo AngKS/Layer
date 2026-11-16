@@ -168,7 +168,7 @@ enum DesignActions {
         let top = (lowest.map { $0 + 16 } ?? device.safeTop + 16)
         var frame = ElementLayout.frame(for: element.kind, sketch: CGRect(x: device.size.width / 2, y: top, width: 0, height: 0), on: device)
         frame.origin.y = min(top, max(device.safeTop, device.size.height - device.safeBottom - frame.height - 8))
-        if element.kind == .symbol || element.kind == .toggle || element.kind == .avatar {
+        if ElementLayout.keepsSketchedPosition(element.kind) {
             frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
         }
         return frame

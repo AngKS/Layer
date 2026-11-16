@@ -101,6 +101,9 @@ struct ScreenBlueprint: Equatable, Sendable {
         (["symbol", "icon", "sf symbol"], .symbol),
         (["divider", "separator", "line", "rule"], .divider),
         (["toggle", "switch"], .toggle),
+        (["checkbox", "check box", "tick box"], .checkbox),
+        (["radio", "radio button", "option"], .radio),
+        (["progress", "progress bar", "progress view", "loading bar"], .progress),
         (["avatar", "profile picture", "profile photo"], .avatar),
         (["text", "label"], .text),
         (["sticky note", "note"], .stickyNote),
@@ -204,10 +207,10 @@ struct ScreenBlueprint: Equatable, Sendable {
     static func size(of item: Item, available: CGFloat, on device: DeviceFrame, inRow: Bool = false) -> CGSize {
         var size = ElementLayout.size(for: item.kind, sketch: .zero)
         let stretches = switch item.kind {
-        case .button, .textField, .divider, .image, .body: true
+        case .button, .textField, .divider, .image, .body, .progress: true
         default: false
         }
-        if item.width == .fill || (item.width == nil && (stretches || inRow && item.kind != .symbol && item.kind != .toggle && item.kind != .avatar)) {
+        if item.width == .fill || (item.width == nil && (stretches || inRow && !ElementLayout.keepsSketchedPosition(item.kind))) {
             size.width = available
         } else {
             size.width = min(size.width, available)

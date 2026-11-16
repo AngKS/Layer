@@ -921,7 +921,7 @@ final class AppModel {
                 if isDrawing { selection = .screen(screen.id) }
             case .element(let kind):
                 if let host {
-                    if let element = store.addElement(kind, from: bounds, to: host.id) {
+                    if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {
                         converted = true
                         added = .init(host: .screen(host.id), element: element.id)
                     }

@@ -1,5 +1,19 @@
 # Magic Pen: more components, better reading, better styling
 
+> **Status.** The first batch has shipped:
+> - checkbox, radio button and progress bar;
+> - toggle on/off from the side its knob is drawn on;
+> - tick and dot marks inside outlines, and where those marks sit (`innerBounds`);
+> - drawn widths and two-column rows;
+> - leading-aligned text and title sizes taken from the sketch;
+> - spacing to the element above snapped to 8/12/16/24/32 pt;
+> - bordered and plain button looks, with the second button on a screen bordered;
+> - 15 pt body text in a darker grey;
+> - `HStack` rows in the generated code.
+>
+> Body text went to 15 pt (subheadline) rather than 17 so existing 44 pt body frames
+> still fit two lines. Next: §3E scoring, §3B glyphs, §4 tokens.
+
 Notes on where the Magic Pen stands today and how to grow it: which components to add,
 how to tell their doodles apart, and how to make what it produces look designed rather
 than placed.

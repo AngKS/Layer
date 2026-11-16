@@ -102,16 +102,21 @@ final class DesignStore {
     }
 
     /// Adds an element where it was sketched. Returns nil if the screen no longer exists.
+    /// `adjust` finishes the element before it is added, in the same undoable step.
     @discardableResult
-    func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID) -> DesignElement? {
+    func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard let index = screens.firstIndex(where: { $0.id == screenID }) else { return nil }
         let local = screens[index].localRect(for: sketch)
-        let element = DesignElement(
-            kind: kind,
-            frame: ElementLayout.frame(for: kind, sketch: local, on: screens[index].device),
-            text: kind.placeholder,
-            tint: Theme.accent
-        )
+        let existing = screens[index].elements.filter { !$0.isHidden }
+        let laid = ElementLayout.sketched(kind, sketch: local, on: screens[index].device, among: existing.map(\.frame))
+        var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
+        element.textAlignment = laid.alignment
+        // A screen's first button is its main action; any more are outlined beside or below it.
+        if kind == .button, existing.contains(where: { $0.kind == .button && $0.resolvedButtonLook == .filled }) {
+            element.buttonLook = .bordered
+            element.text = "Cancel"
+        }
+        adjust(&element)
         change { $0.screens[index].elements.append(element) }
         return element
     }
