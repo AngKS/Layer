@@ -1,4 +1,4 @@
-import AppIntents
+@_weakLinked import AppIntents
 import Foundation
 
 enum ImageStyleOption: String, AppEnum {

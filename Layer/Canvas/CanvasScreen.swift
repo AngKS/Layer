@@ -1,4 +1,4 @@
-import AppIntents
+@_weakLinked import AppIntents
 import SwiftUI
 
 /// One design: an endless canvas with device screens, ink, and floating controls.

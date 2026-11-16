@@ -1,4 +1,4 @@
-import AppIntents
+@_weakLinked import AppIntents
 import Foundation
 
 // Actions on device screens. Changes run in the foreground so that the person sees them

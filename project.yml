@@ -2,7 +2,7 @@ name: Layer
 options:
   bundleIdPrefix: kahshin
   deploymentTarget:
-    iOS: "26.6"
+    iOS: "27.0"
   createIntermediateGroups: true
 settings:
   base:

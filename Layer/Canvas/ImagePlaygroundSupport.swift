@@ -174,7 +174,7 @@ struct ImagePlaygroundPresenter: ViewModifier {
 
     private func options(for request: ImagePlaygroundRequest?) -> ImagePlaygroundOptions {
         var options = ImagePlaygroundOptions()
-        if #available(iOS 27, *), let request {
+        if let request {
             options.sizeSpecification = .closest(to: model.imageSize(for: request))
         }
         return options
