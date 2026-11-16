@@ -68,6 +68,27 @@ enum DemoScript {
             return [SketchSamples.box(rect, radius: rect.width * 0.14)] + SketchSamples.cross(rect)
         case "body":
             return [SketchSamples.wave(onScreen(52, 588, 290, 28), humps: 8)]
+        case "toggle":
+            let rect = onScreen(300, 640, 56, 30)
+            return [SketchSamples.box(rect, radius: rect.height / 2)]
+        case "avatar":
+            let rect = onScreen(30, 60, 64, 64)
+            return [SketchSamples.box(rect, radius: rect.width / 2)]
+        case "scratch":
+            // Scrubbed back and forth over the body text.
+            let rect = onScreen(120, 586, 150, 40)
+            var points: [CGPoint] = []
+            for pass in 0...6 {
+                let y = rect.minY + rect.height * CGFloat(pass) / 6
+                for step in 0...20 {
+                    let t = CGFloat(step) / 20
+                    points.append(CGPoint(x: pass.isMultiple(of: 2) ? rect.minX + rect.width * t : rect.maxX - rect.width * t, y: y))
+                }
+            }
+            return [points]
+        case "note":
+            let frame = screen.canvasFrame
+            return [SketchSamples.box(CGRect(x: frame.maxX + 60, y: frame.minY + 40, width: 140, height: 130), radius: 6)]
         default:
             return nil
         }

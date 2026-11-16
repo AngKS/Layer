@@ -11,7 +11,7 @@ extension DesignElement {
         case .button, .text: 17
         case .textField: 16
         case .stickyNote: 15
-        case .image, .divider, .symbol: 17
+        case .image, .divider, .symbol, .toggle, .avatar: 17
         }
     }
 
@@ -26,7 +26,7 @@ extension DesignElement {
         case .body: RGBColor(hex: 0x8E8C86)
         case .button: RGBColor(hex: 0xFFFFFF)
         case .textField: RGBColor(hex: 0x9A9892)
-        case .text, .stickyNote, .image, .divider, .symbol: Theme.inkTint
+        case .text, .stickyNote, .image, .divider, .symbol, .toggle, .avatar: Theme.inkTint
         }
     }
 
@@ -37,13 +37,35 @@ extension DesignElement {
         case .button: frame.height / 2
         case .textField: 12
         case .stickyNote: 6
-        case .title, .body, .divider, .symbol, .text: 0
+        case .avatar: min(frame.width, frame.height) / 2
+        case .title, .body, .divider, .symbol, .text, .toggle: 0
         }
     }
 
     var resolvedOpacity: Double { opacity ?? 1 }
 
+    var resolvedTextAlignment: TextAlignmentChoice {
+        if let textAlignment { return textAlignment }
+        return switch kind {
+        case .title, .body, .button, .stickyNote: .center
+        default: .leading
+        }
+    }
+
+    /// The outline's width, or zero for none.
+    var resolvedBorderWidth: CGFloat { max(borderWidth ?? 0, 0) }
+    var resolvedBorderColor: RGBColor { borderColor ?? Theme.inkTint }
+
+    /// Whether the corner radius makes a circle of the element.
+    var isCircular: Bool {
+        hasCornerRadius && resolvedCornerRadius >= min(frame.width, frame.height) / 2 - 0.5 && abs(frame.width - frame.height) < 1
+    }
+
     /// Whether `tint` is something this element shows.
-    var hasFill: Bool { kind == .button || kind == .stickyNote || kind == .symbol }
-    var hasCornerRadius: Bool { kind == .image || kind == .button || kind == .textField || kind == .stickyNote }
+    var hasFill: Bool { kind == .button || kind == .stickyNote || kind == .symbol || kind == .toggle }
+    var hasCornerRadius: Bool { kind == .image || kind == .button || kind == .textField || kind == .stickyNote || kind == .avatar }
+    /// Whether an outline can be drawn round the element.
+    var hasBorder: Bool { kind != .divider && kind != .symbol && kind != .toggle }
+    /// Whether the text inside can be aligned.
+    var hasTextAlignment: Bool { kind == .title || kind == .body || kind == .text || kind == .stickyNote || kind == .textField }
 }

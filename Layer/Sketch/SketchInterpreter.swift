@@ -62,19 +62,36 @@ extension SketchRequest {
     /// conventions' dividing lines has the candidates from both sides of that line, and
     /// choosing between them is a judgement call.
     var candidates: [SketchReading] {
+        if case .scratch = observation.form { return [.scratchOut] }
         switch placement {
         case .openCanvas:
             let bounds = observation.bounds
-            if case .enclosure(_, .none) = observation.form,
-               bounds.height >= bounds.width * SketchConventions.tallRatio, bounds.height >= 160 {
+            switch observation.form {
+            case .enclosure(_, .none) where bounds.height >= bounds.width * SketchConventions.tallRatio && bounds.height >= 160:
                 return [.screen]
+            case .enclosure where min(bounds.width, bounds.height) >= SketchConventions.noteSide:
+                // A box beside the screens is a note about them.
+                return [.element(.stickyNote)]
+            case .wave, .scribble, .stackedLines:
+                return bounds.width >= max(bounds.height, 40) ? [.element(.text)] : []
+            default:
+                return []
             }
-            return []
 
         case .onScreen(let local, _, let size):
             switch observation.form {
             case .enclosure(_, .cross):
                 return [.element(.image)]
+            case .enclosure(let roundness, _) where local.width / size.width < SketchConventions.smallFraction:
+                // Small outlines are controls: a round one an avatar, a pill a toggle.
+                let ratio = local.width / max(local.height, 1)
+                if roundness >= SketchConventions.circleRoundness, SketchConventions.roundRatio.contains(ratio) {
+                    return [.element(.avatar)]
+                }
+                if roundness >= SketchConventions.pillBand.lowerBound, SketchConventions.toggleRatio.contains(ratio) {
+                    return [.element(.toggle)]
+                }
+                return ratio <= SketchConventions.wideBand.upperBound ? [.element(.image)] : [.element(.textField)]
             case .enclosure(let roundness, _):
                 let ratio = local.width / max(local.height, 1)
                 var options: [SketchReading] = []
@@ -92,6 +109,8 @@ extension SketchRequest {
                 guard local.width >= local.height else { return [] }
                 let isLong = local.width / size.width > SketchConventions.shortBand.upperBound
                 return isLong ? [.element(.body)] : [.element(.title), .element(.body)]
+            case .scratch:
+                return [.scratchOut]
             }
         }
     }
@@ -101,6 +120,8 @@ extension SketchRequest {
 enum SketchReading: Sendable, Equatable {
     case screen
     case element(ElementKind)
+    /// A scratch-out: whatever it was drawn over is deleted.
+    case scratchOut
     /// Not recognisable as anything; the ink is left alone.
     case unknown
 }
@@ -158,6 +179,15 @@ enum SketchConventions {
     /// A squiggle narrower than this fraction of the screen's width is short enough to be a title.
     static let shortFraction: CGFloat = 0.45
     static let shortBand: ClosedRange<CGFloat> = 0.35...0.55
+    /// An outline narrower than this fraction of the screen is a small control, not a block.
+    static let smallFraction: CGFloat = 0.3
+    /// A small outline at least this round, and about as tall as wide, is a circle.
+    static let circleRoundness = 0.75
+    static let roundRatio: ClosedRange<CGFloat> = 0.75...1.33
+    /// A small pill this much wider than tall is a toggle.
+    static let toggleRatio: ClosedRange<CGFloat> = 1.34...3
+    /// The least an outline on the open canvas measures each way to be a sticky note.
+    static let noteSide: CGFloat = 60
 }
 
 /// The wording used to explain sketches and boards to a language model. Shared so that
@@ -199,6 +229,9 @@ enum SketchPrompt {
         case .element(.symbol): "symbol"
         case .element(.text): "text"
         case .element(.stickyNote): "stickyNote"
+        case .element(.toggle): "toggle"
+        case .element(.avatar): "avatar"
+        case .scratchOut: "scratchOut"
         case .unknown: "unknown"
         }
     }
@@ -283,6 +316,8 @@ enum SketchPrompt {
             return "a single straight horizontal line"
         case .scribble:
             return bounds.width >= bounds.height ? "a \(length)squiggle" : "a loose scribble, taller than it is wide"
+        case .scratch(let passes):
+            return "a zigzag scrubbed back and forth \(passes) times"
         }
     }
 }

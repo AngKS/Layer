@@ -127,29 +127,57 @@ struct LayersPanel: View {
 
     private func layerRow(_ element: DesignElement, ref: DesignStore.ElementRef) -> some View {
         let isSelected = model.selection == .element(ref)
-        return Button {
-            select(.element(ref))
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: element.symbol ?? element.kind.symbol)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.label)
-                    .frame(width: 20)
-                Text(element.kind.layerName)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.ink)
-                Spacer()
-                Circle()
-                    .fill(Theme.accent.color)
-                    .frame(width: 6, height: 6)
+        return HStack(spacing: 0) {
+            Button {
+                // A hidden layer can still be picked here, its outline showing where it is.
+                select(.element(ref))
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: element.symbol ?? element.kind.symbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.label)
+                        .frame(width: 20)
+                    Text(element.displayName)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                }
+                .padding(.leading, 12)
+                .padding(.vertical, 10)
+                .contentShape(.rect)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            .accessibilityLabel(element.displayName)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            rowToggle(
+                element.isLocked ? "Unlock \(element.displayName)" : "Lock \(element.displayName)",
+                symbol: element.isLocked ? "lock.fill" : "lock.open",
+                isOn: element.isLocked
+            ) { model.toggleLock(ref) }
+            rowToggle(
+                element.isHidden ? "Show \(element.displayName)" : "Hide \(element.displayName)",
+                symbol: element.isHidden ? "eye.slash" : "eye",
+                isOn: element.isHidden
+            ) { model.toggleHidden(ref) }
+                .padding(.trailing, 4)
+        }
+        .opacity(element.isHidden ? 0.5 : 1)
+        .background(isSelected ? Theme.rowSelected : .clear, in: .rect(cornerRadius: 10))
+    }
+
+    /// A lock or eye on a layer's row: faint until it is on.
+    private func rowToggle(_ label: String, symbol: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isOn ? Theme.ink : Theme.label.opacity(0.7))
+                .frame(width: 30, height: 36)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(label)
     }
 
     // MARK: Code
@@ -158,7 +186,7 @@ struct LayersPanel: View {
     private var code: some View {
         let screens = model.store.screens
         if let screen = screens.first(where: { $0.id == codeScreenID }) ?? screens.first {
-            let source = SwiftUICodeGenerator.code(for: screen)
+            let source = SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code)
             HStack {
                 Menu {
                     ForEach(screens) { other in
@@ -178,6 +206,7 @@ struct LayersPanel: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                CodeOptionsMenu()
                 CopyButton(text: source)
             }
             .padding(.horizontal, 16)
@@ -192,6 +221,36 @@ struct LayersPanel: View {
                 .padding(.horizontal, 22)
                 .padding(.bottom, 20)
         }
+    }
+}
+
+/// The code's settings, beside the code they change.
+private struct CodeOptionsMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let settings = model.store.canvas.code
+        Menu {
+            Picker("Layout", selection: binding(\.layout, settings.layout)) {
+                ForEach(CodeSettings.Layout.allCases, id: \.self) { layout in
+                    Text(layout.name).tag(layout)
+                }
+            }
+            Toggle("Include Preview", isOn: binding(\.includesPreview, settings.includesPreview))
+            Toggle("Title as Navigation Title", isOn: binding(\.usesNavigationTitle, settings.usesNavigationTitle))
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 32, height: 32)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel("Code Options")
+        .padding(.trailing, 6)
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<CodeSettings, Value>, _ value: Value) -> Binding<Value> {
+        Binding(get: { value }, set: { new in model.store.updateCanvas { $0.code[keyPath: keyPath] = new } })
     }
 }
 

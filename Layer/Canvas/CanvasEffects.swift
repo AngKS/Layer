@@ -30,7 +30,7 @@ struct CanvasGrid: View {
                     }
                     y += gap
                 }
-                context.fill(marks, with: .color(Theme.gridDot))
+                context.fill(marks, with: .color(markColor))
             case .lines:
                 var x = firstX
                 while x < size.width + gap {
@@ -44,10 +44,14 @@ struct CanvasGrid: View {
                     marks.addLine(to: CGPoint(x: size.width, y: y))
                     y += gap
                 }
-                context.stroke(marks, with: .color(Theme.gridDot.opacity(0.55)), lineWidth: 0.5)
+                context.stroke(marks, with: .color(markColor.opacity(0.55)), lineWidth: 0.5)
             }
         }
-        .background(Theme.canvas)
+        .background(settings.resolvedBackground.color)
+    }
+
+    private var markColor: Color {
+        settings.isDark ? .white.opacity(0.22) : Theme.gridDot
     }
 }
 

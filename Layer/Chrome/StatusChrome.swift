@@ -269,6 +269,7 @@ struct DeleteSelectionButton: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .disabled(model.isSelectionLocked)
             .accessibilityLabel("Delete selection")
         }
     }

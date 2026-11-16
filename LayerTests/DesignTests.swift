@@ -614,7 +614,7 @@ struct DesignFileTests {
 @Suite("Generating SwiftUI")
 struct CodeGenerationTests {
     @Test func theDemoScreenBecomesAVerticalStackInReadingOrder() {
-        let code = SwiftUICodeGenerator.code(for: demoScreen())
+        let code = SwiftUICodeGenerator.code(for: demoScreen(), settings: CodeSettings(includesPreview: false))
         let expected = """
             import SwiftUI
 

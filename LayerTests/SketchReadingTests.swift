@@ -104,8 +104,13 @@ struct RuleInterpreterTests {
         #expect(rules.reading(for: try request([box])) == .screen)
     }
 
-    @Test func aSquiggleOnTheOpenCanvasIsLeftAsInk() throws {
+    @Test func aSquiggleOnTheOpenCanvasIsText() throws {
         let wave = SketchSamples.wave(CGRect(x: 100, y: 100, width: 120, height: 20), humps: 4)
+        #expect(rules.reading(for: try request([wave])) == .element(.text))
+    }
+
+    @Test func aSmallSquiggleOnTheOpenCanvasIsLeftAsInk() throws {
+        let wave = SketchSamples.wave(CGRect(x: 100, y: 100, width: 30, height: 20), humps: 2)
         #expect(rules.reading(for: try request([wave])) == .unknown)
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 /// scaled to its size on the canvas.
 struct PhoneScreenView: View {
     let screen: DesignScreen
+    var showsName = true
 
     var body: some View {
         let device = screen.device
@@ -16,7 +17,7 @@ struct PhoneScreenView: View {
 
             statusBar(for: device)
 
-            ForEach(screen.elements) { element in
+            ForEach(screen.elements.filter { !$0.isHidden }) { element in
                 ElementView(element: element)
                     .frame(width: element.frame.width, height: element.frame.height)
                     .offset(x: element.frame.minX, y: element.frame.minY)
@@ -31,11 +32,13 @@ struct PhoneScreenView: View {
                     .offset(x: (size.width - width) / 2, y: size.height - 13)
             }
 
-            Text(screen.name)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.label)
-                .fixedSize()
-                .offset(x: 4, y: -30)
+            if showsName {
+                Text(screen.name)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.label)
+                    .fixedSize()
+                    .offset(x: 4, y: -30)
+            }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .scaleEffect(screen.scale, anchor: .topLeading)
@@ -75,6 +78,10 @@ struct FloatingElementView: View {
 
     var body: some View {
         let frame = floating.element.frame
+        if !floating.element.isHidden { placed(frame) }
+    }
+
+    private func placed(_ frame: CGRect) -> some View {
         ElementView(element: floating.element)
             .frame(width: frame.width, height: frame.height)
             .scaleEffect(floating.scale, anchor: .topLeading)
@@ -89,8 +96,32 @@ struct ElementView: View {
     @Environment(ImageLibrary.self) private var images
 
     var body: some View {
+        let radius = element.resolvedCornerRadius
         content
+            .overlay {
+                if element.hasBorder, element.resolvedBorderWidth > 0 {
+                    RoundedRectangle(cornerRadius: element.hasCornerRadius ? radius : 0, style: .continuous)
+                        .strokeBorder(element.resolvedBorderColor.color, lineWidth: element.resolvedBorderWidth)
+                }
+            }
+            .shadow(color: .black.opacity(element.hasShadow ? 0.18 : 0), radius: element.hasShadow ? 10 : 0, y: element.hasShadow ? 5 : 0)
             .opacity(element.resolvedOpacity)
+    }
+
+    private var alignment: Alignment {
+        switch element.resolvedTextAlignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
+    }
+
+    private var textAlignment: TextAlignment {
+        switch element.resolvedTextAlignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
     }
 
     @ViewBuilder
@@ -101,19 +132,19 @@ struct ElementView: View {
             label
                 .lineLimit(1)
                 .minimumScaleFactor(0.4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
 
         case .body:
             label
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .multilineTextAlignment(textAlignment)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
 
         case .text:
             label
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .multilineTextAlignment(textAlignment)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .top))
 
-        case .image:
+        case .image, .avatar:
             if let picture = images.image(element.imageID) {
                 Color.clear
                     .overlay { Image(uiImage: picture).resizable().scaledToFill() }
@@ -122,8 +153,8 @@ struct ElementView: View {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(LinearGradient(colors: [Theme.imageTop, Theme.imageBottom], startPoint: .top, endPoint: .bottom))
                     .overlay {
-                        Image(systemName: "photo")
-                            .font(.system(size: min(element.frame.width, element.frame.height) * 0.26, weight: .medium))
+                        Image(systemName: element.kind == .avatar ? "person.fill" : "photo")
+                            .font(.system(size: min(element.frame.width, element.frame.height) * (element.kind == .avatar ? 0.45 : 0.26), weight: .medium))
                             .foregroundStyle(.white)
                     }
             }
@@ -141,7 +172,7 @@ struct ElementView: View {
         case .textField:
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .fill(Theme.fieldFill)
-                .overlay(alignment: .leading) {
+                .overlay(alignment: alignment) {
                     label
                         .lineLimit(1)
                         .padding(.horizontal, 16)
@@ -161,10 +192,21 @@ struct ElementView: View {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .fill(element.tint.color)
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-                .overlay {
+                .overlay(alignment: alignment) {
                     label
-                        .multilineTextAlignment(.center)
+                        .multilineTextAlignment(textAlignment)
                         .padding(12)
+                }
+
+        case .toggle:
+            // Drawn rather than a live `Toggle`, so that it scales with its frame.
+            Capsule()
+                .fill(element.isOn ? element.tint.color : Theme.dividerLine)
+                .overlay(alignment: element.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(.white)
+                        .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                        .padding(element.frame.height * 0.07)
                 }
         }
     }

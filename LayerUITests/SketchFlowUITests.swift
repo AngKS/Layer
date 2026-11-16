@@ -139,11 +139,13 @@ final class SketchFlowUITests: XCTestCase {
         // Renaming the board renames its file.
         let name = "Checkout \(Int(Date().timeIntervalSince1970) % 100_000)"
         title.tap()
-        let field = app.alerts.textFields.firstMatch
+        let field = app.textFields["Board name"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "tapping the name should offer to change it")
+        XCTAssertTrue(app.buttons["Canvas"].exists && app.buttons["Magic Pen"].exists, "with the canvas settings below, in tabs")
+        field.tap()
         let old = field.value as? String ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + name)
-        app.alerts.buttons["Rename"].tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + name + "\n")
+        XCTAssertTrue(waitForDisappearance(of: field), "finishing the name should close the menu")
         XCTAssertTrue(wait(for: title, toHave: "value == '\(name)'"))
 
         // Back in the browser the design is listed under that name, and opens with it.

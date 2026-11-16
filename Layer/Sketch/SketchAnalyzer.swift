@@ -27,6 +27,8 @@ struct SketchObservation: Sendable, Equatable {
         /// A single straight horizontal stroke.
         case line
         case scribble
+        /// A zigzag scrubbed back and forth over something, as drawn to cross it out.
+        case scratch(passes: Int)
 
         var isEnclosure: Bool {
             if case .enclosure = self { true } else { false }
@@ -142,6 +144,13 @@ enum SketchAnalyzer {
     // MARK: Open strokes
 
     private static func openForm(_ strokes: [SketchStroke], in bounds: CGRect) -> SketchObservation.Form {
+        // Squiggles and lines run one way; a scratch-out doubles back on itself, again and again.
+        let doubleBack = max(6, bounds.width * 0.3)
+        let reversals = strokes.reduce(0) { $0 + Self.turns($1.points.map(\.x), threshold: doubleBack) }
+        if reversals >= 3, bounds.width >= 16 {
+            return .scratch(passes: reversals + 1)
+        }
+
         if strokes.count >= 2 {
             let sideways = strokes.allSatisfy { $0.bounds.width >= max(24, $0.bounds.height * 2.5) }
             let rows = distinctRows(strokes.map(\.bounds))
@@ -156,9 +165,9 @@ enum SketchAnalyzer {
         }
 
         let threshold = max(3, bounds.height * 0.3)
-        let turns = strokes.reduce(0) { $0 + verticalTurns($1.points, threshold: threshold) }
-        if bounds.width >= bounds.height * 1.5, bounds.height >= 8, turns >= 3 {
-            return .wave(humps: (turns + 1) / 2)
+        let ups = strokes.reduce(0) { $0 + verticalTurns($1.points, threshold: threshold) }
+        if bounds.width >= bounds.height * 1.5, bounds.height >= 8, ups >= 3 {
+            return .wave(humps: (ups + 1) / 2)
         }
         return .scribble
     }
@@ -166,11 +175,16 @@ enum SketchAnalyzer {
     /// Counts how often a stroke reverses between heading up and heading down, ignoring
     /// reversals smaller than `threshold`.
     private static func verticalTurns(_ points: [CGPoint], threshold: CGFloat) -> Int {
-        guard var extreme = points.first?.y else { return 0 }
+        turns(points.map(\.y), threshold: threshold)
+    }
+
+    /// Counts how often a run of values reverses direction, ignoring reversals smaller
+    /// than `threshold`.
+    private static func turns(_ values: [CGFloat], threshold: CGFloat) -> Int {
+        guard var extreme = values.first else { return 0 }
         var direction = 0
         var turns = 0
-        for point in points.dropFirst() {
-            let y = point.y
+        for y in values.dropFirst() {
             switch direction {
             case 1:
                 if y > extreme { extreme = y } else if extreme - y >= threshold { turns += 1; direction = -1; extreme = y }

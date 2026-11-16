@@ -13,15 +13,22 @@ struct ShareMenu: View {
             // The code of the selected screen, or of the first one.
             if let screen = model.selectedScreen ?? model.store.screens.first {
                 ShareLink(
-                    item: SwiftUICodeGenerator.code(for: screen),
+                    item: SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code),
                     preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen))
                 ) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
+            if model.store.screens.count > 1 {
+                Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
+                    if let urls = CodeFiles.write(model.store.screens, settings: model.store.canvas.code) {
+                        picture = SharedPicture(urls: urls)
+                    }
+                }
+            }
             Button("Image of Board", systemImage: "photo") {
                 if let url = BoardSnapshot.file(of: model) {
-                    picture = SharedPicture(url: url)
+                    picture = SharedPicture(urls: [url])
                 } else {
                     nothingToShare = true
                 }
@@ -36,7 +43,7 @@ struct ShareMenu: View {
         }
         .accessibilityLabel("Share")
         .popover(item: $picture) { picture in
-            ActivityView(items: [picture.url])
+            ActivityView(items: picture.urls)
         }
         .alert("There is nothing on the board to make a picture of yet.", isPresented: $nothingToShare) {
             Button("OK", role: .cancel) {}
@@ -44,9 +51,27 @@ struct ShareMenu: View {
     }
 }
 
+/// Files on their way to the share sheet.
 private struct SharedPicture: Identifiable {
-    let url: URL
-    var id: URL { url }
+    let urls: [URL]
+    let id = UUID()
+}
+
+/// The generated SwiftUI for every screen, written out as files to share.
+enum CodeFiles {
+    static func write(_ screens: [DesignScreen], settings: CodeSettings) -> [URL]? {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftUI-\(UUID().uuidString)")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return try SwiftUICodeGenerator.files(for: screens, settings: settings).map { file in
+                let url = folder.appendingPathComponent(file.name)
+                try Data(file.source.utf8).write(to: url, options: .atomic)
+                return url
+            }
+        } catch {
+            return nil
+        }
+    }
 }
 
 /// The system share sheet.
@@ -85,7 +110,7 @@ enum BoardSnapshot {
 
         let board = ZStack(alignment: .topLeading) {
             ForEach(model.store.screens) { screen in
-                PhoneScreenView(screen: screen)
+                PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
                     .offset(x: screen.origin.x, y: screen.origin.y)
             }
             ForEach(model.store.floating) { floating in
@@ -94,7 +119,7 @@ enum BoardSnapshot {
         }
         .offset(x: -area.minX, y: -area.minY)
         .frame(width: area.width, height: area.height, alignment: .topLeading)
-        .background(Theme.canvas)
+        .background(model.store.canvas.resolvedBackground.color)
         .environment(model.images)
 
         let scale = min(2, longestSide / max(area.width, area.height))

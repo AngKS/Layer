@@ -82,7 +82,8 @@ final class DesignStore {
     /// Adds the screen a sketch stands for: an iPhone, as large as it was drawn.
     @discardableResult
     func addScreen(from sketch: CGRect) -> DesignScreen {
-        addScreen(.iPhone, at: ElementLayout.screenPlacement(for: sketch))
+        let device = canvas.sketchDevice
+        return addScreen(device, at: ElementLayout.screenPlacement(for: sketch, device: device))
     }
 
     @discardableResult
@@ -110,6 +111,55 @@ final class DesignStore {
         return element
     }
 
+    /// Adds an element sketched on the open canvas, where and about as large as it was drawn.
+    @discardableResult
+    func addFloating(_ kind: ElementKind, from sketch: CGRect) -> ElementRef {
+        var element = Self.newElement(kind)
+        let scale = looseScale
+        let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
+        switch kind {
+        case .stickyNote:
+            let side = min(max(max(drawn.width, drawn.height), 100), 320).rounded()
+            element.frame.size = CGSize(width: side, height: side)
+        case .text:
+            element.frame.size.width = min(max(drawn.width, 80), 600).rounded()
+        default:
+            break
+        }
+        return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
+    }
+
+    /// The elements a scratch-out drawn over `sketch`, in canvas points, crosses out:
+    /// those, not locked or hidden, whose middle it covers.
+    func elements(scratchedOutBy sketch: CGRect) -> [ElementRef] {
+        let area = sketch.insetBy(dx: -6, dy: -6)
+        func isCrossedOut(_ element: DesignElement, _ placement: Placement) -> Bool {
+            guard !element.isLocked, !element.isHidden else { return false }
+            let frame = placement.canvasRect(for: element.frame)
+            return area.contains(CGPoint(x: frame.midX, y: frame.midY))
+        }
+        var found: [ElementRef] = []
+        for screen in screens {
+            for element in screen.elements where isCrossedOut(element, screen.placement) {
+                found.append(ElementRef(host: .screen(screen.id), element: element.id))
+            }
+        }
+        for floating in floating where isCrossedOut(floating.element, floating.placement) {
+            found.append(ElementRef(host: .canvas, element: floating.id))
+        }
+        return found
+    }
+
+    /// Deletes several elements as one undo step.
+    func delete(_ refs: [ElementRef]) {
+        let ids = Set(refs.map(\.element))
+        change { content in
+            for index in content.screens.indices {
+                content.screens[index].elements.removeAll { ids.contains($0.id) }
+            }
+            content.floating.removeAll { ids.contains($0.id) }
+        }
+    }
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
     /// there, if it is the kind of thing that goes on screens, and onto the open canvas
     /// otherwise. Only the size of `element.frame` is used.
@@ -156,6 +206,112 @@ final class DesignStore {
         case .canvas:
             change { $0.floating.removeAll { $0.id == ref.element } }
         }
+    }
+
+    /// A copy of an element beside the original, a little down and to the right, on top.
+    @discardableResult
+    func duplicate(_ ref: ElementRef) -> ElementRef? {
+        guard let (element, _) = resolve(ref) else { return nil }
+        var copy = element
+        copy.id = UUID()
+        copy.isLocked = false
+        copy.frame = element.frame.offsetBy(dx: 16, dy: 16)
+        switch ref.host {
+        case .screen(let id):
+            guard let index = screens.firstIndex(where: { $0.id == id }) else { return nil }
+            change { $0.screens[index].elements.append(copy) }
+        case .canvas:
+            guard let original = floating.first(where: { $0.id == ref.element }) else { return nil }
+            change { $0.floating.append(FloatingElement(element: copy, scale: original.scale)) }
+        }
+        return ElementRef(host: ref.host, element: copy.id)
+    }
+
+    /// A copy of a screen and everything on it, to its right.
+    @discardableResult
+    func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen? {
+        guard let screen = screen(id) else { return nil }
+        var copy = screen
+        copy.id = UUID()
+        copy.name = Self.copyName(for: screen.name, among: screens.map(\.name))
+        copy.origin.x = screen.canvasFrame.maxX + 60
+        copy.elements = screen.elements.map { element in
+            var element = element
+            element.id = UUID()
+            return element
+        }
+        change { $0.screens.append(copy) }
+        return copy
+    }
+
+    /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
+    static func copyName(for name: String, among names: [String]) -> String {
+        let base = "\(name) Copy"
+        guard names.contains(base) else { return base }
+        var number = 2
+        while names.contains("\(base) \(number)") { number += 1 }
+        return "\(base) \(number)"
+    }
+
+    enum Arrangement: CaseIterable, Sendable {
+        case front, forward, backward, back
+
+        var name: String {
+            switch self {
+            case .front: "Bring to Front"
+            case .forward: "Bring Forward"
+            case .backward: "Send Backward"
+            case .back: "Send to Back"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .front: "square.3.layers.3d.top.filled"
+            case .forward: "square.2.layers.3d.top.filled"
+            case .backward: "square.2.layers.3d.bottom.filled"
+            case .back: "square.3.layers.3d.bottom.filled"
+            }
+        }
+    }
+
+    /// Moves an element up or down among those it shares its screen, or the open canvas, with.
+    func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
+        func reordered<T>(_ items: inout [T], id: (T) -> UUID) {
+            guard let index = items.firstIndex(where: { id($0) == ref.element }) else { return }
+            let target = switch arrangement {
+            case .front: items.count - 1
+            case .forward: min(index + 1, items.count - 1)
+            case .backward: max(index - 1, 0)
+            case .back: 0
+            }
+            guard target != index else { return }
+            let item = items.remove(at: index)
+            items.insert(item, at: target)
+        }
+        switch ref.host {
+        case .screen(let id):
+            guard let index = screens.firstIndex(where: { $0.id == id }) else { return }
+            change { reordered(&$0.screens[index].elements, id: \.id) }
+        case .canvas:
+            change { reordered(&$0.floating, id: \.id) }
+        }
+    }
+
+    /// Whether an element can go further up, or further down, among its neighbours.
+    func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
+        let ids: [UUID] = switch ref.host {
+        case .screen(let id): screen(id)?.elements.map(\.id) ?? []
+        case .canvas: floating.map(\.id)
+        }
+        guard let index = ids.firstIndex(of: ref.element) else { return false }
+        return arrangement == .front || arrangement == .forward ? index < ids.count - 1 : index > 0
+    }
+
+    /// Lines an element on a screen up with an edge or the middle of that screen.
+    func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
+        guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
+        update(ref) { $0.frame = ElementLayout.aligned($0.frame, alignment, in: screen.size) }
     }
 
     func deleteScreen(_ id: DesignScreen.ID) {

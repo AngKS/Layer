@@ -77,14 +77,13 @@ struct TopBar: View {
     }
 }
 
-/// Top left: back to the document browser, and the board's name. Tapping the name renames it.
+/// Top left: back to the document browser, and the board's name. Tapping the name opens
+/// the board's menu: its name, to rename it, and the canvas's settings.
 private struct TitleBar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// Whether the name gives way, ending in an ellipsis, when the row is short of room.
     var isCutToFit = false
-    @State private var isRenaming = false
-    @State private var draft = ""
 
     var body: some View {
         ToolbarPill {
@@ -95,28 +94,39 @@ private struct TitleBar: View {
                     dismiss()
                 }
             }
+            @Bindable var model = model
             Button {
-                draft = model.store.title ?? ""
-                isRenaming = true
+                model.openBoardMenu()
             } label: {
-                Text(model.store.title ?? "Untitled")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .frame(maxWidth: 220, alignment: .leading)
-                    .fixedSize(horizontal: !isCutToFit, vertical: false)
-                    .padding(.trailing, 14)
-                    .frame(height: 40)
-                    .contentShape(.rect)
+                HStack(spacing: 6) {
+                    Text(model.store.title ?? "Untitled")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .frame(maxWidth: 220, alignment: .leading)
+                        .fixedSize(horizontal: !isCutToFit, vertical: false)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.label)
+                        .rotationEffect(.degrees(model.isBoardMenuOpen ? 180 : 0))
+                        .animation(.snappy(duration: 0.2), value: model.isBoardMenuOpen)
+                }
+                .padding(.trailing, 14)
+                .frame(height: 40)
+                .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Board title")
             .accessibilityValue(model.store.title ?? "Untitled")
-        }
-        .alert("Rename Board", isPresented: $isRenaming) {
-            TextField("Title", text: $draft)
-            Button("Rename") { model.store.setTitle(draft) }
-            Button("Cancel", role: .cancel) {}
+            .accessibilityHint("Rename the board and change the canvas settings")
+            .popover(isPresented: $model.isBoardMenuOpen, arrowEdge: .top) {
+                BoardMenu(isSheet: model.isCompactSizeClass)
+                    .environment(model)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(Theme.panel)
+                    .preferredColorScheme(.light)
+            }
         }
     }
 }

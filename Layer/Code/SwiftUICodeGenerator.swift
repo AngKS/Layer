@@ -1,21 +1,71 @@
 import CoreGraphics
 import Foundation
 
-/// Writes a screen out as a SwiftUI view: a vertical stack of its elements, top to bottom,
-/// with the spacing, sizes and styling they have on the canvas.
+/// Writes a screen out as a SwiftUI view. By default that is a vertical stack of its
+/// elements, top to bottom, with the spacing, sizes and styling they have on the canvas;
+/// `CodeSettings` can ask for every element at its exact place instead, a preview, and the
+/// screen's title as its navigation title. Hidden elements are left out.
 enum SwiftUICodeGenerator {
     private static let spacing: CGFloat = 16
+    /// How far down a large navigation title pushes the content, below the status bar.
+    private static let navigationBarHeight: CGFloat = 96
 
     static func fileName(for screen: DesignScreen) -> String {
         screen.typeName + ".swift"
     }
 
-    static func code(for screen: DesignScreen) -> String {
-        let device = screen.device
-        let elements = screen.elements.sorted { $0.frame.minY < $1.frame.minY }
+    static func code(for screen: DesignScreen, settings: CodeSettings = CodeSettings()) -> String {
+        var elements = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
+
+        // The topmost title becomes the navigation title rather than a view of its own.
+        var navigationTitle: String?
+        if settings.usesNavigationTitle, let index = elements.firstIndex(where: { $0.kind == .title }) {
+            navigationTitle = elements.remove(at: index).text
+        }
+
+        var root = switch settings.layout {
+        case .stack: stack(elements, on: screen.device, belowNavigationBar: navigationTitle != nil)
+        case .absolute: absolute(elements)
+        }
+        if let navigationTitle {
+            root = ["NavigationStack {"] + indented(root + [".navigationTitle(\(literal(navigationTitle)))"]) + ["}"]
+        }
+
+        var lines = ["import SwiftUI", "", "struct \(screen.typeName): View {", "    var body: some View {"]
+        lines += root.map { "        " + $0 }
+        lines += ["    }", "}"]
+        if settings.includesPreview {
+            lines += ["", "#Preview {", "    \(screen.typeName)()", "}"]
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Every screen of a design, as files named after them.
+    static func files(for screens: [DesignScreen], settings: CodeSettings = CodeSettings()) -> [(name: String, source: String)] {
+        var used: Set<String> = []
+        return screens.map { screen in
+            var name = fileName(for: screen)
+            var number = 2
+            while used.contains(name) {
+                name = "\(screen.typeName)\(number).swift"
+                number += 1
+            }
+            used.insert(name)
+            return (name, code(for: screen, settings: settings))
+        }
+    }
+
+    private static func indented(_ lines: [String]) -> [String] {
+        lines.map { "    " + $0 }
+    }
+
+    // MARK: A vertical stack
+
+    private static func stack(_ elements: [DesignElement], on device: DeviceFrame, belowNavigationBar: Bool) -> [String] {
         let width = device.size.width
         let margin = elements.map { min($0.frame.minX, width - $0.frame.maxX) }.min().map { max(0, $0) } ?? 0
         let contentWidth = width - margin * 2
+        let topEdge = device.safeTop + (belowNavigationBar ? navigationBarHeight : 0)
 
         var body: [String] = []
         var previousBottom: CGFloat?
@@ -35,33 +85,29 @@ enum SwiftUICodeGenerator {
                     lines.append("    .padding(.top, \(number(gap - spacing)))")
                 }
             }
+            if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                lines.insert("// \(name.replacingOccurrences(of: "\n", with: " "))", at: 0)
+            }
             body += lines
             previousBottom = element.frame.maxY
         }
 
-        var lines = ["import SwiftUI", "", "struct \(screen.typeName): View {", "    var body: some View {"]
-        if body.isEmpty {
-            lines.append("        Color.clear")
-        } else {
-            lines.append("        VStack(alignment: .leading, spacing: \(number(spacing))) {")
-            lines += body.map { "            " + $0 }
-            lines.append("        }")
-            if margin > 0 { lines.append("        .padding(.horizontal, \(number(margin)))") }
-            if let first = elements.first, first.frame.minY - device.safeTop >= 1 {
-                lines.append("        .padding(.top, \(number(first.frame.minY - device.safeTop)))")
-            }
-            if usesSpacer, let last = elements.last {
-                let inset = device.size.height - device.safeBottom - last.frame.maxY
-                if inset >= 1 { lines.append("        .padding(.bottom, \(number(inset)))") }
-            } else {
-                lines.append("        .frame(maxHeight: .infinity, alignment: .top)")
-            }
+        guard !body.isEmpty else { return ["Color.clear"] }
+        var lines = ["VStack(alignment: .leading, spacing: \(number(spacing))) {"]
+        lines += indented(body)
+        lines.append("}")
+        if margin > 0 { lines.append(".padding(.horizontal, \(number(margin)))") }
+        if let first = elements.first, first.frame.minY - topEdge >= 1 {
+            lines.append(".padding(.top, \(number(first.frame.minY - topEdge)))")
         }
-        lines += ["    }", "}"]
-        return lines.joined(separator: "\n")
+        if usesSpacer, let last = elements.last {
+            let inset = device.size.height - device.safeBottom - last.frame.maxY
+            if inset >= 1 { lines.append(".padding(.bottom, \(number(inset)))") }
+        } else {
+            lines.append(".frame(maxHeight: .infinity, alignment: .top)")
+        }
+        return lines
     }
-
-    // MARK: Elements
 
     private static func view(for element: DesignElement, margin: CGFloat, contentWidth: CGFloat, screenWidth: CGFloat) -> [String] {
         let frame = element.frame
@@ -78,38 +124,35 @@ enum SwiftUICodeGenerator {
 
         switch element.kind {
         case .title:
+            let alignment = element.textAlignment.map { $0.rawValue } ?? "leading"
             lines = [
                 "Text(\(literal(element.text)))",
                 "    .font(\(font(of: element, usual: abs(frame.height - 40) < 1 ? ".title.bold()" : nil)))",
-            ] + textColor(of: element, usual: nil) + (centered
+            ] + textColor(of: element, usual: nil) + (centered && (element.textAlignment ?? .center) == .center
                 ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
-                : ["    .frame(width: \(number(frame.width)), alignment: .leading)"] + placement)
+                : ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"] + placement)
 
         case .body:
             lines = [
                 "Text(\(literal(element.text)))",
                 "    .font(\(font(of: element, usual: ".footnote")))",
             ] + textColor(of: element, usual: "    .foregroundStyle(.secondary)") + [
-                "    .multilineTextAlignment(.center)",
+                "    .multilineTextAlignment(.\(element.resolvedTextAlignment.rawValue))",
                 fillsWidth ? "    .frame(maxWidth: .infinity)" : "    .frame(width: \(number(frame.width)))",
             ] + placement
 
         case .text:
+            let alignment = element.resolvedTextAlignment
             lines = [
                 "Text(\(literal(element.text)))",
                 "    .font(\(font(of: element, usual: ".body")))",
-            ] + textColor(of: element, usual: nil) + [
-                "    .frame(width: \(number(frame.width)), alignment: .leading)",
-            ] + placement
+            ] + textColor(of: element, usual: nil)
+                + (alignment == .leading ? [] : ["    .multilineTextAlignment(.\(alignment.rawValue))"])
+                + ["    .frame(width: \(number(frame.width)), alignment: .\(alignment.rawValue))"]
+                + placement
 
-        case .image:
-            lines = [
-                "Image(\"photo\")",
-                "    .resizable()",
-                "    .scaledToFill()",
-                "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
-                "    .clipShape(.rect(cornerRadius: \(number(element.resolvedCornerRadius))))",
-            ] + placement
+        case .image, .avatar:
+            lines = picture(element) + placement
 
         case .button:
             let shape = element.cornerRadius.map { ".rect(cornerRadius: \(number($0)))" } ?? ".capsule"
@@ -129,6 +172,7 @@ enum SwiftUICodeGenerator {
         case .textField:
             lines = [
                 "TextField(\(literal(element.text)), text: .constant(\"\"))",
+            ] + (element.resolvedTextAlignment == .leading ? [] : ["    .multilineTextAlignment(.\(element.resolvedTextAlignment.rawValue))"]) + [
                 "    .padding(.horizontal, 16)",
                 fillsWidth
                     ? "    .frame(maxWidth: .infinity, minHeight: \(number(frame.height)))"
@@ -147,12 +191,146 @@ enum SwiftUICodeGenerator {
         case .divider:
             lines = ["Divider()"] + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"] + placement)
 
+        case .toggle:
+            lines = toggle(element) + placement
+
         case .stickyNote:
             // Sticky notes stay on the canvas; this is only here to keep the switch whole.
             lines = ["Text(\(literal(element.text)))"]
         }
 
-        return element.resolvedOpacity < 1 ? lines + ["    .opacity(\(number(element.resolvedOpacity)))"] : lines
+        return lines + finish(element)
+    }
+
+    // MARK: Exact positions
+
+    /// Every element at its place on the screen, measured from the screen's top-left
+    /// corner, which is why the stack reaches under the status bar.
+    private static func absolute(_ elements: [DesignElement]) -> [String] {
+        guard !elements.isEmpty else { return ["Color.clear"] }
+        var body = ["Color.clear"]
+        for element in elements {
+            if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+            }
+            body += positioned(element)
+        }
+        return ["ZStack(alignment: .topLeading) {"] + indented(body) + [
+            "}",
+            ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)",
+            ".ignoresSafeArea()",
+        ]
+    }
+
+    private static func positioned(_ element: DesignElement) -> [String] {
+        let frame = element.frame
+        let size = "width: \(number(frame.width)), height: \(number(frame.height))"
+        let alignment = element.resolvedTextAlignment.rawValue
+        var lines: [String]
+
+        switch element.kind {
+        case .title, .body, .text, .stickyNote:
+            let usual = switch element.kind {
+            case .title: ".title.bold()"
+            case .body: ".footnote"
+            default: ".body"
+            }
+            lines = [
+                "Text(\(literal(element.text)))",
+                "    .font(\(font(of: element, usual: usual)))",
+            ] + textColor(of: element, usual: element.kind == .body ? "    .foregroundStyle(.secondary)" : nil)
+                + (alignment == "leading" ? [] : ["    .multilineTextAlignment(.\(alignment))"])
+                + (element.kind == .stickyNote
+                    ? ["    .padding(12)", "    .frame(\(size), alignment: .\(alignment))", "    .background(\(color(element.tint)), in: .rect(cornerRadius: \(number(element.resolvedCornerRadius))))"]
+                    : ["    .frame(\(size), alignment: .\(alignment))"])
+
+        case .image, .avatar:
+            lines = picture(element)
+
+        case .button:
+            let shape = element.cornerRadius.map { ".rect(cornerRadius: \(number($0)))" } ?? ".capsule"
+            lines = [
+                "Button {",
+                "} label: {",
+                "    Text(\(literal(element.text)))",
+                "        .font(\(font(of: element, usual: ".headline")))",
+                "        .foregroundStyle(\(element.textColor.map(color) ?? ".white"))",
+                "        .frame(\(size))",
+                "        .background(\(color(element.tint)), in: \(shape))",
+                "}",
+            ]
+
+        case .textField:
+            lines = [
+                "TextField(\(literal(element.text)), text: .constant(\"\"))",
+                "    .padding(.horizontal, 16)",
+                "    .frame(\(size))",
+                "    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: \(number(element.resolvedCornerRadius))))",
+            ]
+
+        case .symbol:
+            lines = [
+                "Image(systemName: \(literal(element.symbol ?? "questionmark.square.dashed")))",
+                "    .resizable()",
+                "    .scaledToFit()",
+                "    .frame(\(size))",
+            ] + (element.tint == Theme.inkTint ? [] : ["    .foregroundStyle(\(color(element.tint)))"])
+
+        case .divider:
+            lines = ["Divider()", "    .frame(width: \(number(frame.width)))"]
+
+        case .toggle:
+            lines = toggle(element) + ["    .frame(\(size))"]
+        }
+
+        return lines + finish(element) + ["    .offset(x: \(number(frame.minX)), y: \(number(frame.minY)))"]
+    }
+
+    // MARK: Pieces shared by both layouts
+
+    private static func picture(_ element: DesignElement) -> [String] {
+        let frame = element.frame
+        let fallback = element.kind == .avatar ? "avatar" : "photo"
+        let shape = element.isCircular ? ".circle" : ".rect(cornerRadius: \(number(element.resolvedCornerRadius)))"
+        return [
+            "Image(\(literal(assetName(element.name) ?? fallback)))",
+            "    .resizable()",
+            "    .scaledToFill()",
+            "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
+            "    .clipShape(\(shape))",
+        ]
+    }
+
+    private static func toggle(_ element: DesignElement) -> [String] {
+        [
+            "Toggle(\(literal(element.name ?? "")), isOn: .constant(\(element.isOn)))",
+            "    .labelsHidden()",
+        ] + (element.tint == Theme.accent ? [] : ["    .tint(\(color(element.tint)))"])
+    }
+
+    /// The border, shadow and opacity that any element can have.
+    private static func finish(_ element: DesignElement) -> [String] {
+        var lines: [String] = []
+        if element.hasBorder, element.resolvedBorderWidth > 0 {
+            let shape = element.isCircular
+                ? "Circle()"
+                : element.kind == .button && element.cornerRadius == nil
+                    ? "Capsule()"
+                    : "RoundedRectangle(cornerRadius: \(number(element.hasCornerRadius ? element.resolvedCornerRadius : 0)))"
+            lines += [
+                "    .overlay {",
+                "        \(shape)",
+                "            .strokeBorder(\(color(element.resolvedBorderColor)), lineWidth: \(number(element.resolvedBorderWidth)))",
+                "    }",
+            ]
+        }
+        if element.hasShadow {
+            lines.append("    .shadow(color: .black.opacity(0.18), radius: 10, y: 5)")
+        }
+        if element.resolvedOpacity < 1 {
+            lines.append("    .opacity(\(number(element.resolvedOpacity)))")
+        }
+        return lines
     }
 
     /// The font modifier's argument: the kind's usual font unless the element has its own.
@@ -167,6 +345,13 @@ enum SwiftUICodeGenerator {
     private static func textColor(of element: DesignElement, usual: String?) -> [String] {
         if let own = element.textColor { return ["    .foregroundStyle(\(color(own)))"] }
         return usual.map { [$0] } ?? []
+    }
+
+    /// A layer's name as an asset catalogue name: "Hero Photo" becomes `hero-photo`.
+    static func assetName(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let words = name.lowercased().split { !$0.isLetter && !$0.isNumber }
+        return words.isEmpty ? nil : words.joined(separator: "-")
     }
 
     // MARK: Literals

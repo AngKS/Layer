@@ -16,7 +16,7 @@ struct CanvasScreen: View {
 
                 OnCanvas {
                     ForEach(model.store.screens) { screen in
-                        PhoneScreenView(screen: screen)
+                        PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
                             .zIndex(screen.id == screenBeingDraggedFrom ? 1 : 0)
@@ -112,7 +112,7 @@ struct CanvasScreen: View {
                     .modifier(BottomCorner(edge: .trailing))
             }
         }
-        .background(Theme.canvas)
+        .background(model.store.canvas.resolvedBackground.color)
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
             set: { if !$0 { model.keptVersionsNotice = nil } }

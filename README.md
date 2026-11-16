@@ -12,8 +12,11 @@ Layer is a freeform canvas for iPad. Draw a tall rectangle and it becomes an iPh
 - **Apple Intelligence first.** Built-in shape rules settle clear sketches instantly. On the close calls, such as a rounded box that could be a button or a text field, the on-device model decides from what else is on the screen. Without Apple Intelligence the rules decide everything, so Layer works on any iPad.
 - **A real canvas.** Pinch to zoom, pan, lock the canvas, zoom to fit. Frames, elements and drawings can be selected, moved and resized, with snapping and spacing guides.
 - **Add things directly.** Text, device frames (iPhone, iPhone Pro Max, iPhone SE, iPad), sticky notes, SF Symbols and images.
-- **Format panel.** Position, size, fill, corner radius, opacity and type for the selection, or the grid and Magic Pen settings when nothing is selected.
-- **SwiftUI code.** The Layers panel's Code tab shows each screen as SwiftUI, ready to copy or share.
+- **Freeform-style objects.** A bar above the selection duplicates, locks and reorders it (⌘D, ⌘L, ⌘], ⌘[). Dragged things snap to smart guides or the grid. Layers can be named, hidden and locked.
+- **Format panel.** Position, size, fill, border, shadow, corner radius, opacity, alignment and type for the selection, plus arranging and aligning it on its screen.
+- **Board menu.** Tap the board's name to rename it. Below the name, tabs hold the canvas settings (background, grid, guides), the Magic Pen settings with a guide to the shapes it reads, the code options and iCloud status.
+- **More Magic Pen shapes.** A small pill becomes a toggle and a small circle an avatar. Beside the screens, a box becomes a sticky note and a squiggle becomes text. Scratching back and forth over an element deletes it.
+- **SwiftUI code.** The Layers panel's Code tab shows each screen as SwiftUI, ready to copy or share. The code can be a stack or use exact positions, end with a `#Preview`, and use the title as a navigation title. Every screen can be shared as files at once.
 - **Documents and iCloud.** Designs are documents in Files and iCloud Drive. A design's file is named after its board, the document browser shows a thumbnail of each board, and versions edited on two devices at once are both kept.
 - **Any window size.** In a narrow window the tools fold into a menu, the panels become sheets and the palette can be tucked away.
 

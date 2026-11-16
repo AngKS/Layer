@@ -19,7 +19,16 @@ enum ElementLayout {
         case .symbol: CGSize(width: 44, height: 44)
         case .text: CGSize(width: 200, height: 24)
         case .stickyNote: CGSize(width: 150, height: 150)
+        case .toggle: CGSize(width: 51, height: 31)
+        case .avatar:
+            // As large as it was drawn, within reason.
+            CGSize(width: snap(min(max(sketch.width, 40), 160), to: 4), height: snap(min(max(sketch.width, 40), 160), to: 4))
         }
+    }
+
+    /// Small elements stay where they were drawn across the screen; the rest are centred.
+    static func keepsSketchedPosition(_ kind: ElementKind) -> Bool {
+        kind == .toggle || kind == .avatar || kind == .symbol
     }
 
     /// A new element takes its kind's standard size, sits centred across the screen, and
@@ -33,7 +42,11 @@ enum ElementLayout {
         let top = device.safeTop + 8
         let bottom = device.size.height - device.safeBottom - 8 - size.height
         let y = min(max(snap(sketch.midY - size.height / 2, to: 4), top), max(top, bottom))
-        return CGRect(x: (device.size.width - size.width) / 2, y: y, width: size.width, height: size.height)
+        var x = (device.size.width - size.width) / 2
+        if keepsSketchedPosition(kind) {
+            x = min(max(snap(sketch.midX - size.width / 2, to: 4), 16), max(16, device.size.width - 16 - size.width))
+        }
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     /// Where a new screen goes: centred on the sketch and as tall as it was drawn.
@@ -80,6 +93,108 @@ enum ElementLayout {
         )
     }
 
+    /// Resizing an avatar keeps it round.
+    static func resizedKeepingShape(_ frame: CGRect, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
+        var result = resized(frame, from: corner, by: translation, kind: kind)
+        guard kind == .avatar else { return result }
+        let side = max(result.width, result.height)
+        if corner == .topLeft || corner == .bottomLeft { result.origin.x = result.maxX - side }
+        if corner == .topLeft || corner == .topRight { result.origin.y = result.maxY - side }
+        result.size = CGSize(width: side, height: side)
+        return result
+    }
+
+    // MARK: Snapping
+
+    /// Lines up a frame being dragged with what is around it, as smart guides do: its
+    /// edges and centre snap to those of `others` and of `container` when within
+    /// `threshold`. Returns the snapped frame and the guides to show for it.
+    static func snapped(_ frame: CGRect, to others: [CGRect], in container: CGRect?, threshold: CGFloat) -> (frame: CGRect, guides: [SnapGuide]) {
+        let targets = others + (container.map { [$0] } ?? [])
+        var result = frame
+        var guides: [SnapGuide] = []
+
+        func lines(_ rect: CGRect, _ axis: SnapGuide.Axis) -> [CGFloat] {
+            axis == .vertical ? [rect.minX, rect.midX, rect.maxX] : [rect.minY, rect.midY, rect.maxY]
+        }
+
+        for axis in [SnapGuide.Axis.vertical, .horizontal] {
+            var best: (delta: CGFloat, position: CGFloat)?
+            for target in targets {
+                for line in lines(target, axis) {
+                    for own in lines(frame, axis) {
+                        let delta = line - own
+                        if abs(delta) <= threshold, abs(delta) < abs(best?.delta ?? .infinity) {
+                            best = (delta, line)
+                        }
+                    }
+                }
+            }
+            guard let best else { continue }
+            if axis == .vertical { result.origin.x += best.delta } else { result.origin.y += best.delta }
+            // Every target that now shares the line is shown along it.
+            let sharing = targets.filter { lines($0, axis).contains { abs($0 - best.position) < 0.5 } }
+            let span = sharing.reduce(result) { $0.union($1) }
+            guides.append(axis == .vertical
+                ? SnapGuide(axis: .vertical, position: best.position, start: span.minY, end: span.maxY)
+                : SnapGuide(axis: .horizontal, position: best.position, start: span.minX, end: span.maxX))
+        }
+        return (result, guides)
+    }
+
+    /// Moves a frame's origin onto the nearest grid mark. The grid is laid out in canvas
+    /// points, every `spacing` of them, and `placement` turns the frame into canvas points.
+    static func snappedToGrid(_ frame: CGRect, spacing: CGFloat, placement: Placement) -> CGRect {
+        guard spacing > 0 else { return frame }
+        let canvas = placement.canvasRect(for: frame)
+        let origin = CGPoint(x: (canvas.minX / spacing).rounded() * spacing, y: (canvas.minY / spacing).rounded() * spacing)
+        var result = frame
+        result.origin = placement.localPoint(for: origin)
+        result.origin.x = (result.origin.x * 10).rounded() / 10
+        result.origin.y = (result.origin.y * 10).rounded() / 10
+        return result
+    }
+
+    /// Where a frame goes when aligned to an edge or the middle of its screen.
+    static func aligned(_ frame: CGRect, _ alignment: Alignment, in screen: CGSize) -> CGRect {
+        var result = frame
+        switch alignment {
+        case .left: result.origin.x = 0
+        case .centerX: result.origin.x = ((screen.width - frame.width) / 2).rounded()
+        case .right: result.origin.x = screen.width - frame.width
+        case .top: result.origin.y = 0
+        case .centerY: result.origin.y = ((screen.height - frame.height) / 2).rounded()
+        case .bottom: result.origin.y = screen.height - frame.height
+        }
+        return result
+    }
+
+    enum Alignment: CaseIterable, Sendable {
+        case left, centerX, right, top, centerY, bottom
+
+        var name: String {
+            switch self {
+            case .left: "Align Left"
+            case .centerX: "Align Centres"
+            case .right: "Align Right"
+            case .top: "Align Top"
+            case .centerY: "Align Middles"
+            case .bottom: "Align Bottom"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .left: "align.horizontal.left"
+            case .centerX: "align.horizontal.center"
+            case .right: "align.horizontal.right"
+            case .top: "align.vertical.top"
+            case .centerY: "align.vertical.center"
+            case .bottom: "align.vertical.bottom"
+            }
+        }
+    }
+
     static func isCentered(_ frame: CGRect, in width: CGFloat = DeviceFrame.iPhone.size.width) -> Bool {
         abs(frame.midX - width / 2) <= 1
     }
@@ -87,6 +202,16 @@ enum ElementLayout {
     private static func snap(_ value: CGFloat, to step: CGFloat) -> CGFloat {
         (value / step).rounded() * step
     }
+}
+
+/// A line something being dragged has snapped to, in its host's points: a vertical line at
+/// `position` across, running from `start` to `end` down, or a horizontal one the other way.
+struct SnapGuide: Equatable, Sendable {
+    enum Axis: Sendable { case vertical, horizontal }
+    var axis: Axis
+    var position: CGFloat
+    var start: CGFloat
+    var end: CGFloat
 }
 
 /// The gaps between an element and whatever sits next to it on each side: the nearest
@@ -108,7 +233,7 @@ struct SpacingGuides: Equatable, Sendable {
 
     static func measure(_ element: DesignElement, in screen: DesignScreen) -> SpacingGuides {
         let frame = element.frame
-        let others = screen.elements.filter { $0.id != element.id }.map(\.frame)
+        let others = screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.frame)
         let beside = others.filter { $0.maxY > frame.minY && $0.minY < frame.maxY }
         let stacked = others.filter { $0.maxX > frame.minX && $0.minX < frame.maxX }
 

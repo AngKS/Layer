@@ -111,6 +111,24 @@ final class AppModel {
     var isInspectorOpen = false {
         didSet { if isInspectorOpen, fitsOnePanel { isLayersOpen = false } }
     }
+    /// Whether the menu under the board's name is open: its name, and the canvas's settings.
+    var isBoardMenuOpen = false
+
+    /// Opens the board's menu. In a compact window a panel's sheet makes way for it first,
+    /// since only one sheet can show at a time.
+    func openBoardMenu() {
+        guard isCompactSizeClass, isInspectorOpen || isLayersOpen else {
+            isBoardMenuOpen = true
+            return
+        }
+        isInspectorOpen = false
+        isLayersOpen = false
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            self?.isBoardMenuOpen = true
+        }
+    }
+
     /// Whether the selected element's text is being typed into.
     var isEditingText = false
     /// Whether sketches convert on their own once the pen has rested for a moment.
@@ -120,6 +138,11 @@ final class AppModel {
             UserDefaults.standard.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
             scheduleConversion()
         }
+    }
+    /// Whether a zigzag scrubbed over an element with the Magic Pen deletes it.
+    /// Remembered between launches.
+    var scratchOutDeletes = UserDefaults.standard.object(forKey: "scratchOutDeletes") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(scratchOutDeletes, forKey: "scratchOutDeletes") }
     }
     /// The size of the view the canvas is shown in, which is the size of the window.
     var canvasSize: CGSize = .zero {
@@ -347,7 +370,48 @@ final class AppModel {
         }
     }
 
+    /// Whether the selection can be moved, resized or deleted: it isn't a locked element.
+    var isSelectionLocked: Bool { selectedElement?.element.isLocked == true }
+
+    func duplicateSelection() {
+        switch selection {
+        case .element(let ref):
+            if let copy = store.duplicate(ref) { selection = .element(copy) }
+        case .screen(let id):
+            if let copy = store.duplicateScreen(id) { selection = .screen(copy.id) }
+        default:
+            break
+        }
+    }
+
+    func arrangeSelection(_ arrangement: DesignStore.Arrangement) {
+        guard case .element(let ref) = selection else { return }
+        store.arrange(ref, arrangement)
+    }
+
+    func alignSelection(_ alignment: ElementLayout.Alignment) {
+        guard case .element(let ref) = selection, !isSelectionLocked else { return }
+        store.align(ref, alignment)
+    }
+
+    func toggleLockOfSelection() {
+        guard case .element(let ref) = selection else { return }
+        store.update(ref) { $0.isLocked.toggle() }
+    }
+
+    /// Hides or shows an element. Hiding one lets go of it, since it can't be touched.
+    func toggleHidden(_ ref: DesignStore.ElementRef) {
+        store.update(ref) { $0.isHidden.toggle() }
+        if selection == .element(ref), store.resolve(ref)?.element.isHidden == true { selection = nil }
+    }
+
+    func toggleLock(_ ref: DesignStore.ElementRef) {
+        store.update(ref) { $0.isLocked.toggle() }
+    }
+
     func deleteSelection() {
+        // A locked element stays put until it is unlocked.
+        if isSelectionLocked { return }
         switch selection {
         case .element(let ref): store.delete(ref)
         case .screen(let id): store.deleteScreen(id)
@@ -559,7 +623,7 @@ final class AppModel {
         let request = SketchRequest(observation: observation, placement: placement, strokes: group.map(\.points))
 
         var band: CGRect?
-        if let host, !observation.form.isEnclosure {
+        if let host, !observation.form.isEnclosure, request.candidates != [.scratchOut] {
             band = CGRect(x: host.canvasFrame.minX, y: bounds.midY, width: host.canvasFrame.width, height: 0)
         }
         let effect = RetraceEffect(strokes: canvasStrokes, band: band)
@@ -578,13 +642,24 @@ final class AppModel {
                 store.addScreen(from: bounds)
                 converted = true
             case .element(let kind):
-                if let host { converted = store.addElement(kind, from: bounds, to: host.id) != nil }
+                if let host {
+                    converted = store.addElement(kind, from: bounds, to: host.id) != nil
+                } else if !kind.belongsOnScreens || kind == .text {
+                    store.addFloating(kind, from: bounds)
+                    converted = true
+                }
+            case .scratchOut:
+                let crossedOut = scratchOutDeletes ? store.elements(scratchedOutBy: bounds) : []
+                if !crossedOut.isEmpty {
+                    store.delete(crossedOut)
+                    converted = true
+                }
             case .unknown:
                 break
             }
             if converted {
                 ink?.removeSketch(keys)
-                suggestTitleIfNeeded()
+                if reading != .scratchOut { suggestTitleIfNeeded() }
             } else {
                 reject(keys)
             }
