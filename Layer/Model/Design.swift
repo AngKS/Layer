@@ -77,6 +77,8 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var textColor: RGBColor?
     var cornerRadius: CGFloat?
     var opacity: Double?
+    /// A locked element can't be moved, resized or deleted until it is unlocked.
+    var isLocked: Bool?
 }
 
 /// Where a group of elements sits on the canvas: where its own origin falls, and how
@@ -164,6 +166,9 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var deviceID: String?
     /// In creation order; later elements sit on top.
     var elements: [DesignElement] = []
+    /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
+    /// still be edited.
+    var isLocked: Bool?
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }

@@ -162,6 +162,43 @@ final class DesignStore {
         change { $0.screens.removeAll { $0.id == id } }
     }
 
+    /// Copies an element beside the original, in the same place it lives. Returns the copy.
+    @discardableResult
+    func duplicate(_ ref: ElementRef) -> ElementRef? {
+        guard let found = resolve(ref) else { return nil }
+        var copy = found.element
+        copy.id = UUID()
+        copy.isLocked = nil
+        copy.frame = copy.frame.offsetBy(dx: 20, dy: 20)
+        switch ref.host {
+        case .screen(let id):
+            guard let index = screens.firstIndex(where: { $0.id == id }) else { return nil }
+            change { $0.screens[index].elements.append(copy) }
+        case .canvas:
+            guard let original = floating.first(where: { $0.id == ref.element }) else { return nil }
+            change { $0.floating.append(FloatingElement(element: copy, scale: original.scale)) }
+        }
+        return ElementRef(host: ref.host, element: copy.id)
+    }
+
+    /// Copies a screen and everything on it, to the right of the original. Returns the copy.
+    @discardableResult
+    func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen.ID? {
+        guard let original = screen(id) else { return nil }
+        var copy = original
+        copy.id = UUID()
+        copy.isLocked = nil
+        copy.name = "\(original.name) Copy"
+        copy.origin.x += original.canvasFrame.width + 60
+        copy.elements = original.elements.map { element in
+            var element = element
+            element.id = UUID()
+            return element
+        }
+        change { $0.screens.append(copy) }
+        return copy.id
+    }
+
     /// Names the board. A name the app suggests itself isn't something to undo.
     func setTitle(_ title: String?, undoable: Bool = true) {
         let cleaned = title?.trimmingCharacters(in: .whitespacesAndNewlines)

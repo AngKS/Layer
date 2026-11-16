@@ -243,6 +243,7 @@ private struct CanvasSettingsView: View {
 
         PanelSection("Magic Pen") {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
+            Toggle("Draw with Finger", isOn: Binding(get: { model.fingerDraws }, set: { model.setFingerDraws($0) }))
             Button("Convert Sketch Now") { model.convertNow() }
                 .disabled(!model.hasSketch)
             Button("Discard Sketch") { model.discardSketch() }

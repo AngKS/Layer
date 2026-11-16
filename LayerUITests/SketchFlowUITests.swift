@@ -157,6 +157,67 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: control("Board title"), toHave: "value == '\(name)'"), "the reopened design should have kept its name")
     }
 
+    func testTheSelectionPopoverLocksDuplicatesAndDeletes() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        control("Draw").tap()
+
+        // Selecting a frame brings up its actions.
+        let label = app.staticTexts["Screen 1"]
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(control("Lock").waitForExistence(timeout: 5), "a selected frame should offer to lock it")
+        XCTAssertTrue(control("Duplicate").exists)
+        XCTAssertTrue(control("Delete selection").exists)
+
+        // Locked, it stays put when dragged, and offers nothing but unlocking.
+        control("Lock").tap()
+        XCTAssertTrue(control("Unlock").waitForExistence(timeout: 5))
+        XCTAssertFalse(control("Delete selection").exists, "a locked frame can't be deleted")
+        let before = label.frame
+        stroke(CGPoint(x: before.midX, y: before.midY), CGPoint(x: before.midX + 120, y: before.midY))
+        XCTAssertEqual(label.frame.minX, before.minX, accuracy: 2, "a locked frame should not move")
+        control("Unlock").tap()
+        XCTAssertTrue(control("Lock").waitForExistence(timeout: 5))
+
+        // Duplicating makes a second frame, selected; deleting removes it again.
+        control("Duplicate").tap()
+        XCTAssertTrue(app.staticTexts["Screen 1 Copy"].waitForExistence(timeout: 5), "the copy should appear beside the frame")
+        XCTAssertTrue(app.staticTexts.matching(labelBeginning("Screen 1 Copy · 393")).firstMatch.waitForExistence(timeout: 5), "the copy should be selected")
+        // The actions move over to the copy; let them arrive.
+        sleep(1)
+        control("Delete selection").tap()
+        XCTAssertTrue(waitForDisappearance(of: app.staticTexts["Screen 1 Copy"]))
+        XCTAssertTrue(label.exists)
+    }
+
+    func testWithAPencilAroundAFingerSelectsAndPansWhileThePaletteIsUp() {
+        // As once Apple Pencil has been seen: the Pencil draws and a finger doesn't.
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        control("Frames").tap()
+        app.buttons.matching(labelBeginning("iPhone")).firstMatch.tap()
+        let label = app.staticTexts["Screen 1"]
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        control("Draw").tap()
+        XCTAssertTrue(app.buttons["Magic Pen"].waitForExistence(timeout: 5), "the palette should be up")
+
+        // A finger tap on the frame selects it, palette and all.
+        point(CGPoint(x: 150, y: 650)).tap()
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(control("Delete selection").waitForExistence(timeout: 5), "a finger tap should select the frame")
+        XCTAssertTrue(app.buttons["Magic Pen"].exists, "the palette should stay up")
+
+        // A finger tap on empty canvas lets go; a finger drag across it pans rather than draws.
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: control("Delete selection")))
+        let before = label.frame
+        stroke(CGPoint(x: 150, y: 420), CGPoint(x: 230, y: 500))
+        sleep(1)
+        XCTAssertGreaterThan(label.frame.minX - before.minX, 40, "a finger should pan the canvas")
+    }
+
     func testTheCanvasPansZoomsLocksAndFramesCanBeMoved() {
         openNewDesign()
         box(sketch)

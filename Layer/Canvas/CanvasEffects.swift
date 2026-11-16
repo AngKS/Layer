@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The grid behind everything: dots or lines, or nothing. It moves and scales with the
 /// canvas, and drops to every second, fourth, eighth mark as the canvas shrinks so it
@@ -6,48 +7,74 @@ import SwiftUI
 struct CanvasGrid: View {
     var viewport = Viewport()
     var settings = CanvasSettings()
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Canvas { context, size in
             guard settings.showsGrid else { return }
             var step = max(settings.gridSpacing, 4)
             while step * viewport.scale < 14 { step *= 2 }
-            let gap = step * viewport.scale
-            // Marks sit on multiples of `step` in canvas points.
-            let firstX = -viewport.offset.x.truncatingRemainder(dividingBy: gap) - gap
-            let firstY = -viewport.offset.y.truncatingRemainder(dividingBy: gap) - gap
-
-            var marks = Path()
-            switch settings.gridStyle {
-            case .dots:
-                let radius = min(max(0.75 * viewport.scale.squareRoot(), 0.6), 1.3)
-                var y = firstY
-                while y < size.height + gap {
-                    var x = firstX
-                    while x < size.width + gap {
-                        marks.addEllipse(in: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2))
-                        x += gap
-                    }
-                    y += gap
-                }
-                context.fill(marks, with: .color(Theme.gridDot))
-            case .lines:
-                var x = firstX
-                while x < size.width + gap {
-                    marks.move(to: CGPoint(x: x, y: 0))
-                    marks.addLine(to: CGPoint(x: x, y: size.height))
-                    x += gap
-                }
-                var y = firstY
-                while y < size.height + gap {
-                    marks.move(to: CGPoint(x: 0, y: y))
-                    marks.addLine(to: CGPoint(x: size.width, y: y))
-                    y += gap
-                }
-                context.stroke(marks, with: .color(Theme.gridDot.opacity(0.55)), lineWidth: 0.5)
-            }
+            // A whole number of pixels between marks, so that the tile repeats exactly and
+            // marks don't creep as the canvas scrolls.
+            let pixels = max((step * viewport.scale * displayScale).rounded(), 2)
+            let gap = pixels / displayScale
+            let origin = CGPoint(
+                x: -(viewport.offset.x.truncatingRemainder(dividingBy: gap)),
+                y: -(viewport.offset.y.truncatingRemainder(dividingBy: gap))
+            )
+            // One tile, repeated by the GPU, rather than thousands of marks drawn every frame.
+            let tile = GridTile.image(pixels: Int(pixels), style: settings.gridStyle, viewScale: viewport.scale, displayScale: displayScale)
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .tiledImage(Image(uiImage: tile), origin: origin, scale: 1)
+            )
         }
         .background(Theme.canvas)
+    }
+}
+
+/// One repeat of the canvas grid: a dot, or a line along two edges, in a square.
+@MainActor
+private enum GridTile {
+    private struct Key: Hashable {
+        var pixels: Int
+        var style: CanvasSettings.GridStyle
+        var radius: Int
+        var displayScale: CGFloat
+    }
+
+    private static var cache: [Key: UIImage] = [:]
+
+    static func image(pixels: Int, style: CanvasSettings.GridStyle, viewScale: CGFloat, displayScale: CGFloat) -> UIImage {
+        let radius = min(max(0.75 * viewScale.squareRoot(), 0.6), 1.3)
+        let key = Key(pixels: pixels, style: style, radius: Int(radius * 20), displayScale: displayScale)
+        if let cached = cache[key] { return cached }
+        if cache.count > 64 { cache.removeAll() }
+
+        let side = CGFloat(pixels) / displayScale
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = displayScale
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { renderer in
+            let context = renderer.cgContext
+            let color = UIColor(Theme.gridDot)
+            switch style {
+            case .dots:
+                // The dot sits on the tile's corner, as the marks sit on multiples of the
+                // spacing; its four quarters are drawn at the four corners.
+                context.setFillColor(color.cgColor)
+                for corner in [CGPoint.zero, CGPoint(x: side, y: 0), CGPoint(x: 0, y: side), CGPoint(x: side, y: side)] {
+                    context.fillEllipse(in: CGRect(x: corner.x - radius, y: corner.y - radius, width: radius * 2, height: radius * 2))
+                }
+            case .lines:
+                context.setFillColor(color.withAlphaComponent(0.55).cgColor)
+                let width = max(0.5, 1 / displayScale)
+                context.fill(CGRect(x: 0, y: 0, width: side, height: width))
+                context.fill(CGRect(x: 0, y: 0, width: width, height: side))
+            }
+        }
+        cache[key] = image
+        return image
     }
 }
 
@@ -155,13 +182,19 @@ struct EdgeGlow: View {
     let isActive: Bool
 
     var body: some View {
-        Rectangle()
-            .strokeBorder(accent.opacity(0.7), lineWidth: 5)
-            .blur(radius: 9)
-            .overlay { Rectangle().strokeBorder(accent.opacity(0.5), lineWidth: 1.5) }
-            .opacity(isActive ? 1 : 0)
-            .animation(.easeInOut(duration: 0.35), value: isActive)
-            .allowsHitTesting(false)
+        // Only there while it shows: a blurred layer the size of the screen costs every
+        // frame it exists, even at no opacity.
+        ZStack {
+            if isActive {
+                Rectangle()
+                    .strokeBorder(accent.opacity(0.7), lineWidth: 5)
+                    .blur(radius: 9)
+                    .overlay { Rectangle().strokeBorder(accent.opacity(0.5), lineWidth: 1.5) }
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: isActive)
+        .allowsHitTesting(false)
     }
 }
 
@@ -172,10 +205,11 @@ struct PenCursor: View {
     var body: some View {
         if let location = pen.location {
             ZStack {
+                // The pen's shadow, soft-edged by its gradient rather than by a blur,
+                // which would be redrawn for every movement of the pen.
                 Capsule()
-                    .fill(.black.opacity(0.11))
-                    .frame(width: 170, height: 20)
-                    .blur(radius: 9)
+                    .fill(EllipticalGradient(colors: [.black.opacity(0.10), .black.opacity(0.04), .clear], center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
+                    .frame(width: 190, height: 38)
                     .offset(x: 95)
                     .rotationEffect(.degrees(16))
                 Circle()

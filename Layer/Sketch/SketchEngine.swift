@@ -51,16 +51,18 @@ final class SketchEngine {
     }
 
     /// Whether the provider is Apple Intelligence and all it needs is switching on.
-    var canBeTurnedOnInSettings: Bool {
-        provider.id == SketchProvider.appleIntelligence.id && readiness != .ready && AppleIntelligenceInterpreter.isTurnedOff
-    }
+    private(set) var canBeTurnedOnInSettings = false
 
     /// Re-checks whether the provider can run, loads its model if so, and finds out
     /// whether it answers. Called when a design opens and when the app comes back to
     /// the screen, since Apple Intelligence can be switched on, or finish downloading,
     /// while the app is away.
     func prepare() {
+        // Asking is not free (tens of milliseconds for Apple Intelligence), so it is asked
+        // here, when the answer can have changed, rather than for every sketch.
         readiness = provider.readiness()
+        canBeTurnedOnInSettings = provider.id == SketchProvider.appleIntelligence.id && readiness != .ready
+            && AppleIntelligenceInterpreter.isTurnedOff
         guard readiness == .ready else { return }
         if provider.id == SketchProvider.appleIntelligence.id, warmSession == nil {
             warmSession = AppleIntelligenceInterpreter.warmUp()
@@ -90,7 +92,6 @@ final class SketchEngine {
         let fallback = rules.reading(for: request)
         guard rules.isCloseCall(request) else { return fallback }
 
-        readiness = provider.readiness()
         guard readiness == .ready, !isStillResting() else { return fallback }
 
         let interpreter = provider.makeInterpreter(nil)
@@ -118,7 +119,7 @@ final class SketchEngine {
     /// own words otherwise.
     func suggestTitle(for content: DesignContent) async -> String {
         let fallback = rules.title(for: content)
-        guard provider.readiness() == .ready, !isStillResting() else { return fallback }
+        guard readiness == .ready, !isStillResting() else { return fallback }
         let interpreter = provider.makeInterpreter(nil)
         let board = SketchPrompt.describe(board: content)
         guard let suggestion = try? await withTimeout(.seconds(5), { try await interpreter.suggestTitle(for: board) }) else {

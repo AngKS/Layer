@@ -9,10 +9,15 @@ struct PhoneScreenView: View {
         let device = screen.device
         let size = device.size
         ZStack(alignment: .topLeading) {
+            // One soft shadow and a hairline edge. Shadows are redrawn on every frame of a
+            // zoom, and a wide one is the costliest thing on the canvas.
             RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
                 .fill(.white)
-                .shadow(color: .black.opacity(0.09), radius: 28, y: 12)
-                .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+                .overlay {
+                    RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
+                        .strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
+                }
 
             statusBar(for: device)
 

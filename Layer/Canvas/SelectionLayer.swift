@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The handles on the canvas for selecting and moving things, live whenever the pencil
-/// palette is away. Elements are tapped to select and dragged to
-/// move, anywhere on the canvas, and resized by their corner handles. A selected screen or
+/// The handles on the canvas for selecting and moving things. With the palette away,
+/// elements are tapped to select and dragged to move, anywhere on the canvas, and resized
+/// by their corner handles. With the palette up the Pencil draws everywhere, so only
+/// what a finger has selected takes touches here. A selected screen or
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
@@ -22,23 +23,36 @@ struct SelectionLayer: View {
         ZStack(alignment: .topLeading) {
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
-                    .gesture(moveScreen(screen))
+                    .gesture(moveScreen(screen), including: screen.isLocked == true ? .subviews : .all)
             }
             if let bounds = model.inkSelectionBounds {
                 dragArea(viewport.viewRect(for: bounds).insetBy(dx: -8, dy: -8))
                     .gesture(moveInk)
             }
 
-            ForEach(store.screens) { screen in
-                dragArea(viewport.viewRect(for: screen.labelFrame))
-                    .onTapGesture { model.selection = .screen(screen.id) }
-                    .gesture(moveScreen(screen))
-                ForEach(screen.elements) { element in
-                    target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen.size)
+            Group {
+                ForEach(store.screens) { screen in
+                    dragArea(viewport.viewRect(for: screen.labelFrame))
+                        .onTapGesture { model.selection = .screen(screen.id) }
+                        .gesture(moveScreen(screen), including: screen.isLocked == true ? .subviews : .all)
+                    ForEach(screen.elements) { element in
+                        target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen.size)
+                    }
+                }
+                ForEach(store.floating) { floating in
+                    target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil)
                 }
             }
-            ForEach(store.floating) { floating in
-                target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil)
+            .allowsHitTesting(model.tool == .select)
+
+            // With the palette up, the selected element is moved by its own area.
+            if model.tool == .draw, let selected = model.selectedElement {
+                let snaps = model.store.canvas.snapsToGuides
+                let screen: CGSize? = if case .screen(let id) = selected.ref.host { store.screen(id)?.size } else { nil }
+                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)))
+                    .gesture(adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true) { origin, translation in
+                        ElementLayout.moved(origin, by: translation, snapsToCenter: snaps && screen != nil, in: screen ?? DeviceFrame.iPhone.size)
+                    }, including: selected.element.isLocked == true ? .subviews : .all)
             }
 
             if let screen = model.selectedScreen {
@@ -53,12 +67,13 @@ struct SelectionLayer: View {
                     SpacingOverlay(guides: .measure(selected.element, in: screen), screen: screen, viewport: viewport)
                 }
                 outline(rect, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
-                ForEach(ElementLayout.Corner.allCases, id: \.self) { corner in
-                    handle(corner, at: rect, for: selected.element, ref: selected.ref, placement: selected.placement)
+                if selected.element.isLocked != true {
+                    ForEach(ElementLayout.Corner.allCases, id: \.self) { corner in
+                        handle(corner, at: rect, for: selected.element, ref: selected.ref, placement: selected.placement)
+                    }
                 }
             }
         }
-        .allowsHitTesting(model.tool == .select)
     }
 
     // MARK: Pieces
@@ -78,7 +93,7 @@ struct SelectionLayer: View {
             .onTapGesture { model.selection = .element(ref) }
             .gesture(adjust(ref, from: element.frame, placement: placement, findsNewHome: true) { origin, translation in
                 ElementLayout.moved(origin, by: translation, snapsToCenter: snaps, in: screen ?? DeviceFrame.iPhone.size)
-            })
+            }, including: element.isLocked == true ? .subviews : .all)
     }
 
     private func handle(
@@ -159,6 +174,7 @@ struct SelectionLayer: View {
                     model.store.beginEdit()
                     model.selection = .screen(screen.id)
                     screenDragOrigin = screen.origin
+                    model.isAdjusting = true
                 }
                 guard let screenDragOrigin else { return }
                 let scale = model.viewport.scale
@@ -171,6 +187,7 @@ struct SelectionLayer: View {
             }
             .onEnded { _ in
                 screenDragOrigin = nil
+                model.isAdjusting = false
                 model.store.endEdit()
             }
     }
@@ -182,8 +199,10 @@ struct SelectionLayer: View {
                 let total = CGSize(width: value.translation.width / scale, height: value.translation.height / scale)
                 model.moveSelectedInk(by: CGSize(width: total.width - inkDragged.width, height: total.height - inkDragged.height))
                 inkDragged = total
+                model.isAdjusting = true
             }
             .onEnded { _ in
+                model.isAdjusting = false
                 model.finishMovingInk(movedBy: inkDragged)
                 inkDragged = .zero
             }

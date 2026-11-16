@@ -192,53 +192,18 @@ struct UndoControl: View {
     }
 }
 
-/// Above the zoom control while something is selected: what it is and its size, and for
-/// an element with text a way into that text.
+/// Above the zoom control while something is selected: what it is and its size.
 struct SelectionReadout: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
         Group {
             if let selected = model.selectedElement {
-                let element = selected.element
-                HStack(spacing: 14) {
-                    if element.kind.hasText {
-                        Button {
-                            model.isEditingText = true
-                        } label: {
-                            Label("Edit text", systemImage: "pencil")
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $model.isEditingText, arrowEdge: .bottom) {
-                            TextField(
-                                element.kind.layerName,
-                                text: Binding(
-                                    get: { model.selectedElement?.element.text ?? "" },
-                                    set: { text in model.store.update(selected.ref) { $0.text = text } }
-                                ),
-                                axis: .vertical
-                            )
-                            .lineLimit(1...6)
-                            .textFieldStyle(.roundedBorder)
-                            .padding(16)
-                            .frame(width: 320)
-                        }
-                        // Everything typed in one sitting undoes as one step.
-                        .onChange(of: model.isEditingText) { _, isEditing in
-                            if isEditing { model.store.beginEdit() } else { model.store.endEdit() }
-                        }
-
-                        Rectangle()
-                            .fill(Theme.label.opacity(0.4))
-                            .frame(width: 1, height: 14)
-                    }
-                    Label(
-                        "\(Int(element.frame.width)) × \(Int(element.frame.height))",
-                        systemImage: "arrow.up.left.and.arrow.down.right"
-                    )
-                    .monospacedDigit()
-                }
+                Label(
+                    "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))",
+                    systemImage: "arrow.up.left.and.arrow.down.right"
+                )
+                .monospacedDigit()
             } else if let screen = model.selectedScreen {
                 Label("\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))", systemImage: "iphone")
                     .monospacedDigit()
@@ -250,27 +215,6 @@ struct SelectionReadout: View {
         .labelStyle(ReadoutLabelStyle())
         .foregroundStyle(Theme.label)
         .padding(.leading, 6)
-    }
-}
-
-/// Beside the readout: removes whatever is selected.
-struct DeleteSelectionButton: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if model.selection != nil {
-            Button {
-                withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.label)
-                    .frame(width: 30, height: 30)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete selection")
-        }
     }
 }
 
