@@ -14,7 +14,14 @@ struct SketchStroke: Sendable, Equatable {
 /// *means* is left to a `SketchInterpreter`.
 struct SketchObservation: Sendable, Equatable {
     enum InnerMark: Sendable, Equatable {
-        case none, cross, other
+        case none
+        /// Strokes running corner to corner across the middle, as drawn to mark an image.
+        case cross
+        /// One bent stroke across the middle, as drawn to check a box.
+        case tick
+        /// A small mark in the middle, as drawn to select a radio button.
+        case dot
+        case other
     }
 
     enum Form: Sendable, Equatable {
@@ -38,6 +45,10 @@ struct SketchObservation: Sendable, Equatable {
     var bounds: CGRect
     var form: Form
     var strokeCount: Int
+    /// For an enclosure with marks inside: where those marks sit, as fractions of the
+    /// enclosure's bounds, so (0, 0, 1, 1) covers all of it. A toggle's knob on the
+    /// right ends past 0.5; a progress bar's hatching ends where the bar is filled to.
+    var innerBounds: CGRect? = nil
 }
 
 enum SketchAnalyzer {
@@ -77,15 +88,18 @@ enum SketchAnalyzer {
         let strokes = strokes.filter { $0.points.count >= 2 }
         let bounds = strokes.flatMap(\.points).boundingBox
         guard !strokes.isEmpty, max(bounds.width, bounds.height) >= 16 else { return nil }
-        let form = enclosure(strokes, in: bounds) ?? openForm(strokes, in: bounds)
-        return SketchObservation(bounds: bounds, form: form, strokeCount: strokes.count)
+        if let closed = enclosure(strokes, in: bounds) {
+            return SketchObservation(bounds: bounds, form: closed.form, strokeCount: strokes.count, innerBounds: closed.inner)
+        }
+        return SketchObservation(bounds: bounds, form: openForm(strokes, in: bounds), strokeCount: strokes.count)
     }
 
     // MARK: Closed outlines
 
-    private static func enclosure(_ strokes: [SketchStroke], in bounds: CGRect) -> SketchObservation.Form? {
+    private static func enclosure(_ strokes: [SketchStroke], in bounds: CGRect) -> (form: SketchObservation.Form, inner: CGRect?)? {
         let short = min(bounds.width, bounds.height)
-        guard short >= 14, short >= max(bounds.width, bounds.height) * 0.1 else { return nil }
+        // Long, thin outlines are allowed: a progress bar can be ten or more times wider than tall.
+        guard short >= 14, short >= max(bounds.width, bounds.height) * 0.07 else { return nil }
 
         // Positions are measured from the centre, in units where the bounds' edges sit at 1.
         func reach(_ point: CGPoint) -> CGFloat {
@@ -96,6 +110,7 @@ enum SketchAnalyzer {
         // Squiggles and crosses do visit the middle, which is what tells them apart.
         var outline: [CGPoint] = []
         var inner: [CGPoint] = []
+        var innerStrokes: [SketchStroke] = []
         for stroke in strokes {
             let reaches = stroke.points.map(reach)
             let nearEdge = reaches.count { $0 >= 0.6 }
@@ -105,6 +120,7 @@ enum SketchAnalyzer {
                 outline += stroke.points
             } else {
                 inner += stroke.points
+                innerStrokes.append(stroke)
             }
         }
         guard !outline.isEmpty else { return nil }
@@ -129,16 +145,43 @@ enum SketchAnalyzer {
             .reduce(0, +) / 4
         let roundness = min(1, Double(cutoff / (short * 0.2)))
 
+        guard !inner.isEmpty else { return (.enclosure(roundness: roundness, inner: .none), nil) }
+        let innerBounds = inner.boundingBox
+        let relative = CGRect(
+            x: (innerBounds.minX - bounds.minX) / bounds.width,
+            y: (innerBounds.minY - bounds.minY) / bounds.height,
+            width: innerBounds.width / bounds.width,
+            height: innerBounds.height / bounds.height
+        )
+        let crossesMiddle = inner.contains { reach($0) < 0.3 }
+        let spans = relative.width >= 0.45 && relative.height >= 0.45
         let mark: SketchObservation.InnerMark
-        if inner.isEmpty {
-            mark = .none
+        if crossesMiddle, spans {
+            // A tick is one stroke that changes direction; an X is two, or one that doubles back.
+            if innerStrokes.count == 1, let tick = innerStrokes.first, isTick(tick.points) {
+                mark = .tick
+            } else {
+                mark = .cross
+            }
+        } else if relative.width <= 0.6, relative.height <= 0.6, (0.3...0.7).contains(relative.midX), (0.3...0.7).contains(relative.midY) {
+            mark = .dot
         } else {
-            let innerBounds = inner.boundingBox
-            let crossesMiddle = inner.contains { reach($0) < 0.3 }
-            let spans = innerBounds.width >= bounds.width * 0.45 && innerBounds.height >= bounds.height * 0.45
-            mark = crossesMiddle && spans ? .cross : .other
+            mark = .other
         }
-        return .enclosure(roundness: roundness, inner: mark)
+        return (.enclosure(roundness: roundness, inner: mark), relative)
+    }
+
+    /// Whether a stroke is a tick: it bends once, sharply, and its two arms both run
+    /// sideways rather than doubling back over each other.
+    private static func isTick(_ points: [CGPoint]) -> Bool {
+        guard let first = points.first, let last = points.last, points.count >= 3 else { return false }
+        // The bend is where the stroke is lowest on the canvas (the largest y).
+        guard let bend = points.max(by: { $0.y < $1.y }) else { return false }
+        let total = pathLength(points)
+        let chord = hypot(last.x - first.x, last.y - first.y)
+        let rises = bend.y - first.y > 2 && bend.y - last.y > 2
+        let forward = first.x < bend.x && bend.x < last.x
+        return total > 0 && chord < total * 0.9 && rises && forward
     }
 
     // MARK: Open strokes

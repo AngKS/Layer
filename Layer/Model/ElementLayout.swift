@@ -20,6 +20,8 @@ enum ElementLayout {
         case .text: CGSize(width: 200, height: 24)
         case .stickyNote: CGSize(width: 150, height: 150)
         case .toggle: CGSize(width: 51, height: 31)
+        case .checkbox, .radio: CGSize(width: 24, height: 24)
+        case .progress: CGSize(width: 333, height: 6)
         case .avatar:
             // As large as it was drawn, within reason.
             CGSize(width: snap(min(max(sketch.width, 40), 160), to: 4), height: snap(min(max(sketch.width, 40), 160), to: 4))
@@ -28,7 +30,12 @@ enum ElementLayout {
 
     /// Small elements stay where they were drawn across the screen; the rest are centred.
     static func keepsSketchedPosition(_ kind: ElementKind) -> Bool {
-        kind == .toggle || kind == .avatar || kind == .symbol
+        kind == .toggle || kind == .avatar || kind == .symbol || kind == .checkbox || kind == .radio
+    }
+
+    /// Kinds that usually run across the screen, and keep their side margins on other devices.
+    static func runsAcross(_ kind: ElementKind) -> Bool {
+        kind == .button || kind == .textField || kind == .divider || kind == .image || kind == .progress
     }
 
     /// A new element takes its kind's standard size, sits centred across the screen, and
@@ -36,7 +43,7 @@ enum ElementLayout {
     /// their side margins on wider and narrower devices.
     static func frame(for kind: ElementKind, sketch: CGRect, on device: DeviceFrame = .iPhone) -> CGRect {
         var size = size(for: kind, sketch: sketch)
-        if kind == .button || kind == .textField || kind == .divider || kind == .image {
+        if runsAcross(kind) {
             size.width += device.size.width - DeviceFrame.iPhone.size.width
         }
         let top = device.safeTop + 8
@@ -47,6 +54,98 @@ enum ElementLayout {
             x = min(max(snap(sketch.midX - size.width / 2, to: 4), 16), max(16, device.size.width - 16 - size.width))
         }
         return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// The side margin of text that is aligned to the leading edge.
+    static let margin: CGFloat = 20
+    /// The gap between two elements side by side.
+    static let gutter: CGFloat = 12
+    /// The gaps between one element and the next that a sketched element snaps to.
+    static let rhythm: [CGFloat] = [8, 12, 16, 24, 32]
+
+    /// A new element drawn with the Magic Pen. It starts from `frame(for:sketch:on:)` and
+    /// keeps more of what was drawn: the width of a box drawn clearly narrower than the
+    /// screen (half a screen wide becomes one of two columns), text drawn against the
+    /// leading edge as leading-aligned, a title's size from how tall it was drawn, and a
+    /// gap to the element above, or a row with the one beside it, that is tidy.
+    ///
+    /// `others` are the frames already on the screen. Returns the frame and, for text
+    /// that should not be centred, its alignment.
+    static func sketched(_ kind: ElementKind, sketch: CGRect, on device: DeviceFrame = .iPhone, among others: [CGRect] = []) -> (frame: CGRect, alignment: TextAlignmentChoice?) {
+        var frame = Self.frame(for: kind, sketch: sketch, on: device)
+        var alignment: TextAlignmentChoice?
+        let width = device.size.width
+        let isDrawnLeading = sketch.minX < margin + (width - margin * 2) * 0.15 && width / 2 - sketch.midX > width * 0.08
+
+        switch kind {
+        case .title, .body:
+            if kind == .title {
+                // Bigger scribbles are bigger titles: Title 2, Title, or Large Title.
+                let height: CGFloat = sketch.height < 34 ? 32 : sketch.height <= 52 ? 40 : 48
+                frame.origin.y += (frame.height - height) / 2
+                frame.size.height = height
+            }
+            // Text drawn beside something on its left, such as a checkbox, starts after it.
+            let rowStart = others
+                .filter { $0.minY < sketch.maxY && sketch.minY < $0.maxY && $0.maxX <= sketch.minX + 8 }
+                .map(\.maxX).max()
+            if let rowStart, width - margin - (rowStart + gutter) >= 60 {
+                frame.origin.x = rowStart + gutter
+                frame.size.width = width - margin - frame.origin.x
+                alignment = .leading
+            } else if isDrawnLeading {
+                frame.origin.x = margin
+                frame.size.width = width - margin * 2
+                alignment = .leading
+            }
+        case _ where runsAcross(kind) && kind != .divider:
+            let full = frame.width
+            let minimum: CGFloat = switch kind {
+            case .button: 88
+            case .textField: 120
+            case .progress: 60
+            default: 44
+            }
+            if sketch.width < full * 0.7, sketch.width > 0 {
+                let left = (width - full) / 2
+                if sketch.width >= full * 0.3 {
+                    // One of two columns.
+                    let half = ((full - gutter) / 2).rounded(.down)
+                    frame.size.width = half
+                    frame.origin.x = sketch.midX < width / 2 ? left : left + full - half
+                } else {
+                    frame.size.width = max(snap(sketch.width, to: 4), minimum)
+                    frame.origin.x = abs(sketch.midX - width / 2) < width * 0.06
+                        ? ((width - frame.width) / 2).rounded()
+                        : min(max(snap(sketch.midX - frame.width / 2, to: 4), left), width - left - frame.width)
+                }
+            }
+        default:
+            break
+        }
+
+        // Line up with what is already there: centred in a row with an element beside it,
+        // or a tidy gap below the element above.
+        let beside = others.filter { abs($0.midY - frame.midY) < max(12, min($0.height, frame.height) / 2) && !overlapsAcross($0, frame) }
+        if let neighbour = beside.min(by: { abs($0.midY - frame.midY) < abs($1.midY - frame.midY) }) {
+            frame.origin.y = (neighbour.midY - frame.height / 2).rounded()
+        } else if let above = others.filter({ $0.maxY <= frame.minY + 4 && overlapsAcross($0, frame) }).max(by: { $0.maxY < $1.maxY }) {
+            let gap = frame.minY - above.maxY
+            if let tidy = rhythm.min(by: { abs($0 - gap) < abs($1 - gap) }), abs(tidy - gap) <= 6 {
+                frame.origin.y = above.maxY + tidy
+            }
+        }
+        // Small controls and narrow boxes drawn near an existing leading edge share it.
+        if !isCentered(frame, in: width), let edge = others.map(\.minX).min(by: { abs($0 - frame.minX) < abs($1 - frame.minX) }),
+           abs(edge - frame.minX) <= 8 {
+            frame.origin.x = edge
+        }
+        return (frame, alignment)
+    }
+
+    /// Whether two frames share any of the screen's width.
+    private static func overlapsAcross(_ a: CGRect, _ b: CGRect) -> Bool {
+        a.minX < b.maxX && b.minX < a.maxX
     }
 
     /// Where a new screen goes: centred on the sketch and as tall as it was drawn.
@@ -73,7 +172,8 @@ enum ElementLayout {
     }
 
     static func resized(_ frame: CGRect, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
-        let minimum = CGSize(width: kind == .symbol ? 12 : 32, height: kind == .divider ? 1 : kind == .symbol ? 12 : 16)
+        let small = kind == .symbol || kind == .checkbox || kind == .radio
+        let minimum = CGSize(width: small ? 12 : 32, height: kind == .divider || kind == .progress ? 1 : small ? 12 : 16)
         var minX = frame.minX, maxX = frame.maxX, minY = frame.minY, maxY = frame.maxY
         switch corner {
         case .topLeft, .bottomLeft: minX = min(frame.minX + translation.width, maxX - minimum.width)
@@ -93,10 +193,10 @@ enum ElementLayout {
         )
     }
 
-    /// Resizing an avatar keeps it round.
+    /// Resizing an avatar or a radio button keeps it round.
     static func resizedKeepingShape(_ frame: CGRect, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
         var result = resized(frame, from: corner, by: translation, kind: kind)
-        guard kind == .avatar else { return result }
+        guard kind == .avatar || kind == .radio else { return result }
         let side = max(result.width, result.height)
         if corner == .topLeft || corner == .bottomLeft { result.origin.x = result.maxX - side }
         if corner == .topLeft || corner == .topRight { result.origin.y = result.maxY - side }

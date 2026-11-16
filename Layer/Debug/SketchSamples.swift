@@ -47,6 +47,19 @@ enum SketchSamples {
         ]
     }
 
+    /// A tick across a box, drawn in one stroke: down to the bend, then up and away.
+    static func tick(_ rect: CGRect) -> [CGPoint] {
+        let start = CGPoint(x: rect.minX + rect.width * 0.2, y: rect.minY + rect.height * 0.5)
+        let bend = CGPoint(x: rect.minX + rect.width * 0.42, y: rect.minY + rect.height * 0.78)
+        let end = CGPoint(x: rect.minX + rect.width * 0.82, y: rect.minY + rect.height * 0.2)
+        return straight(from: start, to: bend) + straight(from: bend, to: end).dropFirst()
+    }
+
+    /// A circle drawn in one stroke.
+    static func circle(center: CGPoint, radius: CGFloat) -> [CGPoint] {
+        box(CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2), radius: radius)
+    }
+
     /// A squiggle running left to right with the given number of humps.
     static func wave(_ rect: CGRect, humps: Int) -> [CGPoint] {
         let steps = max(16, Int(rect.width / 1.5))

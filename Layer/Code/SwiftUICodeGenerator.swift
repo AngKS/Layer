@@ -71,12 +71,17 @@ enum SwiftUICodeGenerator {
         var previousBottom: CGFloat?
         var usesSpacer = false
 
-        for (index, element) in elements.enumerated() {
-            var lines = view(for: element, margin: margin, contentWidth: contentWidth, screenWidth: width)
+        let rows = Self.rows(of: elements)
+        for (index, row) in rows.enumerated() {
+            let element = row[0]
+            let bounds = row.dropFirst().reduce(element.frame) { $0.union($1.frame) }
+            var lines = row.count == 1
+                ? view(for: element, margin: margin, contentWidth: contentWidth, screenWidth: width)
+                : horizontalStack(row, margin: margin)
             if let previousBottom {
-                let gap = element.frame.minY - previousBottom
-                let isLast = index == elements.count - 1
-                let hugsBottom = device.size.height - element.frame.maxY <= device.safeBottom + 60
+                let gap = bounds.minY - previousBottom
+                let isLast = index == rows.count - 1
+                let hugsBottom = device.size.height - bounds.maxY <= device.safeBottom + 60
                 if isLast, hugsBottom, gap > spacing * 2 {
                     // A last element near the bottom edge is pinned there rather than spaced down.
                     body.append("Spacer()")
@@ -85,11 +90,11 @@ enum SwiftUICodeGenerator {
                     lines.append("    .padding(.top, \(number(gap - spacing)))")
                 }
             }
-            if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+            if row.count == 1, let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 lines.insert("// \(name.replacingOccurrences(of: "\n", with: " "))", at: 0)
             }
             body += lines
-            previousBottom = element.frame.maxY
+            previousBottom = bounds.maxY
         }
 
         guard !body.isEmpty else { return ["Color.clear"] }
@@ -105,6 +110,47 @@ enum SwiftUICodeGenerator {
             if inset >= 1 { lines.append(".padding(.bottom, \(number(inset)))") }
         } else {
             lines.append(".frame(maxHeight: .infinity, alignment: .top)")
+        }
+        return lines
+    }
+
+    /// Groups elements, sorted top to bottom, into rows: elements side by side, sharing
+    /// most of their height and none of the screen's width, go in one row, leading first.
+    static func rows(of elements: [DesignElement]) -> [[DesignElement]] {
+        var rows: [[DesignElement]] = []
+        for element in elements {
+            if let last = rows.last, last.allSatisfy({ sharesRow($0.frame, element.frame) }) {
+                rows[rows.count - 1].append(element)
+            } else {
+                rows.append([element])
+            }
+        }
+        return rows.map { $0.sorted { $0.frame.minX < $1.frame.minX } }
+    }
+
+    private static func sharesRow(_ a: CGRect, _ b: CGRect) -> Bool {
+        let overlap = min(a.maxY, b.maxY) - max(a.minY, b.minY)
+        let apart = a.maxX <= b.minX || b.maxX <= a.minX
+        return apart && overlap >= min(a.height, b.height) * 0.5
+    }
+
+    /// A row of elements side by side, each at its own width, spaced as on the canvas.
+    private static func horizontalStack(_ row: [DesignElement], margin: CGFloat) -> [String] {
+        let spacing = zip(row, row.dropFirst()).map { $1.frame.minX - $0.frame.maxX }.min() ?? 0
+        var body: [String] = []
+        for (element, next) in zip(row, row.dropFirst().map { Optional($0) } + [nil]) {
+            if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+            }
+            // Each element at its own width, flush with the one before it.
+            body += view(for: element, margin: element.frame.minX, contentWidth: .infinity, screenWidth: .infinity)
+            if let next, next.frame.minX - element.frame.maxX - spacing >= 2 {
+                body.append("Spacer(minLength: \(number(next.frame.minX - element.frame.maxX - spacing)))")
+            }
+        }
+        var lines = ["HStack(alignment: .center, spacing: \(number(spacing))) {"] + indented(body) + ["}"]
+        if let first = row.first, first.frame.minX - margin >= 1 {
+            lines.append("    .padding(.leading, \(number(first.frame.minX - margin)))")
         }
         return lines
     }
@@ -127,7 +173,7 @@ enum SwiftUICodeGenerator {
             let alignment = element.textAlignment.map { $0.rawValue } ?? "leading"
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: abs(frame.height - 40) < 1 ? ".title.bold()" : nil)))",
+                "    .font(\(font(of: element, usual: titleFont(height: frame.height))))",
             ] + textColor(of: element, usual: nil) + (centered && (element.textAlignment ?? .center) == .center
                 ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
                 : ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"] + placement)
@@ -135,8 +181,8 @@ enum SwiftUICodeGenerator {
         case .body:
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: ".footnote")))",
-            ] + textColor(of: element, usual: "    .foregroundStyle(.secondary)") + [
+                "    .font(\(font(of: element, usual: ".subheadline")))",
+            ] + textColor(of: element, usual: nil) + [
                 "    .multilineTextAlignment(.\(element.resolvedTextAlignment.rawValue))",
                 fillsWidth ? "    .frame(maxWidth: .infinity)" : "    .frame(width: \(number(frame.width)))",
             ] + placement
@@ -155,19 +201,9 @@ enum SwiftUICodeGenerator {
             lines = picture(element) + placement
 
         case .button:
-            let shape = element.cornerRadius.map { ".rect(cornerRadius: \(number($0)))" } ?? ".capsule"
-            lines = [
-                "Button {",
-                "} label: {",
-                "    Text(\(literal(element.text)))",
-                "        .font(\(font(of: element, usual: ".headline")))",
-                "        .foregroundStyle(\(element.textColor.map(color) ?? ".white"))",
-                fillsWidth
-                    ? "        .frame(maxWidth: .infinity, minHeight: \(number(frame.height)))"
-                    : "        .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
-                "        .background(\(color(element.tint)), in: \(shape))",
-                "}",
-            ] + placement
+            lines = button(element, frame: fillsWidth
+                ? "        .frame(maxWidth: .infinity, minHeight: \(number(frame.height)))"
+                : "        .frame(width: \(number(frame.width)), height: \(number(frame.height)))") + placement
 
         case .textField:
             lines = [
@@ -193,6 +229,12 @@ enum SwiftUICodeGenerator {
 
         case .toggle:
             lines = toggle(element) + placement
+
+        case .checkbox, .radio:
+            lines = control(element) + placement
+
+        case .progress:
+            lines = progress(element) + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"] + placement)
 
         case .stickyNote:
             // Sticky notes stay on the canvas; this is only here to keep the switch whole.
@@ -231,14 +273,14 @@ enum SwiftUICodeGenerator {
         switch element.kind {
         case .title, .body, .text, .stickyNote:
             let usual = switch element.kind {
-            case .title: ".title.bold()"
-            case .body: ".footnote"
+            case .title: titleFont(height: frame.height) ?? ".title.bold()"
+            case .body: ".subheadline"
             default: ".body"
             }
             lines = [
                 "Text(\(literal(element.text)))",
                 "    .font(\(font(of: element, usual: usual)))",
-            ] + textColor(of: element, usual: element.kind == .body ? "    .foregroundStyle(.secondary)" : nil)
+            ] + textColor(of: element, usual: nil)
                 + (alignment == "leading" ? [] : ["    .multilineTextAlignment(.\(alignment))"])
                 + (element.kind == .stickyNote
                     ? ["    .padding(12)", "    .frame(\(size), alignment: .\(alignment))", "    .background(\(color(element.tint)), in: .rect(cornerRadius: \(number(element.resolvedCornerRadius))))"]
@@ -248,17 +290,7 @@ enum SwiftUICodeGenerator {
             lines = picture(element)
 
         case .button:
-            let shape = element.cornerRadius.map { ".rect(cornerRadius: \(number($0)))" } ?? ".capsule"
-            lines = [
-                "Button {",
-                "} label: {",
-                "    Text(\(literal(element.text)))",
-                "        .font(\(font(of: element, usual: ".headline")))",
-                "        .foregroundStyle(\(element.textColor.map(color) ?? ".white"))",
-                "        .frame(\(size))",
-                "        .background(\(color(element.tint)), in: \(shape))",
-                "}",
-            ]
+            lines = button(element, frame: "        .frame(\(size))")
 
         case .textField:
             lines = [
@@ -281,6 +313,12 @@ enum SwiftUICodeGenerator {
 
         case .toggle:
             lines = toggle(element) + ["    .frame(\(size))"]
+
+        case .checkbox, .radio:
+            lines = control(element)
+
+        case .progress:
+            lines = progress(element) + ["    .frame(width: \(number(frame.width)))"]
         }
 
         return lines + finish(element) + ["    .offset(x: \(number(frame.minX)), y: \(number(frame.minY)))"]
@@ -299,6 +337,64 @@ enum SwiftUICodeGenerator {
             "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
             "    .clipShape(\(shape))",
         ]
+    }
+
+    /// The text style a title of this height is drawn in: Title 2, Title or Large Title.
+    private static func titleFont(height: CGFloat) -> String? {
+        switch height {
+        case 31...33: ".title2.bold()"
+        case 39...41: ".title.bold()"
+        case 47...49: ".largeTitle.bold()"
+        default: nil
+        }
+    }
+
+    /// A button in its look. `frame` is the label's frame modifier, indented.
+    private static func button(_ element: DesignElement, frame: String) -> [String] {
+        let look = element.resolvedButtonLook
+        let tint = color(element.tint)
+        var lines = [
+            "Button {",
+            "} label: {",
+            "    Text(\(literal(element.text)))",
+            "        .font(\(font(of: element, usual: ".headline")))",
+            "        .foregroundStyle(\(element.textColor.map(color) ?? (look == .filled ? ".white" : tint)))",
+            frame,
+        ]
+        switch look {
+        case .filled:
+            let shape = element.cornerRadius.map { ".rect(cornerRadius: \(number($0)))" } ?? ".capsule"
+            lines.append("        .background(\(tint), in: \(shape))")
+        case .bordered:
+            let shape = element.cornerRadius.map { "RoundedRectangle(cornerRadius: \(number($0)))" } ?? "Capsule()"
+            lines += ["        .overlay {", "            \(shape)", "                .strokeBorder(\(tint), lineWidth: 1.5)", "        }"]
+        case .plain:
+            break
+        }
+        return lines + ["}"]
+    }
+
+    /// A checkbox or radio button, drawn with the symbols iOS uses for them.
+    private static func control(_ element: DesignElement) -> [String] {
+        let symbol = switch (element.kind, element.isOn) {
+        case (.checkbox, true): "checkmark.square.fill"
+        case (.checkbox, false): "square"
+        case (_, true): "largecircle.fill.circle"
+        case (_, false): "circle"
+        }
+        return [
+            "Image(systemName: \(literal(symbol)))",
+            "    .resizable()",
+            "    .scaledToFit()",
+            "    .frame(width: \(number(element.frame.width)), height: \(number(element.frame.height)))",
+            "    .foregroundStyle(\(element.isOn ? color(element.tint) : ".secondary"))",
+        ]
+    }
+
+    private static func progress(_ element: DesignElement) -> [String] {
+        // To the hundredth, which `number` would round away.
+        ["ProgressView(value: \((element.resolvedValue * 100).rounded() / 100))"]
+            + (element.tint == Theme.accent ? [] : ["    .tint(\(color(element.tint)))"])
     }
 
     private static func toggle(_ element: DesignElement) -> [String] {

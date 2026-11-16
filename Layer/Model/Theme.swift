@@ -64,6 +64,8 @@ enum Theme {
     static let bodyText = Color(hex: 0x8E8C86)
     static let fieldFill = Color(hex: 0xF1EFEA)
     static let dividerLine = Color(hex: 0xE2DFD8)
+    /// The ring of an unchecked checkbox or radio button.
+    static let controlOutline = Color(hex: 0xB8B5AE)
 
     static let panel = Color(hex: 0xFBFAF5)
     static let segmentTrack = Color(hex: 0xE8E5DE)

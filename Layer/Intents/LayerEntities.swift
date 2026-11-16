@@ -242,7 +242,7 @@ struct ElementEntity: AppEntity {
 // MARK: Enums
 
 enum ElementKindChoice: String, AppEnum {
-    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote
+    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote, checkbox, radio, progress
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Element Kind"
     static let caseDisplayRepresentations: [ElementKindChoice: DisplayRepresentation] = [
@@ -257,6 +257,9 @@ enum ElementKindChoice: String, AppEnum {
         .toggle: "Toggle",
         .avatar: "Avatar",
         .stickyNote: "Sticky Note",
+        .checkbox: "Checkbox",
+        .radio: "Radio Button",
+        .progress: "Progress Bar",
     ]
 
     init(_ kind: ElementKind) {

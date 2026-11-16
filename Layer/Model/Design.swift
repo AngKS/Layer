@@ -3,7 +3,7 @@ import Foundation
 
 /// The kinds of thing that can sit on a screen or on the open canvas.
 enum ElementKind: String, CaseIterable, Codable, Sendable {
-    case title, body, image, button, textField, divider, symbol, text, stickyNote, toggle, avatar
+    case title, body, image, button, textField, divider, symbol, text, stickyNote, toggle, avatar, checkbox, radio, progress
 
     var layerName: String {
         switch self {
@@ -18,6 +18,9 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
         case .stickyNote: "Sticky Note"
         case .toggle: "Toggle"
         case .avatar: "Avatar"
+        case .checkbox: "Checkbox"
+        case .radio: "Radio Button"
+        case .progress: "Progress Bar"
         }
     }
 
@@ -34,6 +37,9 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
         case .stickyNote: "note.text"
         case .toggle: "switch.2"
         case .avatar: "person.crop.circle"
+        case .checkbox: "checkmark.square"
+        case .radio: "largecircle.fill.circle"
+        case .progress: "progress.indicator"
         }
     }
 
@@ -46,7 +52,7 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
         case .textField: "Placeholder"
         case .text: "Text"
         case .stickyNote: "Note"
-        case .image, .divider, .symbol, .toggle, .avatar: ""
+        case .image, .divider, .symbol, .toggle, .avatar, .checkbox, .radio, .progress: ""
         }
     }
 
@@ -74,6 +80,13 @@ enum TextAlignmentChoice: String, CaseIterable, Codable, Sendable {
         case .trailing: "text.alignright"
         }
     }
+}
+
+/// How a button is drawn: filled with its colour, outlined in it, or as tinted text alone.
+enum ButtonLook: String, CaseIterable, Codable, Sendable {
+    case filled, bordered, plain
+
+    var name: String { rawValue.capitalized }
 }
 
 enum FontWeightChoice: String, CaseIterable, Codable, Sendable {
@@ -113,8 +126,12 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var isLocked = false
     /// A hidden element isn't drawn, can't be touched on the canvas, and is left out of the code.
     var isHidden = false
-    /// For toggles: whether the switch is drawn on.
+    /// For toggles, checkboxes and radio buttons: whether it is drawn on.
     var isOn = true
+    /// For progress bars: how full, from 0 to 1. Half when unset.
+    var value: Double?
+    /// For buttons: filled when unset.
+    var buttonLook: ButtonLook?
 
     var displayName: String {
         guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return kind.layerName }
@@ -146,6 +163,8 @@ extension DesignElement {
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
         isOn = try container.decodeIfPresent(Bool.self, forKey: .isOn) ?? true
+        value = try container.decodeIfPresent(Double.self, forKey: .value)
+        buttonLook = try container.decodeIfPresent(ButtonLook.self, forKey: .buttonLook)
     }
 }
 
