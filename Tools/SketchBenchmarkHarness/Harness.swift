@@ -27,6 +27,9 @@ struct SketchBenchmarkHarness {
             let withModel = arguments.contains("--model")
             let outPath = outputPath(arguments)
             await run(fixturesDir: arguments[2], withModel: withModel, outPath: outPath)
+        case "explain":
+            guard arguments.count > 3 else { printUsage(); exit(1) }
+            explain(fixturesDir: arguments[2], idSubstring: arguments[3])
         case "healthcheck":
             await healthcheck()
         default:
@@ -116,6 +119,7 @@ struct SketchBenchmarkHarness {
         print("Total cases: \(report.totalCases)")
         print(String(format: "Overall accuracy: %.1f%%", report.overallAccuracy * 100))
         print(String(format: "Candidate-set recall: %.1f%%", report.candidateRecall * 100))
+        print(String(format: "Top-3 recall: %.1f%%", report.top3Recall * 100))
         print(String(format: "Escalation rate: %.1f%%", report.escalationRate * 100))
         if let system2 = report.system2Accuracy {
             print(String(format: "System 2 accuracy (escalated, n=%d): %.1f%%", report.system2Count, system2 * 100))
@@ -141,6 +145,34 @@ struct SketchBenchmarkHarness {
             for confusion in report.confusions {
                 print("  \(confusion.expected) -> \(confusion.got): \(confusion.count)")
             }
+        }
+    }
+
+    // MARK: explain (debug)
+
+    static func explain(fixturesDir: String, idSubstring: String) {
+        guard let fixtures = try? SketchFixtureCorpus.load(from: URL(fileURLWithPath: fixturesDir)) else {
+            print("Couldn't load fixtures from \(fixturesDir)")
+            exit(1)
+        }
+        for fixture in fixtures where fixture.id.contains(idSubstring) {
+            guard let request = fixture.makeRequest() else {
+                print("\(fixture.id): didn't observe")
+                continue
+            }
+            if case .enclosure(let roundness, let inner) = request.observation.form {
+                let ratio = request.observation.bounds.width / request.observation.bounds.height
+                let fraction: CGFloat
+                if case .onScreen(_, _, let size) = request.placement {
+                    fraction = request.observation.bounds.width / size.width
+                } else {
+                    fraction = -1
+                }
+                print("\(fixture.id) [expected \(fixture.label)]: roundness=\(roundness) inner=\(inner) ratio=\(ratio) fraction=\(fraction)")
+            } else {
+                print("\(fixture.id) [expected \(fixture.label)]: form=\(request.observation.form)")
+            }
+            print("  scored: \(request.scoredReadings)")
         }
     }
 

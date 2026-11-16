@@ -155,12 +155,18 @@ struct RuleInterpreterTests {
     @Test func shapesNearADividingLineAreCloseCallsBetweenItsTwoSides() throws {
         let box = roundedWideBox(at: 740)
         let betweenPillAndBox = try request(box.paths, local: box.rect)
-        #expect(betweenPillAndBox.candidates == [.element(.button), .element(.textField)])
+        // Ranked by score, not by which branch of the old switch happened to run first:
+        // this box's roundness sits just under `pillRoundness`, so textField narrowly
+        // outscores button, where the old `candidates` always listed button first
+        // regardless of which one the shape actually favoured.
+        #expect(betweenPillAndBox.candidates == [.element(.textField), .element(.button)])
         #expect(rules.isCloseCall(betweenPillAndBox))
 
         let wideish = CGRect(x: 40, y: 200, width: 320, height: 175)
         let betweenWideAndBoxy = try request([SketchSamples.box(wideish, radius: 6)], local: wideish)
-        #expect(betweenWideAndBoxy.candidates == [.element(.image), .element(.textField)])
+        // Same reasoning: this box's ratio sits just past `wideRatio`, so textField
+        // narrowly outscores image.
+        #expect(betweenWideAndBoxy.candidates == [.element(.textField), .element(.image)])
         #expect(rules.isCloseCall(betweenWideAndBoxy))
 
         let medium = CGRect(x: 110, y: 110, width: 175, height: 34)
@@ -321,9 +327,11 @@ struct SketchPromptTests {
     @Test func aCloseCallIsDescribedInWordsWithItsContextAndItsCandidates() throws {
         let box = roundedWideBox(at: 740)
         let text = SketchPrompt.describe(try request(box.paths, local: box.rect, existing: [existingTitle]))
+        // Candidates are named in ranked order now; see the comment on the matching
+        // assertion in `shapesNearADividingLineAreCloseCallsBetweenItsTwoSides`.
         #expect(text == "The sketch is a wide, flat closed outline with rounded corners, empty inside. "
             + "It is drawn on a phone screen, near the bottom. On the screen so far, top to bottom: title. "
-            + "It could be: button or textField.")
+            + "It could be: textField or button.")
     }
 
     @Test func aSquiggleIsDescribedByItsLength() throws {

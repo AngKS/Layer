@@ -26,6 +26,7 @@
 		1EFA42E6F3C15C20810490D6 /* unknown_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 76965ECC52982C4D8C3B4362 /* unknown_noisy_1.json */; };
 		1F0E10A260B2FB743EC62619 /* radio_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E088814AF75747C65F5608B /* radio_jittered_1a.json */; };
 		205FDC75C154A267402228D7 /* scratchOut_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 533F5E84767AE57833313771 /* scratchOut_jittered_1b.json */; };
+		221A4331423E9F3874703254 /* ComponentRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A818B62756FBDE5EADAD1391 /* ComponentRule.swift */; };
 		2224E654D382FEC9C8CE47F5 /* radio_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = C9CBBF0FBECCD252AE3E5B57 /* radio_jittered_2a.json */; };
 		2314A276D861B33A8F93F64F /* screen_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 3820232F948FDC753B7FCA84 /* screen_jittered_1a.json */; };
 		241EEF700A965CE22C52D81A /* OnscreenContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C2F1B0E9354D93D9B272F96 /* OnscreenContext.swift */; };
@@ -167,6 +168,7 @@
 		AE6A78FD61E8AF8B898C5CB0 /* divider_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 8A5219B3D10FD0645E9CD5D0 /* divider_clean_2.json */; };
 		AFC1FF6D94B3537C05AC9FFA /* toggle_progress_progress_3.json in Resources */ = {isa = PBXBuildFile; fileRef = AB61C00F9B35FEBDAB03F634 /* toggle_progress_progress_3.json */; };
 		B137B268CD9DFB98D2FB99FD /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE02CD3BF12421A236346FDA /* Scrubber.swift */; };
+		B269981D9C7109BFC6A2AF76 /* SketchReadingLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A7ADBEF98DF15132A6734D /* SketchReadingLog.swift */; };
 		B281F173D0F82CD1D29B9313 /* avatar_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 4479046F419ECCEE5E7EF1D5 /* avatar_jittered_1a.json */; };
 		B366FF69B311E080A4309B26 /* checkbox_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 91F816514375CF9723C49C42 /* checkbox_noisy_2.json */; };
 		B4BFFA6336C01602437B03BA /* body_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 5B913915C2B0A41F3C06545B /* body_noisy_1.json */; };
@@ -411,6 +413,7 @@
 		A5B79722E18C17025B80AE45 /* button_textField_textField_4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_textField_textField_4.json; sourceTree = "<group>"; };
 		A6AB2B4CCC5FA7D478AD4D6D /* checkbox_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_clean_1.json; sourceTree = "<group>"; };
 		A7C94F9F1A4A0E56BD698177 /* text_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_clean_2.json; sourceTree = "<group>"; };
+		A818B62756FBDE5EADAD1391 /* ComponentRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentRule.swift; sourceTree = "<group>"; };
 		A90DCB142C7DD974FB3300CE /* avatar_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_2a.json; sourceTree = "<group>"; };
 		AB5DF74E91859F550E8EBB85 /* checkbox_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_jittered_2b.json; sourceTree = "<group>"; };
 		AB61C00F9B35FEBDAB03F634 /* toggle_progress_progress_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_progress_progress_3.json; sourceTree = "<group>"; };
@@ -472,6 +475,7 @@
 		E34A52AA48FF8955F9DFDA8C /* button_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_noisy_2.json; sourceTree = "<group>"; };
 		E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchAnalyzer.swift; sourceTree = "<group>"; };
 		E5437CC6E401D1E7BC88475F /* unknown_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_clean_2.json; sourceTree = "<group>"; };
+		E5A7ADBEF98DF15132A6734D /* SketchReadingLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchReadingLog.swift; sourceTree = "<group>"; };
 		E7E2116D4DDC5F0C161AB670 /* avatar_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_clean_2.json; sourceTree = "<group>"; };
 		E9F0B5812BDDAD1996295A16 /* toggle_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_noisy_1.json; sourceTree = "<group>"; };
 		EB4B972000CD48B0ADB8FD5A /* textField_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_jittered_2b.json; sourceTree = "<group>"; };
@@ -627,10 +631,12 @@
 			isa = PBXGroup;
 			children = (
 				A48C5BF2D37782F112D64E89 /* AppleIntelligenceInterpreter.swift */,
+				A818B62756FBDE5EADAD1391 /* ComponentRule.swift */,
 				FBA2EA20C0A640CC214D6D82 /* RuleInterpreter.swift */,
 				E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */,
 				3A834F3E5C52B77D1C250633 /* SketchEngine.swift */,
 				1E5D745E1FC169922426572F /* SketchInterpreter.swift */,
+				E5A7ADBEF98DF15132A6734D /* SketchReadingLog.swift */,
 			);
 			path = Sketch;
 			sourceTree = "<group>";
@@ -1195,6 +1201,7 @@
 				FCAE14F54F8B4ED5BBDF902C /* CanvasIntents.swift in Sources */,
 				42552151F70C3DD69852E3C0 /* CanvasScreen.swift in Sources */,
 				CBC29CEF1E24055A29FFE027 /* CloudFile.swift in Sources */,
+				221A4331423E9F3874703254 /* ComponentRule.swift in Sources */,
 				B864118BC7248D0EDB408350 /* DemoScript.swift in Sources */,
 				9F95AB78B2539081238FBFFB /* Design.swift in Sources */,
 				CEF2BEFD5E7785E6232D94C8 /* DesignActions.swift in Sources */,
@@ -1231,6 +1238,7 @@
 				3FC82F34F63292043534C213 /* SketchBenchmark.swift in Sources */,
 				3F74BB724FD5F672444FF466 /* SketchEngine.swift in Sources */,
 				A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */,
+				B269981D9C7109BFC6A2AF76 /* SketchReadingLog.swift in Sources */,
 				74833BAB3D92098463F2D27E /* SketchSamples.swift in Sources */,
 				512F22D4F134B55390076E7D /* StatusChrome.swift in Sources */,
 				324DA4C40F2350D7DBB164F2 /* StylePanel.swift in Sources */,

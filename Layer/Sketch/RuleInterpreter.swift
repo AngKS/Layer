@@ -8,33 +8,24 @@ struct RuleInterpreter: SketchInterpreter {
     }
 
     func reading(for request: SketchRequest) -> SketchReading {
-        let candidates = request.candidates
-        guard candidates.count > 1, case .onScreen(let local, let existing, let size) = request.placement else {
-            return candidates.first ?? .unknown
-        }
-        if case .enclosure(let roundness, _) = request.observation.form {
-            guard local.width >= local.height * SketchConventions.wideRatio else { return .element(.image) }
-            return .element(roundness >= SketchConventions.pillRoundness ? .button : .textField)
-        }
-        let isShort = local.width / size.width < SketchConventions.shortFraction
-        let hasTitle = existing.contains { $0.kind == .title }
-        return .element(isShort && !hasTitle ? .title : .body)
+        request.scoredReadings.first?.reading ?? .unknown
     }
 
     /// Whether the sketch sits so near one of the rules' dividing lines that its shape
     /// alone shouldn't decide. These are the sketches worth a provider's judgement.
+    ///
+    /// A two-signal trigger, not one global threshold: either the winning score itself is
+    /// in the gray area (not confident even on its own), or it's confident but the runner-up
+    /// is close behind — the case a single threshold misses, since a sketch can score 0.8
+    /// and still have a 0.75 sitting right next to it. `reports/Fast and slow sketch
+    /// recognition.md`, citing the Lenovo gesture-ambiguity patent (US10755027B2).
     func isCloseCall(_ request: SketchRequest) -> Bool {
-        guard request.candidates.count > 1, case .onScreen(let local, let existing, let size) = request.placement else {
-            return false
-        }
-        // An outline only has several candidates when it falls inside one of the bands.
-        if request.observation.form.isEnclosure { return true }
-        if SketchConventions.shortBand.contains(local.width / size.width) { return true }
-        // What is left is a short squiggle: a title near the top of a screen without one,
-        // body text on a screen that has one. Further down an untitled screen it could
-        // be a title or a caption.
-        let hasTitle = existing.contains { $0.kind == .title }
-        return !hasTitle && local.midY > size.height * 0.4
+        guard case .onScreen = request.placement else { return false }
+        let scored = request.scoredReadings
+        guard let top = scored.first else { return false }
+        let lowConfidence = top.score < SketchConventions.closeCallConfidence
+        let smallMargin = scored.count > 1 && (top.score - scored[1].score) < SketchConventions.closeCallMargin
+        return lowConfidence || smallMargin
     }
 
     /// Without a model there is nothing to read meaning from, so the name says what kind

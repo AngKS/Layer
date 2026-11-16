@@ -25,6 +25,12 @@ final class SketchEngine {
     private(set) var lastAttemptFailed = false
     /// True while the provider is being left alone after failing repeatedly.
     private(set) var isResting = false
+    /// The on-device log entry the most recent `read(_:)` wrote, if it wrote one — nil for
+    /// an asked reading, or one off the open canvas. Whoever creates the element this
+    /// reading became should call `SketchReadingLog.shared.link` with it, so a deletion
+    /// soon after can be recognised as a correction. Stage 0 of
+    /// `reports/Fast and slow sketch recognition.md`.
+    @ObservationIgnored private(set) var lastLogID: UUID?
 
     @ObservationIgnored private let rules = RuleInterpreter()
     @ObservationIgnored private var hasWarmedUp = false
@@ -90,11 +96,19 @@ final class SketchEngine {
     }
 
     func read(_ request: SketchRequest) async -> SketchReading {
+        lastLogID = nil
         if request.isAsked { return await readAsked(request) }
         let fallback = rules.reading(for: request)
-        guard rules.isCloseCall(request) else { return fallback }
+        let escalated = rules.isCloseCall(request)
+        guard escalated else {
+            lastLogID = await log(request, chosen: fallback, escalated: false, decidedBy: "rules")
+            return fallback
+        }
 
-        guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
+        guard readiness == .ready, !isStillResting(), !Self.isConserving else {
+            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
+            return fallback
+        }
 
         let interpreter = provider.makeInterpreter(nil)
         let started = ContinuousClock.now
@@ -104,12 +118,49 @@ final class SketchEngine {
             log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: reading), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
             let isPossible = request.candidates.contains(reading)
             record(answered: isPossible)
-            return isPossible ? reading : fallback
+            let final = isPossible ? reading : fallback
+            lastLogID = await log(request, chosen: final, escalated: true, decidedBy: isPossible ? provider.id : "rules")
+            return final
         } catch {
             log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             record(answered: false)
+            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
             return fallback
         }
+    }
+
+    /// Writes one reading to the on-device log (Stage 0), and returns its entry id so the
+    /// element it becomes, if any, can be linked to it. Limited to on-screen readings: the
+    /// scored table and the confusable pairs it's measured against both live there, and an
+    /// open-canvas reading (screen, sticky note, text) never has more than one candidate to
+    /// log.
+    private func log(_ request: SketchRequest, chosen: SketchReading, escalated: Bool, decidedBy: String) async -> UUID? {
+        guard case .onScreen(_, let existing, let size) = request.placement else { return nil }
+        let scored = request.scoredReadings
+        let existingKinds: [String] = existing.map { $0.kind.rawValue }
+        let existingFrames: [[Double]] = existing.map { element -> [Double] in
+            let frame = element.frame
+            return [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)]
+        }
+        let strokePoints: [[[Double]]] = request.strokes.map { stroke -> [[Double]] in
+            stroke.map { point -> [Double] in [Double(point.x), Double(point.y)] }
+        }
+        let candidateNames: [String] = scored.map { SketchPrompt.name(for: $0.reading) }
+        let scoreValues: [Double] = scored.map(\.score)
+        let chosenName = SketchPrompt.name(for: chosen)
+        let screenSize = [Double(size.width), Double(size.height)]
+        return await SketchReadingLog.shared.record(
+            placementKind: "onScreen",
+            existingKinds: existingKinds,
+            existingFrames: existingFrames,
+            screenSize: screenSize,
+            strokes: strokePoints,
+            candidates: candidateNames,
+            scores: scoreValues,
+            chosen: chosenName,
+            escalated: escalated,
+            decidedBy: decidedBy
+        )
     }
 
     /// Reads a drawing someone asked to have read. What their prompt names outright is

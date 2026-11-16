@@ -21,6 +21,8 @@ swiftc \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchAnalyzer.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchInterpreter.swift" \
+    "$REPO_ROOT/Layer/Sketch/ComponentRule.swift" \
+    "$REPO_ROOT/Layer/Sketch/SketchReadingLog.swift" \
     "$REPO_ROOT/Layer/Sketch/RuleInterpreter.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchEngine.swift" \
     "$REPO_ROOT/Layer/Sketch/AppleIntelligenceInterpreter.swift" \

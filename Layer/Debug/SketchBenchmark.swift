@@ -121,9 +121,14 @@ extension Array where Element == [CGPoint] {
 struct SketchBenchmarkCase: Sendable {
     var fixture: SketchFixture
     var expected: SketchReading
-    /// The request's unscored `candidates`: stands in for a ranked shortlist until Stage 1
-    /// gives one. Used to measure shortlist recall ahead of real top-3 scoring.
+    /// The request's candidates. Before Stage 1 this was an unscored, 1–3 item list;
+    /// since Stage 1 it's `scoredReadings` ranked highest first, which can run longer
+    /// (`smallControlScoredReadings` keeps everything scoring above 0.02) — `top3` is the
+    /// metric that actually means "top 3" either way.
     var candidates: [SketchReading]
+    /// The top 3 of `candidates`, ranked — meaningless as a ranking before Stage 1 (every
+    /// candidate was equally "possible," none scored), genuinely top-3-by-score after it.
+    var top3: [SketchReading]
     var rulesReading: SketchReading
     var escalated: Bool
     /// The rules' reading, overridden by the provider's when one ran and gave a reading
@@ -143,7 +148,7 @@ enum SketchBenchmarkRunner {
         return fixtures.map { fixture in
             guard let request = fixture.makeRequest() else {
                 return SketchBenchmarkCase(
-                    fixture: fixture, expected: fixture.expectedReading, candidates: [], rulesReading: .unknown,
+                    fixture: fixture, expected: fixture.expectedReading, candidates: [], top3: [], rulesReading: .unknown,
                     escalated: false, finalReading: .unknown, providerReading: nil,
                     rulesLatency: 0, providerLatency: nil, observed: false
                 )
@@ -152,8 +157,10 @@ enum SketchBenchmarkRunner {
             let reading = rules.reading(for: request)
             let elapsed = (ContinuousClock.now - start).secondsValue
             let escalated = rules.isCloseCall(request)
+            let scored = request.scoredReadings
             return SketchBenchmarkCase(
-                fixture: fixture, expected: fixture.expectedReading, candidates: request.candidates, rulesReading: reading,
+                fixture: fixture, expected: fixture.expectedReading, candidates: scored.map(\.reading),
+                top3: scored.prefix(3).map(\.reading), rulesReading: reading,
                 escalated: escalated, finalReading: reading, providerReading: nil,
                 rulesLatency: elapsed, providerLatency: nil, observed: true
             )
@@ -203,6 +210,11 @@ struct SketchBenchmarkReport: Codable, Sendable {
     /// How often the true kind is somewhere in `candidates` (a stand-in for top-3 recall
     /// until candidates carry real scores).
     var candidateRecall: Double
+    /// How often the true kind is in the top 3 scored candidates. Before Stage 1 this is
+    /// the same set `candidateRecall` measures, just truncated — there was no ranking to
+    /// make "top 3" mean anything yet. After it, this is the metric the report's targets
+    /// table actually means by "top-3 recall".
+    var top3Recall: Double
     var escalationRate: Double
     /// nil when no provider ran against this corpus (the simulator can't call the model).
     var system2Accuracy: Double?
@@ -221,6 +233,7 @@ enum SketchBenchmarkMetrics {
         var confusions: [String: Int] = [:]
         var pairTotals: [String: (total: Int, correct: Int)] = [:]
         var candidateHits = 0
+        var top3Hits = 0
         var escalated = 0
         var system2Correct = 0
         var system2Total = 0
@@ -245,6 +258,7 @@ enum SketchBenchmarkMetrics {
                 pairTotals[pair] = pairTotalsEntry
             }
             if one.candidates.contains(one.expected) { candidateHits += 1 }
+            if one.top3.contains(one.expected) { top3Hits += 1 }
             if one.escalated { escalated += 1 }
             if one.escalated, let providerReading = one.providerReading {
                 system2Total += 1
@@ -273,6 +287,7 @@ enum SketchBenchmarkMetrics {
             }.sorted { $0.count > $1.count },
             pairAccuracy: pairTotals.mapValues { Double($0.correct) / Double($0.total) },
             candidateRecall: total > 0 ? Double(candidateHits) / Double(total) : 0,
+            top3Recall: total > 0 ? Double(top3Hits) / Double(total) : 0,
             escalationRate: total > 0 ? Double(escalated) / Double(total) : 0,
             system2Accuracy: system2Total > 0 ? Double(system2Correct) / Double(system2Total) : nil,
             system2Count: system2Total,

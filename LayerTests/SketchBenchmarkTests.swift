@@ -53,6 +53,7 @@ struct SketchBenchmarkTests {
         print("Total cases: \(report.totalCases)")
         print("Overall accuracy: \(String(format: "%.1f", report.overallAccuracy * 100))%")
         print("Candidate-set recall: \(String(format: "%.1f", report.candidateRecall * 100))%")
+        print("Top-3 recall: \(String(format: "%.1f", report.top3Recall * 100))%")
         print("Escalation rate: \(String(format: "%.1f", report.escalationRate * 100))%")
         for kind in report.perKind {
             print("  \(kind.label): \(kind.correct)/\(kind.total) (\(String(format: "%.1f", kind.accuracy * 100))%)")

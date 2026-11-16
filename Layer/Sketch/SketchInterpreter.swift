@@ -63,82 +63,11 @@ struct SketchRequest: Sendable {
 
 extension SketchRequest {
     /// What this sketch could mean, going by its shape and where it was drawn; empty when
-    /// it can't be anything. A clear shape has one candidate. A shape near one of the
-    /// conventions' dividing lines has the candidates from both sides of that line, and
-    /// choosing between them is a judgement call.
-    var candidates: [SketchReading] {
-        if case .scratch = observation.form { return [.scratchOut] }
-        switch placement {
-        case .openCanvas:
-            let bounds = observation.bounds
-            switch observation.form {
-            case .enclosure(_, .none) where bounds.height >= bounds.width * SketchConventions.tallRatio && bounds.height >= 160:
-                return [.screen]
-            case .enclosure where min(bounds.width, bounds.height) >= SketchConventions.noteSide:
-                // A box beside the screens is a note about them.
-                return [.element(.stickyNote)]
-            case .wave, .stackedLines:
-                // Only writing-like marks: a stray stroke beside the screens stays ink.
-                return bounds.width >= max(bounds.height, 40) ? [.element(.text)] : []
-            default:
-                return []
-            }
-
-        case .onScreen(let local, _, let size):
-            switch observation.form {
-            case .enclosure(_, _) where local.width / max(local.height, 1) >= SketchConventions.progressRatio
-                && local.height <= SketchConventions.progressHeight:
-                // A long, thin outline is a progress bar, however it is filled in.
-                return [.element(.progress)]
-            case .enclosure(let roundness, let inner) where local.width / size.width < SketchConventions.smallFraction:
-                return Self.smallControl(local: local, size: size, roundness: roundness, inner: inner)
-            case .enclosure(_, .cross):
-                return [.element(.image)]
-            case .enclosure(let roundness, _):
-                let ratio = local.width / max(local.height, 1)
-                var options: [SketchReading] = []
-                if ratio <= SketchConventions.wideBand.upperBound { options.append(.element(.image)) }
-                if ratio >= SketchConventions.wideBand.lowerBound {
-                    if roundness >= SketchConventions.pillBand.lowerBound { options.append(.element(.button)) }
-                    if roundness <= SketchConventions.pillBand.upperBound { options.append(.element(.textField)) }
-                }
-                return options
-            case .stackedLines:
-                return [.element(.body)]
-            case .line:
-                return [.element(.divider)]
-            case .wave, .scribble:
-                guard local.width >= local.height else { return [] }
-                let isLong = local.width / size.width > SketchConventions.shortBand.upperBound
-                return isLong ? [.element(.body)] : [.element(.title), .element(.body)]
-            case .scratch:
-                return [.scratchOut]
-            }
-        }
-    }
-}
-
-extension SketchRequest {
-    /// What a small outline on a screen could be. Tiny squares are checkboxes and tiny
-    /// circles radio buttons; a little larger, circles are avatars and pills toggles.
-    static func smallControl(local: CGRect, size: CGSize, roundness: Double, inner: SketchObservation.InnerMark) -> [SketchReading] {
-        let ratio = local.width / max(local.height, 1)
-        let fraction = local.width / size.width
-        let isRound = roundness >= SketchConventions.circleRoundness
-        if SketchConventions.roundRatio.contains(ratio), fraction < SketchConventions.tinyFraction {
-            if !isRound { return [.element(.checkbox)] }
-            // A dot in the middle selects a radio button; a very small empty circle is one too.
-            if inner == .dot || (inner == .none && fraction < SketchConventions.radioFraction) { return [.element(.radio)] }
-        }
-        if inner == .cross { return [.element(.image)] }
-        if isRound, SketchConventions.roundRatio.contains(ratio) {
-            return [.element(.avatar)]
-        }
-        if roundness >= SketchConventions.pillBand.lowerBound, SketchConventions.toggleRatio.contains(ratio) {
-            return [.element(.toggle)]
-        }
-        return ratio <= SketchConventions.wideBand.upperBound ? [.element(.image)] : [.element(.textField)]
-    }
+    /// it can't be anything. Ranked by `scoredReadings`, highest first — a clear shape has
+    /// one candidate miles ahead of anything else; a shape near one of the conventions'
+    /// dividing lines has two or more sitting close together, and choosing between them is
+    /// a judgement call. See `ComponentRule.swift`.
+    var candidates: [SketchReading] { scoredReadings.map(\.reading) }
 }
 
 extension SketchRequest {
@@ -259,6 +188,14 @@ enum SketchConventions {
     /// `progressHeight` screen points, is a progress bar.
     static let progressRatio: CGFloat = 7
     static let progressHeight: CGFloat = 28
+
+    /// Below this score, the winning reading isn't confident even on its own — the low end
+    /// of a close call. Matches the upper edge of the 35–65% "gray area" the Lenovo gesture
+    /// patent (US10755027B2) uses for the same kind of decision.
+    static let closeCallConfidence = 0.65
+    /// When the top two scores sit within this of each other, it's a close call even if
+    /// the winner looked confident on its own. `magic-pen-expansion.md` §3E.
+    static let closeCallMargin = 0.15
 }
 
 /// The wording used to explain sketches and boards to a language model. Shared so that
@@ -282,6 +219,8 @@ enum SketchPrompt {
         - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
         - radioButton: a tiny circle, often with a dot in it, usually one of a column of them.
         - progressBar: a long, very thin outline, often partly shaded in.
+        - avatar: a circle too big to be a radio button, usually alone rather than in a column.
+        - toggle: a small pill with a circle (its knob) nearer one end than the middle.
         """
 
     static let titleInstructions = """
