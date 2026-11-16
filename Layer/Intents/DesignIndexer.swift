@@ -7,6 +7,11 @@ import os
 @MainActor
 enum DesignIndexer {
     private static var pending: [String: Task<Void, Never>] = [:]
+    /// When each design is next due to be indexed. A further change while one is pending
+    /// pushes this out rather than cancelling and starting a new wait, so a flurry of
+    /// changes (every frame of a drag, say) reschedules one task instead of replacing it
+    /// again and again.
+    private static var dueAt: [String: ContinuousClock.Instant] = [:]
     /// The screens indexed for each design, so that deleted ones can be taken out.
     private static var indexedScreens: [String: Set<String>] = [:]
     private static let log = Logger(subsystem: "kahshin.Layer", category: "spotlight")
@@ -14,11 +19,18 @@ enum DesignIndexer {
     /// A design changed: it is indexed again once it has been left alone for a few seconds.
     static func designChanged(_ model: AppModel) {
         guard let id = model.designID else { return }
-        pending[id]?.cancel()
+        dueAt[id] = .now + .seconds(3)
+        guard pending[id] == nil else { return }
         pending[id] = Task { [weak model] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, let model, let snapshot = DesignActions.snapshot(of: model) else { return }
+            while true {
+                guard let due = dueAt[id] else { return }
+                if ContinuousClock.now >= due { break }
+                try? await Task.sleep(until: due)
+                if Task.isCancelled { return }
+            }
             pending[id] = nil
+            dueAt[id] = nil
+            guard let model, let snapshot = DesignActions.snapshot(of: model) else { return }
             await index(snapshot)
         }
     }
