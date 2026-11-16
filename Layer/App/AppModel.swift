@@ -449,10 +449,27 @@ final class AppModel {
         }
     }
 
+    /// True while a number field is being scrubbed.
+    @ObservationIgnored private var isScrubbing = false
+
+    /// Starts scrubbing a field. Everything until `endScrubbing()` undoes as one step.
+    func beginScrubbing() {
+        adjustmentEnd?.cancel()
+        isScrubbing = true
+        store.beginEdit()
+    }
+
+    func endScrubbing() {
+        isScrubbing = false
+        store.endEdit()
+    }
+
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
         store.beginEdit()
         body()
+        // A scrub ends its own edit when it ends.
+        guard !isScrubbing else { return }
         adjustmentEnd?.cancel()
         adjustmentEnd = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))

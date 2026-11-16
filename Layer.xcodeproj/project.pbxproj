@@ -42,6 +42,7 @@
 		9F95AB78B2539081238FBFFB /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21367BB9CEF150145DCDC8DF /* Design.swift */; };
 		A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D745E1FC169922426572F /* SketchInterpreter.swift */; };
 		ADBE4776182FCDF56714EDFB /* SketchAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */; };
+		B137B268CD9DFB98D2FB99FD /* Scrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE02CD3BF12421A236346FDA /* Scrubber.swift */; };
 		B864118BC7248D0EDB408350 /* DemoScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055B2F810E6B0244E35A6D56 /* DemoScript.swift */; };
 		CBC29CEF1E24055A29FFE027 /* CloudFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F5F98FB298DC2DB506114B /* CloudFile.swift */; };
 		D414B9D52993D0B7F38AFBF0 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = FCF81A42DC1853F2DD4AB403 /* AppIcon.icon */; };
@@ -139,6 +140,7 @@
 		DF5E41B2C863AEE851BA0306 /* Layer.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Layer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DF800BC07BBBF3367FD33C86 /* DesignStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignStore.swift; sourceTree = "<group>"; };
 		E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchAnalyzer.swift; sourceTree = "<group>"; };
+		EE02CD3BF12421A236346FDA /* Scrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scrubber.swift; sourceTree = "<group>"; };
 		F0AE2F55F34F86CCA239AC6A /* SwiftHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftHighlighter.swift; sourceTree = "<group>"; };
 		FBA2EA20C0A640CC214D6D82 /* RuleInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleInterpreter.swift; sourceTree = "<group>"; };
 		FCF81A42DC1853F2DD4AB403 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				DDE6E4E41B010D0B7EE9ACE3 /* LayersPanel.swift */,
+				EE02CD3BF12421A236346FDA /* Scrubber.swift */,
 				DF431B52852C4E5B18BAF1B7 /* ShareMenu.swift */,
 				C60B89A5049F477D1B2D57E7 /* StatusChrome.swift */,
 				BF572451F75F5F56DFF44B33 /* StylePanel.swift */,
@@ -497,6 +500,7 @@
 				09B758904EB6E05613E2DE33 /* MagicPen.swift in Sources */,
 				E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
+				B137B268CD9DFB98D2FB99FD /* Scrubber.swift in Sources */,
 				ECB3EC418084CB186D8D428C /* SelectionActions.swift in Sources */,
 				E2A7932B71CE67616BAE044B /* SelectionLayer.swift in Sources */,
 				2B737C1728743984C36AADE4 /* ShareMenu.swift in Sources */,

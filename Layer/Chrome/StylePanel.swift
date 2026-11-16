@@ -7,9 +7,10 @@ struct StylePanel: View {
     var isSheet = false
     /// The room there is for the floating panel, which is otherwise as tall as its settings.
     var maxHeight: CGFloat = 620
+    @State private var scrubber = Scrubber()
 
     var body: some View {
-        let settings = ScrollView {
+        let scrolling = ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let selected = model.selectedElement {
                     ElementSettings(ref: selected.ref, element: selected.element)
@@ -24,8 +25,22 @@ struct StylePanel: View {
             .padding(.bottom, 12)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .scrollDisabled(scrubber.target != nil)
         .foregroundStyle(Theme.ink)
         .tint(Theme.accent.color)
+
+        // Fields and the ruler share one coordinate space, the panel's.
+        let settings = scrolling
+            .overlay { ScrubberOverlay() }
+            .background { PencilBridge(scrubber: scrubber) }
+            .coordinateSpace(.named(Scrubber.space))
+            .onPencilSqueeze { scrubber.squeeze($0) }
+            .environment(scrubber)
+            .onAppear {
+                // A scrub undoes as one step, however long it takes.
+                scrubber.onBegin = { [model] in model.beginScrubbing() }
+                scrubber.onEnd = { [model] in model.endScrubbing() }
+            }
 
         if isSheet {
             settings
@@ -59,23 +74,37 @@ private struct ElementSettings: View {
             onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
         )
 
+        // The same actions as the bar above the selection.
+        PanelSection {
+            HStack(spacing: 6) {
+                IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
+                IconButton(element.isLocked ? "Unlock" : "Lock", symbol: element.isLocked ? "lock.fill" : "lock", isOn: element.isLocked) {
+                    model.toggleLockOfSelection()
+                }
+                IconButton(DesignStore.Arrangement.forward.name, symbol: DesignStore.Arrangement.forward.symbol) { model.arrangeSelection(.forward) }
+                    .disabled(!model.store.canArrange(ref, .forward))
+                IconButton(DesignStore.Arrangement.backward.name, symbol: DesignStore.Arrangement.backward.symbol) { model.arrangeSelection(.backward) }
+                    .disabled(!model.store.canArrange(ref, .backward))
+            }
+        }
+
         PanelSection {
             HStack(spacing: 8) {
                 NumberField("X", value: binding(\.frame.origin.x))
                 NumberField("Y", value: binding(\.frame.origin.y))
             }
             HStack(spacing: 8) {
-                NumberField("W", value: binding(\.frame.size.width), minimum: 1)
-                NumberField("H", value: binding(\.frame.size.height), minimum: 1)
+                NumberField("W", value: binding(\.frame.size.width), range: 1...4000)
+                NumberField("H", value: binding(\.frame.size.height), range: 1...4000)
             }
             HStack(spacing: 8) {
                 if element.hasCornerRadius {
-                    NumberField("R", label: "Corner radius", value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }), minimum: 0)
+                    NumberField("R", label: "Corner radius", value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }), range: 0...999)
                 }
                 NumberField("%", label: "Opacity", value: Binding(
                     get: { (element.resolvedOpacity * 100).rounded() },
-                    set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(min(max(percent, 5), 100)) / 100 } }
-                ))
+                    set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                ), range: 5...100)
             }
             if case .screen = ref.host {
                 HStack(spacing: 6) {
@@ -95,7 +124,7 @@ private struct ElementSettings: View {
             }
             if element.hasBorder {
                 PanelRow("Border") {
-                    NumberField("W", label: "Border width", value: Binding(get: { element.resolvedBorderWidth }, set: { width in change { $0.borderWidth = width > 0 ? width : nil } }), minimum: 0)
+                    NumberField("W", label: "Border width", value: Binding(get: { element.resolvedBorderWidth }, set: { width in change { $0.borderWidth = width > 0 ? width : nil } }), range: 0...40)
                         .frame(width: 84)
                     ColorField(label: "Border colour", color: Binding(get: { element.resolvedBorderColor }, set: { color in change { $0.borderColor = color } }))
                 }
@@ -113,7 +142,7 @@ private struct ElementSettings: View {
                     .padding(10)
                     .background(Theme.fieldFill, in: .rect(cornerRadius: 12))
                 HStack(spacing: 8) {
-                    NumberField("pt", label: "Font size", value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }), minimum: 6)
+                    NumberField("pt", label: "Font size", value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }), range: 6...400)
                         .frame(width: 84)
                     Spacer(minLength: 0)
                     Picker("Weight", selection: Binding(get: { element.resolvedFontWeight }, set: { weight in change { $0.fontWeight = weight } })) {
@@ -162,6 +191,12 @@ private struct FrameSettings: View {
         )
 
         PanelSection {
+            HStack(spacing: 6) {
+                IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
+            }
+        }
+
+        PanelSection {
             Picker("Device", selection: Binding(get: { screen.device.id }, set: { id in change { $0.deviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
                 ForEach(DeviceFrame.all) { device in
                     Text("\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))").tag(device.id)
@@ -174,8 +209,8 @@ private struct FrameSettings: View {
             }
             NumberField("%", label: "Scale", value: Binding(
                 get: { (screen.scale * 100).rounded() },
-                set: { percent in change { $0.scale = min(max(percent, 15), 200) / 100 } }
-            ))
+                set: { percent in change { $0.scale = percent / 100 } }
+            ), range: 15...200)
         }
     }
 
@@ -497,65 +532,140 @@ private struct PanelRow<Content: View>: View {
 }
 
 /// A number that can be typed over, with its unit inside the field. The change is made
-/// when typing ends.
+/// when typing ends. It can also be scrubbed a unit at a time: held with a finger and
+/// dragged sideways, or squeezed over with an Apple Pencil Pro and rolled.
 private struct NumberField: View {
+    @Environment(Scrubber.self) private var scrubber
     let unit: String
     let label: String
     @Binding var value: CGFloat
-    var minimum: CGFloat = -.infinity
+    let range: ClosedRange<CGFloat>
+    @State private var frame = CGRect.zero
+    @GestureState private var isHeld = false
+    /// Whether the number is being typed. Until it is tapped, it is shown as text, which
+    /// leaves holding it free to scrub.
+    @State private var isTyping = false
+    @FocusState private var isEditing: Bool
 
-    init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, minimum: CGFloat = -.infinity) {
+    init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, range: ClosedRange<CGFloat> = -99_999...99_999) {
         self.unit = unit
         self.label = label ?? unit
         _value = value
-        self.minimum = minimum
+        self.range = range
     }
 
     var body: some View {
+        let isScrubbing = scrubber.target?.label == label && scrubber.target?.frame == frame
         HStack(spacing: 6) {
             Text(unit)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.label)
                 .accessibilityHidden(true)
-            TextField(
-                label,
-                value: Binding(get: { Double(value) }, set: { value = max(CGFloat($0), minimum) }),
-                format: .number.precision(.fractionLength(0...1))
-            )
-            .keyboardType(.numbersAndPunctuation)
-            .font(.system(size: 14).monospacedDigit())
-            .accessibilityLabel(label)
+            if isTyping {
+                TextField(
+                    label,
+                    value: Binding(get: { Double(value) }, set: { value = min(max(CGFloat($0), range.lowerBound), range.upperBound) }),
+                    format: Self.format
+                )
+                .keyboardType(.numbersAndPunctuation)
+                .focused($isEditing)
+                // Focus taken as the field appears is dropped; a moment later it holds.
+                .task {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    isEditing = true
+                }
+                .onChange(of: isEditing) { _, focused in if !focused { isTyping = false } }
+                .accessibilityLabel(label)
+            } else {
+                Text(Double(value), format: Self.format)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel(label)
+                    .accessibilityValue(Text(Double(value), format: Self.format))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { isTyping = true }
+                    .accessibilityAdjustableAction { direction in
+                        let step: CGFloat = direction == .increment ? 1 : -1
+                        value = Scrubber.value(from: value.rounded(), steps: Int(step), in: range)
+                    }
+            }
         }
+        .font(.system(size: 14).monospacedDigit())
         .padding(.horizontal, 10)
         .frame(height: 32)
         .frame(maxWidth: .infinity)
         .background(Theme.fieldFill, in: .rect(cornerRadius: 10))
+        .contentShape(.rect(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.accent.color, lineWidth: isScrubbing ? 1.5 : 0)
+        }
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Scrubber.space)) }) { frame = $0 }
+        // A pencil hovering here is what a squeeze would scrub.
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            switch phase {
+            case .active: scrubber.hovered = target
+            case .ended: if scrubber.hovered?.label == label { scrubber.hovered = nil }
+            }
+        }
+        // Tapped, it is typed into; held, it scrubs.
+        .onTapGesture { if !isTyping { isTyping = true } }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                .updating($isHeld) { value, isHeld, _ in
+                    if case .second(true, _) = value { isHeld = true }
+                }
+                .onChanged { value in
+                    guard case .second(true, let drag) = value else { return }
+                    if scrubber.target == nil { scrubber.begin(target) }
+                    scrubber.scrub(to: Scrubber.steps(forDrag: drag?.translation.width ?? 0))
+                },
+            isEnabled: !isTyping
+        )
+        // However the hold ends, lifted or cancelled, scrubbing ends with it.
+        .onChange(of: isHeld) { _, held in if !held { scrubber.end() } }
+    }
+
+    private static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+
+    private var target: Scrubber.Target {
+        Scrubber.Target(
+            label: label, unit: unit, frame: frame, range: range,
+            get: { value }, set: { value = $0 }
+        )
     }
 }
 
 /// A square button with an icon, for a row of related actions.
 private struct IconButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let label: String
     let symbol: String
+    var isOn = false
     let action: () -> Void
 
-    init(_ label: String, symbol: String, action: @escaping () -> Void) {
+    init(_ label: String, symbol: String, isOn: Bool = false, action: @escaping () -> Void) {
         self.label = label
         self.symbol = symbol
+        self.isOn = isOn
         self.action = action
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            withAnimation(.smooth(duration: 0.25)) { action() }
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .medium))
+                .opacity(isEnabled ? 1 : 0.35)
                 .frame(maxWidth: .infinity)
                 .frame(height: 32)
-                .background(Theme.fieldFill, in: .rect(cornerRadius: 9))
+                .background(isOn ? Theme.chromeActive : Theme.fieldFill, in: .rect(cornerRadius: 9))
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
         .help(label)
     }
 }

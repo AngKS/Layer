@@ -362,3 +362,84 @@ struct MoreCodeTests {
         #expect(files.map(\.name) == ["Home.swift", "Home2.swift"])
     }
 }
+
+@Suite("Scrubbing number fields")
+@MainActor
+struct ScrubbingTests {
+    private final class Box {
+        var value: CGFloat
+        var steps = 0
+        init(_ value: CGFloat) { self.value = value }
+    }
+
+    private func target(_ box: Box, range: ClosedRange<CGFloat> = 0...100) -> Scrubber.Target {
+        Scrubber.Target(label: "W", unit: "W", frame: .zero, range: range, get: { box.value }, set: { box.value = $0 })
+    }
+
+    @Test func dragAndRollTurnIntoWholeSteps() {
+        #expect(Scrubber.steps(forDrag: 7) == 0)
+        #expect(Scrubber.steps(forDrag: 25) == 3)
+        #expect(Scrubber.steps(forDrag: -17) == -2)
+        #expect(Scrubber.steps(forRoll: .degrees(35)) == 3)
+        #expect(Scrubber.steps(forRoll: .degrees(-12)) == -1)
+    }
+
+    @Test func rollingPastTheWrapIsASmallTurnNotAFullOne() {
+        #expect(abs(Scrubber.turn(from: .degrees(175), to: .degrees(-175)).degrees - 10) < 0.001)
+        #expect(abs(Scrubber.turn(from: .degrees(-170), to: .degrees(170)).degrees + 20) < 0.001)
+    }
+
+    @Test func scrubbingStepsFromWhereItBeganAndStaysInRange() {
+        let scrubber = Scrubber()
+        let box = Box(40.4)
+        var began = 0, ended = 0
+        scrubber.onBegin = { began += 1 }
+        scrubber.onEnd = { ended += 1 }
+        scrubber.onStep = { _ in box.steps += 1 }
+
+        scrubber.begin(target(box))
+        scrubber.scrub(to: 5)
+        #expect(box.value == 45)
+        scrubber.scrub(to: -100)
+        #expect(box.value == 0)
+        scrubber.end()
+        scrubber.end()
+        #expect(began == 1 && ended == 1)
+        #expect(box.steps == 2)
+        #expect(scrubber.target == nil)
+    }
+
+    @Test func rollingTheBarrelWhileScrubbingStepsTheValue() {
+        let scrubber = Scrubber()
+        let box = Box(10)
+        scrubber.begin(target(box))
+        scrubber.rolled(to: .degrees(170))
+        scrubber.rolled(to: .degrees(-170))   // 20° on, across the wrap
+        scrubber.rolled(to: .degrees(-160))   // 30° in all
+        #expect(box.value == 13)
+        scrubber.end()
+        // With no field being scrubbed, rolling does nothing.
+        scrubber.rolled(to: .degrees(0))
+        #expect(box.value == 13)
+    }
+
+    @Test func aScrubUndoesAsOneStep() throws {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let start = title.frame.width
+
+        model.beginScrubbing()
+        for step in 1...12 {
+            model.adjusting { model.store.update(ref) { $0.frame.size.width = start + CGFloat(step) } }
+        }
+        model.endScrubbing()
+        #expect(model.store.resolve(ref)?.element.frame.width == start + 12)
+        undo.undo()
+        #expect(model.store.resolve(ref)?.element.frame.width == start)
+    }
+}
