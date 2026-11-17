@@ -181,6 +181,10 @@ struct InkCanvas: UIViewRepresentable {
         /// True while the document canvas is being set from the design, which is not a
         /// change for the design to follow.
         private var isShowingDrawings = false
+        /// Each stroke on the document canvas with the area it covers, for finding the ink
+        /// under the Pencil as it hovers. Worked out once after the strokes change, rather
+        /// than for every stroke on every hover event.
+        private var inkAreas: [(stroke: PKStroke, area: CGRect)]?
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -542,9 +546,10 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
                 model.sketchChanged(sketch())
-            } else if !isShowingDrawings {
-                followInk()
+                return
             }
+            inkAreas = nil
+            if !isShowingDrawings { followInk() }
         }
 
         // MARK: The design's drawings
@@ -557,6 +562,7 @@ struct InkCanvas: UIViewRepresentable {
             isShowingDrawings = true
             defer { isShowingDrawings = false }
             documentCanvas.drawing = PKDrawing(strokes: strokes)
+            inkAreas = nil
         }
 
         /// The strokes on the document canvas changed, drawn, erased or moved with
@@ -652,14 +658,16 @@ struct InkCanvas: UIViewRepresentable {
         /// The drawing with ink under a canvas point, among those on the document
         /// canvas. Nil if there is no ink at the point.
         func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
-            let hit = documentCanvas.drawing.strokes.last { stroke in
-                guard stroke.renderBounds.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
+            let areas = inkAreas ?? documentCanvas.drawing.strokes.map { ($0, $0.renderBounds) }
+            inkAreas = areas
+            let hit = areas.last { stroke, area in
+                guard area.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
                 return stroke.path.interpolatedPoints(by: .distance(4)).contains { sample in
                     let location = sample.location.applying(stroke.transform)
                     return hypot(location.x - point.x, location.y - point.y) <= tolerance + max(sample.size.width, sample.size.height) / 2
                 }
             }
-            return hit.flatMap { drawings.drawing(owning: $0.key) }
+            return hit.flatMap { drawings.drawing(owning: $0.stroke.key) }
         }
 
         /// The drawing that strokes with these keys ended up in, when they share one.
@@ -679,7 +687,12 @@ struct InkCanvas: UIViewRepresentable {
         /// Sets the strokes on the document canvas from here. The design's drawings
         /// change to match, and that change is what undo takes back.
         private func setDocumentDrawing(_ drawing: PKDrawing) {
+            // PencilKit tells its delegate of a drawing set in code too, which would follow
+            // the ink once there and again here.
+            isShowingDrawings = true
             documentCanvas.drawing = drawing
+            isShowingDrawings = false
+            inkAreas = nil
             followInk()
         }
 

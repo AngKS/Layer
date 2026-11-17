@@ -20,15 +20,7 @@ struct SelectionLayer: View {
         let store = model.store
         let viewport = model.viewport
         ZStack(alignment: .topLeading) {
-            // What is selected and its size, for VoiceOver and automation rather than the eye.
-            if let summary = selectionSummary {
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .accessibilityElement()
-                    .accessibilityLabel("Selection")
-                    .accessibilityValue(summary)
-                    .accessibilityIdentifier("Selection")
-            }
+            SelectionSummary()
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
                     .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
@@ -129,23 +121,6 @@ struct SelectionLayer: View {
             .allowsHitTesting(false)
     }
 
-    private var selectionSummary: String? {
-        if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
-            return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
-        }
-        if let selected = model.selectedElement {
-            if selected.element.kind == .drawing {
-                let strokes = selected.element.strokeCount
-                return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
-            }
-            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
-        }
-        if let screen = model.selectedScreen {
-            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
-        }
-        return nil
-    }
-
     // MARK: Pieces
 
     /// An invisible area that takes touches, at least big enough for a finger.
@@ -197,6 +172,40 @@ struct SelectionLayer: View {
 
 }
 
+
+/// What is selected and its size, for VoiceOver and automation rather than the eye. A view
+/// of its own, so that it isn't worked out again on every frame of a pan, as the outlines are.
+private struct SelectionSummary: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let summary {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityLabel("Selection")
+                .accessibilityValue(summary)
+                .accessibilityIdentifier("Selection")
+        }
+    }
+
+    private var summary: String? {
+        if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
+            return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
+        }
+        if let selected = model.selectedElement {
+            if selected.element.kind == .drawing {
+                let strokes = selected.element.strokeCount
+                return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
+            }
+            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
+        }
+        if let screen = model.selectedScreen {
+            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
+        }
+        return nil
+    }
+}
 
 /// Where a drag on the canvas started, and what a dragged element has snapped to. Kept in
 /// an object of its own so that the element targets, which draw in a separate view, and the
