@@ -382,3 +382,48 @@ struct MagicPenPutAwayTests {
         #expect(!model.isPenDown)
     }
 }
+
+/// One use of a tool on the document canvas, a pen stroke or a rub of the eraser, is
+/// followed once, when it ends: the eraser changes the strokes many times on the way, and
+/// each change wrote the whole drawing out again (C-M6).
+@Suite("Ink followed once a tool is put down")
+@MainActor
+struct InkFollowedAtTheEndTests {
+    @Test func changesDuringAToolUseAreFollowedWhenItEnds() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        let mark = model.store.historyMark
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        #expect(model.store.floating.isEmpty, "not followed while the tool is in use")
+
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        #expect(model.store.floating.count == 1)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        #expect(model.store.historyMark == mark + 1)
+    }
+
+    /// The design changing mid-use (a spoken command, say) shows its drawings on the canvas:
+    /// the ink not yet followed is followed first, not drawn over.
+    @Test func inkNotYetFollowedIsKeptWhenTheDesignChangesMidUse() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: cross(at: CGPoint(x: 100, y: 100)))
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+
+        model.store.addScreen(from: CGRect(x: 600, y: 100, width: 200, height: 400))
+        #expect(coordinator.documentCanvas.drawing.strokes.count == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+    }
+}

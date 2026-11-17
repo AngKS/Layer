@@ -304,6 +304,11 @@ struct InkCanvas: UIViewRepresentable {
                 sketchCanvas.isHidden = !showsSketch
             }
             documentCanvas.isDrawingEnabled = isDrawing && !isLasso
+            // Put away mid-use, the tool's changes so far are followed now.
+            if !documentCanvas.isDrawingEnabled, isUsingDocumentTool {
+                isUsingDocumentTool = false
+                followInkNotYetFollowed()
+            }
             // With the palette up, a finger that doesn't draw taps to select. The Pencil's
             // taps are its own: dots and strokes.
             tap.isEnabled = !isDrawing || !fingerDraws
@@ -557,7 +562,27 @@ struct InkCanvas: UIViewRepresentable {
                 return
             }
             inkAreas = nil
-            if !isShowingDrawings { followInk() }
+            guard !isShowingDrawings else { return }
+            // While a tool is in use, its changes are followed once it is put down: the
+            // eraser changes the strokes many times in one rub, and each change wrote the
+            // whole drawing out again. PencilKit always says when a tool use ends.
+            if isUsingDocumentTool {
+                hasInkToFollow = true
+                return
+            }
+            followInk()
+        }
+
+        /// Whether a pen or the eraser is in use on the document canvas, and whether it has
+        /// changed the strokes yet.
+        private var isUsingDocumentTool = false
+        private var hasInkToFollow = false
+
+        /// Follows the ink a tool in use has changed, now rather than when it is put down.
+        private func followInkNotYetFollowed() {
+            guard hasInkToFollow else { return }
+            hasInkToFollow = false
+            followInk()
         }
 
         // MARK: The design's drawings
@@ -566,6 +591,9 @@ struct InkCanvas: UIViewRepresentable {
         /// when a design opens, and after a drawing is moved, resized, locked, hidden or
         /// deleted, or put back by undo.
         func showDrawings() {
+            // The design changed while a tool is in use (a spoken command, say): what the tool
+            // has done so far is followed first, not drawn over.
+            followInkNotYetFollowed()
             guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
             isShowingDrawings = true
             defer { isShowingDrawings = false }
@@ -593,6 +621,7 @@ struct InkCanvas: UIViewRepresentable {
             } else {
                 // One use of a tool is one undo step, however many times it changes the
                 // strokes on the way, as rubbing out does.
+                isUsingDocumentTool = true
                 model.store.beginEdit()
             }
         }
@@ -602,6 +631,8 @@ struct InkCanvas: UIViewRepresentable {
                 isSketchPenDown = false
                 model.penUp()
             } else {
+                isUsingDocumentTool = false
+                followInkNotYetFollowed()
                 model.store.endEdit()
             }
         }
