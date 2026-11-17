@@ -379,13 +379,15 @@ extension HostedModelTests {
         app.store.beginHeldEdit()                  // the spoken command starts
         app.store.beginEdit()                      // a finger starts to drag the image
         app.store.update(image) { $0.frame.origin.x = 40 }
+        let mark = app.store.historyMark           // the one step, from the first change
         _ = try await box.createScreen(name: nil, description: "a simple login screen")
         app.store.endHeldEdit()                    // the command is over; the finger is still down
         app.store.update(image) { $0.frame.origin.x = 60 }
         app.store.update(image) { $0.frame.origin.x = 80 }
 
         #expect(app.store.screens.count == 2)
-        #expect(!undo.canUndo)
+        // No streamed element or move was a step of its own.
+        #expect(app.store.historyMark == mark)
         app.store.endEdit()                        // the finger lifts
         undo.undo()
         #expect(app.store.content == before)
