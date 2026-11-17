@@ -188,8 +188,12 @@ enum SketchConventions {
     /// A square or circle narrower than this fraction of the screen is a checkbox or radio
     /// button rather than an image or avatar (about 47 points on an iPhone).
     static let tinyFraction: CGFloat = 0.12
-    /// An empty circle narrower than this is a radio button rather than an avatar.
-    static let radioFraction: CGFloat = 0.08
+    /// An empty circle narrower than this is a radio button rather than an avatar: about
+    /// 33 points on an iPhone, halfway between a drawn radio (28–30 pt across) and the
+    /// smallest avatar (34 pt and up). The measured width includes the pen's own
+    /// thickness, which the earlier 0.08 (31 pt) didn't allow for, so a 30 pt radio
+    /// circle measured as wider than the cutoff.
+    static let radioFraction: CGFloat = 0.085
     /// An outline at least this many times wider than tall, and no taller than
     /// `progressHeight` screen points, is a progress bar.
     static let progressRatio: CGFloat = 7
@@ -223,9 +227,9 @@ enum SketchPrompt {
         - title: a short squiggle near the top. A screen has one title.
         - bodyText: a longer squiggle, or a squiggle below a title or an image.
         - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
-        - radioButton: a tiny circle, often with a dot in it, usually one of a column of them.
+        - radioButton: a tiny circle, under about 33 points across, often with a dot in it, usually one of a column of them.
         - progressBar: a long, very thin outline, often partly shaded in.
-        - avatar: a circle too big to be a radio button, usually alone rather than in a column.
+        - avatar: a circle about 34 points across or more, usually alone rather than in a column.
         - toggle: a small pill with a circle (its knob) nearer one end than the middle.
 
         You're only asked about sketches the shape rules themselves found ambiguous, and \
@@ -385,7 +389,13 @@ enum SketchPrompt {
             case .dot: "with a dot in the middle"
             case .other: "with some marks inside"
             }
-            return "a \(proportion) closed outline with \(corners), \(inside)"
+            // On a screen, say how big it is: a radio button and an avatar (or a checkbox and
+            // an image) differ by size alone, which the model can't judge without it.
+            // Only for small shapes: for wide boxes the number measurably pulled a button
+            // towards a text field, and their size isn't what tells those apart.
+            let across = widthFraction.map { $0 < SketchConventions.tinyFraction } == true
+                ? " about \(Int(bounds.width.rounded())) points across" : ""
+            return "a \(proportion) closed outline\(across) with \(corners), \(inside)"
         case .wave(let humps):
             return "a \(length)squiggle with \(humps) humps, running left to right"
         case .stackedLines(let count):
