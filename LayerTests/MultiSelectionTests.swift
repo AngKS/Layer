@@ -1,5 +1,7 @@
 import CoreGraphics
 import Foundation
+import Observation
+import os
 import PencilKit
 import Testing
 @testable import Layer
@@ -586,5 +588,94 @@ struct SeveralThingsOnTheCanvasTests {
         board.model.lassoDrawn(loop(round: area).map(board.model.viewport.viewPoint(for:)))
         board.model.sweepEnded()
         #expect(board.model.selection == .element(board.note))
+    }
+}
+
+/// Drags on the canvas, as `SelectionLayer`'s gestures drive them. SwiftUI doesn't call
+/// `onEnded` for a drag it cancels, so a drag has to end without it.
+@Suite("Dragging on the canvas")
+@MainActor
+struct CanvasDragTests {
+    private func move(_ board: Board, _ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
+        let (element, placement) = board.store.resolve(ref)!
+        drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: board.model) {
+            drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        }
+    }
+
+    /// The Pencil landing on what a finger drags takes the selection, and the drag's view
+    /// with it. The drag ends there, as one step, and the guides and spacing go.
+    @Test func aDragWhoseViewGoesEndsThere() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let owner = CanvasDrags.Owner()
+        let before = board.store.content
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: owner)
+        move(board, drags, board.note, by: 40, from: CGPoint(x: 1, y: 1), owner: owner)
+        #expect(board.model.isAdjusting)
+        #expect(board.store.isEditing)
+
+        drags.cancel(owner, model: board.model)
+        #expect(!board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+        #expect(!drags.isDragging)
+        #expect(drags.elementOrigin == nil)
+
+        board.undo.undo()
+        #expect(board.store.content == before)
+    }
+
+    /// Cancelled without a word, a drag used to leave its origin behind, and the next drag,
+    /// of anything, began from the first element's frame.
+    @Test func theDragAfterOneThatWasCancelledMovesFromItsOwnPlace() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let titleBefore = board.canvasFrame(board.title)
+        move(board, drags, board.title, by: 20, from: CGPoint(x: 1, y: 1), owner: CanvasDrags.Owner())
+
+        let noteBefore = board.canvasFrame(board.note)
+        let other = CanvasDrags.Owner()
+        move(board, drags, board.note, by: 10, from: CGPoint(x: 500, y: 500), owner: other)
+        #expect(board.canvasFrame(board.note) == noteBefore.offsetBy(dx: 10, dy: 0))
+        drags.dropElement(board.note, findsNewHome: true, owner: other, model: board.model)
+        #expect(!board.store.isEditing)
+
+        // Two steps: the drag that was cut short, and this one.
+        board.undo.undo()
+        #expect(board.canvasFrame(board.note) == noteBefore)
+        #expect(board.canvasFrame(board.title) != titleBefore)
+        board.undo.undo()
+        #expect(board.canvasFrame(board.title) == titleBefore)
+    }
+
+    @Test func aNewTouchOnTheSameViewIsANewDrag() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let owner = CanvasDrags.Owner()
+        let start = board.canvasFrame(board.note)
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: owner)
+        // The first touch was cancelled; the second begins where the note now is.
+        move(board, drags, board.note, by: 5, from: CGPoint(x: 9, y: 9), owner: owner)
+        #expect(board.canvasFrame(board.note) == start.offsetBy(dx: 25, dy: 0))
+    }
+
+    /// The targets are drawn with the rule a drag will use. Read while they are drawn, the
+    /// viewport made them depend on where the canvas had scrolled, and every frame of a pan
+    /// drew them all again.
+    @Test func aDragsRuleDoesNotDependOnWhereTheCanvasHasScrolled() throws {
+        let board = Board()
+        let drags = CanvasDrags()
+        let (element, placement) = try #require(board.store.resolve(board.note))
+        let redrawn = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        } onChange: {
+            redrawn.withLock { $0 = true }
+        }
+        board.model.scrollOffset = CGPoint(x: 300, y: 120)
+        #expect(!redrawn.withLock { $0 })
     }
 }
