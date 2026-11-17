@@ -201,11 +201,6 @@ final class AppModel {
     }
     /// Whether there is only room for one panel at a time.
     private var fitsOnePanel: Bool { isCompactSizeClass || (canvasSize.width > 0 && canvasSize.width < 680) }
-    /// Whether the fixed palette bar of a compact window has been tucked away, pen still
-    /// in hand. Remembered between launches, as the floating palette's place is.
-    var isPaletteCollapsed = UserDefaults.standard.bool(forKey: "isPaletteCollapsed") {
-        didSet { UserDefaults.standard.set(isPaletteCollapsed, forKey: "isPaletteCollapsed") }
-    }
     /// True while an element is being dragged or resized, which shows the spacing guides.
     var isAdjusting = false
 
@@ -341,16 +336,25 @@ final class AppModel {
 
     var isGenerating: Bool { generation?.phase == .writing }
 
+    /// Whether the screen being generated opened an undo step of its own to close.
+    @ObservationIgnored private var generationOwnsEdit = true
+
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
-    func generateScreen(from description: String) {
+    ///
+    /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
+    /// is already being held open and the screen is part of it, so it opens none of its
+    /// own. That is also how an edit by hand made in the meantime is told from it: see
+    /// `DesignStore.endHeldEdit()`.
+    func generateScreen(from description: String, partOfHeldEdit: Bool = false) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
         let device = store.canvas.sketchDevice
-        store.beginEdit()
+        generationOwnsEdit = !partOfHeldEdit
+        if generationOwnsEdit { store.beginEdit() }
         let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
         store.updateScreen(screen.id) { $0.name = ScreenGenerator.name(for: prompt) }
         DesignActions.reveal(.screen(screen.id), in: self)
@@ -384,6 +388,11 @@ final class AppModel {
         generationTask?.cancel()
     }
 
+    /// Returns once the screen being generated has finished, failed or been stopped.
+    func waitForGeneration() async {
+        await generationTask?.value
+    }
+
     private func finishGeneration(error: (any Error)?) {
         generationTask = nil
         guard var finished = generation else { return }
@@ -394,7 +403,7 @@ final class AppModel {
         }
         // A screen nothing was written on isn't left behind.
         if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
-        store.endEdit()
+        if generationOwnsEdit { store.endEdit() }
         finished.isThinking = false
         generation = finished
         // Success says so briefly; a failure stays until it is dismissed.
@@ -412,6 +421,84 @@ final class AppModel {
         guard !isGenerating else { return }
         generationDismissal?.cancel()
         generation = nil
+    }
+
+    /// The pencil bar of a narrow window was flicked aside or down. That puts it away and
+    /// ends drawing, so nothing is left in the corner but what belongs there, and a
+    /// finger goes back to selecting and panning. Draw in the tools menu brings it back.
+    func pencilBarFlickedAway() {
+        guard isCompactSizeClass, tool == .draw else { return }
+        withAnimation(.smooth(duration: 0.3)) { tool = .select }
+    }
+
+    // MARK: Voice mode
+
+    /// The call that is up in this design, if one is.
+    private(set) var voice: VoiceCall?
+    /// Why a call couldn't start or couldn't go on, to tell the person once.
+    var voiceNotice: String?
+
+    var isInVoiceCall: Bool { voice != nil }
+
+    /// Whether the phone button is there to start a call with: in the free corner of a
+    /// narrow window, with no call up already and no panel over that corner. Drawing and
+    /// voice mode are one or the other: while Draw is on the pencil bar has the bottom of
+    /// the window and the button is gone, as Draw is unavailable while a call is up.
+    var offersVoiceMode: Bool {
+        isCompactSizeClass && tool != .draw && !isInVoiceCall && !isLayersOpen && !isInspectorOpen
+    }
+
+    /// Starts a call: the phone button's action. A call with no model to act on what it
+    /// hears would be no use, so one that can't be used is said so instead.
+    func startVoiceCall() {
+        guard voice == nil else { return }
+        if case .unavailable(let reason) = modelChoice.sketchProvider.readiness() {
+            voiceNotice = reason
+            return
+        }
+        Task { await startVoiceCall(route: DictationRoute(), runner: VoiceAgent(model: self)) }
+    }
+
+    /// Starts a call that hears through `route` and acts through `runner`. Returns once
+    /// the call is listening, or has ended because it couldn't.
+    func startVoiceCall(route: any VoiceRoute, runner: any VoiceCommandRunner) async {
+        guard voice == nil else { return }
+        // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
+        tool = .select
+        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        // What the agent is doing, tool by tool, is what the pill says while it works.
+        (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }
+        call.onEnd = { [weak self, weak call] in
+            guard let self, let call, self.voice === call else { return }
+            self.voiceNotice = call.endReason
+            withAnimation(.smooth(duration: 0.3)) { self.voice = nil }
+        }
+        withAnimation(.smooth(duration: 0.3)) { voice = call }
+        await call.start()
+    }
+
+    func endVoiceCall() {
+        voice?.end()
+    }
+
+    /// Layer only listens while it is in front: a call ends when its window leaves the
+    /// screen. The window's own scene says when that is. SwiftUI's scene phase can't be
+    /// used for it: it reads as in the background while a window is being resized, and
+    /// stays that way, though the window never left.
+    func windowLeftTheScreen() {
+        endVoiceCall()
+    }
+
+    /// The words on the canvas, which are the ones most likely to be spoken and misheard:
+    /// the names of the screens and what their elements say.
+    private var voiceVocabulary: [String] {
+        var seen: Set<String> = []
+        let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
+        return words
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 60 && seen.insert($0).inserted }
+            .prefix(100)
+            .map { $0 }
     }
 
     // MARK: The file
@@ -441,6 +528,7 @@ final class AppModel {
 
     func close() {
         isClosed = true
+        voice?.end()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()

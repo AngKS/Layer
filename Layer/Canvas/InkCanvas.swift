@@ -151,6 +151,9 @@ struct InkCanvas: UIViewRepresentable {
         private var boxStart: CGPoint?
         /// Notices Apple Pencil touching the canvas, without taking part in anything.
         let pencilDetector = PencilDetector()
+        /// Notice the pencil bar of a narrow window being flicked away: one for each window
+        /// of the scene, because iPadOS keeps that bar in a window of its own.
+        private var paletteFlicks: [PaletteFlick] = []
         /// Knows where fingers are resting, for tapping things while one is held.
         let restingFingers = RestingFingerDetector()
         private var fingerDraws = true
@@ -208,6 +211,7 @@ struct InkCanvas: UIViewRepresentable {
                     pencilDetector.view?.removeGestureRecognizer(pencilDetector)
                     documentCanvas.window?.addGestureRecognizer(pencilDetector)
                 }
+                watchForFlicks()
                 // On the window too: the finger that rests may be on an element's own
                 // handle, which is drawn above the canvas.
                 if restingFingers.view !== documentCanvas.window {
@@ -299,14 +303,9 @@ struct InkCanvas: UIViewRepresentable {
             if !(isDrawing && isMagicPen) { model.pen.location = nil }
 
             let showsPalette = isDrawing && !hidesPalette
-            // A canvas whose palette is out of sight takes only the Pencil. A palette
-            // that is tucked away is still in use, so fingers go on drawing then, unless
-            // the Pencil settings say that only the Pencil draws.
             // Drawing, a finger draws only if it is meant to; otherwise it pans the canvas.
-            let isTuckedAway = isDrawing && hidesPalette
             let policy: PKCanvasViewDrawingPolicy = !isDrawing ? .default
                 : fingerDraws && !UIPencilInteraction.prefersPencilOnlyDrawing ? .anyInput : .pencilOnly
-            _ = isTuckedAway
             // The lasso is drawn with whatever draws: the Pencil, and a finger when fingers draw.
             lasso.isEnabled = isLasso
             lasso.allowedTouchTypes = (policy == .anyInput ? [UITouch.TouchType.direct, .pencil] : [.pencil]).map { NSNumber(value: $0.rawValue) }
@@ -315,6 +314,7 @@ struct InkCanvas: UIViewRepresentable {
                 if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
                 palette.setVisible(showsPalette, forFirstResponder: canvas)
             }
+            watchForFlicks()
             // The canvas stays first responder outside draw mode too, so the system's
             // undo and redo gestures keep reaching the document's undo history.
             if documentCanvas.window != nil, !canvases.contains(where: \.isFirstResponder) {
@@ -330,11 +330,43 @@ struct InkCanvas: UIViewRepresentable {
             }
         }
 
+        /// Whether a touch is on the pencil bar of a narrow window. iPadOS fixes that bar
+        /// across the bottom of the window; a wider window's palette floats and looks
+        /// after itself, so there is nothing there to flick away.
+        private func isOnPencilBar(_ touch: UITouch) -> Bool {
+            guard tool == .draw, !hidesPalette, model.isCompactSizeClass, palette.isVisible, let window = documentCanvas.window else { return false }
+            // Only where the bar says it is. With the bar down, as it is while a name is
+            // being typed, the keyboard is in the same place and is swiped on too.
+            let bar = palette.frameObscured(in: window)
+            return !bar.isNull && !bar.isEmpty && bar.contains(touch.location(in: window))
+        }
+
+        /// Puts a flick recogniser on each window of the scene that hasn't one. The bar is
+        /// not in the app's own window, and nothing says which window it is in, so each is
+        /// watched for a touch that starts where the bar is.
+        private func watchForFlicks() {
+            let windows = documentCanvas.window?.windowScene?.windows ?? []
+            paletteFlicks.removeAll { flick in
+                if let window = flick.view, windows.contains(where: { $0 === window }) { return false }
+                flick.view?.removeGestureRecognizer(flick)
+                return true
+            }
+            for window in windows where !paletteFlicks.contains(where: { $0.view === window }) {
+                let flick = PaletteFlick()
+                flick.isOnBar = { [weak self] in self?.isOnPencilBar($0) ?? false }
+                flick.onFlick = { [weak self] in self?.model.pencilBarFlickedAway() }
+                window.addGestureRecognizer(flick)
+                paletteFlicks.append(flick)
+            }
+        }
+
         func hidePalette() {
             zoomAnimation?.stop()
             palette.removeObserver(self)
             palette.removeObserver(documentCanvas)
             pencilDetector.view?.removeGestureRecognizer(pencilDetector)
+            for flick in paletteFlicks { flick.view?.removeGestureRecognizer(flick) }
+            paletteFlicks = []
             restingFingers.view?.removeGestureRecognizer(restingFingers)
             for canvas in canvases {
                 palette.setVisible(false, forFirstResponder: canvas)
@@ -344,6 +376,9 @@ struct InkCanvas: UIViewRepresentable {
         // MARK: Scrolling and zooming
 
         private var viewSize: CGSize { documentCanvas.bounds.size }
+
+        /// The window this canvas is showing in, as the system knows it.
+        var windowScene: UIWindowScene? { documentCanvas.window?.windowScene }
 
         /// Arranges the viewport for the view's size whenever that changes. A new design
         /// opens in the middle of the canvas; one with content opens showing all of it.
@@ -494,6 +529,11 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         // MARK: Palette and canvas events
+
+        /// The bar's window can be made only as the bar first comes up.
+        func toolPickerVisibilityDidChange(_ toolPicker: PKToolPicker) {
+            watchForFlicks()
+        }
 
         func toolPickerSelectedToolItemDidChange(_ toolPicker: PKToolPicker) {
             refresh()
@@ -784,6 +824,67 @@ private final class ZoomAnimation: NSObject {
         let to = end.canvasPoint(for: middle)
         let center = CGPoint(x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased)
         step(.centered(on: center, scale: scale, in: viewSize), false)
+    }
+}
+
+/// Notices a flick that begins on the pencil bar of a narrow window, and says so. iPadOS
+/// gives that bar no flick of its own, and no word when it is touched, so one of these
+/// watches from each window of the scene: the bar is in a system window, not the app's.
+/// It never recognizes anything, so nothing the bar does is disturbed:
+/// tapping a pen, dragging through its tools and choosing a colour all go on as they were.
+final class PaletteFlick: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    /// Whether a touch is on the bar. Never, while the bar isn't up.
+    var isOnBar: (UITouch) -> Bool = { _ in false }
+    var onFlick: () -> Void = {}
+    private var began: (point: CGPoint, time: TimeInterval)?
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    /// Whether a movement is a flick: sideways by 50 points or more and more sideways
+    /// than not, or downward, off the bottom of the window, by 40 points or more.
+    static func isFlick(_ translation: CGSize) -> Bool {
+        let (sideways, down) = (abs(translation.width), translation.height)
+        return (sideways >= 50 && sideways > abs(down)) || (down >= 40 && down > sideways)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        // Only a touch that starts on the bar: a stroke that wanders over it isn't one.
+        guard began == nil, let touch = touches.first, let view, isOnBar(touch) else {
+            if began == nil { state = .failed }
+            return
+        }
+        began = (touch.location(in: view), touch.timestamp)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        defer {
+            began = nil
+            state = .failed
+        }
+        guard let began, let touch = touches.first, let view else { return }
+        let ended = touch.location(in: view)
+        // Quick, as a flick is: a slow drag along the bar is looking through its tools.
+        guard touch.timestamp - began.time < 0.6 else { return }
+        if Self.isFlick(CGSize(width: ended.x - began.point.x, height: ended.y - began.point.y)) { onFlick() }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        began = nil
+        state = .failed
+    }
+
+    override func reset() {
+        began = nil
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 

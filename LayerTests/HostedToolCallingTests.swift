@@ -1,0 +1,362 @@
+import Foundation
+@_weakLinked import FoundationModels
+import Testing
+@testable import Layer
+
+/// What a tool was called with, gathered across the threads tools run on.
+actor ToolLog {
+    private(set) var calls: [String] = []
+
+    func add(_ call: String) {
+        calls.append(call)
+    }
+}
+
+/// A tool that only writes down what it was asked.
+struct RecordingTool: Tool {
+    let log: ToolLog
+    let name = "setText"
+    let description = "Changes the words on an element."
+
+    @Generable
+    struct Arguments {
+        var element: String
+        var text: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await log.add("\(arguments.element)=\(arguments.text)")
+        return "Reworded \(arguments.element)."
+    }
+}
+
+extension SSE {
+    /// Anthropic asking for a tool, its arguments arriving in pieces.
+    static func anthropicToolCall(id: String, name: String, json pieces: [String]) -> String {
+        var lines = [
+            #"data: {"type":"message_start","message":{"usage":{"input_tokens":42,"output_tokens":1}}}"#,
+            #"data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"\#(id)","name":"\#(name)","input":{}}}"#,
+        ]
+        for piece in pieces {
+            lines.append(#"data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":\#(quoted(piece))}}"#)
+        }
+        lines += [
+            #"data: {"type":"content_block_stop","index":0}"#,
+            #"data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}"#,
+            #"data: {"type":"message_stop"}"#,
+        ]
+        return lines.map { "event: x\n\($0)\n" }.joined(separator: "\n")
+    }
+
+    /// OpenAI asking for a tool: its name first, then its arguments in pieces.
+    static func openAIToolCall(id: String, name: String, json pieces: [String]) -> String {
+        var lines = [
+            #"data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"\#(id)","type":"function","function":{"name":"\#(name)","arguments":""}}]}}]}"#,
+        ]
+        for piece in pieces {
+            lines.append(#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":\#(quoted(piece))}}]}}]}"#)
+        }
+        lines += [
+            #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            #"data: {"choices":[],"usage":{"prompt_tokens":30,"completion_tokens":5}}"#,
+            "data: [DONE]",
+        ]
+        return lines.joined(separator: "\n\n")
+    }
+
+    private static func quoted(_ text: String) -> String {
+        String(String(data: try! JSONSerialization.data(withJSONObject: [text]), encoding: .utf8)!.dropFirst().dropLast())
+    }
+}
+
+/// These share the stubbed providers and their keys with the rest of the suite, so they
+/// are part of it and run in turn with it.
+extension HostedModelTests {
+    private static let argumentPieces = [#"{"element":"E2","#, #""text":"Ahoy"}"#]
+
+    private func body(ofRequest index: Int) throws -> [String: Any] {
+        let requests = StubProvider.requests
+        try #require(requests.count > index, "only \(requests.count) requests were sent")
+        return try #require(try JSONSerialization.jsonObject(with: requests[index].body) as? [String: Any])
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func anthropicIsSentTheToolsAndAnswersWithACall() async throws {
+        StubProvider.answer(with: [
+            .init(body: SSE.anthropicToolCall(id: "toolu_1", name: "setText", json: Self.argumentPieces)),
+            .init(body: SSE.anthropic(text: ["Done."])),
+        ])
+        let log = ToolLog()
+        let session = LanguageModelSession(
+            model: HostedLanguageModel(provider: .anthropic, model: "claude-test"),
+            tools: [RecordingTool(log: log)], instructions: "You edit designs."
+        )
+        let response = try await session.respond(to: "make the button say ahoy")
+        #expect(response.content == "Done.")
+        #expect(await log.calls == ["E2=Ahoy"])
+        #expect(StubProvider.requests.count == 2)
+
+        // The tool went to Anthropic in its own form, one call at a time.
+        let first = try body(ofRequest: 0)
+        let tool = try #require((first["tools"] as? [[String: Any]])?.first)
+        #expect(tool["name"] as? String == "setText")
+        #expect(tool["description"] as? String == "Changes the words on an element.")
+        let schema = try #require(tool["input_schema"] as? [String: Any])
+        #expect(schema["type"] as? String == "object")
+        #expect(Set((schema["properties"] as? [String: Any] ?? [:]).keys) == ["element", "text"])
+        let choice = try #require(first["tool_choice"] as? [String: Any])
+        #expect(choice["type"] as? String == "auto")
+        #expect(choice["disable_parallel_tool_use"] as? Bool == true)
+
+        // Its result went back as Anthropic expects: the call, then what came of it.
+        let messages = try #require(try body(ofRequest: 1)["messages"] as? [[String: Any]])
+        #expect(messages.map { $0["role"] as? String } == ["user", "assistant", "user"])
+        let call = try #require((messages[1]["content"] as? [[String: Any]])?.last)
+        #expect(call["type"] as? String == "tool_use")
+        #expect(call["id"] as? String == "toolu_1")
+        #expect(call["name"] as? String == "setText")
+        #expect(call["input"] as? [String: String] == ["element": "E2", "text": "Ahoy"])
+        let result = try #require((messages[2]["content"] as? [[String: Any]])?.first)
+        #expect(result["type"] as? String == "tool_result")
+        #expect(result["tool_use_id"] as? String == "toolu_1")
+        #expect(result["content"] as? String == "Reworded E2.")
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func openAIIsSentTheToolsAndAnswersWithACall() async throws {
+        StubProvider.answer(with: [
+            .init(body: SSE.openAIToolCall(id: "call_1", name: "setText", json: Self.argumentPieces)),
+            .init(body: SSE.openAI(text: ["Done."])),
+        ])
+        let log = ToolLog()
+        let session = LanguageModelSession(
+            model: HostedLanguageModel(provider: .openAI, model: "gpt-test"),
+            tools: [RecordingTool(log: log)], instructions: "You edit designs."
+        )
+        let response = try await session.respond(to: "make the button say ahoy")
+        #expect(response.content == "Done.")
+        #expect(await log.calls == ["E2=Ahoy"])
+
+        let first = try body(ofRequest: 0)
+        let tool = try #require((first["tools"] as? [[String: Any]])?.first)
+        #expect(tool["type"] as? String == "function")
+        let function = try #require(tool["function"] as? [String: Any])
+        #expect(function["name"] as? String == "setText")
+        #expect((function["parameters"] as? [String: Any])?["type"] as? String == "object")
+        #expect(first["parallel_tool_calls"] as? Bool == false)
+        #expect(first["tool_choice"] == nil)
+
+        let messages = try #require(try body(ofRequest: 1)["messages"] as? [[String: Any]])
+        #expect(messages.map { $0["role"] as? String } == ["system", "user", "assistant", "tool"])
+        let call = try #require((messages[2]["tool_calls"] as? [[String: Any]])?.first)
+        #expect(call["id"] as? String == "call_1")
+        #expect(call["type"] as? String == "function")
+        let called = try #require(call["function"] as? [String: Any])
+        #expect(called["name"] as? String == "setText")
+        let arguments = try #require((called["arguments"] as? String)?.data(using: .utf8))
+        #expect(try JSONSerialization.jsonObject(with: arguments) as? [String: String] == ["element": "E2", "text": "Ahoy"])
+        #expect(messages[3]["tool_call_id"] as? String == "call_1")
+        #expect(messages[3]["content"] as? String == "Reworded E2.")
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"), arguments: [HostedProvider.anthropic, .openAI])
+    func aModelCanBeMadeToUseATool(provider: HostedProvider) async throws {
+        StubProvider.answer(with: [
+            .init(body: provider == .anthropic
+                ? SSE.anthropicToolCall(id: "t1", name: "setText", json: Self.argumentPieces)
+                : SSE.openAIToolCall(id: "t1", name: "setText", json: Self.argumentPieces)),
+            .init(body: provider == .anthropic ? SSE.anthropic(text: ["Done."]) : SSE.openAI(text: ["Done."])),
+        ])
+        let session = LanguageModelSession(model: HostedLanguageModel(provider: provider, model: "m"), tools: [RecordingTool(log: ToolLog())])
+        _ = try await session.respond(to: "reword it", options: GenerationOptions(toolCallingMode: .required))
+        let first = try body(ofRequest: 0)
+        switch provider {
+        case .anthropic: #expect((first["tool_choice"] as? [String: Any])?["type"] as? String == "any")
+        case .openAI, .lmStudio: #expect(first["tool_choice"] as? String == "required")
+        }
+    }
+
+    /// A server may ignore being asked for one tool at a time. Tools asked for together
+    /// would be run together, in no fixed order, on the one design; so only the first is
+    /// taken, and the model asks for the next once it has that one's result.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func onlyTheFirstToolOfAnAnswerIsRun() async throws {
+        let twoAtOnce = [
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"setText","arguments":"{\"element\":\"E2\",\"text\":\"One\"}"}}]}}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"setText","arguments":"{\"element\":\"E3\",\"text\":\"Two\"}"}}]}}]}"#,
+            #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+        ].joined(separator: "\n\n")
+        StubProvider.answer(with: [
+            .init(body: twoAtOnce),
+            .init(body: SSE.openAIToolCall(id: "call_3", name: "setText", json: [#"{"element":"E3","text":"Two"}"#])),
+            .init(body: SSE.openAI(text: ["Done."])),
+        ])
+        let log = ToolLog()
+        let session = LanguageModelSession(model: HostedLanguageModel(provider: .lmStudio, model: "local"), tools: [RecordingTool(log: log)])
+        let response = try await session.respond(to: "reword both")
+        #expect(response.content == "Done.")
+        #expect(await log.calls == ["E2=One", "E3=Two"])
+        // The model is shown the one call that was run, and its result, before it goes on.
+        let messages = try #require(try body(ofRequest: 1)["messages"] as? [[String: Any]])
+        let asked = try #require(messages.first { $0["role"] as? String == "assistant" }?["tool_calls"] as? [[String: Any]])
+        #expect(asked.map { $0["id"] as? String } == ["call_1"])
+    }
+
+    @Test func toolCallsAreReadFromEachProvidersStream() throws {
+        func events(_ stream: String, from provider: HostedProvider) throws -> [HostedModelClient.StreamEvent] {
+            var parser = HostedModelClient.StreamParser(provider: provider)
+            return try stream.split(separator: "\n").flatMap { try parser.events(forLine: String($0)) }
+        }
+        for (provider, stream) in [
+            (HostedProvider.anthropic, SSE.anthropicToolCall(id: "c1", name: "setText", json: Self.argumentPieces)),
+            (.openAI, SSE.openAIToolCall(id: "c1", name: "setText", json: Self.argumentPieces)),
+        ] {
+            let calls = try events(stream, from: provider).compactMap { event -> String? in
+                guard case .toolCall(let id, let name, let arguments) = event else { return nil }
+                #expect(id == "c1")
+                #expect(name == "setText")
+                return arguments
+            }
+            #expect(calls.joined() == Self.argumentPieces.joined(), "\(provider)")
+        }
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func aLocalServerThatRejectsToolsSaysSo() async throws {
+        StubProvider.answer(with: .init(status: 400, body: #"{"error":{"message":"This model does not support tools."}}"#, contentType: "application/json"))
+        let session = LanguageModelSession(model: HostedLanguageModel(provider: .lmStudio, model: "tiny"), tools: [RecordingTool(log: ToolLog())])
+        await #expect(throws: HostedModelError.toolsUnsupported(.lmStudio)) {
+            try await session.respond(to: "reword it")
+        }
+        #expect(HostedModelError.toolsUnsupported(.lmStudio).errorDescription == "This model can't take voice commands. Choose another in Settings.")
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func aLocalServerErrorWithoutToolsIsStillItsOwn() async throws {
+        StubProvider.answer(with: .init(status: 400, body: #"{"error":{"message":"This model does not support tools."}}"#, contentType: "application/json"))
+        let session = LanguageModelSession(model: HostedLanguageModel(provider: .lmStudio, model: "tiny"))
+        await #expect(throws: HostedModelError.server(.lmStudio, status: 400, message: "This model does not support tools.")) {
+            try await session.respond(to: "hello")
+        }
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aSpokenCommandRunsThroughTheDesignsHostedModel() async throws {
+        let (app, screen) = VoiceFixture.undoableLogin()
+        // Choosing a model has the sketch engine try it out. That request is let through
+        // first, so that the replies below go to the command's own two.
+        StubProvider.answer(with: .init(body: SSE.anthropic(text: ["ok"])))
+        app.setModelChoice(.hosted(.anthropic, model: "claude-test"))
+        try await Task.sleep(for: .milliseconds(400))
+        StubProvider.answer(with: [
+            .init(body: SSE.anthropicToolCall(id: "toolu_1", name: "styleElement", json: [#"{"element":"E2","#, #""look":"green"}"#])),
+            .init(body: SSE.anthropic(text: ["Done."])),
+        ])
+        let agent = VoiceAgent(model: app)
+
+        let outcome = await agent.run("make the sign in button green")
+
+        #expect(outcome.problem == nil)
+        #expect(outcome.lines == ["Restyled the button “Sign in”."])
+        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        // The model was sent the rules, the whole canvas and every tool, as Anthropic takes them.
+        let first = try body(ofRequest: 0)
+        let system = try #require(first["system"] as? String)
+        #expect(system.contains(VoiceRules.full))
+        #expect(system.contains(#"E2 button "Sign in" x20 y420 w353 h50"#))
+        #expect((first["tools"] as? [[String: Any]])?.count == 15)
+        #expect(first["model"] as? String == "claude-test")
+        // Its second look at the canvas is after the change.
+        let second = try #require(try body(ofRequest: 1)["system"] as? String)
+        #expect(second.contains("colour green"))
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aCallDoesNotStartWithoutAUsableModel() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        try APIKeyStore.removeKey(for: .openAI)
+        app.tool = .draw
+
+        app.startVoiceCall()
+
+        // Told why, in the words the model settings use, and nothing else has changed.
+        #expect(app.voice == nil)
+        #expect(app.voiceNotice == HostedModelError.missingKey(.openAI).errorDescription)
+        #expect(app.tool == .draw)
+        try APIKeyStore.setKey("test-key-openai", for: .openAI)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aHostedModelThatCannotBeReachedIsSaidInWords() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        StubProvider.failNextRequests()
+        let before = app.store.content
+        let outcome = await VoiceAgent(model: app).run("make the button green")
+        #expect(outcome.problem == HostedModelError.offline.errorDescription)
+        #expect(app.store.content == before)
+        #expect(!app.store.isHoldingEdit)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aSpokenScreenIsWrittenByTheDesignsModel() async throws {
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+
+        let line = try await box.createScreen(description: "a simple login screen")
+
+        #expect(app.store.screens.count == 2)
+        let made = try #require(app.store.screens.last)
+        #expect(made.elements.map(\.kind) == [.title, .button])
+        // The model is told what to call the new screen, and how much is on it.
+        #expect(line.contains("S2"))
+        #expect(line.contains("2 elements"))
+        #expect(handles.screen("S2") == made.id)
+        #expect(box.lines == [line])
+        // The canvas's own notice isn't left up: the call's pill has said it.
+        #expect(app.generation == nil)
+    }
+
+    /// Someone can be dragging an element while a spoken screen is written. The screen
+    /// being finished must not close the step under the finger: every move after it
+    /// would then be an undo step of its own, and push the earlier history out.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aDragHeldThroughASpokenScreenIsStillOneStep() async throws {
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
+        let (app, screen) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        let undo = try #require(app.store.undoManager)
+        undo.removeAllActions()
+        let before = app.store.content
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        let image = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screen(screen)?.elements.last).id)
+
+        app.store.beginHeldEdit()                  // the spoken command starts
+        app.store.beginEdit()                      // a finger starts to drag the image
+        app.store.update(image) { $0.frame.origin.x = 40 }
+        _ = try await box.createScreen(description: "a simple login screen")
+        app.store.endHeldEdit()                    // the command is over; the finger is still down
+        app.store.update(image) { $0.frame.origin.x = 60 }
+        app.store.update(image) { $0.frame.origin.x = 80 }
+
+        #expect(app.store.screens.count == 2)
+        #expect(!undo.canUndo)
+        app.store.endEdit()                        // the finger lifts
+        undo.undo()
+        #expect(app.store.content == before)
+        #expect(!undo.canUndo)
+    }
+}

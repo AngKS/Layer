@@ -462,13 +462,49 @@ final class DesignStore {
     /// Starts a change made in many small steps, such as a drag or typing. Everything
     /// until `endEdit()` undoes as one step.
     func beginEdit() {
+        if isHoldingEdit { isEditingByHandInHold = true }
         if editStart == nil { editStart = content }
     }
 
     func endEdit() {
+        guard !isHoldingEdit else {
+            // The hold keeps the step open; the edit by hand is only noted as over.
+            isEditingByHandInHold = false
+            return
+        }
         guard let start = editStart else { return }
         editStart = nil
         if start != content { registerUndo(restoring: start) }
+    }
+
+    /// Whether an edit is being held open: see `beginHeldEdit()`.
+    @ObservationIgnored private(set) var isHoldingEdit = false
+    /// Whether an edit by hand is under way inside the hold: a drag begun while a spoken
+    /// command runs, or one already begun when the command started. Not a count: like
+    /// `beginEdit()` itself, which a slider calls with every move and ends once.
+    @ObservationIgnored private var isEditingByHandInHold = false
+
+    /// Starts an edit that stays open until `endHeldEdit()`, whatever begins and ends
+    /// inside it. A spoken command makes several changes; held, they undo as the one
+    /// step the command was. What the command itself does inside the hold doesn't call
+    /// `beginEdit()`: that is how an edit by hand is told from it.
+    func beginHeldEdit() {
+        guard !isHoldingEdit else { return }
+        // An edit already under way goes on inside the hold.
+        isEditingByHandInHold = editStart != nil
+        if editStart == nil { editStart = content }
+        isHoldingEdit = true
+    }
+
+    /// Ends the hold. If an edit by hand is still under way inside it (a finger still
+    /// dragging when the command finishes), the step stays open for that edit to close:
+    /// closed here, every further move of the drag would be an undo step of its own.
+    func endHeldEdit() {
+        guard isHoldingEdit else { return }
+        isHoldingEdit = false
+        let stillOpen = isEditingByHandInHold
+        isEditingByHandInHold = false
+        if !stillOpen { endEdit() }
     }
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {

@@ -93,6 +93,8 @@ enum HostedModelError: LocalizedError, Equatable, Sendable {
     case server(HostedProvider, status: Int, message: String?)
     case unreadableResponse(HostedProvider)
     case refused(HostedProvider, String)
+    /// The model, on a server of the person's own, can't call tools.
+    case toolsUnsupported(HostedProvider)
 
     var errorDescription: String? {
         switch self {
@@ -105,6 +107,7 @@ enum HostedModelError: LocalizedError, Equatable, Sendable {
             message.map { "\(provider.name) said: \($0)" } ?? "\(provider.name) couldn't answer (error \(status))."
         case .unreadableResponse(let provider): "\(provider.name) sent an answer Layer couldn't read."
         case .refused(let provider, let reason): "\(provider.name) declined: \(reason)"
+        case .toolsUnsupported: "This model can't take voice commands. Choose another in Settings."
         }
     }
 }
