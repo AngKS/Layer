@@ -27,7 +27,7 @@ Layer is a freeform canvas for iPad. Draw a tall rectangle and it becomes an iPh
 
 ## Requirements
 
-- iPadOS 26.6 or later
+- iPadOS 27 or later
 - Xcode 27.2 or later to build
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 - Apple Intelligence is optional
@@ -49,6 +49,19 @@ xcodebuild -project Layer.xcodeproj -scheme Layer \
 ```
 
 The UI tests expect a landscape iPad simulator with the app's window full screen.
+
+There are two test plans. `Layer` (the default) runs everything. `CI` runs the unit tests
+only and skips `SiriIntentsLiveTests`, which drives the document browser and is flaky on
+fresh simulators. Choose it with `-testPlan CI`.
+
+## TestFlight
+
+Xcode Cloud builds every push to `main`, archives it and sends it to TestFlight internal
+testers. `ci_scripts/ci_post_xcodebuild.sh` fills in each build's "What to Test" notes from
+the latest commit messages. Xcode Cloud sets the build number itself.
+
+App Intent titles, descriptions and enum names must not contain Apple trademarks
+(Siri, iPhone, iPad, Apple). App Store Connect rejects the upload with ITMS-90626.
 
 ## Project layout
 
