@@ -8,30 +8,220 @@ extension UTType {
     static let layerDesign = UTType(exportedAs: "kahshin.layer.design")
 }
 
-/// The part of a design that the design tools edit: screens, loose elements, its title and
-/// how its canvas is set up.
-struct DesignContent: Codable, Equatable, Sendable {
-    var screens: [DesignScreen] = []
-    /// Elements on the open canvas, outside every screen.
-    var floating: [FloatingElement] = []
+/// The part of a design that the design tools edit: its screens, everything on them and
+/// on the open canvas, its title and how its canvas is set up.
+///
+/// Everything that isn't a screen is kept in one list, `elements`, and each element says
+/// what it is on. `screens` and `floating` are views of that list: each screen with the
+/// elements on it, and the elements on the open canvas. Reading them is how most of the
+/// app sees a design; changing the list is done with the methods below, or by setting
+/// either view whole.
+struct DesignContent: Equatable, Sendable {
+    /// The screens themselves, without what is on them.
+    private var frames: [DesignScreen] = []
+    /// Everything on the board that isn't a screen, back to front. Among elements on the
+    /// same screen, or together on the open canvas, later ones sit on top; the order of
+    /// two elements that share neither means nothing.
+    private(set) var elements: [DesignElement] = []
+    /// Elements that were read but not understood, to be written back where they were.
+    private var unread: [UnreadElement] = []
     /// The board's name. Nil until one has been suggested or typed.
     var title: String?
     var canvas = CanvasSettings()
 
     init() {}
 
-    /// Reads every part that is present, so designs saved before a part existed still open.
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        screens = try container.decodeIfPresent([DesignScreen].self, forKey: .screens) ?? []
-        floating = try container.decodeIfPresent([FloatingElement].self, forKey: .floating) ?? []
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        canvas = try container.decodeIfPresent(CanvasSettings.self, forKey: .canvas) ?? CanvasSettings()
-    }
-
     /// The pictures the design shows.
     var imageIDs: Set<UUID> {
-        Set((screens.flatMap(\.elements) + floating.map(\.element)).compactMap(\.imageID))
+        Set(elements.compactMap(\.imageID))
+    }
+
+    // MARK: Views of the list
+
+    /// Each screen with what is on it.
+    var screens: [DesignScreen] {
+        get {
+            guard !frames.isEmpty else { return [] }
+            var onScreen: [DesignScreen.ID: [DesignElement]] = [:]
+            for element in elements {
+                if let parent = element.parent { onScreen[parent, default: []].append(element) }
+            }
+            return frames.map { frame in
+                var screen = frame
+                screen.elements = onScreen[frame.id] ?? []
+                return screen
+            }
+        }
+        set {
+            let loose = elements.filter { $0.parent == nil }
+            frames = newValue.map(\.withoutElements)
+            elements = newValue.flatMap { screen in screen.elements.map { $0.placed(on: screen.id, scale: nil) } } + loose
+        }
+    }
+
+    /// The elements on the open canvas, outside every screen.
+    var floating: [FloatingElement] {
+        get { elements.filter { $0.parent == nil }.map { FloatingElement(element: $0, scale: $0.scale ?? 1) } }
+        set { elements = elements.filter { $0.parent != nil } + newValue.map { $0.element.placed(on: nil, scale: $0.scale) } }
+    }
+
+    /// One screen with what is on it.
+    func screen(_ id: DesignScreen.ID) -> DesignScreen? {
+        guard var screen = frames.first(where: { $0.id == id }) else { return nil }
+        screen.elements = children(of: id)
+        return screen
+    }
+
+    func element(_ id: DesignElement.ID) -> DesignElement? {
+        elements.first { $0.id == id }
+    }
+
+    /// What is on a screen, or on the open canvas when `parent` is nil, back to front.
+    func children(of parent: DesignScreen.ID?) -> [DesignElement] {
+        elements.filter { $0.parent == parent }
+    }
+
+    // MARK: Changing the list
+
+    /// Puts an element on a screen, or on the open canvas when `parent` is nil, where it
+    /// is drawn `scale` canvas points to each of its own. It goes on top of what is
+    /// already there. Returns the element as it is kept.
+    @discardableResult
+    mutating func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
+        let placed = element.placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
+        elements.append(placed)
+        return placed
+    }
+
+    /// Changes an element in place. What it is and what it is on stay as they are: use
+    /// `move` for the second.
+    mutating func update(_ id: DesignElement.ID, _ body: (inout DesignElement) -> Void) {
+        guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
+        let before = elements[index]
+        body(&elements[index])
+        elements[index].id = before.id
+        elements[index].parent = before.parent
+        elements[index].scale = before.scale
+    }
+
+    mutating func remove(_ ids: Set<DesignElement.ID>) {
+        elements.removeAll { ids.contains($0.id) }
+    }
+
+    /// Gives an element to another screen, or to the open canvas, at `frame` there. It
+    /// goes on top of what is already there.
+    mutating func move(_ id: DesignElement.ID, to parent: DesignScreen.ID?, scale: CGFloat? = nil, frame: CGRect) {
+        guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
+        var element = elements.remove(at: index).placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
+        element.frame = frame
+        elements.append(element)
+    }
+
+    /// Puts the elements on one screen, or on the open canvas, in a new order, back to
+    /// front. `order` holds the same identifiers they have now. Elements elsewhere keep
+    /// their places in the list.
+    mutating func reorder(_ parent: DesignScreen.ID?, to order: [DesignElement.ID]) {
+        let slots = elements.indices.filter { elements[$0].parent == parent }
+        let siblings = Dictionary(uniqueKeysWithValues: slots.map { (elements[$0].id, elements[$0]) })
+        guard order.count == slots.count, Set(order) == Set(siblings.keys) else { return }
+        for (slot, id) in zip(slots, order) {
+            if let element = siblings[id] { elements[slot] = element }
+        }
+    }
+
+    /// Replaces what is on a screen.
+    mutating func setChildren(of screen: DesignScreen.ID, to children: [DesignElement]) {
+        elements.removeAll { $0.parent == screen }
+        elements += children.map { $0.placed(on: screen, scale: nil) }
+    }
+
+    /// Adds a screen, with whatever it holds.
+    mutating func addScreen(_ screen: DesignScreen) {
+        frames.append(screen.withoutElements)
+        elements += screen.elements.map { $0.placed(on: screen.id, scale: nil) }
+    }
+
+    /// Removes a screen and everything on it.
+    mutating func removeScreen(_ id: DesignScreen.ID) {
+        frames.removeAll { $0.id == id }
+        elements.removeAll { $0.parent == id }
+    }
+
+    /// Changes a screen. `body` is given the screen with what is on it, and may change that too.
+    mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
+        guard let index = frames.firstIndex(where: { $0.id == id }) else { return }
+        let before = children(of: id)
+        var screen = frames[index]
+        screen.elements = before
+        body(&screen)
+        screen.id = id
+        frames[index] = screen.withoutElements
+        if screen.elements != before { setChildren(of: id, to: screen.elements) }
+    }
+}
+
+private extension DesignScreen {
+    var withoutElements: DesignScreen {
+        var screen = self
+        screen.elements = []
+        return screen
+    }
+}
+
+private extension DesignElement {
+    func placed(on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
+        var element = self
+        element.parent = parent
+        element.scale = scale
+        return element
+    }
+}
+
+extension DesignContent: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case screens, elements, floating, title, canvas
+    }
+
+    /// Reads every part that is present, so designs saved before a part existed still
+    /// open. Until version 3 each screen held its own elements and those on the open
+    /// canvas were a list of their own, `floating`; they are gathered into the one list.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let screens = try container.decodeIfPresent([DesignScreen].self, forKey: .screens) ?? []
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        canvas = try container.decodeIfPresent(CanvasSettings.self, forKey: .canvas) ?? CanvasSettings()
+        if container.contains(.elements) {
+            frames = screens.map(\.withoutElements)
+            (elements, unread) = try DesignElement.readList(in: container, forKey: .elements)
+        } else {
+            self.screens = screens
+            floating = try container.decodeIfPresent([FloatingElement].self, forKey: .floating) ?? []
+        }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(frames, forKey: .screens)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encode(canvas, forKey: .canvas)
+
+        // Elements this version couldn't read go back where they were among the others.
+        var list = container.nestedUnkeyedContainer(forKey: .elements)
+        var kept = unread[...]
+        var written = 0
+        func writeUnread(all: Bool = false) throws {
+            while let next = kept.first, all || next.index <= written {
+                try list.encode(next.json)
+                kept = kept.dropFirst()
+                written += 1
+            }
+        }
+        for element in elements {
+            try writeUnread()
+            try list.encode(element)
+            written += 1
+        }
+        try writeUnread(all: true)
     }
 }
 
@@ -58,8 +248,11 @@ struct DesignFile: Sendable {
         }
     }
 
-    /// Version 1 was a single JSON file with the ink and pictures inside it.
-    static let currentVersion = 2
+    /// Version 1 was a single JSON file with the ink and pictures inside it. Version 2
+    /// made it a package, with each screen holding its own elements. Version 3 keeps the
+    /// elements in one list, each saying what it is on. Earlier versions still open, and
+    /// are saved as version 3.
+    static let currentVersion = 3
 
     var version = currentVersion
     var content = DesignContent()

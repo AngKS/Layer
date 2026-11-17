@@ -53,9 +53,17 @@ enum FontWeightChoice: String, CaseIterable, Codable, Sendable {
     var name: String { rawValue.capitalized }
 }
 
+/// One thing on the board. All of them are kept in one list, `DesignContent.elements`,
+/// and each says what it is on.
 struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var id = UUID()
     var kind: ElementKind
+    /// The screen it is on, or nil on the open canvas.
+    var parent: DesignScreen.ID?
+    /// On the open canvas: how many canvas points each of its own points is drawn as, so
+    /// that it keeps the proportions it would have on a screen drawn at that scale. Nil
+    /// on a screen, which has a scale of its own.
+    var scale: CGFloat?
     /// In its screen's own points, the same units the generated SwiftUI uses.
     var frame: CGRect
     var text: String
@@ -103,6 +111,8 @@ extension DesignElement {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         kind = try container.decode(ElementKind.self, forKey: .kind)
+        parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
+        scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
         frame = try container.decode(CGRect.self, forKey: .frame)
         text = try container.decode(String.self, forKey: .text)
         tint = try container.decode(RGBColor.self, forKey: .tint)
@@ -152,6 +162,8 @@ struct Placement: Equatable, Sendable {
 /// An element that sits on the open canvas rather than on a screen. Its frame is in points
 /// of its own, `scale` canvas points each, so it keeps the proportions it would have on
 /// a screen drawn at that scale.
+///
+/// A view of the design: the elements in its list that have no parent. See `DesignContent`.
 struct FloatingElement: Identifiable, Equatable, Codable, Sendable {
     var element: DesignElement
     var scale: CGFloat
@@ -202,6 +214,10 @@ struct DeviceFrame: Identifiable, Equatable, Sendable {
 
 /// One device screen on the canvas. Elements live in the screen's logical points; `origin`
 /// and `scale` say where and how large the screen is drawn on the canvas.
+///
+/// A design keeps its elements in one list, not screen by screen. A `DesignScreen` that
+/// comes from a design is a view of it: the screen together with the elements in that
+/// list that are on it. See `DesignContent`.
 struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var id = UUID()
     var name: String
@@ -209,7 +225,7 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var scale: CGFloat
     /// Which device this is; an iPhone when unset.
     var deviceID: String?
-    /// In creation order; later elements sit on top.
+    /// What is on the screen. Later elements sit on top.
     var elements: [DesignElement] = []
     /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
     /// still be edited.
@@ -237,6 +253,63 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }
         return cleaned
+    }
+}
+
+extension DesignScreen {
+    enum CodingKeys: String, CodingKey {
+        case id, name, origin, scale, deviceID, elements, isLocked
+    }
+
+    /// Reads a screen, with the elements it held when designs were saved screen by screen.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        origin = try container.decode(CGPoint.self, forKey: .origin)
+        scale = try container.decode(CGFloat.self, forKey: .scale)
+        deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
+        elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
+    }
+
+    /// A screen is saved without its elements, which are saved in the design's one list.
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(origin, forKey: .origin)
+        try container.encode(scale, forKey: .scale)
+        try container.encodeIfPresent(deviceID, forKey: .deviceID)
+        try container.encodeIfPresent(isLocked, forKey: .isLocked)
+    }
+}
+
+/// An element that was read from a design but not understood, kept as it was read with
+/// its place in the list, to be written back.
+struct UnreadElement: Equatable, Sendable {
+    var index: Int
+    var json: JSONValue
+}
+
+extension DesignElement {
+    /// Reads a list of elements one at a time, so that one this version can't read, of a
+    /// kind added since for instance, doesn't stop the design from opening. Those come
+    /// back as `unread`.
+    static func readList<Key: CodingKey>(in container: KeyedDecodingContainer<Key>, forKey key: Key) throws -> (elements: [DesignElement], unread: [UnreadElement]) {
+        var list = try container.nestedUnkeyedContainer(forKey: key)
+        var elements: [DesignElement] = []
+        var unread: [UnreadElement] = []
+        while !list.isAtEnd {
+            let index = list.currentIndex
+            // A failed read leaves the list where it was, so the same entry is read again as it is.
+            if let element = try? list.decode(DesignElement.self) {
+                elements.append(element)
+            } else {
+                unread.append(UnreadElement(index: index, json: try list.decode(JSONValue.self)))
+            }
+        }
+        return (elements, unread)
     }
 }
 
