@@ -13,15 +13,20 @@ final class StubProvider: URLProtocol {
         var contentType = "text/event-stream"
     }
 
-    private static let state = OSAllocatedUnfairLock<(reply: Reply?, requests: [(url: URL, headers: [String: String], body: Data)])>(initialState: (nil, []))
+    private static let state = OSAllocatedUnfairLock<(replies: [Reply], requests: [(url: URL, headers: [String: String], body: Data)])>(initialState: ([], []))
 
     static func answer(with reply: Reply) {
-        state.withLock { $0 = (reply, []) }
+        state.withLock { $0 = ([reply], []) }
+    }
+
+    /// Answers requests in turn, one reply each; the last goes on answering any after it.
+    static func answer(with replies: [Reply]) {
+        state.withLock { $0 = (replies, []) }
     }
 
     /// Requests fail as they do with no network.
     static func failNextRequests() {
-        state.withLock { $0 = (nil, []) }
+        state.withLock { $0 = ([], []) }
     }
 
     static var requests: [(url: URL, headers: [String: String], body: Data)] { state.withLock { $0.requests } }
@@ -33,7 +38,8 @@ final class StubProvider: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host else { return false }
-        return host == "api.anthropic.com" || host == "api.openai.com"
+        // LM Studio's own machine too, where its server is looked for when no address is set.
+        return host == "api.anthropic.com" || host == "api.openai.com" || host == "localhost"
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -53,7 +59,7 @@ final class StubProvider: URLProtocol {
         let record = (url: request.url!, headers: request.allHTTPHeaderFields ?? [:], body: body)
         let reply = Self.state.withLock { state -> Reply? in
             state.requests.append(record)
-            return state.reply
+            return state.replies.count > 1 ? state.replies.removeFirst() : state.replies.first
         }
         guard let reply else {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))

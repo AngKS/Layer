@@ -8,10 +8,42 @@ struct HostedConversation: Equatable, Sendable {
     struct Message: Equatable, Sendable {
         var role: Role
         var text: String
+        /// Tools the model asked for in this turn of its own.
+        var toolCalls: [HostedToolCall] = []
+        /// What came of the tools it asked for, in the turn that answers it.
+        var toolResults: [HostedToolResult] = []
     }
 
     var system: String?
     var messages: [Message] = []
+    /// The tools the model may call in answering.
+    var tools: [HostedTool] = []
+    /// Whether the model must call a tool rather than answer in words.
+    var requiresTool = false
+}
+
+/// A tool a model may call, as providers are told about it.
+struct HostedTool: Equatable, Sendable {
+    var name: String
+    var description: String
+    /// The JSON Schema of its arguments.
+    var schema: Data
+}
+
+/// A model's request to run a tool.
+struct HostedToolCall: Equatable, Sendable {
+    /// The provider's own name for this call, which its result is sent back under.
+    var id: String
+    var name: String
+    /// The arguments, as JSON.
+    var arguments: String
+}
+
+/// What a tool answered.
+struct HostedToolResult: Equatable, Sendable {
+    var callID: String
+    var name: String
+    var text: String
 }
 
 /// What a provider answered.
@@ -86,6 +118,9 @@ enum HostedModelClient {
         case text(String)
         /// More of what the model thought before answering, for models that say.
         case reasoning(String)
+        /// More of the arguments of a tool the model is asking for. The pieces of one
+        /// call share its `id`, and add up to its arguments as JSON.
+        case toolCall(id: String, name: String, arguments: String)
         /// Tokens used so far, as the provider counts them.
         case usage(input: Int, output: Int)
     }
@@ -102,14 +137,15 @@ enum HostedModelClient {
                 do {
                     let request = try streamingRequest(conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature, provider: provider, model: model, key: key)
                     let lines = try await openStream(request, for: provider)
-                    var parser = StreamParser(provider: provider)
+                    var parser = StreamParser(provider: provider, answersInTool: schema != nil)
                     for try await line in lines {
                         for event in try parser.events(forLine: line) { continuation.yield(event) }
                         if parser.isFinished { break }
                     }
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: error)
+                    let sentTools = schema == nil && !conversation.tools.isEmpty
+                    continuation.finish(throwing: sentTools ? withoutToolSupport(error, for: provider) : error)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -125,7 +161,7 @@ enum HostedModelClient {
         for try await event in stream(conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature, provider: provider, model: model, key: key) {
             switch event {
             case .text(let text): reply.text += text
-            case .reasoning: break
+            case .reasoning, .toolCall: break
             case .usage(let input, let output):
                 reply.inputTokens = max(reply.inputTokens, input)
                 reply.outputTokens = max(reply.outputTokens, output)
@@ -148,7 +184,7 @@ enum HostedModelClient {
                 // Required by Anthropic. Generous by default: the caller's own limit,
                 // when it sets one, is what counts.
                 "max_tokens": maximumTokens ?? 1024,
-                "messages": conversation.messages.map { ["role": $0.role.rawValue, "content": $0.text] },
+                "messages": conversation.messages.map(anthropicMessage),
                 "stream": true,
             ]
             if let system = conversation.system, !system.isEmpty { body["system"] = system }
@@ -159,18 +195,35 @@ enum HostedModelClient {
             if let schemaObject {
                 body["tools"] = [["name": "respond", "description": "Give the answer in this structure.", "input_schema": schemaObject]]
                 body["tool_choice"] = ["type": "tool", "name": "respond"]
+            } else if !conversation.tools.isEmpty {
+                body["tools"] = try conversation.tools.map {
+                    ["name": $0.name, "description": $0.description, "input_schema": try JSONSerialization.jsonObject(with: $0.schema)]
+                }
+                // One tool at a time: tools asked for together are run together, in no
+                // fixed order, and ours change the same design.
+                body["tool_choice"] = ["type": conversation.requiresTool ? "any" : "auto", "disable_parallel_tool_use": true] as [String: Any]
             }
             request = URLRequest(url: provider.baseURL.appending(path: "messages"))
         case .openAI, .lmStudio:
             var messages: [[String: Any]] = []
             if let system = conversation.system, !system.isEmpty { messages.append(["role": "system", "content": system]) }
-            messages += conversation.messages.map { ["role": $0.role.rawValue, "content": $0.text] }
+            messages += conversation.messages.flatMap(openAIMessages)
             body = ["model": model, "messages": messages, "stream": true, "stream_options": ["include_usage": true]]
             // Includes any reasoning the model does, so a small limit can leave nothing for the answer.
             if let maximumTokens { body["max_completion_tokens"] = maximumTokens }
             // Temperature isn't sent: OpenAI's reasoning models refuse any but their own.
             if let schemaObject {
                 body["response_format"] = ["type": "json_schema", "json_schema": ["name": "response", "schema": schemaObject, "strict": false]]
+            } else if !conversation.tools.isEmpty {
+                body["tools"] = try conversation.tools.map {
+                    [
+                        "type": "function",
+                        "function": ["name": $0.name, "description": $0.description, "parameters": try JSONSerialization.jsonObject(with: $0.schema)],
+                    ] as [String: Any]
+                }
+                // One tool at a time, as for Anthropic.
+                body["parallel_tool_calls"] = false
+                if conversation.requiresTool { body["tool_choice"] = "required" }
             }
             request = URLRequest(url: provider.baseURL.appending(path: "chat/completions"))
         }
@@ -183,13 +236,84 @@ enum HostedModelClient {
         return request
     }
 
+    /// A turn as Anthropic takes it: plain text, or blocks once tools are involved. A
+    /// model's turn carries the tools it asked for; the turn after carries their results.
+    private static func anthropicMessage(_ message: HostedConversation.Message) -> [String: Any] {
+        guard !message.toolCalls.isEmpty || !message.toolResults.isEmpty else {
+            return ["role": message.role.rawValue, "content": message.text]
+        }
+        var blocks: [[String: Any]] = message.toolResults.map {
+            ["type": "tool_result", "tool_use_id": $0.callID, "content": $0.text]
+        }
+        if !message.text.isEmpty { blocks.append(["type": "text", "text": message.text]) }
+        blocks += message.toolCalls.map {
+            ["type": "tool_use", "id": $0.id, "name": $0.name, "input": jsonObject($0.arguments)]
+        }
+        return ["role": message.role.rawValue, "content": blocks]
+    }
+
+    /// A turn as OpenAI takes it. Each tool's result is a message of its own.
+    private static func openAIMessages(_ message: HostedConversation.Message) -> [[String: Any]] {
+        var messages: [[String: Any]] = message.toolResults.map {
+            ["role": "tool", "tool_call_id": $0.callID, "content": $0.text]
+        }
+        if !message.toolCalls.isEmpty {
+            messages.append([
+                "role": "assistant",
+                "content": message.text.isEmpty ? NSNull() : message.text as Any,
+                "tool_calls": message.toolCalls.map {
+                    ["id": $0.id, "type": "function", "function": ["name": $0.name, "arguments": $0.arguments]] as [String: Any]
+                },
+            ])
+        } else if !message.text.isEmpty || message.toolResults.isEmpty {
+            messages.append(["role": message.role.rawValue, "content": message.text])
+        }
+        return messages
+    }
+
+    /// A tool call's arguments as an object, or an empty one if they can't be read.
+    private static func jsonObject(_ arguments: String) -> Any {
+        (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [String: Any]()
+    }
+
+    /// A server of the person's own that turns down a request because it carries tools
+    /// is running a model that can't call them, which is worth saying in those words.
+    private static func withoutToolSupport(_ error: any Error, for provider: HostedProvider) -> any Error {
+        guard provider.isLocal, case HostedModelError.server(_, let status, let message?) = error,
+              (400..<500).contains(status), message.localizedCaseInsensitiveContains("tool")
+        else { return error }
+        return HostedModelError.toolsUnsupported(provider)
+    }
+
     /// Reads a provider's server-sent events, one `data:` line at a time.
     struct StreamParser {
         let provider: HostedProvider
+        /// Whether the answer itself comes as a tool's input, which is how Anthropic is
+        /// asked for a structured answer. Then that input is the answer's text.
+        let answersInTool: Bool
         private(set) var isFinished = false
         private var inputTokens = 0
+        /// The tool calls under way, by where the provider says they are in its answer.
+        private var toolCalls: [Int: (id: String, name: String, hasArguments: Bool)] = [:]
 
-        init(provider: HostedProvider) { self.provider = provider }
+        init(provider: HostedProvider, answersInTool: Bool = false) {
+            self.provider = provider
+            self.answersInTool = answersInTool
+        }
+
+        /// A piece of a tool call's arguments. A call with no arguments at all is given
+        /// an empty object when it ends, so that it is still a call.
+        private mutating func toolCallEvent(at index: Int, arguments: String) -> [StreamEvent] {
+            guard let call = toolCalls[index], !arguments.isEmpty else { return [] }
+            toolCalls[index]?.hasArguments = true
+            return [.toolCall(id: call.id, name: call.name, arguments: arguments)]
+        }
+
+        private mutating func finishToolCalls(at index: Int? = nil) -> [StreamEvent] {
+            let ending = toolCalls.filter { index == nil || $0.key == index }.sorted { $0.key < $1.key }
+            for (key, _) in ending { toolCalls[key] = nil }
+            return ending.filter { !$0.value.hasArguments }.map { .toolCall(id: $0.value.id, name: $0.value.name, arguments: "{}") }
+        }
 
         mutating func events(forLine line: String) throws -> [StreamEvent] {
             guard line.hasPrefix("data:") else { return [] }
@@ -209,14 +333,29 @@ enum HostedModelClient {
                     let usage = (json["message"] as? [String: Any])?["usage"] as? [String: Any]
                     inputTokens = usage?["input_tokens"] as? Int ?? 0
                     return [.usage(input: inputTokens, output: usage?["output_tokens"] as? Int ?? 0)]
+                case "content_block_start":
+                    // A tool the model is asking for, unless the tool is the answer itself.
+                    let block = json["content_block"] as? [String: Any]
+                    if !answersInTool, block?["type"] as? String == "tool_use",
+                       let index = json["index"] as? Int, let id = block?["id"] as? String, let name = block?["name"] as? String {
+                        toolCalls[index] = (id, name, false)
+                    }
+                    return []
                 case "content_block_delta":
                     let delta = json["delta"] as? [String: Any]
                     switch delta?["type"] as? String {
                     case "text_delta": return (delta?["text"] as? String).map { [.text($0)] } ?? []
                     case "thinking_delta": return (delta?["thinking"] as? String).map { [.reasoning($0)] } ?? []
-                    case "input_json_delta": return (delta?["partial_json"] as? String).map { [.text($0)] } ?? []
+                    case "input_json_delta":
+                        guard let fragment = delta?["partial_json"] as? String else { return [] }
+                        if let index = json["index"] as? Int, toolCalls[index] != nil {
+                            return toolCallEvent(at: index, arguments: fragment)
+                        }
+                        return [.text(fragment)]
                     default: return []
                     }
+                case "content_block_stop":
+                    return (json["index"] as? Int).map { finishToolCalls(at: $0) } ?? []
                 case "message_delta":
                     let usage = json["usage"] as? [String: Any]
                     return [.usage(input: inputTokens, output: usage?["output_tokens"] as? Int ?? 0)]
@@ -234,12 +373,23 @@ enum HostedModelClient {
                     throw HostedModelError.server(provider, status: 0, message: error["message"] as? String)
                 }
                 var events: [StreamEvent] = []
-                if let delta = (json["choices"] as? [[String: Any]])?.first?["delta"] as? [String: Any] {
+                let choice = (json["choices"] as? [[String: Any]])?.first
+                if let delta = choice?["delta"] as? [String: Any] {
                     if let refusal = delta["refusal"] as? String, !refusal.isEmpty { throw HostedModelError.refused(provider, refusal) }
                     // Reasoning models served this way send their thinking first, under one of these names.
                     if let thought = (delta["reasoning_content"] ?? delta["reasoning"]) as? String, !thought.isEmpty { events.append(.reasoning(thought)) }
                     if let text = delta["content"] as? String, !text.isEmpty { events.append(.text(text)) }
+                    // A tool call is named in its first piece; the rest carry its arguments.
+                    for piece in delta["tool_calls"] as? [[String: Any]] ?? [] {
+                        let index = piece["index"] as? Int ?? 0
+                        let function = piece["function"] as? [String: Any]
+                        if toolCalls[index] == nil, let id = piece["id"] as? String, let name = function?["name"] as? String {
+                            toolCalls[index] = (id, name, false)
+                        }
+                        events += toolCallEvent(at: index, arguments: function?["arguments"] as? String ?? "")
+                    }
                 }
+                if choice?["finish_reason"] is String { events += finishToolCalls() }
                 if let usage = json["usage"] as? [String: Any] {
                     events.append(.usage(input: usage["prompt_tokens"] as? Int ?? 0, output: usage["completion_tokens"] as? Int ?? 0))
                 }

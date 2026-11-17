@@ -28,8 +28,8 @@ struct HostedLanguageModel: LanguageModel {
     var model: String
 
     var capabilities: LanguageModelCapabilities {
-        // Both providers can answer in a JSON structure. Tools and pictures aren't wired up.
-        LanguageModelCapabilities([.guidedGeneration])
+        // Every provider can answer in a JSON structure and call tools. Pictures aren't wired up.
+        LanguageModelCapabilities([.guidedGeneration, .toolCalling])
     }
 
     var executorConfiguration: HostedModelExecutor.Configuration {
@@ -60,9 +60,18 @@ struct HostedModelExecutor: LanguageModelExecutor {
     ) async throws {
         let key = APIKeyStore.key(for: model.provider)
         if model.provider.requiresKey, key == nil { throw HostedModelError.missingKey(model.provider) }
-        let conversation = Self.conversation(from: request.transcript)
+        var conversation = Self.conversation(from: request.transcript)
         let schema = try request.schema.map(Self.jsonSchema(of:))
         let options = request.generationOptions
+        // The session's tools go to the provider as its own. When the model asks for
+        // one, the session runs it and comes back here with the call and its result in
+        // the transcript.
+        if options.toolCallingMode?.kind != .disallowed {
+            conversation.tools = try request.enabledToolDefinitions.map {
+                HostedTool(name: $0.name, description: $0.description, schema: try Self.jsonSchema(of: $0.parameters))
+            }
+            conversation.requiresTool = options.toolCallingMode?.kind == .required
+        }
         let events = HostedModelClient.stream(
             conversation, schema: schema, maximumTokens: options.maximumResponseTokens, temperature: options.temperature,
             provider: model.provider, model: model.model, key: key
@@ -78,6 +87,8 @@ struct HostedModelExecutor: LanguageModelExecutor {
                 // What a reasoning model thought before answering goes into the
                 // transcript as reasoning, apart from the answer.
                 await channel.send(.reasoning(action: .appendText(thought, tokenCount: 1)))
+            case .toolCall(let id, let name, let arguments):
+                await channel.send(.toolCalls(action: .toolCall(id: id, name: name, action: .appendArguments(arguments, tokenCount: 1))))
             case .usage(let input, let output):
                 usage = (input, output)
             }
@@ -91,8 +102,9 @@ struct HostedModelExecutor: LanguageModelExecutor {
     }
 
     /// The transcript as a provider's conversation: instructions become the system
-    /// prompt, prompts and responses become turns. Structured segments are sent as their
-    /// JSON. Tool calls, reasoning and attachments aren't sent; this model doesn't offer them.
+    /// prompt, prompts and responses become turns, and a tool the model asked for is
+    /// followed by what it answered. Structured segments are sent as their JSON.
+    /// Reasoning and attachments aren't sent.
     static func conversation(from transcript: Transcript) -> HostedConversation {
         var conversation = HostedConversation()
         var system: [String] = []
@@ -104,8 +116,18 @@ struct HostedModelExecutor: LanguageModelExecutor {
                 conversation.messages.append(.init(role: .user, text: text(of: prompt.segments)))
             case .response(let response):
                 conversation.messages.append(.init(role: .assistant, text: text(of: response.segments)))
+            case .toolCalls(let calls):
+                conversation.messages.append(.init(role: .assistant, text: "", toolCalls: calls.map {
+                    HostedToolCall(id: $0.id, name: $0.toolName, arguments: $0.arguments.jsonString)
+                }))
             case .toolOutput(let output):
-                conversation.messages.append(.init(role: .user, text: "\(output.toolName) returned: \(text(of: output.segments))"))
+                let result = HostedToolResult(callID: output.id, name: output.toolName, text: text(of: output.segments))
+                // The results of tools asked for together go back together, in one turn.
+                if let last = conversation.messages.indices.last, !conversation.messages[last].toolResults.isEmpty {
+                    conversation.messages[last].toolResults.append(result)
+                } else {
+                    conversation.messages.append(.init(role: .user, text: "", toolResults: [result]))
+                }
             default:
                 continue
             }

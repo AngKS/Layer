@@ -57,7 +57,7 @@ struct LMStudioLiveTests {
             switch event {
             case .text(let piece): pieces.append(piece)
             case .reasoning(let piece): thought += piece
-            case .usage: break
+            case .usage, .toolCall: break
             }
         }
         print("LMSTUDIO answer in \(pieces.count) pieces: \(pieces.joined()) (thought \(thought.count) characters)")
