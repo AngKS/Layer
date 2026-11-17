@@ -391,6 +391,14 @@ final class AppModel {
         generation = nil
     }
 
+    /// The pencil bar of a narrow window was flicked aside or down. That puts it away and
+    /// ends drawing, so nothing is left in the corner but what belongs there, and a
+    /// finger goes back to selecting and panning. Draw in the tools menu brings it back.
+    func pencilBarFlickedAway() {
+        guard isCompactSizeClass, tool == .draw else { return }
+        withAnimation(.smooth(duration: 0.3)) { tool = .select }
+    }
+
     // MARK: Voice mode
 
     /// The call that is up in this design, if one is.
@@ -399,6 +407,14 @@ final class AppModel {
     var voiceNotice: String?
 
     var isInVoiceCall: Bool { voice != nil }
+
+    /// Whether the phone button is there to start a call with: in the free corner of a
+    /// narrow window, with no call up already and no panel over that corner. Drawing and
+    /// voice mode are one or the other: while Draw is on the pencil bar has the bottom of
+    /// the window and the button is gone, as Draw is unavailable while a call is up.
+    var offersVoiceMode: Bool {
+        isCompactSizeClass && tool != .draw && !isInVoiceCall && !isLayersOpen && !isInspectorOpen
+    }
 
     /// Starts a call: the phone button's action. A call with no model to act on what it
     /// hears would be no use, so one that can't be used is said so instead.

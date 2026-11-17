@@ -92,6 +92,35 @@ final class VoiceModeUITests: XCTestCase {
         }
     }
 
+    /// In a narrow window the pencil bar lies across the bottom, over the corner the phone
+    /// button is in. Flicking the bar aside puts it away, and Draw in the menu brings it back.
+    func testFlickingThePencilBarAsidePutsItAway() {
+        openNewDesign(arguments: ["-convertsAutomatically", "NO"])
+        resizeWindow(toWidth: 375)
+        let pen = app.buttons["Magic Pen"].firstMatch
+        if !pen.waitForExistence(timeout: 3) { chooseTool("Draw") }
+        XCTAssertTrue(pen.waitForExistence(timeout: 5), "Draw should put the pencil bar up")
+        XCTAssertFalse(control("Start voice mode").exists, "with Draw on there should be no phone button, not one under the bar")
+        shoot("narrow-bar-up")
+
+        // A flick along the bar, starting on it.
+        let bar = pen.frame
+        let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").coordinate(withNormalizedOffset: .zero)
+        let start = screen.withOffset(CGVector(dx: bar.midX + 60, dy: bar.midY))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 170, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+
+        XCTAssertTrue(wait(forGone: pen), "a flick aside should put the pencil bar away")
+        XCTAssertTrue(control("Start voice mode").isHittable, "the corner should be the phone button's again")
+        shoot("narrow-bar-flicked")
+
+        // Draw in the menu brings it back, and a flick down puts it away again.
+        chooseTool("Draw")
+        XCTAssertTrue(pen.waitForExistence(timeout: 5), "Draw should bring the pencil bar back")
+        let again = screen.withOffset(CGVector(dx: pen.frame.midX + 60, dy: pen.frame.midY))
+        again.press(forDuration: 0.05, thenDragTo: again.withOffset(CGVector(dx: 0, dy: 70)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(wait(forGone: pen), "a flick down should put the pencil bar away")
+    }
+
     /// The real agent and its tools, with a model that calls the tools the script names.
     func testASpokenCommandChangesTheCanvas() {
         let spoken = "make the sign in button green and say ahoy => styleElement element=E2 look=green && setText element=E2 text=Ahoy"
@@ -139,6 +168,11 @@ final class VoiceModeUITests: XCTestCase {
 
     private func wait(for element: XCUIElement, toHave format: String, _ argument: String, timeout: TimeInterval = 25) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format, argument), object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func wait(forGone element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 

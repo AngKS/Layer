@@ -132,7 +132,7 @@ struct CanvasScreen: View {
         }
         .overlay {
             // The free corner of a narrow window is where voice mode starts.
-            if isCompact, usesSheets, !isInCall, !model.isLayersOpen, !model.isInspectorOpen {
+            if isCompact, model.offersVoiceMode {
                 PhoneButton()
                     .modifier(BottomCorner(edge: .trailing))
                     .transition(.opacity)

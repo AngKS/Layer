@@ -392,14 +392,17 @@ struct VoiceCallTests {
         var captions: [VoiceCall.Caption] = []
         let call = try #require(app.voice)
         let watching = Task {
-            while !Task.isCancelled {
+            while true {
                 if let caption = call.caption, captions.last != caption { captions.append(caption) }
+                // One more look after being told to stop, so the last caption isn't missed.
+                if Task.isCancelled { break }
                 try? await Task.sleep(for: .milliseconds(2))
             }
         }
         route.send(.command("make the button green"))
         #expect(await eventually { call.caption?.kind == .done })
         watching.cancel()
+        await watching.value
         #expect(captions.first == VoiceCall.Caption(kind: .working, text: "Thinking…"))
         #expect(captions.last?.kind == .done)
         app.endVoiceCall()
@@ -720,6 +723,75 @@ struct VoiceDemoTests {
     @Test func aResultInPlainWordsIsNotSteps() {
         #expect(VoiceDemo.steps(from: "Made the button blue") == nil)
         #expect(VoiceDemo.steps(from: "!No connection to the internet.") == nil)
+    }
+}
+
+@Suite("Flicking the pencil bar away")
+@MainActor
+struct PencilBarFlickTests {
+    @Test func aFlickAsideOrDownIsOneAndAnythingElseIsNot() {
+        // Sideways, either way, and mostly sideways.
+        #expect(PaletteFlick.isFlick(CGSize(width: 90, height: 6)))
+        #expect(PaletteFlick.isFlick(CGSize(width: -120, height: -20)))
+        // Downward, off the bottom of the window.
+        #expect(PaletteFlick.isFlick(CGSize(width: 10, height: 50)))
+        // A tap, a short nudge, and a drag up into the canvas are none of them a flick.
+        #expect(!PaletteFlick.isFlick(CGSize(width: 2, height: 1)))
+        #expect(!PaletteFlick.isFlick(CGSize(width: 30, height: 4)))
+        #expect(!PaletteFlick.isFlick(CGSize(width: 12, height: -140)))
+    }
+
+    @Test func flickingTheBarAwayInANarrowWindowEndsDrawing() {
+        let app = AppModel(document: LayerDocument())
+        app.isCompactSizeClass = true
+        app.tool = .draw
+        app.pencilBarFlickedAway()
+        #expect(app.tool == .select)
+    }
+
+    /// A wider window has the palette that floats, which tucks itself into a corner.
+    @Test func aWiderWindowKeepsItsPalette() {
+        let app = AppModel(document: LayerDocument())
+        app.isCompactSizeClass = false
+        app.tool = .draw
+        app.pencilBarFlickedAway()
+        #expect(app.tool == .draw)
+    }
+
+    /// Drawing and voice mode are one or the other: while Draw is on the pencil bar has
+    /// the bottom of a narrow window, and the phone button isn't there at all.
+    @Test func thePhoneButtonIsHiddenWhileDrawIsOn() {
+        let app = AppModel(document: LayerDocument())
+        app.isCompactSizeClass = true
+        app.tool = .select
+        #expect(app.offersVoiceMode)
+        app.tool = .draw
+        #expect(!app.offersVoiceMode)
+        // Putting the bar away brings the phone button back.
+        app.pencilBarFlickedAway()
+        #expect(app.offersVoiceMode)
+    }
+
+    @Test func thePhoneButtonIsOnlyInANarrowWindowWithNothingOverIt() async {
+        let app = AppModel(document: LayerDocument())
+        // A design opens with Draw on, so with no phone button until the bar is put away.
+        app.isCompactSizeClass = true
+        #expect(!app.offersVoiceMode)
+        app.tool = .select
+        #expect(app.offersVoiceMode)
+        app.isCompactSizeClass = false
+        #expect(!app.offersVoiceMode)
+        app.isCompactSizeClass = true
+        app.isLayersOpen = true
+        #expect(!app.offersVoiceMode)
+        app.isLayersOpen = false
+        app.isInspectorOpen = true
+        #expect(!app.offersVoiceMode)
+        app.isInspectorOpen = false
+        // A call that is up has the pill in its place.
+        await app.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        #expect(!app.offersVoiceMode)
+        app.endVoiceCall()
     }
 }
 

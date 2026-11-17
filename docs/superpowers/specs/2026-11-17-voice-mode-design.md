@@ -176,7 +176,9 @@ still one undo step.
 **The pencil bar in the narrow window.** `PaletteToggle` and `isPaletteCollapsed` are removed.
 Draw in the "…" menu puts the bar up; turning it off puts the bar away. A flick sideways or
 downward on the bar also puts it away and ends drawing, so nothing is left behind and a finger
-goes back to selecting and panning. During a call the Draw item is disabled.
+goes back to selecting and panning. During a call the Draw item is disabled. Drawing and voice
+mode are one or the other: while Draw is on there is no phone button, and it comes back when
+the bar is put away. A design opens with Draw on, so that is how a call is reached.
 
 ### How it is built
 
@@ -317,8 +319,10 @@ Each stage leaves something that works.
   given with a reply request apply to that reply only, the exact events that carry a finished
   function call, and whether turning automatic replies off still commits the turn at a pause.
   The stage 5 spike settles them.
-- **Catching a flick on the system's pencil bar** may not be possible. The stage 6 spike settles
-  it.
+- **Catching a flick on the system's pencil bar** may not be possible. The stage 6 spike settled
+  it: it is possible, in the simulator. The bar is in a system window of the same scene, so the
+  app watches each window of the scene for a touch that begins where the bar is. Not yet tried
+  on an iPad, and it would stop working, without a word, if iPadOS moved the bar elsewhere.
 - **Speech assets may be missing in the simulator.** The scripted debug hook covers the UI
   regardless.
 - **The experiments above ran on macOS with a scripted model.** Stage 2's tests repeat them in the
