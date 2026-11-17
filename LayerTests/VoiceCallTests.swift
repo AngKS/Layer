@@ -35,6 +35,7 @@ enum VoiceFixture {
 final class FakeRoute: VoiceRoute {
     private var continuation: AsyncStream<VoiceRouteEvent>.Continuation?
     private(set) var isStopped = false
+    private(set) var finishCount = 0
     private(set) var vocabulary: [String] = []
     var startError: (any Error)?
     /// While set, the route is still getting ready.
@@ -52,6 +53,10 @@ final class FakeRoute: VoiceRoute {
     func stop() {
         isStopped = true
         continuation?.finish()
+    }
+
+    func finish() {
+        finishCount += 1
     }
 
     func send(_ event: VoiceRouteEvent) {

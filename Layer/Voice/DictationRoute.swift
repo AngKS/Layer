@@ -35,14 +35,17 @@ final class DictationRoute: VoiceRoute {
     private var isStopped = false
 
     /// `assembler` decides where one command ends and the next begins; its own
-    /// defaults are the ones for a person speaking to an iPad.
+    /// defaults are the ones for a person speaking to an iPad. With `endsOnPause` false
+    /// a command ends only on `finish()`; it applies to the assembler made here, not to
+    /// one handed in.
     init(
+        endsOnPause: Bool = true,
         source: any VoiceAudioSource = MicrophoneTap(), recogniser: any PhraseRecogniser = AppleSpeechRecogniser(),
-        assembler: UtteranceAssembler = UtteranceAssembler()
+        assembler: UtteranceAssembler? = nil
     ) {
         self.source = source
         self.recogniser = recogniser
-        self.assembler = assembler
+        self.assembler = assembler ?? UtteranceAssembler(endsOnPause: endsOnPause)
     }
 
     func start(vocabulary: [String]) async throws -> AsyncStream<VoiceRouteEvent> {
@@ -123,6 +126,12 @@ final class DictationRoute: VoiceRoute {
         continuation = nil
     }
 
+    func finish() {
+        // Once stopped there is nothing left to end.
+        guard !isStopped else { return }
+        assembler.finishNow(at: .now)
+    }
+
     private func heard(_ phrase: HeardPhrase) {
         guard !isStopped else { return }
         assembler.heard(phrase.text, isFinal: phrase.isFinal, at: .now)
@@ -147,7 +156,7 @@ final class DictationRoute: VoiceRoute {
             assembler.settled(at: .now)
         case .command(let command):
             lastHearing = ""
-            VoiceLog.log.info("route: a pause ended a command of \(command.count) characters")
+            VoiceLog.log.info("route: a command of \(command.count) characters ended")
             continuation?.yield(.command(command))
         }
     }

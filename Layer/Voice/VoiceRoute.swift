@@ -21,6 +21,15 @@ protocol VoiceRoute: AnyObject {
     func start(vocabulary: [String]) async throws -> AsyncStream<VoiceRouteEvent>
     /// Stops listening and lets go of the microphone. The stream then ends.
     func stop()
+    /// Ends the command being spoken now, without waiting for a pause: what has been
+    /// heard is settled and sent as one `.command`, or nothing if no words were heard.
+    /// The route keeps listening afterwards, until `stop()`. For routes that end a
+    /// command only when told to; one that ends on a pause has no use for it.
+    func finish()
+}
+
+extension VoiceRoute {
+    func finish() {}
 }
 
 /// What carries a spoken command out.
@@ -80,6 +89,9 @@ struct UtteranceAssembler {
     private let patience: Duration
     private let settling: Duration
     private let loudness: Float
+    /// Whether a pause in the speech can end a command. Where it can't, only `finishNow`
+    /// does: a speaker holding a button down may pause as long as they like.
+    private let endsOnPause: Bool
 
     /// Phrases the recogniser has settled since the last command.
     private var settledPhrases: [String] = []
@@ -99,6 +111,8 @@ struct UtteranceAssembler {
     /// Words taken as a command before they were settled, so that they aren't taken for
     /// a second command if the recogniser settles them late.
     private var takenUnsettled: String?
+    /// Whether the command was ended by being told to, not by a pause.
+    private var isFinishing = false
 
     /// - Parameters:
     ///   - pause: How long the room is quiet before the speaker is taken to have stopped.
@@ -109,10 +123,14 @@ struct UtteranceAssembler {
     ///   - patience: How long the recogniser is given to settle once asked.
     ///   - settling: How long its last phrases are given to arrive once it has settled.
     ///   - loudness: The level, from 0 to 1, at and above which sound counts as speech.
+    ///   - endsOnPause: Whether a command ends when the speaker pauses. When not, only
+    ///     `finishNow(at:)` ends one.
     init(
+        endsOnPause: Bool = true,
         pause: Duration = .milliseconds(1800), staleness: Duration = .milliseconds(2500), patience: Duration = .milliseconds(1500),
         settling: Duration = .milliseconds(250), loudness: Float = 0.2
     ) {
+        self.endsOnPause = endsOnPause
         self.pause = pause
         self.staleness = staleness
         self.patience = patience
@@ -134,7 +152,7 @@ struct UtteranceAssembler {
         // quiet to begin with: then this is the room, not the speaker, and the command
         // that ended on its words going stale stays ended. Otherwise it would be called
         // back ten times a second and never taken.
-        guard !endedOnStaleWords else { return }
+        guard !endedOnStaleWords, !isFinishing else { return }
         askedToSettle = nil
         settledAt = nil
     }
@@ -168,6 +186,17 @@ struct UtteranceAssembler {
         settledAt = now
     }
 
+    /// The command is over, whatever the room sounds like: the speaker said so. The next
+    /// `next(at:)` goes down the same path a pause does, so the recogniser is asked to
+    /// settle, with the same patience if it never does. Nothing heard, nothing to end.
+    mutating func finishNow(at now: ContinuousClock.Instant) {
+        // Already settling: the command is on its way, and a second ask must not make
+        // a second command.
+        guard askedToSettle == nil else { return }
+        guard !settledPhrases.isEmpty || !unsettled.isEmpty || hasSpoken else { return }
+        isFinishing = true
+    }
+
     /// What to do now. Asked often, about ten times a second.
     mutating func next(at now: ContinuousClock.Instant) -> Step {
         let hasWords = !settledPhrases.isEmpty || !unsettled.isEmpty
@@ -185,11 +214,11 @@ struct UtteranceAssembler {
             return take()
         }
 
-        let isQuiet = hasSpoken && lastLoud.map { now - $0 >= pause } == true
-        let isStale = hasWords && lastHeard.map { now - $0 >= staleness } == true
-        guard isQuiet || isStale else { return .wait }
+        let isQuiet = endsOnPause && hasSpoken && lastLoud.map { now - $0 >= pause } == true
+        let isStale = endsOnPause && hasWords && lastHeard.map { now - $0 >= staleness } == true
+        guard isQuiet || isStale || isFinishing else { return .wait }
         askedToSettle = now
-        endedOnStaleWords = !isQuiet
+        endedOnStaleWords = !isQuiet && !isFinishing
         return .settle
     }
 
@@ -204,6 +233,7 @@ struct UtteranceAssembler {
         askedToSettle = nil
         settledAt = nil
         endedOnStaleWords = false
+        isFinishing = false
         return command.isEmpty ? .wait : .command(command)
     }
 

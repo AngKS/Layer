@@ -125,6 +125,12 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     }
 }
 
+/// Events a test has collected, read on the main actor.
+@MainActor
+private final class Received {
+    var events: [VoiceRouteEvent] = []
+}
+
 /// Something handed to another thread on the test's own say-so.
 private struct Handed<Value>: @unchecked Sendable {
     let value: Value
@@ -377,5 +383,89 @@ struct DictationRouteTests {
         #expect(call.phase == .ended)
         #expect(!bench.audio.wasStarted)
         #expect(!bench.audio.isRunning)
+    }
+
+    // MARK: - Ending only when told to
+
+    @Test func aPauseDoesNotEndACommandWhenOnlyFinishDoes() {
+        var assembler = UtteranceAssembler(endsOnPause: false)
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        assembler.heard("make the header", isFinal: true, at: t0)
+        #expect(assembler.next(at: t0 + .seconds(10)) == .wait)
+        assembler.finishNow(at: t0 + .seconds(10))
+        #expect(assembler.next(at: t0 + .seconds(10)) == .settle)
+        assembler.settled(at: t0 + .seconds(10))
+        #expect(assembler.next(at: t0 + .milliseconds(10_300)) == .command("make the header"))
+    }
+
+    @Test func finishWithNothingHeardSendsNothing() {
+        var assembler = UtteranceAssembler(endsOnPause: false)
+        let t0 = ContinuousClock.now
+        assembler.finishNow(at: t0)
+        #expect(assembler.next(at: t0 + .seconds(3)) == .wait)
+        // And it isn't held over to end the next command the moment it is heard.
+        assembler.sound(level: 0.5, at: t0 + .seconds(4))
+        assembler.heard("hello", isFinal: false, at: t0 + .seconds(4))
+        #expect(assembler.next(at: t0 + .seconds(5)) == .wait)
+    }
+
+    @Test func finishTakesWhatWasHeardEvenIfTheRecogniserNeverSettles() {
+        var assembler = UtteranceAssembler(endsOnPause: false)
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        assembler.heard("make the header", isFinal: false, at: t0)
+        assembler.finishNow(at: t0 + .seconds(1))
+        #expect(assembler.next(at: t0 + .seconds(1)) == .settle)
+        #expect(assembler.next(at: t0 + .milliseconds(2000)) == .wait)
+        #expect(assembler.next(at: t0 + .milliseconds(2500)) == .command("make the header"))
+    }
+
+    @Test func finishWhileAlreadySettlingGivesOneCommand() {
+        var assembler = UtteranceAssembler()
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        assembler.heard("make the header", isFinal: true, at: t0)
+        #expect(assembler.next(at: t0 + .seconds(3)) == .settle)
+        assembler.finishNow(at: t0 + .seconds(3))
+        #expect(assembler.next(at: t0 + .seconds(3)) == .wait)
+        assembler.settled(at: t0 + .seconds(3))
+        #expect(assembler.next(at: t0 + .milliseconds(3300)) == .command("make the header"))
+        #expect(assembler.next(at: t0 + .seconds(5)) == .wait)
+    }
+
+    @Test func soundAfterFinishDoesNotCallItBack() {
+        var assembler = UtteranceAssembler(endsOnPause: false)
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        assembler.heard("make the header", isFinal: true, at: t0)
+        assembler.finishNow(at: t0 + .seconds(1))
+        #expect(assembler.next(at: t0 + .seconds(1)) == .settle)
+        assembler.sound(level: 0.5, at: t0 + .milliseconds(1100))
+        assembler.settled(at: t0 + .milliseconds(1200))
+        #expect(assembler.next(at: t0 + .milliseconds(1500)) == .command("make the header"))
+    }
+
+    @Test func aRouteThatEndsOnlyWhenToldSendsOnFinish() async throws {
+        let audio = FakeAudioSource()
+        let recogniser = FakeRecogniser()
+        let route = DictationRoute(endsOnPause: false, source: audio, recogniser: recogniser)
+        let events = try await route.start(vocabulary: [])
+        let received = Received()
+        let collecting = Task { @MainActor in
+            for await event in events {
+                if case .level = event { continue }
+                received.events.append(event)
+            }
+        }
+        audio.play(amplitude: 0.5)
+        recogniser.hear("make the header", isFinal: true)
+        try await Task.sleep(for: .milliseconds(2500))
+        #expect(!received.events.contains { if case .command = $0 { true } else { false } })
+        route.finish()
+        #expect(await eventually { received.events.contains(.command("make the header")) })
+        route.stop()
+        route.finish()
+        collecting.cancel()
     }
 }
