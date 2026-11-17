@@ -615,6 +615,9 @@ final class AppModel {
     func close() {
         // Closed by the back button, then again as the canvas goes from the screen.
         guard !isClosed else { return }
+        // Ink a pen or the eraser has changed and that is waiting for the tool to be put
+        // down goes into the design now, while it can still be saved.
+        ink?.flushPendingInk()
         // A change made in the format panel moments ago is still an edit waiting for the
         // panel's pause to end it: it ends now, while the design can still be saved.
         adjustmentEnd?.cancel()
@@ -803,6 +806,7 @@ final class AppModel {
     /// announced to be saved. (Only drawn, not announced, when the app is merely inactive:
     /// Control Center or an alert over it.)
     func leavingTheScreen() {
+        ink?.flushPendingInk()
         refreshPreview()
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
@@ -1178,6 +1182,9 @@ final class AppModel {
     /// How many edits the store had seen begun at the panel's last change: while it is the
     /// same, nothing else has begun one since.
     @ObservationIgnored private var adjustmentLastBegin: Int?
+    /// Whether the panel's change was made inside a spoken command's hold. Its pause may
+    /// come after the command has ended, which leaves the step open for the panel to end.
+    @ObservationIgnored private var adjustmentBeganInHold = false
 
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
@@ -1187,6 +1194,7 @@ final class AppModel {
         store.beginEdit()
         adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
         adjustmentLastBegin = store.editBegins
+        if store.isHoldingEdit { adjustmentBeganInHold = true }
         body()
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
@@ -1197,11 +1205,12 @@ final class AppModel {
             // Its own edit, or, inside a spoken command's hold, its own part of it: there
             // an end only says the panel's edit by hand is over, and the command then
             // closes its step. Left, the hold would wait for an end that never comes.
-            if adjustmentLastBegin == store.editBegins, adjustmentOwnsEditAt != nil || store.isHoldingEdit {
+            if adjustmentLastBegin == store.editBegins, adjustmentOwnsEditAt != nil || adjustmentBeganInHold || store.isHoldingEdit {
                 store.endEdit()
             }
             adjustmentOwnsEditAt = nil
             adjustmentLastBegin = nil
+            adjustmentBeganInHold = false
         }
     }
 

@@ -120,6 +120,7 @@ struct InkCanvas: UIViewRepresentable {
 
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.documentCanvas.documentUndoManager = undoManager
+        context.coordinator.watchHistory(undoManager)
         context.coordinator.apply(tool)
         context.coordinator.setLocked(isLocked)
         context.coordinator.setHidesPalette(hidesPalette)
@@ -130,6 +131,8 @@ struct InkCanvas: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.flushPendingInk()
+        coordinator.stopWatchingHistory()
         coordinator.hidePalette()
     }
 
@@ -566,12 +569,19 @@ struct InkCanvas: UIViewRepresentable {
             // While a tool is in use, its changes are followed once it is put down: the
             // eraser changes the strokes many times in one rub, and each change wrote the
             // whole drawing out again. PencilKit always says when a tool use ends.
-            if isUsingDocumentTool {
+            // The first change of a use is followed at once, which puts the use's step in
+            // the history: undo pressed mid-use then takes back the use so far, as it did when
+            // every change was followed, and not the step before.
+            if isUsingDocumentTool, hasFollowedThisUse {
                 hasInkToFollow = true
                 return
             }
+            if isUsingDocumentTool { hasFollowedThisUse = true }
             followInk()
         }
+
+        /// Whether the tool in use has had a change followed yet.
+        private var hasFollowedThisUse = false
 
         /// Whether a pen or the eraser is in use on the document canvas, and whether it has
         /// changed the strokes yet.
@@ -579,10 +589,43 @@ struct InkCanvas: UIViewRepresentable {
         private var hasInkToFollow = false
 
         /// Follows the ink a tool in use has changed, now rather than when it is put down.
+        /// Not while the design is being put back by undo or redo, which drops it as it begins
+        /// (see `watchHistory`).
         private func followInkNotYetFollowed() {
             guard hasInkToFollow else { return }
+            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             hasInkToFollow = false
             followInk()
+        }
+
+        /// Puts ink a tool in use has changed into the design now: the design is closing, or
+        /// the app is leaving the screen, and may not be back to hear the tool put down.
+        func flushPendingInk() {
+            followInkNotYetFollowed()
+        }
+
+        /// The document's history, watched so that undo or redo pressed mid-use drops the ink
+        /// not yet followed: it belongs to the use's step, which undo is taking back. Kept, it
+        /// would be followed at the tool's end over what undo put back.
+        private var watchedHistory: UndoManager?
+        private var historyObservers: [NSObjectProtocol] = []
+
+        func watchHistory(_ history: UndoManager?) {
+            guard history !== watchedHistory else { return }
+            stopWatchingHistory()
+            watchedHistory = history
+            guard let history else { return }
+            historyObservers = [Notification.Name.NSUndoManagerWillUndoChange, .NSUndoManagerWillRedoChange].map { name in
+                NotificationCenter.default.addObserver(forName: name, object: history, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.hasInkToFollow = false }
+                }
+            }
+        }
+
+        func stopWatchingHistory() {
+            for observer in historyObservers { NotificationCenter.default.removeObserver(observer) }
+            historyObservers = []
+            watchedHistory = nil
         }
 
         // MARK: The design's drawings
@@ -622,6 +665,7 @@ struct InkCanvas: UIViewRepresentable {
                 // One use of a tool is one undo step, however many times it changes the
                 // strokes on the way, as rubbing out does.
                 isUsingDocumentTool = true
+                hasFollowedThisUse = false
                 model.store.beginEdit()
             }
         }

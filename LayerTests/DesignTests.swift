@@ -1152,6 +1152,14 @@ struct ClosingTests {
 @Suite("Changes made in the format panel")
 @MainActor
 struct FormatPanelEditTests {
+    /// Waits for the panel's pause to end the edit. Main-actor tests from other suites run
+    /// in between, so a fixed sleep can come round before the pause has.
+    private func pauseEnds(_ model: AppModel) async throws -> Bool {
+        for _ in 0..<100 where model.store.isEditing {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return !model.store.isEditing
+    }
     private func makeModel() -> (model: AppModel, undo: UndoManager, screen: DesignScreen) {
         let undo = UndoManager()
         undo.groupsByEvent = false
@@ -1167,8 +1175,7 @@ struct FormatPanelEditTests {
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout 2" } }
         #expect(model.store.isEditing)
-        try await Task.sleep(for: .milliseconds(150))
-        #expect(!model.store.isEditing)
+        #expect(try await pauseEnds(model))
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1209,9 +1216,26 @@ struct FormatPanelEditTests {
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         try await Task.sleep(for: .milliseconds(150))
         model.store.endHeldEdit()
-        #expect(!model.store.isEditing)
+        #expect(try await pauseEnds(model))
 
         // The next change is a step of its own.
+        let mark = model.store.historyMark
+        model.store.updateScreen(screen.id) { $0.origin.y += 10 }
+        #expect(model.store.historyMark == mark + 1)
+    }
+
+    /// The command ends before the panel's pause: the step the hold left open for the
+    /// panel's edit by hand is the panel's to end.
+    @Test func aPanelChangeInACommandThatEndsBeforeThePauseLeavesNoEditOpen() async throws {
+        let (model, _, screen) = makeModel()
+        model.adjustmentPause = .milliseconds(200)
+        model.store.beginHeldEdit()
+        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.endHeldEdit()
+        #expect(model.store.isEditing, "the panel's edit goes on until its pause")
+        #expect(try await pauseEnds(model))
+
         let mark = model.store.historyMark
         model.store.updateScreen(screen.id) { $0.origin.y += 10 }
         #expect(model.store.historyMark == mark + 1)
