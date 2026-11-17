@@ -102,15 +102,15 @@ struct UtteranceAssembler {
 
     /// - Parameters:
     ///   - pause: How long the room is quiet before the speaker is taken to have stopped.
-    ///     Long enough for a thought between words: at 0.8 s, people speaking to an iPad
-    ///     had their sentences cut in two.
+    ///     Long enough for a thought between words: at 0.8 s and again at 1.2 s, people
+    ///     speaking to an iPad had their sentences cut in two.
     ///   - staleness: How long the words go unchanged before a command is taken as
     ///     finished, where the sound can't say. Longer than a recogniser's bursts are apart.
     ///   - patience: How long the recogniser is given to settle once asked.
     ///   - settling: How long its last phrases are given to arrive once it has settled.
     ///   - loudness: The level, from 0 to 1, at and above which sound counts as speech.
     init(
-        pause: Duration = .milliseconds(1200), staleness: Duration = .seconds(2), patience: Duration = .milliseconds(1500),
+        pause: Duration = .milliseconds(1800), staleness: Duration = .milliseconds(2500), patience: Duration = .milliseconds(1500),
         settling: Duration = .milliseconds(250), loudness: Float = 0.2
     ) {
         self.pause = pause

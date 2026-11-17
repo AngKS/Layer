@@ -635,14 +635,25 @@ struct UtteranceAssemblerTests {
         var assembler = UtteranceAssembler()
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("I want a screen", isFinal: true, at: at(900))
-        // Quiet for 1.1 s: still thinking.
-        #expect(assembler.next(at: at(2100)) == .wait)
-        // Quiet for 1.2 s: finished.
-        #expect(assembler.next(at: at(2200)) == .settle)
+        // Quiet for 1.7 s: still thinking. At 1.2 s, on an iPad, "I want a screen to"
+        // was taken as a whole command.
+        #expect(assembler.next(at: at(2700)) == .wait)
+        // Quiet for 1.8 s: finished.
+        #expect(assembler.next(at: at(2800)) == .settle)
+    }
+
+    /// Where the room never goes quiet, words unchanged for 2.5 s end the command: longer
+    /// than the pause, so that it is the pause that ends a command wherever it can.
+    @Test func inANoisyRoomWordsUnchangedFor2Point5SecondsEndACommand() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 6000)
+        assembler.heard("zoom out", isFinal: true, at: at(1000))
+        #expect(assembler.next(at: at(3400)) == .wait)
+        #expect(assembler.next(at: at(3500)) == .settle)
     }
 
     @Test func quietAfterSpeechEndsACommand() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("make the button blue", isFinal: true, at: at(900))
         #expect(assembler.hearing == "make the button blue")
@@ -663,7 +674,7 @@ struct UtteranceAssemblerTests {
     /// A recogniser hands words over in bursts about a second apart. A second without
     /// new words, in the middle of a sentence, is not the end of it.
     @Test func aGapBetweenBurstsOfWordsDoesNotCutACommandShort() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 3000)
         assembler.heard("Make the button half width and", isFinal: false, at: at(1500))
         assembler.heard("Make the button half width, and align", isFinal: true, at: at(1600))
@@ -678,7 +689,7 @@ struct UtteranceAssemblerTests {
 
     /// A word or two is over before the recogniser has reported anything.
     @Test func aShortCommandIsFlushedOutOfTheRecogniser() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 400)
         #expect(assembler.next(at: at(1000)) == .wait)
         #expect(assembler.next(at: at(1200)) == .settle)
@@ -688,7 +699,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func noiseWithoutWordsIsNothing() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.sound(level: 0.9, at: at(0))
         #expect(assembler.next(at: at(800)) == .settle)
         assembler.settled(at: at(850))
@@ -699,7 +710,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func speakingAgainBeforeItIsTakenGoesOnWithTheCommand() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("make the button", isFinal: true, at: at(900))
         #expect(assembler.next(at: at(1800)) == .settle)
@@ -716,7 +727,7 @@ struct UtteranceAssemblerTests {
 
     /// Where the room is never quiet, words going stale are what ends a command.
     @Test func inANoisyRoomWordsGoingStaleEndTheCommand() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 4000)
         assembler.heard("zoom out", isFinal: true, at: at(1000))
         #expect(assembler.next(at: at(2500)) == .wait)
@@ -729,7 +740,7 @@ struct UtteranceAssemblerTests {
     /// to do next, turn and turn about, ten times a second. Loudness that never stops
     /// must not keep calling the command back from being taken.
     @Test func inARoomThatIsNeverQuietStaleWordsStillEndTheCommand() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.sound(level: 0.6, at: at(0))
         assembler.heard("zoom out", isFinal: false, at: at(100))
         var steps: [UtteranceAssembler.Step] = []
@@ -744,7 +755,7 @@ struct UtteranceAssemblerTests {
 
     /// Speech too soft to tell from the room is still heard by its words.
     @Test func softSpeechIsKnownByItsWords() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         for moment in stride(from: 0, through: 3000, by: 100) { assembler.sound(level: 0.05, at: at(moment)) }
         assembler.heard("zoom out", isFinal: true, at: at(500))
         #expect(assembler.next(at: at(2400)) == .wait)
@@ -754,7 +765,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func volatileTextIsShownButReplaced() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard("make the", isFinal: false, at: at(0))
         #expect(assembler.hearing == "make the")
         assembler.heard("make the button", isFinal: false, at: at(200))
@@ -767,7 +778,7 @@ struct UtteranceAssemblerTests {
 
     /// Between commands a recogniser can settle a phrase that is only punctuation.
     @Test func punctuationAloneIsNotWords() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard(",...", isFinal: true, at: at(0))
         assembler.heard(".", isFinal: false, at: at(100))
         #expect(assembler.hearing == "")
@@ -780,7 +791,7 @@ struct UtteranceAssemblerTests {
 
     /// The quiet before a command can come out as punctuation at the start of it.
     @Test func punctuationBeforeTheFirstWordIsDropped() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard(",... Show me the 1st screen.", isFinal: true, at: at(0))
         #expect(assembler.hearing == "Show me the 1st screen.")
         assembler.heard(".. make it blue", isFinal: false, at: at(100))
@@ -790,7 +801,7 @@ struct UtteranceAssemblerTests {
     /// A recogniser runs behind the speaker. Asked to settle, it brings out the words it
     /// was still working on; those are the end of this command, not the speaker going on.
     @Test func wordsTheRecogniserBringsOutOnSettlingDoNotRestartTheWait() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("show me the", isFinal: false, at: at(900))
         #expect(assembler.next(at: at(1800)) == .settle)
@@ -804,7 +815,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func wordsThatNeverSettleAreTakenAsTheyAre() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 600)
         assembler.heard("show me the first screen", isFinal: false, at: at(500))
         #expect(assembler.next(at: at(1400)) == .settle)
@@ -824,7 +835,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func silenceGivesNothing() {
-        var assembler = UtteranceAssembler(pause: .milliseconds(800))
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         for moment in stride(from: 0, through: 5000, by: 100) { assembler.sound(level: 0, at: at(moment)) }
         #expect(assembler.next(at: at(5000)) == .wait)
         assembler.heard("   ", isFinal: true, at: at(6000))
