@@ -183,3 +183,19 @@ final class InkBoardPerformanceTests: XCTestCase {
     }
 }
 
+
+/// Typing in the library's search field: every keystroke searches the whole library (C-M2).
+@MainActor
+final class LibrarySearchPerformanceTests: XCTestCase {
+    static let typed = ["s", "se", "set", "sett", "setti", "settin", "setting", "settings", "settings ", "settings s",
+                        "settings sc", "settings scr", "settings scre", "settings scree", "settings screen",
+                        "m", "ma", "mac", "h", "he", "hea", "heart", "cloud.sun.rain", "t", "to", "tog", "toggle",
+                        "a", "ar", "arr", "arro", "arrow", "checkout flow with coupons"]
+
+    /// One keystroke's search, as the library works it out.
+    func testOneSearchEachKeystroke() {
+        measure {
+            for search in Self.typed { _ = AssetLibrary.searchEverywhere(search) }
+        }
+    }
+}

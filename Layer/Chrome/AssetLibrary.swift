@@ -38,6 +38,17 @@ struct Asset: Identifiable, Hashable, Sendable {
     let section: String
     /// Lower-case words a search finds it by: its name's words and other words for it.
     let terms: [String]
+    /// The words of its name, split once rather than on every search.
+    let nameWords: [String]
+
+    init(content: Content, name: String, tab: AssetTab, section: String, terms: [String]) {
+        self.content = content
+        self.name = name
+        self.tab = tab
+        self.section = section
+        self.terms = terms
+        nameWords = AssetLibrary.words(in: name)
+    }
 
     /// What a drag carries, and what the canvas reads back when it is dropped.
     var id: String {
@@ -133,6 +144,11 @@ enum AssetLibrary {
 
     private static let byID: [String: Asset] = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+    /// Each tab's assets, in order.
+    private static let byTab: [AssetTab: [Asset]] = Dictionary(grouping: all, by: \.tab)
+
+    private static func assets(in tab: AssetTab) -> [Asset] { byTab[tab] ?? [] }
+
     /// The asset a drag carried, from its id. A symbol that isn't in the catalogue is still
     /// one, as long as SF Symbols has it.
     static func asset(id: String) -> Asset? {
@@ -192,11 +208,14 @@ enum AssetLibrary {
     /// start one of an asset's words. A word that is a whole word of its name counts for
     /// most. With nothing searched, everything in the tab, in order.
     static func matching(_ search: String, in tab: AssetTab) -> [Asset] {
-        let candidates = all.filter { $0.tab == tab }
-        guard !words(in: search).isEmpty else { return candidates }
-        var found = scored(search, among: candidates).map(\.asset)
+        guard !words(in: search).isEmpty else { return assets(in: tab) }
+        return matching(search, in: tab, scored: scored(search, among: assets(in: tab)), exactSymbol: tab == .icons ? customSymbol(search) : nil)
+    }
+
+    private static func matching(_ search: String, in tab: AssetTab, scored: [(asset: Asset, score: Int)], exactSymbol: Asset?) -> [Asset] {
+        var found = scored.map(\.asset)
         // A symbol named exactly, from beyond the catalogue, comes first.
-        if tab == .icons, let exact = customSymbol(search), !found.contains(where: { $0.id == exact.id }) {
+        if tab == .icons, let exact = exactSymbol, !found.contains(where: { $0.id == exact.id }) {
             found.insert(exact, at: 0)
         }
         return found
@@ -211,12 +230,12 @@ enum AssetLibrary {
 
     /// The strongest score `search` has in `tab`, or nil when nothing there matches.
     static func topScore(for search: String, in tab: AssetTab) -> Int? {
-        scored(search, among: all.filter { $0.tab == tab }).first?.score
+        scored(search, among: assets(in: tab)).first?.score
     }
 
     static func bestMatch(for search: String) -> (tab: AssetTab, score: Int)? {
         var best = AssetTab.allCases
-            .compactMap { tab in scored(search, among: all.filter { $0.tab == tab }).first.map { (tab: tab, score: $0.score) } }
+            .compactMap { tab in scored(search, among: assets(in: tab)).first.map { (tab: tab, score: $0.score) } }
         // A symbol's exact name: certain when it is dotted, as in cloud.sun.rain; a plain
         // word such as "hexagon" is a symbol too, but more likely means the shape.
         if customSymbol(search) != nil {
@@ -236,12 +255,16 @@ enum AssetLibrary {
     /// find nothing are left out.
     static func searchEverywhere(_ search: String) -> [ResultGroup] {
         guard !words(in: search).isEmpty else { return [] }
+        // Looked up once: asking SF Symbols for a name loads its image.
+        let exactSymbol = customSymbol(search)
         let groups: [(group: ResultGroup, score: Int)] = AssetTab.allCases.compactMap { tab in
-            let assets = matching(search, in: tab)
+            // Each tab is scored once, for both what it finds and how well.
+            let scored = scored(search, among: assets(in: tab))
+            let assets = matching(search, in: tab, scored: scored, exactSymbol: exactSymbol)
             guard !assets.isEmpty else { return nil }
-            var score = topScore(for: search, in: tab) ?? 0
+            var score = scored.first?.score ?? 0
             // The exact symbol counts as the Icons group's score, as `bestMatch` scores it.
-            if tab == .icons, customSymbol(search) != nil {
+            if tab == .icons, exactSymbol != nil {
                 score = max(score, search.contains(".") ? 10_000 : 250)
             }
             return (ResultGroup(tab: tab, assets: assets), score)
@@ -263,7 +286,7 @@ enum AssetLibrary {
         let query = words(in: search)
         var scored: [(asset: Asset, score: Int, index: Int)] = []
         for (index, asset) in candidates.enumerated() {
-            let nameWords = words(in: asset.name)
+            let nameWords = asset.nameWords
             var score = 0
             var matchesAll = true
             for word in query {
@@ -404,10 +427,13 @@ struct AssetLibraryView: View {
     @AppStorage("assetLibrary.tab") private var tab = AssetTab.icons
     @AppStorage(AssetLibrary.recentsKey) private var storedRecents = ""
     @State private var search = ""
+    /// The last search and what it found. The body is worked out again for other reasons,
+    /// a generation starting for one, and the library isn't searched again for those.
+    @State private var lastSearch = LastSearch()
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        let groups = AssetLibrary.searchEverywhere(search)
+        let groups = lastSearch.groups(for: search)
         VStack(spacing: 0) {
             searchField(firstResult: groups.first?.assets.first)
             // The tabs stay where they are while searching, so the layout doesn't jump, but
@@ -445,6 +471,12 @@ struct AssetLibraryView: View {
 
     private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// Whether to offer to write a screen for the search: there are words, and nothing
+    /// was found. Every group found has at least one asset, so the first is enough to tell.
+    private func offersGeneration(_ firstResult: Asset?) -> Bool {
+        isSearching && firstResult == nil
+    }
+
     // MARK: Search
 
     private func searchField(firstResult: Asset?) -> some View {
@@ -454,14 +486,14 @@ struct AssetLibraryView: View {
             TextField("Search the library", text: $search)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .submitLabel(onGenerate != nil && AssetLibrary.offersGeneration(for: search) ? .go : .done)
+                .submitLabel(onGenerate != nil && offersGeneration(firstResult) ? .go : .done)
                 .focused($isSearchFocused)
                 // Return puts the best match on the canvas; when nothing matches, it writes
                 // the screen the words describe.
                 .onSubmit {
                     if let firstResult {
                         onPick(firstResult)
-                    } else if let onGenerate, AssetLibrary.offersGeneration(for: search), !model.isGenerating {
+                    } else if let onGenerate, offersGeneration(firstResult), !model.isGenerating {
                         onGenerate(query)
                     }
                 }
@@ -771,5 +803,20 @@ private struct TemplatePreview: View {
         .scaleEffect(scale, anchor: .topLeading)
         .frame(width: device.size.width * scale, height: height, alignment: .topLeading)
         .allowsHitTesting(false)
+    }
+}
+
+/// What the library's search last found, kept for the search it was.
+@MainActor
+private final class LastSearch {
+    private var search: String?
+    private var found: [AssetLibrary.ResultGroup] = []
+
+    func groups(for search: String) -> [AssetLibrary.ResultGroup] {
+        if search != self.search {
+            self.search = search
+            found = AssetLibrary.searchEverywhere(search)
+        }
+        return found
     }
 }
