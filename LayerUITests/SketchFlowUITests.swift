@@ -485,6 +485,53 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: rows.element(boundBy: 1), toHave: "exists == true", timeout: 5), "the copy should be listed as a layer too")
     }
 
+    func testUndoGoesBackThroughMovingADrawingAndThroughDrawingIt() {
+        openNewDesign()
+
+        // Two strokes with the Pen, crossing, make one drawing.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 780, y: 400), CGPoint(x: 900, y: 480))
+        stroke(CGPoint(x: 900, y: 400), CGPoint(x: 780, y: 480))
+        let crossing = CGPoint(x: 840, y: 440)
+        // On the first stroke only, away from where the second crosses it.
+        let firstStroke = CGPoint(x: 795, y: 410)
+        let empty = CGPoint(x: 700, y: 650)
+        control("Draw").tap()
+        point(crossing).tap()
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
+
+        // Moving the drawing is a change to the design; drawing its strokes was PencilKit's.
+        stroke(crossing, CGPoint(x: 1000, y: 300))
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        let undo = app.buttons.matching(identifier: "arrow.uturn.backward").firstMatch
+        let redo = app.buttons.matching(identifier: "arrow.uturn.forward").firstMatch
+
+        // The first undo takes back the move.
+        undo.tap()
+        point(crossing).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "undo should move the drawing back")
+        point(empty).tap()
+
+        // The next takes back the second stroke, leaving a drawing of one.
+        undo.tap()
+        point(firstStroke).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "undo should take back the second stroke")
+        point(empty).tap()
+
+        // The next takes back the first, and the drawing with it.
+        undo.tap()
+        point(firstStroke).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "undo should take back the first stroke, and so the drawing")
+
+        // Redo brings both strokes back as one drawing.
+        redo.tap()
+        redo.tap()
+        point(crossing).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "redo should bring the drawing back")
+    }
+
     func testTheReferenceDesignFitsTheCanvas() {
         // The scripted demo draws the reference design, letting each sketch convert on its
         // own after a pause, then opens the code panel.

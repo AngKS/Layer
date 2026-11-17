@@ -30,7 +30,8 @@ final class DesignStore {
         }
     }
 
-    /// The document's undo manager, shared with PencilKit's ink. Its history is capped, so a
+    /// The document's undo manager. Ink is in its history too, as changes to the design's
+    /// drawings: PencilKit keeps none of its own here. Its history is capped, so a
     /// long sitting doesn't keep every earlier version of the design alive.
     @ObservationIgnored var undoManager: UndoManager? {
         didSet { undoManager?.levelsOfUndo = Self.undoLevels }
@@ -480,15 +481,13 @@ final class DesignStore {
         change { $0.updateScreen(id, body) }
     }
 
-    // MARK: Following the ink
+    // MARK: Changes worked out elsewhere
 
-    /// Applies a change that follows something with an undo history of its own, and so
-    /// registers none here. Drawings follow the ink canvas this way: PencilKit undoes
-    /// and redoes its strokes itself, and the design's drawings are worked out from them.
-    func follow(_ body: (inout DesignContent) -> Void) {
-        // An edit under way began before this, and must not take it back when it is undone.
-        if editStart != nil { body(&editStart!) }
-        body(&content)
+    /// Applies a change to the design as one undo step. The ink canvas's changes to
+    /// drawings come this way: a stroke drawn or rubbed out there is a change to a
+    /// drawing here, undone like any other.
+    func apply(_ body: (inout DesignContent) -> Void) {
+        change(body)
     }
 
     // MARK: Undo

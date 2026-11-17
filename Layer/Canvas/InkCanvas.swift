@@ -1,17 +1,65 @@
 import PencilKit
 import SwiftUI
 
+/// The undo manager the document's ink canvas hands to PencilKit and to the system.
+///
+/// Undo and redo asked of it, by the palette's buttons or the system's gestures, go to the
+/// document's own history. What PencilKit registers with it for its strokes goes nowhere.
+/// The design keeps ink's history itself, as changes to its drawings (see `DrawingSync`),
+/// because PencilKit's own entries stop working once the canvas has been set from the
+/// design, as it is whenever a drawing is moved, locked, hidden, deleted or put back.
+final class InkUndoManager: UndoManager {
+    /// The document's history, which undo and redo are passed on to.
+    weak var document: UndoManager? {
+        didSet {
+            guard document !== oldValue else { return }
+            let center = NotificationCenter.default
+            for name in Self.changes {
+                center.removeObserver(self, name: name, object: oldValue)
+                if let document { center.addObserver(self, selector: #selector(documentChanged(_:)), name: name, object: document) }
+            }
+        }
+    }
+
+    private static let changes: [Notification.Name] = [
+        .NSUndoManagerDidCloseUndoGroup, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+    ]
+
+    override init() {
+        super.init()
+        // What PencilKit registers here is never undone, so none of it need be kept.
+        levelsOfUndo = 1
+    }
+
+    override var canUndo: Bool { document?.canUndo ?? false }
+    override var canRedo: Bool { document?.canRedo ?? false }
+    override func undo() { document?.undo() }
+    override func redo() { document?.redo() }
+    override var undoMenuItemTitle: String { document?.undoMenuItemTitle ?? super.undoMenuItemTitle }
+    override var redoMenuItemTitle: String { document?.redoMenuItemTitle ?? super.redoMenuItemTitle }
+
+    /// Says for the document's history what it says for itself, so that whatever watches
+    /// this one, the palette's buttons for instance, knows when undo and redo can be done.
+    @objc private func documentChanged(_ note: Notification) {
+        NotificationCenter.default.post(name: note.name, object: self)
+    }
+}
+
 /// Where the design's drawings are drawn on: it holds the strokes of every drawing that
-/// is neither locked nor hidden. Its strokes go on the document's undo history, which is
-/// what makes them undoable alongside design changes. The drawings themselves are kept in
-/// the design, and follow what happens here: see `DrawingSync`.
+/// is neither locked nor hidden. The drawings themselves are kept in the design, and
+/// each change to the strokes here is a change to them there, which is what makes ink
+/// undoable alongside everything else: see `DrawingSync` and `InkUndoManager`.
 final class DocumentCanvasView: PKCanvasView {
-    var documentUndoManager: UndoManager?
+    let inkUndoManager = InkUndoManager()
+    var documentUndoManager: UndoManager? {
+        get { inkUndoManager.document }
+        set { inkUndoManager.document = newValue }
+    }
     var onMoveToWindow: (() -> Void)?
     var onLayout: (() -> Void)?
 
     override var undoManager: UndoManager? {
-        documentUndoManager ?? super.undoManager
+        documentUndoManager == nil ? super.undoManager : inkUndoManager
     }
 
     override func didMoveToWindow() {
@@ -432,19 +480,34 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         /// The strokes on the document canvas changed, drawn, erased or moved with
-        /// PencilKit's tools or put there from here: the design's drawings follow.
+        /// PencilKit's tools or put there from here: the design's drawings change to
+        /// match, which is the step that undo takes back.
         private func followInk() {
+            // While the design is being put back by undo or redo it is the one to follow.
+            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
             model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
+            // PencilKit's own record of the change is not the one that is kept.
+            documentCanvas.inkUndoManager.removeAllActions()
         }
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
-            if canvasView === sketchCanvas { model.penDown() }
+            if canvasView === sketchCanvas {
+                model.penDown()
+            } else {
+                // One use of a tool is one undo step, however many times it changes the
+                // strokes on the way, as rubbing out does.
+                model.store.beginEdit()
+            }
         }
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
-            if canvasView === sketchCanvas { model.penUp() }
+            if canvasView === sketchCanvas {
+                model.penUp()
+            } else {
+                model.store.endEdit()
+            }
         }
 
         /// Follows the Magic Pen while it draws or hovers, for the cursor.
@@ -485,30 +548,10 @@ struct InkCanvas: UIViewRepresentable {
             guard !removed.isEmpty else { return }
             drawing.strokes.removeAll { keys.contains(Self.key(for: $0)) }
             setDocumentDrawing(drawing)
-            registerUndo(ofRemoving: removed)
         }
 
-        private func registerUndo(ofRemoving strokes: [PKStroke]) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                var drawing = coordinator.documentCanvas.drawing
-                drawing.strokes.append(contentsOf: strokes)
-                coordinator.setDocumentDrawing(drawing)
-                coordinator.registerUndo(ofAdding: strokes)
-            }
-            undoManager.endUndoGrouping()
-        }
-
-        private func registerUndo(ofAdding strokes: [PKStroke]) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                coordinator.deleteInk(Set(strokes.map(Self.key(for:))))
-            }
-            undoManager.endUndoGrouping()
-        }
-
+        /// Sets the strokes on the document canvas from here. The design's drawings
+        /// change to match, and that change is what undo takes back.
         private func setDocumentDrawing(_ drawing: PKDrawing) {
             documentCanvas.drawing = drawing
             followInk()
@@ -552,7 +595,6 @@ struct InkCanvas: UIViewRepresentable {
             var drawing = documentCanvas.drawing
             drawing.strokes.append(contentsOf: added)
             setDocumentDrawing(drawing)
-            registerUndo(ofAdding: added)
             return Set(added.map(Self.key(for:)))
         }
 

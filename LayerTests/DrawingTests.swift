@@ -247,15 +247,20 @@ struct DrawingStoreTests {
         store.undoManager = undo
         var sync = DrawingSync()
         let changes = sync.changes(for: cross(at: CGPoint(x: 400, y: 300)), in: store.content)
-        store.follow { changes.apply(to: &$0) }
+        store.apply { changes.apply(to: &$0) }
         let drawing = try #require(store.floating.first)
         return (store, undo, DesignStore.ElementRef(host: .canvas, element: drawing.id))
     }
 
-    @Test func followingTheInkCanvasAddsNothingToUndo() throws {
-        let (store, undo, _) = try storeWithDrawing()
+    @Test func inkDrawnOnTheCanvasIsAnUndoStepOfTheDesigns() throws {
+        let (store, undo, ref) = try storeWithDrawing()
         #expect(store.floating.map(\.element.kind) == [.drawing])
-        #expect(!undo.canUndo, "PencilKit undoes its own strokes")
+        let drawn = store.resolve(ref)?.element
+
+        undo.undo()
+        #expect(store.floating.isEmpty)
+        undo.redo()
+        #expect(store.resolve(ref)?.element == drawn, "redo brings back the same drawing, not another like it")
     }
 
     @Test func aDrawingIsLockedHiddenCopiedAndDeletedLikeAnyElement() throws {

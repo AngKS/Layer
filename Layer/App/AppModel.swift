@@ -910,11 +910,11 @@ final class AppModel {
 
     // MARK: Ink events
 
-    /// The ink drawn with PencilKit's own tools changed: the design's drawings follow it.
-    /// PencilKit keeps the undo history of its strokes, so this adds none of its own.
+    /// The ink drawn with PencilKit's own tools changed: the design's drawings change to
+    /// match. This is the step undo takes back, for ink as for anything else.
     func inkChanged(_ changes: DrawingSync.Changes) {
         guard !changes.isEmpty else { return }
-        store.follow { changes.apply(to: &$0) }
+        store.apply { changes.apply(to: &$0) }
     }
 
     /// The Magic Pen's ink changed.
