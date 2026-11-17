@@ -6,7 +6,8 @@ import PencilKit
 ///
 /// The design is where drawings are kept: each is an element with its own ink. The ink
 /// canvas is where they are drawn on: it shows the strokes of every drawing that is
-/// neither locked nor hidden, and PencilKit's pens, eraser and lasso work on them there.
+/// neither locked nor hidden, and PencilKit's pens and eraser work on them there. (The
+/// palette's lasso selects whole drawings, with everything else: see `InkCanvas`.)
 /// So there are two directions. When the strokes on the canvas change, `changes` says
 /// what the design's drawings become. When the design's drawings change, by being moved,
 /// locked, deleted or put back by undo, `strokes(showing:on:)` says what the canvas
@@ -83,8 +84,11 @@ struct DrawingSync {
         for drawing in drawings {
             var drawingMarks: [Mark] = []
             for stroke in drawing.canvasStrokes {
-                // A stroke already on the canvas where it should be is kept as it is.
-                let kept = held[stroke.key].flatMap { $0.transform.isClose(to: stroke.transform) ? $0 : nil } ?? stroke
+                // A stroke already on the canvas where it should be is kept as it is. One
+                // that has moved is made again: handed the stroke it knows with only a
+                // new transform, PencilKit goes on drawing it where it was.
+                let kept = held[stroke.key].flatMap { $0.transform.isClose(to: stroke.transform) ? $0 : nil }
+                    ?? PKStroke(ink: stroke.ink, path: stroke.path, transform: stroke.transform, mask: stroke.mask)
                 placed[kept.key] = kept
                 order.append(kept.key)
                 owner[kept.key] = drawing.id
