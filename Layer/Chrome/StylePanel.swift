@@ -428,6 +428,19 @@ private struct MagicPenTab: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            // The model this design uses, saved in its file.
+            HStack {
+                Label("Model", systemImage: model.modelChoice.symbol)
+                Spacer(minLength: 8)
+                ModelChoicePicker(choice: Binding(get: { model.modelChoice }, set: { model.setModelChoice($0) }))
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityLabel("Model for this design")
+            }
+            Text(model.engine.statusLine)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if model.engine.canBeTurnedOnInSettings {
                 Button("Turn On Apple Intelligence", systemImage: "apple.intelligence") {
                     if let settings = URL(string: UIApplication.openSettingsURLString) {

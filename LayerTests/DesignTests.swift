@@ -587,7 +587,10 @@ struct DesignFileTests {
     @Test func aDocumentSavesWhatTheModelLastToldIt() throws {
         let document = LayerDocument()
         let model = AppModel(document: document)
-        #expect(document.current.content == DesignContent())
+        // Empty, apart from the model a new design starts with.
+        var empty = DesignContent()
+        empty.canvas.model = ModelPreferences.defaultChoice
+        #expect(document.current.content == empty)
         #expect(document.current.drawing.strokes.isEmpty)
 
         model.store.addScreen(from: leftScreenSketch)

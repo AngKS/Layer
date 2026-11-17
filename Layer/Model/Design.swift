@@ -306,6 +306,9 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     /// The device a tall rectangle drawn with the Magic Pen becomes; an iPhone when unset.
     var sketchDeviceID: String?
     var code = CodeSettings()
+    /// The model that reads this design's sketches and names it. Nil in designs saved
+    /// before there was a choice, which use the app's default (`ModelPreferences`).
+    var model: ModelChoice?
 
     static let paper = RGBColor(hex: 0xF4F3EC)
     /// Canvas colours offered as swatches beside the colour well.
@@ -334,7 +337,12 @@ extension CanvasSettings {
         background = try container.decodeIfPresent(RGBColor.self, forKey: .background)
         sketchDeviceID = try container.decodeIfPresent(String.self, forKey: .sketchDeviceID)
         code = try container.decodeIfPresent(CodeSettings.self, forKey: .code) ?? CodeSettings()
+        // A choice this version can't read, from a newer Layer, is treated as no choice.
+        model = try? container.decodeIfPresent(ModelChoice.self, forKey: .model)
     }
+
+    /// The model this design uses: its own choice, or the app's default.
+    var resolvedModel: ModelChoice { model ?? ModelPreferences.defaultChoice }
 }
 
 /// How screens are written out as SwiftUI.

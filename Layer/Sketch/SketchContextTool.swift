@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import FoundationModels
+@_weakLinked import FoundationModels
 
 /// What's already on the screen, for the sketch agent to ask about — structured facts
 /// (kinds, positions, counts), not a second look at the ink itself, matching the report's

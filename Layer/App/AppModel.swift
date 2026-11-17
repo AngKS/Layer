@@ -49,7 +49,7 @@ final class AppModel {
 
     let document: LayerDocument
     let store: DesignStore
-    let engine = SketchEngine()
+    let engine: SketchEngine
     let pen = PenTracker()
     let images: ImageLibrary
     /// Where the design is saved, when the system has said.
@@ -265,13 +265,32 @@ final class AppModel {
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
+        engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         store.onChange = { [weak self, document] content in
             document.update { $0.content = content }
+            self?.applyModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
         }
+    }
+
+    // MARK: The model
+
+    /// The model this design uses, as saved in its file or the app's default.
+    var modelChoice: ModelChoice { store.content.canvas.resolvedModel }
+
+    /// Changes the model this design uses, saved in its file. Undoable like any setting.
+    func setModelChoice(_ choice: ModelChoice) {
+        guard store.canvas.model != choice else { return }
+        store.updateCanvas { $0.model = choice }
+    }
+
+    /// Points the sketch engine at this design's model. Cheap when nothing changed, so it
+    /// runs on every change to the design and whenever the app's model settings change.
+    func applyModelChoice() {
+        engine.use(modelChoice.sketchProvider)
     }
 
     // MARK: The file

@@ -1,0 +1,46 @@
+@_weakLinked import FoundationModels
+import os
+
+/// Reads sketches and names boards with a hosted model, through the same Foundation
+/// Models session API, prompt and answer structure as `AppleIntelligenceInterpreter`:
+/// only the model passed to the session differs. See that type for what the model is
+/// asked and why.
+struct HostedSketchInterpreter: SketchInterpreter {
+    private static let log = Logger(subsystem: "kahshin.Layer", category: "sketch-agent")
+
+    let model: HostedLanguageModel
+
+    /// `{chosen, runnerUp}`, restricted to the sketch's own candidates.
+    static func decisionSchema(for names: [String]) throws -> GenerationSchema {
+        try AppleIntelligenceInterpreter.agentSchema(for: names)
+    }
+
+    func read(_ request: SketchRequest) async throws -> SketchReading {
+        let candidates = request.options
+        let names = candidates.map(SketchPrompt.name(for:))
+        guard names.count > 1 else { return candidates.first ?? .unknown }
+
+        let scored = request.scoredReadings
+        let rankedLine = scored.isEmpty ? nil : "The rules' own ranked guesses, most likely first: "
+            + scored.map { "\(SketchPrompt.name(for: $0.reading)) (score \(String(format: "%.2f", $0.score)))" }.joined(separator: ", ") + "."
+        let prompt = [SketchPrompt.describe(request), rankedLine].compactMap { $0 }.joined(separator: " ")
+
+        let session = LanguageModelSession(model: model, instructions: SketchPrompt.instructions)
+        // No token limit: unlike the on-device model's, a hosted model's limit can include
+        // its own reasoning, and a tight one can leave nothing for the answer.
+        let response = try await session.respond(to: prompt, schema: try Self.decisionSchema(for: names), options: GenerationOptions(temperature: 0))
+        let chosenName = try response.content.value(String.self, forProperty: "chosen")
+        Self.log.info("\(model.provider.rawValue, privacy: .public) \(model.model, privacy: .public) chose \(chosenName, privacy: .public)")
+        return zip(names, candidates).first { $0.0 == chosenName }?.1 ?? .unknown
+    }
+
+    func suggestTitle(for board: String) async throws -> String {
+        let session = LanguageModelSession(model: model, instructions: SketchPrompt.titleInstructions)
+        // Streamed, so a name starts arriving as soon as the provider starts writing it.
+        var title = ""
+        for try await partial in session.streamResponse(to: board, options: GenerationOptions(temperature: 0)) {
+            title = partial.content
+        }
+        return title
+    }
+}

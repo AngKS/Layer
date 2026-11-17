@@ -75,6 +75,7 @@ final class OpenDesigns {
             }
             var file = DesignFile()
             file.content.title = title
+            file.content.canvas.model = ModelPreferences.defaultChoice
             let wrapper = try file.wrapper()
             var coordinationError: NSError?
             var writeError: Error?
@@ -111,6 +112,14 @@ enum DocumentBrowser {
             try await Task.sleep(for: .milliseconds(100))
         }
         throw LayerIntentError.couldNotOpen
+    }
+
+    /// The document browser in every window.
+    static func all() -> [UIDocumentBrowserViewController] {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .compactMap { search($0.rootViewController) }
     }
 
     /// The document browser in the frontmost window.
