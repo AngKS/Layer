@@ -104,11 +104,17 @@ enum SSE {
 }
 
 @Suite("Hosted models through Foundation Models", .serialized)
-struct HostedModelTests {
+final class HostedModelTests {
     init() throws {
         URLProtocol.registerClass(StubProvider.self)
         try APIKeyStore.setKey("test-key-anthropic", for: .anthropic)
         try APIKeyStore.setKey("test-key-openai", for: .openAI)
+    }
+
+    // The tests run inside the app, so their keys would otherwise stay in its Keychain.
+    deinit {
+        try? APIKeyStore.removeKey(for: .anthropic)
+        try? APIKeyStore.removeKey(for: .openAI)
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
@@ -216,9 +222,13 @@ struct HostedModelTests {
         let screen = try #require(app.store.screen(screenID))
         #expect(screen.elements.map(\.kind) == [.title, .textField, .textField, .button])
         #expect(screen.elements.map(\.text) == ["Welcome back", "Email", "Password", "Sign in"])
-        // The description went to the design's model, with the instructions.
-        let body = StubProvider.lastBody
-        #expect((body["messages"] as? [[String: Any]])?.first?["content"] as? String == ScreenGenerator.instructions)
+        // The description went to the design's model, with the generator's instructions.
+        // (Switching models also sends the engine's own short check, so it's one of several.)
+        let systems = StubProvider.requests.compactMap { request -> String? in
+            let body = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any]
+            return (body?["messages"] as? [[String: Any]])?.first?["content"] as? String
+        }
+        #expect(systems.contains(ScreenGenerator.instructions))
 
         // One undo takes the whole generated screen away.
         undo.undo()
