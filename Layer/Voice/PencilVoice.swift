@@ -105,8 +105,11 @@ final class PencilVoice {
     }
 
     @ObservationIgnored private weak var model: AppModel?
-    @ObservationIgnored private let makeRoute: @MainActor () -> any VoiceRoute
-    @ObservationIgnored private let makeRunner: @MainActor (AppModel) -> any VoiceCommandRunner
+    /// How each listen hears, and what carries a command out. Settable so that the
+    /// simulator's scripted squeeze can put its own into the instance the canvas already
+    /// shows; a change reaches the next call, not one already up.
+    @ObservationIgnored var makeRoute: @MainActor () -> any VoiceRoute
+    @ObservationIgnored var makeRunner: @MainActor (AppModel) -> any VoiceCommandRunner
     @ObservationIgnored private let clock: () -> ContinuousClock.Instant
     @ObservationIgnored private var mode: Mode?
     /// The call getting ready, which a squeeze waits on before it listens.
