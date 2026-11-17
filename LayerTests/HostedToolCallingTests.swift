@@ -324,8 +324,8 @@ extension HostedModelTests {
         #expect(line.contains("S2"))
         #expect(line.contains("2 elements"))
         #expect(handles.screen("S2") == made.id)
-        #expect(line == "Made the screen “Welcome” as S2, with 2 elements.")
-        // The pill is told the same without the handle.
+        #expect(line == "Made the screen “Welcome” as S2, with 2 elements. It is the S2 now in the canvas list.")
+        // The pill is told what was made, without the handle.
         #expect(box.lines == ["Made the screen “Welcome”, with 2 elements."])
         // The canvas's own notice isn't left up: the call's pill has said it.
         #expect(app.generation == nil)

@@ -308,7 +308,9 @@ final class VoiceToolbox: VoiceActing {
         if case .failed(let reason) = outcome { return failed(reason) }
         guard let screen = model.store.screen(screenID) else { return failed("The model didn't describe any elements.") }
         let count = screen.elements.count
-        return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements").")
+        // Said so: seeing the new screen in its canvas list, a model took it for another
+        // one already there with the same name.
+        return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements"). It is the \(handles.handle(forScreen: screenID)) now in the canvas list.")
     }
 
     func renameScreen(screen: String, name: String) -> String {
@@ -680,7 +682,7 @@ final class VoiceToolbox: VoiceActing {
     private func done(_ line: String) -> String {
         VoiceLog.log.info("tool: done. \(line, privacy: .private)")
         // The model is told the handle of what was made, to go on with. The pill isn't.
-        lines.append(line.replacing(#/ as [ES]\d+/#, with: ""))
+        lines.append(line.replacing(#/ It is the [ES]\d+ now in the canvas list\./#, with: "").replacing(#/ as [ES]\d+/#, with: ""))
         lastFailed = false
         return line
     }

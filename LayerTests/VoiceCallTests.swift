@@ -378,7 +378,8 @@ struct VoiceCallTests {
             #expect(VoiceCall.isWorthAsking(command), "\(command)")
         }
         // Noises, and the start of something.
-        for command in ["So", "um", "make.", "the", "Okay, so.", "Yeah", "and then", "you", "I", ""] {
+        for command in ["So", "um", "make.", "the", "Okay, so.", "Yeah", "and then", "you", "I", "",
+                        "cool, cool, cool. Okay.", "Nice!", "Great, thanks"] {
             #expect(!VoiceCall.isWorthAsking(command), "\(command)")
         }
     }
@@ -448,6 +449,8 @@ struct VoiceCallTests {
         #expect(VoiceCall.localAction(for: "Cancel it.") == .stop)
         #expect(VoiceCall.localAction(for: "OK stop") == .stop)
         #expect(VoiceCall.localAction(for: "please hang up") == .hangUp)
+        #expect(VoiceCall.localAction(for: "Thank you, bye-bye.") == .hangUp)
+        #expect(VoiceCall.localAction(for: "Bye.") == .hangUp)
         // Still only the bare phrase: anything more is a command for the model.
         #expect(VoiceCall.localAction(for: "please stop the title being bold") == nil)
         #expect(VoiceCall.localAction(for: "please") == nil)
@@ -971,10 +974,35 @@ struct PencilBarFlickTests {
         #expect(app.offersVoiceMode)
     }
 
+    /// A narrow window, or a phone, opens a design with Draw off. The palette comes when
+    /// the window widens; drawing turned on by hand is kept whatever the width does.
+    @Test func aDesignOpenedNarrowStartsWithoutDrawing() {
+        let narrow = AppModel(document: LayerDocument())
+        narrow.isCompactSizeClass = true
+        #expect(narrow.tool == .select)
+        narrow.isCompactSizeClass = false
+        #expect(narrow.tool == .draw)
+
+        let wide = AppModel(document: LayerDocument())
+        wide.isCompactSizeClass = false
+        #expect(wide.tool == .draw)
+        wide.isCompactSizeClass = true
+        #expect(wide.tool == .draw)
+
+        let chosen = AppModel(document: LayerDocument())
+        chosen.isCompactSizeClass = true
+        chosen.tool = .draw
+        chosen.isCompactSizeClass = false
+        chosen.isCompactSizeClass = true
+        #expect(chosen.tool == .draw)
+    }
+
     @Test func thePhoneButtonIsOnlyInANarrowWindowWithNothingOverIt() async {
         let app = AppModel(document: LayerDocument())
-        // A design opens with Draw on, so with no phone button until the bar is put away.
+        // A design opened in a narrow window starts with Draw off, so with the phone button.
         app.isCompactSizeClass = true
+        #expect(app.offersVoiceMode)
+        app.tool = .draw
         #expect(!app.offersVoiceMode)
         app.tool = .select
         #expect(app.offersVoiceMode)
