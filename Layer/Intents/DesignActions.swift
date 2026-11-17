@@ -144,6 +144,7 @@ enum DesignActions {
         let area: CGRect? = switch target {
         case .element(let ref): model.store.resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
         case .screen(let id): model.store.screen(id).map { $0.canvasFrame.union($0.labelFrame) }
+        case .several: model.store.canvasFrame(of: target)
         }
         if let area { model.ink?.glide(toShow: area) }
     }

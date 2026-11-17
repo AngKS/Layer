@@ -40,10 +40,21 @@ struct KindSuggestion: Identifiable, Equatable {
     var observation: SketchObservation
 }
 
-/// What is selected on the canvas. A drawing is an element like any other.
-enum CanvasSelection: Hashable, Sendable {
-    case element(DesignStore.ElementRef)
-    case screen(DesignScreen.ID)
+/// A line being drawn round things to select them, in the view's points: the loop of the
+/// palette's lasso, or the box a finger drags out after resting on the canvas.
+enum Sweep: Equatable, Sendable {
+    case lasso([CGPoint])
+    case box(from: CGPoint, to: CGPoint)
+
+    /// The line as a loop, corner by corner for a box.
+    var loop: [CGPoint] {
+        switch self {
+        case .lasso(let points):
+            points
+        case .box(let start, let end):
+            [start, CGPoint(x: end.x, y: start.y), end, CGPoint(x: start.x, y: end.y)]
+        }
+    }
 }
 
 /// One open design's working state, and the path from Magic Pen sketches to elements.
@@ -241,11 +252,16 @@ final class AppModel {
         // field for instance, not landing on the canvas.
         if chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
         // With the palette up, the Pencil is for drawing: landing on what a finger
-        // selected lets go of it, rather than dragging it about.
-        if tool == .draw, let rect = selectionViewRect, rect.insetBy(dx: -8, dy: -8).contains(viewPoint) {
+        // selected lets go of it, rather than dragging it about. Not with the lasso in
+        // hand, though: what the lasso has picked, the Pencil can drag.
+        if tool == .draw, !isLassoInHand, let rect = selectionViewRect, rect.insetBy(dx: -8, dy: -8).contains(viewPoint) {
             selection = nil
         }
     }
+
+    /// Whether the palette's lasso is the tool in hand. Then a loop drawn on the canvas
+    /// selects what it goes round, rather than leaving ink. Kept current by the ink canvas.
+    @ObservationIgnored var isLassoInHand = false
 
     /// Where the controls that float over the canvas are, in the view's points, by name.
     /// Read when the Pencil touches down, not drawn from, so not observed.
@@ -616,14 +632,27 @@ final class AppModel {
 
     // MARK: Selection
 
+    /// The one element that is selected. Nil when several things are: see `selectedElements`.
     var selectedElement: (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
         guard case .element(let ref) = selection, let found = store.resolve(ref) else { return nil }
         return (ref, found.element, found.placement)
     }
 
+    /// The one screen that is selected. Nil when several things are.
     var selectedScreen: DesignScreen? {
         guard case .screen(let id) = selection else { return nil }
         return store.screen(id)
+    }
+
+    /// Everything selected, one thing at a time, in the design's own order.
+    var selectedThings: [CanvasSelection] { store.things(in: selection) }
+
+    /// Every element selected, alone or among other things, from the back to the front.
+    var selectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
+        selectedThings.compactMap { thing in
+            guard case .element(let ref) = thing, let found = store.resolve(ref) else { return nil }
+            return (ref, found.element, found.placement)
+        }
     }
 
     /// A tap that landed on the canvas itself rather than on an element: it picks the
@@ -634,12 +663,109 @@ final class AppModel {
         // handles stay out of the Pencil's way while it draws. A drawing has no handle
         // of its own until it is selected, so a tap on its ink always reaches here.
         if case .element(let ref)? = hoverTarget(at: viewPoint), tool == .draw || store.resolve(ref)?.element.kind == .drawing {
-            selection = .element(ref)
+            pick(.element(ref))
         } else if let screen = store.screen(at: point) {
-            selection = .screen(screen.id)
+            pick(.screen(screen.id))
         } else {
-            selection = nil
+            pick(nil)
         }
+    }
+
+    // MARK: Selecting several things
+
+    /// Where fingers are resting on the canvas, in the view's points, not counting one
+    /// that has just lifted. Supplied by the ink canvas, which sees every touch.
+    @ObservationIgnored var restingFingers: () -> [CGPoint] = { [] }
+    /// What the finger that rested during the last tap was on, so that its own lifting
+    /// isn't taken for a tap; and when it lifted, once that is known.
+    @ObservationIgnored private var rested: (on: CanvasSelection?, lifted: ContinuousClock.Instant?)?
+
+    /// A tap picked something, or nothing when it landed on empty canvas. On its own it
+    /// selects just that. With another finger resting on the canvas, as in Freeform, it
+    /// adds the thing to what is selected, or lets go of it if it was: the thing the
+    /// resting finger is on is selected with it.
+    func pick(_ thing: CanvasSelection?) {
+        let resting = restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
+        guard let finger = resting.first else {
+            if let rested {
+                self.rested = nil
+                // Lifting the finger that rested reaches whatever it was on as a tap.
+                let isLifting = rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
+                if isLifting, rested.on == thing { return }
+            }
+            selection = thing
+            return
+        }
+        var held = hoverTarget(at: finger)
+        // A finger resting on a screen while its elements are tapped is only holding the
+        // selection open: the screen isn't picked along with what is on it.
+        if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
+        rested = (held, nil)
+        guard let thing, thing != held else { return }
+        var things = selection?.things ?? []
+        // Resting on something that isn't selected starts again from it.
+        if let held, !things.contains(held) { things = [held] }
+        selection = CanvasSelection(things.symmetricDifference([thing]))
+    }
+
+    /// The last finger resting on the canvas has lifted.
+    func fingersLifted() {
+        rested?.lifted = .now
+    }
+
+    /// Selects what a loop drawn on the canvas goes round, in canvas points, and lets go
+    /// of everything else.
+    func select(enclosedBy loop: [CGPoint]) {
+        selection = CanvasSelection(store.things(enclosedBy: loop))
+    }
+
+    /// The loop or box being drawn round things, while it is being drawn.
+    private(set) var sweep: Sweep?
+
+    /// The lasso has drawn this much of its loop, in the view's points. Nothing is
+    /// picked until it is finished.
+    func lassoDrawn(_ points: [CGPoint]) {
+        sweep = .lasso(points)
+    }
+
+    /// A box is being dragged out between two corners, in the view's points. What it
+    /// holds is selected as it grows.
+    func boxDragged(from start: CGPoint, to end: CGPoint) {
+        let box = Sweep.box(from: start, to: end)
+        sweep = box
+        let picked = CanvasSelection(store.things(enclosedBy: box.loop.map(viewport.canvasPoint(for:))))
+        if selection != picked { selection = picked }
+    }
+
+    /// The loop or box is finished. A lasso's loop selects what it went round.
+    func sweepEnded() {
+        if case .lasso(let points) = sweep {
+            select(enclosedBy: points.map(viewport.canvasPoint(for:)))
+        }
+        sweep = nil
+    }
+
+    /// The loop or box was given up, as when a second finger turns it into a pinch.
+    func sweepCancelled() {
+        sweep = nil
+    }
+
+    /// Lets go of one thing, leaving the rest of what is selected.
+    func deselect(_ thing: CanvasSelection) {
+        guard let selection, selection.contains(thing) else { return }
+        self.selection = selection.removing(thing)
+    }
+
+    /// Makes one change to every selected element that `applies` to, as one step: a
+    /// colour, for instance, to each that has a fill.
+    func changeSelectedElements(where applies: (DesignElement) -> Bool = { _ in true }, _ body: (inout DesignElement) -> Void) {
+        store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
+    }
+
+    /// Gives every element selected to whatever it now lies on, after a drag.
+    func rehostSelection() {
+        guard let selection else { return }
+        self.selection = store.rehost(selection)
     }
 
     /// The drawing with ink at a canvas point.
@@ -680,24 +806,19 @@ final class AppModel {
             return viewport.viewRect(for: found.placement.canvasRect(for: found.element.frame))
         case .screen(let id):
             return store.screen(id).map { viewport.viewRect(for: $0.canvasFrame) }
+        case .several:
+            return store.canvasFrame(of: target).map(viewport.viewRect(for:))
         }
     }
 
-    /// Whether what is selected is locked in place.
+    /// Whether what is selected is locked in place: all of it, when it is several things.
     var isSelectionLocked: Bool {
-        switch selection {
-        case .element: selectedElement?.element.isLocked == true
-        case .screen: selectedScreen?.isLocked == true
-        case nil: false
-        }
+        selection.map(store.isLocked) ?? false
     }
 
     func setSelectionLocked(_ locked: Bool) {
-        switch selection {
-        case .element(let ref): store.update(ref) { $0.isLocked = locked }
-        case .screen(let id): store.updateScreen(id) { $0.isLocked = locked ? true : nil }
-        case nil: break
-        }
+        guard let selection else { return }
+        store.setLocked(locked, selection)
     }
 
     var canDuplicateSelection: Bool { selection != nil }
@@ -705,16 +826,10 @@ final class AppModel {
     /// Whatever can be selected can be locked: elements, drawings among them, and screens.
     var canLockSelection: Bool { selection != nil }
 
-    /// Copies what is selected and selects the copy.
+    /// Copies what is selected and selects the copy, or the copies.
     func duplicateSelection() {
-        switch selection {
-        case .element(let ref):
-            if let copy = store.duplicate(ref) { selection = .element(copy) }
-        case .screen(let id):
-            if let copy = store.duplicateScreen(id) { selection = .screen(copy.id) }
-        case nil:
-            break
-        }
+        guard let selection, let copies = store.duplicate(selection) else { return }
+        self.selection = copies
     }
 
     func arrangeSelection(_ arrangement: DesignStore.Arrangement) {
@@ -722,9 +837,24 @@ final class AppModel {
         store.arrange(ref, arrangement)
     }
 
+    /// Lines up what is selected: one element with its screen, several things with each other.
     func alignSelection(_ alignment: ElementLayout.Alignment) {
-        guard case .element(let ref) = selection, !isSelectionLocked else { return }
-        store.align(ref, alignment)
+        guard let selection, !isSelectionLocked else { return }
+        switch selection {
+        case .element(let ref): store.align(ref, alignment)
+        case .several: store.align(selection, alignment)
+        case .screen: break
+        }
+    }
+
+    /// Spaces the selected things evenly, across or down. It takes three to have a gap to even out.
+    func distributeSelection(_ distribution: ElementLayout.Distribution) {
+        guard let selection, canDistributeSelection else { return }
+        store.distribute(selection, distribution)
+    }
+
+    var canDistributeSelection: Bool {
+        (selection?.things.count ?? 0) >= 3 && !isSelectionLocked
     }
 
     func toggleLockOfSelection() {
@@ -734,14 +864,15 @@ final class AppModel {
     /// Hides or shows an element. Hiding one lets go of it, since it can't be touched.
     func toggleHidden(_ ref: DesignStore.ElementRef) {
         store.update(ref) { $0.isHidden.toggle() }
-        if selection == .element(ref), store.resolve(ref)?.element.isHidden == true { selection = nil }
+        if store.resolve(ref)?.element.isHidden == true { deselect(.element(ref)) }
     }
 
     func toggleLock(_ ref: DesignStore.ElementRef) {
         store.update(ref) { $0.isLocked.toggle() }
     }
 
-    /// Where what is selected is, in the view's own points.
+    /// Where what is selected is, in the view's own points: for several things, the area
+    /// they cover together.
     var selectionViewRect: CGRect? {
         switch selection {
         case .element:
@@ -750,26 +881,30 @@ final class AppModel {
         case .screen:
             guard let screen = selectedScreen else { return nil }
             return viewport.viewRect(for: screen.canvasFrame.union(screen.labelFrame))
+        case .several(let things):
+            return store.canvasFrame(of: .several(things)).map(viewport.viewRect(for:))
         case nil:
             return nil
         }
     }
 
+    /// Deletes what is selected. Of several things, those that are locked are left.
     func deleteSelection() {
-        guard !isSelectionLocked else { return }
-        switch selection {
-        case .element(let ref): store.delete(ref)
-        case .screen(let id): store.deleteScreen(id)
-        case nil: break
-        }
-        selection = nil
+        guard let selection, !isSelectionLocked else { return }
+        store.delete(selection)
+        self.selection = nil
     }
 
     private func dropSelectionOfMissingThings() {
-        switch selection {
-        case .element(let ref) where store.resolve(ref) == nil: selection = nil
-        case .screen(let id) where store.screen(id) == nil: selection = nil
-        default: break
+        if let selection {
+            let present = selection.things.filter { thing in
+                switch thing {
+                case .element(let ref): store.resolve(ref) != nil
+                case .screen(let id): store.screen(id) != nil
+                case .several: false
+                }
+            }
+            if present.count != selection.things.count { self.selection = CanvasSelection(present) }
         }
         if let suggestion, store.resolve(suggestion.ref) == nil { dismissSuggestion() }
     }

@@ -246,6 +246,65 @@ enum ElementLayout {
         return result
     }
 
+    /// Lines several frames up with one another: each takes the edge, or the middle, of
+    /// the area they cover together. Sizes are kept, and so is where each frame is the
+    /// other way: lining up across leaves each at its own height.
+    static func aligned(_ frames: [CGRect], _ alignment: Alignment) -> [CGRect] {
+        guard let area = frames.dropFirst().reduce(frames.first, { $0?.union($1) }) else { return frames }
+        return frames.map { frame in
+            var result = frame
+            switch alignment {
+            case .left: result.origin.x = area.minX
+            case .centerX: result.origin.x = area.midX - frame.width / 2
+            case .right: result.origin.x = area.maxX - frame.width
+            case .top: result.origin.y = area.minY
+            case .centerY: result.origin.y = area.midY - frame.height / 2
+            case .bottom: result.origin.y = area.maxY - frame.height
+            }
+            return result
+        }
+    }
+
+    /// Spaces three or more frames evenly along a line: the two at the ends stay where
+    /// they are and those between are moved so that every gap is the same. The frames
+    /// come back in the order they were given.
+    static func distributed(_ frames: [CGRect], _ distribution: Distribution) -> [CGRect] {
+        guard frames.count >= 3 else { return frames }
+        func start(_ frame: CGRect) -> CGFloat { distribution == .horizontal ? frame.minX : frame.minY }
+        func length(_ frame: CGRect) -> CGFloat { distribution == .horizontal ? frame.width : frame.height }
+
+        let order = frames.indices.sorted { start(frames[$0]) < start(frames[$1]) }
+        guard let first = order.first, let last = order.last else { return frames }
+        let span = start(frames[last]) + length(frames[last]) - start(frames[first])
+        let gap = (span - frames.map(length).reduce(0, +)) / CGFloat(frames.count - 1)
+
+        var result = frames
+        var next = start(frames[first])
+        for index in order {
+            if distribution == .horizontal { result[index].origin.x = next } else { result[index].origin.y = next }
+            next += length(frames[index]) + gap
+        }
+        return result
+    }
+
+    enum Distribution: CaseIterable, Sendable {
+        case horizontal, vertical
+
+        var name: String {
+            switch self {
+            case .horizontal: "Distribute Horizontally"
+            case .vertical: "Distribute Vertically"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .horizontal: "distribute.horizontal.center"
+            case .vertical: "distribute.vertical.center"
+            }
+        }
+    }
+
     enum Alignment: CaseIterable, Sendable {
         case left, centerX, right, top, centerY, bottom
 

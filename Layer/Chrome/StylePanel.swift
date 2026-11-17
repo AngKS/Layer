@@ -16,6 +16,8 @@ struct StylePanel: View {
                     ElementSettings(ref: selected.ref, element: selected.element)
                 } else if let screen = model.selectedScreen {
                     FrameSettings(screen: screen)
+                } else if model.selection?.isSeveral == true {
+                    SeveralSettings()
                 }
             }
             .padding(.bottom, 12)
@@ -238,7 +240,139 @@ private struct FrameSettings: View {
     }
 }
 
-/// With nothing selected: the sketch in progress, and the way to the canvas's settings.
+/// Several things selected at once: lining them up with one another, and the settings
+/// their elements have in common, each of which is set for every element that has it. A
+/// setting shows what the first of those elements has.
+private struct SeveralSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let things = model.selectedThings
+        let elements = model.selectedElements.map(\.element)
+        let isLocked = model.isSelectionLocked
+
+        PanelHeader(symbol: "square.on.square.dashed", title: "\(things.count) Items") {
+            withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
+        }
+
+        PanelSection {
+            HStack(spacing: 6) {
+                IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
+                IconButton(isLocked ? "Unlock" : "Lock", symbol: isLocked ? "lock.fill" : "lock", isOn: isLocked) {
+                    model.toggleLockOfSelection()
+                }
+            }
+        }
+
+        PanelSection {
+            HStack(spacing: 6) {
+                ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
+                    IconButton(alignment.name, symbol: alignment.symbol) { model.alignSelection(alignment) }
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(ElementLayout.Distribution.allCases, id: \.self) { distribution in
+                    IconButton(distribution.name, symbol: distribution.symbol) { model.distributeSelection(distribution) }
+                }
+            }
+            .disabled(!model.canDistributeSelection)
+        }
+        .disabled(isLocked)
+
+        let rounded = elements.first(where: \.hasCornerRadius)
+        let effects = elements.first { $0.kind.spec.hasEffects }
+        if rounded != nil || effects != nil {
+            PanelSection {
+                HStack(spacing: 8) {
+                    if let rounded {
+                        NumberField("R", label: "Corner radius", value: Binding(
+                            get: { rounded.resolvedCornerRadius },
+                            set: { radius in change(where: \.hasCornerRadius) { $0.cornerRadius = radius } }
+                        ), range: 0...999)
+                    }
+                    if let effects {
+                        NumberField("%", label: "Opacity", value: Binding(
+                            get: { (effects.resolvedOpacity * 100).rounded() },
+                            set: { percent in change(where: \.kind.spec.hasEffects) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                        ), range: 5...100)
+                    }
+                }
+            }
+        }
+
+        let filled = elements.first(where: \.hasFill)
+        let bordered = elements.first(where: \.hasBorder)
+        if filled != nil || bordered != nil || effects != nil {
+            PanelSection {
+                if let filled {
+                    PanelRow("Fill") {
+                        ColorField(label: "Fill colour", color: Binding(get: { filled.tint }, set: { colour in change(where: \.hasFill) { $0.tint = colour } }))
+                    }
+                }
+                if let bordered {
+                    PanelRow("Border") {
+                        NumberField("W", label: "Border width", value: Binding(
+                            get: { bordered.resolvedBorderWidth },
+                            set: { width in change(where: \.hasBorder) { $0.borderWidth = width > 0 ? width : nil } }
+                        ), range: 0...40)
+                            .frame(width: 84)
+                        ColorField(label: "Border colour", color: Binding(
+                            get: { bordered.resolvedBorderColor },
+                            set: { colour in change(where: \.hasBorder) { $0.borderColor = colour } }
+                        ))
+                    }
+                }
+                if let effects {
+                    Toggle("Shadow", isOn: Binding(get: { effects.hasShadow }, set: { shadow in change(where: \.kind.spec.hasEffects) { $0.hasShadow = shadow } }))
+                }
+            }
+        }
+
+        if let worded = elements.first(where: \.kind.hasText) {
+            PanelSection {
+                HStack(spacing: 8) {
+                    NumberField("pt", label: "Font size", value: Binding(
+                        get: { worded.resolvedFontSize.rounded() },
+                        set: { size in change(where: \.kind.hasText) { $0.fontSize = size } }
+                    ), range: 6...400)
+                        .frame(width: 84)
+                    Spacer(minLength: 0)
+                    Picker("Weight", selection: Binding(get: { worded.resolvedFontWeight }, set: { weight in change(where: \.kind.hasText) { $0.fontWeight = weight } })) {
+                        ForEach(FontWeightChoice.allCases, id: \.self) { weight in
+                            Text(weight.name).tag(weight)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    ColorPicker("Text colour", selection: Binding(
+                        get: { worded.resolvedTextColor.color },
+                        set: { colour in change(where: \.kind.hasText) { $0.textColor = RGBColor(UIColor(colour)) } }
+                    ), supportsOpacity: false)
+                        .labelsHidden()
+                }
+                if let aligned = elements.first(where: \.hasTextAlignment) {
+                    Picker("Text alignment", selection: Binding(
+                        get: { aligned.resolvedTextAlignment },
+                        set: { alignment in change(where: \.hasTextAlignment) { $0.textAlignment = alignment } }
+                    )) {
+                        ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
+                            Image(systemName: alignment.symbol)
+                                .accessibilityLabel(alignment.name)
+                                .tag(alignment)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+        }
+    }
+
+    /// Makes a change to every selected element a setting applies to. A run of quick
+    /// changes, a colour being dragged for instance, undoes as one step.
+    private func change(where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        model.adjusting { model.changeSelectedElements(where: applies, body) }
+    }
+}
 
 // MARK: The board menu
 

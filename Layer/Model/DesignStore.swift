@@ -490,6 +490,18 @@ final class DesignStore {
         change(body)
     }
 
+    /// Makes several changes one undo step. Inside a gradual edit that is already under
+    /// way they join that edit instead.
+    func asOneStep(_ body: () -> Void) {
+        guard editStart == nil else {
+            body()
+            return
+        }
+        beginEdit()
+        body()
+        endEdit()
+    }
+
     // MARK: Undo
 
     /// Adds an element to the list as its own change. Returns it as it is kept.

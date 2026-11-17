@@ -521,7 +521,7 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
         DesignActions.edit(model, undoManager: undoManager, actionName: hidden ? "Hide" : "Show") {
             model.store.update(ref) { $0.isHidden = hidden }
         }
-        if hidden, model.selection == .element(ref) { model.selection = nil }
+        if hidden { model.deselect(.element(ref)) }
         return .result()
     }
 }
