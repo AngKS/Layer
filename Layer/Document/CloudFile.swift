@@ -68,11 +68,14 @@ enum CloudFile {
     /// Makes sure Layer's folder exists in iCloud Drive, which is what makes it show up
     /// in Files and as the place new designs are saved. Does nothing without iCloud.
     static func prepareContainer() {
-        DispatchQueue.global(qos: .utility).async {
+        settling.async {
             guard let container = FileManager.default.url(forUbiquityContainerIdentifier: nil) else { return }
             settleConflicts(in: container.appendingPathComponent("Documents"))
         }
     }
+
+    /// Where versions are settled, one design at a time.
+    private static let settling = DispatchQueue(label: "kahshin.Layer.settlingVersions", qos: .utility)
 
     /// Settles every design in Layer's iCloud folder that two devices saved at once, not
     /// just the one that is open. A conflicted file left unresolved anywhere in the folder
@@ -96,10 +99,14 @@ enum CloudFile {
     /// has already chosen which version is the design; every other version is saved
     /// beside it as a design of its own, so that nothing anyone drew is lost. Returns the
     /// names of the copies it made, which is empty when there was nothing to settle.
-    static func keepConflictingVersions(of url: URL) async -> [String] {
+    ///
+    /// Settling is done one at a time, on a queue of its own. The system says a file changed
+    /// several times around a conflict and the save after it, and two checks settling the
+    /// same conflict at once each copied its versions.
+    static func keepConflictingVersions(of url: URL, resolving resolve: @escaping @Sendable (URL) -> [String] = keepConflictingVersionsNow) async -> [String] {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: keepConflictingVersionsNow(of: url))
+            settling.async {
+                continuation.resume(returning: resolve(url))
             }
         }
     }

@@ -689,6 +689,8 @@ final class AppModel {
     }
 
     @ObservationIgnored private var fileCheck: Task<Void, Never>?
+    /// Keeps aside the versions of the file other devices saved at the same time.
+    @ObservationIgnored var keepConflictingVersions: @Sendable (URL) async -> [String] = { await CloudFile.keepConflictingVersions(of: $0) }
 
     /// Looks at where the design's file stands with iCloud, and settles any versions of
     /// it that other devices saved at the same time. Done when the design opens, when
@@ -710,15 +712,19 @@ final class AppModel {
         guard let url = fileURL, !isClosed else { return }
         fileCheck?.cancel()
         fileCheck = Task { [weak self] in
-            let copies = await CloudFile.keepConflictingVersions(of: url)
-            let state = await Task.detached { CloudFile.syncState(of: url) }.value
-            guard let self, !Task.isCancelled, fileURL == url else { return }
-            if !copies.isEmpty {
+            guard let keep = self?.keepConflictingVersions else { return }
+            let copies = await keep(url)
+            // Said even by a check the next one cut short: settling can't be stopped part
+            // way, and the next check finds the versions settled and has nothing to say.
+            if !copies.isEmpty, let self, !isClosed, fileURL == url {
                 let names = copies.map { "“\($0)”" }.formatted(.list(type: .and))
                 keptVersionsNotice = copies.count == 1
                     ? "This design was changed on another device at the same time. That version is kept as \(names), beside this one."
                     : "This design was changed on other devices at the same time. Those versions are kept as \(names), beside this one."
             }
+            guard !Task.isCancelled else { return }
+            let state = await Task.detached { CloudFile.syncState(of: url) }.value
+            guard let self, !Task.isCancelled, fileURL == url else { return }
             if syncState != state { syncState = state }
             // While something has still to go up, keep looking, less often each time, and
             // not at all while the app is away: coming back checks again.

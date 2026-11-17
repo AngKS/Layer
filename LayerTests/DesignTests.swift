@@ -1,4 +1,5 @@
 import CoreGraphics
+import os
 import PencilKit
 import SwiftUI
 import Testing
@@ -1180,5 +1181,47 @@ struct FormatPanelEditTests {
 
         undo.undo()
         #expect(model.store.content == before)
+    }
+}
+
+/// Checks of the file overlap: the system says the file changed several times around a
+/// conflict and the save after it (C-I7).
+@Suite("Checking a design's file")
+@MainActor
+struct FileCheckTests {
+    /// Two checks settling the same conflict at once both copied its versions, as
+    /// "Name (from iPad)" and "Name (from iPad) 2".
+    @Test func conflictsAreSettledOneAtATime() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).layer")
+        let inFlight = OSAllocatedUnfairLock(initialState: (now: 0, most: 0))
+        let resolve: @Sendable (URL) -> [String] = { _ in
+            inFlight.withLock { $0.now += 1; $0.most = max($0.most, $0.now) }
+            Thread.sleep(forTimeInterval: 0.05)
+            inFlight.withLock { $0.now -= 1 }
+            return []
+        }
+        async let first = CloudFile.keepConflictingVersions(of: url, resolving: resolve)
+        async let second = CloudFile.keepConflictingVersions(of: url, resolving: resolve)
+        _ = await (first, second)
+        #expect(inFlight.withLock { $0.most } == 1)
+    }
+
+    /// A check cut short by the next one still says what it kept aside.
+    @Test func versionsKeptByACheckCutShortAreStillMentioned() async throws {
+        let model = AppModel(document: LayerDocument())
+        defer { model.close() }
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        model.keepConflictingVersions = { _ in
+            let call = calls.withLock { $0 += 1; return $0 }
+            guard call == 1 else { return [] }
+            try? await Task.sleep(for: .milliseconds(100))
+            return ["Board (from iPad)"]
+        }
+        model.fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).layer")
+        model.checkFile()
+        for _ in 0..<40 where model.keptVersionsNotice == nil {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(model.keptVersionsNotice?.contains("Board (from iPad)") == true)
     }
 }
