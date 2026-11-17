@@ -239,14 +239,15 @@ final class AppModel {
     }
 
     /// Apple Pencil touched the canvas. The first time, a finger stops drawing, unless
-    /// that has been set by hand.
-    func pencilTouched(at viewPoint: CGPoint) {
+    /// that has been set by hand. `elsewhere` is a touch in a presentation of its own over
+    /// the canvas: a panel's sheet, a popover or an alert.
+    func pencilTouched(at viewPoint: CGPoint, elsewhere: Bool = false) {
         if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
             fingerDraws = false
         }
-        // On a panel, the popover or the bars, the Pencil is pressing a control, scrubbing a
+        // On a panel, a popover or the bars, the Pencil is pressing a control, scrubbing a
         // field for instance, not landing on the canvas.
-        if chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
+        if elsewhere || chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
         // With the palette up, the Pencil is for drawing: landing on what a finger
         // selected lets go of it, rather than dragging it about. Not with the lasso in
         // hand, though: what the lasso has picked, the Pencil can drag.

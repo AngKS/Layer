@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UIKit
 import Observation
 import os
 import PencilKit
@@ -678,4 +679,47 @@ struct CanvasDragTests {
         board.model.scrollOffset = CGPoint(x: 300, y: 120)
         #expect(!redrawn.withLock { $0 })
     }
+}
+
+/// The Pencil on a control over the canvas is on the control, not on the element under it:
+/// with Draw on, landing on what a finger selected lets go of it, and the format sheet over
+/// it closed under the Pencil (C-I6).
+@Suite("The Pencil on controls over the canvas")
+@MainActor
+struct PencilOnChromeTests {
+    @Test func aTouchInASheetOrPopoverIsNotOnTheCanvas() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let canvasRoot = UIView(frame: window.bounds)
+        let container = UIView(frame: canvasRoot.bounds)
+        let overlay = UIView(frame: CGRect(x: 10, y: 10, width: 50, height: 50))
+        canvasRoot.addSubview(container)
+        canvasRoot.addSubview(overlay)
+        window.addSubview(canvasRoot)
+        let sheetRoot = UIView(frame: CGRect(x: 0, y: 400, width: 1000, height: 400))
+        let field = UIView(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+        sheetRoot.addSubview(field)
+        window.addSubview(sheetRoot)
+
+        #expect(InkCanvas.Coordinator.isInAnotherPresentation(field, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(overlay, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(container, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(nil, than: container))
+    }
+
+    @Test func thePencilInASheetOverTheSelectionKeepsIt() throws {
+        let board = Board()
+        board.model.tool = .draw
+        board.model.selection = .element(board.note)
+        let point = try #require(board.model.selectionViewRect).center
+
+        board.model.pencilTouched(at: point, elsewhere: true)
+        #expect(board.model.selection == .element(board.note))
+
+        board.model.pencilTouched(at: point)
+        #expect(board.model.selection == nil)
+    }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }

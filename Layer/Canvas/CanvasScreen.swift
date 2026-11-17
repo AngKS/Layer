@@ -152,6 +152,8 @@ struct CanvasScreen: View {
             // A call's pill takes their place along the bottom while it is up.
             if !isInCall {
                 ViewControls()
+                    // A Pencil on the zoom or undo isn't on the element under them.
+                    .reportsChromeFrame("view controls", to: model)
                     .modifier(BottomCorner(edge: .leading))
                     .transition(.opacity)
             }
@@ -160,6 +162,7 @@ struct CanvasScreen: View {
             // The free corner of a narrow window is where voice mode starts.
             if isCompact, model.offersVoiceMode {
                 PhoneButton()
+                    .reportsChromeFrame("phone button", to: model)
                     .modifier(BottomCorner(edge: .trailing))
                     .transition(.opacity)
             }

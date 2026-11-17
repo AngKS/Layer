@@ -241,7 +241,7 @@ struct InkCanvas: UIViewRepresentable {
             box.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             pencilDetector.onPencil = { [weak self] touch in
                 guard let self, let container = documentCanvas.superview else { return }
-                model.pencilTouched(at: touch.location(in: container))
+                model.pencilTouched(at: touch.location(in: container), elsewhere: Self.isInAnotherPresentation(touch.view, than: container))
             }
             model.restingFingers = { [weak self] in
                 guard let self, let container = documentCanvas.superview else { return [] }
@@ -651,6 +651,21 @@ struct InkCanvas: UIViewRepresentable {
         /// second finger, a pinch or a two-finger scroll, makes it give way.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
             gestureRecognizer === lasso && canvases.contains { other === $0.panGestureRecognizer || other === $0.pinchGestureRecognizer }
+        }
+
+        /// Whether a view the Pencil touched is in a presentation of its own over the canvas,
+        /// such as a panel's sheet, a popover or an alert, rather than on the canvas or the
+        /// controls laid over it. The detector is on the window, which they share; what is
+        /// presented sits in its own branch under the window, apart from the canvas's.
+        static func isInAnotherPresentation(_ touched: UIView?, than canvas: UIView) -> Bool {
+            guard let touched, let window = canvas.window, touched.window === window else { return false }
+            func branch(of view: UIView) -> UIView? {
+                var view = view
+                while let parent = view.superview, parent !== window { view = parent }
+                return view.superview === window ? view : nil
+            }
+            guard let canvasBranch = branch(of: canvas) else { return false }
+            return branch(of: touched) !== canvasBranch
         }
 
         // MARK: Picking and changing ink
