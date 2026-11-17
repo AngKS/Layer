@@ -227,6 +227,9 @@ enum SwiftUICodeGenerator {
         case .divider:
             lines = ["Divider()"] + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"] + placement)
 
+        case .shape:
+            lines = shape(element) + ["    .frame(width: \(number(frame.width)), height: \(number(frame.height)))"] + placement
+
         case .toggle:
             lines = toggle(element) + placement
 
@@ -314,6 +317,9 @@ enum SwiftUICodeGenerator {
 
         case .divider:
             lines = ["Divider()", "    .frame(width: \(number(frame.width)))"]
+
+        case .shape:
+            lines = shape(element) + ["    .frame(\(size))"]
 
         case .toggle:
             lines = toggle(element) + ["    .frame(\(size))"]
@@ -409,6 +415,35 @@ enum SwiftUICodeGenerator {
             "Toggle(\(literal(element.name ?? "")), isOn: .constant(\(element.isOn)))",
             "    .labelsHidden()",
         ] + (element.tint == Theme.accent ? [] : ["    .tint(\(color(element.tint)))"])
+    }
+
+    /// A shape, filled or outlined in its colour, without its frame. SwiftUI's own shapes
+    /// where there is one; otherwise its outline as a path, at the element's size.
+    private static func shape(_ element: DesignElement) -> [String] {
+        let kind = element.shape ?? .rectangle
+        let paint = color(element.tint)
+        let width = number(ShapeKind.outlineWidth)
+        let builtIn: String? = switch kind {
+        case .rectangle: "Rectangle()"
+        case .roundedRectangle: "RoundedRectangle(cornerRadius: \(number(element.resolvedCornerRadius)), style: .continuous)"
+        case .ellipse: "Ellipse()"
+        case .capsule: "Capsule()"
+        default: nil
+        }
+        if let builtIn {
+            return [builtIn, element.isOn ? "    .fill(\(paint))" : "    .strokeBorder(\(paint), lineWidth: \(width))"]
+        }
+        // Outlined, the path is drawn inside the frame as the canvas draws it.
+        let inset = element.isOn ? 0 : ShapeKind.outlineWidth / 2
+        let size = CGSize(width: element.frame.width - inset * 2, height: element.frame.height - inset * 2)
+        let points = (kind.polygon(in: size) ?? []).map { "CGPoint(x: \(number($0.x + inset)), y: \(number($0.y + inset)))" }
+        return [
+            "Path { path in",
+            "    path.addLines([\(points.joined(separator: ", "))])",
+            "    path.closeSubpath()",
+            "}",
+            element.isOn ? ".fill(\(paint))" : ".stroke(\(paint), style: StrokeStyle(lineWidth: \(width), lineJoin: .round))",
+        ].map { $0.hasPrefix(".") ? "    " + $0 : $0 }
     }
 
     /// The border, shadow and opacity that any element can have.

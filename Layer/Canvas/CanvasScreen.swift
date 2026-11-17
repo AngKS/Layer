@@ -74,6 +74,20 @@ struct CanvasScreen: View {
             }
             if model.hovered != target { model.hovered = target }
         }
+        // Things dragged out of the library land where they are dropped: on a screen when
+        // dropped over one, on the open canvas otherwise.
+        .dropDestination(for: String.self) { ids, location in
+            let assets = ids.compactMap(AssetLibrary.asset(id:))
+            guard !assets.isEmpty else { return false }
+            withAnimation(.smooth(duration: 0.3)) {
+                for (index, asset) in assets.enumerated() {
+                    // Several at once fan out a little, rather than piling up.
+                    let offset = CGFloat(index) * 24
+                    model.addAsset(asset, at: CGPoint(x: location.x + offset, y: location.y + offset))
+                }
+            }
+            return true
+        }
         .ignoresSafeArea()
         // A screen being generated says how it is getting on, clear of the screen itself.
         // During a call the pill says it instead.

@@ -25,7 +25,8 @@ final class CanvasBenchmarkUITests: XCTestCase {
         openNewDesign()
         // A board with something on it: three phone frames.
         for _ in 0..<3 {
-            control("Frames").tap()
+            control("Library").tap()
+            app.buttons["Wireframes"].tap()
             let iPhone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'iPhone'")).firstMatch
             XCTAssertTrue(iPhone.waitForExistence(timeout: 5))
             iPhone.tap()

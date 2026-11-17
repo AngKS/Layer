@@ -22,7 +22,11 @@ struct PhoneScreenView: View {
                         .strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
                 }
 
-            statusBar(for: device)
+            if device.family == .desktop {
+                menuBar(for: device)
+            } else {
+                statusBar(for: device)
+            }
 
             ForEach(screen.elements.filter { !$0.isHidden }) { element in
                 ElementView(element: element)
@@ -50,6 +54,29 @@ struct PhoneScreenView: View {
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .scaleEffect(screen.scale, anchor: .topLeading)
         .frame(width: size.width * screen.scale, height: size.height * screen.scale, alignment: .topLeading)
+    }
+
+    /// A Mac's menu bar: the Apple menu and an app's menus on the left, status on the right.
+    private func menuBar(for device: DeviceFrame) -> some View {
+        HStack(spacing: 20) {
+            Image(systemName: "apple.logo")
+                .font(.system(size: 15, weight: .medium))
+            Text("App").font(.system(size: 13, weight: .bold))
+            ForEach(["File", "Edit", "View", "Window", "Help"], id: \.self) { menu in
+                Text(menu).font(.system(size: 13))
+            }
+            Spacer()
+            HStack(spacing: 14) {
+                Image(systemName: "wifi")
+                Image(systemName: "battery.100")
+                Text("Mon 9:41")
+            }
+            .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundStyle(Theme.statusGlyph)
+        .padding(.horizontal, 18)
+        .frame(width: device.size.width, height: device.safeTop)
+        .background(.black.opacity(0.03))
     }
 
     /// The time and status icons, around a Dynamic Island on devices that have one.
@@ -200,6 +227,9 @@ struct ElementView: View {
                 .resizable()
                 .scaledToFit()
                 .foregroundStyle(element.tint.color)
+
+        case .shape:
+            ShapeElementView(kind: element.shape ?? .rectangle, color: element.tint.color, isFilled: element.isOn, cornerRadius: radius)
 
         case .stickyNote:
             RoundedRectangle(cornerRadius: radius, style: .continuous)

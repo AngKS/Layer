@@ -4,6 +4,8 @@ import Foundation
 /// The kinds of thing that can sit on a screen or on the open canvas.
 enum ElementKind: String, CaseIterable, Codable, Sendable {
     case title, body, image, button, textField, divider, symbol, text, stickyNote, toggle, avatar, checkbox, radio, progress
+    /// A plain shape: a rectangle, a circle, a triangle, an arrow. See `ShapeKind`.
+    case shape
     /// Ink kept as it was drawn: a sketch, a figure, an arrow, a handwritten note.
     case drawing
 
@@ -73,6 +75,8 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var tint: RGBColor
     /// For symbols: the SF Symbol's name.
     var symbol: String?
+    /// For shapes: which one. A rectangle when unset.
+    var shape: ShapeKind?
     /// For images that show an attached picture: which one.
     var imageID: UUID?
 
@@ -94,7 +98,8 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var isLocked = false
     /// A hidden element isn't drawn, can't be touched on the canvas, and is left out of the code.
     var isHidden = false
-    /// For toggles, checkboxes and radio buttons: whether it is drawn on.
+    /// For toggles, checkboxes and radio buttons: whether it is drawn on. For shapes:
+    /// whether it is filled with its colour, rather than outlined in it.
     var isOn = true
     /// For progress bars: how full, from 0 to 1. Half when unset.
     var value: Double?
@@ -107,7 +112,7 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
 
     /// Everything about an element that is saved with the design. `ink` is saved apart.
     enum CodingKeys: String, CodingKey {
-        case id, kind, parent, scale, frame, text, tint, symbol, imageID
+        case id, kind, parent, scale, frame, text, tint, symbol, shape, imageID
         case fontSize, fontWeight, textColor, cornerRadius, opacity, textAlignment, borderColor, borderWidth, hasShadow
         case name, isLocked, isHidden, isOn, value, buttonLook
     }
@@ -130,6 +135,7 @@ extension DesignElement {
         text = try container.decode(String.self, forKey: .text)
         tint = try container.decode(RGBColor.self, forKey: .tint)
         symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        shape = try container.decodeIfPresent(ShapeKind.self, forKey: .shape)
         imageID = try container.decodeIfPresent(UUID.self, forKey: .imageID)
         fontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize)
         fontWeight = try container.decodeIfPresent(FontWeightChoice.self, forKey: .fontWeight)
@@ -197,6 +203,22 @@ struct DeviceFrame: Identifiable, Equatable, Sendable {
     let cornerRadius: CGFloat
     let hasIsland: Bool
     let hasHomeIndicator: Bool
+    /// What kind of device it is, which decides the furniture drawn round its screen:
+    /// a status bar on phones and tablets, a menu bar on a Mac.
+    var family = Family.phone
+
+    enum Family: String, CaseIterable, Sendable {
+        case phone, tablet, desktop
+
+        /// The heading devices of this family are listed under.
+        var name: String {
+            switch self {
+            case .phone: "Phones"
+            case .tablet: "Tablets"
+            case .desktop: "Desktops"
+            }
+        }
+    }
 
     /// The device a sketched screen becomes.
     static let iPhone = DeviceFrame(
@@ -216,7 +238,29 @@ struct DeviceFrame: Identifiable, Equatable, Sendable {
         ),
         DeviceFrame(
             id: "ipad", name: "iPad", size: CGSize(width: 820, height: 1180),
-            safeTop: 24, safeBottom: 20, cornerRadius: 26, hasIsland: false, hasHomeIndicator: true
+            safeTop: 24, safeBottom: 20, cornerRadius: 26, hasIsland: false, hasHomeIndicator: true, family: .tablet
+        ),
+        DeviceFrame(
+            id: "ipad-mini", name: "iPad mini", size: CGSize(width: 744, height: 1133),
+            safeTop: 24, safeBottom: 20, cornerRadius: 22, hasIsland: false, hasHomeIndicator: true, family: .tablet
+        ),
+        DeviceFrame(
+            id: "ipad-pro-13", name: "iPad Pro 13″", size: CGSize(width: 1032, height: 1376),
+            safeTop: 24, safeBottom: 20, cornerRadius: 30, hasIsland: false, hasHomeIndicator: true, family: .tablet
+        ),
+        // Macs: a window-sized screen under a menu bar. Their sizes are the default
+        // "looks like" resolutions of each display.
+        DeviceFrame(
+            id: "macbook-air", name: "MacBook Air 13″", size: CGSize(width: 1470, height: 956),
+            safeTop: 32, safeBottom: 0, cornerRadius: 10, hasIsland: false, hasHomeIndicator: false, family: .desktop
+        ),
+        DeviceFrame(
+            id: "macbook-pro-16", name: "MacBook Pro 16″", size: CGSize(width: 1728, height: 1117),
+            safeTop: 32, safeBottom: 0, cornerRadius: 10, hasIsland: false, hasHomeIndicator: false, family: .desktop
+        ),
+        DeviceFrame(
+            id: "imac", name: "iMac 24″", size: CGSize(width: 2240, height: 1260),
+            safeTop: 24, safeBottom: 0, cornerRadius: 6, hasIsland: false, hasHomeIndicator: false, family: .desktop
         ),
     ]
 

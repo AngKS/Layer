@@ -353,6 +353,9 @@ final class AppModel {
         generationDismissal?.cancel()
 
         let device = store.canvas.sketchDevice
+        // What the design says already, before the new screen joins it, so the new one's
+        // words match. Nothing for an empty design.
+        let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
         generationOwnsEdit = !partOfHeldEdit
         if generationOwnsEdit { store.beginEdit() }
         let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
@@ -363,7 +366,7 @@ final class AppModel {
         let choice = modelChoice
         generationTask = Task { [weak self] in
             do {
-                for try await update in ScreenGenerator.stream(prompt, using: choice) {
+                for try await update in ScreenGenerator.stream(prompt, board: board, using: choice) {
                     guard let self, let current = store.screen(screen.id) else { return }
                     switch update {
                     case .startedWriting:
@@ -1071,13 +1074,61 @@ final class AppModel {
         viewport.canvasPoint(for: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 
-    /// Puts a new element in the middle of the view, selected and ready to be dragged.
+    /// Puts a new element in the middle of the view, or centred on `point` in canvas
+    /// points, selected and ready to be dragged. Over a screen it joins the screen, kept
+    /// inside its edges.
     @discardableResult
-    private func add(_ element: DesignElement) -> DesignStore.ElementRef {
-        let ref = store.place(element, centeredAt: middleOfView)
+    private func add(_ element: DesignElement, at point: CGPoint? = nil) -> DesignStore.ElementRef {
+        var center = point ?? middleOfView
+        if element.kind.belongsOnScreens, let screen = store.screens.last(where: { $0.canvasFrame.contains(center) }) {
+            var local = screen.placement.localPoint(for: center)
+            let half = CGSize(width: element.frame.width / 2, height: element.frame.height / 2)
+            if half.width * 2 <= screen.size.width { local.x = min(max(local.x, half.width), screen.size.width - half.width) }
+            if half.height * 2 <= screen.size.height { local.y = min(max(local.y, half.height), screen.size.height - half.height) }
+            center = screen.placement.canvasPoint(for: local)
+        }
+        let ref = store.place(element, centeredAt: center)
         tool = .select
         selection = .element(ref)
         return ref
+    }
+
+    /// Puts something from the library on the canvas: in the middle of the view, or where
+    /// it was dropped, `viewPoint` being in the canvas view's own points.
+    func addAsset(_ asset: Asset, at viewPoint: CGPoint? = nil) {
+        let point = viewPoint.map { viewport.canvasPoint(for: $0) }
+        AssetLibrary.noteUsed(asset)
+        switch asset.content {
+        case .symbol(let name):
+            add(DesignStore.newElement(.symbol, symbol: name), at: point)
+        case .shape(let kind, let filled):
+            var element = DesignStore.newElement(.shape)
+            element.shape = kind
+            element.frame.size = kind.size
+            element.isOn = filled
+            add(element, at: point)
+        case .component(let id):
+            guard let element = AssetLibrary.element(forComponent: id) else { return }
+            add(element, at: point)
+            if element.kind == .stickyNote { isEditingText = true }
+        case .frame(let id):
+            guard let device = DeviceFrame.all.first(where: { $0.id == id }) else { return }
+            addFrame(device, centeredAt: point)
+        case .template(let name):
+            addTemplate(name, centeredAt: point)
+        }
+    }
+
+    /// Adds a ready-made screen from the library, laid out on the design's usual device,
+    /// as one undo step.
+    func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
+        guard let blueprint = AssetLibrary.template(named: name) else { return }
+        let device = store.canvas.sketchDevice
+        store.beginEdit()
+        defer { store.endEdit() }
+        let screen = addFrame(device, centeredAt: point)
+        store.updateScreen(screen.id) { $0.name = name }
+        _ = store.setElements(blueprint.layout(on: device), on: screen.id, replacing: true)
     }
 
     func addSymbol(_ name: String) {
@@ -1107,17 +1158,20 @@ final class AppModel {
         add(element)
     }
 
-    /// Adds a device frame in the middle of the view, sized to fit comfortably in it.
-    func addFrame(_ device: DeviceFrame) {
+    /// Adds a device frame in the middle of the view, or centred on `point` in canvas
+    /// points, sized to fit comfortably in the view.
+    @discardableResult
+    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> DesignScreen {
         let room = (canvasSize.height - 220) / viewport.scale
         let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
         let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
-        let middle = middleOfView
+        let middle = point ?? middleOfView
         let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
         let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
         tool = .select
         selection = .screen(screen.id)
         suggestTitleIfNeeded()
+        return screen
     }
 
     /// Names the board once, the first time it has something on it worth naming.

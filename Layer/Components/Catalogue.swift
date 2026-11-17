@@ -23,6 +23,7 @@ extension ElementKind {
         case .radio: Catalogue.radio
         case .progress: Catalogue.progress
         case .drawing: Catalogue.drawing
+        case .shape: Catalogue.shape
         }
     }
 }
@@ -32,6 +33,7 @@ enum Catalogue {
     static let title = ComponentSpec(
         name: "Title", symbol: "textformat", placeholder: "Title", promptName: "title",
         writtenNames: ["title", "heading", "header", "headline", "large title"],
+        sketchHint: "a short squiggle near the top. A screen has one title.",
         size: .fixed(CGSize(width: 228, height: 40)),
         // Bigger scribbles are bigger titles: Title 2, Title, or Large Title.
         sketchFit: .words(sizedByHeight: true),
@@ -46,6 +48,7 @@ enum Catalogue {
         placeholder: "A short description goes here, a line or two that says what this is.",
         promptName: "bodyText",
         writtenNames: ["body", "body text", "description", "paragraph", "subtitle", "caption"],
+        sketchHint: "a longer squiggle, or a squiggle below a title or an image.",
         size: .fixed(CGSize(width: 297, height: 44)),
         sketchFit: .words(sizedByHeight: false),
         fillsWrittenWidth: true,
@@ -60,6 +63,7 @@ enum Catalogue {
     static let image = ComponentSpec(
         name: "Image", symbol: "photo", promptName: "image",
         writtenNames: ["image", "photo", "picture", "hero", "hero image", "banner"],
+        sketchHint: "a large box, about as tall as it is wide or taller.",
         size: .tallAsDrawn(width: 333, height: 120...520, step: 8),
         runsAcross: true,
         sketchFit: .box(narrowest: 44),
@@ -71,6 +75,7 @@ enum Catalogue {
     static let button = ComponentSpec(
         name: "Button", symbol: "capsule.fill", placeholder: "Continue", promptName: "button",
         writtenNames: ["button", "primary button", "cta"],
+        sketchHint: "a wide pill or rounded box. Usually near the bottom of a screen, and a screen rarely has more than one or two.",
         size: .fixed(CGSize(width: 353, height: 50)),
         runsAcross: true,
         sketchFit: .box(narrowest: 88),
@@ -83,6 +88,7 @@ enum Catalogue {
     static let textField = ComponentSpec(
         name: "Text Field", symbol: "character.cursor.ibeam", placeholder: "Placeholder", promptName: "textField",
         writtenNames: ["text field", "textfield", "field", "input", "search field", "email field", "password field"],
+        sketchHint: "a wide box with squarish or slightly rounded corners. Often stacked with other text fields in the upper or middle part of a screen.",
         size: .fixed(CGSize(width: 333, height: 48)),
         runsAcross: true,
         sketchFit: .box(narrowest: 120),
@@ -139,6 +145,7 @@ enum Catalogue {
     static let toggle = ComponentSpec(
         name: "Toggle", symbol: "switch.2", promptName: "toggle",
         writtenNames: ["toggle", "switch"],
+        sketchHint: "a small pill with a circle (its knob) nearer one end than the middle.",
         size: .fixed(CGSize(width: 51, height: 31)),
         keepsSketchedPosition: true,
         traits: [.fill, .onState],
@@ -149,6 +156,7 @@ enum Catalogue {
     static let avatar = ComponentSpec(
         name: "Avatar", symbol: "person.crop.circle", promptName: "avatar",
         writtenNames: ["avatar", "profile picture", "profile photo"],
+        sketchHint: "a circle about \(SketchConventions.radioPoints + 1) points across or more, usually alone rather than in a column.",
         // As large as it was drawn, within reason.
         size: .squareAsDrawn(side: 40...160, step: 4),
         staysSquare: true,
@@ -160,6 +168,7 @@ enum Catalogue {
     static let checkbox = ComponentSpec(
         name: "Checkbox", symbol: "checkmark.square", promptName: "checkbox",
         writtenNames: ["checkbox", "check box", "tick box"],
+        sketchHint: "a tiny square, often with a tick or an X in it, usually beside a label.",
         size: .fixed(CGSize(width: 24, height: 24)),
         minimumSize: CGSize(width: 12, height: 12),
         keepsSketchedPosition: true,
@@ -172,6 +181,7 @@ enum Catalogue {
     static let radio = ComponentSpec(
         name: "Radio Button", symbol: "largecircle.fill.circle", promptName: "radioButton",
         writtenNames: ["radio", "radio button", "option"],
+        sketchHint: "a tiny circle, under about \(SketchConventions.radioPoints) points across, often with a dot in it, usually one of a column of them.",
         size: .fixed(CGSize(width: 24, height: 24)),
         minimumSize: CGSize(width: 12, height: 12),
         staysSquare: true,
@@ -196,9 +206,24 @@ enum Catalogue {
         traits: []
     )
 
+    /// What it is drawn as is the element's own `shape`. Not something a sketch is read
+    /// as, nor written in a generated screen: shapes are added from the library.
+    static let shape = ComponentSpec(
+        name: "Shape", symbol: "square.on.circle", promptName: "shape",
+        writtenNames: [],
+        isAskedForOnScreens: false,
+        size: .fixed(CGSize(width: 100, height: 100)),
+        minimumSize: CGSize(width: 8, height: 8),
+        keepsSketchedPosition: true,
+        cornerRadius: .points(16),
+        traits: [.fill, .onState],
+        onName: "Filled"
+    )
+
     static let progress = ComponentSpec(
         name: "Progress Bar", symbol: "progress.indicator", promptName: "progressBar",
         writtenNames: ["progress", "progress bar", "progress view", "loading bar"],
+        sketchHint: "a long, very thin outline, often partly shaded in.",
         size: .fixed(CGSize(width: 333, height: 6)),
         minimumSize: CGSize(width: 32, height: 1),
         runsAcross: true,
