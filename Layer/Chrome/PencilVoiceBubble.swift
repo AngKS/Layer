@@ -37,6 +37,12 @@ struct PencilVoiceBubble: View {
     /// Measured once laid out. Until then, about the size it opens at.
     @State private var size = CGSize(width: 190, height: 52)
     @State private var isMeasured = false
+    /// The largest it has been measured since it opened at this tip.
+    @State private var largest = CGSize.zero
+    /// Which way round the tip it went, chosen once for the tip it opened at: the side is
+    /// kept as it grows and shrinks from state to state, unless something comes in the way.
+    @State private var chosenTurn: Double?
+    @State private var chosenFor: CGPoint?
 
     /// How far the bubble keeps from the tip.
     nonisolated static let gap: CGFloat = 28
@@ -58,16 +64,69 @@ struct PencilVoiceBubble: View {
         anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat,
         avoiding obstacles: [CGRect] = [], subject: CGRect? = nil
     ) -> CGPoint {
-        // The way the bubble goes from the tip: opposite the barrel, or straight down.
-        let away = azimuth.map { $0.radians + .pi } ?? .pi / 2
-        let turns: [Double] = [0, -1, 1, -2, 2, -3, 3].map { $0 * .pi / 4 }
-        let places = turns.map { place(towards: away + $0, anchor: anchor, size: size, in: bounds, topInset: topInset) }
-        // Clear of the tip by half the gap at least: kept from the bar or an edge, it may
-        // have been brought nearer than the whole of it.
-        let clearOfTip = places.filter { !$0.insetBy(dx: -gap / 2, dy: -gap / 2).contains(anchor) }
-        let clearOfChrome = clearOfTip.filter { place in !obstacles.contains { $0.intersects(place) } }
-        let clear = clearOfChrome.first { place in subject.map { !$0.intersects(place) } ?? true }
-        return (clear ?? clearOfChrome.first ?? clearOfTip.first ?? places[0]).origin
+        let turn = turn(anchor: anchor, azimuth: azimuth, size: size, in: bounds, topInset: topInset, avoiding: obstacles, subject: subject)
+        return origin(anchor: anchor, azimuth: azimuth, turn: turn, size: size, in: bounds, topInset: topInset)
+    }
+
+    /// The turns tried, in radians away from straight opposite the barrel, in order.
+    nonisolated static let turns: [Double] = [0, -1, 1, -2, 2, -3, 3].map { $0 * .pi / 4 }
+
+    /// Which way round the tip a bubble of `size` goes, as `origin` says: one of `turns`.
+    nonisolated static func turn(
+        anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat,
+        avoiding obstacles: [CGRect] = [], subject: CGRect? = nil
+    ) -> Double {
+        turn(anchor: anchor, azimuth: azimuth, sizes: [size], in: bounds, topInset: topInset, avoiding: obstacles, subject: subject)
+    }
+
+    /// Which way round the tip a bubble goes that will be each of `sizes` in turn: the
+    /// first side that does for all of them. A smaller bubble sits nearer the tip, so a
+    /// side clear for the largest isn't always clear for the smallest.
+    nonisolated static func turn(
+        anchor: CGPoint, azimuth: Angle?, sizes: [CGSize], in bounds: CGRect, topInset: CGFloat,
+        avoiding obstacles: [CGRect] = [], subject: CGRect? = nil
+    ) -> Double {
+        let places = turns.map { turn in
+            (turn: turn, frames: sizes.map { place(towards: away(azimuth) + turn, anchor: anchor, size: $0, in: bounds, topInset: topInset) })
+        }
+        let clearOfTip = places.filter { $0.frames.allSatisfy { isClear(of: anchor, $0) } }
+        let clearOfChrome = clearOfTip.filter { place in place.frames.allSatisfy { frame in !obstacles.contains { $0.intersects(frame) } } }
+        let clear = clearOfChrome.first { place in subject.map { subject in place.frames.allSatisfy { !subject.intersects($0) } } ?? true }
+        return (clear ?? clearOfChrome.first ?? clearOfTip.first ?? places[0]).turn
+    }
+
+    /// The top-left of a bubble of `size` that has gone `turn` round the tip.
+    nonisolated static func origin(anchor: CGPoint, azimuth: Angle?, turn: Double, size: CGSize, in bounds: CGRect, topInset: CGFloat) -> CGPoint {
+        place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset).origin
+    }
+
+    /// Whether the side `turn` no longer does for a bubble of `size`: kept inside the
+    /// window it comes over the tip, or chrome has come in the way.
+    nonisolated static func isBlocked(
+        turn: Double, anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat, avoiding obstacles: [CGRect]
+    ) -> Bool {
+        let frame = place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset)
+        return !isClear(of: anchor, frame) || obstacles.contains { $0.intersects(frame) }
+    }
+
+    /// The sizes the side is chosen for: about as small as the bubble gets (working or
+    /// done), listening, listening with words if they are shown, and as big as it gets (a
+    /// problem's line, or the largest it has been measured).
+    nonisolated static func plannedSizes(showsWords: Bool, largestMeasured: CGSize) -> [CGSize] {
+        [CGSize(width: 80, height: 48), CGSize(width: 200, height: 52)]
+            + (showsWords ? [CGSize(width: 262, height: 64)] : [])
+            + [CGSize(width: max(300, largestMeasured.width), height: max(52, largestMeasured.height))]
+    }
+
+    /// The way the bubble goes from the tip: opposite the barrel, or straight down.
+    nonisolated private static func away(_ azimuth: Angle?) -> Double {
+        azimuth.map { $0.radians + .pi } ?? .pi / 2
+    }
+
+    /// Clear of the tip by half the gap at least: kept from the bar or an edge, a bubble
+    /// may have been brought nearer than the whole of it.
+    nonisolated private static func isClear(of anchor: CGPoint, _ frame: CGRect) -> Bool {
+        !frame.insetBy(dx: -gap / 2, dy: -gap / 2).contains(anchor)
     }
 
     /// The bubble's frame `gap` beyond the tip in the direction `angle` (radians, clockwise
@@ -88,7 +147,18 @@ struct PencilVoiceBubble: View {
         let canvas = model.store.canvas
         // The other chrome on the canvas, such as the actions over what the squeeze selected.
         let chrome = model.chromeFrames.filter { $0.key != "pencil bubble" }.map(\.value)
-        let origin = Self.origin(anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset, avoiding: chrome, subject: model.selectionViewRect)
+        // The side is the one chosen when it opened here, for every size it takes, so that
+        // it doesn't swap sides from state to state. Only something in the way chooses again.
+        let turn: Double = if let chosenTurn, chosenFor == bubble.anchor,
+            !Self.isBlocked(turn: chosenTurn, anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset, avoiding: chrome) {
+            chosenTurn
+        } else {
+            Self.turn(
+                anchor: bubble.anchor, azimuth: bubble.azimuth, sizes: Self.plannedSizes(showsWords: showsWords, largestMeasured: largest),
+                in: bounds, topInset: topInset, avoiding: chrome, subject: model.selectionViewRect
+            )
+        }
+        let origin = Self.origin(anchor: bubble.anchor, azimuth: bubble.azimuth, turn: turn, size: size, in: bounds, topInset: topInset)
         // The tip, as a point of the canvas the bubble is laid out across: what it grows
         // out of and shrinks back to.
         let tip = UnitPoint(
@@ -119,7 +189,16 @@ struct PencilVoiceBubble: View {
                 size = measured
                 isMeasured = true
             }
+            largest = CGSize(width: max(largest.width, measured.width), height: max(largest.height, measured.height))
         }
+        // Kept from here on: chosen when it opens, again at a new tip, and when the side it
+        // had was blocked.
+        .onChange(of: Choice(turn: turn, anchor: bubble.anchor), initial: true) { _, choice in
+            chosenTurn = choice.turn
+            chosenFor = choice.anchor
+        }
+        // A new tip starts afresh: how big the last one's bubble got says nothing here.
+        .onChange(of: bubble.anchor) { largest = .zero }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Listening with \(model.modelChoice.displayName)")
         .accessibilityValue(accessibilityValue)
@@ -224,6 +303,12 @@ struct PencilVoiceBubble: View {
         case .problem(let message): message
         }
     }
+}
+
+/// The side a bubble went, and for which tip.
+private struct Choice: Equatable {
+    var turn: Double
+    var anchor: CGPoint
 }
 
 /// The waveform on its own, so that the levels, which change many times a second, redraw

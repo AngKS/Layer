@@ -616,6 +616,34 @@ struct PencilVoiceTests {
         #expect(Self.distance(from: tip, to: onScreen) >= 28 - 0.01)
     }
 
+    @Test func theBubbleKeepsItsSideFromStateToState() {
+        // The squeeze in sheet A3: the Sign in button, its actions above it, a right-hander.
+        let tip = CGPoint(x: 605, y: 436)
+        let button = CGRect(x: 499, y: 422, width: 212, height: 29)
+        let actions = CGRect(x: 468, y: 360, width: 274, height: 52)
+        let bounds = CGRect(x: 0, y: 0, width: 1210, height: 834)
+        // Listening, listening with words, working, done and a problem, as measured there.
+        let sizes = [CGSize(width: 200, height: 48), CGSize(width: 262, height: 62), CGSize(width: 78, height: 48),
+                     CGSize(width: 90, height: 48), CGSize(width: 300, height: 48)]
+        // Chosen afresh for each size, the side changed as the bubble did: what was seen.
+        let afresh = Set(sizes.map {
+            PencilVoiceBubble.turn(anchor: tip, azimuth: .degrees(45), size: $0, in: bounds, topInset: 88, avoiding: [actions], subject: button)
+        })
+        #expect(afresh.count > 1)
+        // Chosen once, for every size it takes, every state stays on that side, clear of the
+        // tip, the actions and the button.
+        let planned = PencilVoiceBubble.plannedSizes(showsWords: true, largestMeasured: .zero)
+        let turn = PencilVoiceBubble.turn(anchor: tip, azimuth: .degrees(45), sizes: planned, in: bounds, topInset: 88, avoiding: [actions], subject: button)
+        var sides: Set<[Bool]> = []
+        for size in sizes {
+            #expect(!PencilVoiceBubble.isBlocked(turn: turn, anchor: tip, azimuth: .degrees(45), size: size, in: bounds, topInset: 88, avoiding: [actions]))
+            let frame = CGRect(origin: PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(45), turn: turn, size: size, in: bounds, topInset: 88), size: size)
+            #expect(!frame.intersects(actions) && !frame.intersects(button))
+            sides.insert([frame.midX < tip.x, frame.midY < tip.y])
+        }
+        #expect(sides.count == 1)
+    }
+
     @Test func theBubbleShowsTheNewestWholeWords() {
         #expect(PencilVoiceBubble.newestWords(of: "make it blue") == "make it blue")
         let said = "make the sign in button blue and give it a little more space above"
