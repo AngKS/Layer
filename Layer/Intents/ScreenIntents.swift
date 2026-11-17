@@ -1,4 +1,5 @@
 @_weakLinked import AppIntents
+import CoreGraphics
 import Foundation
 
 // Actions on device screens. Changes run in the foreground so that the person sees them
@@ -21,9 +22,21 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Design", description: "The design to add it to. The design at the front if not given.")
     var design: DesignEntity?
 
+    @Parameter(title: "X", description: "Where the screen's left edge goes, in canvas points. To the right of the other screens if not given.")
+    var x: Double?
+
+    @Parameter(title: "Y", description: "Where the screen's top edge goes, in canvas points. Level with the newest screen if not given.")
+    var y: Double?
+
+    @Parameter(title: "Scale", description: "How large it is drawn on the canvas, as a percentage of its real size, from 10 to 400. The newest screen's scale if not given.", inclusiveRange: (10, 400))
+    var scale: Double?
+
     static var parameterSummary: some ParameterSummary {
         Summary("Add \(\.$device) screen named \(\.$name)") {
             \.$design
+            \.$x
+            \.$y
+            \.$scale
         }
     }
 
@@ -31,8 +44,12 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> & ProvidesDialog {
         let model = try await DesignActions.model(for: design)
         let frame = device.frame
+        var placement = DesignActions.placementForNewScreen(frame, in: model)
+        if let scale { placement.scale = CGFloat(scale) / 100 }
+        if let x { placement.origin.x = CGFloat(x) }
+        if let y { placement.origin.y = CGFloat(y) }
         let screen = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Screen") {
-            var screen = model.store.addScreen(frame, at: DesignActions.placementForNewScreen(frame, in: model))
+            var screen = model.store.addScreen(frame, at: placement)
             if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 model.store.updateScreen(screen.id) { $0.name = name }
                 screen.name = name
@@ -51,9 +68,11 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
         """
         Builds a whole screen in a Layer design from a description, one element per line from top to bottom, \
         such as “title: Welcome back”, “text field: Email”, “button: Sign in [blue, bold]”. Start a line with \
-        “row:” and split elements with “|” to put them side by side. Kinds: title, body, button, text field, \
-        image, symbol, divider, toggle, avatar, text. Square brackets hold the look: a colour name or hex code, \
-        a weight, a size such as 18pt, radius 12, or text white.
+        “row:” and split elements with “|” to put them side by side; a blank line or “---” starts a new section. \
+        Kinds: title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, \
+        avatar, text. Square brackets hold the look: a colour name or hex code, a weight, a size such as 18pt, \
+        radius 12, text white, fill or fit, on or off, a percentage such as 40% for a progress bar, filled, \
+        bordered or plain for a button, left, centre or right, shadow, border red, opacity 50%.
         """,
         categoryName: "Screens"
     )
@@ -258,5 +277,80 @@ struct DeleteScreenIntent: AppIntent, UndoableIntent {
             model.store.deleteScreen(target.id)
         }
         return .result(dialog: "Deleted \(target.name).")
+    }
+}
+
+struct MoveScreenIntent: AppIntent, UndoableIntent {
+    static let title: LocalizedStringResource = "Move or Scale Screen"
+    static let description = IntentDescription(
+        """
+        Moves a screen on the canvas, or changes how large it is drawn. Positions are canvas points for its \
+        top-left corner; scale is a percentage of its real size. Its elements move with it. Anything left out \
+        stays as it is.
+        """,
+        categoryName: "Screens"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(title: "Screen", description: "The screen to move. The selected or newest screen if not given.")
+    var screen: ScreenEntity?
+
+    @Parameter(title: "X", description: "Where its left edge goes, in canvas points.")
+    var x: Double?
+
+    @Parameter(title: "Y", description: "Where its top edge goes, in canvas points.")
+    var y: Double?
+
+    @Parameter(title: "Scale", description: "How large it is drawn, as a percentage of its real size, from 10 to 400.", inclusiveRange: (10, 400))
+    var scale: Double?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Move \(\.$screen)") {
+            \.$x
+            \.$y
+            \.$scale
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let (model, target) = try await DesignActions.screenOrCurrent(screen)
+        guard target.isLocked != true else { throw LayerIntentError.locked }
+        DesignActions.edit(model, undoManager: undoManager, actionName: "Move Screen") {
+            model.store.updateScreen(target.id) { screen in
+                if let x { screen.origin.x = CGFloat(x) }
+                if let y { screen.origin.y = CGFloat(y) }
+                if let scale { screen.scale = CGFloat(scale) / 100 }
+            }
+        }
+        return .result(dialog: "Moved \(target.name).")
+    }
+}
+
+struct SetScreenLockedIntent: AppIntent, UndoableIntent {
+    static let title: LocalizedStringResource = "Lock or Unlock Screen"
+    static let description = IntentDescription(
+        "Locks a screen so it can't be moved or deleted, or unlocks it. Its elements can still be edited.",
+        categoryName: "Screens"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(title: "Screen", description: "The screen to lock or unlock. The selected or newest screen if not given.")
+    var screen: ScreenEntity?
+
+    @Parameter(title: "Locked", description: "On to lock it, off to unlock it.", default: true)
+    var locked: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Set \(\.$screen) locked to \(\.$locked)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let (model, target) = try await DesignActions.screenOrCurrent(screen)
+        DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock Screen" : "Unlock Screen") {
+            model.store.updateScreen(target.id) { $0.isLocked = locked ? true : nil }
+        }
+        return .result(dialog: locked ? "Locked \(target.name)." : "Unlocked \(target.name).")
     }
 }

@@ -296,3 +296,109 @@ enum DesignDescriber {
         return lines.joined(separator: "\n")
     }
 }
+
+// MARK: Layout as data
+
+/// A design as JSON, with every position and size, for a model or a shortcut that edits a
+/// design and needs to see exactly where things are. Screens give their canvas position and
+/// scale; their elements give frames in the screen's own points. Loose elements give frames
+/// in canvas points. Each element's `id` is the identifier its entity goes by.
+enum DesignLayoutWriter {
+    static func json(for snapshot: DesignSnapshot, ink: (count: Int, bounds: CGRect?)? = nil, hasUnreadSketch: Bool = false) -> String {
+        let content = snapshot.content
+        var root: [String: Any] = [
+            "design": snapshot.name,
+            "id": snapshot.id,
+            "canvas": canvas(content.canvas),
+            "screens": content.screens.map { screen in
+                [
+                    "id": EntityKey.screen(design: snapshot.id, screen: screen.id),
+                    "name": screen.name,
+                    "device": DeviceChoice(screen.device).rawValue,
+                    "width": number(screen.size.width),
+                    "height": number(screen.size.height),
+                    "x": number(screen.origin.x),
+                    "y": number(screen.origin.y),
+                    "scale": number(screen.scale * 100),
+                    "locked": screen.isLocked == true,
+                    "safeAreaTop": number(screen.device.safeTop),
+                    "safeAreaBottom": number(screen.device.safeBottom),
+                    "elements": screen.elements.map { element(design: snapshot.id, host: .screen(screen.id), $0, frame: $0.frame) },
+                ] as [String: Any]
+            },
+            "canvasElements": content.floating.map { floating in
+                element(design: snapshot.id, host: .canvas, floating.element, frame: floating.canvasFrame)
+            },
+        ]
+        if let ink {
+            var drawing: [String: Any] = ["strokes": ink.count]
+            if let bounds = ink.bounds { drawing["bounds"] = rect(bounds) }
+            root["ink"] = drawing
+        }
+        if hasUnreadSketch { root["unreadMagicPenSketch"] = true }
+        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func element(design: String, host: DesignStore.ElementRef.Host, _ element: DesignElement, frame: CGRect) -> [String: Any] {
+        var info: [String: Any] = [
+            "id": EntityKey.element(design: design, host: host, element: element.id),
+            "kind": element.kind.rawValue,
+            "name": element.displayName,
+            "x": number(frame.minX),
+            "y": number(frame.minY),
+            "width": number(frame.width),
+            "height": number(frame.height),
+            "colour": element.tint.hex,
+        ]
+        if element.kind.hasText { info["text"] = element.text }
+        if let symbol = element.symbol { info["symbol"] = symbol }
+        if element.imageID != nil { info["hasPicture"] = true }
+        if let fontSize = element.fontSize { info["fontSize"] = number(fontSize) }
+        if let weight = element.fontWeight { info["fontWeight"] = weight.rawValue }
+        if let textColor = element.textColor { info["textColour"] = textColor.hex }
+        if let alignment = element.textAlignment { info["textAlignment"] = alignment.rawValue }
+        if let radius = element.cornerRadius { info["cornerRadius"] = number(radius) }
+        if let opacity = element.opacity { info["opacity"] = opacity }
+        if let width = element.borderWidth, width > 0 {
+            info["borderWidth"] = number(width)
+            if let colour = element.borderColor { info["borderColour"] = colour.hex }
+        }
+        if element.hasShadow { info["shadow"] = true }
+        if element.isLocked { info["locked"] = true }
+        if element.isHidden { info["hidden"] = true }
+        switch element.kind {
+        case .toggle, .checkbox, .radio: info["on"] = element.isOn
+        case .progress: info["progress"] = element.value ?? 0.5
+        case .button: info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue
+        default: break
+        }
+        return info
+    }
+
+    private static func canvas(_ settings: CanvasSettings) -> [String: Any] {
+        [
+            "background": settings.resolvedBackground.hex,
+            "showsGrid": settings.showsGrid,
+            "gridStyle": settings.gridStyle.rawValue,
+            "gridSpacing": number(settings.gridSpacing),
+            "snapsToGuides": settings.snapsToGuides,
+            "snapsToGrid": settings.snapsToGrid,
+            "showsMeasurements": settings.showsMeasurements,
+            "showsFrameNames": settings.showsFrameNames,
+            "newScreenDevice": DeviceChoice(settings.sketchDevice).rawValue,
+            "codeLayout": settings.code.layout.rawValue,
+            "codeIncludesPreview": settings.code.includesPreview,
+            "codeUsesNavigationTitle": settings.code.usesNavigationTitle,
+        ]
+    }
+
+    private static func rect(_ rect: CGRect) -> [String: Double] {
+        ["x": number(rect.minX), "y": number(rect.minY), "width": number(rect.width), "height": number(rect.height)]
+    }
+
+    /// Rounded to a tenth of a point, which is all a layout needs.
+    private static func number(_ value: CGFloat) -> Double {
+        (Double(value) * 10).rounded() / 10
+    }
+}

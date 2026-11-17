@@ -29,6 +29,36 @@ struct ScreenBlueprint: Equatable, Sendable {
         var fontSize: CGFloat?
         var weight: FontWeightChoice?
         var cornerRadius: CGFloat?
+        var alignment: TextAlignmentChoice?
+        /// For toggles, checkboxes and radio buttons.
+        var isOn: Bool?
+        /// For progress bars, from 0 to 1.
+        var value: Double?
+        var buttonLook: ButtonLook?
+        var hasShadow: Bool?
+        var borderColour: RGBColor?
+        var borderWidth: CGFloat?
+        var opacity: Double?
+
+        /// Gives an element this item's look, leaving what the item doesn't say alone.
+        func applyLook(to element: inout DesignElement) {
+            if let colour { element.tint = colour }
+            if let textColour { element.textColor = textColour }
+            if let fontSize { element.fontSize = fontSize }
+            if let weight { element.fontWeight = weight }
+            if let cornerRadius { element.cornerRadius = cornerRadius }
+            if let alignment { element.textAlignment = alignment }
+            if let isOn { element.isOn = isOn }
+            if let value { element.value = min(max(value, 0), 1) }
+            if let buttonLook { element.buttonLook = buttonLook }
+            if let hasShadow { element.hasShadow = hasShadow }
+            if let borderColour {
+                element.borderColor = borderColour
+                if (element.borderWidth ?? 0) == 0 { element.borderWidth = borderWidth ?? 1 }
+            }
+            if let borderWidth { element.borderWidth = borderWidth > 0 ? borderWidth : nil }
+            if let opacity { element.opacity = opacity >= 0.995 ? nil : min(max(opacity, 0), 1) }
+        }
     }
 
     struct Section: Equatable, Sendable {
@@ -142,13 +172,51 @@ struct ScreenBlueprint: Equatable, Sendable {
         } else if text.isEmpty {
             item.text = kind.placeholder
         }
-        for word in look {
+        applyLook(look, to: &item)
+        return item
+    }
+
+    /// Reads look words, such as `blue`, `bold`, `18pt`, `radius 12`, `text white`, `off`,
+    /// `40%`, `bordered`, `centre`, `shadow`, `border red` or `opacity 50%`, into an item.
+    /// Words it doesn't know are skipped.
+    static func applyLook(_ words: [String], to item: inout Item) {
+        for word in words.map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !word.isEmpty {
             if word == "fill" || word == "full width" {
                 item.width = .fill
             } else if word == "fit" {
                 item.width = .fit
             } else if let weight = FontWeightChoice(rawValue: word) {
                 item.weight = weight
+            } else if ["on", "checked", "ticked", "selected"].contains(word) {
+                item.isOn = true
+            } else if ["off", "unchecked", "unticked", "unselected"].contains(word) {
+                item.isOn = false
+            } else if ["filled", "solid", "primary"].contains(word) {
+                item.buttonLook = .filled
+            } else if ["bordered", "outlined", "secondary"].contains(word) {
+                item.buttonLook = .bordered
+            } else if ["plain", "borderless", "link", "text only"].contains(word) {
+                item.buttonLook = .plain
+            } else if ["left", "leading", "align left"].contains(word) {
+                item.alignment = .leading
+            } else if ["center", "centre", "centered", "centred", "align center", "align centre"].contains(word) {
+                item.alignment = .center
+            } else if ["right", "trailing", "align right"].contains(word) {
+                item.alignment = .trailing
+            } else if word == "shadow" {
+                item.hasShadow = true
+            } else if word == "no shadow" {
+                item.hasShadow = false
+            } else if let amount = stripPrefix(word, ["opacity"]).flatMap(fraction) {
+                item.opacity = amount
+            } else if let border = stripPrefix(word, ["border", "outline"]) {
+                if let width = Double(border.hasSuffix("pt") ? String(border.dropLast(2)) : border) {
+                    item.borderWidth = CGFloat(width)
+                } else if let colour = ColourWords.parse(border) {
+                    item.borderColour = colour
+                }
+            } else if word.hasSuffix("%"), let amount = fraction(word) {
+                item.value = amount
             } else if word.hasSuffix("pt"), let size = Double(word.dropLast(2).trimmingCharacters(in: .whitespaces)) {
                 item.fontSize = CGFloat(size)
             } else if let radius = stripPrefix(word, ["radius", "corner", "corners"]).flatMap({ Double($0) }) {
@@ -159,7 +227,15 @@ struct ScreenBlueprint: Equatable, Sendable {
                 item.colour = colour
             }
         }
-        return item
+    }
+
+    /// `40%` or `0.4` as 0.4.
+    private static func fraction(_ word: String) -> Double? {
+        let trimmed = word.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix("%") {
+            return Double(trimmed.dropLast().trimmingCharacters(in: .whitespaces)).map { min(max($0 / 100, 0), 1) }
+        }
+        return Double(trimmed).map { min(max($0 > 1 ? $0 / 100 : $0, 0), 1) }
     }
 
     // MARK: Laying it out
@@ -228,14 +304,10 @@ struct ScreenBlueprint: Equatable, Sendable {
         var element = DesignStore.newElement(item.kind, symbol: item.symbol)
         element.frame = frame
         element.text = item.text
-        if let colour = item.colour { element.tint = colour }
-        element.textColor = item.textColour
-        element.fontSize = item.fontSize
-        element.fontWeight = item.weight
-        element.cornerRadius = item.cornerRadius
         if item.kind == .title || item.kind == .body || item.kind == .text {
             element.textAlignment = frame.width >= 200 ? nil : .center
         }
+        item.applyLook(to: &element)
         return element
     }
 }

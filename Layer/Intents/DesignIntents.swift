@@ -122,6 +122,39 @@ struct DescribeDesignIntent: AppIntent {
     }
 }
 
+struct GetDesignLayoutIntent: AppIntent {
+    static let title: LocalizedStringResource = "Get Design Layout"
+    static let description = IntentDescription(
+        """
+        Returns a Layer design as JSON with every position and size: each screen's device, canvas position and \
+        scale, and its elements' frames in the screen's own points, text and look; loose elements in canvas \
+        points; the canvas settings; and how much ink is drawn. Use it to see exactly where things are before \
+        moving, styling or drawing.
+        """,
+        categoryName: "Designs"
+    )
+    static let supportedModes: IntentModes = .background
+
+    @Parameter(title: "Design", description: "The design to read. The design at the front if not given.")
+    var design: DesignEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Get the layout of \(\.$design)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // An open design also reports its ink, which is only known while it is open.
+        let open = design.map { OpenDesigns.shared.model(forDesign: $0.id) } ?? OpenDesigns.shared.current
+        if let open, let snapshot = DesignActions.snapshot(of: open) {
+            return .result(value: DesignLayoutWriter.json(for: snapshot, ink: open.ink?.inkSummary, hasUnreadSketch: open.hasSketch))
+        }
+        guard let design else { throw LayerIntentError.noOpenDesign }
+        guard let snapshot = await DesignActions.snapshot(design: design.id) else { throw LayerIntentError.designNotFound }
+        return .result(value: DesignLayoutWriter.json(for: snapshot))
+    }
+}
+
 struct ExportDesignImageIntent: AppIntent {
     static let title: LocalizedStringResource = "Export Design as Image"
     static let description = IntentDescription(

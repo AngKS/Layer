@@ -1,5 +1,7 @@
 @_weakLinked import AppIntents
+import CoreGraphics
 import Foundation
+import UniformTypeIdentifiers
 
 enum ImageStyleOption: String, AppEnum {
     case illustration, animation, sketch
@@ -70,5 +72,91 @@ struct GenerateImageIntent: AppIntent {
             }
         }
         return .result(dialog: "Opened Image Playground. Pick the picture you like and it goes on your design.")
+    }
+}
+
+struct AddImageFileIntent: AppIntent, UndoableIntent {
+    static let title: LocalizedStringResource = "Add Picture"
+    static let description = IntentDescription(
+        """
+        Adds a picture from a file or photo to a screen in a Layer design, as an image element: below what is \
+        already there, or at the position and size given in the screen's points. Without a screen and with On \
+        Canvas, it goes in the middle of the view. With Replace Image, it becomes the picture of that image instead.
+        """,
+        categoryName: "Elements"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(title: "Picture", description: "The picture to add: a PNG, JPEG, HEIC or other image file.", supportedContentTypes: [.image])
+    var file: IntentFile
+
+    @Parameter(title: "Screen", description: "The screen to add it to. The selected or newest screen if not given.")
+    var screen: ScreenEntity?
+
+    @Parameter(title: "Replace Image", description: "An image element to give this picture, keeping its place and size.")
+    var element: ElementEntity?
+
+    @Parameter(title: "X", description: "Distance of its left edge from the screen's left edge, in points.")
+    var x: Double?
+
+    @Parameter(title: "Y", description: "Distance of its top edge from the screen's top edge, in points.")
+    var y: Double?
+
+    @Parameter(title: "Width", description: "Its width in points. As wide as the screen allows if not given.", inclusiveRange: (1, 4000))
+    var width: Double?
+
+    @Parameter(title: "Height", description: "Its height in points. As tall as the picture's shape asks if not given.", inclusiveRange: (1, 4000))
+    var height: Double?
+
+    @Parameter(title: "On Canvas", description: "Put it in the middle of the view instead of on a screen.", default: false)
+    var onCanvas: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add \(\.$file) to \(\.$screen)") {
+            \.$element
+            \.$x
+            \.$y
+            \.$width
+            \.$height
+            \.$onCanvas
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<ElementEntity> & ProvidesDialog {
+        guard let prepared = ImageImport.prepare(file.data) else { throw LayerIntentError.invalidImage }
+        let model: AppModel
+        let request: ImagePlaygroundRequest
+        if let element {
+            let (found, ref, existing) = try await DesignActions.element(element)
+            guard existing.kind == .image else { throw LayerIntentError.notAnImage }
+            model = found
+            request = ImagePlaygroundRequest(target: .replace(ref))
+        } else if onCanvas, screen == nil {
+            model = try await DesignActions.model(for: nil as String?)
+            request = ImagePlaygroundRequest(target: .newImage(onScreen: nil))
+        } else {
+            let (found, target) = try await DesignActions.screenOrCurrent(screen)
+            model = found
+            request = ImagePlaygroundRequest(target: .newImage(onScreen: target.id))
+        }
+        let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> DesignStore.ElementRef? in
+            guard let ref = model.placeGeneratedImage(prepared, for: request) else { return nil }
+            if element == nil, x != nil || y != nil || width != nil || height != nil {
+                model.store.update(ref) { image in
+                    let aspect = image.frame.height / max(image.frame.width, 1)
+                    if let width {
+                        image.frame.size.width = CGFloat(width)
+                        if height == nil { image.frame.size.height = (CGFloat(width) * aspect).rounded() }
+                    }
+                    if let height { image.frame.size.height = CGFloat(height) }
+                    if let x { image.frame.origin.x = CGFloat(x) }
+                    if let y { image.frame.origin.y = CGFloat(y) }
+                }
+            }
+            return ref
+        }
+        guard let ref, let entity = DesignActions.entity(for: ref, in: model) else { throw LayerIntentError.elementNotFound }
+        return .result(value: entity, dialog: "Added the picture to \(entity.screenName).")
     }
 }

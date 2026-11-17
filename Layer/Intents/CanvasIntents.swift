@@ -1,5 +1,8 @@
 @_weakLinked import AppIntents
+import CoreGraphics
 import Foundation
+import PencilKit
+import UIKit
 
 // The canvas itself, undo and redo, and the Magic Pen.
 
@@ -29,8 +32,32 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Show Screen Names", description: "Whether each screen's name is drawn above it.")
     var showsFrameNames: Bool?
 
+    @Parameter(title: "Show Spacing", description: "Whether the distances to neighbours are shown while an element is moved or resized.")
+    var showsMeasurements: Bool?
+
     @Parameter(title: "Background", description: "The canvas colour behind everything.")
     var background: ColourOption?
+
+    @Parameter(title: "Background Hex", description: "The canvas colour as a hex code such as #F4F3EC, when no named colour fits.")
+    var backgroundHex: String?
+
+    @Parameter(title: "New Screen Device", description: "The device a tall rectangle drawn with the Magic Pen becomes.")
+    var sketchDevice: DeviceChoice?
+
+    @Parameter(title: "Code Layout", description: "Whether generated SwiftUI is a stack, the way a person writes it, or uses each element's exact position.")
+    var codeLayout: CodeLayoutOption?
+
+    @Parameter(title: "Include Preview", description: "Whether each generated SwiftUI file ends with a #Preview.")
+    var includesPreview: Bool?
+
+    @Parameter(title: "Title as Navigation Title", description: "Whether a screen's title becomes its navigation title in the generated SwiftUI.")
+    var usesNavigationTitle: Bool?
+
+    @Parameter(title: "Convert After a Pause", description: "Whether Magic Pen sketches are read on their own once the pen rests. Applies to every design.")
+    var convertsAutomatically: Bool?
+
+    @Parameter(title: "Scratch Out to Delete", description: "Whether scribbling over an element with the Magic Pen deletes it. Applies to every design.")
+    var scratchOutDeletes: Bool?
 
     @Parameter(title: "Design", description: "The design to change. The design at the front if not given.")
     var design: DesignEntity?
@@ -43,13 +70,22 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
             \.$snapsToGuides
             \.$snapsToGrid
             \.$showsFrameNames
+            \.$showsMeasurements
             \.$background
+            \.$backgroundHex
+            \.$sketchDevice
+            \.$codeLayout
+            \.$includesPreview
+            \.$usesNavigationTitle
+            \.$convertsAutomatically
+            \.$scratchOutDeletes
             \.$design
         }
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        let colour = try ColourOption.resolve(background, hex: backgroundHex)
         let model = try await DesignActions.model(for: design)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Canvas Settings") {
             model.store.updateCanvas { canvas in
@@ -59,10 +95,255 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
                 if let snapsToGuides { canvas.snapsToGuides = snapsToGuides }
                 if let snapsToGrid { canvas.snapsToGrid = snapsToGrid }
                 if let showsFrameNames { canvas.showsFrameNames = showsFrameNames }
-                if let background { canvas.background = background.colour }
+                if let showsMeasurements { canvas.showsMeasurements = showsMeasurements }
+                if let colour { canvas.background = colour }
+                if let sketchDevice { canvas.sketchDeviceID = sketchDevice == .iPhone ? nil : sketchDevice.rawValue }
+                if let codeLayout { canvas.code.layout = codeLayout.layout }
+                if let includesPreview { canvas.code.includesPreview = includesPreview }
+                if let usesNavigationTitle { canvas.code.usesNavigationTitle = usesNavigationTitle }
             }
         }
+        // App-wide preferences, outside the design's undo history.
+        if let convertsAutomatically { model.convertsAutomatically = convertsAutomatically }
+        if let scratchOutDeletes { model.scratchOutDeletes = scratchOutDeletes }
         return .result()
+    }
+}
+
+struct SetCanvasViewIntent: AppIntent {
+    static let title: LocalizedStringResource = "Set Canvas View"
+    static let description = IntentDescription(
+        """
+        Pans and zooms the canvas of the design at the front, or locks it against panning and zooming by touch. \
+        The centre is in canvas points; the zoom is a percentage, 100 being actual size.
+        """,
+        categoryName: "Canvas"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(title: "Zoom", description: "How far to zoom, as a percentage from 10 to 400. Unchanged if not given.", inclusiveRange: (10, 400))
+    var zoom: Double?
+
+    @Parameter(title: "Centre X", description: "The canvas point to put in the middle of the view, across. Unchanged if not given.")
+    var centerX: Double?
+
+    @Parameter(title: "Centre Y", description: "The canvas point to put in the middle of the view, down. Unchanged if not given.")
+    var centerY: Double?
+
+    @Parameter(title: "Locked", description: "Whether touch can pan and zoom the canvas.")
+    var locked: Bool?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Set the canvas view") {
+            \.$zoom
+            \.$centerX
+            \.$centerY
+            \.$locked
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let model = try await DesignActions.model(for: nil as String?)
+        if zoom != nil || centerX != nil || centerY != nil {
+            guard let ink = model.ink else { throw LayerIntentError.canvasNotReady }
+            let current = model.viewport.canvasPoint(for: CGPoint(x: model.canvasSize.width / 2, y: model.canvasSize.height / 2))
+            let center = CGPoint(x: centerX.map { CGFloat($0) } ?? current.x, y: centerY.map { CGFloat($0) } ?? current.y)
+            ink.glide(toCenter: center, scale: zoom.map { CGFloat($0) / 100 } ?? model.viewport.scale)
+        }
+        if let locked { model.isCanvasLocked = locked }
+        return .result()
+    }
+}
+
+struct DrawStrokesIntent: AppIntent {
+    static let title: LocalizedStringResource = "Draw Strokes"
+    static let description = IntentDescription(
+        """
+        Draws pen strokes on a Layer design, as a stylus would. With the Magic Pen they are read as interface \
+        elements, exactly as a hand-drawn sketch is: a tall rectangle becomes a screen, a zigzag a title, low long \
+        waves body text, a box with a cross an image, a rounded bar a button, a small pill a toggle, a small circle \
+        an avatar, a tiny square a checkbox, a long thin box a progress bar, and scribbling over an element deletes \
+        it. With another pen they stay as ink; give Read As to have that ink read as what it describes. \
+        Write one stroke per line: x,y points such as “20,40 120,40 120,90”, or a shape: box x y w h [radius], \
+        pill x y w h, circle cx cy r, oval x y w h, line x1 y1 x2 y2 …, wave x y w h [humps], cross x y w h, \
+        tick x y w h, dot cx cy [r], scribble x y w h. A JSON array of strokes of [x, y] points works too. \
+        Returns the design's contents afterwards.
+        """,
+        categoryName: "Magic Pen"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(
+        title: "Strokes",
+        description: "One stroke per line: x,y points, or a shape such as “box 30 200 330 56 12” or “wave 150 112 96 40 3”.",
+        inputOptions: String.IntentInputOptions(multiline: true)
+    )
+    var strokes: String
+
+    @Parameter(title: "Pen", description: "The Magic Pen, whose sketches become elements, or a pen whose ink stays as drawn.", default: .magicPen)
+    var pen: InkPenOption
+
+    @Parameter(title: "Coordinates", description: "Screen points, from the top-left of the screen; or canvas points, needed to sketch a new screen or draw beside the screens.", default: .screen)
+    var coordinates: StrokeSpaceOption
+
+    @Parameter(title: "Screen", description: "The screen the points are measured from. The selected or newest screen if not given.")
+    var screen: ScreenEntity?
+
+    @Parameter(title: "Read As", description: "What the strokes are meant to be, such as “a button saying Sign up”. They are read with this in mind and replaced by what they mean.")
+    var prompt: String?
+
+    @Parameter(title: "Convert Now", description: "Whether Magic Pen strokes are read straight away, and the action waits to report what they became.", default: true)
+    var convertsNow: Bool
+
+    @Parameter(title: "Colour", description: "The ink colour for pens other than the Magic Pen.")
+    var colour: ColourOption?
+
+    @Parameter(title: "Colour Hex", description: "The ink colour as a hex code such as #1C1C1E.")
+    var colourHex: String?
+
+    @Parameter(title: "Line Width", description: "The ink's width in points, for pens other than the Magic Pen.", inclusiveRange: (0.5, 40))
+    var lineWidth: Double?
+
+    @Parameter(title: "Design", description: "The design to draw on, for canvas points. The design at the front if not given.")
+    var design: DesignEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Draw \(\.$strokes) with \(\.$pen)") {
+            \.$coordinates
+            \.$screen
+            \.$prompt
+            \.$convertsNow
+            \.$colour
+            \.$colourHex
+            \.$lineWidth
+            \.$design
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let paths: [[CGPoint]]
+        do {
+            paths = try StrokeScript.parse(strokes)
+        } catch let error as StrokeScript.ParseError {
+            throw LayerIntentError.invalidStrokes(error.line > 0 ? "Line \(error.line), “\(error.text)”: \(error.reason)" : error.reason)
+        }
+        guard !paths.isEmpty else { throw LayerIntentError.invalidStrokes("There were no strokes in it.") }
+        let inkColour = try ColourOption.resolve(colour, hex: colourHex)
+
+        let model: AppModel
+        var placement: Placement?
+        if coordinates == .screen {
+            let (found, target) = try await DesignActions.screenOrCurrent(screen)
+            model = found
+            placement = target.placement
+        } else {
+            model = try await DesignActions.model(for: screen?.designID ?? design?.id)
+        }
+        guard let ink = model.ink else { throw LayerIntentError.canvasNotReady }
+        let canvasPaths = paths.map { path in path.map { placement?.canvasPoint(for: $0) ?? $0 } }
+        let reading = prompt.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+
+        if pen == .magicPen, reading == nil {
+            model.tool = .draw
+            ink.appendSketch(canvasPaths)
+            guard convertsNow else {
+                return .result(value: Self.contents(of: model), dialog: "Sketched \(paths.count) strokes with the Magic Pen.")
+            }
+            model.convertNow()
+            await model.waitForConversions()
+            let note = model.hasSketch ? " Some strokes weren't read as anything and are still on the canvas." : ""
+            return .result(value: Self.contents(of: model) + note, dialog: "Sketched and converted \(paths.count) strokes.")
+        }
+
+        let type: PKInk.InkType = switch pen {
+        case .magicPen, .monoline: .monoline
+        case .pen: .pen
+        case .marker: .marker
+        case .pencil: .pencil
+        }
+        let defaultWidth: CGFloat = switch pen {
+        case .marker: 10
+        case .pencil: 3
+        default: 2
+        }
+        let width = (lineWidth.map { CGFloat($0) } ?? defaultWidth) * (placement?.scale ?? 1)
+        let keys = ink.appendInk(canvasPaths, ink: PKInk(type, color: (inkColour ?? Theme.inkTint).uiColor), width: width)
+        guard let reading else {
+            return .result(value: Self.contents(of: model), dialog: "Drew \(paths.count) strokes.")
+        }
+        model.tool = .select
+        model.selection = .ink(keys)
+        model.convertSelection(prompt: reading)
+        await model.waitForConversions()
+        return .result(value: Self.contents(of: model), dialog: "Drew \(paths.count) strokes and read them as \(reading).")
+    }
+
+    @MainActor
+    private static func contents(of model: AppModel) -> String {
+        let snapshot = DesignActions.snapshot(of: model)
+            ?? DesignSnapshot(id: "", name: model.store.title ?? "The design", content: model.store.content, modified: nil)
+        return DesignDescriber.describe(snapshot)
+    }
+}
+
+struct EraseInkIntent: AppIntent {
+    static let title: LocalizedStringResource = "Erase Ink"
+    static let description = IntentDescription(
+        """
+        Erases ink drawn with the ordinary pens on the design at the front: every stroke touching an area, or all \
+        of it when no area is given. Elements and Magic Pen sketches stay. It can be undone.
+        """,
+        categoryName: "Magic Pen"
+    )
+    static let supportedModes: IntentModes = .foreground
+
+    @Parameter(title: "X", description: "The area's left edge, in canvas points, or in screen points when a screen is given.")
+    var x: Double?
+
+    @Parameter(title: "Y", description: "The area's top edge.")
+    var y: Double?
+
+    @Parameter(title: "Width", description: "The area's width.")
+    var width: Double?
+
+    @Parameter(title: "Height", description: "The area's height.")
+    var height: Double?
+
+    @Parameter(title: "Screen", description: "Measure the area from this screen's top-left corner, in its points.")
+    var screen: ScreenEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Erase ink") {
+            \.$x
+            \.$y
+            \.$width
+            \.$height
+            \.$screen
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let model: AppModel
+        var area: CGRect?
+        if let x, let y, let width, let height {
+            area = CGRect(x: x, y: y, width: width, height: height)
+        }
+        if let screen {
+            let (found, target) = try await DesignActions.screen(screen)
+            model = found
+            area = area.map(target.canvasRect(for:)) ?? target.canvasFrame
+        } else {
+            model = try await DesignActions.model(for: nil as String?)
+        }
+        guard let ink = model.ink else { throw LayerIntentError.canvasNotReady }
+        let keys = ink.inkKeys(touching: area)
+        guard !keys.isEmpty else { return .result(dialog: "There's no ink there.") }
+        if case .ink? = model.selection { model.selection = nil }
+        ink.deleteInk(keys)
+        return .result(dialog: "Erased \(keys.count) strokes.")
     }
 }
 

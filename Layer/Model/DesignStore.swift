@@ -405,6 +405,61 @@ final class DesignStore {
         return ElementRef(host: host, element: element.id)
     }
 
+    /// Puts a ready-made element on the open canvas exactly where its frame says, in points
+    /// of its own drawn `scale` canvas points each.
+    @discardableResult
+    func addFloating(_ element: DesignElement, scale: CGFloat) -> ElementRef {
+        change { $0.floating.append(FloatingElement(element: element, scale: scale)) }
+        return ElementRef(host: .canvas, element: element.id)
+    }
+
+    /// Moves an element onto a screen, or onto the open canvas when `screenID` is nil.
+    /// `origin` is where its top-left corner goes, in its new host's points; when nil it
+    /// keeps its place on the canvas. It keeps its size in points. Returns where it now
+    /// lives, or nil when the element or screen is gone or the element can't go on screens.
+    @discardableResult
+    func move(_ ref: ElementRef, toScreen screenID: DesignScreen.ID?, origin: CGPoint?) -> ElementRef? {
+        guard let (element, placement) = resolve(ref) else { return nil }
+        var target: DesignScreen?
+        if let screenID {
+            guard let found = screen(screenID), element.kind.belongsOnScreens else { return nil }
+            target = found
+        }
+        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
+        // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
+        let newPlacement = target?.placement ?? Placement(origin: .zero, scale: placement.scale)
+
+        var moved = element
+        if let origin {
+            moved.frame.origin = origin
+        } else {
+            let frame = placement.canvasRect(for: element.frame)
+            let center = newPlacement.localPoint(for: CGPoint(x: frame.midX, y: frame.midY))
+            moved.frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
+        }
+
+        if host == ref.host {
+            update(ref) { $0.frame = moved.frame }
+            return ref
+        }
+        change { content in
+            switch ref.host {
+            case .screen(let id):
+                if let index = content.screens.firstIndex(where: { $0.id == id }) {
+                    content.screens[index].elements.removeAll { $0.id == element.id }
+                }
+            case .canvas:
+                content.floating.removeAll { $0.id == element.id }
+            }
+            if let target, let index = content.screens.firstIndex(where: { $0.id == target.id }) {
+                content.screens[index].elements.append(moved)
+            } else {
+                content.floating.append(FloatingElement(element: moved, scale: newPlacement.scale))
+            }
+        }
+        return ElementRef(host: host, element: element.id)
+    }
+
     // MARK: Changes made gradually
 
     /// Starts a change made in many small steps, such as a drag or typing. Everything

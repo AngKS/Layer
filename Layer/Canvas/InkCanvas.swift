@@ -315,6 +315,12 @@ struct InkCanvas: UIViewRepresentable {
             animate(to: .centered(on: center, scale: clamped, in: viewSize))
         }
 
+        /// Glides to centre a canvas point in the view at a zoom.
+        func glide(toCenter center: CGPoint, scale: CGFloat) {
+            let clamped = min(max(scale, Viewport.zoomRange.lowerBound), Viewport.zoomRange.upperBound)
+            animate(to: .centered(on: center, scale: clamped, in: viewSize))
+        }
+
         /// Glides to show one part of the canvas whole, zoomed in no further than actual size.
         func glide(toShow area: CGRect) {
             animate(to: .fitting(area, within: clearArea))
@@ -542,24 +548,65 @@ struct InkCanvas: UIViewRepresentable {
             refresh()
         }
 
-        /// Adds sketch strokes, in canvas points, as if the Magic Pen had drawn them. For
-        /// the scripted demo.
-        func appendSketch(_ strokes: [[CGPoint]]) {
-            let ink = PKInk(.monoline, color: UIColor(Theme.ink))
-            let now = Date()
-            let added = strokes.enumerated().map { index, points in
-                let controlPoints = points.enumerated().map { offset, point in
-                    PKStrokePoint(
-                        location: point, timeOffset: Double(offset) * 0.008, size: CGSize(width: 2, height: 2),
-                        opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2
-                    )
-                }
-                let path = PKStrokePath(controlPoints: controlPoints, creationDate: now.addingTimeInterval(Double(index) * 0.001))
-                return PKStroke(ink: ink, path: path)
-            }
+        /// Adds sketch strokes, in canvas points, as if the Magic Pen had drawn them: for
+        /// the scripted demo, and for Siri, Shortcuts and models drawing with the Magic Pen.
+        /// Returns the new strokes' keys.
+        @discardableResult
+        func appendSketch(_ strokes: [[CGPoint]]) -> Set<Double> {
+            let added = makeStrokes(strokes, ink: PKInk(.monoline, color: UIColor(Theme.ink)), width: 2)
+            guard !added.isEmpty else { return [] }
             sketchCanvas.drawing.strokes.append(contentsOf: added)
             refresh()
             model.sketchChanged(sketch())
+            return Set(added.map(Self.key(for:)))
+        }
+
+        /// Adds ordinary ink, in canvas points, as if drawn with one of PencilKit's pens.
+        /// It undoes as one step. Returns the new strokes' keys.
+        @discardableResult
+        func appendInk(_ strokes: [[CGPoint]], ink: PKInk, width: CGFloat) -> Set<Double> {
+            let added = makeStrokes(strokes, ink: ink, width: width)
+            guard !added.isEmpty else { return [] }
+            var drawing = documentCanvas.drawing
+            drawing.strokes.append(contentsOf: added)
+            setDocumentDrawing(drawing)
+            registerUndo(ofAdding: added)
+            return Set(added.map(Self.key(for:)))
+        }
+
+        /// The keys of the ordinary ink strokes touching an area of the canvas, or of all of
+        /// them when `area` is nil.
+        func inkKeys(touching area: CGRect?) -> Set<Double> {
+            let strokes = documentCanvas.drawing.strokes.filter { stroke in
+                guard let area else { return true }
+                return stroke.renderBounds.intersects(area)
+            }
+            return Set(strokes.map(Self.key(for:)))
+        }
+
+        /// How many ordinary ink strokes there are, and the area they cover.
+        var inkSummary: (count: Int, bounds: CGRect?) {
+            let strokes = documentCanvas.drawing.strokes
+            return (strokes.count, strokes.isEmpty ? nil : documentCanvas.drawing.bounds)
+        }
+
+        /// The creation date the last stroke made here was given. Each new stroke is given a
+        /// later one, since a stroke's creation date is its key.
+        private var lastStrokeDate = Date.distantPast
+
+        /// PencilKit strokes through points in canvas points, drawn at an even pace.
+        private func makeStrokes(_ strokes: [[CGPoint]], ink: PKInk, width: CGFloat) -> [PKStroke] {
+            strokes.filter { !$0.isEmpty }.map { points in
+                let controlPoints = points.enumerated().map { offset, point in
+                    PKStrokePoint(
+                        location: point, timeOffset: Double(offset) * 0.008, size: CGSize(width: width, height: width),
+                        opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2
+                    )
+                }
+                let created = max(Date(), lastStrokeDate.addingTimeInterval(0.001))
+                lastStrokeDate = created
+                return PKStroke(ink: ink, path: PKStrokePath(controlPoints: controlPoints, creationDate: created))
+            }
         }
 
         /// The Magic Pen's strokes, as points for reading. While one stroke is still being
