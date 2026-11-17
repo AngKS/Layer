@@ -384,6 +384,22 @@ struct VoiceToolsTests {
         #expect(bench.app.store.content == before)
     }
 
+    // MARK: Devices
+
+    /// On an iPad "an admin dashboard on the MacBook" and "a iPad screen" both made
+    /// phone screens: a spoken screen always took the canvas's device.
+    @Test func aDeviceIsKnownByWhatItIsCalled() {
+        #expect(VoiceToolbox.device(named: "on the MacBook")?.id == "macbook-air")
+        #expect(VoiceToolbox.device(named: "MacBook Pro")?.id == "macbook-pro-16")
+        #expect(VoiceToolbox.device(named: "Create a iPad screen.")?.id == "ipad")
+        #expect(VoiceToolbox.device(named: "iPad mini")?.id == "ipad-mini")
+        #expect(VoiceToolbox.device(named: "for the iMac")?.id == "imac")
+        #expect(VoiceToolbox.device(named: "an iPhone SE screen")?.id == "iphone-se")
+        #expect(VoiceToolbox.device(named: "a phone")?.id == "iphone")
+        #expect(VoiceToolbox.device(named: "a login screen") == nil)
+        #expect(VoiceToolbox.device(named: "a machine learning dashboard") == nil)
+    }
+
     // MARK: Placing one thing by another
 
     /// "Move this image below the title": the image goes under it, left edges together,

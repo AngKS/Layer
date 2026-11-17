@@ -138,9 +138,10 @@ enum DesignActions {
     }
 
     /// Selects something and glides the canvas to show it.
-    static func reveal(_ target: CanvasSelection, in model: AppModel) {
+    /// `selecting` false shows it without selecting it, as for a screen just made.
+    static func reveal(_ target: CanvasSelection, in model: AppModel, selecting: Bool = true) {
         model.tool = .select
-        model.selection = target
+        if selecting { model.selection = target }
         let area: CGRect? = switch target {
         case .element(let ref): model.store.resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
         case .screen(let id): model.store.screen(id).map { $0.canvasFrame.union($0.labelFrame) }

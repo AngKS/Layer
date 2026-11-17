@@ -9,7 +9,7 @@ import Foundation
 /// written against this protocol rather than the app, so that the same tools can be
 /// measured against a model with nothing but a recorder behind them.
 protocol VoiceActing: AnyObject, Sendable {
-    @MainActor func createScreen(name: String?, description: String) async throws -> String
+    @MainActor func createScreen(name: String?, description: String, device: String?) async throws -> String
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String
     @MainActor func stackElements(elements: String, direction: String) -> String
     @MainActor func placeElement(element: String, relation: String, target: String) -> String
@@ -31,6 +31,11 @@ protocol VoiceActing: AnyObject, Sendable {
 }
 
 extension VoiceActing {
+    /// Makes a screen on whichever device what was said names, or the canvas's own.
+    @MainActor func createScreen(name: String?, description: String) async throws -> String {
+        try await createScreen(name: name, description: description, device: nil)
+    }
+
     /// Adds an element where new elements go: below the rest.
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
         addElement(screen: screen, kind: kind, text: text, look: look, relation: nil, target: nil)
@@ -162,10 +167,12 @@ struct CreateScreenTool: Tool {
         var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
+        @Guide(description: "The device, if the person named one: iPhone, iPad, MacBook or iMac.")
+        var device: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await actor.createScreen(name: arguments.name, description: arguments.description)
+        try await actor.createScreen(name: arguments.name, description: arguments.description, device: arguments.device)
     }
 }
 

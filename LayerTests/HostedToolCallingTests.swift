@@ -331,6 +331,28 @@ extension HostedModelTests {
         #expect(app.generation == nil)
     }
 
+    /// The device named in what was said is the new screen's, when the model names none.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aSpokenScreenIsOnTheDeviceAskedFor() async throws {
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Dashboard\n", "button: Refresh\n"])))
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        box.spokenCommand = "I want an admin dashboard on the MacBook."
+
+        _ = try await box.createScreen(name: "Admin Dashboard", description: "an admin dashboard", device: nil)
+
+        #expect(app.store.screens.last?.device.id == "macbook-air")
+        // Shown, but not selected.
+        #expect(app.selection == nil)
+
+        _ = try await box.createScreen(name: "Settings", description: "settings", device: "iPad")
+        #expect(app.store.screens.last?.device.id == "ipad")
+    }
+
     /// gpt-6-luna turns tools down while it reasons, and says to send reasoning_effort
     /// "none". Asked again that way it answers, and is asked that way from then on.
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
