@@ -1,4 +1,4 @@
-import AppIntents
+@_weakLinked import AppIntents
 import Foundation
 
 // The canvas itself, undo and redo, and the Magic Pen.

@@ -25,6 +25,17 @@ final class SketchEngine {
     private(set) var lastAttemptFailed = false
     /// True while the provider is being left alone after failing repeatedly.
     private(set) var isResting = false
+    /// The on-device log entry the most recent `read(_:)` wrote, if it wrote one — nil for
+    /// an asked reading, or one off the open canvas. Whoever creates the element this
+    /// reading became should call `SketchReadingLog.shared.link` with it, so a deletion
+    /// soon after can be recognised as a correction. Stage 0 of
+    /// `reports/Fast and slow sketch recognition.md`.
+    @ObservationIgnored private(set) var lastLogID: UUID?
+    /// A word `HandwritingRecognizer` read out of the most recent `read(_:)`'s strokes, if
+    /// it tried and found one. Whoever creates the element this reading became can use it
+    /// as the element's text, the way a prompt's own wording already becomes a label in
+    /// `readAsked`. Stage 2.
+    @ObservationIgnored private(set) var lastRecognizedText: String?
 
     @ObservationIgnored private let rules = RuleInterpreter()
     @ObservationIgnored private var hasWarmedUp = false
@@ -89,12 +100,30 @@ final class SketchEngine {
         }
     }
 
-    func read(_ request: SketchRequest) async -> SketchReading {
-        if request.isAsked { return await readAsked(request) }
+    func read(_ requested: SketchRequest) async -> SketchReading {
+        lastLogID = nil
+        lastRecognizedText = nil
+        if requested.isAsked { return await readAsked(requested) }
+        let request: SketchRequest
+        if Self.mightBeHandwriting(requested.observation.form) {
+            var withText = requested
+            withText.recognizedText = await HandwritingRecognizer.recognize(requested.strokes)
+            lastRecognizedText = withText.recognizedText
+            request = withText
+        } else {
+            request = requested
+        }
         let fallback = rules.reading(for: request)
-        guard rules.isCloseCall(request) else { return fallback }
+        let escalated = rules.isCloseCall(request)
+        guard escalated else {
+            lastLogID = await log(request, chosen: fallback, escalated: false, decidedBy: "rules")
+            return fallback
+        }
 
-        guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
+        guard readiness == .ready, !isStillResting(), !Self.isConserving else {
+            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
+            return fallback
+        }
 
         let interpreter = provider.makeInterpreter(nil)
         let started = ContinuousClock.now
@@ -104,12 +133,64 @@ final class SketchEngine {
             log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: reading), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
             let isPossible = request.candidates.contains(reading)
             record(answered: isPossible)
-            return isPossible ? reading : fallback
+            let final = isPossible ? reading : fallback
+            lastLogID = await log(request, chosen: final, escalated: true, decidedBy: isPossible ? provider.id : "rules")
+            return final
         } catch {
             log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             record(answered: false)
+            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
             return fallback
         }
+    }
+
+    /// Writes one reading to the on-device log (Stage 0), and returns its entry id so the
+    /// element it becomes, if any, can be linked to it. Limited to on-screen readings: the
+    /// scored table and the confusable pairs it's measured against both live there, and an
+    /// open-canvas reading (screen, sticky note, text) never has more than one candidate to
+    /// log.
+    /// Whether this shape is even worth asking PencilKit's handwriting recognizer about.
+    /// Most sketches are clean geometric shapes with an obvious answer; trying to recognise
+    /// words out of every one of them would cost a model call nothing needs. A squiggle
+    /// might be a word; an enclosure with something unclassified inside it (`.other`, never
+    /// `.tick`/`.cross`/`.dot`) might have a word written inside it, such as a button's
+    /// label. Shared with `SketchBenchmarkRunner`, so the benchmark exercises the same
+    /// trigger `read(_:)` does rather than guessing at it separately.
+    nonisolated static func mightBeHandwriting(_ form: SketchObservation.Form) -> Bool {
+        switch form {
+        case .wave, .scribble: true
+        case .enclosure(_, .other): true
+        default: false
+        }
+    }
+
+    private func log(_ request: SketchRequest, chosen: SketchReading, escalated: Bool, decidedBy: String) async -> UUID? {
+        guard case .onScreen(_, let existing, let size) = request.placement else { return nil }
+        let scored = request.scoredReadings
+        let existingKinds: [String] = existing.map { $0.kind.rawValue }
+        let existingFrames: [[Double]] = existing.map { element -> [Double] in
+            let frame = element.frame
+            return [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)]
+        }
+        let strokePoints: [[[Double]]] = request.strokes.map { stroke -> [[Double]] in
+            stroke.map { point -> [Double] in [Double(point.x), Double(point.y)] }
+        }
+        let candidateNames: [String] = scored.map { SketchPrompt.name(for: $0.reading) }
+        let scoreValues: [Double] = scored.map(\.score)
+        let chosenName = SketchPrompt.name(for: chosen)
+        let screenSize = [Double(size.width), Double(size.height)]
+        return await SketchReadingLog.shared.record(
+            placementKind: "onScreen",
+            existingKinds: existingKinds,
+            existingFrames: existingFrames,
+            screenSize: screenSize,
+            strokes: strokePoints,
+            candidates: candidateNames,
+            scores: scoreValues,
+            chosen: chosenName,
+            escalated: escalated,
+            decidedBy: decidedBy
+        )
     }
 
     /// Reads a drawing someone asked to have read. What their prompt names outright is

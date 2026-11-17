@@ -23,6 +23,12 @@ struct SketchRequest: Sendable {
     /// Set when someone asked for this drawing to be read, with what they typed about it,
     /// which may be nothing. Nil for a Magic Pen sketch read on its own.
     var prompt: String? = nil
+    /// A handwritten word or phrase `HandwritingRecognizer` (PencilKit's on-device
+    /// `PKStrokeRecognizer`, Stage 2) read out of these strokes, if it found one — set by
+    /// `SketchEngine` before scoring, for shapes where that's even worth trying. Evidence
+    /// for `ComponentRule`'s text/title/body decision, and the label content once a kind
+    /// is chosen; nil otherwise, which never changes any existing score.
+    var recognizedText: String? = nil
 
     var isAsked: Bool { prompt != nil }
 
@@ -63,82 +69,11 @@ struct SketchRequest: Sendable {
 
 extension SketchRequest {
     /// What this sketch could mean, going by its shape and where it was drawn; empty when
-    /// it can't be anything. A clear shape has one candidate. A shape near one of the
-    /// conventions' dividing lines has the candidates from both sides of that line, and
-    /// choosing between them is a judgement call.
-    var candidates: [SketchReading] {
-        if case .scratch = observation.form { return [.scratchOut] }
-        switch placement {
-        case .openCanvas:
-            let bounds = observation.bounds
-            switch observation.form {
-            case .enclosure(_, .none) where bounds.height >= bounds.width * SketchConventions.tallRatio && bounds.height >= 160:
-                return [.screen]
-            case .enclosure where min(bounds.width, bounds.height) >= SketchConventions.noteSide:
-                // A box beside the screens is a note about them.
-                return [.element(.stickyNote)]
-            case .wave, .stackedLines:
-                // Only writing-like marks: a stray stroke beside the screens stays ink.
-                return bounds.width >= max(bounds.height, 40) ? [.element(.text)] : []
-            default:
-                return []
-            }
-
-        case .onScreen(let local, _, let size):
-            switch observation.form {
-            case .enclosure(_, _) where local.width / max(local.height, 1) >= SketchConventions.progressRatio
-                && local.height <= SketchConventions.progressHeight:
-                // A long, thin outline is a progress bar, however it is filled in.
-                return [.element(.progress)]
-            case .enclosure(let roundness, let inner) where local.width / size.width < SketchConventions.smallFraction:
-                return Self.smallControl(local: local, size: size, roundness: roundness, inner: inner)
-            case .enclosure(_, .cross):
-                return [.element(.image)]
-            case .enclosure(let roundness, _):
-                let ratio = local.width / max(local.height, 1)
-                var options: [SketchReading] = []
-                if ratio <= SketchConventions.wideBand.upperBound { options.append(.element(.image)) }
-                if ratio >= SketchConventions.wideBand.lowerBound {
-                    if roundness >= SketchConventions.pillBand.lowerBound { options.append(.element(.button)) }
-                    if roundness <= SketchConventions.pillBand.upperBound { options.append(.element(.textField)) }
-                }
-                return options
-            case .stackedLines:
-                return [.element(.body)]
-            case .line:
-                return [.element(.divider)]
-            case .wave, .scribble:
-                guard local.width >= local.height else { return [] }
-                let isLong = local.width / size.width > SketchConventions.shortBand.upperBound
-                return isLong ? [.element(.body)] : [.element(.title), .element(.body)]
-            case .scratch:
-                return [.scratchOut]
-            }
-        }
-    }
-}
-
-extension SketchRequest {
-    /// What a small outline on a screen could be. Tiny squares are checkboxes and tiny
-    /// circles radio buttons; a little larger, circles are avatars and pills toggles.
-    static func smallControl(local: CGRect, size: CGSize, roundness: Double, inner: SketchObservation.InnerMark) -> [SketchReading] {
-        let ratio = local.width / max(local.height, 1)
-        let fraction = local.width / size.width
-        let isRound = roundness >= SketchConventions.circleRoundness
-        if SketchConventions.roundRatio.contains(ratio), fraction < SketchConventions.tinyFraction {
-            if !isRound { return [.element(.checkbox)] }
-            // A dot in the middle selects a radio button; a very small empty circle is one too.
-            if inner == .dot || (inner == .none && fraction < SketchConventions.radioFraction) { return [.element(.radio)] }
-        }
-        if inner == .cross { return [.element(.image)] }
-        if isRound, SketchConventions.roundRatio.contains(ratio) {
-            return [.element(.avatar)]
-        }
-        if roundness >= SketchConventions.pillBand.lowerBound, SketchConventions.toggleRatio.contains(ratio) {
-            return [.element(.toggle)]
-        }
-        return ratio <= SketchConventions.wideBand.upperBound ? [.element(.image)] : [.element(.textField)]
-    }
+    /// it can't be anything. Ranked by `scoredReadings`, highest first — a clear shape has
+    /// one candidate miles ahead of anything else; a shape near one of the conventions'
+    /// dividing lines has two or more sitting close together, and choosing between them is
+    /// a judgement call. See `ComponentRule.swift`.
+    var candidates: [SketchReading] { scoredReadings.map(\.reading) }
 }
 
 extension SketchRequest {
@@ -253,12 +188,24 @@ enum SketchConventions {
     /// A square or circle narrower than this fraction of the screen is a checkbox or radio
     /// button rather than an image or avatar (about 47 points on an iPhone).
     static let tinyFraction: CGFloat = 0.12
-    /// An empty circle narrower than this is a radio button rather than an avatar.
-    static let radioFraction: CGFloat = 0.08
+    /// An empty circle narrower than this is a radio button rather than an avatar: about
+    /// 33 points on an iPhone, halfway between a drawn radio (28–30 pt across) and the
+    /// smallest avatar (34 pt and up). The measured width includes the pen's own
+    /// thickness, which the earlier 0.08 (31 pt) didn't allow for, so a 30 pt radio
+    /// circle measured as wider than the cutoff.
+    static let radioFraction: CGFloat = 0.085
     /// An outline at least this many times wider than tall, and no taller than
     /// `progressHeight` screen points, is a progress bar.
     static let progressRatio: CGFloat = 7
     static let progressHeight: CGFloat = 28
+
+    /// Below this score, the winning reading isn't confident even on its own — the low end
+    /// of a close call. Matches the upper edge of the 35–65% "gray area" the Lenovo gesture
+    /// patent (US10755027B2) uses for the same kind of decision.
+    static let closeCallConfidence = 0.65
+    /// When the top two scores sit within this of each other, it's a close call even if
+    /// the winner looked confident on its own. `magic-pen-expansion.md` §3E.
+    static let closeCallMargin = 0.15
 }
 
 /// The wording used to explain sketches and boards to a language model. Shared so that
@@ -280,8 +227,15 @@ enum SketchPrompt {
         - title: a short squiggle near the top. A screen has one title.
         - bodyText: a longer squiggle, or a squiggle below a title or an image.
         - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
-        - radioButton: a tiny circle, often with a dot in it, usually one of a column of them.
+        - radioButton: a tiny circle, under about 33 points across, often with a dot in it, usually one of a column of them.
         - progressBar: a long, very thin outline, often partly shaded in.
+        - avatar: a circle about 34 points across or more, usually alone rather than in a column.
+        - toggle: a small pill with a circle (its knob) nearer one end than the middle.
+
+        You're only asked about sketches the shape rules themselves found ambiguous, and \
+        you're given their own ranked, scored guesses — read those scores as real evidence \
+        of how the rules see it, not decoration. Answer with your choice, and a runner-up \
+        only if a second reading is genuinely plausible.
         """
 
     static let titleInstructions = """
@@ -435,7 +389,13 @@ enum SketchPrompt {
             case .dot: "with a dot in the middle"
             case .other: "with some marks inside"
             }
-            return "a \(proportion) closed outline with \(corners), \(inside)"
+            // On a screen, say how big it is: a radio button and an avatar (or a checkbox and
+            // an image) differ by size alone, which the model can't judge without it.
+            // Only for small shapes: for wide boxes the number measurably pulled a button
+            // towards a text field, and their size isn't what tells those apart.
+            let across = widthFraction.map { $0 < SketchConventions.tinyFraction } == true
+                ? " about \(Int(bounds.width.rounded())) points across" : ""
+            return "a \(proportion) closed outline\(across) with \(corners), \(inside)"
         case .wave(let humps):
             return "a \(length)squiggle with \(humps) humps, running left to right"
         case .stackedLines(let count):

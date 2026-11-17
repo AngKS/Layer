@@ -1,4 +1,4 @@
-import AppIntents
+@_weakLinked import AppIntents
 import CoreGraphics
 
 /// Tells Apple Intelligence what is on the canvas, so that a request such as “make this

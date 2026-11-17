@@ -169,6 +169,9 @@ final class DesignStore {
             }
             content.floating.removeAll { ids.contains($0.id) }
         }
+        // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
+        // deleted soon after it was made. See SketchReadingLog.
+        for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
     }
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
     /// there, if it is the kind of thing that goes on screens, and onto the open canvas
@@ -216,6 +219,8 @@ final class DesignStore {
         case .canvas:
             change { $0.floating.removeAll { $0.id == ref.element } }
         }
+        // See the matching note on delete(_ refs:).
+        Task { await SketchReadingLog.shared.noteDeleted(ref.element) }
     }
 
     /// A copy of an element beside the original, a little down and to the right, on top.

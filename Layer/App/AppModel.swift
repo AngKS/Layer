@@ -903,6 +903,13 @@ final class AppModel {
         // Let the re-trace play out even when the reading comes back at once.
         async let minimum: Void? = try? Task.sleep(for: .milliseconds(750))
         let reading = await engine.read(request)
+        // Stage 0 instrumentation (reports/Fast and slow sketch recognition.md): if this
+        // reading became an element below, linking it here lets a deletion soon after be
+        // recognised as a likely correction of this specific reading.
+        let readingLogID = engine.lastLogID
+        // Stage 2: a word PencilKit's handwriting recognizer read out of these same
+        // strokes, such as "Sign in" inside a box, which becomes the element's label below.
+        let recognizedText = engine.lastRecognizedText
         _ = await minimum
         // Closed while the sketch was being read: nothing is put on a design that has gone.
         guard !isClosed, !Task.isCancelled else {
@@ -928,6 +935,12 @@ final class AppModel {
                 } else if !kind.belongsOnScreens || kind == .text {
                     added = store.addFloating(kind, from: bounds)
                     converted = true
+                }
+                if let added, let readingLogID {
+                    Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                }
+                if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
+                    store.update(added) { $0.text = recognizedText }
                 }
             case .scratchOut:
                 let crossedOut = scratchOutDeletes ? store.elements(scratchedOutBy: bounds) : []
