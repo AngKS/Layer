@@ -488,4 +488,59 @@ struct PencilVoiceTests {
         #expect(bench.pencil.call == nil && bench.runner.warmUps == 0)
         bench.end()
     }
+
+    // MARK: Where the bubble goes
+
+    private static let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+    private static let bubbleSize = CGSize(width: 200, height: 56)
+
+    private static func bubbleFrame(at tip: CGPoint, azimuth: Angle?, topInset: CGFloat = 80) -> CGRect {
+        CGRect(origin: PencilVoiceBubble.origin(anchor: tip, azimuth: azimuth, size: bubbleSize, in: bounds, topInset: topInset), size: bubbleSize)
+    }
+
+    /// How far a rectangle is from a point, 0 when it holds it.
+    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return (dx * dx + dy * dy).squareRoot()
+    }
+
+    @Test func aRightHandedPencilPutsTheBubbleUpAndLeft() {
+        // The barrel points down and right of the tip, so the hand is there.
+        let tip = CGPoint(x: 500, y: 400)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .degrees(45))
+        #expect(frame.midX < tip.x && frame.midY < tip.y)
+        #expect(Self.distance(from: tip, to: frame) >= 28 - 0.01)
+    }
+
+    @Test func aLeftHandedPencilPutsTheBubbleUpAndRight() {
+        let tip = CGPoint(x: 500, y: 400)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .degrees(135))
+        #expect(frame.midX > tip.x && frame.midY < tip.y)
+        #expect(Self.distance(from: tip, to: frame) >= 28 - 0.01)
+    }
+
+    @Test func theGripMeasuredOnTheIPadPutsTheBubbleLeft() {
+        // About 0.06–0.17 rad on the iPad mini: the barrel points right of the tip.
+        let tip = CGPoint(x: 500, y: 400)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .radians(0.1))
+        #expect(frame.maxX <= tip.x - 28 + 0.01)
+        #expect(abs(frame.midY - tip.y) < 28)
+    }
+
+    @Test func aTipNearTheTopKeepsTheBubbleBelowTheBar() {
+        let tip = CGPoint(x: 500, y: 90)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .degrees(45), topInset: 80)
+        #expect(frame.minY >= 80)
+        #expect(frame.minX >= 12 && frame.maxX <= 1000 - 12 && frame.maxY <= 800 - 12)
+        // And a tip by a corner keeps it inside the window.
+        let corner = Self.bubbleFrame(at: CGPoint(x: 5, y: 795), azimuth: .degrees(-45))
+        #expect(corner.minX >= 12 && corner.maxY <= 800 - 12)
+    }
+
+    @Test func noAzimuthPutsTheBubbleBelow() {
+        let tip = CGPoint(x: 500, y: 400)
+        let frame = Self.bubbleFrame(at: tip, azimuth: nil)
+        #expect(frame.origin == CGPoint(x: 400, y: 428))
+    }
 }

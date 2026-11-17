@@ -66,6 +66,9 @@ struct CanvasScreen: View {
         // Apple Pencil, or a pointer, hovering over the canvas outlines what it is over. Only
         // with the palette away: while drawing, the pen's own cursor shows where it is.
         .onContinuousHover(coordinateSpace: .local) { phase in
+            // The pen coming near gets the pencil's model ready, so the first squeeze
+            // doesn't wait for it. Nothing listens yet.
+            if case .active = phase { model.pencilVoice.hovered() }
             guard !model.isHoveringList else { return }
             var target: CanvasSelection?
             if case .active(let point) = phase, model.tool == .select, point.y > model.topBarBottom,
@@ -73,6 +76,13 @@ struct CanvasScreen: View {
                 target = model.hoverTarget(at: point)
             }
             if model.hovered != target { model.hovered = target }
+        }
+        // Apple Pencil Pro's squeeze listens for a command about what the pen is over. Every
+        // visible view's squeeze action is called, so this one goes on a layer of its own
+        // behind the canvas: that way it can be left out in Draw, where the squeeze must stay
+        // PencilKit's, without the canvas itself being made anew each time Draw turns on.
+        .background {
+            Color.clear.modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.tool != .draw))
         }
         // Things dragged out of the library land where they are dropped: on a screen when
         // dropped over one, on the open canvas otherwise.
@@ -158,6 +168,12 @@ struct CanvasScreen: View {
             CallPill()
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
+        }
+        // The pencil's bubble, at the tip where a squeeze opened it, over the canvas and
+        // its controls, laid out in the canvas's own points as the squeeze was.
+        .overlay {
+            PencilVoiceLayer()
+                .ignoresSafeArea()
         }
         // Layer only listens while it is in front.
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { note in
@@ -250,6 +266,35 @@ private struct BottomCorner: ViewModifier {
             .padding(edge == .leading ? .leading : .trailing, 20)
             .padding(.bottom, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge == .leading ? .bottomLeading : .bottomTrailing)
+    }
+}
+
+/// Feeds Apple Pencil Pro's squeezes to the pencil's push-to-talk while `isOn`. While off
+/// the action is not there at all: an action that is there, even one that ignores the
+/// squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the iPad).
+private struct SqueezeToSpeak: ViewModifier {
+    let pencil: PencilVoice
+    let isOn: Bool
+    /// Whether a squeeze is under way. Its `.active` comes every 10–20 ms while it lasts,
+    /// and only the first one starts anything, as with the scrubber.
+    @State private var isSqueezing = false
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content.onPencilSqueeze { phase in
+                switch phase {
+                case .active(let value):
+                    guard !isSqueezing else { return }
+                    isSqueezing = true
+                    pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
+                case .ended, .failed:
+                    isSqueezing = false
+                    pencil.squeezeEnded()
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 
