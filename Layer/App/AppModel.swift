@@ -220,7 +220,7 @@ final class AppModel {
     @ObservationIgnored private var settle: Task<Void, Never>?
     /// Sketches being read, so that a design that closes can stop them.
     @ObservationIgnored private var conversions: [Task<Void, Never>] = []
-    @ObservationIgnored private var isPenDown = false
+    @ObservationIgnored private(set) var isPenDown = false
     @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
 
@@ -1533,8 +1533,13 @@ final class AppModel {
     private func reject(_ keys: Set<Double>) {
         rejected.insert(keys)
         Task { [weak self] in
-            // Long enough to add the strokes that would complete a half-drawn shape.
-            repeat { try? await Task.sleep(for: .seconds(4)) } while self?.isPenDown == true
+            // Long enough to add the strokes that would complete a half-drawn shape. Not for
+            // ever, though, should the pen's end never be heard.
+            var waited = 0
+            repeat {
+                try? await Task.sleep(for: .seconds(4))
+                waited += 4
+            } while self?.isPenDown == true && waited < 30
             self?.dissolve(keys)
         }
     }

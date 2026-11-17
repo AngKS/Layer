@@ -361,3 +361,24 @@ struct DrawingFileTests {
         #expect(file.drawing.strokes.count == 4)
     }
 }
+
+/// The Magic Pen's canvas stops taking the Pencil mid-stroke when Draw goes off, by a
+/// palette flick, a call or a spoken command. PencilKit may never say that stroke ended,
+/// and while the pen was thought down nothing was read again (C-M5).
+@Suite("The Magic Pen put away mid-stroke")
+@MainActor
+struct MagicPenPutAwayTests {
+    @Test func thePenIsUpOnceItsCanvasStopsTakingIt() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        coordinator.apply(.draw)
+        coordinator.canvasViewDidBeginUsingTool(coordinator.sketchCanvas)
+        #expect(model.isPenDown)
+
+        coordinator.apply(.select)
+        #expect(!model.isPenDown)
+        // And the end, if it does come, changes nothing.
+        coordinator.canvasViewDidEndUsingTool(coordinator.sketchCanvas)
+        #expect(!model.isPenDown)
+    }
+}

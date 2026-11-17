@@ -185,6 +185,8 @@ struct InkCanvas: UIViewRepresentable {
         /// under the Pencil as it hovers. Worked out once after the strokes change, rather
         /// than for every stroke on every hover event.
         private var inkAreas: [(stroke: PKStroke, area: CGRect)]?
+        /// Whether the Magic Pen is drawing a stroke on the sketch canvas.
+        private var isSketchPenDown = false
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -284,6 +286,12 @@ struct InkCanvas: UIViewRepresentable {
             // With the lasso in hand a loop selects things here, rather than strokes in PencilKit.
             let isLasso = isDrawing && palette.selectedToolItem is PKToolPickerLassoItem
             sketchCanvas.isUserInteractionEnabled = isDrawing && isMagicPen
+            // Put away mid-stroke, the canvas may never say the stroke ended; until it is
+            // up, the pen is thought down and nothing is read.
+            if !sketchCanvas.isUserInteractionEnabled, isSketchPenDown {
+                isSketchPenDown = false
+                model.penUp()
+            }
             // The Magic Pen's canvas is put away while it isn't in use and holds nothing, so
             // PencilKit doesn't keep tiling and scrolling a second canvas the size of the board.
             let showsSketch = (isDrawing && isMagicPen) || !sketchCanvas.drawing.strokes.isEmpty
@@ -580,6 +588,7 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
             if canvasView === sketchCanvas {
+                isSketchPenDown = true
                 model.penDown()
             } else {
                 // One use of a tool is one undo step, however many times it changes the
@@ -590,6 +599,7 @@ struct InkCanvas: UIViewRepresentable {
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
+                isSketchPenDown = false
                 model.penUp()
             } else {
                 model.store.endEdit()
