@@ -228,11 +228,8 @@ final class CanvasDrags {
     /// The lines the dragged element has snapped to, and the placement of their points.
     var guides: [SnapGuide] = []
     var guidePlacement = Placement(origin: .zero, scale: 1)
-    /// The drag under way: whose it is, where on the glass it began, and when it last moved.
-    @ObservationIgnored private var session: (owner: Owner, start: CGPoint, moved: ContinuousClock.Instant)?
-    /// How long a drag can go without moving before another view's drag may take over: by
-    /// then SwiftUI has cancelled it without a word. Sooner, it is a second finger.
-    @ObservationIgnored var staleAfter: Duration = .milliseconds(500)
+    /// The drag under way: whose it is, and where on the glass it began.
+    @ObservationIgnored private var session: (owner: Owner, start: CGPoint)?
     /// The frame an element had when the current drag began.
     @ObservationIgnored private(set) var elementOrigin: CGRect?
     @ObservationIgnored private(set) var screenOrigin: CGPoint?
@@ -247,22 +244,18 @@ final class CanvasDrags {
 
     private enum Turn { case new, continuing, ignored }
 
-    /// Whether a drag is new, goes on, or is to be left alone. A drag under way that began
-    /// somewhere else on the same view, or another view's that has stopped moving, was
-    /// cancelled without a word: it is ended first, so that it leaves no stale origin, edit
-    /// or guides behind. Another view's that is still moving is a second finger, and the
-    /// new drag is left alone: taking over on every frame, the two made every frame a step.
+    /// Whether a drag is new, goes on, or is to be left alone. Another view's drag under way
+    /// is a second finger, and the new one is left alone: taking over, the two made every
+    /// frame a step. A drag SwiftUI cancelled has already been ended by its owner's gesture
+    /// state resetting, or its view going (see `canvasDrag`). A new touch on the same view
+    /// means the one before was cancelled: it is ended first, leaving nothing behind.
     private func begins(_ owner: Owner, at start: CGPoint, model: AppModel) -> Turn {
-        let now = ContinuousClock.now
         if let session {
-            if session.owner === owner, session.start == start {
-                self.session?.moved = now
-                return .continuing
-            }
-            if session.owner !== owner, now - session.moved < staleAfter { return .ignored }
+            guard session.owner === owner else { return .ignored }
+            if session.start == start { return .continuing }
             endAbandoned(model: model)
         }
-        session = (owner, start, now)
+        session = (owner, start)
         return .new
     }
 

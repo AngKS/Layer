@@ -633,10 +633,11 @@ struct CanvasDragTests {
         let board = Board()
         board.store.updateCanvas { $0.snapsToGuides = false }
         let drags = CanvasDrags()
-        // Cut short: it has stopped moving by the time the next drag begins.
-        drags.staleAfter = .zero
         let titleBefore = board.canvasFrame(board.title)
-        move(board, drags, board.title, by: 20, from: CGPoint(x: 1, y: 1), owner: CanvasDrags.Owner())
+        let first = CanvasDrags.Owner()
+        move(board, drags, board.title, by: 20, from: CGPoint(x: 1, y: 1), owner: first)
+        // SwiftUI cancels it: its gesture state resets without `onEnded`.
+        drags.cancel(first, model: board.model)
 
         let noteBefore = board.canvasFrame(board.note)
         let other = CanvasDrags.Owner()
