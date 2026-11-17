@@ -275,7 +275,11 @@ final class SketchFlowUITests: XCTestCase {
 
         // The library's wireframes add a frame of another device, selected.
         addFrame("iPad")
-        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 2 · 820'", timeout: 5), "an iPad frame should be added and selected")
+        // It comes in unselected; tapping its name selects it.
+        XCTAssertTrue(app.staticTexts["Screen 2"].waitForExistence(timeout: 5), "an iPad frame should be added")
+        XCTAssertFalse(selectionElement.exists, "a new frame comes in unselected")
+        app.staticTexts["Screen 2"].tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 2 · 820'", timeout: 5), "the iPad frame should be selected once tapped")
     }
 
     func testThingsAreAddedFromTheBarAndStyledFromTheFormatPanel() {
@@ -802,16 +806,24 @@ final class SketchFlowUITests: XCTestCase {
     }
 
     /// Reads the sketch on the canvas. The tests draw with conversion after a pause off;
-    /// turning it on in the board's Magic Pen tab reads what is there, and it is turned
-    /// off again for the next sketch.
+    /// switching it on in the board's Magic Pen tab reads what is there after the pause.
+    /// The menu is closed at once, so the sketch is read with it closed: a board named
+    /// while its menu is open has the menu's old title written back when it closes.
     private func convert() {
-        let toggle = app.switches["Convert After a Pause"]
-        if !toggle.exists { openMagicPenSettings() }
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the board menu should have the conversion setting")
-        toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap()
-        // A pause of 0.9 s, and the reading itself.
+        setConvertsAfterAPause(true)
+        // The pause of 0.9 s, and the reading itself.
         sleep(2)
-        if (toggle.value as? String) == "1" { toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap() }
+        setConvertsAfterAPause(false)
+    }
+
+    private func setConvertsAfterAPause(_ isOn: Bool) {
+        openMagicPenSettings()
+        let toggle = app.switches["Convert After a Pause"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the board menu should have the conversion setting")
+        if ((toggle.value as? String) == "1") != isOn {
+            let knob = toggle.switches.firstMatch
+            (knob.exists ? knob : toggle).tap()
+        }
         closeMenu()
     }
 
