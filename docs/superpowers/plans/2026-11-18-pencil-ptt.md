@@ -300,7 +300,7 @@ If the iPad isn't reachable, note it, carry on, and run this check as part of Ta
   - Add `.onPencilSqueeze` mapping `.active(value)` to `squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)`, firing once per squeeze as `Scrubber` does, and `.ended`/`.failed` to `squeezeEnded()`.
   - Call `pencilVoice.hovered()` in the existing `onContinuousHover` `.active` branch.
   - Haptics: `UICanvasFeedbackGenerator` `.alignmentOccurred(at:)` when the bubble turns `.listening`, and `.pathCompleted(at:)` on send, at the anchor.
-  - If Task 1 found the palette taking the squeeze, apply its fix here.
+  - **The squeeze handler is only attached while `model.tool != .draw`** (a conditional `ViewModifier`). Task 1 found that a canvas `.onPencilSqueeze` stops PencilKit's palette appearing on squeeze in Draw, which the user requires. `.active` repeats during one squeeze, so act on its first only.
 - [ ] **Step 5:** Run `PencilVoiceTests` and build. Expected: PASS.
 - [ ] **Step 6:** Commit: "The pencil bubble: model and waveform at the tip, words if asked for".
 
@@ -325,7 +325,7 @@ If the iPad isn't reachable, note it, carry on, and run this check as part of Ta
 ### Task 8: On the iPad
 
 - [ ] **Step 1:** Build Release for "AKS Mini", install, and launch with the console logged to the scratchpad.
-- [ ] **Step 2:** Ask the user to try:
+- [ ] **Step 2:** Ask the user to try (including: with Draw on, a squeeze shows PencilKit's palette):
   - a held squeeze over an element ("make this blue");
   - a quick squeeze toggle over the canvas ("a settings screen with notifications and dark mode toggles");
   - a squeeze while a command runs;
