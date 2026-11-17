@@ -6,6 +6,9 @@ import Foundation
 /// passing it between threads safe.
 struct AudioChunk: @unchecked Sendable {
     let buffer: AVAudioPCMBuffer
+    /// When the sound was handed over by the microphone. Chunks can wait in a queue
+    /// before they are listened to, and a pause is measured from when it was spoken.
+    var time: ContinuousClock.Instant = .now
 }
 
 /// Where a call's sound comes from: the microphone, or a recording standing in for it.

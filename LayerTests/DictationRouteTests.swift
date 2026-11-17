@@ -147,7 +147,7 @@ struct MicrophoneTapTests {
     /// builds while the block belongs to no actor.
     @Test func soundIsTakenOnWhateverThreadTheEngineBringsItOn() async {
         let (sound, continuation) = AsyncStream<AudioChunk>.makeStream()
-        let block = Handed(value: MicrophoneTap.tapBlock(into: continuation))
+        let block = Handed(value: AudioEngineHardware.tapBlock(handingTo: { continuation.yield($0) }))
         let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
         buffer.frameLength = 160
@@ -164,6 +164,165 @@ struct MicrophoneTapTests {
         var chunks = 0
         for await _ in sound { chunks += 1 }
         #expect(chunks == 1)
+    }
+
+    // MARK: One microphone for every route
+
+    private func chunk() -> AudioChunk {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
+        buffer.frameLength = 160
+        return AudioChunk(buffer: buffer)
+    }
+
+    private func count(_ sound: AsyncStream<AudioChunk>) -> Task<Int, Never> {
+        Task {
+            var chunks = 0
+            for await _ in sound { chunks += 1 }
+            return chunks
+        }
+    }
+
+    /// Two routes overlap, as a sent squeeze settling does with the next squeeze. The
+    /// first to stop must not turn the microphone off under the other: that left the
+    /// second route hearing nothing, and its command was lost.
+    @Test func overlappingListenersShareOneMicrophone() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        let first = try await microphone.listen()
+        let second = try await microphone.listen()
+        #expect(hardware.starts == 1)
+        let firstHeard = count(first.sound), secondHeard = count(second.sound)
+        hardware.play(chunk())
+        microphone.stopListening(first.listener)
+        #expect(await firstHeard.value == 1)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(hardware.stops == 0)
+        // The second still hears.
+        hardware.play(chunk())
+        microphone.stopListening(second.listener)
+        #expect(await secondHeard.value == 2)
+        #expect(await eventuallyOff { hardware.stops == 1 })
+        #expect(hardware.starts == 1)
+    }
+
+    @Test func theMicrophoneComesBackOnForTheNextListener() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        let first = try await microphone.listen()
+        microphone.stopListening(first.listener)
+        let second = try await microphone.listen()
+        #expect(await eventuallyOff { hardware.starts + hardware.stops >= 1 })
+        // Either it stayed on for the second, or it went off and came back on.
+        #expect(hardware.starts - hardware.stops == 1)
+        microphone.stopListening(second.listener)
+        #expect(await eventuallyOff { hardware.starts == hardware.stops })
+    }
+
+    @Test func aMicrophoneThatCannotStartCountsNoListener() async throws {
+        let hardware = FakeHardware()
+        hardware.startError = DictationRoute.Failure.microphoneUnavailable
+        let microphone = Microphone(hardware: hardware)
+        await #expect(throws: DictationRoute.Failure.microphoneUnavailable) { _ = try await microphone.listen() }
+        #expect(microphone.listenerCount == 0)
+        hardware.startError = nil
+        let listening = try await microphone.listen()
+        #expect(hardware.starts == 1)
+        microphone.stopListening(listening.listener)
+    }
+
+    @Test func losingTheMicrophoneEndsEveryonesSound() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        let first = try await microphone.listen(), second = try await microphone.listen()
+        let firstHeard = count(first.sound), secondHeard = count(second.sound)
+        hardware.loseIt()
+        #expect(await firstHeard.value == 0)
+        #expect(await secondHeard.value == 0)
+        #expect(await eventuallyOff { hardware.stops == 1 })
+        #expect(microphone.listenerCount == 0)
+    }
+
+    private func eventuallyOff(_ condition: @Sendable () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition() {
+            if ContinuousClock.now > deadline { return false }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return true
+    }
+}
+
+/// Hardware the test turns on and off by hand, and hands sound through.
+final class FakeHardware: MicrophoneHardware, @unchecked Sendable {
+    private let state = NSLock()
+    private var started = 0
+    private var stopped = 0
+    private var failure: (any Error)?
+    private var hearing: (@Sendable (AudioChunk) -> Void)?
+    private var lost: (@Sendable () -> Void)?
+
+    var starts: Int { state.withLock { started } }
+    var stops: Int { state.withLock { stopped } }
+    var startError: (any Error)? {
+        get { state.withLock { failure } }
+        set { state.withLock { failure = newValue } }
+    }
+
+    func start(hearing: @escaping @Sendable (AudioChunk) -> Void, lost: @escaping @Sendable () -> Void) throws -> AVAudioFormat {
+        try state.withLock {
+            if let failure { throw failure }
+            started += 1
+            self.hearing = hearing
+            self.lost = lost
+        }
+        return AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
+    }
+
+    func stop() {
+        state.withLock {
+            stopped += 1
+            hearing = nil
+            lost = nil
+        }
+    }
+
+    func play(_ chunk: AudioChunk) {
+        state.withLock { hearing }?(chunk)
+    }
+
+    func loseIt() {
+        state.withLock { lost }?()
+    }
+}
+
+@Suite("Getting speech ready")
+struct PreparedOnceTests {
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func next() -> Int { lock.withLock { value += 1; return value } }
+        var count: Int { lock.withLock { value } }
+    }
+
+    /// Every squeeze makes a route of its own. The language and the model are worked out
+    /// for the first, and the rest are handed the same.
+    @Test func itIsWorkedOutOnceForEveryone() async throws {
+        let ready = PreparedOnce<String, Int>()
+        let made = Counter()
+        async let one = ready.value(for: "en") { try await Task.sleep(for: .milliseconds(50)); return made.next() }
+        async let two = ready.value(for: "en") { made.next() }
+        #expect(try await [one, two] == [1, 1])
+        #expect(try await ready.value(for: "en") { made.next() } == 1)
+        #expect(made.count == 1)
+    }
+
+    @Test func aFailureIsTriedAgain() async throws {
+        let ready = PreparedOnce<String, Int>()
+        await #expect(throws: DictationRoute.Failure.speechUnavailable) {
+            _ = try await ready.value(for: "en") { throw DictationRoute.Failure.speechUnavailable }
+        }
+        #expect(try await ready.value(for: "en") { 7 } == 7)
     }
 }
 

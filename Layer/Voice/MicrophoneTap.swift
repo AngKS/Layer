@@ -1,84 +1,241 @@
 import AVFoundation
+import os
 
-/// The microphone, as a stream of sound, for as long as a call is up.
+/// One route's use of the microphone, as a stream of sound, from `start()` to `stop()`.
+/// The microphone itself is shared: see `Microphone`.
 @MainActor
 final class MicrophoneTap: VoiceAudioSource {
-    private let engine = AVAudioEngine()
-    private var continuation: AsyncStream<AudioChunk>.Continuation?
-    private var watching: [any NSObjectProtocol] = []
+    private let microphone: Microphone
+    private var listener: Microphone.Listener?
+    /// Whether `stop()` came while `start()` was still under way.
+    private var stoppedWhileStarting = false
+    private(set) var format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+
+    init(microphone: Microphone = .shared) {
+        self.microphone = microphone
+    }
 
     /// Asks to use the microphone, the first time, and says whether it may be used.
     static func requestAccess() async -> Bool {
         await AVAudioApplication.requestRecordPermission()
     }
 
-    var format: AVAudioFormat { engine.inputNode.outputFormat(forBus: 0) }
-
     /// Starts the microphone, asking to use it the first time.
     func start() async throws -> AsyncStream<AudioChunk> {
+        stoppedWhileStarting = false
         guard await Self.requestAccess() else { throw DictationRoute.Failure.microphoneRefused }
+        let (listener, sound, format) = try await microphone.listen()
+        guard !stoppedWhileStarting else {
+            microphone.stopListening(listener)
+            throw CancellationError()
+        }
+        self.listener = listener
+        self.format = format
+        return sound
+    }
+
+    func stop() {
+        stoppedWhileStarting = true
+        guard let listener else { return }
+        self.listener = nil
+        microphone.stopListening(listener)
+    }
+}
+
+/// What the microphone needs of the hardware. The iPad's is `AudioEngineHardware`; tests
+/// stand one in that hands over what they say.
+///
+/// Called only on the microphone's own queue, one call at a time.
+protocol MicrophoneHardware: AnyObject, Sendable {
+    /// Turns the microphone on: the audio session, the engine and its tap. Sound goes to
+    /// `hearing`, on whatever thread brings it. `lost` is called if the microphone goes
+    /// away under it. Throws having undone whatever it got as far as doing.
+    func start(hearing: @escaping @Sendable (AudioChunk) -> Void, lost: @escaping @Sendable () -> Void) throws -> AVAudioFormat
+    /// Turns it off and lets go of the audio session.
+    func stop()
+}
+
+/// The iPad's one microphone, shared by every route that is listening.
+///
+/// Routes overlap. A squeeze's route is still settling its command when the next squeeze
+/// opens another, and a phone call can be up at the same time. When each route turned the
+/// hardware on and off for itself, the first to finish switched the audio session off
+/// under the others, which then heard nothing, and two engines tapped the one input. Here
+/// there is one engine and one tap, the sound is handed to every route listening, and the
+/// audio session is let go of only when the last of them stops.
+///
+/// Turning the hardware on and off blocks for a moment, so it happens on a queue of the
+/// microphone's own, never on the main actor, where the Pencil is drawing.
+final class Microphone: @unchecked Sendable {
+    typealias Listener = UUID
+
+    static let shared = Microphone(hardware: AudioEngineHardware())
+
+    private let hardware: any MicrophoneHardware
+    private let queue = DispatchQueue(label: "Layer.Microphone", qos: .userInitiated)
+    private let listeners = OSAllocatedUnfairLock<[Listener: AsyncStream<AudioChunk>.Continuation]>(initialState: [:])
+    /// The format the hardware is giving sound in, while it is on. Touched only on `queue`,
+    /// which is what makes the class safe to share.
+    private var format: AVAudioFormat?
+
+    init(hardware: any MicrophoneHardware) {
+        self.hardware = hardware
+    }
+
+    /// Starts hearing the microphone, turning it on if no one else has. The stream ends when
+    /// `stopListening` is called, or when the microphone goes away.
+    func listen() async throws -> (listener: Listener, sound: AsyncStream<AudioChunk>, format: AVAudioFormat) {
+        let listener = Listener()
+        // If the listener falls behind, the oldest sound is what it can best do without.
+        let (sound, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .bufferingNewest(64))
+        // Counted before the hardware is asked for, so that a route stopping meanwhile
+        // can't turn it off under this one.
+        listeners.withLock { $0[listener] = continuation }
+        do {
+            let format: AVAudioFormat = try await withCheckedThrowingContinuation { done in
+                queue.async { done.resume(with: Result { try self.turnOn() }) }
+            }
+            return (listener, sound, format)
+        } catch {
+            stopListening(listener)
+            throw error
+        }
+    }
+
+    /// Stops hearing the microphone, and turns it off if no one else is listening.
+    func stopListening(_ listener: Listener) {
+        let continuation = listeners.withLock { $0.removeValue(forKey: listener) }
+        continuation?.finish()
+        queue.async { self.turnOffIfUnheard() }
+    }
+
+    /// Whether anyone is listening. For tests.
+    var listenerCount: Int { listeners.withLock { $0.count } }
+
+    // MARK: On the queue
+
+    private func turnOn() throws -> AVAudioFormat {
+        if let format { return format }
+        // Everyone who asked has gone already.
+        guard listenerCount > 0 else { throw CancellationError() }
+        let format = try hardware.start(hearing: Self.handOut(to: listeners), lost: { [weak self] in
+            guard let self else { return }
+            self.queue.async { self.lost() }
+        })
+        VoiceLog.log.info("microphone: on")
+        self.format = format
+        return format
+    }
+
+    private func turnOffIfUnheard() {
+        guard format != nil, listenerCount == 0 else { return }
+        hardware.stop()
+        format = nil
+        VoiceLog.log.info("microphone: off")
+    }
+
+    /// The microphone went away: everyone listening hears the sound end, which is how a
+    /// route learns of it.
+    private func lost() {
+        guard format != nil else { return }
+        hardware.stop()
+        format = nil
+        let all = listeners.withLock { listeners in
+            defer { listeners = [:] }
+            return listeners
+        }
+        for continuation in all.values { continuation.finish() }
+    }
+
+    /// Hands each chunk to everyone listening. The engine calls this on a thread of its
+    /// own, so it must belong to no actor: `nonisolated`, and `@Sendable`.
+    nonisolated private static func handOut(
+        to listeners: OSAllocatedUnfairLock<[Listener: AsyncStream<AudioChunk>.Continuation]>
+    ) -> @Sendable (AudioChunk) -> Void {
+        { @Sendable chunk in
+            for continuation in listeners.withLock({ Array($0.values) }) {
+                continuation.yield(chunk)
+            }
+        }
+    }
+}
+
+/// The iPad's microphone: the audio session, an `AVAudioEngine` and a tap on its input.
+/// Used only on `Microphone`'s queue, one call at a time, which is what makes it safe to share.
+final class AudioEngineHardware: MicrophoneHardware, @unchecked Sendable {
+    private var engine: AVAudioEngine?
+    private var watching: [any NSObjectProtocol] = []
+
+    func start(hearing: @escaping @Sendable (AudioChunk) -> Void, lost: @escaping @Sendable () -> Void) throws -> AVAudioFormat {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
-        // With nothing to record from there is no call to be had.
-        guard session.isInputAvailable, session.availableInputs?.isEmpty == false else {
+        do {
+            // With nothing to record from there is nothing to hear.
+            guard session.isInputAvailable, session.availableInputs?.isEmpty == false else {
+                throw DictationRoute.Failure.microphoneUnavailable
+            }
+            let engine = AVAudioEngine()
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else { throw DictationRoute.Failure.microphoneUnavailable }
+            // A tenth of a second at a time, which is the shortest the engine hands over.
+            // The underscored name is the one iOS 27's SDK gives the call that reports a
+            // failure; the plain one is deprecated and has no Swift name of its own yet.
+            // Its error parameter sits before the block, so Swift keeps an empty place for it.
+            try input.__installTap(
+                onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format, error: (), block: Self.tapBlock(handingTo: hearing)
+            )
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                input.removeTap(onBus: 0)
+                throw error
+            }
+            self.engine = engine
+            watch(engine, lost: lost)
+            return format
+        } catch {
+            // Left on, the session would keep other apps' sound stopped.
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            throw DictationRoute.Failure.microphoneUnavailable
+            throw error
         }
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw DictationRoute.Failure.microphoneUnavailable }
-        // If the listener falls behind, the oldest sound is what it can best do without.
-        let (sound, continuation) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .bufferingNewest(64))
-        self.continuation = continuation
-        // A tenth of a second at a time, which is the shortest the engine hands over.
-        // The underscored name is the one iOS 27's SDK gives the call that reports a
-        // failure; the plain one is deprecated and has no Swift name of its own yet.
-        // Its error parameter sits before the block, so Swift keeps an empty place for it.
-        try input.__installTap(
-            onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format, error: (), block: Self.tapBlock(into: continuation)
-        )
-        engine.prepare()
-        try engine.start()
-        watchForLosingTheMicrophone()
-        return sound
+    }
+
+    func stop() {
+        for watch in watching { NotificationCenter.default.removeObserver(watch) }
+        watching = []
+        guard let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        self.engine = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     /// The block the engine hands its sound to. The engine calls it on a thread of its
     /// own, so it must belong to no actor, which is why this is `nonisolated` and the
-    /// block `@Sendable`. Written in place in `start()`, as it first was, the block is
-    /// taken for the main actor's, and Swift stops the app the moment the first sound
-    /// arrives on the engine's thread. Only a real microphone shows it.
-    nonisolated static func tapBlock(into continuation: AsyncStream<AudioChunk>.Continuation) -> AVAudioNodeTapBlock {
-        { @Sendable buffer, _ in continuation.yield(AudioChunk(buffer: buffer)) }
-    }
-
-    func stop() {
-        guard let continuation else { return }
-        for watch in watching { NotificationCenter.default.removeObserver(watch) }
-        watching = []
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        continuation.finish()
-        self.continuation = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    /// block `@Sendable`. Written in place inside a main-actor class, as it first was,
+    /// the block is taken for the main actor's, and Swift stops the app the moment the
+    /// first sound arrives on the engine's thread. Only a real microphone shows it.
+    nonisolated static func tapBlock(handingTo hearing: @escaping @Sendable (AudioChunk) -> Void) -> AVAudioNodeTapBlock {
+        { @Sendable buffer, _ in hearing(AudioChunk(buffer: buffer, time: .now)) }
     }
 
     /// A phone call, Siri, or the microphone changing under the engine (headphones going
-    /// on or off) stops the sound. The stream then ends, which is how the call hears of it.
-    private func watchForLosingTheMicrophone() {
+    /// on or off) stops the sound.
+    private func watch(_ engine: AVAudioEngine, lost: @escaping @Sendable () -> Void) {
         let center = NotificationCenter.default
         watching = [
-            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { note in
                 let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
-                if began {
-                    VoiceLog.log.info("microphone: interrupted")
-                    MainActor.assumeIsolated { self?.stop() }
-                }
+                guard began else { return }
+                VoiceLog.log.info("microphone: interrupted")
+                lost()
             },
-            center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in
                 VoiceLog.log.info("microphone: the audio route changed")
-                MainActor.assumeIsolated { self?.stop() }
+                lost()
             },
         ]
     }
