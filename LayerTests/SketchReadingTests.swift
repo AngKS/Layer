@@ -194,11 +194,17 @@ private actor CallCounter {
 
 private struct StubInterpreter: SketchInterpreter {
     let answer: SketchReading
+    /// The second choice it names alongside its answer, if any.
+    var runnerUp: SketchReading? = nil
     let calls: CallCounter
 
     func read(_ request: SketchRequest) async throws -> SketchReading {
         await calls.record()
         return answer
+    }
+
+    func decide(_ request: SketchRequest) async throws -> SketchDecision {
+        SketchDecision(chosen: try await read(request), runnerUp: runnerUp)
     }
 
     func suggestTitle(for board: String) async throws -> String {
@@ -211,12 +217,12 @@ private struct StubInterpreter: SketchInterpreter {
 struct SketchEngineTests {
     private let calls = CallCounter()
 
-    private func engine(answering answer: SketchReading, readiness: ProviderReadiness = .ready) -> SketchEngine {
+    private func engine(answering answer: SketchReading, runnerUp: SketchReading? = nil, readiness: ProviderReadiness = .ready) -> SketchEngine {
         let calls = calls
         return SketchEngine(provider: SketchProvider(
             id: "stub", name: "Stub", symbol: "sparkle", needsAPIKey: false,
             readiness: { readiness },
-            makeInterpreter: { _ in StubInterpreter(answer: answer, calls: calls) }
+            makeInterpreter: { _ in StubInterpreter(answer: answer, runnerUp: runnerUp, calls: calls) }
         ))
     }
 
@@ -283,6 +289,54 @@ struct SketchEngineTests {
         #expect(await engine.read(try request(box.paths, local: box.rect)) == .element(.textField))
         #expect(await calls.count == 0)
         #expect(engine.statusLine == "Apple Intelligence is turned off in Settings. Using built-in shape rules.")
+    }
+
+    // MARK: What else a close call nearly was
+
+    @Test func aCloseCallTheRulesSettleOffersTheirRunnerUp() async throws {
+        let box = roundedWideBox(at: 740)
+        let engine = engine(answering: .element(.button), readiness: .unavailable("Off"))
+        let outcome = await engine.outcome(for: try request(box.paths, local: box.rect))
+        #expect(outcome.reading == .element(.textField))
+        #expect(outcome.alternative == .element(.button))
+    }
+
+    @Test func whenTheProviderOverrulesTheRulesTheirReadingIsTheAlternative() async throws {
+        let box = roundedWideBox(at: 740)
+        let outcome = await engine(answering: .element(.button)).outcome(for: try request(box.paths, local: box.rect))
+        #expect(outcome.reading == .element(.button))
+        #expect(outcome.alternative == .element(.textField))
+    }
+
+    /// A box near both dividing lines at once: it could be an image, a button or a text field.
+    private func threeWaySketch() throws -> SketchRequest {
+        let rect = CGRect(x: 60, y: 300, width: 200, height: 100)
+        let sketch = try request([SketchSamples.box(rect, radius: rect.height * 0.22)], local: rect)
+        try #require(sketch.scoredReadings.count == 3)
+        return sketch
+    }
+
+    @Test func aProvidersOwnSecondChoiceIsTheAlternative() async throws {
+        let sketch = try threeWaySketch()
+        let ranked = sketch.scoredReadings.map(\.reading)
+        // The provider's second choice is the one the rules thought least likely.
+        let outcome = await engine(answering: ranked[0], runnerUp: ranked[2]).outcome(for: sketch)
+        #expect(outcome.reading == ranked[0])
+        #expect(outcome.alternative == ranked[2])
+    }
+
+    @Test func aSecondChoiceTheSketchCannotBeIsIgnored() async throws {
+        let sketch = try threeWaySketch()
+        let ranked = sketch.scoredReadings.map(\.reading)
+        let outcome = await engine(answering: ranked[0], runnerUp: .element(.title)).outcome(for: sketch)
+        #expect(outcome.alternative == ranked[1])
+    }
+
+    @Test func aClearSketchOffersNothingElse() async throws {
+        let pill = CGRect(x: 28, y: 738, width: 337, height: 60)
+        let outcome = await engine(answering: .element(.textField)).outcome(for: try request([SketchSamples.box(pill, radius: 30)], local: pill))
+        #expect(outcome.reading == .element(.button))
+        #expect(outcome.alternative == nil)
     }
 }
 

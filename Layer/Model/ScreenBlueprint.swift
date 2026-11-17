@@ -121,23 +121,8 @@ struct ScreenBlueprint: Equatable, Sendable {
         return nil
     }
 
-    /// The words people use for each kind of element.
-    static let kindWords: [(words: [String], kind: ElementKind)] = [
-        (["title", "heading", "header", "headline", "large title"], .title),
-        (["body", "body text", "description", "paragraph", "subtitle", "caption"], .body),
-        (["button", "primary button", "cta"], .button),
-        (["text field", "textfield", "field", "input", "search field", "email field", "password field"], .textField),
-        (["image", "photo", "picture", "hero", "hero image", "banner"], .image),
-        (["symbol", "icon", "sf symbol"], .symbol),
-        (["divider", "separator", "line", "rule"], .divider),
-        (["toggle", "switch"], .toggle),
-        (["checkbox", "check box", "tick box"], .checkbox),
-        (["radio", "radio button", "option"], .radio),
-        (["progress", "progress bar", "progress view", "loading bar"], .progress),
-        (["avatar", "profile picture", "profile photo"], .avatar),
-        (["text", "label"], .text),
-        (["sticky note", "note"], .stickyNote),
-    ]
+    /// The words people use for each kind of element. No word belongs to two kinds.
+    static let kindWords: [(words: [String], kind: ElementKind)] = ElementKind.allCases.map { ($0.spec.writtenNames, $0) }
 
     static func kind(named word: String) -> ElementKind? {
         let word = word.lowercased().trimmingCharacters(in: .whitespaces)
@@ -282,10 +267,7 @@ struct ScreenBlueprint: Equatable, Sendable {
     /// for kinds that usually run edge to edge or when asked to fill.
     static func size(of item: Item, available: CGFloat, on device: DeviceFrame, inRow: Bool = false) -> CGSize {
         var size = ElementLayout.size(for: item.kind, sketch: .zero)
-        let stretches = switch item.kind {
-        case .button, .textField, .divider, .image, .body, .progress: true
-        default: false
-        }
+        let stretches = item.kind.spec.fillsWrittenWidth
         if item.width == .fill || (item.width == nil && (stretches || inRow && !ElementLayout.keepsSketchedPosition(item.kind))) {
             size.width = available
         } else {

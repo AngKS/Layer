@@ -419,9 +419,13 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
 
         // Dragging moves it: afterwards it is found at its new place and not at its old one.
+        XCTAssertTrue(showsInk(near: CGPoint(x: 260, y: 440)), "the ink should be drawn where it was drawn")
         stroke(CGPoint(x: 260, y: 440), CGPoint(x: 560, y: 300))
         point(CGPoint(x: 150, y: 650)).tap()
         XCTAssertTrue(waitForDisappearance(of: readout))
+        // And it is drawn there: the ink itself moves, not only what a tap finds.
+        XCTAssertTrue(showsInk(near: CGPoint(x: 560, y: 300)), "the ink should be drawn at its new place")
+        XCTAssertFalse(showsInk(near: CGPoint(x: 260, y: 440)), "and no longer at its old one")
         point(CGPoint(x: 260, y: 440)).tap()
         XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should have left its old place")
         point(CGPoint(x: 560, y: 300)).tap()
@@ -436,6 +440,232 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(of: readout))
         point(CGPoint(x: 260, y: 440)).tap()
         XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should be gone")
+    }
+
+    func testADrawingIsALayerThatCanBeHiddenLockedAndCopied() {
+        openNewDesign()
+
+        // Two strokes with the Pen, crossing, clear of where the layers panel opens.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 780, y: 400), CGPoint(x: 900, y: 480))
+        stroke(CGPoint(x: 900, y: 400), CGPoint(x: 780, y: 480))
+        let ink = CGPoint(x: 840, y: 440)
+        let empty = CGPoint(x: 700, y: 650)
+        control("Draw").tap()
+        point(ink).tap()
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
+
+        // It is a layer like any other, listed under the canvas.
+        control("Layers").tap()
+        let row = app.buttons["Drawing"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the drawing should be listed as a layer")
+
+        // Hidden, its ink leaves the canvas and can't be picked there. Shown, it is back.
+        control("Hide Drawing").tap()
+        point(ink).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "a hidden drawing can't be picked on the canvas")
+        control("Show Drawing").tap()
+        point(ink).tap()
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "shown again, the drawing should be back where it was")
+
+        // Locked, it is still there to be picked, and offers only to be unlocked.
+        control("Lock").tap()
+        XCTAssertTrue(control("Unlock").waitForExistence(timeout: 5), "a locked drawing should offer to unlock")
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        point(ink).tap()
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "a locked drawing should still be on the canvas")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "locked-drawing"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        control("Unlock").tap()
+
+        // Copied, there are two drawings.
+        XCTAssertTrue(control("Duplicate").waitForExistence(timeout: 5))
+        control("Duplicate").tap()
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@", "Drawing"))
+        XCTAssertTrue(wait(for: rows.element(boundBy: 1), toHave: "exists == true", timeout: 5), "the copy should be listed as a layer too")
+    }
+
+    func testUndoGoesBackThroughMovingADrawingAndThroughDrawingIt() {
+        openNewDesign()
+
+        // Two strokes with the Pen, crossing, make one drawing.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 780, y: 400), CGPoint(x: 900, y: 480))
+        stroke(CGPoint(x: 900, y: 400), CGPoint(x: 780, y: 480))
+        let crossing = CGPoint(x: 840, y: 440)
+        // On the first stroke only, away from where the second crosses it.
+        let firstStroke = CGPoint(x: 795, y: 410)
+        let empty = CGPoint(x: 700, y: 650)
+        control("Draw").tap()
+        point(crossing).tap()
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
+
+        // Moving the drawing is a change to the design; drawing its strokes was PencilKit's.
+        stroke(crossing, CGPoint(x: 1000, y: 300))
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        let undo = app.buttons.matching(identifier: "arrow.uturn.backward").firstMatch
+        let redo = app.buttons.matching(identifier: "arrow.uturn.forward").firstMatch
+
+        // The first undo takes back the move.
+        undo.tap()
+        point(crossing).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "undo should move the drawing back")
+        point(empty).tap()
+
+        // The next takes back the second stroke, leaving a drawing of one.
+        undo.tap()
+        point(firstStroke).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "undo should take back the second stroke")
+        point(empty).tap()
+
+        // The next takes back the first, and the drawing with it.
+        undo.tap()
+        point(firstStroke).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "undo should take back the first stroke, and so the drawing")
+
+        // Redo brings both strokes back as one drawing.
+        redo.tap()
+        redo.tap()
+        point(crossing).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "redo should bring the drawing back")
+    }
+
+    func testSeveralThingsAreBoxedLinedUpMovedAndDeletedTogether() {
+        openNewDesign()
+
+        // Two drawings well apart, each two crossing strokes of the Pen.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 200, y: 400), CGPoint(x: 320, y: 480))
+        stroke(CGPoint(x: 320, y: 400), CGPoint(x: 200, y: 480))
+        stroke(CGPoint(x: 780, y: 300), CGPoint(x: 900, y: 380))
+        stroke(CGPoint(x: 900, y: 300), CGPoint(x: 780, y: 380))
+        let empty = CGPoint(x: 700, y: 650)
+        control("Draw").tap()
+
+        // A finger that rests on the canvas and then drags pulls out a box, which selects
+        // what it holds: both drawings, as one selection.
+        point(CGPoint(x: 150, y: 250)).press(forDuration: 0.9, thenDragTo: point(CGPoint(x: 950, y: 540)))
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value BEGINSWITH '2 items'", timeout: 5), "the box should select both drawings")
+        let apart = selectionSize
+        XCTAssertGreaterThan(apart.width, 600, "the two drawings start well apart")
+        let boxed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        boxed.name = "several-selected"
+        boxed.lifetime = .keepAlways
+        add(boxed)
+
+        // Their popover lines them up with each other: left edges together, they cover
+        // the width of one of them, and are as far apart down the canvas as before.
+        control("Align").tap()
+        app.buttons["Align Left"].tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        for _ in 0..<20 where selectionSize.width > 200 { usleep(150_000) }
+        XCTAssertLessThan(selectionSize.width, 200, "lined up by their left edges, the two should sit one above the other")
+        XCTAssertEqual(selectionSize.height, apart.height, accuracy: 3, "lining up across shouldn't move anything down")
+        XCTAssertTrue(showsInk(near: CGPoint(x: 260, y: 340)), "the drawing that moved should be drawn where it now is")
+        XCTAssertFalse(showsInk(near: CGPoint(x: 840, y: 340)), "and no longer where it was")
+
+        // The format panel has settings for them together.
+        control("Format selection").tap()
+        XCTAssertTrue(app.staticTexts["2 Items"].waitForExistence(timeout: 5), "the format panel should be for both")
+        XCTAssertTrue(control("Distribute Horizontally").exists)
+        XCTAssertFalse(control("Distribute Horizontally").isEnabled, "two things have nothing to be spaced between")
+        let formatted = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        formatted.name = "several-format"
+        formatted.lifetime = .keepAlways
+        add(formatted)
+        control("Format selection").tap()
+
+        // Dragging one moves both: each is found 200 across and 100 down from where it was.
+        stroke(CGPoint(x: 260, y: 440), CGPoint(x: 460, y: 540))
+        XCTAssertTrue(wait(for: readout, toHave: "value BEGINSWITH '2 items'", timeout: 5), "they should stay selected after the drag")
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        point(CGPoint(x: 460, y: 440)).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "the drawing that wasn't under the finger should have moved too")
+        point(empty).tap()
+        point(CGPoint(x: 260, y: 340)).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "and should have left where it was")
+
+        // The move is one step to undo.
+        app.buttons.matching(identifier: "arrow.uturn.backward").firstMatch.tap()
+        point(CGPoint(x: 260, y: 340)).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "one undo should put both back")
+        point(empty).tap()
+
+        // Boxed again and deleted, both are gone.
+        point(CGPoint(x: 150, y: 250)).press(forDuration: 0.9, thenDragTo: point(CGPoint(x: 950, y: 540)))
+        XCTAssertTrue(wait(for: readout, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Delete selection").tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        for place in [CGPoint(x: 260, y: 440), CGPoint(x: 260, y: 340)] {
+            point(place).tap()
+            XCTAssertFalse(readout.waitForExistence(timeout: 2), "both drawings should be gone")
+        }
+    }
+
+    func testTheLassoPicksThingsAndLeavesNoInk() {
+        openNewDesign()
+
+        // A drawing: two crossing strokes of the Pen.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 780, y: 400), CGPoint(x: 900, y: 480))
+        stroke(CGPoint(x: 900, y: 400), CGPoint(x: 780, y: 480))
+        let crossing = CGPoint(x: 840, y: 440)
+
+        // With the palette's lasso in hand, a tap on the ink picks the drawing.
+        choosePaletteTool("Lasso")
+        point(crossing).tap()
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "a tap of the lasso should pick the drawing")
+
+        // What the lasso picked can be dragged with the lasso still in hand.
+        stroke(crossing, CGPoint(x: 640, y: 340))
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5))
+
+        // A line drawn with the lasso goes round nothing: it lets go of the drawing, and
+        // leaves no ink behind.
+        stroke(CGPoint(x: 300, y: 300), CGPoint(x: 500, y: 400))
+        XCTAssertTrue(waitForDisappearance(of: readout), "a lasso round nothing should let go")
+        point(CGPoint(x: 400, y: 350)).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "the lasso should leave no ink where it was drawn")
+
+        // The drawing is where it was dragged to, and no longer where it was drawn.
+        point(crossing).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should have left its old place")
+        point(CGPoint(x: 640, y: 340)).tap()
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "the drawing should be where the lasso dragged it")
+    }
+
+    func testWithTheLassoInHandAFingerStillTapsAndPans() {
+        // As once Apple Pencil has been seen: the Pencil draws the lasso and a finger doesn't.
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        control("Frames").tap()
+        app.buttons.matching(labelBeginning("iPhone")).firstMatch.tap()
+        let label = app.staticTexts["Screen 1"]
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        control("Draw").tap()
+        choosePaletteTool("Lasso")
+
+        // A finger tap on the frame selects it, and one on empty canvas lets go.
+        point(CGPoint(x: 150, y: 650)).tap()
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(control("Delete selection").waitForExistence(timeout: 5), "a finger tap should select the frame")
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: control("Delete selection")))
+
+        // A finger drag pans the canvas: it is the Pencil that draws the lasso.
+        let before = label.frame
+        stroke(CGPoint(x: 150, y: 420), CGPoint(x: 230, y: 500))
+        sleep(1)
+        XCTAssertGreaterThan(label.frame.minX - before.minX, 40, "a finger should pan the canvas with the lasso in hand")
     }
 
     func testTheReferenceDesignFitsTheCanvas() {
@@ -463,6 +693,29 @@ final class SketchFlowUITests: XCTestCase {
         screenshot.name = "reference-design"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    func testACloseCallOffersWhatItNearlyWasAndBecomesThatWhenTapped() {
+        // The scripted demo draws a screen, then a wide box whose corners are between a
+        // text field's and a button's.
+        app.launchArguments = ["-LayerDemo", "screen,closeCall"]
+        openNewDesign()
+
+        let suggestion = app.buttons.matching(labelBeginning("Did you mean")).firstMatch
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 40), "a close call should offer what it nearly was")
+        // Which of the two it was read as depends on how large it was drawn; the other is offered.
+        let offersTextField = suggestion.label.contains("Text Field")
+        let (read, offered) = offersTextField ? ("Continue", "Placeholder") : ("Placeholder", "Continue")
+        XCTAssertTrue(app.staticTexts[read].exists, "the box should have become a button or a text field")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "did-you-mean"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        suggestion.tap()
+        XCTAssertTrue(app.staticTexts[offered].waitForExistence(timeout: 5), "taking the suggestion should make it what was offered")
+        XCTAssertFalse(app.staticTexts[read].exists, "what it was read as should be gone")
+        XCTAssertTrue(waitForDisappearance(of: suggestion), "the suggestion should go once it is taken")
     }
 
     // MARK: Documents
@@ -583,6 +836,49 @@ final class SketchFlowUITests: XCTestCase {
     /// What is selected and its size, as the canvas tells VoiceOver: "228 × 40", "Drawing · 2 strokes".
     private var selectionElement: XCUIElement {
         app.descendants(matching: .any)["Selection"]
+    }
+
+    /// Whether ink, which is dark, is drawn within a few points of a place in the window.
+    /// Read from a picture of the screen: what is drawn, not what a tap would find.
+    private func showsInk(near place: CGPoint, within reach: CGFloat = 10) -> Bool {
+        // Whatever is gliding into place has a moment to arrive.
+        usleep(600_000)
+        let window = app.windows.firstMatch.frame
+        guard let picture = XCUIScreen.main.screenshot().image.cgImage else { return false }
+        // The picture is the screen as the device holds it: upright, or on its side when
+        // the iPad is turned, with the window's top along the picture's right edge.
+        let isUpright = (picture.width > picture.height) == (window.width > window.height)
+        let scale = CGFloat(isUpright ? picture.width : picture.height) / window.width
+        let area = CGRect(x: place.x - reach, y: place.y - reach, width: reach * 2, height: reach * 2)
+        let pixels = isUpright
+            ? CGRect(x: area.minX * scale, y: area.minY * scale, width: area.width * scale, height: area.height * scale)
+            : CGRect(x: (window.height - area.maxY) * scale, y: area.minX * scale, width: area.height * scale, height: area.width * scale)
+        guard let crop = picture.cropping(to: pixels.integral) else { return false }
+
+        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: crop.width, height: crop.height, bitsPerComponent: 8, bytesPerRow: crop.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+            return true
+        }
+        guard drawn else { return false }
+        var dark = 0
+        for index in stride(from: 0, to: bytes.count, by: 4) where Int(bytes[index]) + Int(bytes[index + 1]) + Int(bytes[index + 2]) < 200 {
+            dark += 1
+        }
+        // The dots of the canvas's grid are pale; a stroke through the area is some dozens of dark pixels.
+        return dark >= 12
+    }
+
+    /// The size at the end of the selection's spoken value: the area several things
+    /// cover together, in "2 items · 700 × 180". Zero when it gives no size.
+    private var selectionSize: CGSize {
+        guard let value = selectionElement.value as? String, let size = value.components(separatedBy: " · ").last else { return .zero }
+        let sides = size.components(separatedBy: " × ").compactMap { Double($0) }
+        return sides.count == 2 ? CGSize(width: sides[0], height: sides[1]) : .zero
     }
 
     private func wait(for element: XCUIElement, toHave condition: String, timeout: TimeInterval = 8) -> Bool {

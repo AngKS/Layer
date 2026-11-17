@@ -239,6 +239,10 @@ enum SwiftUICodeGenerator {
         case .stickyNote:
             // Sticky notes stay on the canvas; this is only here to keep the switch whole.
             lines = ["Text(\(literal(element.text)))"]
+
+        case .drawing:
+            // Ink is a note about the design, not part of the interface: no code for it.
+            return []
         }
 
         return lines + finish(element)
@@ -319,6 +323,9 @@ enum SwiftUICodeGenerator {
 
         case .progress:
             lines = progress(element) + ["    .frame(width: \(number(frame.width)))"]
+
+        case .drawing:
+            return []
         }
 
         return lines + finish(element) + ["    .offset(x: \(number(frame.minX)), y: \(number(frame.minY)))"]

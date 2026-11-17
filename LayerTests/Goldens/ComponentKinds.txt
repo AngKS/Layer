@@ -1,0 +1,377 @@
+## title
+name: Title | symbol: textformat | placeholder: Title
+hasText: true | belongsOnScreens: true | prompt: title
+written as: title, heading, header, headline, large title
+found by each of its written names: true
+size: 228x40 | sketched small: 228x40 | sketched large: 228x40 | sketched 90x300: 228x40
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 82.5,704 228x40 - | among others: 82.5,704 228x40 - | on iPad: 20,704 780x40 leading
+sketched half-left: 20,404 353x40 leading | among others: 20,404 353x40 leading | on iPad: 20,404 780x40 leading
+sketched narrow-right: 82.5,300 228x32 - | among others: 56,296 317x32 leading | on iPad: 296,300 228x32 -
+sketched small-centre: 82.5,208 228x40 - | among others: 82.5,208 228x40 - | on iPad: 296,208 228x40 -
+sketched leading-text: 20,120 353x40 leading | among others: 20,116 353x40 leading | on iPad: 20,120 780x40 leading
+sketched tall: 82.5,344 228x48 - | among others: 56,344 317x48 leading | on iPad: 20,344 780x48 leading
+sketched short-title: 82.5,108 228x32 - | among others: 82.5,108 228x32 - | on iPad: 296,108 228x32 -
+sketched big-title: 82.5,120 228x48 - | among others: 82.5,116 228x48 - | on iPad: 296,120 228x48 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 228x40 tint #CD6C57 text "Title"
+font: 28 bold | text colour: #000000, bordered #000000 | radius: 0 | alignment: center
+hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
+loose, drawn large: 228x40 | drawn small: 228x40
+in a blueprint: 228x40 | in a row: 170x40 | at 40pt: 228x56
+laid out: 82,75 229x40 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, text, width, x, y
+
+## body
+name: Body | symbol: text.alignleft | placeholder: A short description goes here, a line or two that says what this is.
+hasText: true | belongsOnScreens: true | prompt: bodyText
+written as: body, body text, description, paragraph, subtitle, caption
+found by each of its written names: true
+size: 297x44 | sketched small: 297x44 | sketched large: 297x44 | sketched 90x300: 297x44
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 48,704 297x44 - | among others: 48,704 297x44 - | on iPad: 20,704 780x44 leading
+sketched half-left: 20,404 353x44 leading | among others: 20,404 353x44 leading | on iPad: 20,404 780x44 leading
+sketched narrow-right: 48,292 297x44 - | among others: 56,290 317x44 leading | on iPad: 261.5,292 297x44 -
+sketched small-centre: 48,204 297x44 - | among others: 48,204 297x44 - | on iPad: 261.5,204 297x44 -
+sketched leading-text: 20,116 353x44 leading | among others: 20,116 353x44 leading | on iPad: 20,116 780x44 leading
+sketched tall: 48,348 297x44 - | among others: 56,348 317x44 leading | on iPad: 20,348 780x44 leading
+sketched short-title: 48,104 297x44 - | among others: 48,108 297x44 - | on iPad: 261.5,104 297x44 -
+sketched big-title: 48,124 297x44 - | among others: 48,124 297x44 - | on iPad: 261.5,124 297x44 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 297x44 tint #CD6C57 text "A short description goes here, a line or two that says what this is."
+font: 15 regular | text colour: #55544F, bordered #55544F | radius: 0 | alignment: center
+hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
+loose, drawn large: 297x44 | drawn small: 297x44
+in a blueprint: 353x44 | in a row: 170x44 | at 40pt: 353x56
+laid out: 20,75 353x44 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, text, width, x, y
+
+## image
+name: Image | symbol: photo | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: image
+written as: image, photo, picture, hero, hero image, banner
+found by each of its written names: true
+size: 333x120 | sketched small: 333x120 | sketched large: 333x520 | sketched 90x300: 333x304
+keepsSketchedPosition: false | runsAcross: true
+sketched wide: 30,664 333x120 - | among others: 30,664 333x120 - | on iPad: 30,664 374x120 -
+sketched half-left: 30,364 160x120 - | among others: 30,364 160x120 - | on iPad: 30,364 160x120 -
+sketched narrow-right: 288,256 72x120 - | among others: 288,252 72x120 - | on iPad: 288,256 72x120 -
+sketched small-centre: 171,168 52x120 - | among others: 171,168 52x120 - | on iPad: 172,168 52x120 -
+sketched leading-text: 30,80 160x120 - | among others: 30,80 160x120 - | on iPad: 30,80 112x120 -
+sketched tall: 30,184 333x368 - | among others: 30,184 333x368 - | on iPad: 30,184 374x368 -
+sketched short-title: 149,67 96x120 - | among others: 149,67 96x120 - | on iPad: 152,64 96x120 -
+sketched big-title: 149,84 96x120 - | among others: 149,84 96x120 - | on iPad: 152,84 96x120 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 333x120 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 16 | alignment: leading
+hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 333x120 | drawn small: 333x120
+in a blueprint: 353x200 | in a row: 170x120 | at 40pt: 353x200
+laid out: 20,75 353x200 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
+## button
+name: Button | symbol: capsule.fill | placeholder: Continue
+hasText: true | belongsOnScreens: true | prompt: button
+written as: button, primary button, cta
+found by each of its written names: true
+size: 353x50 | sketched small: 353x50 | sketched large: 353x50 | sketched 90x300: 353x50
+keepsSketchedPosition: false | runsAcross: true
+sketched wide: 20,700 353x50 - | among others: 20,700 353x50 - | on iPad: 20,700 384x50 -
+sketched half-left: 20,400 170x50 - | among others: 20,400 170x50 - | on iPad: 24,400 160x50 -
+sketched narrow-right: 280,292 88x50 - | among others: 280,287 88x50 - | on iPad: 280,292 88x50 -
+sketched small-centre: 153,200 88x50 - | among others: 153,200 88x50 - | on iPad: 152,200 88x50 -
+sketched leading-text: 20,112 170x50 - | among others: 20,112 170x50 - | on iPad: 24,112 112x50 -
+sketched tall: 20,344 353x50 - | among others: 20,340 353x50 - | on iPad: 20,344 384x50 -
+sketched short-title: 149,100 96x50 - | among others: 149,100 96x50 - | on iPad: 152,100 96x50 -
+sketched big-title: 149,120 96x50 - | among others: 149,116 96x50 - | on iPad: 152,120 96x50 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 353x50 tint #CD6C57 text "Continue"
+font: 17 semibold | text colour: #FFFFFF, bordered #CD6C57 | radius: 20 | alignment: center
+hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 353x50 | drawn small: 353x50
+in a blueprint: 353x50 | in a row: 170x50 | at 40pt: 353x56
+laid out: 20,75 353x50 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: buttonStyle, colour, height, kind, name, text, width, x, y
+
+## textField
+name: Text Field | symbol: character.cursor.ibeam | placeholder: Placeholder
+hasText: true | belongsOnScreens: true | prompt: textField
+written as: text field, textfield, field, input, search field, email field, password field
+found by each of its written names: true
+size: 333x48 | sketched small: 333x48 | sketched large: 333x48 | sketched 90x300: 333x48
+keepsSketchedPosition: false | runsAcross: true
+sketched wide: 30,700 333x48 - | among others: 30,700 333x48 - | on iPad: 30,700 374x48 -
+sketched half-left: 30,400 160x48 - | among others: 30,400 160x48 - | on iPad: 30,400 160x48 -
+sketched narrow-right: 243,292 120x48 - | among others: 243,288 120x48 - | on iPad: 264,292 120x48 -
+sketched small-centre: 137,204 120x48 - | among others: 137,204 120x48 - | on iPad: 136,204 120x48 -
+sketched leading-text: 30,116 160x48 - | among others: 30,116 160x48 - | on iPad: 30,116 120x48 -
+sketched tall: 30,344 333x48 - | among others: 30,340 333x48 - | on iPad: 30,344 374x48 -
+sketched short-title: 137,100 120x48 - | among others: 137,100 120x48 - | on iPad: 140,100 120x48 -
+sketched big-title: 137,120 120x48 - | among others: 137,116 120x48 - | on iPad: 140,120 120x48 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 333x48 tint #CD6C57 text "Placeholder"
+font: 16 regular | text colour: #9A9892, bordered #9A9892 | radius: 12 | alignment: leading
+hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: true
+loose, drawn large: 333x48 | drawn small: 333x48
+in a blueprint: 353x48 | in a row: 170x48 | at 40pt: 353x56
+laid out: 20,75 353x48 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, text, width, x, y
+
+## divider
+name: Divider | symbol: minus | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: divider
+written as: divider, separator, line, rule
+found by each of its written names: true
+size: 333x1 | sketched small: 333x1 | sketched large: 333x1 | sketched 90x300: 333x1
+keepsSketchedPosition: false | runsAcross: true
+sketched wide: 30,724 333x1 - | among others: 30,724 333x1 - | on iPad: 30,724 760x1 -
+sketched half-left: 30,424 333x1 - | among others: 30,424 333x1 - | on iPad: 30,424 760x1 -
+sketched narrow-right: 30,316 333x1 - | among others: 30,316 333x1 - | on iPad: 30,316 760x1 -
+sketched small-centre: 30,224 333x1 - | among others: 30,224 333x1 - | on iPad: 30,224 760x1 -
+sketched leading-text: 30,136 333x1 - | among others: 30,132 333x1 - | on iPad: 30,136 760x1 -
+sketched tall: 30,368 333x1 - | among others: 30,368 333x1 - | on iPad: 30,368 760x1 -
+sketched short-title: 30,124 333x1 - | among others: 30,124 333x1 - | on iPad: 30,124 760x1 -
+sketched big-title: 30,144 333x1 - | among others: 30,144 333x1 - | on iPad: 30,144 760x1 -
+resized to nothing: 40,40 32x60 | resized taller: 30,40 110x60 | keeping shape: 40,40 120x60 | keeping shape from top left: 20,40 120x60
+new: 333x1 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: false | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 333x1 | drawn small: 333x1
+in a blueprint: 353x1 | in a row: 170x1 | at 40pt: 353x1
+laid out: 20,75 353x1 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
+## symbol
+name: Symbol | symbol: star | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: symbol
+written as: symbol, icon, sf symbol
+found by each of its written names: true
+size: 44x44 | sketched small: 44x44 | sketched large: 44x44 | sketched 90x300: 44x44
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 168,704 44x44 - | among others: 168,704 44x44 - | on iPad: 168,704 44x44 -
+sketched half-left: 84,404 44x44 - | among others: 82.5,404 44x44 - | on iPad: 84,404 44x44 -
+sketched narrow-right: 304,292 44x44 - | among others: 304,290 44x44 - | on iPad: 304,292 44x44 -
+sketched small-centre: 176,204 44x44 - | among others: 176,204 44x44 - | on iPad: 176,204 44x44 -
+sketched leading-text: 56,116 44x44 - | among others: 56,116 44x44 - | on iPad: 56,116 44x44 -
+sketched tall: 180,348 44x44 - | among others: 180,348 44x44 - | on iPad: 180,348 44x44 -
+sketched short-title: 176,104 44x44 - | among others: 176,108 44x44 - | on iPad: 176,104 44x44 -
+sketched big-title: 176,124 44x44 - | among others: 176,124 44x44 - | on iPad: 176,124 44x44 -
+resized to nothing: 40,40 12x12 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 44x44 tint #2B2A27 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 44x44 | drawn small: 44x44
+in a blueprint: 44x44 | in a row: 44x44 | at 40pt: 44x44
+laid out: 174,75 45x44 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
+## text
+name: Text | symbol: character.textbox | placeholder: Text
+hasText: true | belongsOnScreens: true | prompt: text
+written as: text, label
+found by each of its written names: true
+size: 200x24 | sketched small: 200x24 | sketched large: 200x24 | sketched 90x300: 200x24
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 96.5,712 200x24 - | among others: 96.5,712 200x24 - | on iPad: 310,712 200x24 -
+sketched half-left: 96.5,412 200x24 - | among others: 96.5,412 200x24 - | on iPad: 310,412 200x24 -
+sketched narrow-right: 96.5,304 200x24 - | among others: 96.5,300 200x24 - | on iPad: 310,304 200x24 -
+sketched small-centre: 96.5,216 200x24 - | among others: 96.5,216 200x24 - | on iPad: 310,216 200x24 -
+sketched leading-text: 96.5,128 200x24 - | among others: 96.5,124 200x24 - | on iPad: 310,128 200x24 -
+sketched tall: 96.5,356 200x24 - | among others: 96.5,356 200x24 - | on iPad: 310,356 200x24 -
+sketched short-title: 96.5,112 200x24 - | among others: 96.5,112 200x24 - | on iPad: 310,112 200x24 -
+sketched big-title: 96.5,132 200x24 - | among others: 96.5,132 200x24 - | on iPad: 310,132 200x24 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 200x24 tint #CD6C57 text "Text"
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
+loose, drawn large: 455x24 | drawn small: 80x24
+in a blueprint: 200x24 | in a row: 170x24 | at 40pt: 200x56
+laid out: 96,75 201x24 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, text, width, x, y
+
+## stickyNote
+name: Sticky Note | symbol: note.text | placeholder: Note
+hasText: true | belongsOnScreens: false | prompt: stickyNote
+written as: sticky note, note
+found by each of its written names: true
+size: 150x150 | sketched small: 150x150 | sketched large: 150x150 | sketched 90x300: 150x150
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 121.5,652 150x150 - | among others: 121.5,652 150x150 - | on iPad: 335,652 150x150 -
+sketched half-left: 121.5,352 150x150 - | among others: 121.5,352 150x150 - | on iPad: 335,352 150x150 -
+sketched narrow-right: 121.5,240 150x150 - | among others: 121.5,237 150x150 - | on iPad: 335,240 150x150 -
+sketched small-centre: 121.5,152 150x150 - | among others: 121.5,152 150x150 - | on iPad: 335,152 150x150 -
+sketched leading-text: 121.5,67 150x150 - | among others: 121.5,67 150x150 - | on iPad: 335,64 150x150 -
+sketched tall: 121.5,292 150x150 - | among others: 121.5,292 150x150 - | on iPad: 335,292 150x150 -
+sketched short-title: 121.5,67 150x150 - | among others: 121.5,67 150x150 - | on iPad: 335,48 150x150 -
+sketched big-title: 121.5,68 150x150 - | among others: 121.5,68 150x150 - | on iPad: 335,68 150x150 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 150x150 tint #FCE38A text "Note"
+font: 15 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 6 | alignment: center
+hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: true
+loose, drawn large: 320x320 | drawn small: 100x100
+in a blueprint: 150x150 | in a row: 170x150 | at 40pt: 150x150
+laid out: 121,75 151x150 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, text, width, x, y
+
+## toggle
+name: Toggle | symbol: switch.2 | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: toggle
+written as: toggle, switch
+found by each of its written names: true
+size: 51x31 | sketched small: 51x31 | sketched large: 51x31 | sketched 90x300: 51x31
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 164,708 51x31 - | among others: 164,708 51x31 - | on iPad: 164,708 51x31 -
+sketched half-left: 80,408 51x31 - | among others: 82.5,408 51x31 - | on iPad: 80,408 51x31 -
+sketched narrow-right: 300,300 51x31 - | among others: 300,297 51x31 - | on iPad: 300,300 51x31 -
+sketched small-centre: 172,212 51x31 - | among others: 172,212 51x31 - | on iPad: 172,212 51x31 -
+sketched leading-text: 52,124 51x31 - | among others: 52,124 51x31 - | on iPad: 52,124 51x31 -
+sketched tall: 176,352 51x31 - | among others: 176,352 51x31 - | on iPad: 176,352 51x31 -
+sketched short-title: 172,108 51x31 - | among others: 172,108 51x31 - | on iPad: 172,108 51x31 -
+sketched big-title: 172,128 51x31 - | among others: 172,124 51x31 - | on iPad: 172,128 51x31 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 51x31 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
+loose, drawn large: 51x31 | drawn small: 51x31
+in a blueprint: 51x31 | in a row: 51x31 | at 40pt: 51x31
+laid out: 171,75 51x31 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on false value -
+layout data: colour, height, kind, name, on, width, x, y
+
+## avatar
+name: Avatar | symbol: person.crop.circle | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: avatar
+written as: avatar, profile picture, profile photo
+found by each of its written names: true
+size: 40x40 | sketched small: 40x40 | sketched large: 160x160 | sketched 90x300: 92x92
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 112,644 160x160 - | among others: 112,644 160x160 - | on iPad: 112,644 160x160 -
+sketched half-left: 24,344 160x160 - | among others: 20,340 160x160 - | on iPad: 24,344 160x160 -
+sketched narrow-right: 288,280 72x72 - | among others: 288,276 72x72 - | on iPad: 288,280 72x72 -
+sketched small-centre: 172,200 52x52 - | among others: 172,200 52x52 - | on iPad: 172,200 52x52 -
+sketched leading-text: 24,84 112x112 - | among others: 20,84 112x112 - | on iPad: 24,84 112x112 -
+sketched tall: 120,288 160x160 - | among others: 120,288 160x160 - | on iPad: 120,288 160x160 -
+sketched short-title: 152,76 96x96 - | among others: 152,76 96x96 - | on iPad: 152,76 96x96 -
+sketched big-title: 152,96 96x96 - | among others: 152,96 96x96 - | on iPad: 152,96 96x96 -
+resized to nothing: 40,40 32x16 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x120 | keeping shape from top left: 20,-20 120x120
+new: 40x40 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
+hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 40x40 | drawn small: 40x40
+in a blueprint: 40x40 | in a row: 40x40 | at 40pt: 40x40
+laid out: 176,75 41x40 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
+## checkbox
+name: Checkbox | symbol: checkmark.square | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: checkbox
+written as: checkbox, check box, tick box
+found by each of its written names: true
+size: 24x24 | sketched small: 24x24 | sketched large: 24x24 | sketched 90x300: 24x24
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 180,712 24x24 - | among others: 180,712 24x24 - | on iPad: 180,712 24x24 -
+sketched half-left: 92,412 24x24 - | among others: 92,412 24x24 - | on iPad: 92,412 24x24 -
+sketched narrow-right: 312,304 24x24 - | among others: 312,300 24x24 - | on iPad: 312,304 24x24 -
+sketched small-centre: 184,216 24x24 - | among others: 184,216 24x24 - | on iPad: 184,216 24x24 -
+sketched leading-text: 68,128 24x24 - | among others: 68,124 24x24 - | on iPad: 68,128 24x24 -
+sketched tall: 188,356 24x24 - | among others: 188,356 24x24 - | on iPad: 188,356 24x24 -
+sketched short-title: 188,112 24x24 - | among others: 188,112 24x24 - | on iPad: 188,112 24x24 -
+sketched big-title: 188,132 24x24 - | among others: 188,132 24x24 - | on iPad: 188,132 24x24 -
+resized to nothing: 40,40 12x12 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 24x24 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 10 | alignment: leading
+hasFill: true | hasCornerRadius: true | hasBorder: false | hasOnState: true | hasTextAlignment: false
+loose, drawn large: 24x24 | drawn small: 24x24
+in a blueprint: 24x24 | in a row: 24x24 | at 40pt: 24x24
+laid out: 184,75 25x24 alignment -
+marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, on, width, x, y
+
+## radio
+name: Radio Button | symbol: largecircle.fill.circle | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: radioButton
+written as: radio, radio button, option
+found by each of its written names: true
+size: 24x24 | sketched small: 24x24 | sketched large: 24x24 | sketched 90x300: 24x24
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 180,712 24x24 - | among others: 180,712 24x24 - | on iPad: 180,712 24x24 -
+sketched half-left: 92,412 24x24 - | among others: 92,412 24x24 - | on iPad: 92,412 24x24 -
+sketched narrow-right: 312,304 24x24 - | among others: 312,300 24x24 - | on iPad: 312,304 24x24 -
+sketched small-centre: 184,216 24x24 - | among others: 184,216 24x24 - | on iPad: 184,216 24x24 -
+sketched leading-text: 68,128 24x24 - | among others: 68,124 24x24 - | on iPad: 68,128 24x24 -
+sketched tall: 188,356 24x24 - | among others: 188,356 24x24 - | on iPad: 188,356 24x24 -
+sketched short-title: 188,112 24x24 - | among others: 188,112 24x24 - | on iPad: 188,112 24x24 -
+sketched big-title: 188,132 24x24 - | among others: 188,132 24x24 - | on iPad: 188,132 24x24 -
+resized to nothing: 40,40 12x12 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x120 | keeping shape from top left: 20,-20 120x120
+new: 24x24 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
+hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
+loose, drawn large: 24x24 | drawn small: 24x24
+in a blueprint: 24x24 | in a row: 24x24 | at 40pt: 24x24
+laid out: 184,75 25x24 alignment -
+marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, on, width, x, y
+
+## progress
+name: Progress Bar | symbol: progress.indicator | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: progressBar
+written as: progress, progress bar, progress view, loading bar
+found by each of its written names: true
+size: 333x6 | sketched small: 333x6 | sketched large: 333x6 | sketched 90x300: 333x6
+keepsSketchedPosition: false | runsAcross: true
+sketched wide: 30,724 333x6 - | among others: 30,724 333x6 - | on iPad: 30,724 374x6 -
+sketched half-left: 30,424 160x6 - | among others: 30,424 160x6 - | on iPad: 30,424 160x6 -
+sketched narrow-right: 288,312 72x6 - | among others: 288,309 72x6 - | on iPad: 288,312 72x6 -
+sketched small-centre: 167,224 60x6 - | among others: 167,224 60x6 - | on iPad: 168,224 60x6 -
+sketched leading-text: 30,136 160x6 - | among others: 30,132 160x6 - | on iPad: 30,136 112x6 -
+sketched tall: 30,364 333x6 - | among others: 30,364 333x6 - | on iPad: 30,364 374x6 -
+sketched short-title: 149,120 96x6 - | among others: 149,116 96x6 - | on iPad: 152,120 96x6 -
+sketched big-title: 149,140 96x6 - | among others: 149,140 96x6 - | on iPad: 152,140 96x6 -
+resized to nothing: 40,40 32x1 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 333x6 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
+hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 333x6 | drawn small: 333x6
+in a blueprint: 353x6 | in a row: 170x6 | at 40pt: 353x6
+laid out: 20,75 353x6 alignment -
+marks: empty on true value - | dot on the right on true value 0.9 | shaded to 0.42 on true value 0.4
+layout data: colour, height, kind, name, progress, width, x, y
+
+## drawing
+name: Drawing | symbol: scribble | placeholder: 
+hasText: false | belongsOnScreens: false | prompt: drawing
+written as: 
+found by each of its written names: true
+size: 120x120 | sketched small: 120x120 | sketched large: 120x120 | sketched 90x300: 120x120
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 136.5,664 120x120 - | among others: 136.5,664 120x120 - | on iPad: 350,664 120x120 -
+sketched half-left: 136.5,364 120x120 - | among others: 136.5,364 120x120 - | on iPad: 350,364 120x120 -
+sketched narrow-right: 136.5,256 120x120 - | among others: 136.5,252 120x120 - | on iPad: 350,256 120x120 -
+sketched small-centre: 136.5,168 120x120 - | among others: 136.5,168 120x120 - | on iPad: 350,168 120x120 -
+sketched leading-text: 136.5,80 120x120 - | among others: 136.5,80 120x120 - | on iPad: 350,80 120x120 -
+sketched tall: 136.5,308 120x120 - | among others: 136.5,308 120x120 - | on iPad: 350,308 120x120 -
+sketched short-title: 136.5,67 120x120 - | among others: 136.5,67 120x120 - | on iPad: 350,64 120x120 -
+sketched big-title: 136.5,84 120x120 - | among others: 136.5,84 120x120 - | on iPad: 350,84 120x120 -
+resized to nothing: 40,40 8x8 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 120x120 tint #2B2A27 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: false | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 120x120 | drawn small: 120x120
+in a blueprint: 120x120 | in a row: 170x120 | at 40pt: 120x120
+laid out: 136,75 121x120 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
+asked for on a screen: title, bodyText, image, button, textField, divider, toggle, avatar, checkbox, radioButton, progressBar
+asked for on the open canvas: text, stickyNote, phoneScreen

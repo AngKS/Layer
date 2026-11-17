@@ -67,6 +67,7 @@ struct AddElementIntent: AppIntent, UndoableIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ElementEntity> & ProvidesDialog {
+        guard kind != .drawing else { throw LayerIntentError.drawingsAreDrawn }
         var element = DesignStore.newElement(kind.element, symbol: kind == .symbol ? (symbol ?? "star") : nil)
         if let text, kind.element.hasText { element.text = text }
         if let colour { element.tint = colour.colour }
@@ -520,7 +521,7 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
         DesignActions.edit(model, undoManager: undoManager, actionName: hidden ? "Hide" : "Show") {
             model.store.update(ref) { $0.isHidden = hidden }
         }
-        if hidden, model.selection == .element(ref) { model.selection = nil }
+        if hidden { model.deselect(.element(ref)) }
         return .result()
     }
 }

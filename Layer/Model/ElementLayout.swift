@@ -9,33 +9,17 @@ enum ElementLayout {
 
     /// The size an element starts at, on the standard phone.
     static func size(for kind: ElementKind, sketch: CGRect) -> CGSize {
-        switch kind {
-        case .title: CGSize(width: 228, height: 40)
-        case .body: CGSize(width: 297, height: 44)
-        case .button: CGSize(width: 353, height: 50)
-        case .textField: CGSize(width: 333, height: 48)
-        case .divider: CGSize(width: 333, height: 1)
-        case .image: CGSize(width: 333, height: snap(min(max(sketch.height, 120), 520), to: 8))
-        case .symbol: CGSize(width: 44, height: 44)
-        case .text: CGSize(width: 200, height: 24)
-        case .stickyNote: CGSize(width: 150, height: 150)
-        case .toggle: CGSize(width: 51, height: 31)
-        case .checkbox, .radio: CGSize(width: 24, height: 24)
-        case .progress: CGSize(width: 333, height: 6)
-        case .avatar:
-            // As large as it was drawn, within reason.
-            CGSize(width: snap(min(max(sketch.width, 40), 160), to: 4), height: snap(min(max(sketch.width, 40), 160), to: 4))
-        }
+        kind.spec.size.size(sketched: sketch)
     }
 
     /// Small elements stay where they were drawn across the screen; the rest are centred.
     static func keepsSketchedPosition(_ kind: ElementKind) -> Bool {
-        kind == .toggle || kind == .avatar || kind == .symbol || kind == .checkbox || kind == .radio
+        kind.spec.keepsSketchedPosition
     }
 
     /// Kinds that usually run across the screen, and keep their side margins on other devices.
     static func runsAcross(_ kind: ElementKind) -> Bool {
-        kind == .button || kind == .textField || kind == .divider || kind == .image || kind == .progress
+        kind.spec.runsAcross
     }
 
     /// A new element takes its kind's standard size, sits centred across the screen, and
@@ -77,9 +61,9 @@ enum ElementLayout {
         let width = device.size.width
         let isDrawnLeading = sketch.minX < margin + (width - margin * 2) * 0.15 && width / 2 - sketch.midX > width * 0.08
 
-        switch kind {
-        case .title, .body:
-            if kind == .title {
+        switch kind.spec.sketchFit {
+        case .words(let sizedByHeight):
+            if sizedByHeight {
                 // Bigger scribbles are bigger titles: Title 2, Title, or Large Title.
                 let height: CGFloat = sketch.height < 34 ? 32 : sketch.height <= 52 ? 40 : 48
                 frame.origin.y += (frame.height - height) / 2
@@ -98,14 +82,8 @@ enum ElementLayout {
                 frame.size.width = width - margin * 2
                 alignment = .leading
             }
-        case _ where runsAcross(kind) && kind != .divider:
+        case .box(let minimum):
             let full = frame.width
-            let minimum: CGFloat = switch kind {
-            case .button: 88
-            case .textField: 120
-            case .progress: 60
-            default: 44
-            }
             if sketch.width < full * 0.7, sketch.width > 0 {
                 let left = (width - full) / 2
                 if sketch.width >= full * 0.3 {
@@ -120,7 +98,7 @@ enum ElementLayout {
                         : min(max(snap(sketch.midX - frame.width / 2, to: 4), left), width - left - frame.width)
                 }
             }
-        default:
+        case .standard:
             break
         }
 
@@ -172,14 +150,13 @@ enum ElementLayout {
     }
 
     static func resized(_ frame: CGRect, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
-        let small = kind == .symbol || kind == .checkbox || kind == .radio
-        let minimum = CGSize(width: small ? 12 : 32, height: kind == .divider || kind == .progress ? 1 : small ? 12 : 16)
+        let minimum = kind.spec.minimumSize
         var minX = frame.minX, maxX = frame.maxX, minY = frame.minY, maxY = frame.maxY
         switch corner {
         case .topLeft, .bottomLeft: minX = min(frame.minX + translation.width, maxX - minimum.width)
         case .topRight, .bottomRight: maxX = max(frame.maxX + translation.width, minX + minimum.width)
         }
-        if kind != .divider {
+        if !kind.spec.hasFixedHeight {
             switch corner {
             case .topLeft, .topRight: minY = min(frame.minY + translation.height, maxY - minimum.height)
             case .bottomLeft, .bottomRight: maxY = max(frame.maxY + translation.height, minY + minimum.height)
@@ -196,7 +173,7 @@ enum ElementLayout {
     /// Resizing an avatar or a radio button keeps it round.
     static func resizedKeepingShape(_ frame: CGRect, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
         var result = resized(frame, from: corner, by: translation, kind: kind)
-        guard kind == .avatar || kind == .radio else { return result }
+        guard kind.spec.staysSquare else { return result }
         let side = max(result.width, result.height)
         if corner == .topLeft || corner == .bottomLeft { result.origin.x = result.maxX - side }
         if corner == .topLeft || corner == .topRight { result.origin.y = result.maxY - side }
@@ -267,6 +244,65 @@ enum ElementLayout {
         case .bottom: result.origin.y = screen.height - frame.height
         }
         return result
+    }
+
+    /// Lines several frames up with one another: each takes the edge, or the middle, of
+    /// the area they cover together. Sizes are kept, and so is where each frame is the
+    /// other way: lining up across leaves each at its own height.
+    static func aligned(_ frames: [CGRect], _ alignment: Alignment) -> [CGRect] {
+        guard let area = frames.dropFirst().reduce(frames.first, { $0?.union($1) }) else { return frames }
+        return frames.map { frame in
+            var result = frame
+            switch alignment {
+            case .left: result.origin.x = area.minX
+            case .centerX: result.origin.x = area.midX - frame.width / 2
+            case .right: result.origin.x = area.maxX - frame.width
+            case .top: result.origin.y = area.minY
+            case .centerY: result.origin.y = area.midY - frame.height / 2
+            case .bottom: result.origin.y = area.maxY - frame.height
+            }
+            return result
+        }
+    }
+
+    /// Spaces three or more frames evenly along a line: the two at the ends stay where
+    /// they are and those between are moved so that every gap is the same. The frames
+    /// come back in the order they were given.
+    static func distributed(_ frames: [CGRect], _ distribution: Distribution) -> [CGRect] {
+        guard frames.count >= 3 else { return frames }
+        func start(_ frame: CGRect) -> CGFloat { distribution == .horizontal ? frame.minX : frame.minY }
+        func length(_ frame: CGRect) -> CGFloat { distribution == .horizontal ? frame.width : frame.height }
+
+        let order = frames.indices.sorted { start(frames[$0]) < start(frames[$1]) }
+        guard let first = order.first, let last = order.last else { return frames }
+        let span = start(frames[last]) + length(frames[last]) - start(frames[first])
+        let gap = (span - frames.map(length).reduce(0, +)) / CGFloat(frames.count - 1)
+
+        var result = frames
+        var next = start(frames[first])
+        for index in order {
+            if distribution == .horizontal { result[index].origin.x = next } else { result[index].origin.y = next }
+            next += length(frames[index]) + gap
+        }
+        return result
+    }
+
+    enum Distribution: CaseIterable, Sendable {
+        case horizontal, vertical
+
+        var name: String {
+            switch self {
+            case .horizontal: "Distribute Horizontally"
+            case .vertical: "Distribute Vertically"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .horizontal: "distribute.horizontal.center"
+            case .vertical: "distribute.vertical.center"
+            }
+        }
     }
 
     enum Alignment: CaseIterable, Sendable {

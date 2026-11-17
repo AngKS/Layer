@@ -119,7 +119,7 @@ struct UndoControl: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        // The undo history is shared with PencilKit, so it changes outside this view too.
+        // The undo history takes in ink drawn on the canvas, so it changes outside this view too.
         .onReceive(undoChanges) { _ in refresh() }
         // The control is made afresh when the window's width moves it, with history already there.
         .onAppear { refresh() }

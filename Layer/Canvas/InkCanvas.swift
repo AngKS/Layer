@@ -1,15 +1,65 @@
 import PencilKit
 import SwiftUI
 
-/// Holds the document's ink. Its strokes go on the document's undo history, which is what
-/// makes them undoable alongside design changes and tells the system to save.
+/// The undo manager the document's ink canvas hands to PencilKit and to the system.
+///
+/// Undo and redo asked of it, by the palette's buttons or the system's gestures, go to the
+/// document's own history. What PencilKit registers with it for its strokes goes nowhere.
+/// The design keeps ink's history itself, as changes to its drawings (see `DrawingSync`),
+/// because PencilKit's own entries stop working once the canvas has been set from the
+/// design, as it is whenever a drawing is moved, locked, hidden, deleted or put back.
+final class InkUndoManager: UndoManager {
+    /// The document's history, which undo and redo are passed on to.
+    weak var document: UndoManager? {
+        didSet {
+            guard document !== oldValue else { return }
+            let center = NotificationCenter.default
+            for name in Self.changes {
+                center.removeObserver(self, name: name, object: oldValue)
+                if let document { center.addObserver(self, selector: #selector(documentChanged(_:)), name: name, object: document) }
+            }
+        }
+    }
+
+    private static let changes: [Notification.Name] = [
+        .NSUndoManagerDidCloseUndoGroup, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+    ]
+
+    override init() {
+        super.init()
+        // What PencilKit registers here is never undone, so none of it need be kept.
+        levelsOfUndo = 1
+    }
+
+    override var canUndo: Bool { document?.canUndo ?? false }
+    override var canRedo: Bool { document?.canRedo ?? false }
+    override func undo() { document?.undo() }
+    override func redo() { document?.redo() }
+    override var undoMenuItemTitle: String { document?.undoMenuItemTitle ?? super.undoMenuItemTitle }
+    override var redoMenuItemTitle: String { document?.redoMenuItemTitle ?? super.redoMenuItemTitle }
+
+    /// Says for the document's history what it says for itself, so that whatever watches
+    /// this one, the palette's buttons for instance, knows when undo and redo can be done.
+    @objc private func documentChanged(_ note: Notification) {
+        NotificationCenter.default.post(name: note.name, object: self)
+    }
+}
+
+/// Where the design's drawings are drawn on: it holds the strokes of every drawing that
+/// is neither locked nor hidden. The drawings themselves are kept in the design, and
+/// each change to the strokes here is a change to them there, which is what makes ink
+/// undoable alongside everything else: see `DrawingSync` and `InkUndoManager`.
 final class DocumentCanvasView: PKCanvasView {
-    var documentUndoManager: UndoManager?
+    let inkUndoManager = InkUndoManager()
+    var documentUndoManager: UndoManager? {
+        get { inkUndoManager.document }
+        set { inkUndoManager.document = newValue }
+    }
     var onMoveToWindow: (() -> Void)?
     var onLayout: (() -> Void)?
 
     override var undoManager: UndoManager? {
-        documentUndoManager ?? super.undoManager
+        documentUndoManager == nil ? super.undoManager : inkUndoManager
     }
 
     override func didMoveToWindow() {
@@ -30,8 +80,9 @@ final class SketchCanvasView: PKCanvasView {
 
 /// The ink layers, the PencilKit palette, and the scrolling and zooming of the canvas.
 ///
-/// Two PencilKit canvases fill the view. The document canvas takes every palette tool
-/// except the Magic Pen; the sketch canvas sits above it and takes the Magic Pen. Each is
+/// Two PencilKit canvases fill the view. The document canvas takes the palette's pens and
+/// eraser; the sketch canvas sits above it and takes the Magic Pen. The palette's lasso
+/// draws on neither: its loop selects what it goes round, see `LassoGestureRecognizer`. Each is
 /// a scroll view over the whole canvas, and whichever one the fingers are on leads while
 /// the other follows, so the pair pan and zoom as one. Their scroll position is published
 /// as the model's viewport, which everything drawn in SwiftUI follows.
@@ -61,6 +112,8 @@ struct InkCanvas: UIViewRepresentable {
             container.addSubview(canvas)
         }
         container.addGestureRecognizer(context.coordinator.tap)
+        container.addGestureRecognizer(context.coordinator.lasso)
+        container.addGestureRecognizer(context.coordinator.box)
         model.ink = context.coordinator
         return container
     }
@@ -81,17 +134,28 @@ struct InkCanvas: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, PKCanvasViewDelegate, PKToolPickerObserver {
+    final class Coordinator: NSObject, PKCanvasViewDelegate, PKToolPickerObserver, UIGestureRecognizerDelegate {
         let model: AppModel
         let documentCanvas = DocumentCanvasView()
         let sketchCanvas = SketchCanvasView()
         /// Taps on the canvas outside draw mode: selecting, deselecting, leaving comments.
         let tap = UITapGestureRecognizer()
+        /// The palette's lasso: a loop drawn with it selects what it goes round, elements
+        /// and screens as well as ink. PencilKit's own lasso knows only strokes, so with
+        /// the lasso in hand the document canvas stops drawing and this takes the loop.
+        let lasso = LassoGestureRecognizer()
+        /// A finger that rests on the canvas and then drags pulls out a box, which
+        /// selects what it holds, as in Freeform.
+        let box = UILongPressGestureRecognizer()
+        /// Where the box being dragged out began, in the container's points.
+        private var boxStart: CGPoint?
         /// Notices Apple Pencil touching the canvas, without taking part in anything.
         let pencilDetector = PencilDetector()
         /// Notice the pencil bar of a narrow window being flicked away: one for each window
         /// of the scene, because iPadOS keeps that bar in a window of its own.
         private var paletteFlicks: [PaletteFlick] = []
+        /// Knows where fingers are resting, for tapping things while one is held.
+        let restingFingers = RestingFingerDetector()
         private var fingerDraws = true
         private let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
         private var tool: AppModel.Tool?
@@ -112,6 +176,11 @@ struct InkCanvas: UIViewRepresentable {
         /// since `PKStroke` isn't equatable: a stroke only grows while it is being drawn,
         /// so the same point count means the same points.
         private var sketchStrokeCache: [Double: (pointCount: Int, result: SketchStroke)] = [:]
+        /// Which strokes on the document canvas belong to which of the design's drawings.
+        private var drawings = DrawingSync()
+        /// True while the document canvas is being set from the design, which is not a
+        /// change for the design to follow.
+        private var isShowingDrawings = false
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -133,7 +202,7 @@ struct InkCanvas: UIViewRepresentable {
                 canvas.scrollsToTop = false
                 canvas.delegate = self
             }
-            documentCanvas.drawing = model.document.current.drawing
+            showDrawings()
             documentCanvas.onMoveToWindow = { [weak self] in
                 guard let self else { return }
                 // On the window, to see the Pencil land on things drawn above the canvas.
@@ -143,6 +212,12 @@ struct InkCanvas: UIViewRepresentable {
                     documentCanvas.window?.addGestureRecognizer(pencilDetector)
                 }
                 watchForFlicks()
+                // On the window too: the finger that rests may be on an element's own
+                // handle, which is drawn above the canvas.
+                if restingFingers.view !== documentCanvas.window {
+                    restingFingers.view?.removeGestureRecognizer(restingFingers)
+                    documentCanvas.window?.addGestureRecognizer(restingFingers)
+                }
                 // The smallest window the bars and controls still fit in.
                 documentCanvas.window?.windowScene?.sizeRestrictions?.minimumSize = CGSize(width: 360, height: 480)
                 refresh()
@@ -154,10 +229,21 @@ struct InkCanvas: UIViewRepresentable {
             sketchCanvas.addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(penMoved(_:))))
 
             tap.addTarget(self, action: #selector(tapped(_:)))
+            lasso.addTarget(self, action: #selector(lassoed(_:)))
+            lasso.delegate = self
+            lasso.isEnabled = false
+            box.addTarget(self, action: #selector(boxDragged(_:)))
+            box.minimumPressDuration = 0.4
+            box.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             pencilDetector.onPencil = { [weak self] touch in
                 guard let self, let container = documentCanvas.superview else { return }
                 model.pencilTouched(at: touch.location(in: container))
             }
+            model.restingFingers = { [weak self] in
+                guard let self, let container = documentCanvas.superview else { return [] }
+                return restingFingers.fingers(in: container)
+            }
+            restingFingers.onAllLifted = { [weak self] in self?.model.fingersLifted() }
 
             palette.stateAutosaveName = "app.layer.palette"
             palette.colorUserInterfaceStyle = .light
@@ -191,6 +277,8 @@ struct InkCanvas: UIViewRepresentable {
         func refresh() {
             let isDrawing = tool == .draw
             let isMagicPen = palette.selectedToolItemIdentifier == MagicPen.identifier
+            // With the lasso in hand a loop selects things here, rather than strokes in PencilKit.
+            let isLasso = isDrawing && palette.selectedToolItem is PKToolPickerLassoItem
             sketchCanvas.isUserInteractionEnabled = isDrawing && isMagicPen
             // The Magic Pen's canvas is put away while it isn't in use and holds nothing, so
             // PencilKit doesn't keep tiling and scrolling a second canvas the size of the board.
@@ -203,19 +291,25 @@ struct InkCanvas: UIViewRepresentable {
                 }
                 sketchCanvas.isHidden = !showsSketch
             }
-            documentCanvas.isDrawingEnabled = isDrawing
+            documentCanvas.isDrawingEnabled = isDrawing && !isLasso
             // With the palette up, a finger that doesn't draw taps to select. The Pencil's
             // taps are its own: dots and strokes.
             tap.isEnabled = !isDrawing || !fingerDraws
             tap.allowedTouchTypes = isDrawing
                 ? [NSNumber(value: UITouch.TouchType.direct.rawValue)]
                 : [UITouch.TouchType.direct, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
+            // A finger that selects can also rest and drag out a box.
+            box.isEnabled = tap.isEnabled
             if !(isDrawing && isMagicPen) { model.pen.location = nil }
 
             let showsPalette = isDrawing && !hidesPalette
             // Drawing, a finger draws only if it is meant to; otherwise it pans the canvas.
             let policy: PKCanvasViewDrawingPolicy = !isDrawing ? .default
                 : fingerDraws && !UIPencilInteraction.prefersPencilOnlyDrawing ? .anyInput : .pencilOnly
+            // The lasso is drawn with whatever draws: the Pencil, and a finger when fingers draw.
+            lasso.isEnabled = isLasso
+            lasso.allowedTouchTypes = (policy == .anyInput ? [UITouch.TouchType.direct, .pencil] : [.pencil]).map { NSNumber(value: $0.rawValue) }
+            if model.isLassoInHand != isLasso { model.isLassoInHand = isLasso }
             for canvas in canvases {
                 if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
                 palette.setVisible(showsPalette, forFirstResponder: canvas)
@@ -273,6 +367,7 @@ struct InkCanvas: UIViewRepresentable {
             pencilDetector.view?.removeGestureRecognizer(pencilDetector)
             for flick in paletteFlicks { flick.view?.removeGestureRecognizer(flick) }
             paletteFlicks = []
+            restingFingers.view?.removeGestureRecognizer(restingFingers)
             for canvas in canvases {
                 palette.setVisible(false, forFirstResponder: canvas)
             }
@@ -447,19 +542,52 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
                 model.sketchChanged(sketch())
-            } else {
-                model.drawingChanged(canvasView.drawing)
-                model.inkSelectionMayHaveMoved()
+            } else if !isShowingDrawings {
+                followInk()
             }
+        }
+
+        // MARK: The design's drawings
+
+        /// Makes the document canvas show the design's drawings, when it doesn't already:
+        /// when a design opens, and after a drawing is moved, resized, locked, hidden or
+        /// deleted, or put back by undo.
+        func showDrawings() {
+            guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
+            isShowingDrawings = true
+            defer { isShowingDrawings = false }
+            documentCanvas.drawing = PKDrawing(strokes: strokes)
+        }
+
+        /// The strokes on the document canvas changed, drawn, erased or moved with
+        /// PencilKit's tools or put there from here: the design's drawings change to
+        /// match, which is the step that undo takes back.
+        private func followInk() {
+            // While the design is being put back by undo or redo it is the one to follow.
+            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
+            let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
+            model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
+            // PencilKit's own record of the change is not the one that is kept.
+            documentCanvas.inkUndoManager.removeAllActions()
         }
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
-            if canvasView === sketchCanvas { model.penDown() }
+            if canvasView === sketchCanvas {
+                model.penDown()
+            } else {
+                // One use of a tool is one undo step, however many times it changes the
+                // strokes on the way, as rubbing out does.
+                model.store.beginEdit()
+            }
         }
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
-            if canvasView === sketchCanvas { model.penUp() }
+            if canvasView === sketchCanvas {
+                model.penUp()
+            } else {
+                model.store.endEdit()
+            }
         }
 
         /// Follows the Magic Pen while it draws or hovers, for the cursor.
@@ -473,67 +601,71 @@ struct InkCanvas: UIViewRepresentable {
             model.canvasTapped(at: recognizer.location(in: recognizer.view))
         }
 
-        // MARK: Selecting and moving document ink
+        // MARK: Drawing round things
 
-        /// The drawing under a canvas point: the stroke there and every stroke touching
-        /// it, directly or through others. Nil if there is no ink at the point.
-        func drawing(at point: CGPoint, tolerance: CGFloat) -> Set<Double>? {
-            let strokes = documentCanvas.drawing.strokes
-            guard let hit = strokes.last(where: { stroke in
+        /// The lasso drew some more of its loop, finished it, or only tapped, which picks
+        /// what is under it as a tap of PencilKit's lasso picks a stroke.
+        @objc func lassoed(_ recognizer: LassoGestureRecognizer) {
+            switch recognizer.state {
+            case .began, .changed:
+                isAtOpeningViewport = false
+                model.lassoDrawn(recognizer.points)
+            case .ended:
+                if recognizer.isTap {
+                    if let point = recognizer.points.first { model.canvasTapped(at: point) }
+                } else {
+                    model.lassoDrawn(recognizer.points)
+                    model.sweepEnded()
+                }
+            default:
+                model.sweepCancelled()
+            }
+        }
+
+        /// A finger rested on the canvas, and now drags out a box. Until it has moved
+        /// there is no box, and a finger that rests and lifts leaves things as they were.
+        @objc func boxDragged(_ recognizer: UILongPressGestureRecognizer) {
+            let point = recognizer.location(in: recognizer.view)
+            switch recognizer.state {
+            case .began:
+                isAtOpeningViewport = false
+                boxStart = point
+            case .changed:
+                guard let boxStart else { return }
+                if model.sweep != nil || hypot(point.x - boxStart.x, point.y - boxStart.y) > 8 {
+                    model.boxDragged(from: boxStart, to: point)
+                }
+            default:
+                boxStart = nil
+                model.sweepEnded()
+            }
+        }
+
+        /// The canvases scroll only once it is plain that the lasso isn't being drawn: a
+        /// second finger, a pinch or a two-finger scroll, makes it give way.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            gestureRecognizer === lasso && canvases.contains { other === $0.panGestureRecognizer || other === $0.pinchGestureRecognizer }
+        }
+
+        // MARK: Picking and changing ink
+
+        /// The drawing with ink under a canvas point, among those on the document
+        /// canvas. Nil if there is no ink at the point.
+        func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
+            let hit = documentCanvas.drawing.strokes.last { stroke in
                 guard stroke.renderBounds.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
                 return stroke.path.interpolatedPoints(by: .distance(4)).contains { sample in
                     let location = sample.location.applying(stroke.transform)
                     return hypot(location.x - point.x, location.y - point.y) <= tolerance + max(sample.size.width, sample.size.height) / 2
                 }
-            }) else { return nil }
-
-            let outlines = strokes.map { stroke in
-                let bounds = stroke.renderBounds
-                return SketchStroke(key: Self.key(for: stroke), points: [bounds.origin, CGPoint(x: bounds.maxX, y: bounds.maxY)])
             }
-            let hitKey = Self.key(for: hit)
-            let group = SketchAnalyzer.cluster(outlines, reach: tolerance).first { $0.contains { $0.key == hitKey } }
-            return Set(group?.map(\.key) ?? [hitKey])
+            return hit.flatMap { drawings.drawing(owning: $0.key) }
         }
 
-        /// The area the strokes with these keys cover, or nil if none of them exist.
-        func bounds(of keys: Set<Double>) -> CGRect? {
-            let rects = documentCanvas.drawing.strokes.filter { keys.contains(Self.key(for: $0)) }.map(\.renderBounds)
-            return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
-        }
-
-        func translateInk(_ keys: Set<Double>, by delta: CGSize) {
-            let move = CGAffineTransform(translationX: delta.width, y: delta.height)
-            var drawing = documentCanvas.drawing
-            drawing.strokes = drawing.strokes.map { stroke in
-                guard keys.contains(Self.key(for: stroke)) else { return stroke }
-                var moved = stroke
-                moved.transform = stroke.transform.concatenating(move)
-                return moved
-            }
-            setDocumentDrawing(drawing)
-        }
-
-        /// Makes a finished move undoable. PencilKit only records what its own tools do.
-        func registerUndo(ofMoving keys: Set<Double>, by delta: CGSize) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                let back = CGSize(width: -delta.width, height: -delta.height)
-                coordinator.translateInk(keys, by: back)
-                coordinator.registerUndo(ofMoving: keys, by: back)
-            }
-            undoManager.endUndoGrouping()
-        }
-
-        /// The strokes with these keys, as points on the canvas, for reading as a sketch.
-        func inkStrokes(_ keys: Set<Double>) -> [SketchStroke] {
-            documentCanvas.drawing.strokes.filter { keys.contains(Self.key(for: $0)) }.map { stroke in
-                SketchStroke(
-                    key: Self.key(for: stroke),
-                    points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
-                )
-            }
+        /// The drawing that strokes with these keys ended up in, when they share one.
+        func drawing(owning keys: Set<Double>) -> DesignElement.ID? {
+            let owners = Set(keys.compactMap { drawings.drawing(owning: $0) })
+            return owners.count == 1 ? owners.first : nil
         }
 
         func deleteInk(_ keys: Set<Double>) {
@@ -542,34 +674,13 @@ struct InkCanvas: UIViewRepresentable {
             guard !removed.isEmpty else { return }
             drawing.strokes.removeAll { keys.contains(Self.key(for: $0)) }
             setDocumentDrawing(drawing)
-            registerUndo(ofRemoving: removed)
         }
 
-        private func registerUndo(ofRemoving strokes: [PKStroke]) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                var drawing = coordinator.documentCanvas.drawing
-                drawing.strokes.append(contentsOf: strokes)
-                coordinator.setDocumentDrawing(drawing)
-                coordinator.registerUndo(ofAdding: strokes)
-            }
-            undoManager.endUndoGrouping()
-        }
-
-        private func registerUndo(ofAdding strokes: [PKStroke]) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                coordinator.deleteInk(Set(strokes.map(Self.key(for:))))
-            }
-            undoManager.endUndoGrouping()
-        }
-
+        /// Sets the strokes on the document canvas from here. The design's drawings
+        /// change to match, and that change is what undo takes back.
         private func setDocumentDrawing(_ drawing: PKDrawing) {
             documentCanvas.drawing = drawing
-            model.drawingChanged(drawing)
-            model.inkSelectionMayHaveMoved()
+            followInk()
         }
 
         // MARK: Magic Pen sketches
@@ -610,7 +721,6 @@ struct InkCanvas: UIViewRepresentable {
             var drawing = documentCanvas.drawing
             drawing.strokes.append(contentsOf: added)
             setDocumentDrawing(drawing)
-            registerUndo(ofAdding: added)
             return Set(added.map(Self.key(for:)))
         }
 
@@ -630,10 +740,6 @@ struct InkCanvas: UIViewRepresentable {
             return (strokes.count, strokes.isEmpty ? nil : documentCanvas.drawing.bounds)
         }
 
-        /// The creation date the last stroke made here was given. Each new stroke is given a
-        /// later one, since a stroke's creation date is its key.
-        private var lastStrokeDate = Date.distantPast
-
         /// PencilKit strokes through points in canvas points, drawn at an even pace.
         private func makeStrokes(_ strokes: [[CGPoint]], ink: PKInk, width: CGFloat) -> [PKStroke] {
             strokes.filter { !$0.isEmpty }.map { points in
@@ -643,9 +749,7 @@ struct InkCanvas: UIViewRepresentable {
                         opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2
                     )
                 }
-                let created = max(Date(), lastStrokeDate.addingTimeInterval(0.001))
-                lastStrokeDate = created
-                return PKStroke(ink: ink, path: PKStrokePath(controlPoints: controlPoints, creationDate: created))
+                return PKStroke(ink: ink, path: PKStrokePath(controlPoints: controlPoints, creationDate: InkGeometry.newStrokeDate()))
             }
         }
 
@@ -672,7 +776,7 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         private static func key(for stroke: PKStroke) -> Double {
-            stroke.path.creationDate.timeIntervalSinceReferenceDate
+            stroke.key
         }
     }
 }
@@ -777,6 +881,151 @@ final class PaletteFlick: UIGestureRecognizer, UIGestureRecognizerDelegate {
 
     override func reset() {
         began = nil
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
+}
+
+/// The loop of the lasso: one touch, followed from where it lands to where it lifts. A
+/// touch that lifts without having moved is a tap. A second finger landing before the
+/// loop is under way means a pinch or a two-finger scroll, and the lasso gives way to it.
+final class LassoGestureRecognizer: UIGestureRecognizer {
+    /// The loop so far, in the view's points.
+    private(set) var points: [CGPoint] = []
+    /// Whether the touch lifted where it landed.
+    private(set) var isTap = false
+    private weak var touch: UITouch?
+    /// How far a touch moves before it is drawing rather than tapping.
+    private let slop: CGFloat = 6
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard touch == nil, touches.count == 1, let first = touches.first else {
+            // Under way, the loop carries on and the extra finger is left out of it.
+            if state == .possible {
+                state = .failed
+            } else {
+                for extra in touches where extra !== touch { ignore(extra, for: event) }
+            }
+            return
+        }
+        touch = first
+        isTap = false
+        points = [first.location(in: view)]
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch, touches.contains(touch), let start = points.first else { return }
+        if state == .possible {
+            let now = touch.location(in: view)
+            guard hypot(now.x - start.x, now.y - start.y) > slop else { return }
+            points.append(now)
+            state = .began
+        } else {
+            // Every point the touch passed through since the last event, for a smooth loop.
+            let passed = event.coalescedTouches(for: touch) ?? [touch]
+            points.append(contentsOf: passed.map { $0.location(in: view) })
+            state = .changed
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch, touches.contains(touch) else { return }
+        if state == .possible {
+            isTap = true
+            state = .ended
+        } else {
+            state = .ended
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch, touches.contains(touch) else { return }
+        state = state == .possible ? .failed : .cancelled
+    }
+
+    override func reset() {
+        super.reset()
+        touch = nil
+        points = []
+    }
+}
+
+/// A gesture recognizer that never recognizes anything. It only keeps track of the
+/// fingers that are down and haven't strayed from where they landed, so that a tap can
+/// tell whether another finger is resting on the canvas: holding one thing and tapping
+/// others selects them together.
+final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    /// Called when the last finger has lifted.
+    var onAllLifted: (() -> Void)?
+
+    private struct Finger {
+        weak var touch: UITouch?
+        var start: CGPoint
+        var hasStrayed = false
+    }
+
+    private var down: [ObjectIdentifier: Finger] = [:]
+    /// How far a finger can drift and still be resting. Further, it is dragging or scrolling.
+    private let drift: CGFloat = 14
+
+    init() {
+        super.init(target: nil, action: nil)
+        allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    /// Where fingers are resting, in a view's points. A finger that has just lifted, the
+    /// one whose tap is being handled for instance, isn't resting.
+    func fingers(in view: UIView) -> [CGPoint] {
+        down.values.compactMap { finger in
+            guard !finger.hasStrayed, let touch = finger.touch else { return nil }
+            switch touch.phase {
+            case .began, .moved, .stationary: return touch.location(in: view)
+            default: return nil
+            }
+        }
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches {
+            down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view))
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches {
+            guard let finger = down[ObjectIdentifier(touch)], !finger.hasStrayed else { continue }
+            let now = touch.location(in: view)
+            if hypot(now.x - finger.start.x, now.y - finger.start.y) > drift {
+                down[ObjectIdentifier(touch)]?.hasStrayed = true
+            }
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        lifted(touches)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        lifted(touches)
+    }
+
+    private func lifted(_ touches: Set<UITouch>) {
+        for touch in touches { down[ObjectIdentifier(touch)] = nil }
+        guard down.isEmpty else { return }
+        onAllLifted?()
+        // Nothing was ever going to be recognized: say so, and be ready for the next touch.
+        state = .failed
+    }
+
+    override func reset() {
+        super.reset()
+        down.removeAll()
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
