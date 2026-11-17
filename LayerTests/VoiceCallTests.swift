@@ -660,6 +660,120 @@ struct VoiceCallTests {
         #expect(!first.isStopped)
         app.endVoiceCall()
     }
+
+    // MARK: Listening on request
+
+    @Test func anOnRequestCallListensOnlyWhenAsked() async {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        await call.start()
+        #expect(routes.isEmpty && call.phase == .listening && runner.warmUps == 1)
+        await call.listen(for: nil)
+        #expect(routes.count == 1 && call.isHearing)
+        call.send()
+        #expect(routes[0].finishCount == 1)
+        routes[0].send(.command("make it blue"))
+        #expect(await eventually { runner.commands == ["make it blue"] && routes[0].isStopped && !call.isHearing })
+        call.end()
+    }
+
+    @Test func queuedCommandRunsOnItsOwnTarget() async {
+        // Two squeezes on different targets while the first command is still running:
+        // each command starts with its own target.
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        var started: [VoiceTarget?] = []
+        call.onCommandStarts = { started.append($0) }
+        await call.start()
+        let a = VoiceTarget.canvas(CGPoint(x: 1, y: 1)), b = VoiceTarget.canvas(CGPoint(x: 2, y: 2))
+        await call.listen(for: a); call.send(); routes[0].send(.command("make a login screen"))
+        #expect(await eventually { runner.commands.count == 1 })
+        await call.listen(for: b); call.send(); routes[1].send(.command("make a settings screen"))
+        #expect(await eventually { call.queuedCount == 1 })
+        runner.holds = false
+        #expect(await eventually { runner.commands.count == 2 })
+        #expect(started == [a, b])
+        #expect(runner.cancelled.isEmpty)
+        call.end()
+    }
+
+    @Test func cancellingListeningQueuesNothing() async {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        await call.start()
+        await call.listen(for: nil)
+        call.cancelListening()
+        routes[0].send(.command("make it blue"))
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(routes[0].isStopped && !call.isHearing)
+        #expect(runner.commands.isEmpty && call.queuedCount == 0)
+        call.end()
+    }
+
+    @Test func aSentRouteThatSaysNothingIsStoppedAfterAWhile() async {
+        var routes: [FakeRoute] = []
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: FakeRunner())
+        call.finishWait = .milliseconds(50)
+        await call.start()
+        await call.listen(for: nil)
+        call.send()
+        #expect(await eventually { routes[0].isStopped && !call.isHearing })
+        call.end()
+    }
+
+    @Test func anOnRequestCommandEndingMidSentenceRunsAtOnce() async {
+        // The person said they were done, so "to" at the end is not a pause for thought.
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        call.fragmentWait = .seconds(60)
+        await call.start()
+        await call.listen(for: nil)
+        call.send()
+        routes[0].send(.command("I want a screen to"))
+        #expect(await eventually(within: .seconds(1)) { runner.commands == ["I want a screen to"] })
+        call.end()
+    }
+
+    @Test func hangUpOnAnOnRequestCallOnlyStops() async {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        await call.start()
+        await call.listen(for: nil); call.send(); routes[0].send(.command("make it blue"))
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        await call.listen(for: nil); call.send(); routes[1].send(.command("Hang up"))
+        #expect(await eventually { runner.cancelled == ["make it blue"] })
+        #expect(call.phase != .ended)
+        call.end()
+    }
+
+    @Test func aListenThatFailsLeavesThePencilCallUp() async {
+        var routes: [FakeRoute] = []
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: FakeRunner())
+        await call.start()
+        await call.listen(for: nil)
+        routes[0].send(.failed("No microphone"))
+        #expect(await eventually { call.caption == VoiceCall.Caption(kind: .problem, text: "No microphone") })
+        #expect(routes[0].isStopped && !call.isHearing && call.phase == .listening)
+        call.end()
+    }
+
+    @Test func aPencilCallAndAPhoneCallCoexist() async {
+        let (phone, phoneRoute, _) = makeCall()
+        let pencil = VoiceCall(listening: .onRequest { FakeRoute() }, runner: FakeRunner())
+        await phone.start()
+        await pencil.start()
+        #expect(phone.phase == .listening && !phoneRoute.isStopped)
+        let (other, _, _) = makeCall()
+        await other.start()
+        #expect(phone.phase == .ended && pencil.phase == .listening)
+        other.end()
+        pencil.end()
+    }
 }
 
 @Suite("Commands from recognised speech")
