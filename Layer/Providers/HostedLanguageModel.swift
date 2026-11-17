@@ -77,6 +77,7 @@ struct HostedModelExecutor: LanguageModelExecutor {
             provider: model.provider, model: model.model, key: key
         )
         var usage: (input: Int, output: Int)?
+        var firstToolCall: String?
         for try await event in events {
             switch event {
             case .text(let fragment):
@@ -88,6 +89,12 @@ struct HostedModelExecutor: LanguageModelExecutor {
                 // transcript as reasoning, apart from the answer.
                 await channel.send(.reasoning(action: .appendText(thought, tokenCount: 1)))
             case .toolCall(let id, let name, let arguments):
+                // One tool an answer. The session runs tools asked for together at the
+                // same time and in no fixed order, and a server may ask for several
+                // however it was told. The rest are left: the model asks for the next
+                // when it is shown this one's result.
+                if firstToolCall == nil { firstToolCall = id }
+                guard id == firstToolCall else { continue }
                 await channel.send(.toolCalls(action: .toolCall(id: id, name: name, action: .appendArguments(arguments, tokenCount: 1))))
             case .usage(let input, let output):
                 usage = (input, output)

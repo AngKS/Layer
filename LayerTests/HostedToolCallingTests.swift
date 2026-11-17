@@ -176,6 +176,33 @@ extension HostedModelTests {
         }
     }
 
+    /// A server may ignore being asked for one tool at a time. Tools asked for together
+    /// would be run together, in no fixed order, on the one design; so only the first is
+    /// taken, and the model asks for the next once it has that one's result.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func onlyTheFirstToolOfAnAnswerIsRun() async throws {
+        let twoAtOnce = [
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"setText","arguments":"{\"element\":\"E2\",\"text\":\"One\"}"}}]}}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"setText","arguments":"{\"element\":\"E3\",\"text\":\"Two\"}"}}]}}]}"#,
+            #"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+        ].joined(separator: "\n\n")
+        StubProvider.answer(with: [
+            .init(body: twoAtOnce),
+            .init(body: SSE.openAIToolCall(id: "call_3", name: "setText", json: [#"{"element":"E3","text":"Two"}"#])),
+            .init(body: SSE.openAI(text: ["Done."])),
+        ])
+        let log = ToolLog()
+        let session = LanguageModelSession(model: HostedLanguageModel(provider: .lmStudio, model: "local"), tools: [RecordingTool(log: log)])
+        let response = try await session.respond(to: "reword both")
+        #expect(response.content == "Done.")
+        #expect(await log.calls == ["E2=One", "E3=Two"])
+        // The model is shown the one call that was run, and its result, before it goes on.
+        let messages = try #require(try body(ofRequest: 1)["messages"] as? [[String: Any]])
+        let asked = try #require(messages.first { $0["role"] as? String == "assistant" }?["tool_calls"] as? [[String: Any]])
+        #expect(asked.map { $0["id"] as? String } == ["call_1"])
+    }
+
     @Test func toolCallsAreReadFromEachProvidersStream() throws {
         func events(_ stream: String, from provider: HostedProvider) throws -> [HostedModelClient.StreamEvent] {
             var parser = HostedModelClient.StreamParser(provider: provider)
