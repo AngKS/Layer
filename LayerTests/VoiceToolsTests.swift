@@ -738,6 +738,35 @@ struct VoiceToolsTests {
         #expect(app.store.content.screens.isEmpty)
     }
 
+    // MARK: After close, and where new screens go
+
+    /// No screen is started on a design that has closed: its generation would run on with
+    /// nothing to stop it, writing to a file the browser has let go of (B-I4).
+    @Test func noScreenIsMadeOnceTheDesignHasClosed() async throws {
+        let bench = bench()
+        bench.app.close()
+        let line = try await bench.box.createScreen(name: "Settings", description: "a settings screen")
+        #expect(line == AppModel.closedProblem)
+        #expect(bench.app.generation == nil && bench.app.store.screens.count == 1)
+    }
+
+    /// The command's own anchor puts its screen where the pencil pointed, and only its own:
+    /// the next command's screen goes where screens always go (B-M4).
+    @Test func aNewScreenGoesWhereItsCommandPointed() async throws {
+        let bench = bench()
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        bench.app.screenStream = { _, _, _ in stream }
+        let point = CGPoint(x: 9000, y: 9000)
+        bench.box.newScreenAnchor = point
+        let making = Task { try await bench.box.createScreen(name: "Settings", description: "a settings screen") }
+        #expect(await eventually { bench.app.isGenerating })
+        #expect(bench.app.store.screens.last?.origin == point)
+        feed.finish()
+        _ = try await making.value
+        bench.box.reset()
+        #expect(bench.box.newScreenAnchor == nil)
+    }
+
     // MARK: Undo
 
     @Test func aHeldEditIsOneUndoStep() throws {

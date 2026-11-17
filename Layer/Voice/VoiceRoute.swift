@@ -45,6 +45,9 @@ extension VoiceRoute {
 protocol VoiceCommandRunner: AnyObject {
     /// Runs one command to its end. Cancelling the task that awaits it stops the command.
     func run(_ command: String) async -> VoiceOutcome
+    /// Runs one command about what the pencil pointed at. What it was about goes with the
+    /// command and no other, so that another command running meanwhile can't take it.
+    func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome
     /// Gets ready to be asked, so that the first command doesn't wait on it. Asked for
     /// as a call starts, and again after a command that left things to start afresh.
     func warmUp() async
@@ -52,6 +55,56 @@ protocol VoiceCommandRunner: AnyObject {
 
 extension VoiceCommandRunner {
     func warmUp() async {}
+
+    func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
+        await run(command)
+    }
+}
+
+/// Lets one spoken command at a time act on a design. The pencil's call and a phone call
+/// each have their own model, and both change the same design: run together, one's undo
+/// step closed in the middle of the other's, and one took the other's selection. A
+/// command waits here for its turn, in the order the commands came, and is never cut short
+/// by one that comes after it.
+@MainActor
+final class VoiceCommandGate {
+    private(set) var isBusy = false
+    private var waiting: [(id: UUID, turn: CheckedContinuation<Bool, Never>)] = []
+
+    /// Waits for this command's turn. False if the command was stopped while it waited,
+    /// in which case it has no turn to give back.
+    func enter() async -> Bool {
+        guard isBusy else {
+            isBusy = true
+            return true
+        }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { turn in
+                if Task.isCancelled {
+                    turn.resume(returning: false)
+                } else {
+                    waiting.append((id, turn))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in self.giveUp(id) }
+        }
+    }
+
+    /// The command is over: the next one waiting goes.
+    func leave() {
+        guard !waiting.isEmpty else {
+            isBusy = false
+            return
+        }
+        waiting.removeFirst().turn.resume(returning: true)
+    }
+
+    private func giveUp(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting.remove(at: index).turn.resume(returning: false)
+    }
 }
 
 /// How a command went, for the call to show.

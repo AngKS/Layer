@@ -57,10 +57,8 @@ struct VoiceAgentTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aHintFromThePencilGoesWithItsCommandOnly() async throws {
         let bench = bench([:])
-        bench.app.voiceHint = "(Pointed at empty canvas.)"
-        _ = await bench.agent.run("a settings screen")
-        #expect(bench.recorder.requests.last?.prompts.last == "(Pointed at empty canvas.) a settings screen")
-        #expect(bench.app.voiceHint == nil)
+        _ = await bench.agent.run("a settings screen", about: .canvas(CGPoint(x: 100, y: 200)))
+        #expect(bench.recorder.requests.last?.prompts.last == VoiceAgent.canvasHint + " a settings screen")
         _ = await bench.agent.run("zoom out")
         #expect(bench.recorder.requests.last?.prompts.last == "zoom out")
     }
@@ -362,5 +360,60 @@ struct VoiceAgentTests {
         #expect(text.content == "command 3")
         // Nothing to trim, nothing changed.
         #expect(VoiceProfile.trimmed(entries, keepingCommands: 6).count == entries.count)
+    }
+
+    // MARK: Wave 2
+
+    /// "No, …" after a drag by hand undoes the command's step only if it is still on top.
+    /// It used to undo the drag (B-M2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionAfterAChangeByHandLeavesThatChange() async throws {
+        let bench = bench(["make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)]])
+        _ = await bench.agent.run("make the button say ahoy")
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.app.store.screen(bench.screen)?.elements[2].id))
+        bench.app.store.update(image) { $0.frame.origin.x = 60 }
+
+        _ = await bench.agent.run("No, that's wrong.")
+
+        #expect(bench.app.store.resolve(image)?.element.frame.origin.x == 60)
+        #expect(bench.button?.text == "Ahoy")
+    }
+
+    /// A command that reaches a design after it has closed does nothing to it (B-I4).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandAfterTheDesignClosedDoesNothing() async throws {
+        let bench = bench(["make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)]])
+        bench.app.close()
+        let outcome = await bench.agent.run("make the button say ahoy")
+        #expect(outcome.problem == AppModel.closedProblem)
+        #expect(bench.button?.text == "Sign in")
+        #expect(bench.recorder.requests.isEmpty)
+    }
+
+    /// A command running as the design closes is refused its next tool (B-I4).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandRunningAsTheDesignClosesDoesNoMore() async throws {
+        let bench = bench(["two things": [
+            Step(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#),
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .milliseconds(300)),
+        ]])
+        let running = Task { await bench.agent.run("two things") }
+        #expect(await eventually { bench.button?.text == "One" })
+        bench.app.close()
+        _ = await running.value
+        #expect(bench.button?.tint == Theme.accent)
+    }
+
+    /// The session starts afresh after so many commands, so that the pencil's, which lives
+    /// as long as the design, doesn't keep every word for good (B-M5).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func theSessionStartsAfreshAfterSoManyCommands() async throws {
+        let bench = bench([:])
+        bench.agent.commandsPerSession = 2
+        _ = await bench.agent.run("one")
+        _ = await bench.agent.run("two")
+        #expect(bench.recorder.requests.last?.prompts == ["one", "two"])
+        _ = await bench.agent.run("three")
+        #expect(bench.recorder.requests.last?.prompts == ["three"])
     }
 }

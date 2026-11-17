@@ -337,6 +337,11 @@ private struct SqueezeToSpeak: ViewModifier {
         }
         // Draw coming on mid-squeeze means its end never arrives here.
         .onChange(of: isOn) { isSqueezing = false }
+        // Nor does it once the canvas has gone.
+        .onDisappear {
+            if isSqueezing { pencil.squeezeFailed() }
+            isSqueezing = false
+        }
     }
 
     private func squeezable(_ content: Content) -> some View {
@@ -346,9 +351,13 @@ private struct SqueezeToSpeak: ViewModifier {
                 guard !isSqueezing else { return }
                 isSqueezing = true
                 pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
-            case .ended, .failed:
+            case .ended:
                 isSqueezing = false
                 pencil.squeezeEnded()
+            case .failed:
+                // Nobody said the squeeze was over, so a held one sends nothing.
+                isSqueezing = false
+                pencil.squeezeFailed()
             }
         }
     }

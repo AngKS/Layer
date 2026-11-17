@@ -86,6 +86,14 @@ final class FakeRunner: VoiceCommandRunner {
         warmUps += 1
     }
 
+    /// What each command was about, in order.
+    private(set) var targets: [VoiceTarget?] = []
+
+    func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
+        targets.append(target)
+        return await run(command)
+    }
+
     func run(_ command: String) async -> VoiceOutcome {
         commands.append(command)
         while holds, !Task.isCancelled {
@@ -883,6 +891,147 @@ struct VoiceCallTests {
         other.end()
         pencil.end()
     }
+
+    // MARK: Taking turns, and a pencil call's life (Wave 2)
+
+    private func pencilCall(_ runner: FakeRunner, routes: @escaping (FakeRoute) -> Void = { _ in }) -> VoiceCall {
+        VoiceCall(listening: .onRequest { let r = FakeRoute(); routes(r); return r }, runner: runner)
+    }
+
+    /// The pencil's call and a phone call act on one design: one command at a time, in
+    /// the order they came, and neither is cut short by the other (B-I2, D-I4).
+    @Test func callsOnOneDesignTakeTurns() async {
+        let gate = VoiceCommandGate()
+        var pencilRoutes: [FakeRoute] = []
+        let pencilRunner = FakeRunner(); pencilRunner.holds = true
+        let pencil = pencilCall(pencilRunner) { pencilRoutes.append($0) }
+        let (phone, phoneRoute, phoneRunner) = makeCall()
+        pencil.gate = gate
+        phone.gate = gate
+        var started: [String] = []
+        pencil.onCommandStarts = { _ in started.append("pencil") }
+        phone.onCommandStarts = { _ in started.append("phone") }
+        await pencil.start()
+        await phone.start()
+
+        await pencil.listen(for: nil); pencil.send(); pencilRoutes[0].send(.command("make a settings screen"))
+        #expect(await eventually { pencilRunner.commands == ["make a settings screen"] })
+        phoneRoute.send(.command("make the title bold"))
+        try? await Task.sleep(for: .milliseconds(100))
+        // The phone call's command waits, and says so; it hasn't selected anything yet.
+        #expect(phoneRunner.commands.isEmpty && started == ["pencil"])
+        #expect(phone.caption == VoiceCall.Caption(kind: .working, text: VoiceCall.waitingItsTurn))
+        #expect(pencilRunner.cancelled.isEmpty)
+
+        pencilRunner.holds = false
+        #expect(await eventually { phoneRunner.commands == ["make the title bold"] })
+        #expect(started == ["pencil", "phone"])
+        #expect(pencilRunner.cancelled.isEmpty)
+        #expect(await eventually { !gate.isBusy })
+        pencil.end(); phone.end()
+    }
+
+    /// Hanging up while a command waits its turn stops it there, and the turn isn't lost.
+    @Test func aCommandStoppedWhileWaitingGivesUpItsTurn() async {
+        let gate = VoiceCommandGate()
+        let first = FakeRunner(); first.holds = true
+        var routes: [FakeRoute] = []
+        let pencil = pencilCall(first) { routes.append($0) }
+        pencil.gate = gate
+        let (phone, phoneRoute, phoneRunner) = makeCall()
+        phone.gate = gate
+        await pencil.start(); await phone.start()
+        await pencil.listen(for: nil); pencil.send(); routes[0].send(.command("make a settings screen"))
+        #expect(await eventually { first.commands.count == 1 })
+        phoneRoute.send(.command("make the title bold"))
+        #expect(await eventually { phone.caption?.text == VoiceCall.waitingItsTurn })
+        phone.end()
+        first.holds = false
+        #expect(await eventually { !gate.isBusy && pencil.phase == .listening })
+        #expect(phoneRunner.commands.isEmpty)
+        // The next command goes at once.
+        await pencil.listen(for: nil); pencil.send(); routes[1].send(.command("make it red"))
+        #expect(await eventually { first.commands == ["make a settings screen", "make it red"] })
+        pencil.end()
+    }
+
+    /// The model's endCall hangs up a phone call. A pencil call stays up, with whatever
+    /// else was asked of it and its warm model (D-I6).
+    @Test func endCallLeavesAPencilCallUp() async {
+        let runner = FakeRunner()
+        runner.outcomes = [VoiceOutcome(lines: ["Hanging up."], endsCall: true)]
+        var routes: [FakeRoute] = []
+        let call = pencilCall(runner) { routes.append($0) }
+        await call.start()
+        await call.listen(for: nil); call.send(); routes[0].send(.command("that's all thanks"))
+        #expect(await eventually { runner.commands.count == 1 && call.phase == .listening })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(call.phase == .listening)
+        call.end()
+    }
+
+    /// A pencil call that ended while its model got ready stays ended (D-M6).
+    @Test func aPencilCallEndedWhileWarmingStaysEnded() async {
+        let runner = SlowRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        let starting = Task { await call.start() }
+        #expect(await eventually { runner.isWarming })
+        call.end()
+        runner.isWarming = false
+        await starting.value
+        #expect(call.phase == .ended && call.startedAt == nil)
+    }
+
+    /// Closing the design stops sent routes that are still settling, not only the one
+    /// listening, so no microphone is left on (D-I5).
+    @Test func stoppingAllListeningStopsSettlingRoutesToo() async {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = pencilCall(runner) { routes.append($0) }
+        call.finishWait = .seconds(60)
+        await call.start()
+        await call.listen(for: nil); call.send()
+        await call.listen(for: nil)
+        #expect(routes.count == 2 && !routes[0].isStopped && call.isHearing)
+        call.stopAllListening()
+        #expect(routes[0].isStopped && routes[1].isStopped && !call.isHearing)
+        // What the settling route still sends is acted on no more.
+        routes[0].send(.command("make it blue"))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(runner.commands.isEmpty)
+        call.end()
+    }
+
+    /// Each command's own lines say which command they are, so that a pencil bubble can
+    /// tell its own from an earlier one's (D-M3).
+    @Test func captionsSayWhichCommandTheyAreAbout() async {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = pencilCall(runner) { routes.append($0) }
+        call.captionTimes = (.seconds(60), .seconds(60))
+        await call.start()
+        await call.listen(for: nil); call.send(); routes[0].send(.command("make it blue"))
+        #expect(await eventually { call.caption?.kind == .done })
+        #expect(call.caption?.command == 1 && call.commandsTaken == 1)
+        await call.listen(for: nil)
+        routes[1].send(.hearing("make it"))
+        #expect(await eventually { call.caption?.kind == .hearing })
+        #expect(call.caption?.command == nil)
+        call.end()
+    }
+}
+
+/// A runner whose getting ready lasts until the test lets it go.
+@MainActor
+private final class SlowRunner: VoiceCommandRunner {
+    var isWarming = false
+    func warmUp() async {
+        isWarming = true
+        while isWarming { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    func run(_ command: String) async -> VoiceOutcome { VoiceOutcome() }
+
 }
 
 @Suite("Commands from recognised speech")

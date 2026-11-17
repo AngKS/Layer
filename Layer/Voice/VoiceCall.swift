@@ -57,6 +57,9 @@ final class VoiceCall {
         /// Which showing of a line this is, so that the same words shown twice can be
         /// told apart. Not part of what the line says, so not part of `==`.
         var id = UUID()
+        /// Which command the line is about, numbered as the call took them, when it is
+        /// about one: what a sent pencil bubble follows. Not part of `==` either.
+        var command: Int?
 
         static func == (lhs: Caption, rhs: Caption) -> Bool {
             lhs.kind == rhs.kind && lhs.text == rhs.text
@@ -85,6 +88,8 @@ final class VoiceCall {
     private(set) var levels: [Float] = []
     /// Commands spoken and not yet started.
     private(set) var queuedCount = 0
+    /// How many commands the call has taken, which is the number of the last one.
+    @ObservationIgnored private(set) var commandsTaken = 0
     /// Why the call ended, when it wasn't hung up.
     private(set) var endReason: String?
     /// Whether a route asked for is open, from its starting until it stops. Only a call
@@ -107,11 +112,14 @@ final class VoiceCall {
     /// How long a route told to finish has to send its command before it is stopped
     /// anyway. A late phrase can keep a recogniser settling for a couple of seconds.
     @ObservationIgnored var finishWait: Duration = .seconds(3)
+    /// The design's turn-taking for spoken commands, shared with its other calls. Without
+    /// one, the call's commands take no turns but their own.
+    @ObservationIgnored var gate: VoiceCommandGate?
 
     @ObservationIgnored private let listeningStyle: Listening
     @ObservationIgnored private let runner: any VoiceCommandRunner
     @ObservationIgnored private let vocabulary: @MainActor () -> [String]
-    @ObservationIgnored private var queue: [(text: String, target: VoiceTarget?)] = []
+    @ObservationIgnored private var queue: [(text: String, target: VoiceTarget?, number: Int)] = []
     /// The route asked for and not yet told the command is over.
     @ObservationIgnored private var open: Ear?
     /// A route made and prepared as the call started, never started, for the first listen.
@@ -155,6 +163,8 @@ final class VoiceCall {
             // The model too. There is no microphone to wait on here, and warming up only
             // starts the model off, so it is awaited.
             await runner.warmUp()
+            // Ended while the model got ready: it stays ended.
+            guard phase == .starting else { return }
             VoiceLog.log.info("call: listening when asked")
             phase = .listening
             startedAt = .now
@@ -242,6 +252,12 @@ final class VoiceCall {
             events?.cancel()
             deadline?.cancel()
         }
+
+        /// An ear let go of without being closed, with the call it belonged to, still
+        /// stops its route: otherwise the microphone stays counted as in use.
+        isolated deinit {
+            close()
+        }
     }
 
     /// Starts listening for one command about `target`. Asked again before `send()`, the
@@ -323,6 +339,14 @@ final class VoiceCall {
         if caption?.kind == .hearing { caption = nil }
     }
 
+    /// Stops every route it asked for, sent and settling ones too, and sends nothing more:
+    /// the design is closing. Commands already taken still run.
+    func stopAllListening() {
+        for ear in [open].compactMap({ $0 }) + finishing { close(ear) }
+        spare = nil
+        if caption?.kind == .hearing { caption = nil }
+    }
+
     private func close(_ ear: Ear) {
         ear.close()
         if open === ear {
@@ -369,8 +393,11 @@ final class VoiceCall {
         guard phase != .ended else { return }
         switch event {
         case .level(let level):
-            levels.append(level)
-            if levels.count > Self.levelCount { levels.removeFirst(levels.count - Self.levelCount) }
+            // Made whole and set once, so that whatever draws the waveform hears of it once.
+            var latest = levels
+            latest.append(level)
+            if latest.count > Self.levelCount { latest.removeFirst(latest.count - Self.levelCount) }
+            levels = latest
         case .hearing(let words):
             if !words.isEmpty { show(.hearing, words) }
         case .command(let command):
@@ -425,7 +452,8 @@ final class VoiceCall {
             if caption?.kind == .hearing { caption = nil }
             return
         }
-        queue.append((command, target))
+        commandsTaken += 1
+        queue.append((command, target, commandsTaken))
         queuedCount = queue.count
         startWorker()
     }
@@ -516,24 +544,40 @@ final class VoiceCall {
         worker = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.phase != .ended, !self.queue.isEmpty else { break }
-                let (command, target) = self.queue.removeFirst()
+                let (command, target, number) = self.queue.removeFirst()
                 self.queuedCount = self.queue.count
                 self.phase = .working
-                self.show(.working, "Thinking…")
-                self.onCommandStarts?(target)
+                self.working = number
+                let gate = self.gate
+                let waits = gate?.isBusy == true
+                self.show(.working, waits ? Self.waitingItsTurn : "Thinking…", about: number)
                 let runner = self.runner
-                let run = Task { await runner.run(command) }
+                // Waiting its turn is part of the command, so that "stop" or hanging up
+                // while it waits stops it there.
+                let run = Task { [weak self] () -> VoiceOutcome in
+                    if let gate {
+                        guard await gate.enter() else { return VoiceOutcome(wasCancelled: true) }
+                    }
+                    defer { gate?.leave() }
+                    guard let self, self.phase != .ended, !Task.isCancelled else { return VoiceOutcome(wasCancelled: true) }
+                    if waits { self.show(.working, "Thinking…", about: number) }
+                    self.onCommandStarts?(target)
+                    return await runner.run(command, about: target)
+                }
                 self.running = run
                 let outcome = await run.value
                 self.running = nil
                 guard self.phase != .ended else { break }
-                self.show(outcome)
+                self.show(outcome, about: number)
+                self.working = nil
                 // Stopped or gone wrong, the model starts afresh for the next command.
                 // Warmed now, the next one doesn't wait on that.
                 if outcome.wasCancelled || outcome.problem != nil {
                     Task { await runner.warmUp() }
                 }
-                if outcome.endsCall {
+                // A pencil call stays up for the next squeeze, with whatever else was
+                // asked of it, as for a spoken "hang up": only a phone call is hung up.
+                if outcome.endsCall, !self.listensOnRequest {
                     self.end()
                     break
                 }
@@ -544,34 +588,41 @@ final class VoiceCall {
         }
     }
 
+    /// Said while a command waits for another call's to finish.
+    static let waitingItsTurn = "Waiting for the last command…"
+
+    /// The number of the command being carried out, for its captions.
+    @ObservationIgnored private var working: Int?
+
     /// What the command under way is doing right now, such as "Restyling…".
     func showStep(_ text: String) {
         guard phase == .working else { return }
-        show(.working, text)
+        show(.working, text, about: working)
     }
 
-    private func show(_ outcome: VoiceOutcome) {
+    private func show(_ outcome: VoiceOutcome, about command: Int) {
         VoiceLog.log.info("""
             call: command over. steps \(outcome.lines.count), stopped \(outcome.wasCancelled), \
             problem: \(outcome.problem ?? "none", privacy: .private), said: \(outcome.said, privacy: .private)
             """)
         if outcome.wasCancelled {
-            show(.done, "Stopped")
+            show(.done, "Stopped", about: command)
         } else if let problem = outcome.problem {
-            show(.problem, problem)
+            show(.problem, problem, about: command)
         } else if let line = outcome.lines.last {
-            show(.done, line)
+            show(.done, line, about: command)
         } else if !outcome.said.isEmpty {
             // Nothing was done, so no tick, whatever the model says it did.
-            show(.said, outcome.said)
+            show(.said, outcome.said, about: command)
         } else {
             caption = nil
         }
     }
 
-    private func show(_ kind: Caption.Kind, _ text: String) {
+    /// `command` is the number of the command the line is about, for a line that is.
+    private func show(_ kind: Caption.Kind, _ text: String, about command: Int? = nil) {
         captionClearing?.cancel()
-        let shown = Caption(kind: kind, text: text)
+        let shown = Caption(kind: kind, text: text, command: command)
         caption = shown
         // Words being heard and work under way stay until something replaces them.
         let time: Duration

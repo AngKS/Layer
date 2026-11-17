@@ -26,12 +26,17 @@ final class VoiceToolbox: VoiceActing {
         self.handles = handles
     }
 
+    /// Where a new screen goes for the command under way, in canvas points: where the
+    /// pencil pointed at empty canvas. Nil puts it where screens always go.
+    var newScreenAnchor: CGPoint?
+
     /// Forgets the last command's results, ready for the next.
     func reset() {
         lines = []
         failures = []
         endsCall = false
         lastFailed = false
+        newScreenAnchor = nil
     }
 
     // MARK: Screens
@@ -269,9 +274,10 @@ final class VoiceToolbox: VoiceActing {
         guard let model else { throw CancellationError() }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
+        guard !model.isClosed else { return failed(AppModel.closedProblem) }
         guard !model.isGenerating else { return failed("A screen is already being written.") }
         // Inside a command the screen is part of the command's own undo step.
-        model.generateScreen(from: description, named: Self.screenName(name), partOfHeldEdit: model.store.isHoldingEdit)
+        model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, partOfHeldEdit: model.store.isHoldingEdit)
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
@@ -284,7 +290,10 @@ final class VoiceToolbox: VoiceActing {
         model.dismissGeneration()
         try Task.checkCancellation()
         if case .failed(let reason) = outcome { return failed(reason) }
-        guard let screen = model.store.screen(screenID) else { return failed("The model didn't describe any elements.") }
+        guard let screen = model.store.screen(screenID) else {
+            // Taken away while it was being written, by undo or by hand.
+            return failed(outcome == nil ? "The screen was taken away while it was being written." : "The model didn't describe any elements.")
+        }
         let count = screen.elements.count
         return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements").")
     }

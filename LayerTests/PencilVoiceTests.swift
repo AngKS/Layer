@@ -56,6 +56,9 @@ private final class Bench {
             clock: { [unowned self] in now }
         )
         pencil.squeezeIsOff = { false }
+        // Other suites' calls run alongside: only this design's own call counts, unless a
+        // test says otherwise.
+        pencil.phoneCallIsUp = { false }
         pencil.readiness = { readiness }
         pencil.silenceCheck = .milliseconds(5)
         app.pencilVoice = pencil
@@ -250,22 +253,21 @@ struct PencilVoiceTests {
         #expect(bench.app.selection == nil)
         bench.routes[0].send(.command("a settings screen"))
         #expect(await eventually { bench.runner.commands == ["a settings screen"] })
-        // The view is unscrolled and unzoomed, so the pen's point is the canvas point.
+        // The view is unscrolled and unzoomed, so the pen's point is the canvas point. It
+        // goes with the command, not into anything another command could read.
         let anchor = Bench.overCanvas
-        #expect(bench.app.newScreenAnchor == anchor)
-        #expect(bench.app.voiceHint == "(The person pointed at empty canvas: a description of a screen means a new screen there.)")
+        #expect(bench.runner.targets == [.canvas(anchor)])
 
         // The model's createScreen comes here, and the screen goes at the pen's point.
         let device = bench.app.store.canvas.sketchDevice
         #expect(DesignActions.placementForNewScreen(device, in: bench.app, near: anchor).origin == anchor)
-        bench.app.generateScreen(from: "a settings screen")
+        bench.app.generateScreen(from: "a settings screen", near: anchor)
         let made = try #require(bench.app.store.screens.last)
         #expect(made.origin == anchor)
         bench.app.stopGenerating()
         await bench.app.waitForGeneration()
 
         bench.runner.holds = false
-        #expect(await eventually { bench.app.newScreenAnchor == nil && bench.app.voiceHint == nil })
         bench.end()
     }
 
@@ -438,14 +440,31 @@ struct PencilVoiceTests {
         bench.end()
     }
 
+    /// Whether anything was said is the route's to say: it answers a finish at once when
+    /// nothing was.
     @Test func aToggleWithNothingSaidClosesAtOnce() async {
         let bench = Bench()
         #expect(await bench.toggle())
         bench.pencil.call?.finishWait = .seconds(60)
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
-        #expect(bench.pencil.bubble == nil && bench.routes[0].isStopped)
+        #expect(bench.routes[0].finishCount == 1)
         bench.pencil.squeezeEnded()
+        bench.routes[0].send(.nothingHeard)
+        #expect(await eventually { bench.pencil.bubble == nil && bench.routes[0].isStopped })
         #expect(bench.runner.commands.isEmpty && !(bench.pencil.call?.isHearing ?? true))
+        bench.end()
+    }
+
+    /// "Undo" said just before the second squeeze, before the recogniser showed it: the
+    /// route still has it, so it is sent, not dropped for want of a caption (D-M1).
+    @Test func aToggleSendsWordsNotYetShown() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(bench.routes[0].finishCount == 1 && !bench.routes[0].isStopped)
+        bench.pencil.squeezeEnded()
+        bench.routes[0].send(.command("undo"))
+        #expect(await eventually { bench.runner.commands == ["undo"] })
         bench.end()
     }
 
@@ -453,6 +472,7 @@ struct PencilVoiceTests {
         let (app, _) = VoiceFixture.login()
         var pencil: PencilVoice? = PencilVoice(model: app, makeRoute: { FakeRoute() }, makeRunner: { _ in FakeRunner() })
         pencil?.readiness = { .ready }
+        pencil?.phoneCallIsUp = { false }
         pencil?.hovered()
         #expect(await eventually { pencil?.call?.phase == .listening })
         try? await Task.sleep(for: .milliseconds(50))
@@ -619,6 +639,115 @@ struct PencilVoiceTests {
         NotificationCenter.default.post(name: ModelPreferences.changed, object: nil)
         bench.pencil.hovered()
         #expect(checks == 3)
+        bench.end()
+    }
+
+    // MARK: Wave 2: one microphone, one command at a time, and a clean life-cycle
+
+    /// A phone call takes the microphone: the pencil stops listening, and sends nothing.
+    /// Its call shares the design's turns with the phone call's (D-I1, B-I2).
+    @Test func startingAPhoneCallStopsAPencilListen() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        #expect(bench.pencil.call?.gate === bench.app.voiceCommands)
+        await bench.app.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        #expect(bench.routes[0].isStopped && bench.pencil.bubble == nil)
+        #expect(bench.app.voice?.gate === bench.app.voiceCommands)
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+    }
+
+    /// A phone call in another window has the microphone: a squeeze here only retargets.
+    @Test func aSqueezeDuringAnotherWindowsCallOnlyRetargets() async {
+        let bench = Bench()
+        let other = VoiceFixture.login().app
+        await other.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        let call = other.voice
+        bench.pencil.phoneCallIsUp = { VoiceCall.current === call && call != nil }
+        #expect(VoiceCall.current === other.voice)
+        bench.pencil.hovered()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.pencil.squeezeEnded()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call == nil && bench.routes.isEmpty && bench.pencil.bubble == nil)
+        #expect(bench.app.selection == bench.button)
+        #expect(bench.pencil.retarget?.point == Bench.overButton)
+        other.endVoiceCall()
+        bench.end()
+    }
+
+    /// A held squeeze whose end never comes stops listening after a minute, and says so (D-C1).
+    @Test func aHoldWhoseEndNeverComesStopsAfterAMinute() async {
+        let bench = Bench()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        bench.now += .seconds(59)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.state == .listening && !bench.routes[0].isStopped)
+        bench.now += .seconds(2)
+        #expect(await eventually { bench.routes[0].isStopped && bench.state == .problem(PencilVoice.heldTooLong) })
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+    }
+
+    /// A squeeze whose gesture fails was never said to be over: a held one sends nothing (D-C1).
+    @Test func aHeldSqueezeThatFailsSendsNothing() async {
+        let bench = Bench()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        #expect(await bench.hear("make it blue"))
+        bench.now += .seconds(1)
+        bench.pencil.squeezeFailed()
+        #expect(bench.routes[0].isStopped && bench.routes[0].finishCount == 0 && bench.pencil.bubble == nil)
+        // The next squeeze starts afresh.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.routes.count == 2 })
+        bench.end()
+    }
+
+    /// The device sends a squeeze's start over and over: only the first one listens (D-M9).
+    @Test func aSqueezeStartedAgainListensOnce() async {
+        let bench = Bench()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.routes.count == 1 && !bench.routes[0].isStopped && bench.state == .listening)
+        bench.end()
+    }
+
+    /// Closing while a sent route still settles stops it: nothing more is sent, and the
+    /// microphone is let go of (D-I5).
+    @Test func closingWhileARouteSettlesStopsIt() async {
+        let bench = Bench()
+        #expect(await bench.hold())
+        #expect(bench.routes[0].finishCount == 1 && !bench.routes[0].isStopped)
+        bench.app.close()
+        #expect(bench.routes[0].isStopped)
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.pencil.call == nil })
+        #expect(bench.runner.commands.isEmpty)
+    }
+
+    /// A sent bubble follows its own command: the one before it finishing isn't this one done (D-M3).
+    @Test func aSentBubbleDoesNotShowAnEarlierCommandsOutcome() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        // The second is sent while the first still runs.
+        #expect(await bench.hold())
+        #expect(bench.state == .working)
+        bench.pencil.call?.captionTimes = (.seconds(60), .seconds(60))
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .done })
+        try? await Task.sleep(for: .milliseconds(50))
+        // The first's tick is no tick for the second, which hasn't even been heard yet.
+        #expect(bench.state == .working)
+        bench.routes[1].send(.command("make it red"))
+        #expect(await eventually { bench.state == .done })
         bench.end()
     }
 }

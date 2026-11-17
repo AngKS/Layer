@@ -284,6 +284,9 @@ final class AppModel {
         images = ImageLibrary(file.images)
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         store.onChange = { [weak self, document] content in
+            // A command or generation still unwinding after the design closed doesn't
+            // write to a document the browser has already let go of.
+            guard self?.isClosed != true else { return }
             document.update { $0.content = content }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
@@ -345,13 +348,16 @@ final class AppModel {
     ///
     /// `name` is what to call the screen; without one it is named from the description.
     ///
+    /// `anchor` is a canvas point to put the screen at, where the pencil pointed for a
+    /// spoken command; without one it goes where new screens always go.
+    ///
     /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
     /// is already being held open and the screen is part of it, so it opens none of its
     /// own. That is also how an edit by hand made in the meantime is told from it: see
     /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, named name: String? = nil, partOfHeldEdit: Bool = false) {
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, partOfHeldEdit: Bool = false) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isGenerating else { return }
+        guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
@@ -362,16 +368,20 @@ final class AppModel {
         generationOwnsEdit = !partOfHeldEdit
         if generationOwnsEdit { store.beginEdit() }
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
-        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: newScreenAnchor))
+        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
         store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
         DesignActions.reveal(.screen(screen.id), in: self)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
 
         let choice = modelChoice
+        let stream = screenStream(prompt, board, choice)
         generationTask = Task { [weak self] in
             do {
-                for try await update in ScreenGenerator.stream(prompt, board: board, using: choice) {
-                    guard let self, let current = store.screen(screen.id) else { return }
+                for try await update in stream {
+                    guard let self else { return }
+                    // The screen was taken away, by undo or by hand: there is nothing left to
+                    // write on, but the generation still finishes, or it is stuck writing.
+                    guard let current = store.screen(screen.id) else { break }
                     switch update {
                     case .startedWriting:
                         generation?.isThinking = false
@@ -400,9 +410,26 @@ final class AppModel {
         await generationTask?.value
     }
 
+    /// Where a generated screen's updates come from. A test puts its own in.
+    @ObservationIgnored var screenStream: (String, String?, ModelChoice) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
+        ScreenGenerator.stream($0, board: $1, using: $2)
+    }
+
     private func finishGeneration(error: (any Error)?) {
         generationTask = nil
         guard var finished = generation else { return }
+        // Nothing is written to a design that has closed, and nothing is left to show.
+        guard !isClosed else {
+            generation = nil
+            return
+        }
+        // A screen taken away while it was written has nothing to show either. Its edit,
+        // if it opened one, is still closed.
+        guard store.screen(finished.screenID) != nil else {
+            if generationOwnsEdit { store.endEdit() }
+            generation = nil
+            return
+        }
         if let error {
             finished.phase = .failed(error.localizedDescription)
         } else {
@@ -466,13 +493,29 @@ final class AppModel {
         Task { await startVoiceCall(route: DictationRoute(), runner: VoiceAgent(model: self)) }
     }
 
+    /// Lets one spoken command at a time act on the design, whichever call it came from.
+    let voiceCommands = VoiceCommandGate()
+
+    /// Said when a command reaches a design that has closed.
+    static let closedProblem = "The design has closed."
+
+    /// Stops the pencil listening, if it is: another call is taking the microphone.
+    func stopPencilListening() {
+        pencilVoiceIfMade?.stopListening()
+    }
+
     /// Starts a call that hears through `route` and acts through `runner`. Returns once
     /// the call is listening, or has ended because it couldn't.
     func startVoiceCall(route: any VoiceRoute, runner: any VoiceCommandRunner) async {
         guard voice == nil else { return }
         // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
         tool = .select
+        // One microphone at a time, in every window: the phone call hears from now on. A
+        // pencil command already sent still runs, in its turn.
+        for design in OpenDesigns.shared.all where design !== self { design.stopPencilListening() }
+        stopPencilListening()
         let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        call.gate = voiceCommands
         // What the agent is doing, tool by tool, is what the pill says while it works.
         (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }
         call.onEnd = { [weak self, weak call] in
@@ -496,14 +539,6 @@ final class AppModel {
         endVoiceCall()
         pencilVoiceIfMade?.stopListening()
     }
-
-    /// Where a new screen goes while a command the pencil pointed at empty canvas for is
-    /// running, in canvas points. Nil the rest of the time, when screens go where they
-    /// always have.
-    @ObservationIgnored var newScreenAnchor: CGPoint?
-    /// A line told to the model ahead of the next spoken command, about where the pencil
-    /// pointed. The agent takes it, and clears it, as it asks.
-    @ObservationIgnored var voiceHint: String?
 
     /// Apple Pencil Pro's push-to-talk, made when first asked for. A test puts its own in.
     var pencilVoice: PencilVoice {
@@ -541,7 +576,7 @@ final class AppModel {
     /// Set once the design has closed. Whatever was still under way then, a name being
     /// thought up or a picture due, is dropped rather than done to a file the document
     /// browser has already listed.
-    @ObservationIgnored private var isClosed = false
+    @ObservationIgnored private(set) var isClosed = false
 
     /// Gets a design ready to go back to the document browser: its picture as the board
     /// was left, its name decided, and its file given that name.
