@@ -293,6 +293,84 @@ final class AppModel {
         engine.use(modelChoice.sketchProvider)
     }
 
+    // MARK: Generating screens
+
+    /// A screen being written by the design's model, element by element.
+    struct ScreenGeneration: Equatable {
+        enum Phase: Equatable {
+            case writing
+            case finished
+            case failed(String)
+        }
+
+        var screenID: DesignScreen.ID
+        var description: String
+        var elementCount = 0
+        var phase = Phase.writing
+    }
+
+    /// The screen being generated, or the last one while its outcome is shown.
+    private(set) var generation: ScreenGeneration?
+    @ObservationIgnored private var generationTask: Task<Void, Never>?
+
+    var isGenerating: Bool { generation?.phase == .writing }
+
+    /// Adds a new screen and has the design's model write it from `description`. Its
+    /// elements appear as the model writes them; the whole screen is one undo step.
+    func generateScreen(from description: String) {
+        let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !isGenerating else { return }
+        generationTask?.cancel()
+
+        let device = store.canvas.sketchDevice
+        store.beginEdit()
+        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
+        store.updateScreen(screen.id) { $0.name = ScreenGenerator.name(for: prompt) }
+        DesignActions.reveal(.screen(screen.id), in: self)
+        generation = ScreenGeneration(screenID: screen.id, description: prompt)
+
+        let choice = modelChoice
+        generationTask = Task { [weak self] in
+            do {
+                for try await blueprint in ScreenGenerator.stream(prompt, using: choice) {
+                    guard let self, let current = store.screen(screen.id) else { return }
+                    withAnimation(.snappy(duration: 0.25)) {
+                        _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                    }
+                    generation?.elementCount = blueprint.itemCount
+                }
+                self?.finishGeneration(error: nil)
+            } catch {
+                self?.finishGeneration(error: error is CancellationError ? nil : error)
+            }
+        }
+    }
+
+    /// Stops the model; what it has written so far stays.
+    func stopGenerating() {
+        generationTask?.cancel()
+    }
+
+    private func finishGeneration(error: (any Error)?) {
+        generationTask = nil
+        guard var finished = generation else { return }
+        if let error {
+            finished.phase = .failed(error.localizedDescription)
+        } else {
+            finished.phase = finished.elementCount > 0 ? .finished : .failed(ScreenGenerator.GenerationError.nothingWritten.localizedDescription)
+        }
+        // A screen nothing was written on isn't left behind.
+        if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
+        store.endEdit()
+        generation = finished
+    }
+
+    /// Clears a finished generation's outcome.
+    func dismissGeneration() {
+        guard !isGenerating else { return }
+        generation = nil
+    }
+
     // MARK: The file
 
     @ObservationIgnored private var renaming: Task<Void, Never>?
@@ -324,6 +402,7 @@ final class AppModel {
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
         fileCheck?.cancel()
+        generationTask?.cancel()
         settle?.cancel()
         adjustmentEnd?.cancel()
         for conversion in conversions { conversion.cancel() }

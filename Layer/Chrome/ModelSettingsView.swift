@@ -6,6 +6,8 @@ import SwiftUI
 final class ProviderSettings: Identifiable {
     nonisolated let provider: HostedProvider
     var keyDraft = ""
+    /// The server address being edited, for a self-hosted provider.
+    var serverDraft: String
     private(set) var hasKey: Bool
     private(set) var models: [HostedModelInfo]
     private(set) var isFetching = false
@@ -18,6 +20,17 @@ final class ProviderSettings: Identifiable {
         self.provider = provider
         hasKey = APIKeyStore.hasKey(for: provider)
         models = ModelPreferences.knownModels(for: provider)
+        serverDraft = ModelPreferences.server(for: provider)
+    }
+
+    /// Whether the provider can be used now: it has a key, or needs none.
+    var isConfigured: Bool { hasKey || !provider.requiresKey }
+
+    /// Saves the server address and looks for the models it serves.
+    func saveServer() {
+        ModelPreferences.setServer(serverDraft, for: provider)
+        serverDraft = ModelPreferences.server(for: provider)
+        fetchModels()
     }
 
     /// Saves the typed key in the Keychain and fetches the models it can use.
@@ -45,7 +58,8 @@ final class ProviderSettings: Identifiable {
     /// Asks the provider which models the saved key can use. The last list fetched stays
     /// in place, and on screen, if this fails.
     func fetchModels() {
-        guard let key = APIKeyStore.key(for: provider) else { return }
+        let key = APIKeyStore.key(for: provider)
+        guard key != nil || !provider.requiresKey else { return }
         fetch?.cancel()
         isFetching = true
         error = nil
@@ -55,7 +69,9 @@ final class ProviderSettings: Identifiable {
                 guard let self, !Task.isCancelled else { return }
                 models = found
                 ModelPreferences.remember(found, for: provider)
-                if found.isEmpty { error = "This key can't use any models that answer chat." }
+                if found.isEmpty {
+                    error = provider.isLocal ? "\(provider.name) has no models downloaded." : "This key can't use any models that answer chat."
+                }
                 NotificationCenter.default.post(name: ModelPreferences.changed, object: nil)
             } catch {
                 guard let self, !Task.isCancelled else { return }
@@ -107,14 +123,14 @@ struct ModelSettingsView: View {
         .onChange(of: defaultChoice) { _, choice in ModelPreferences.defaultChoice = choice }
         // Lists are fetched again each time the sheet opens, so they stay current.
         .task {
-            for settings in providers where settings.hasKey { settings.fetchModels() }
+            for settings in providers where settings.isConfigured { settings.fetchModels() }
         }
     }
 
     private var defaultFooter: String {
         "Each design keeps the model it was made with; change a design's own in its Magic Pen settings. "
-            + "Apple Intelligence runs on this iPad. Anthropic and OpenAI models run on their servers: "
-            + "descriptions of your sketches are sent to them."
+            + "Apple Intelligence runs on this iPad. Anthropic and OpenAI models run on their servers, "
+            + "and LM Studio on your own computer: descriptions of your sketches are sent to them."
     }
 }
 
@@ -124,6 +140,19 @@ private struct ProviderSection: View {
 
     var body: some View {
         Section {
+            if settings.provider.defaultServer != nil {
+                LabeledContent("Server") {
+                    TextField(settings.provider.defaultServer ?? "", text: $settings.serverDraft)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(settings.saveServer)
+                        .accessibilityLabel("\(settings.provider.name) server address")
+                }
+                Button("Connect", systemImage: "network") { settings.saveServer() }
+                    .disabled(settings.isFetching)
+            }
             if settings.hasKey {
                 LabeledContent("API Key") {
                     Label("Saved in Keychain", systemImage: "lock.fill")
@@ -146,13 +175,17 @@ private struct ProviderSection: View {
                 Button("Save Key", systemImage: "key") { settings.saveKey() }
                     .disabled(settings.keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            if !settings.provider.requiresKey, !settings.hasKey, !settings.models.isEmpty {
+                Button("Refresh Models", systemImage: "arrow.clockwise") { settings.fetchModels() }
+                    .disabled(settings.isFetching)
+            }
 
             if settings.isFetching {
                 HStack(spacing: 8) {
                     ProgressView()
                     Text("Finding models…").foregroundStyle(.secondary)
                 }
-            } else if settings.hasKey, !settings.models.isEmpty {
+            } else if settings.isConfigured, !settings.models.isEmpty {
                 Text(settings.models.count == 1 ? "1 model available" : "\(settings.models.count) models available")
                     .foregroundStyle(.secondary)
             }
@@ -163,7 +196,9 @@ private struct ProviderSection: View {
         } header: {
             Label(settings.provider.name, systemImage: settings.provider.symbol)
         } footer: {
-            if !settings.hasKey {
+            if settings.provider.isLocal {
+                Text("Runs on your own computer: start LM Studio's server, and use this Mac's address on the local network from an iPad.")
+            } else if !settings.hasKey {
                 Link("Get an \(settings.provider.name) API key", destination: settings.provider.keyPage)
             }
         }
@@ -203,9 +238,9 @@ struct ModelChoicePicker: View {
 
     private func models(for provider: HostedProvider) -> [HostedModelInfo] {
         if let live = providers?.first(where: { $0.provider == provider }) {
-            return live.hasKey ? live.models : []
+            return live.isConfigured ? live.models : []
         }
-        return APIKeyStore.hasKey(for: provider) ? ModelPreferences.knownModels(for: provider) : []
+        return ModelPreferences.isConfigured(provider) ? ModelPreferences.knownModels(for: provider) : []
     }
 
     private func isOffered(_ choice: ModelChoice) -> Bool {

@@ -58,7 +58,8 @@ struct HostedModelExecutor: LanguageModelExecutor {
         to request: LanguageModelExecutorGenerationRequest, model: HostedLanguageModel,
         streamingInto channel: LanguageModelExecutorGenerationChannel
     ) async throws {
-        guard let key = APIKeyStore.key(for: model.provider) else { throw HostedModelError.missingKey(model.provider) }
+        let key = APIKeyStore.key(for: model.provider)
+        if model.provider.requiresKey, key == nil { throw HostedModelError.missingKey(model.provider) }
         let conversation = Self.conversation(from: request.transcript)
         let schema = try request.schema.map(Self.jsonSchema(of:))
         let options = request.generationOptions
@@ -73,6 +74,10 @@ struct HostedModelExecutor: LanguageModelExecutor {
                 // Providers don't count tokens per fragment; one per fragment is what
                 // the framework is told until the real totals arrive with the usage.
                 await channel.send(.response(action: .appendText(fragment, tokenCount: 1)))
+            case .reasoning(let thought):
+                // What a reasoning model thought before answering goes into the
+                // transcript as reasoning, apart from the answer.
+                await channel.send(.reasoning(action: .appendText(thought, tokenCount: 1)))
             case .usage(let input, let output):
                 usage = (input, output)
             }

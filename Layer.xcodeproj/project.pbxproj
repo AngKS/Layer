@@ -22,6 +22,7 @@
 		1BCF3008D24010E14BB2644E /* radio_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 3C96FF4F8B75BBE1903DB02D /* radio_jittered_2b.json */; };
 		1CDDCAC09402BE41D8EBB5F5 /* avatar_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = BFD793EB1367F9CB4B21E0C4 /* avatar_jittered_1b.json */; };
 		1D68E7B75BEA96CE3A487BE5 /* radio_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 38ADF600B4614D2D93D8D8C3 /* radio_jittered_1b.json */; };
+		1DBB19348CF9BA5AE385AE72 /* ScreenGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2B71D39A49D089D6CA6D09 /* ScreenGenerator.swift */; };
 		1DCA96061EBC26C6E9D02518 /* stickyNote_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = C965BB35D27442237C7828A8 /* stickyNote_jittered_1a.json */; };
 		1EED872311885B75B533D509 /* DesignPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6005F6BC73F06BCE8F41B816 /* DesignPackage.swift */; };
 		1EFA42E6F3C15C20810490D6 /* unknown_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 76965ECC52982C4D8C3B4362 /* unknown_noisy_1.json */; };
@@ -40,6 +41,7 @@
 		3065FDFCDC3BF7FC54F484C0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ED1415691EB8753973D446A /* Theme.swift */; };
 		30A4509406BEC55E82B5D648 /* image_textField_image_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 3D1C5936B35D8839D1615A26 /* image_textField_image_2.json */; };
 		30B92392D4241D853DFC9E1B /* progress_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 3B82CC6BDCAA612F90D4838C /* progress_jittered_1b.json */; };
+		31B81AF7B11953438E382C6B /* ScreenGenerationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 800E83124DC63477FF49470B /* ScreenGenerationTests.swift */; };
 		31B9FE12BEA7E9C3A1B42323 /* divider_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 2FB07F1ED5A60A893C3B0105 /* divider_clean_1.json */; };
 		324DA4C40F2350D7DBB164F2 /* StylePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF572451F75F5F56DFF44B33 /* StylePanel.swift */; };
 		3442C0E7DD416876DFA2C889 /* toggle_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = F18877DD363D1D2CC6BAA933 /* toggle_jittered_2a.json */; };
@@ -127,6 +129,7 @@
 		7EAC51BAA4E4E54928590638 /* DesignFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEFFB503BCF7CE59521786E /* DesignFile.swift */; };
 		7F4062485B5F6890C2F0B1BF /* SymbolPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43307FB4332333082D85DBFB /* SymbolPicker.swift */; };
 		7F4D7BC80533E8E84B983029 /* progress_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = A26F728331B06C0C8E4E8CBA /* progress_clean_2.json */; };
+		80397F63F1C913EFA60625D4 /* GenerateScreenPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27F1C76E80D7C425B468608 /* GenerateScreenPanel.swift */; };
 		8066F5FB47341EF262F0DF3B /* stickyNote_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 10BF3C2F25C36221CC151AE2 /* stickyNote_clean_2.json */; };
 		8088ECD8AFEBC5082705BA77 /* image_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = BAA734A20F2453F4B1D3EB37 /* image_clean_1.json */; };
 		829E1C8D5549A511AC03039F /* avatar_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 7ABFEA276705A10EA9154E0C /* avatar_noisy_1.json */; };
@@ -399,6 +402,7 @@
 		7D959168FAD665881CBAC9CD /* CanvasScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasScreen.swift; sourceTree = "<group>"; };
 		7E9A47BE672AF5C474731DD7 /* divider_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_noisy_1.json; sourceTree = "<group>"; };
 		7EF06558001F9646F506F005 /* text_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_noisy_2.json; sourceTree = "<group>"; };
+		800E83124DC63477FF49470B /* ScreenGenerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGenerationTests.swift; sourceTree = "<group>"; };
 		807E021B6A5C95E3E3B01891 /* stickyNote_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_noisy_1.json; sourceTree = "<group>"; };
 		81CA97B9A6B429EA72EB56FA /* body_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_noisy_2.json; sourceTree = "<group>"; };
 		822515325C156C7B3ED6C2C6 /* textField_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_clean_1.json; sourceTree = "<group>"; };
@@ -442,6 +446,7 @@
 		AB5DF74E91859F550E8EBB85 /* checkbox_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_jittered_2b.json; sourceTree = "<group>"; };
 		AB61C00F9B35FEBDAB03F634 /* toggle_progress_progress_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_progress_progress_3.json; sourceTree = "<group>"; };
 		AC17B009FF499090B9EFC578 /* checkbox_radio_radio_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_radio_3.json; sourceTree = "<group>"; };
+		AC2B71D39A49D089D6CA6D09 /* ScreenGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGenerator.swift; sourceTree = "<group>"; };
 		ACCF34B883E75964E9662547 /* progress_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_noisy_2.json; sourceTree = "<group>"; };
 		AE20ECAF7534512F2EE03E44 /* GlyphMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphMatcher.swift; sourceTree = "<group>"; };
 		AF5567634AE631FEFA9FF16B /* Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewport.swift; sourceTree = "<group>"; };
@@ -502,6 +507,7 @@
 		E0E9A3C3175D23604BD0A70B /* radio_avatar_radio_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_avatar_radio_2.json; sourceTree = "<group>"; };
 		E13116FD862E660E5BE098CF /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		E14BD9AC08BB6AB501A5D9EB /* radio_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_clean_1.json; sourceTree = "<group>"; };
+		E27F1C76E80D7C425B468608 /* GenerateScreenPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateScreenPanel.swift; sourceTree = "<group>"; };
 		E34A52AA48FF8955F9DFDA8C /* button_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_noisy_2.json; sourceTree = "<group>"; };
 		E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchAnalyzer.swift; sourceTree = "<group>"; };
 		E5437CC6E401D1E7BC88475F /* unknown_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_clean_2.json; sourceTree = "<group>"; };
@@ -535,6 +541,7 @@
 		019BBED4354F6E9E20344E04 /* Chrome */ = {
 			isa = PBXGroup;
 			children = (
+				E27F1C76E80D7C425B468608 /* GenerateScreenPanel.swift */,
 				DDE6E4E41B010D0B7EE9ACE3 /* LayersPanel.swift */,
 				E13116FD862E660E5BE098CF /* ModelSettingsView.swift */,
 				EE02CD3BF12421A236346FDA /* Scrubber.swift */,
@@ -662,6 +669,7 @@
 				C0E9CF91BDC7654B1CAA911E /* HostedModelTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				A85EF7EB01015117DC8F76E0 /* PerformanceTests.swift */,
+				800E83124DC63477FF49470B /* ScreenGenerationTests.swift */,
 				ED047D577FD94F4FA71A0E68 /* SiriIntentsLiveTests.swift */,
 				DFEFB654B701753D17A905FE /* SiriIntentsTests.swift */,
 				73904A9517CA25EB858FAB2E /* SketchBenchmarkTests.swift */,
@@ -680,6 +688,7 @@
 				43B6243D62E7152C04A2D74D /* HandwritingRecognizer.swift */,
 				4C860245772672A5BCE55B13 /* HostedSketchInterpreter.swift */,
 				FBA2EA20C0A640CC214D6D82 /* RuleInterpreter.swift */,
+				AC2B71D39A49D089D6CA6D09 /* ScreenGenerator.swift */,
 				E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */,
 				0F296EF7BB53596E9E6D60C7 /* SketchContextTool.swift */,
 				3A834F3E5C52B77D1C250633 /* SketchEngine.swift */,
@@ -1248,6 +1257,7 @@
 				98E5D0F3B4AB52DA3528CA7F /* HostedModelTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				F997EC4625D66DA01E70C75A /* PerformanceTests.swift in Sources */,
+				31B81AF7B11953438E382C6B /* ScreenGenerationTests.swift in Sources */,
 				FAEC2C0ABF27693D3B9C1B2E /* SiriIntentsLiveTests.swift in Sources */,
 				CF9F3B8C3003209A64C3249C /* SiriIntentsTests.swift in Sources */,
 				08E0CD9CF360324C85308E0E /* SketchBenchmarkTests.swift in Sources */,
@@ -1280,6 +1290,7 @@
 				3FB837CFB0C3810D71EDED06 /* ElementIntents.swift in Sources */,
 				57FA8044E36266D6D3C77B08 /* ElementLayout.swift in Sources */,
 				92480E5F86E235DBC0FC8B4E /* ElementStyle.swift in Sources */,
+				80397F63F1C913EFA60625D4 /* GenerateScreenPanel.swift in Sources */,
 				A24A9C4912B12D167CC99F0B /* GlyphMatcher.swift in Sources */,
 				718BBD36F1EB666DC10C683C /* HandwritingRecognizer.swift in Sources */,
 				3EFB790E9096035C448C55EC /* HostedLanguageModel.swift in Sources */,
@@ -1302,6 +1313,7 @@
 				E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
 				3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */,
+				1DBB19348CF9BA5AE385AE72 /* ScreenGenerator.swift in Sources */,
 				AD04D9FCE3FC4E442D3885D6 /* ScreenIntents.swift in Sources */,
 				B137B268CD9DFB98D2FB99FD /* Scrubber.swift in Sources */,
 				54A68555300666BC78765A6E /* SelectionActions.swift in Sources */,

@@ -31,25 +31,19 @@ enum HostedModelClient {
     // MARK: Listing models
 
     /// The models this key can use, newest first. Throws `HostedModelError`.
-    static func models(for provider: HostedProvider, key: String) async throws -> [HostedModelInfo] {
+    static func models(for provider: HostedProvider, key: String?) async throws -> [HostedModelInfo] {
+        var request = URLRequest(url: provider.baseURL.appending(path: "models").appending(queryItems: provider == .anthropic ? [URLQueryItem(name: "limit", value: "100")] : []))
+        authorize(&request, for: provider, key: key)
+        request.timeoutInterval = 20
+        let json = try await send(request, for: provider)
+        guard let data = json["data"] as? [[String: Any]] else { throw HostedModelError.unreadableResponse(provider) }
         switch provider {
         case .anthropic:
-            var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/models?limit=100")!)
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-            request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
-            request.timeoutInterval = 20
-            let json = try await send(request, for: provider)
-            guard let data = json["data"] as? [[String: Any]] else { throw HostedModelError.unreadableResponse(provider) }
             return data.compactMap { item in
                 guard let id = item["id"] as? String else { return nil }
                 return HostedModelInfo(id: id, name: (item["display_name"] as? String) ?? id)
             }
         case .openAI:
-            var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            request.timeoutInterval = 20
-            let json = try await send(request, for: provider)
-            guard let data = json["data"] as? [[String: Any]] else { throw HostedModelError.unreadableResponse(provider) }
             return data
                 .compactMap { item -> (HostedModelInfo, Double)? in
                     guard let id = item["id"] as? String, isOpenAIChatModel(id) else { return nil }
@@ -57,6 +51,22 @@ enum HostedModelClient {
                 }
                 .sorted { $0.1 > $1.1 }
                 .map(\.0)
+        case .lmStudio:
+            // Every model LM Studio has downloaded, less the ones that only make search vectors.
+            return data.compactMap { item in
+                guard let id = item["id"] as? String, !id.contains("embed") else { return nil }
+                return HostedModelInfo(id: id, name: id)
+            }
+        }
+    }
+
+    /// Adds the provider's own way of passing the key. A self-hosted server without a key gets none.
+    static func authorize(_ request: inout URLRequest, for provider: HostedProvider, key: String?) {
+        if provider == .anthropic {
+            request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
+            if let key { request.setValue(key, forHTTPHeaderField: "x-api-key") }
+        } else if let key {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
     }
 
@@ -74,6 +84,8 @@ enum HostedModelClient {
     enum StreamEvent: Equatable, Sendable {
         /// More of the answer's text; for a structured request, more of its JSON.
         case text(String)
+        /// More of what the model thought before answering, for models that say.
+        case reasoning(String)
         /// Tokens used so far, as the provider counts them.
         case usage(input: Int, output: Int)
     }
@@ -83,7 +95,7 @@ enum HostedModelClient {
     /// Failures, before or during the answer, are `HostedModelError`.
     static func stream(
         _ conversation: HostedConversation, schema: Data?, maximumTokens: Int?, temperature: Double?,
-        provider: HostedProvider, model: String, key: String
+        provider: HostedProvider, model: String, key: String?
     ) -> AsyncThrowingStream<StreamEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -107,12 +119,13 @@ enum HostedModelClient {
     /// The whole answer at once, gathered from `stream`.
     static func reply(
         to conversation: HostedConversation, schema: Data?, maximumTokens: Int?, temperature: Double?,
-        provider: HostedProvider, model: String, key: String
+        provider: HostedProvider, model: String, key: String?
     ) async throws -> HostedReply {
         var reply = HostedReply(text: "")
         for try await event in stream(conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature, provider: provider, model: model, key: key) {
             switch event {
             case .text(let text): reply.text += text
+            case .reasoning: break
             case .usage(let input, let output):
                 reply.inputTokens = max(reply.inputTokens, input)
                 reply.outputTokens = max(reply.outputTokens, output)
@@ -123,7 +136,7 @@ enum HostedModelClient {
 
     static func streamingRequest(
         _ conversation: HostedConversation, schema: Data?, maximumTokens: Int?, temperature: Double?,
-        provider: HostedProvider, model: String, key: String
+        provider: HostedProvider, model: String, key: String?
     ) throws -> URLRequest {
         let schemaObject = try schema.map { try JSONSerialization.jsonObject(with: $0) }
         var request: URLRequest
@@ -147,10 +160,8 @@ enum HostedModelClient {
                 body["tools"] = [["name": "respond", "description": "Give the answer in this structure.", "input_schema": schemaObject]]
                 body["tool_choice"] = ["type": "tool", "name": "respond"]
             }
-            request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-            request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
-        case .openAI:
+            request = URLRequest(url: provider.baseURL.appending(path: "messages"))
+        case .openAI, .lmStudio:
             var messages: [[String: Any]] = []
             if let system = conversation.system, !system.isEmpty { messages.append(["role": "system", "content": system]) }
             messages += conversation.messages.map { ["role": $0.role.rawValue, "content": $0.text] }
@@ -161,9 +172,9 @@ enum HostedModelClient {
             if let schemaObject {
                 body["response_format"] = ["type": "json_schema", "json_schema": ["name": "response", "schema": schemaObject, "strict": false]]
             }
-            request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            request = URLRequest(url: provider.baseURL.appending(path: "chat/completions"))
         }
+        authorize(&request, for: provider, key: key)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("text/event-stream", forHTTPHeaderField: "accept")
@@ -202,6 +213,7 @@ enum HostedModelClient {
                     let delta = json["delta"] as? [String: Any]
                     switch delta?["type"] as? String {
                     case "text_delta": return (delta?["text"] as? String).map { [.text($0)] } ?? []
+                    case "thinking_delta": return (delta?["thinking"] as? String).map { [.reasoning($0)] } ?? []
                     case "input_json_delta": return (delta?["partial_json"] as? String).map { [.text($0)] } ?? []
                     default: return []
                     }
@@ -217,13 +229,15 @@ enum HostedModelClient {
                 default:
                     return []
                 }
-            case .openAI:
+            case .openAI, .lmStudio:
                 if let error = json["error"] as? [String: Any] {
                     throw HostedModelError.server(provider, status: 0, message: error["message"] as? String)
                 }
                 var events: [StreamEvent] = []
                 if let delta = (json["choices"] as? [[String: Any]])?.first?["delta"] as? [String: Any] {
                     if let refusal = delta["refusal"] as? String, !refusal.isEmpty { throw HostedModelError.refused(provider, refusal) }
+                    // Reasoning models served this way send their thinking first, under one of these names.
+                    if let thought = (delta["reasoning_content"] ?? delta["reasoning"]) as? String, !thought.isEmpty { events.append(.reasoning(thought)) }
                     if let text = delta["content"] as? String, !text.isEmpty { events.append(.text(text)) }
                 }
                 if let usage = json["usage"] as? [String: Any] {
@@ -273,7 +287,10 @@ enum HostedModelClient {
     }
 
     private static func failure(_ error: URLError, for provider: HostedProvider) -> HostedModelError {
-        switch error.code {
+        if provider.isLocal, [.cannotConnectToHost, .cannotFindHost, .timedOut, .networkConnectionLost].contains(error.code) {
+            return .serverUnreachable(provider)
+        }
+        return switch error.code {
         case .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost,
              .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff:
             .offline

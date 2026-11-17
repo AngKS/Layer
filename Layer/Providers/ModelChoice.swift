@@ -58,6 +58,33 @@ enum ModelPreferences {
         }
     }
 
+    private static func serverKey(_ provider: HostedProvider) -> String { "server.\(provider.rawValue)" }
+
+    /// The server address set for a self-hosted provider, or its usual one.
+    static func server(for provider: HostedProvider) -> String {
+        UserDefaults.standard.string(forKey: serverKey(provider)) ?? provider.defaultServer ?? ""
+    }
+
+    static func setServer(_ address: String, for provider: HostedProvider) {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(trimmed.isEmpty ? nil : trimmed, forKey: serverKey(provider))
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    /// The server's API root, `…/v1`, from the address as typed: with or without a scheme or `/v1`.
+    static func serverURL(for provider: HostedProvider) -> URL {
+        var address = server(for: provider)
+        if !address.contains("://") { address = "http://" + address }
+        while address.hasSuffix("/") { address.removeLast() }
+        if !address.hasSuffix("/v1") { address += "/v1" }
+        return URL(string: address) ?? URL(string: "http://localhost:1234/v1")!
+    }
+
+    /// Whether a provider can be used: it has a key, or needs none.
+    static func isConfigured(_ provider: HostedProvider) -> Bool {
+        !provider.requiresKey || APIKeyStore.hasKey(for: provider)
+    }
+
     /// The models last fetched for a provider, so pickers can show them without asking again.
     static func knownModels(for provider: HostedProvider) -> [HostedModelInfo] {
         guard let data = UserDefaults.standard.data(forKey: modelsKey(provider)) else { return [] }
@@ -78,7 +105,7 @@ extension SketchProvider {
             symbol: provider.symbol,
             needsAPIKey: true,
             readiness: {
-                APIKeyStore.hasKey(for: provider) ? .ready : .unavailable(HostedModelError.missingKey(provider).errorDescription ?? "")
+                ModelPreferences.isConfigured(provider) ? .ready : .unavailable(HostedModelError.missingKey(provider).errorDescription ?? "")
             },
             makeInterpreter: { _ in HostedSketchInterpreter(model: HostedLanguageModel(provider: provider, model: model)) }
         )

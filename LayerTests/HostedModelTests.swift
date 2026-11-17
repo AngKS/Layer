@@ -1,5 +1,5 @@
 import Foundation
-import FoundationModels
+@_weakLinked import FoundationModels
 import os
 import Testing
 @testable import Layer
@@ -167,7 +167,7 @@ struct HostedModelTests {
             let tool = try #require((body["tools"] as? [[String: Any]])?.first)
             #expect((tool["input_schema"] as? [String: Any])?["type"] as? String == "object")
             #expect((body["tool_choice"] as? [String: Any])?["name"] as? String == "respond")
-        case .openAI:
+        case .openAI, .lmStudio:
             let format = try #require(body["response_format"] as? [String: Any])
             #expect(format["type"] as? String == "json_schema")
         }
@@ -191,6 +191,51 @@ struct HostedModelTests {
             try await session.respond(to: "Hello")
         }
         #expect(StubProvider.requests.isEmpty)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aGeneratedScreenFillsInOnTheCanvasAndUndoesInOneStep() async throws {
+        let lines = ["title: Welcome back\n", "text field: Email\n", "text field: Pass", "word\n", "button: Sign in [blue]"]
+        StubProvider.answer(with: .init(body: SSE.openAI(text: lines)))
+        let app = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        app.store.undoManager = undo
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        let screensBefore = app.store.screens.count
+
+        app.generateScreen(from: "a sign-in screen")
+        #expect(app.isGenerating)
+        let screenID = try #require(app.generation?.screenID)
+        #expect(app.store.screen(screenID)?.name == "A sign-in screen")
+        let deadline = ContinuousClock.now + .seconds(10)
+        while app.isGenerating, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+
+        #expect(app.generation?.phase == .finished)
+        #expect(app.generation?.elementCount == 4)
+        let screen = try #require(app.store.screen(screenID))
+        #expect(screen.elements.map(\.kind) == [.title, .textField, .textField, .button])
+        #expect(screen.elements.map(\.text) == ["Welcome back", "Email", "Password", "Sign in"])
+        // The description went to the design's model, with the instructions.
+        let body = StubProvider.lastBody
+        #expect((body["messages"] as? [[String: Any]])?.first?["content"] as? String == ScreenGenerator.instructions)
+
+        // One undo takes the whole generated screen away.
+        undo.undo()
+        #expect(app.store.screens.count == screensBefore)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aFailedGenerationLeavesNoEmptyScreen() async throws {
+        StubProvider.answer(with: .init(status: 401, body: #"{"error":{"message":"bad key"}}"#, contentType: "application/json"))
+        let app = AppModel(document: LayerDocument())
+        app.setModelChoice(.hosted(.anthropic, model: "m"))
+        app.generateScreen(from: "a profile screen")
+        let deadline = ContinuousClock.now + .seconds(10)
+        while app.isGenerating, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(app.generation?.phase == .failed(HostedModelError.keyRejected(.anthropic).localizedDescription))
+        #expect(app.store.screens.isEmpty)
     }
 
     @Test func modelsAreListedFromEachProvider() async throws {
@@ -225,7 +270,7 @@ struct HostedModelTests {
         #expect(body["stream"] as? Bool == true)
         switch provider {
         case .anthropic: #expect(body["max_tokens"] as? Int == 50)
-        case .openAI: #expect(body["max_completion_tokens"] as? Int == 50)
+        case .openAI, .lmStudio: #expect(body["max_completion_tokens"] as? Int == 50)
         }
     }
 
