@@ -40,6 +40,111 @@ final class VoiceToolbox: VoiceActing {
     /// their left edges together, or along a row with their tops together, 12 points
     /// apart. They keep the order they stand in; those on top of one another, which have
     /// none, take the order they were named in. It starts where the first of them is.
+    /// What was said, for the command under way: a delete goes ahead only if it asks for
+    /// one. Nil where no one spoke, as in tests of a tool alone.
+    var spokenCommand: String?
+
+    /// Whether what was said asks for something to be taken away. Three times the
+    /// on-device model answered a command that said nothing of the kind with a delete.
+    static func asksToRemove(_ said: String) -> Bool {
+        let words = said.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let removing: Set<String> = [
+            "delete", "deleting", "deleted", "remove", "removing", "erase", "erasing", "clear", "bin", "trash", "scrap",
+            "discard", "ditch", "drop", "kill", "lose", "cut",
+        ]
+        if words.contains(where: removing.contains) { return true }
+        if let get = words.firstIndex(of: "get"), words.dropFirst(get + 1).first == "rid" { return true }
+        if let take = words.firstIndex(of: "take"), !Set(words[take...]).isDisjoint(with: ["out", "off", "away"]) { return true }
+        return false
+    }
+
+    private func refusesToDelete() -> String? {
+        guard let spokenCommand, !Self.asksToRemove(spokenCommand) else { return nil }
+        return failed("Nothing was said about removing anything, so nothing was removed.")
+    }
+
+    /// Puts one element next to another, 12 points from it: below or above it with their
+    /// left edges together, or beside it with their tops together.
+    func placeElement(element: String, relation: String, target: String) -> String {
+        guard let model else { return gone }
+        guard let side = Self.side(named: relation) else {
+            return failed("I can put it above, below, left of or right of another, not “\(relation)”.")
+        }
+        // Next to the screen it is on is an edge of that screen: asked for "the image to
+        // the top", the on-device model names the screen here, or the element at the top.
+        // Unless one thing was said to go by another, an edge is what was meant.
+        let askedToPlace = spokenCommand.map(Self.asksToPlace) ?? true
+        if VoiceHandles.tidied(target)?.hasPrefix("S") == true || !askedToPlace {
+            let edge = switch side {
+            case .above: "top"
+            case .below: "bottom"
+            case .leftOf: "left"
+            case .rightOf: "right"
+            }
+            return alignElement(element: element, alignment: edge)
+        }
+        let moving: FoundElement
+        let other: FoundElement
+        switch (find(element: element), find(element: target)) {
+        case (.failure(let refusal), _), (_, .failure(let refusal)): return failed(refusal.line)
+        case (.success(let one), .success(let two)): (moving, other) = (one, two)
+        }
+        guard moving.ref != other.ref else { return failed("Name two different elements.") }
+        guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
+        guard !moving.element.isLocked else { return failed("\(handles.handle(forElement: moving.element.id)) is locked.") }
+        let store = model.store
+        guard let frame = store.canvasFrame(of: .element(moving.ref)), let by = store.canvasFrame(of: .element(other.ref)) else {
+            return failed("That couldn't be placed.")
+        }
+        // In the points of the screen they are on.
+        let gap = 12 * (store.resolve(moving.ref)?.placement.scale ?? 1)
+        let origin = switch side {
+        case .below: CGPoint(x: by.minX, y: by.maxY + gap)
+        case .above: CGPoint(x: by.minX, y: by.minY - gap - frame.height)
+        case .leftOf: CGPoint(x: by.minX - gap - frame.width, y: by.minY)
+        case .rightOf: CGPoint(x: by.maxX + gap, y: by.minY)
+        }
+        DesignActions.reveal(.element(moving.ref), in: model)
+        store.position([.element(moving.ref): origin])
+        return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
+    }
+
+    /// Whether what was said puts one thing by another: "below the title", "next to it".
+    /// "On the left" and "to the top" are edges of the screen.
+    static func asksToPlace(_ said: String) -> Bool {
+        let words = said.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        if !Set(words).isDisjoint(with: ["below", "under", "underneath", "beneath", "above", "beside", "besides"]) { return true }
+        for (one, next) in zip(words, words.dropFirst()) {
+            if (one == "next" && next == "to") || (["left", "right", "top"].contains(one) && next == "of") { return true }
+        }
+        return false
+    }
+
+    enum Side: String {
+        case below, above
+        case leftOf = "left of"
+        case rightOf = "right of"
+    }
+
+    static func side(named words: String) -> Side? {
+        let said = Set(words.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+        if !said.isDisjoint(with: ["below", "under", "underneath", "beneath"]) { return .below }
+        if !said.isDisjoint(with: ["above", "over", "top"]) { return .above }
+        if said.contains("left") { return .leftOf }
+        if !said.isDisjoint(with: ["right", "beside", "next"]) { return .rightOf }
+        return nil
+    }
+
+    /// The handles in a list such as "E3, E4" or "E2 E1". A handle written loosely, "E 2",
+    /// is one.
+    private static func handleList(_ written: String) -> [String] {
+        written.components(separatedBy: CharacterSet(charactersIn: ",;&")).flatMap { part -> [String] in
+            let part = part.replacingOccurrences(of: " and ", with: " ")
+            let words = part.split(separator: " ").map(String.init)
+            return words.count > 1 && words.allSatisfy({ VoiceHandles.tidied($0) != nil }) ? words : [part]
+        }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
     func stackElements(elements: String, direction: String) -> String {
         guard let model else { return gone }
         let isColumn: Bool
@@ -48,11 +153,7 @@ final class VoiceToolbox: VoiceActing {
         case "row", "horizontal", "horizontally", "across": isColumn = false
         default: return failed("I can stack in a column or a row, not “\(direction)”.")
         }
-        let named = elements.components(separatedBy: CharacterSet(charactersIn: ",;")).flatMap { part -> [String] in
-            // "E2 E1" names two; "E 2" is one, written loosely.
-            let words = part.split(separator: " ").map(String.init)
-            return words.allSatisfy { VoiceHandles.tidied($0) != nil } ? words : [part]
-        }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let named = Self.handleList(elements)
         var found: [FoundElement] = []
         for handle in named {
             switch find(element: handle) {
@@ -203,6 +304,7 @@ final class VoiceToolbox: VoiceActing {
         switch find(screen: screen) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
+            if let refusal = refusesToDelete() { return refusal }
             let handle = handles.handle(forScreen: found.id)
             // Only what the person named goes: see `VoiceNaming`. A handle given as the
             // name is no name at all.
@@ -320,6 +422,8 @@ final class VoiceToolbox: VoiceActing {
 
     func alignElement(element: String, alignment: String) -> String {
         guard let model else { return gone }
+        let named = Self.handleList(element)
+        if named.count > 1 { return alignTogether(named, alignment: alignment) }
         switch find(element: element) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
@@ -332,6 +436,32 @@ final class VoiceToolbox: VoiceActing {
             model.store.align(found.ref, edge)
             return done("Aligned \(Self.describe(found.element)) to the \(name).")
         }
+    }
+
+    /// Lines several elements up with one another: by an edge, or through the middle, of
+    /// the area they cover together.
+    private func alignTogether(_ named: [String], alignment: String) -> String {
+        guard let model else { return gone }
+        guard let (edge, name) = Self.alignment(named: alignment) else {
+            return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
+        }
+        var found: [FoundElement] = []
+        for handle in named {
+            switch find(element: handle) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let one):
+                guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
+                if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
+            }
+        }
+        guard found.count > 1 else { return alignElement(element: named[0], alignment: alignment) }
+        guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
+        let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
+        DesignActions.reveal(.element(found[0].ref), in: model)
+        model.store.align(together, edge)
+        model.selection = together
+        let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
+        return done("Lined up \(found.count) elements by their \(by).")
     }
 
     func duplicateElement(element: String) -> String {
@@ -350,6 +480,7 @@ final class VoiceToolbox: VoiceActing {
         switch find(element: element) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
+            if let refusal = refusesToDelete() { return refusal }
             let handle = handles.handle(forElement: found.element.id)
             // Only what the person named goes: see `VoiceNaming`. A handle given as the
             // name is no name at all.

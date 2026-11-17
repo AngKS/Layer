@@ -372,6 +372,20 @@ to five changes the user asked for. Where they differ from the design above, the
   each step, which is what made its closing word take three seconds. A hosted model is
   still told again after each step.
 
+## Changed after the second session on an iPad (2026-11-18)
+
+- **A command ends after 1.8 s of quiet** (2.5 s of unchanged words in a noisy room).
+- **A sentence that stops on a word needing more** ("to", "the", "and", "below"…) waits
+  up to 4 s for the rest, and is joined to it; with nothing more it is taken as it is.
+- **A correction undoes the last change first.** A command opening "No", "Not …" or
+  "That's wrong" undoes the last command's change (if it made one), and the model is told
+  so. Said alone, it is the undo and nothing more.
+- **Two tools changed or added.** `placeElement` puts one element below, above, left of
+  or right of another, 12 points apart; it goes ahead only if what was said puts one
+  thing by another, and is otherwise the matching edge of the screen. `alignElement`
+  given two or more elements lines them up with one another. Eighteen tools in all.
+- **A delete goes ahead only if what was said asks for something to be removed.**
+
 ## Sources
 
 - iPhoneOS 27.2 SDK: `FoundationModels.swiftinterface` (`LanguageModelSession.DynamicProfile`,

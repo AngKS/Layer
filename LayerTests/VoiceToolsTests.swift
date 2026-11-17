@@ -384,6 +384,106 @@ struct VoiceToolsTests {
         #expect(bench.app.store.content == before)
     }
 
+    // MARK: Placing one thing by another
+
+    /// "Move this image below the title": the image goes under it, left edges together,
+    /// 12 points apart. Above, left of and right of go the same way.
+    @Test func placingPutsOneElementByAnother() throws {
+        let bench = bench()
+        let line = bench.box.placeElement(element: "E3", relation: "below", target: "E1")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 128, width: 200, height: 200))
+        #expect(line == "Put the image below the title “Welcome back”.")
+
+        _ = bench.box.placeElement(element: "E3", relation: "above", target: "E2")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 208, width: 200, height: 200))
+        _ = bench.box.placeElement(element: "E3", relation: "right of", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        _ = bench.box.placeElement(element: "E3", relation: "beside", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        _ = bench.box.placeElement(element: "E3", relation: "left of", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: -192, y: 420))
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    /// Asked for "the image to the top", the on-device model reached for this tool and
+    /// named the screen. Next to a screen it is in is an edge of it.
+    @Test func placingByAScreenIsAligningToItsEdge() throws {
+        let bench = bench()
+        #expect(bench.box.placeElement(element: "E3", relation: "above", target: "S1").hasPrefix("Aligned the image to the top"))
+        #expect(bench.box.placeElement(element: "E3", relation: "left of", target: "S1").hasPrefix("Aligned the image to the left"))
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    /// "Move the image to the top" went to this tool, "above the title". Unless something
+    /// was said of one thing by another, it is an edge of the screen that was meant.
+    @Test func placingNeedsToHaveBeenAskedFor() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Move the image to the top"
+        #expect(bench.box.placeElement(element: "E3", relation: "above", target: "E1").hasPrefix("Aligned the image to the top"))
+        bench.box.spokenCommand = "Move this image below the title."
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E1") == "Put the image below the title “Welcome back”.")
+        #expect(VoiceToolbox.asksToPlace("put the image next to the button"))
+        #expect(VoiceToolbox.asksToPlace("Put it to the left of the title"))
+        #expect(!VoiceToolbox.asksToPlace("Put the avatar on the left"))
+        #expect(!VoiceToolbox.asksToPlace("move it to the top"))
+    }
+
+    @Test func placingNeedsTwoThingsAndAWay() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E3") == "Name two different elements.")
+        #expect(bench.box.placeElement(element: "E3", relation: "inside", target: "E1")
+            == "I can put it above, below, left of or right of another, not “inside”.")
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E99") == "There is no E99.")
+        #expect(bench.app.store.content == before)
+    }
+
+    // MARK: Aligning several with one another
+
+    /// "Align the image and the avatar": with two or more named, they line up with one
+    /// another, not each with the screen.
+    @Test func aligningSeveralLinesThemUpWithOneAnother() throws {
+        let bench = bench()
+        let line = bench.box.alignElement(element: "E1, E3", alignment: "centre")
+        // Through the middle of the area they cover together, 20 to 373 across.
+        // The store puts each on a whole point of its own, so within half a point.
+        #expect(abs(try #require(bench.element("E3")).frame.midX - 196.5) <= 1)
+        #expect(try #require(bench.element("E1")).frame.minX == 20)
+        #expect(line == "Lined up 2 elements by their centres.")
+        _ = bench.box.alignElement(element: "E2 E3", alignment: "top")
+        #expect(try #require(bench.element("E3")).frame.minY == 420)
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    // MARK: Deleting only when asked to
+
+    /// Three times the on-device model answered a command that said nothing of removing
+    /// with a delete: "Can you edit the image to be a section?" deleted the image. A
+    /// delete now goes ahead only if what was said asks for one.
+    @Test func nothingIsDeletedUnlessRemovingWasAskedFor() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Can you edit the image to be a section?"
+        #expect(bench.box.deleteElement(element: "E3", named: "image") == "Nothing was said about removing anything, so nothing was removed.")
+        #expect(bench.element("E3") != nil)
+        #expect(bench.box.deleteScreen(screen: "S1", named: "login screen").hasPrefix("Nothing was said about removing"))
+        #expect(bench.app.store.screens.count == 1)
+
+        bench.box.spokenCommand = "get rid of the image"
+        _ = bench.box.deleteElement(element: "E3", named: "image")
+        #expect(bench.element("E3") == nil)
+    }
+
+    @Test func whatAsksForSomethingToBeRemoved() {
+        for said in ["Delete the image", "remove it", "get rid of the button", "erase that", "take the title out",
+                     "Clear the screen", "bin it", "lose the avatar", "Deleting the logo please", "scrap that screen"] {
+            #expect(VoiceToolbox.asksToRemove(said), "\(said)")
+        }
+        for said in ["Can you edit the image to be a section?", "Make the checkbox blue", "make the dropdown bigger",
+                     "move it down", "Take a look at the title"] {
+            #expect(!VoiceToolbox.asksToRemove(said), "\(said)")
+        }
+    }
+
     // MARK: In the person's words
 
     /// Handles are between the app and the model. What reaches the pill has none.

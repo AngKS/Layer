@@ -127,6 +127,7 @@ final class VoiceCall {
         running?.cancel()
         worker?.cancel()
         captionClearing?.cancel()
+        letGoOfFragment()
         queue.removeAll()
         queuedCount = 0
         caption = nil
@@ -156,6 +157,7 @@ final class VoiceCall {
         guard !command.isEmpty else { return }
         let action = Self.localAction(for: command)
         VoiceLog.log.info("call: heard a command of \(command.count) characters\(action == nil ? "" : ", acted on here", privacy: .public): \(command, privacy: .private)")
+        if action != nil { letGoOfFragment() }
         switch action {
         case .stop:
             // The command under way reports that it was stopped, which is what is shown.
@@ -165,16 +167,52 @@ final class VoiceCall {
         case .hangUp:
             end()
         case nil:
-            guard Self.isWorthAsking(command) else {
-                VoiceLog.log.info("call: let go, it is no command")
-                // The words were shown as they were heard, and aren't to be acted on.
-                if caption?.kind == .hearing { caption = nil }
-                return
+            var command = command
+            // The rest of a sentence that stopped mid-way.
+            if let held = heldFragment {
+                command = held + " " + command
+                letGoOfFragment()
             }
-            queue.append(command)
-            queuedCount = queue.count
-            startWorker()
+            // Only something worth asking about is waited on: "So" alone is let go at once.
+            if Self.endsMidSentence(command), Self.isWorthAsking(command) {
+                hold(command)
+            } else {
+                take(command)
+            }
         }
+    }
+
+    private func take(_ command: String) {
+        guard Self.isWorthAsking(command) else {
+            VoiceLog.log.info("call: let go, it is no command")
+            // The words were shown as they were heard, and aren't to be acted on.
+            if caption?.kind == .hearing { caption = nil }
+            return
+        }
+        queue.append(command)
+        queuedCount = queue.count
+        startWorker()
+    }
+
+    /// Keeps a sentence that stopped mid-way for the rest of it, and takes it as it is if
+    /// nothing follows.
+    private func hold(_ fragment: String) {
+        VoiceLog.log.info("call: waiting for the rest of a sentence")
+        heldFragment = fragment
+        show(.hearing, fragment)
+        let wait = fragmentWait
+        fragmentTimer = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self, let held = self.heldFragment, self.phase != .ended else { return }
+            self.letGoOfFragment()
+            self.take(held)
+        }
+    }
+
+    private func letGoOfFragment() {
+        heldFragment = nil
+        fragmentTimer?.cancel()
+        fragmentTimer = nil
     }
 
     /// "Stop" and "hang up" are acted on here, so that they work at once and whatever the
@@ -196,6 +234,27 @@ final class VoiceCall {
     /// a noise or a single word on its own, "So" or the "make" of a sentence not yet
     /// said, and a model handed one does something all the same. Only a word that is a
     /// command by itself is taken alone; anything of two words that mean something is.
+    /// How long a sentence stopped mid-way waits for the rest before it is taken as it is.
+    @ObservationIgnored var fragmentWait: Duration = .seconds(4)
+    @ObservationIgnored private var heldFragment: String?
+    @ObservationIgnored private var fragmentTimer: Task<Void, Never>?
+
+    /// Whether what was heard stops in the middle of a sentence, on a word that needs
+    /// more after it: "I want a screen to". A pause there is a thought, not the end.
+    static func endsMidSentence(_ command: String) -> Bool {
+        let words = command.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        guard let last = words.last else { return false }
+        return needsMore.contains(last)
+    }
+
+    /// Words a sentence doesn't end on. Not "in", "on", "up" and the like, which end
+    /// "zoom in" and "turn it on"; nor "this" and "that", which end "undo that".
+    private static let needsMore: Set<String> = [
+        "to", "the", "a", "an", "and", "or", "but", "of", "for", "with", "into", "onto", "at", "by", "from", "my", "your",
+        "its", "their", "then", "than", "as", "is", "are", "be", "so", "because", "about", "below", "above", "beside",
+        "under", "between", "make", "put", "move", "set", "change", "add", "give", "want", "can", "could", "would",
+    ]
+
     static func isWorthAsking(_ command: String) -> Bool {
         let words = command.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)

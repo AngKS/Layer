@@ -383,6 +383,50 @@ struct VoiceCallTests {
         }
     }
 
+    // MARK: A sentence cut short
+
+    /// A pause in the middle of a sentence ends what was heard on "to" or "the". On an
+    /// iPad "I want a screen to" made a screen. It waits for the rest instead.
+    @Test func aSentenceStoppedMidWayWaitsForTheRest() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .seconds(5)
+        await call.start()
+        route.send(.command("I want a screen to"))
+        route.send(.command("view my baby photos"))
+        #expect(await eventually { runner.commands == ["I want a screen to view my baby photos"] })
+        call.end()
+    }
+
+    @Test func aSentenceStoppedMidWayIsTakenAsItIsIfNothingFollows() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .milliseconds(100)
+        await call.start()
+        route.send(.command("make the image bigger and"))
+        #expect(await eventually { runner.commands == ["make the image bigger and"] })
+        call.end()
+    }
+
+    @Test func stopLetsGoOfASentenceStoppedMidWay() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .milliseconds(100)
+        await call.start()
+        route.send(.command("make the image bigger and"))
+        route.send(.command("stop"))
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(runner.commands.isEmpty)
+        call.end()
+    }
+
+    @Test func whatIsASentenceStoppedMidWay() {
+        for said in ["I want a screen to", "Inc increase the width of it to", "With to 80% of the", "make it bigger and",
+                     "put the image below", "Can you make"] {
+            #expect(VoiceCall.endsMidSentence(said), "\(said)")
+        }
+        for said in ["Zoom out.", "zoom in", "make it blue", "Move it down to the bottom.", "turn it on", "Undo."] {
+            #expect(!VoiceCall.endsMidSentence(said), "\(said)")
+        }
+    }
+
     /// The words were shown as they were heard. Let go, they are taken down again.
     @Test func aFragmentLetGoIsTakenOffThePill() async {
         let (call, route, _) = makeCall()

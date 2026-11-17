@@ -105,6 +105,10 @@ final class Recorder: VoiceActing {
         note("stackElements", ["elements": elements, "direction": direction], saying: "Stacked the elements in a \(direction).")
     }
 
+    func placeElement(element: String, relation: String, target: String) -> String {
+        note("placeElement", ["element": element, "relation": relation, "target": target], saying: "Put \(element) \(relation) \(target).")
+    }
+
     func pan(direction: String) -> String {
         note("pan", ["direction": direction], saying: "Moved the view \(direction).")
     }
@@ -277,6 +281,10 @@ let cases: [Case] = [
     Case(canvas: .one, command: "No, undo revert.", tools: ["undo"], isFromTheIPad: true),
     Case(canvas: .three, command: "Show me the 2nd screen.", tools: ["show"], isRight: has("target", "S2"), isFromTheIPad: true),
     Case(canvas: .three, command: "Show me the next screen.", tools: ["show"], isRight: has("target", "S3"), isFromTheIPad: true),
+    // From the second session on the iPad, after placing and aligning together were added.
+    Case(canvas: .one, command: "Move this image below the title.", tools: ["placeElement"], isRight: { $0["element"] == "E3" && $0["target"] == "E1" && ($0["relation"] ?? "").lowercased().contains("below") }, isFromTheIPad: true),
+    Case(canvas: .one, command: "Put the image beside the button.", tools: ["placeElement"], isRight: { $0["element"] == "E3" && $0["target"] == "E2" }, isFromTheIPad: true),
+    Case(canvas: .one, command: "Align the image and the title together.", tools: ["alignElement"], isRight: { ["E1", "E3"].allSatisfy(($0["element"] ?? "").contains) }, isFromTheIPad: true),
     // Heard wrongly or not clear. The right thing is to do nothing and say so.
     Case(canvas: .one, command: "Can you edit the image to be a section?", tools: [], isFromTheIPad: true),
     Case(canvas: .one, command: "make the baby photo title rate.", tools: [], isFromTheIPad: true),

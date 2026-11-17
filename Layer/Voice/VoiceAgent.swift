@@ -33,6 +33,30 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Gets the model ready to be asked: the conversation is made, told the rules, the
     /// tools and the canvas, and the model is given them to read ahead of the first
     /// command. On an iPad that reading was fourteen seconds of the first command's wait.
+    enum Correction: Equatable {
+        case undoOnly
+        case undoThenAsk
+    }
+
+    /// Whether a command says the last one was wrong: "No, …", "Not the …", "That's
+    /// wrong". `undoOnly` when it says nothing more; `undoThenAsk` when it goes on to say
+    /// what was meant.
+    static func correction(in command: String) -> Correction? {
+        let words = command.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        guard let first = words.first else { return nil }
+        let opens = ["no", "nope", "nah", "not", "wrong", "oops"].contains(first)
+            || (words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong")
+        guard opens else { return nil }
+        let saysNoMore: Set<String> = [
+            "no", "nope", "nah", "not", "wrong", "oops", "undo", "revert", "that", "s", "is", "was", "it", "one", "go", "back",
+            "sorry", "wait", "the", "please", "change",
+        ]
+        return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
+    }
+
+    /// Whether the last command changed the design, and so has a change a correction undoes.
+    private var lastCommandChangedDesign = false
+
     func warmUp() async {
         guard session == nil, let model else { return }
         let session = makeSession()
@@ -65,12 +89,29 @@ final class VoiceAgent: VoiceCommandRunner {
         // Everything the command changes is one step to undo, whatever becomes of it.
         model.store.beginHeldEdit()
         defer { model.store.endHeldEdit() }
+        toolbox.spokenCommand = command
 
         var outcome = VoiceOutcome()
+        // "Not the check marks": the last change is undone before what was meant is done.
+        // Left to the model, it did what was meant and left the mistake.
+        var prompt = command
+        if let correction = Self.correction(in: command), lastCommandChangedDesign {
+            VoiceLog.log.info("agent: a correction, so the last change is undone first")
+            _ = toolbox.undo()
+            lastCommandChangedDesign = false
+            if correction == .undoOnly {
+                outcome.lines = toolbox.lines
+                return outcome
+            }
+            prompt = "(The last change has been undone.) " + command
+            lookAtTheCanvas()
+        }
+        let before = model.store.content
+        defer { lastCommandChangedDesign = model.store.content != before }
         VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")
         let began = ContinuousClock.now
         do {
-            let response = try await session.respond(to: command)
+            let response = try await session.respond(to: prompt)
             // Handles are between the app and the model; the person is told in words.
             outcome.said = toolbox.inWords(response.content.trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {

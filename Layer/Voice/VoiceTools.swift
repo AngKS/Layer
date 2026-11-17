@@ -11,6 +11,7 @@ import Foundation
 protocol VoiceActing: AnyObject, Sendable {
     @MainActor func createScreen(name: String?, description: String) async throws -> String
     @MainActor func stackElements(elements: String, direction: String) -> String
+    @MainActor func placeElement(element: String, relation: String, target: String) -> String
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
@@ -103,7 +104,7 @@ enum VoiceTools {
         [
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
-            StackElementsTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
+            StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor),
             ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
             UndoTool(actor: actor), RedoTool(actor: actor), EndCallTool(actor: actor),
@@ -128,6 +129,7 @@ enum VoiceTools {
         case "moveElement": "Resizing…"
         case "alignElement": "Aligning…"
         case "stackElements": "Stacking…"
+        case "placeElement": "Placing…"
         case "duplicateElement": "Duplicating…"
         case "deleteElement", "deleteScreen": "Deleting…"
         case "renameScreen": "Renaming…"
@@ -256,11 +258,11 @@ struct MoveElementTool: Tool {
 struct AlignElementTool: Tool {
     let actor: any VoiceActing
     let name = "alignElement"
-    let description = "Lines an element up with an edge or the centre of its screen. “Centre”, “centrally” and “middle” all mean centred from side to side."
+    let description = "Lines an element up with an edge or the centre of its screen, or several elements up with one another. “Centre”, “centrally” and “middle” all mean centred from side to side."
 
     @Generable
     struct Arguments {
-        @Guide(description: "The element's handle, such as E3.")
+        @Guide(description: "The element's handle, such as E3. Two or more, comma separated, are lined up with one another.")
         var element: String
         @Guide(description: "One of: left, centre, right, top, bottom, or vertical centre for centred from top to bottom.")
         var alignment: String
@@ -286,6 +288,26 @@ struct StackElementsTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.stackElements(elements: arguments.elements, direction: arguments.direction)
+    }
+}
+
+struct PlaceElementTool: Tool {
+    let actor: any VoiceActing
+    let name = "placeElement"
+    let description = "Puts an element next to another element: below, above, left of or right of it. Use it for “below the title”, “beside the image” and “under the button”. For an edge of the screen, use alignElement."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The handle of the element to move, such as E3.")
+        var element: String
+        @Guide(description: "below, above, left of or right of.")
+        var relation: String
+        @Guide(description: "The handle of the element it goes next to, such as E1.")
+        var target: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.placeElement(element: arguments.element, relation: arguments.relation, target: arguments.target)
     }
 }
 
