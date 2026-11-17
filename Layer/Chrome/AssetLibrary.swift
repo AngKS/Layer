@@ -410,17 +410,18 @@ struct AssetLibraryView: View {
         let groups = AssetLibrary.searchEverywhere(search)
         VStack(spacing: 0) {
             searchField(firstResult: groups.first?.assets.first)
-            // The tabs are for browsing: a search looks in all of them.
-            if !isSearching {
-                Picker("Library", selection: $tab) {
-                    ForEach(AssetTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
+            // The tabs stay where they are while searching, so the layout doesn't jump, but
+            // they don't filter: a search looks in all of them, and clearing it returns to
+            // the tab that was open.
+            Picker("Library", selection: $tab) {
+                ForEach(AssetTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
+            .pickerStyle(.segmented)
+            .disabled(isSearching)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
