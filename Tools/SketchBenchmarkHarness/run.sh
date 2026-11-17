@@ -22,6 +22,7 @@ swiftc \
     "$REPO_ROOT/Layer/Document/JSONValue.swift" \
     "$REPO_ROOT/Layer/Debug/SketchSamples.swift" \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \
+    "$REPO_ROOT/Layer/Sketch/PromptOverrides.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchAnalyzer.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchInterpreter.swift" \
     "$REPO_ROOT/Layer/Sketch/GlyphMatcher.swift" \

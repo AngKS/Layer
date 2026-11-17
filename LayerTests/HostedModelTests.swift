@@ -240,7 +240,7 @@ final class HostedModelTests {
             let body = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any]
             return (body?["messages"] as? [[String: Any]])?.first?["content"] as? String
         }
-        #expect(systems.contains(ScreenGenerator.instructions))
+        #expect(systems.contains(ScreenGenerator.instructions(for: "a sign-in screen", using: .hosted(.openAI, model: "gpt-test"))))
 
         // One undo takes the whole generated screen away.
         undo.undo()

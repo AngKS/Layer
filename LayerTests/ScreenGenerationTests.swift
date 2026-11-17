@@ -28,6 +28,122 @@ struct ScreenStreamParsingTests {
         #expect(ScreenGenerator.name(for: "a sign-in screen with email and password") == "A sign-in screen with")
         #expect(ScreenGenerator.name(for: "   ") == "Generated Screen")
     }
+
+    @Test func aScreenHasOnePrimaryAction() throws {
+        let written = """
+            title: Plans
+            button: Start free trial
+            button: Compare plans
+            row: button: Not now | button: Upgrade
+            button: Restore purchase [plain]
+            """
+        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
+        let looks = blueprint.sections.flatMap(\.items).filter { $0.kind == .button }.map(\.buttonLook)
+        // The first stays filled; the rest step down, plainly beside others in a row;
+        // a look the model chose stays.
+        #expect(looks == [nil, .bordered, .plain, .plain, .plain])
+    }
+
+    @Test func theButtonWrittenAsFilledIsThePrimaryOne() throws {
+        let written = "button: Cancel\nbutton: Pay now [filled]"
+        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
+        #expect(blueprint.sections.flatMap(\.items).map(\.buttonLook) == [.bordered, .filled])
+    }
+
+    @Test func aScreenOfOnlyBorderedButtonsGetsAMainOne() throws {
+        // As the on-device model wrote a recipe screen: every action bordered or plain.
+        let written = "image\ntitle: Lemon curd\nbutton: Print [bordered]\nbutton: Save to recipe book [bordered]\nbutton: Share [plain]"
+        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
+        let looks = blueprint.sections.flatMap(\.items).filter { $0.kind == .button }.map(\.buttonLook)
+        #expect(looks == [.bordered, nil, .plain])
+    }
+}
+
+@Suite("What a model is told to write a screen")
+struct ScreenPromptTests {
+    @Test func everyKindThatGoesOnScreensIsNamedAndReadsBack() {
+        let names = ScreenPrompt.kindNames
+        #expect(!names.contains("sticky note"))
+        #expect(names.contains("text field") && names.contains("progress"))
+        for name in names {
+            #expect(ScreenBlueprint.kind(named: name) != nil, "\(name) should read back as a kind")
+        }
+    }
+
+    @Test func examplesFitTheDescription() {
+        #expect(ScreenPrompt.examples(for: "Notification settings", count: 1).map(\.name) == ["settings"])
+        #expect(ScreenPrompt.examples(for: "a checkout with the delivery address", count: 1).map(\.name) == ["form"])
+        #expect(ScreenPrompt.examples(for: "Log in", count: 1).map(\.name) == ["sign in"])
+        // Nothing matched: not a sign-in form, which every screen would otherwise copy.
+        let unmatched = ScreenPrompt.examples(for: "a weather dashboard", count: 2).map(\.name)
+        #expect(unmatched.count == 2 && !unmatched.contains("sign in"))
+    }
+
+    @Test func everyExampleIsAScreenWithOnePrimaryAction() throws {
+        for example in ScreenPrompt.library {
+            let blueprint = try #require(ScreenBlueprint.parse(example.lines), "\(example.name)")
+            #expect(blueprint == blueprint.withOnePrimaryAction(), "\(example.name) should already have one primary action")
+            #expect(!blueprint.sections.flatMap(\.items).contains { $0.kind == .text && ScreenBlueprint.kind(named: $0.text) != nil },
+                    "\(example.name) has a line that didn't read as its kind")
+        }
+    }
+
+    @Test func theOnDeviceModelIsToldLess() {
+        let compact = ScreenPrompt.instructions(.compact, for: "a profile")
+        let full = ScreenPrompt.instructions(.full, for: "a profile")
+        #expect(compact.count < full.count)
+        // About a quarter of the on-device model's 4,096-token context, at about four characters a token.
+        #expect(compact.count < 4_000, "\(compact.count) characters")
+    }
+
+    @Test func theBoardIsSentWithTheDescriptionWhenThereIsOne() {
+        #expect(ScreenPrompt.request("a profile", board: nil, room: .full) == "a profile")
+        let board = String(repeating: "a title saying “Hi”, ", count: 100)
+        let compact = ScreenPrompt.request("a profile", board: board, room: .compact)
+        #expect(compact.hasPrefix("a profile\n\n") && compact.hasSuffix("…"))
+        #expect(compact.count < 520)
+    }
+}
+
+@Suite("Where the sketch hints come from")
+struct SketchHintTests {
+    /// The instructions every benchmark up to Stage 4 measured, word for word. The hints
+    /// now come from the catalogue; until a benchmark shows a better wording, they must
+    /// still add up to this.
+    @Test func theMeasuredInstructionsAreUnchanged() {
+        let measured = """
+            You help a phone app design tool read hand-drawn wireframe sketches. Each message \
+            describes one sketch the user drew on a phone screen, what else is on that screen, \
+            and what the sketch could be. Its shape alone doesn't settle it, so use the \
+            context to choose the one the user most likely meant.
+
+            What designers usually mean:
+            - button: a wide pill or rounded box. Usually near the bottom of a screen, and a \
+            screen rarely has more than one or two.
+            - textField: a wide box with squarish or slightly rounded corners. Often stacked \
+            with other text fields in the upper or middle part of a screen.
+            - image: a large box, about as tall as it is wide or taller.
+            - title: a short squiggle near the top. A screen has one title.
+            - bodyText: a longer squiggle, or a squiggle below a title or an image.
+            - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
+            - radioButton: a tiny circle, under about 33 points across, often with a dot in it, usually one of a column of them.
+            - progressBar: a long, very thin outline, often partly shaded in.
+            - avatar: a circle about 34 points across or more, usually alone rather than in a column.
+            - toggle: a small pill with a circle (its knob) nearer one end than the middle.
+
+            You're only asked about sketches the shape rules themselves found ambiguous, and \
+            you're given their own ranked, scored guesses — read those scores as real evidence \
+            of how the rules see it, not decoration. Answer with your choice, and a runner-up \
+            only if a second reading is genuinely plausible.
+            """
+        #expect(SketchPrompt.defaultInstructions(.all) == measured)
+    }
+
+    @Test func candidateHintsNameOnlyTheCandidates() {
+        let lines = SketchPrompt.hints(for: [.button, .textField])
+        #expect(lines.hasPrefix("- button: ") && lines.contains("\n- textField: "))
+        #expect(!lines.contains("avatar"))
+    }
 }
 
 /// Runs against LM Studio on this Mac, when asked for:

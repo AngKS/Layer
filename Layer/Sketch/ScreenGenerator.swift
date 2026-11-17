@@ -19,31 +19,19 @@ enum ScreenGenerator {
         }
     }
 
-    static let instructions = """
-        You design phone app screens for a wireframing tool. Given a description of a screen, \
-        write its elements one per line, from top to bottom, in this form:
+    /// What `choice`'s model is told before it writes the screen in `description`. See
+    /// `ScreenPrompt` for how it is put together.
+    static func instructions(for description: String, using choice: ModelChoice) -> String {
+        ScreenPrompt.instructions(room(for: choice), for: description)
+    }
 
-        kind: words [look]
+    static func room(for choice: ModelChoice) -> ScreenPrompt.Room {
+        choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported ? .full : .compact
+    }
 
-        Kinds: title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, \
-        progress, avatar, text. Start a line with "row:" and separate elements with "|" to put \
-        them side by side. A blank line starts a new section. Square brackets are optional and \
-        hold the look: a colour name, bold, a size such as 18pt, radius 12, on or off, 40% for a \
-        progress bar, bordered or plain for a button.
-
-        Example:
-        title: Welcome back
-        body: Sign in to continue
-        text field: Email
-        text field: Password
-        button: Sign in [blue]
-        row: button: Forgot password? [plain] | button: Create account [plain]
-
-        Write only the lines: no introduction, no explanation, no markdown. Use 4 to 12 lines.
-        """
-
-    /// The screen so far: the blueprint of every finished line in `text`. While the model
-    /// is still writing, the last line may be half written, so it waits for the next.
+    /// The screen so far: the blueprint of every finished line in `text`, with one
+    /// primary action. While the model is still writing, the last line may be half
+    /// written, so it waits for the next.
     static func blueprint(ofFinishedLinesIn text: String, isComplete: Bool) -> ScreenBlueprint? {
         var lines = text.components(separatedBy: "\n")
         if !isComplete { lines.removeLast() }
@@ -52,7 +40,7 @@ enum ScreenGenerator {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             return !trimmed.hasPrefix("```") && !trimmed.hasPrefix("#")
         }
-        return ScreenBlueprint.parse(kept.joined(separator: "\n"))
+        return ScreenBlueprint.parse(kept.joined(separator: "\n"))?.withOnePrimaryAction()
     }
 
     /// A short name for the new screen, from the first words of its description.
@@ -73,17 +61,20 @@ enum ScreenGenerator {
         case screen(ScreenBlueprint)
     }
 
-    /// Writes a screen described in `description` with `choice`'s model. Each screen
-    /// update has more elements than the one before.
-    static func stream(_ description: String, using choice: ModelChoice) -> AsyncThrowingStream<Update, any Error> {
+    /// Writes a screen described in `description` with `choice`'s model. `board` is what
+    /// the rest of the design says (`SketchPrompt.describe(board:)`), so the new screen's
+    /// words match it; nil for an empty design. Each screen update has more elements than
+    /// the one before.
+    static func stream(_ description: String, board: String? = nil, using choice: ModelChoice) -> AsyncThrowingStream<Update, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let session = makeSession(for: choice)
+                    let session = makeSession(for: choice, description: description)
+                    let request = ScreenPrompt.request(description, board: board, room: room(for: choice))
                     var text = ""
                     var count = 0
                     var hasStarted = false
-                    for try await snapshot in session.streamResponse(to: description) {
+                    for try await snapshot in session.streamResponse(to: request) {
                         text = snapshot.content
                         if !hasStarted, !text.isEmpty {
                             hasStarted = true
@@ -108,7 +99,8 @@ enum ScreenGenerator {
         }
     }
 
-    private static func makeSession(for choice: ModelChoice) -> LanguageModelSession {
+    private static func makeSession(for choice: ModelChoice, description: String) -> LanguageModelSession {
+        let instructions = instructions(for: description, using: choice)
         if let provider = choice.hostedProvider, let model = choice.model, HostedLanguageModel.isSupported {
             return LanguageModelSession(model: HostedLanguageModel(provider: provider, model: model), instructions: instructions)
         }

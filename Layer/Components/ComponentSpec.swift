@@ -19,6 +19,11 @@ struct ComponentSpec: Sendable {
     /// The words people use for it when a screen is written out, as Shortcuts and
     /// generated screens do.
     var writtenNames: [String]
+    /// What designers usually mean when they sketch it, for a model choosing between
+    /// readings of a close call (`SketchPrompt`). Nil for kinds the shape rules never
+    /// offer as a close call. Sizes come from `SketchConventions`, so the model and the
+    /// rules draw the same lines.
+    var sketchHint: String? = nil
 
     // MARK: Where it goes
 
