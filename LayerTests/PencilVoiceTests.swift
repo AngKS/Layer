@@ -567,6 +567,65 @@ struct PencilVoiceTests {
         #expect(frame.origin == CGPoint(x: 400, y: 428))
     }
 
+    // MARK: Seen in the simulator
+
+    @Test func belowTheBarTheBubbleSwivelsOffTheTip() {
+        // The barrel points down, so the bubble would go straight up, into the bar.
+        let tip = CGPoint(x: 400, y: 110)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .degrees(90), topInset: 80)
+        #expect(frame.minY >= 80)
+        #expect(Self.distance(from: tip, to: frame) >= 14 - 0.01)
+    }
+
+    @Test func byTheRightEdgeTheBubbleSwivelsOffTheTip() {
+        // The barrel points left, so the bubble would go right, past the edge.
+        let tip = CGPoint(x: 980, y: 400)
+        let frame = Self.bubbleFrame(at: tip, azimuth: .degrees(180))
+        #expect(frame.maxX <= 1000 - 12)
+        #expect(Self.distance(from: tip, to: frame) >= 14 - 0.01)
+    }
+
+    @Test func theBubbleKeepsOffTheSelectionsActions() {
+        let tip = CGPoint(x: 500, y: 400)
+        let preferred = Self.bubbleFrame(at: tip, azimuth: .degrees(45))
+        // The actions over what the squeeze selected lie where the bubble would go.
+        let actions = preferred.insetBy(dx: -20, dy: 10)
+        let origin = PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(45), size: Self.bubbleSize, in: Self.bounds, topInset: 80, avoiding: [actions])
+        let frame = CGRect(origin: origin, size: Self.bubbleSize)
+        #expect(!frame.intersects(actions))
+        #expect(Self.distance(from: tip, to: frame) >= 28 - 0.01)
+        // With nothing in the way it goes where it always did.
+        let free = PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(45), size: Self.bubbleSize, in: Self.bounds, topInset: 80, avoiding: [])
+        #expect(free == preferred.origin)
+    }
+
+    @Test func theBubbleKeepsOffWhatIsSpokenAboutAndTheActionsOverIt() {
+        // A button, squeezed in its middle, with its actions just above it.
+        let tip = CGPoint(x: 500, y: 400)
+        let button = CGRect(x: 390, y: 385, width: 220, height: 30)
+        let actions = CGRect(x: 370, y: 320, width: 260, height: 50)
+        let origin = PencilVoiceBubble.origin(
+            anchor: tip, azimuth: .degrees(45), size: Self.bubbleSize, in: Self.bounds, topInset: 80, avoiding: [actions], subject: button)
+        let frame = CGRect(origin: origin, size: Self.bubbleSize)
+        #expect(!frame.intersects(button) && !frame.intersects(actions))
+        // A whole screen can't be kept clear of: the actions and the tip still are.
+        let screen = CGRect(x: 300, y: 100, width: 400, height: 650)
+        let onScreen = CGRect(origin: PencilVoiceBubble.origin(
+            anchor: tip, azimuth: .degrees(45), size: Self.bubbleSize, in: Self.bounds, topInset: 80, avoiding: [actions], subject: screen), size: Self.bubbleSize)
+        #expect(!onScreen.intersects(actions))
+        #expect(Self.distance(from: tip, to: onScreen) >= 28 - 0.01)
+    }
+
+    @Test func theBubbleShowsTheNewestWholeWords() {
+        #expect(PencilVoiceBubble.newestWords(of: "make it blue") == "make it blue")
+        let said = "make the sign in button blue and give it a little more space above"
+        let shown = PencilVoiceBubble.newestWords(of: said)
+        #expect(shown == "…it a little more space above")
+        // Whole words only: what is shown begins where a word does.
+        #expect(said.hasSuffix(" " + shown.dropFirst()))
+        #expect(shown.count <= PencilVoiceBubble.wordsLength)
+    }
+
     // MARK: Fix round 1 of the bubble
 
     @Test func theSqueezeIsThePencilsWhileAToggleIsOpenOrBeingSent() async {

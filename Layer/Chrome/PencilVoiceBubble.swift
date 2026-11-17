@@ -46,28 +46,49 @@ struct PencilVoiceBubble: View {
     /// The bubble's top-left: `gap` from the tip in the direction away from the barrel, or
     /// below the tip when the pencil's angle isn't known, and kept inside `bounds` and clear
     /// of the bar above `topInset`.
-    nonisolated static func origin(anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat) -> CGPoint {
-        var center: CGPoint
-        if let azimuth {
-            // The azimuth is the way the barrel points from the tip: the bubble goes the
-            // other way, far enough that all of it is at least `gap` beyond the tip.
-            let dx = -cos(azimuth.radians), dy = -sin(azimuth.radians)
-            let reach = gap + abs(dx) * size.width / 2 + abs(dy) * size.height / 2
-            center = CGPoint(x: anchor.x + dx * reach, y: anchor.y + dy * reach)
-        } else {
-            center = CGPoint(x: anchor.x, y: anchor.y + gap + size.height / 2)
-        }
-        var origin = CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2)
+    ///
+    /// Kept inside, it can be pushed back over the tip, by the bar above or a window edge,
+    /// and the pen would hide it. It can also land on chrome in `obstacles`, such as the
+    /// actions over what the squeeze selected, or on `subject`, what is being spoken about.
+    /// Then it swivels round the tip, a step at a time away from straight opposite the
+    /// barrel, to the first place clear of all of them. Failing that, it keeps clear of
+    /// the tip and the chrome, and failing that, of the tip alone: a subject as big as a
+    /// whole screen can't be kept clear of.
+    nonisolated static func origin(
+        anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat,
+        avoiding obstacles: [CGRect] = [], subject: CGRect? = nil
+    ) -> CGPoint {
+        // The way the bubble goes from the tip: opposite the barrel, or straight down.
+        let away = azimuth.map { $0.radians + .pi } ?? .pi / 2
+        let turns: [Double] = [0, -1, 1, -2, 2, -3, 3].map { $0 * .pi / 4 }
+        let places = turns.map { place(towards: away + $0, anchor: anchor, size: size, in: bounds, topInset: topInset) }
+        // Clear of the tip by half the gap at least: kept from the bar or an edge, it may
+        // have been brought nearer than the whole of it.
+        let clearOfTip = places.filter { !$0.insetBy(dx: -gap / 2, dy: -gap / 2).contains(anchor) }
+        let clearOfChrome = clearOfTip.filter { place in !obstacles.contains { $0.intersects(place) } }
+        let clear = clearOfChrome.first { place in subject.map { !$0.intersects(place) } ?? true }
+        return (clear ?? clearOfChrome.first ?? clearOfTip.first ?? places[0]).origin
+    }
+
+    /// The bubble's frame `gap` beyond the tip in the direction `angle` (radians, clockwise
+    /// from the right), kept inside the window and below the bar.
+    nonisolated private static func place(towards angle: Double, anchor: CGPoint, size: CGSize, in bounds: CGRect, topInset: CGFloat) -> CGRect {
+        let dx = cos(angle), dy = sin(angle)
+        // Far enough that all of it is at least `gap` beyond the tip.
+        let reach = gap + abs(dx) * size.width / 2 + abs(dy) * size.height / 2
+        var origin = CGPoint(x: anchor.x + dx * reach - size.width / 2, y: anchor.y + dy * reach - size.height / 2)
         let inner = bounds.insetBy(dx: margin, dy: margin)
         let minY = max(inner.minY, topInset + margin)
         origin.x = max(min(origin.x, inner.maxX - size.width), inner.minX)
         origin.y = max(min(origin.y, inner.maxY - size.height), minY)
-        return origin
+        return CGRect(origin: origin, size: size)
     }
 
     var body: some View {
         let canvas = model.store.canvas
-        let origin = Self.origin(anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset)
+        // The other chrome on the canvas, such as the actions over what the squeeze selected.
+        let chrome = model.chromeFrames.filter { $0.key != "pencil bubble" }.map(\.value)
+        let origin = Self.origin(anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset, avoiding: chrome, subject: model.selectionViewRect)
         // The tip, as a point of the canvas the bubble is laid out across: what it grows
         // out of and shrinks back to.
         let tip = UnitPoint(
@@ -132,14 +153,17 @@ struct PencilVoiceBubble: View {
                         // Dim until the microphone is on: words now would be lost.
                         .opacity(bubble.state == .gettingReady ? 0.4 : 1)
                     if let words = wordsShown {
-                        Text(words)
+                        // One line, so that the bubble stays small: a second one spilled
+                        // out of the glass, since a bubble sized to fit has no width to
+                        // wrap in. The newest words are the ones worth seeing, whole.
+                        Text(Self.newestWords(of: words))
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            // The newest words are the ones worth seeing.
+                            // Primary: secondary was too faint where the glass, tinted with
+                            // a dark canvas, lies over a white screen.
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
                             .truncationMode(.head)
-                            .frame(maxWidth: 220, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 240, alignment: .leading)
                             .transition(.opacity)
                     }
                 }
@@ -167,6 +191,23 @@ struct PencilVoiceBubble: View {
                     .accessibilityLabel("\(queued) more waiting")
             }
         }
+    }
+
+    /// About as many characters as fit the words' line.
+    nonisolated static let wordsLength = 32
+
+    /// The last whole words of `words` that fit `wordsLength`, after an ellipsis if any
+    /// were left out. A word longer than the line on its own is left for the line to cut.
+    nonisolated static func newestWords(of words: String) -> String {
+        guard words.count > wordsLength else { return words }
+        var kept: [Substring] = []
+        var length = 1
+        for word in words.split(separator: " ").reversed() {
+            guard kept.isEmpty || length + word.count + 1 <= wordsLength else { break }
+            kept.insert(word, at: 0)
+            length += word.count + 1
+        }
+        return "…" + kept.joined(separator: " ")
     }
 
     /// The words heard for this listen, when Settings asks for them.
