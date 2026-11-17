@@ -1,6 +1,7 @@
-import SwiftUI
+import Foundation
 
-/// The SF Symbols offered for placing on the canvas, grouped the way people look for them.
+/// The SF Symbols the library's Icons tab offers, grouped the way people look for them.
+/// Any other symbol can still be placed by typing its exact name: see `AssetLibrary`.
 ///
 /// iOS has no way to list every SF Symbol, so this is a hand-picked set of the ones that
 /// turn up in app wireframes. A test checks that every name here is a real symbol.
@@ -73,65 +74,5 @@ enum SymbolCatalog {
             let symbols = category.symbols.filter { name in words.allSatisfy(name.contains) }
             return symbols.isEmpty ? nil : Category(name: category.name, symbols: symbols)
         }
-    }
-}
-
-/// A searchable grid of SF Symbols. Picking one hands its name back.
-struct SymbolPicker: View {
-    let onPick: (String) -> Void
-    @State private var search = ""
-
-    private let columns = [GridItem(.adaptive(minimum: 44), spacing: 6)]
-
-    var body: some View {
-        let categories = SymbolCatalog.matching(search)
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search symbols", text: $search)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .padding(10)
-            .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 10))
-            .padding(12)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if categories.isEmpty {
-                        Text("No symbols match “\(search)”.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 20)
-                    }
-                    ForEach(categories) { category in
-                        Text(category.name)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 6)
-                        LazyVGrid(columns: columns, spacing: 6) {
-                            ForEach(category.symbols, id: \.self) { name in
-                                Button {
-                                    onPick(name)
-                                } label: {
-                                    Image(systemName: name)
-                                        .font(.system(size: 20))
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(.rect)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(name)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 16)
-            }
-        }
-        .foregroundStyle(.primary)
-        // The size of its popover. In a narrow window it is a sheet instead, and fills it.
-        .frame(idealWidth: 340, maxWidth: .infinity, idealHeight: 480, maxHeight: .infinity)
     }
 }

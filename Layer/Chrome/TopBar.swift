@@ -156,7 +156,7 @@ private struct TitleBar: View {
 /// Top centre: the layers panel on its own, then everything that puts something on the board.
 private struct ToolsBar: View {
     @Environment(AppModel.self) private var model
-    @State private var isPickingSymbol = false
+    @State private var isLibraryOpen = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
     @State private var isGenerating = false
@@ -177,12 +177,6 @@ private struct ToolsBar: View {
                 ToolButton(symbol: "character.textbox", label: "Text") {
                     withAnimation(.smooth(duration: 0.3)) { model.addText() }
                 }
-                Menu {
-                    FrameChoices()
-                } label: {
-                    ToolIcon(symbol: "iphone")
-                }
-                .accessibilityLabel("Frames")
                 ToolButton(symbol: "wand.and.sparkles", label: "Generate Screen", isActive: isGenerating || model.isGenerating) {
                     isGenerating = true
                 }
@@ -192,14 +186,11 @@ private struct ToolsBar: View {
                 ToolButton(symbol: "note.text", label: "Sticky note") {
                     withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
                 }
-                ToolButton(symbol: "square.on.circle", label: "Symbols", isActive: isPickingSymbol) {
-                    isPickingSymbol = true
+                ToolButton(symbol: "square.on.circle", label: "Library", isActive: isLibraryOpen) {
+                    isLibraryOpen = true
                 }
-                .popover(isPresented: $isPickingSymbol) {
-                    SymbolPicker { name in
-                        isPickingSymbol = false
-                        withAnimation(.smooth(duration: 0.3)) { model.addSymbol(name) }
-                    }
+                .popover(isPresented: $isLibraryOpen) {
+                    LibraryPopover(isPresented: $isLibraryOpen)
                 }
                 Menu {
                     ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
@@ -218,7 +209,7 @@ private struct ToolsBar: View {
 private struct ToolsMenu: View {
     @Environment(AppModel.self) private var model
     @State private var isGeneratingScreen = false
-    @State private var isPickingSymbol = false
+    @State private var isLibraryOpen = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
 
@@ -237,14 +228,11 @@ private struct ToolsMenu: View {
             Button("Text", systemImage: "character.textbox") {
                 withAnimation(.smooth(duration: 0.3)) { model.addText() }
             }
-            Menu("Frames", systemImage: "iphone") {
-                FrameChoices()
-            }
             Button("Generate Screen", systemImage: "wand.and.sparkles") { isGeneratingScreen = true }
             Button("Sticky Note", systemImage: "note.text") {
                 withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
             }
-            Button("Symbols", systemImage: "square.on.circle") { isPickingSymbol = true }
+            Button("Library", systemImage: "square.on.circle") { isLibraryOpen = true }
             Menu("Add Image", systemImage: "paperclip") {
                 ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
             }
@@ -255,26 +243,33 @@ private struct ToolsMenu: View {
         .popover(isPresented: $isGeneratingScreen) {
             GenerateScreenPanel()
         }
-        .popover(isPresented: $isPickingSymbol) {
-            SymbolPicker { name in
-                isPickingSymbol = false
-                withAnimation(.smooth(duration: 0.3)) { model.addSymbol(name) }
-            }
+        .popover(isPresented: $isLibraryOpen) {
+            LibraryPopover(isPresented: $isLibraryOpen)
         }
         .modifier(ImageAttaching(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto))
     }
 }
 
-/// The devices a frame can be added for.
-private struct FrameChoices: View {
+/// The library, as the Library button presents it: picking a thing puts it in the
+/// middle of the view and closes the library. Dragging one out closes it too, once the
+/// drag is under way, so that the canvas behind it can take the drop.
+private struct LibraryPopover: View {
     @Environment(AppModel.self) private var model
+    @Binding var isPresented: Bool
 
     var body: some View {
-        ForEach(DeviceFrame.all) { device in
-            Button("\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))") {
-                withAnimation(.smooth(duration: 0.3)) { model.addFrame(device) }
+        AssetLibraryView { asset in
+            isPresented = false
+            withAnimation(.smooth(duration: 0.3)) { model.addAsset(asset) }
+        } onDragStart: {
+            // After the lift: put away at once, the popover would take the drag with it.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                isPresented = false
             }
         }
+        .environment(model)
+        .environment(model.images)
     }
 }
 

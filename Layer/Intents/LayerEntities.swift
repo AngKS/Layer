@@ -252,7 +252,7 @@ struct ElementEntity: AppEntity {
 // MARK: Enums
 
 enum ElementKindChoice: String, AppEnum {
-    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote, checkbox, radio, progress, drawing
+    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote, checkbox, radio, progress, shape, drawing
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Element Kind"
     static let caseDisplayRepresentations: [ElementKindChoice: DisplayRepresentation] = [
@@ -270,6 +270,7 @@ enum ElementKindChoice: String, AppEnum {
         .checkbox: "Checkbox",
         .radio: "Radio Button",
         .progress: "Progress Bar",
+        .shape: "Shape",
         .drawing: "Drawing",
     ]
 
@@ -286,6 +287,11 @@ enum DeviceChoice: String, AppEnum {
     case iPhoneProMax = "iphone-pro-max"
     case iPhoneSE = "iphone-se"
     case iPad = "ipad"
+    case iPadMini = "ipad-mini"
+    case iPadPro13 = "ipad-pro-13"
+    case macBookAir = "macbook-air"
+    case macBookPro16 = "macbook-pro-16"
+    case iMac = "imac"
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Device"
     static let caseDisplayRepresentations: [DeviceChoice: DisplayRepresentation] = [
@@ -295,6 +301,11 @@ enum DeviceChoice: String, AppEnum {
         .iPhoneProMax: "Large phone",
         .iPhoneSE: "Small phone",
         .iPad: "Tablet",
+        .iPadMini: "Small tablet",
+        .iPadPro13: "Large tablet",
+        .macBookAir: "Laptop",
+        .macBookPro16: "Large laptop",
+        .iMac: "Desktop",
     ]
 
     init(_ device: DeviceFrame) {

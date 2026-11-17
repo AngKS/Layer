@@ -209,8 +209,7 @@ final class SketchFlowUITests: XCTestCase {
         // As once Apple Pencil has been seen: the Pencil draws and a finger doesn't.
         app.launchArguments += ["-fingerDraws", "NO"]
         openNewDesign()
-        control("Frames").tap()
-        app.buttons.matching(labelBeginning("iPhone")).firstMatch.tap()
+        addFrame("iPhone")
         let label = app.staticTexts["Screen 1"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
         control("Draw").tap()
@@ -293,9 +292,8 @@ final class SketchFlowUITests: XCTestCase {
         app.buttons.matching(identifier: "arrow.uturn.backward").firstMatch.tap()
         XCTAssertTrue(settles(label.frame.minX, at: before.minX), "undo should put the frame back where it was")
 
-        // The frames menu adds a frame of another device, selected.
-        control("Frames").tap()
-        app.buttons.matching(labelBeginning("iPad")).firstMatch.tap()
+        // The library's wireframes add a frame of another device, selected.
+        addFrame("iPad")
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 2 · 820'", timeout: 5), "an iPad frame should be added and selected")
     }
 
@@ -306,10 +304,10 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
         control("Layers").tap()
 
-        // A symbol picked from the menu lands in the middle of the view, on the frame, selected.
-        control("Symbols").tap()
-        let search = app.textFields["Search symbols"]
-        XCTAssertTrue(search.waitForExistence(timeout: 5), "the symbols menu should open")
+        // A symbol picked from the library lands in the middle of the view, on the frame, selected.
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "the library should open")
         search.tap()
         search.typeText("heart fill")
         let heart = app.buttons["heart.fill"]
@@ -643,12 +641,51 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "the drawing should be where the lasso dragged it")
     }
 
+    func testTheLibraryHasTabsAndThingsAreDraggedFromItOntoTheCanvas() {
+        openNewDesign()
+        control("Library").tap()
+        XCTAssertTrue(app.textFields["Search the library"].waitForExistence(timeout: 5), "the library should open")
+        for tab in ["Icons", "Wireframes", "Shapes", "Components"] {
+            app.buttons[tab].tap()
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "library-\(tab.lowercased())"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+
+        // A star dragged from the shapes lands where it is let go, selected. The library
+        // gets out of the way of the drop.
+        app.buttons["Shapes"].tap()
+        let star = app.buttons["Star"].firstMatch
+        XCTAssertTrue(star.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch.frame
+        let target = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.width * 0.25, dy: window.height * 0.6))
+        star.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.0, thenDragTo: target)
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '100 × 100'", timeout: 5), "the star should be on the canvas, selected")
+        let dropped = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        dropped.name = "library-dropped"
+        dropped.lifetime = .keepAlways
+        add(dropped)
+
+        // Searching for something in another tab goes to it.
+        let search = app.textFields["Search the library"]
+        if !search.exists { control("Library").tap() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("toggle")
+        XCTAssertTrue(app.buttons["Toggle"].firstMatch.waitForExistence(timeout: 5), "a search for a component should show the components")
+        let searched = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        searched.name = "library-search"
+        searched.lifetime = .keepAlways
+        add(searched)
+    }
+
     func testWithTheLassoInHandAFingerStillTapsAndPans() {
         // As once Apple Pencil has been seen: the Pencil draws the lasso and a finger doesn't.
         app.launchArguments += ["-fingerDraws", "NO"]
         openNewDesign()
-        control("Frames").tap()
-        app.buttons.matching(labelBeginning("iPhone")).firstMatch.tap()
+        addFrame("iPhone")
         let label = app.staticTexts["Screen 1"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
         control("Draw").tap()
@@ -678,7 +715,7 @@ final class SketchFlowUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
-            "Designs", "Board title", "Layers", "Draw", "Text", "Frames", "Sticky note", "Symbols", "Add Image",
+            "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image",
             "Share", "Zoom out", "Zoom", "Zoom in", "Magic Pen",
         ]
         for label in controls {
@@ -823,6 +860,17 @@ final class SketchFlowUITests: XCTestCase {
 
     private func control(_ label: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    /// Adds a frame of the device whose name starts with `device`, from the library's wireframes.
+    private func addFrame(_ device: String) {
+        control("Library").tap()
+        let tab = app.buttons["Wireframes"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "the library should open")
+        tab.tap()
+        let frame = app.buttons.matching(labelBeginning(device)).firstMatch
+        XCTAssertTrue(frame.waitForExistence(timeout: 5))
+        frame.tap()
     }
 
     private func labelBeginning(_ prefix: String) -> NSPredicate {

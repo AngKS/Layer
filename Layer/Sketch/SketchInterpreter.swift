@@ -219,6 +219,8 @@ enum SketchConventions {
     /// thickness, which the earlier 0.08 (31 pt) didn't allow for, so a 30 pt radio
     /// circle measured as wider than the cutoff.
     static let radioFraction: CGFloat = 0.085
+    /// `radioFraction` in points on the standard phone, as the model is told it.
+    static var radioPoints: Int { Int((radioFraction * DeviceFrame.iPhone.size.width).rounded(.down)) }
     /// An outline at least this many times wider than tall, and no taller than
     /// `progressHeight` screen points, is a progress bar.
     static let progressRatio: CGFloat = 7
@@ -237,37 +239,63 @@ enum SketchConventions {
 /// every model-backed provider describes them the same way. Measurements are put into
 /// words here, because small models judge "wide and flat" better than "5.2 times wider".
 enum SketchPrompt {
-    static let instructions = """
-        You help a phone app design tool read hand-drawn wireframe sketches. Each message \
-        describes one sketch the user drew on a phone screen, what else is on that screen, \
-        and what the sketch could be. Its shape alone doesn't settle it, so use the \
-        context to choose the one the user most likely meant.
+    /// Where the catalogue's `sketchHint`s go.
+    enum HintPlacement: String, Sendable {
+        /// Every kind's hint, in the instructions. What the benchmarks up to Stage 4 measured.
+        case all
+        /// Only the hints for this sketch's own candidates, in its message, so a small
+        /// model reads two or three lines that matter rather than ten.
+        case candidates
+    }
 
-        What designers usually mean:
-        - button: a wide pill or rounded box. Usually near the bottom of a screen, and a \
-        screen rarely has more than one or two.
-        - textField: a wide box with squarish or slightly rounded corners. Often stacked \
-        with other text fields in the upper or middle part of a screen.
-        - image: a large box, about as tall as it is wide or taller.
-        - title: a short squiggle near the top. A screen has one title.
-        - bodyText: a longer squiggle, or a squiggle below a title or an image.
-        - checkbox: a tiny square, often with a tick or an X in it, usually beside a label.
-        - radioButton: a tiny circle, under about 33 points across, often with a dot in it, usually one of a column of them.
-        - progressBar: a long, very thin outline, often partly shaded in.
-        - avatar: a circle about 34 points across or more, usually alone rather than in a column.
-        - toggle: a small pill with a circle (its knob) nearer one end than the middle.
+    /// Which placement is in force. In a debug build, `LAYER_SKETCH_HINTS=candidates`
+    /// chooses the other, so the benchmark can compare them without rebuilding.
+    static var hintPlacement: HintPlacement {
+        #if DEBUG
+        if let chosen = ProcessInfo.processInfo.environment["LAYER_SKETCH_HINTS"].flatMap(HintPlacement.init) { return chosen }
+        #endif
+        return .all
+    }
 
-        You're only asked about sketches the shape rules themselves found ambiguous, and \
-        you're given their own ranked, scored guesses — read those scores as real evidence \
-        of how the rules see it, not decoration. Answer with your choice, and a runner-up \
-        only if a second reading is genuinely plausible.
-        """
+    /// The kinds with hints, in the order the model is told them: the common wide shapes
+    /// first, then words, then the small controls.
+    static let hintOrder: [ElementKind] = [.button, .textField, .image, .title, .body, .checkbox, .radio, .progress, .avatar, .toggle]
 
-    static let titleInstructions = """
-        You name design boards in an app design tool. Each message describes what is on \
-        one board. Answer with a name for the board of two to four words, in title case, \
-        and nothing else: no quotation marks, no full stop.
-        """
+    /// One line per kind, such as "- button: a wide pill or rounded box…".
+    static func hints(for kinds: [ElementKind]) -> String {
+        kinds.compactMap { kind in kind.spec.sketchHint.map { "- \(kind.spec.promptName): \($0)" } }.joined(separator: "\n")
+    }
+
+    static var instructions: String {
+        PromptOverrides.text(.sketchInstructions, default: defaultInstructions(hintPlacement))
+    }
+
+    static func defaultInstructions(_ placement: HintPlacement) -> String {
+        let intro = """
+            You help a phone app design tool read hand-drawn wireframe sketches. Each message \
+            describes one sketch the user drew on a phone screen, what else is on that screen, \
+            and what the sketch could be. Its shape alone doesn't settle it, so use the \
+            context to choose the one the user most likely meant.
+            """
+        let outro = """
+            You're only asked about sketches the shape rules themselves found ambiguous, and \
+            you're given their own ranked, scored guesses — read those scores as real evidence \
+            of how the rules see it, not decoration. Answer with your choice, and a runner-up \
+            only if a second reading is genuinely plausible.
+            """
+        switch placement {
+        case .all: return "\(intro)\n\nWhat designers usually mean:\n\(hints(for: hintOrder))\n\n\(outro)"
+        case .candidates: return "\(intro)\n\n\(outro)"
+        }
+    }
+
+    static var titleInstructions: String {
+        PromptOverrides.text(.titleInstructions, default: """
+            You name design boards in an app design tool. Each message describes what is on \
+            one board. Answer with a name for the board of two to four words, in title case, \
+            and nothing else: no quotation marks, no full stop.
+            """)
+    }
 
     /// The name a reading goes by in prompts and in models' answers.
     static func name(for reading: SketchReading) -> String {
@@ -303,6 +331,11 @@ enum SketchPrompt {
         let options = request.options.map(name(for:))
         if options.count > 1 {
             sentences.append("It could be: \(options.dropLast().joined(separator: ", ")) or \(options[options.count - 1]).")
+            if hintPlacement == .candidates {
+                let kinds = request.options.compactMap { if case .element(let kind) = $0 { kind } else { nil } }
+                let lines = hints(for: hintOrder.filter(kinds.contains))
+                if !lines.isEmpty { sentences.append("\nWhat designers usually mean by these:\n\(lines)") }
+            }
         }
         if let prompt = request.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
             sentences.append("The designer says of it: “\(prompt)”. Go by what they say.")

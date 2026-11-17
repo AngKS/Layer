@@ -348,6 +348,31 @@ laid out: 20,75 353x6 alignment -
 marks: empty on true value - | dot on the right on true value 0.9 | shaded to 0.42 on true value 0.4
 layout data: colour, height, kind, name, progress, width, x, y
 
+## shape
+name: Shape | symbol: square.on.circle | placeholder: 
+hasText: false | belongsOnScreens: true | prompt: shape
+written as: 
+found by each of its written names: true
+size: 100x100 | sketched small: 100x100 | sketched large: 100x100 | sketched 90x300: 100x100
+keepsSketchedPosition: true | runsAcross: false
+sketched wide: 140,676 100x100 - | among others: 140,676 100x100 - | on iPad: 140,676 100x100 -
+sketched half-left: 56,376 100x100 - | among others: 56,376 100x100 - | on iPad: 56,376 100x100 -
+sketched narrow-right: 276,264 100x100 - | among others: 276,262 100x100 - | on iPad: 276,264 100x100 -
+sketched small-centre: 148,176 100x100 - | among others: 148,176 100x100 - | on iPad: 148,176 100x100 -
+sketched leading-text: 28,88 100x100 - | among others: 20,88 100x100 - | on iPad: 28,88 100x100 -
+sketched tall: 152,320 100x100 - | among others: 152,320 100x100 - | on iPad: 152,320 100x100 -
+sketched short-title: 148,76 100x100 - | among others: 148,76 100x100 - | on iPad: 148,76 100x100 -
+sketched big-title: 148,96 100x100 - | among others: 148,96 100x100 - | on iPad: 148,96 100x100 -
+resized to nothing: 40,40 8x8 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 100x100 tint #CD6C57 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 16 | alignment: leading
+hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
+loose, drawn large: 100x100 | drawn small: 100x100
+in a blueprint: 100x100 | in a row: 100x100 | at 40pt: 100x100
+laid out: 146,75 101x100 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, on, shape, width, x, y
+
 ## drawing
 name: Drawing | symbol: scribble | placeholder: 
 hasText: false | belongsOnScreens: false | prompt: drawing

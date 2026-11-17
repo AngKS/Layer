@@ -353,6 +353,7 @@ enum DesignLayoutWriter {
         ]
         if element.kind.hasText { info["text"] = element.text }
         if let symbol = element.symbol { info["symbol"] = symbol }
+        if element.kind == .shape { info["shape"] = (element.shape ?? .rectangle).rawValue }
         if element.imageID != nil { info["hasPicture"] = true }
         if let fontSize = element.fontSize { info["fontSize"] = number(fontSize) }
         if let weight = element.fontWeight { info["fontWeight"] = weight.rawValue }
