@@ -40,18 +40,18 @@ enum StrokeScript {
         let trimmed = written.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[") || trimmed.hasPrefix("{") { return try parseJSON(trimmed) }
 
-        var strokes: [[CGPoint]] = []
+        var parsed: [[CGPoint]] = []
         let lines = written.replacingOccurrences(of: ";", with: "\n").components(separatedBy: .newlines)
         for (index, raw) in lines.enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("//") { continue }
             do {
-                strokes += try strokes(fromLine: line)
+                parsed += try strokes(fromLine: line)
             } catch let reason as Reason {
                 throw ParseError(line: index + 1, text: line, reason: reason.text)
             }
         }
-        return strokes.filter { !$0.isEmpty }
+        return parsed.filter { !$0.isEmpty }
     }
 
     // MARK: Lines
