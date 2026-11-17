@@ -33,17 +33,22 @@ struct LayerApp: App {
 
 /// The canvas for one open design.
 private struct DesignEditor: View {
-    @State private var model: AppModel
+    /// Makes the design's model once. `State(initialValue:)` would make one on every
+    /// `init`, which the document group runs again whenever it is redrawn (when the file
+    /// is renamed, for instance), and throw all but the first away.
+    @State private var made = MadeOnce()
     @Environment(\.scenePhase) private var scenePhase
 
+    private let document: LayerDocument
     private let fileURL: URL?
 
     init(document: LayerDocument, fileURL: URL?) {
-        _model = State(initialValue: AppModel(document: document))
+        self.document = document
         self.fileURL = fileURL
     }
 
     var body: some View {
+        let model = made.model(for: document)
         CanvasScreen()
             .environment(model)
             .environment(model.images)
@@ -58,7 +63,7 @@ private struct DesignEditor: View {
                     model.checkFile()
                     model.engine.prepare()
                 } else {
-                    model.refreshPreview()
+                    model.leavingTheScreen()
                 }
             }
             // The system's own document object says when a save finishes or a conflict turns up.
@@ -76,5 +81,18 @@ private struct DesignEditor: View {
             .preferredColorScheme(.light)
             .toolbar(.hidden, for: .navigationBar)
             .persistentSystemOverlays(.hidden)
+    }
+}
+
+/// Holds the model of the design an editor shows, made the first time it is asked for.
+@MainActor
+private final class MadeOnce {
+    private var model: AppModel?
+
+    func model(for document: LayerDocument) -> AppModel {
+        if let model { return model }
+        let made = AppModel(document: document)
+        model = made
+        return made
     }
 }

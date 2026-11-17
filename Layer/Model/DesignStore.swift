@@ -469,6 +469,7 @@ final class DesignStore {
     /// Starts a change made in many small steps, such as a drag or typing. Everything
     /// until `endEdit()` undoes as one step.
     func beginEdit() {
+        editBegins += 1
         if isHoldingEdit { isEditingByHandInHold = true }
         if editStart == nil { openEdit() }
     }
@@ -486,6 +487,36 @@ final class DesignStore {
         if !editIsInHistory, start != content { registerUndo(restoring: start) }
         editIsInHistory = false
     }
+
+    /// Whether a gradual edit is under way.
+    var isEditing: Bool { editStart != nil }
+
+    /// Counts every `beginEdit()` and `beginHeldEdit()`, so that whatever began an edit can
+    /// tell whether anything else has joined it since. Edits don't nest: any end ends them.
+    @ObservationIgnored private(set) var editBegins = 0
+
+    /// Tells the system the document has changes to save, without a step in the history.
+    /// The system marks a document as changed only when its undo manager closes a group,
+    /// so a change made without an undo step (a name the app settles on, the file's name,
+    /// the picture for the document browser, or the rest of an edit after an autosave)
+    /// would otherwise never be written if nothing else changed before the design closed.
+    ///
+    /// A no-op step is put in a group of its own and taken out again. The undo manager
+    /// groups by event, which would hold the group open until the run loop turns and then
+    /// leave it on the stack empty: outside any group, it is told to group by hand.
+    func markNeedsSaving() {
+        guard let undoManager else { return }
+        let groupsByEvent = undoManager.groupsByEvent
+        if undoManager.groupingLevel == 0 { undoManager.groupsByEvent = false }
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: saveMarker) { _ in }
+        undoManager.endUndoGrouping()
+        undoManager.removeAllActions(withTarget: saveMarker)
+        undoManager.groupsByEvent = groupsByEvent
+    }
+
+    @ObservationIgnored private let saveMarker = SaveMarker()
+    private final class SaveMarker {}
 
     private func openEdit() {
         editStart = content
@@ -505,6 +536,7 @@ final class DesignStore {
     /// `beginEdit()`: that is how an edit by hand is told from it.
     func beginHeldEdit() {
         guard !isHoldingEdit else { return }
+        editBegins += 1
         // An edit already under way goes on inside the hold.
         isEditingByHandInHold = editStart != nil
         if editStart == nil { openEdit() }

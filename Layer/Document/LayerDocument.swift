@@ -9,7 +9,15 @@ import UniformTypeIdentifiers
 final class LayerDocument: ReferenceFileDocument {
     static let readableContentTypes: [UTType] = [.layerDesign]
 
-    private let file: OSAllocatedUnfairLock<DesignFile>
+    private let state: OSAllocatedUnfairLock<State>
+
+    private struct State {
+        var file: DesignFile
+        /// How many times the design has been changed here, and how many of those changes
+        /// the last snapshot for saving had seen.
+        var changes = 0
+        var snapshotted = 0
+    }
     /// Whether this design was made just now rather than opened. Its file then still has
     /// the name the system gave it.
     let isNew: Bool
@@ -19,32 +27,44 @@ final class LayerDocument: ReferenceFileDocument {
         // A new design starts with the app's default model, and keeps it from then on.
         var new = DesignFile()
         new.content.canvas.model = ModelPreferences.defaultChoice
-        file = OSAllocatedUnfairLock(initialState: new)
+        state = OSAllocatedUnfairLock(initialState: State(file: new))
         isNew = true
     }
 
     /// A design that was opened: `file` is what was read from disk.
     init(file opened: DesignFile) {
-        file = OSAllocatedUnfairLock(initialState: opened)
+        state = OSAllocatedUnfairLock(initialState: State(file: opened))
         isNew = false
     }
 
     init(configuration: ReadConfiguration) throws {
-        file = OSAllocatedUnfairLock(initialState: try DesignFile(wrapper: configuration.file))
+        state = OSAllocatedUnfairLock(initialState: State(file: try DesignFile(wrapper: configuration.file)))
         isNew = false
     }
 
     /// The design as it would be saved right now.
     var current: DesignFile {
-        file.withLock { $0 }
+        state.withLock { $0.file }
     }
 
     func update(_ change: @Sendable (inout DesignFile) -> Void) {
-        file.withLock { change(&$0) }
+        state.withLock {
+            change(&$0.file)
+            $0.changes += 1
+        }
+    }
+
+    /// Whether the design has changed since it was last taken for saving: what a design
+    /// that is closing still has to tell the system to save.
+    var hasChangesSinceSnapshot: Bool {
+        state.withLock { $0.changes != $0.snapshotted }
     }
 
     func snapshot(contentType: UTType) throws -> DesignFile {
-        current
+        state.withLock {
+            $0.snapshotted = $0.changes
+            return $0.file
+        }
     }
 
     func fileWrapper(snapshot: DesignFile, configuration: WriteConfiguration) throws -> FileWrapper {

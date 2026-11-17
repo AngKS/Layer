@@ -1041,3 +1041,144 @@ struct ResourceTests {
         #expect(library.image(id) != nil)
     }
 }
+
+/// The system's own document, which saves only when it is told something changed: by the
+/// undo manager it shares with the design. Stands in for the one `DocumentGroup` makes.
+@MainActor
+private func systemDocument(for model: AppModel, groupsByEvent: Bool = false) -> (system: UIDocument, undo: UndoManager) {
+    let system = UIDocument(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    let undo = UndoManager()
+    undo.groupsByEvent = groupsByEvent
+    system.undoManager = undo
+    model.store.undoManager = undo
+    return (system, undo)
+}
+
+/// What an autosave does: the design is taken as it stands and written, and the system's
+/// document has nothing left unsaved.
+@MainActor
+private func autosave(_ model: AppModel, _ system: UIDocument) throws {
+    _ = try model.document.snapshot(contentType: .layerDesign)
+    system.updateChangeCount(.cleared)
+}
+
+@Suite("Closing a design")
+@MainActor
+struct ClosingTests {
+    /// A colour tapped in the format panel joins the step it opened until the panel's pause
+    /// ends it. Saved meanwhile, and the design closed before the pause was over, the change
+    /// after the save told the system nothing and was lost.
+    @Test func aChangeInTheFormatPanelJustBeforeClosingIsSaved() async throws {
+        let model = AppModel(document: LayerDocument())
+        let (system, _) = systemDocument(for: model)
+        model.store.addScreen(from: leftScreenSketch)
+        model.adjusting { model.store.updateCanvas { $0.background = RGBColor(hex: 0xFF0000) } }
+        #expect(system.hasUnsavedChanges)
+        try autosave(model, system)
+
+        model.adjusting { model.store.updateCanvas { $0.background = RGBColor(hex: 0x0000FF) } }
+        await model.prepareToClose()
+
+        #expect(system.hasUnsavedChanges)
+        #expect(!model.store.isEditing)
+        #expect(try model.document.snapshot(contentType: .layerDesign).content.canvas.background == RGBColor(hex: 0x0000FF))
+    }
+
+    /// The name settled at close, the file's name and the picture for the browser are
+    /// written without an undo step: they still have to reach the disk.
+    @Test func whatClosingWritesWithoutAnUndoStepIsSaved() throws {
+        let model = AppModel(document: LayerDocument())
+        let (system, undo) = systemDocument(for: model)
+        model.store.addScreen(from: leftScreenSketch)
+        try autosave(model, system)
+        let mark = model.store.historyMark
+        let couldUndo = undo.canUndo
+
+        model.store.setTitle("Checkout", undoable: false)
+        model.document.update { $0.fileName = "Checkout" }
+        model.close()
+
+        #expect(system.hasUnsavedChanges)
+        // Told without a step of its own: the history is as it was.
+        #expect(model.store.historyMark == mark)
+        #expect(undo.canUndo == couldUndo)
+    }
+
+    @Test func aDesignOpenedAndClosedUntouchedIsNotSavedAgain() throws {
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        let (system, _) = systemDocument(for: model)
+        model.close()
+        #expect(!system.hasUnsavedChanges)
+    }
+
+    /// The undo manager the system gives a design groups changes by event. Told outside any
+    /// group, the system has to know at once, and undo must not gain an empty step.
+    @Test func tellingTheSystemToSaveAddsNoStepToUndo() throws {
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        let (system, undo) = systemDocument(for: model, groupsByEvent: true)
+        model.store.markNeedsSaving()
+        #expect(system.hasUnsavedChanges)
+        #expect(!undo.canUndo)
+        #expect(undo.groupsByEvent)
+    }
+}
+
+/// The format panel makes a run of quick changes one step, ended by a pause. The pause
+/// is the panel's own: it doesn't end an edit something else began meanwhile.
+@Suite("Changes made in the format panel")
+@MainActor
+struct FormatPanelEditTests {
+    private func makeModel() -> (model: AppModel, undo: UndoManager, screen: DesignScreen) {
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        let model = AppModel(document: LayerDocument())
+        model.store.undoManager = undo
+        model.adjustmentPause = .milliseconds(20)
+        return (model, undo, model.store.addScreen(from: leftScreenSketch))
+    }
+
+    @Test func thePanelsPauseEndsItsOwnEdit() async throws {
+        let (model, undo, screen) = makeModel()
+        let before = model.store.content
+        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout 2" } }
+        #expect(model.store.isEditing)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(!model.store.isEditing)
+        undo.undo()
+        #expect(model.store.content == before)
+    }
+
+    /// A drag begun just after a colour was tapped: the pause used to end the drag's edit
+    /// halfway, and every later move of the drag was an undo step of its own.
+    @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
+        let (model, undo, screen) = makeModel()
+        let before = model.store.content
+        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        model.store.beginEdit()
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        try await Task.sleep(for: .milliseconds(150))
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        #expect(model.store.isEditing)
+        model.store.endEdit()
+
+        undo.undo()
+        #expect(model.store.content == before)
+    }
+
+    @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
+        let (model, undo, screen) = makeModel()
+        let before = model.store.content
+        model.store.beginEdit()
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(model.store.isEditing)
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.endEdit()
+
+        undo.undo()
+        #expect(model.store.content == before)
+    }
+}

@@ -96,8 +96,7 @@ private struct TitleBar: View {
             Button {
                 // The design goes back to the browser with its picture and its name up to date.
                 Task {
-                    await model.prepareToClose()
-                    dismiss()
+                    if await model.prepareToClose() { dismiss() }
                 }
             } label: {
                 Image(systemName: "chevron.left")

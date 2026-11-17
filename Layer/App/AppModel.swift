@@ -579,8 +579,13 @@ final class AppModel {
     @ObservationIgnored private(set) var isClosed = false
 
     /// Gets a design ready to go back to the document browser: its picture as the board
-    /// was left, its name decided, and its file given that name.
-    func prepareToClose() async {
+    /// was left, its name decided, and its file given that name. False when the design is
+    /// already on its way out, so that a second tap of the back button doesn't dismiss it
+    /// again, or early, while the first still waits for the file's name.
+    @discardableResult
+    func prepareToClose() async -> Bool {
+        guard !isClosing, !isClosed else { return false }
+        isClosing = true
         refreshPreview()
         // A name still being thought up is settled now, from the design's own words.
         if titleSuggestion != nil, store.title == nil {
@@ -588,9 +593,22 @@ final class AppModel {
         }
         await settleFileName()
         close()
+        return true
     }
 
+    @ObservationIgnored private var isClosing = false
+
     func close() {
+        // Closed by the back button, then again as the canvas goes from the screen.
+        guard !isClosed else { return }
+        // A change made in the format panel moments ago is still an edit waiting for the
+        // panel's pause to end it: it ends now, while the design can still be saved.
+        adjustmentEnd?.cancel()
+        adjustmentEnd = nil
+        store.endEdit()
+        // What was written without an undo step, or after the last save within an edit,
+        // reaches the disk only if the system is told there is something to save.
+        if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
         voice?.end()
         // Listening stops, but a pencil command already running is left to finish.
@@ -602,7 +620,6 @@ final class AppModel {
         generationTask?.cancel()
         generationDismissal?.cancel()
         settle?.cancel()
-        adjustmentEnd?.cancel()
         suggestionExpiry?.cancel()
         for conversion in conversions { conversion.cancel() }
         conversions.removeAll()
@@ -759,6 +776,14 @@ final class AppModel {
         previewedBoard = board
         let picture = BoardSnapshot.thumbnail(of: self)
         document.update { $0.preview = picture }
+    }
+
+    /// The app is leaving the screen, and the system saves the design as it goes. The
+    /// board's picture is drawn for it, and, written without an undo step, has to be
+    /// announced to be saved.
+    func leavingTheScreen() {
+        refreshPreview()
+        if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
 
     /// Redraws the board's picture while the board is left alone. Only its views are drawn
@@ -1120,17 +1145,32 @@ final class AppModel {
         store.endEdit()
     }
 
+    /// How long the format panel waits after its last change before ending its step.
+    @ObservationIgnored var adjustmentPause: Duration = .milliseconds(600)
+
+    /// While the format panel's edit is its own, how many edits the store had seen begun
+    /// when the panel last joined it. Anything else beginning an edit since, a drag, a
+    /// stroke or a scrub, makes the edit theirs to end: ended by the panel's pause, a drag
+    /// begun just after a colour was tapped lost its step halfway, and each later move was
+    /// a step of its own.
+    @ObservationIgnored private var adjustmentOwnsEditAt: Int?
+
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
+        // The panel's own edit if it opens one, or goes on with one it opened that nothing
+        // else has joined. Inside another's edit, the change joins that one.
+        let ownsEdit = !store.isEditing || adjustmentOwnsEditAt == store.editBegins
         store.beginEdit()
+        adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
         body()
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
         adjustmentEnd?.cancel()
         adjustmentEnd = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.store.endEdit()
+            try? await Task.sleep(for: self?.adjustmentPause ?? .zero)
+            guard !Task.isCancelled, let self else { return }
+            if adjustmentOwnsEditAt == store.editBegins { store.endEdit() }
+            adjustmentOwnsEditAt = nil
         }
     }
 
