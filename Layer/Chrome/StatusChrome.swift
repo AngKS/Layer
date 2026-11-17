@@ -83,39 +83,6 @@ struct ViewControls: View {
     }
 }
 
-/// Bottom right in a compact window, while drawing. There the pencil palette is a bar
-/// fixed across the bottom: iPadOS only gives wider windows the palette that floats and
-/// tucks into a corner. This does the tucking for the bar. It puts the bar away with the
-/// pen still in hand, leaving itself in the corner, and brings the bar back.
-struct PaletteToggle: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let isCollapsed = model.isPaletteCollapsed
-        Button {
-            set(collapsed: !isCollapsed)
-        } label: {
-            Image(systemName: isCollapsed ? "pencil.tip" : "chevron.down")
-                .font(.system(size: isCollapsed ? 22 : 18, weight: .regular))
-                .foregroundStyle(.primary)
-                .frame(width: isCollapsed ? 56 : 44, height: isCollapsed ? 56 : 44)
-                .contentShape(.circle)
-                .glassEffect(.regular, in: .circle)
-        }
-        .buttonStyle(.plain)
-        // A flick down or aside puts the palette away, as it would the floating one; a flick up brings it back.
-        .simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { drag in
-            let isUpward = drag.translation.height < -abs(drag.translation.width)
-            set(collapsed: !isUpward)
-        })
-        .accessibilityLabel(isCollapsed ? "Show palette" : "Hide palette")
-    }
-
-    private func set(collapsed: Bool) {
-        withAnimation(.smooth(duration: 0.3)) { model.isPaletteCollapsed = collapsed }
-    }
-}
-
 /// Undo and redo, for when the pencil palette and its own undo buttons are away. Each
 /// is only there while it has something to do: undo once there is a step to take back,
 /// redo once one has been taken back, and nothing at all on an untouched design. As part

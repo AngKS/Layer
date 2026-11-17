@@ -9,7 +9,6 @@ struct CanvasScreen: View {
 
     var body: some View {
         let accent = Theme.accent.color
-        let isCompact = model.isCompactWidth
         let usesSheets = model.isCompactSizeClass
         ZStack(alignment: .topLeading) {
                 // Its own view, so that scrolling redraws the grid and not this whole screen.
@@ -32,9 +31,9 @@ struct CanvasScreen: View {
 
                 InkCanvas(
                     model: model, tool: model.tool, isLocked: model.isCanvasLocked,
-                    // In a compact window the palette is a bar across the bottom, which
-                    // can be tucked away, and which a panel's sheet takes the place of.
-                    hidesPalette: usesSheets && (model.isPaletteCollapsed || model.isLayersOpen || model.isInspectorOpen),
+                    // In a compact window the palette is a bar across the bottom, which a
+                    // panel's sheet takes the place of. The bar is up for as long as Draw is on.
+                    hidesPalette: usesSheets && (model.isLayersOpen || model.isInspectorOpen),
                     fingerDraws: model.fingerDraws,
                     watchesPencil: model.needsPencilDetector,
                     topInset: model.topBarBottom, undoManager: undoManager
@@ -121,12 +120,6 @@ struct CanvasScreen: View {
             // Undo and redo join the zoom at any width, which leaves the other corner free.
             ViewControls()
                 .modifier(BottomCorner(edge: .leading))
-        }
-        .overlay {
-            if isCompact, usesSheets, model.tool == .draw, !model.isLayersOpen, !model.isInspectorOpen {
-                PaletteToggle()
-                    .modifier(BottomCorner(edge: .trailing))
-            }
         }
         .background(model.store.canvas.resolvedBackground.color)
         // What is on the canvas, for Siri and Apple Intelligence: see `OnscreenContext`.

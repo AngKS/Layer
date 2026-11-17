@@ -185,11 +185,6 @@ final class AppModel {
     }
     /// Whether there is only room for one panel at a time.
     private var fitsOnePanel: Bool { isCompactSizeClass || (canvasSize.width > 0 && canvasSize.width < 680) }
-    /// Whether the fixed palette bar of a compact window has been tucked away, pen still
-    /// in hand. Remembered between launches, as the floating palette's place is.
-    var isPaletteCollapsed = UserDefaults.standard.bool(forKey: "isPaletteCollapsed") {
-        didSet { UserDefaults.standard.set(isPaletteCollapsed, forKey: "isPaletteCollapsed") }
-    }
     /// True while an element is being dragged or resized, which shows the spacing guides.
     var isAdjusting = false
 

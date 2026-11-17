@@ -209,14 +209,9 @@ struct InkCanvas: UIViewRepresentable {
             if !(isDrawing && isMagicPen) { model.pen.location = nil }
 
             let showsPalette = isDrawing && !hidesPalette
-            // A canvas whose palette is out of sight takes only the Pencil. A palette
-            // that is tucked away is still in use, so fingers go on drawing then, unless
-            // the Pencil settings say that only the Pencil draws.
             // Drawing, a finger draws only if it is meant to; otherwise it pans the canvas.
-            let isTuckedAway = isDrawing && hidesPalette
             let policy: PKCanvasViewDrawingPolicy = !isDrawing ? .default
                 : fingerDraws && !UIPencilInteraction.prefersPencilOnlyDrawing ? .anyInput : .pencilOnly
-            _ = isTuckedAway
             for canvas in canvases {
                 if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
                 palette.setVisible(showsPalette, forFirstResponder: canvas)
