@@ -331,6 +331,34 @@ extension HostedModelTests {
         #expect(app.generation == nil)
     }
 
+    /// gpt-6-luna turns tools down while it reasons, and says to send reasoning_effort
+    /// "none". Asked again that way it answers, and is asked that way from then on.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func anOpenAIModelThatWontReasonWithToolsIsAskedWithReasoningOff() async throws {
+        let (app, screen) = VoiceFixture.undoableLogin()
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["ok"])))
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test-reasoning"))
+        try await Task.sleep(for: .milliseconds(400))
+        let refusal = #"{"error":{"message":"Function tools with reasoning_effort are not supported for gpt-test-reasoning in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'."}}"#
+        StubProvider.answer(with: [
+            .init(status: 400, body: refusal, contentType: "application/json"),
+            .init(body: SSE.openAIToolCall(id: "call_1", name: "styleElement", json: [#"{"element":"E2","look":"green"}"#])),
+            .init(body: SSE.openAI(text: ["Done."])),
+        ])
+
+        let outcome = await VoiceAgent(model: app).run("make the sign in button green")
+
+        #expect(outcome.problem == nil)
+        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        let bodies = try StubProvider.requests.map { try #require(JSONSerialization.jsonObject(with: $0.body) as? [String: Any]) }
+        #expect(bodies.count == 3)
+        #expect(bodies[0]["reasoning_effort"] == nil)
+        #expect(bodies[1]["reasoning_effort"] as? String == "none")
+        // The next request didn't have to be turned down first.
+        #expect(bodies[2]["reasoning_effort"] as? String == "none")
+    }
+
     /// Someone can be dragging an element while a spoken screen is written. The screen
     /// being finished must not close the step under the finger: every move after it
     /// would then be an undo step of its own, and push the earlier history out.

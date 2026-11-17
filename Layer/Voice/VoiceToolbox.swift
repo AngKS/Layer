@@ -60,7 +60,8 @@ final class VoiceToolbox: VoiceActing {
 
     private func refusesToDelete() -> String? {
         guard let spokenCommand, !Self.asksToRemove(spokenCommand) else { return nil }
-        return failed("Nothing was said about removing anything, so nothing was removed.")
+        // The model's doing, not the person's: it is said that way round.
+        return failed("That would have deleted something you didn't ask to remove, so nothing was changed.")
     }
 
     /// Puts one element next to another, 12 points from it: below or above it with their
@@ -89,7 +90,9 @@ final class VoiceToolbox: VoiceActing {
         case (.failure(let refusal), _), (_, .failure(let refusal)): return failed(refusal.line)
         case (.success(let one), .success(let two)): (moving, other) = (one, two)
         }
-        guard moving.ref != other.ref else { return failed("Name two different elements.") }
+        guard moving.ref != other.ref else {
+            return failed("Name two different elements. To add a new one next to another, give addElement where it goes.")
+        }
         guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
         guard !moving.element.isLocked else { return failed("\(handles.handle(forElement: moving.element.id)) is locked.") }
         let store = model.store
@@ -319,7 +322,7 @@ final class VoiceToolbox: VoiceActing {
 
     // MARK: Elements
 
-    func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
+    func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
         guard let model else { return gone }
         let host: DesignScreen
         if let screen, !screen.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -342,7 +345,14 @@ final class VoiceToolbox: VoiceActing {
         element.frame = DesignActions.frameForNewElement(element, on: host)
         let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
         DesignActions.reveal(.element(ref), in: model)
-        return done("Added \(Self.describe(element, article: "a")) as \(handles.handle(forElement: element.id)).")
+        let handle = handles.handle(forElement: element.id)
+        let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
+        // "Add an image below the title": put by the other one as it is added.
+        if let relation, !relation.trimmingCharacters(in: .whitespaces).isEmpty,
+           let target, !target.trimmingCharacters(in: .whitespaces).isEmpty {
+            return added + " " + placeElement(element: handle, relation: relation, target: target)
+        }
+        return added
     }
 
     func setText(element: String, text: String) -> String {

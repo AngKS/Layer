@@ -10,9 +10,9 @@ import Foundation
 /// measured against a model with nothing but a recorder behind them.
 protocol VoiceActing: AnyObject, Sendable {
     @MainActor func createScreen(name: String?, description: String) async throws -> String
+    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String
     @MainActor func stackElements(elements: String, direction: String) -> String
     @MainActor func placeElement(element: String, relation: String, target: String) -> String
-    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
     @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String
@@ -28,6 +28,13 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func undo() -> String
     @MainActor func redo() -> String
     @MainActor func endCall() -> String
+}
+
+extension VoiceActing {
+    /// Adds an element where new elements go: below the rest.
+    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
+        addElement(screen: screen, kind: kind, text: text, look: look, relation: nil, target: nil)
+    }
 }
 
 /// Whether the word a person used for something fits the thing a model took it to mean.
@@ -177,10 +184,17 @@ struct AddElementTool: Tool {
         var text: String?
         @Guide(description: "Optional look words, comma separated, such as: blue, bold, 18pt, radius 12, text white, bordered.")
         var look: String?
+        @Guide(description: "Where to put it, if the person said it goes next to another element: below, above, left of or right of.")
+        var relation: String?
+        @Guide(description: "The handle of that other element, such as E1.")
+        var target: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.addElement(screen: arguments.screen, kind: arguments.kind, text: arguments.text, look: arguments.look)
+        await actor.addElement(
+            screen: arguments.screen, kind: arguments.kind, text: arguments.text, look: arguments.look,
+            relation: arguments.relation, target: arguments.target
+        )
     }
 }
 

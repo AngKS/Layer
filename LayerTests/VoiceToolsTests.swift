@@ -428,10 +428,25 @@ struct VoiceToolsTests {
         #expect(!VoiceToolbox.asksToPlace("move it to the top"))
     }
 
+    /// "Add an image below the title": on an iPad the model could only try to place an
+    /// image that wasn't there yet. Adding takes where to put it.
+    @Test func anElementIsAddedNextToAnother() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Can you add an image below the title?"
+        let line = bench.box.addElement(screen: "S1", kind: "image", text: nil, look: nil, relation: "below", target: "E1")
+        let added = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        #expect(added.kind == .image)
+        #expect(added.frame.minX == 20)
+        #expect(added.frame.minY == 128)
+        #expect(line.hasPrefix("Added an image as E4."))
+        #expect(bench.box.lines.last == "Put the image below the title “Welcome back”.")
+        #expect(bench.box.failures.isEmpty)
+    }
+
     @Test func placingNeedsTwoThingsAndAWay() {
         let bench = bench()
         let before = bench.app.store.content
-        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E3") == "Name two different elements.")
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E3").hasPrefix("Name two different elements."))
         #expect(bench.box.placeElement(element: "E3", relation: "inside", target: "E1")
             == "I can put it above, below, left of or right of another, not “inside”.")
         #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E99") == "There is no E99.")
@@ -463,9 +478,9 @@ struct VoiceToolsTests {
     @Test func nothingIsDeletedUnlessRemovingWasAskedFor() throws {
         let bench = bench()
         bench.box.spokenCommand = "Can you edit the image to be a section?"
-        #expect(bench.box.deleteElement(element: "E3", named: "image") == "Nothing was said about removing anything, so nothing was removed.")
+        #expect(bench.box.deleteElement(element: "E3", named: "image") == "That would have deleted something you didn't ask to remove, so nothing was changed.")
         #expect(bench.element("E3") != nil)
-        #expect(bench.box.deleteScreen(screen: "S1", named: "login screen").hasPrefix("Nothing was said about removing"))
+        #expect(bench.box.deleteScreen(screen: "S1", named: "login screen").hasPrefix("That would have deleted something"))
         #expect(bench.app.store.screens.count == 1)
 
         bench.box.spokenCommand = "get rid of the image"

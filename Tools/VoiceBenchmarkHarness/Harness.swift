@@ -47,7 +47,7 @@ final class Recorder: VoiceActing {
         note("createScreen", ["name": name, "description": description], saying: "Made the screen as S9, with 6 elements.")
     }
 
-    func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
+    func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
         note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look], saying: "Added a \(kind) as E20.")
     }
 
