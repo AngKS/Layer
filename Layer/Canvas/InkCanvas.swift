@@ -572,10 +572,6 @@ struct InkCanvas: UIViewRepresentable {
             return (strokes.count, strokes.isEmpty ? nil : documentCanvas.drawing.bounds)
         }
 
-        /// The creation date the last stroke made here was given. Each new stroke is given a
-        /// later one, since a stroke's creation date is its key.
-        private var lastStrokeDate = Date.distantPast
-
         /// PencilKit strokes through points in canvas points, drawn at an even pace.
         private func makeStrokes(_ strokes: [[CGPoint]], ink: PKInk, width: CGFloat) -> [PKStroke] {
             strokes.filter { !$0.isEmpty }.map { points in
@@ -585,9 +581,7 @@ struct InkCanvas: UIViewRepresentable {
                         opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2
                     )
                 }
-                let created = max(Date(), lastStrokeDate.addingTimeInterval(0.001))
-                lastStrokeDate = created
-                return PKStroke(ink: ink, path: PKStrokePath(controlPoints: controlPoints, creationDate: created))
+                return PKStroke(ink: ink, path: PKStrokePath(controlPoints: controlPoints, creationDate: InkGeometry.newStrokeDate()))
             }
         }
 

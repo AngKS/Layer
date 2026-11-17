@@ -265,7 +265,8 @@ final class DesignStore {
     @discardableResult
     func duplicate(_ ref: ElementRef) -> ElementRef? {
         guard let (element, _) = resolve(ref) else { return nil }
-        var copy = element
+        // A drawing's copy is made of strokes of its own.
+        var copy = element.withStrokesOfItsOwn()
         copy.id = UUID()
         copy.isLocked = false
         copy.frame = element.frame.offsetBy(dx: 16, dy: 16)

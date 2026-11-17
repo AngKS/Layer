@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import PencilKit
 
 extension PKStroke {
@@ -57,6 +58,23 @@ extension DesignElement {
         }
     }
 
+    /// The same drawing with strokes of its own: each stroke is made again with a new
+    /// key. A copy needs this, or its strokes would be taken for the original's once
+    /// both are on the ink canvas.
+    func withStrokesOfItsOwn() -> DesignElement {
+        guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink) else { return self }
+        let strokes = drawing.strokes.map { stroke in
+            PKStroke(
+                ink: stroke.ink,
+                path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: InkGeometry.newStrokeDate()),
+                transform: stroke.transform, mask: stroke.mask
+            )
+        }
+        var copy = self
+        copy.ink = PKDrawing(strokes: strokes).dataRepresentation()
+        return copy
+    }
+
     /// Whether a touch anywhere in the element's frame picks it. A drawing on the ink
     /// canvas is picked by its strokes instead, which leaves the space round and inside
     /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
@@ -68,6 +86,18 @@ extension DesignElement {
 enum InkGeometry {
     /// How near two strokes come, in canvas points, to count as parts of one drawing.
     static let reach: CGFloat = 14
+
+    private static let lastStrokeDate = OSAllocatedUnfairLock(initialState: Date.distantPast)
+
+    /// A creation date for a stroke made in code, later than any given out before. A
+    /// stroke's creation date is its key, so no two may share one.
+    static func newStrokeDate() -> Date {
+        lastStrokeDate.withLock { last in
+            let date = max(Date(), last.addingTimeInterval(0.001))
+            last = date
+            return date
+        }
+    }
 
     /// The area strokes cover, their thickness included. Nil for no strokes.
     static func bounds(of strokes: [PKStroke]) -> CGRect? {

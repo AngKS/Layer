@@ -266,13 +266,34 @@ struct DrawingStoreTests {
 
         let copy = try #require(store.duplicate(ref))
         #expect(store.floating.map(\.element.kind) == [.drawing, .drawing])
-        #expect(store.resolve(copy)?.element.ink == store.resolve(ref)?.element.ink)
+        #expect(store.resolve(copy)?.element.strokeCount == 2)
+        #expect(store.resolve(copy)?.element.frame.size == store.resolve(ref)?.element.frame.size)
         #expect(store.resolve(copy)?.element.isLocked == false)
 
         store.delete(ref)
         #expect(store.floating.map(\.id) == [copy.element])
         undo.undo()
         #expect(store.floating.count == 2)
+    }
+
+    @Test func aCopiedDrawingHasStrokesOfItsOwn() throws {
+        let (store, _, ref) = try storeWithDrawing()
+        let copy = try #require(store.duplicate(ref))
+        let original = try #require(store.resolve(ref)?.element)
+        let copied = try #require(store.resolve(copy)?.element)
+        let keys = (original.canvasStrokes + copied.canvasStrokes).map(\.key)
+        #expect(Set(keys).count == 4, "no two strokes on the canvas may be taken for the same one")
+
+        // On the canvas, with a stroke then drawn elsewhere, the two stay two drawings.
+        var sync = DrawingSync()
+        let toShow = sync.strokes(showing: store.content, on: [])
+        var held = try #require(toShow)
+        held.append(stroke(from: CGPoint(x: 1500, y: 900), to: CGPoint(x: 1600, y: 900)))
+        var content = store.content
+        sync.changes(for: held, in: content).apply(to: &content)
+        #expect(content.elements.map(\.strokeCount) == [2, 2, 1])
+        #expect(content.element(original.id)?.frame == original.frame)
+        #expect(content.element(copied.id)?.frame == copied.frame)
     }
 
     @Test func aDrawingStaysOnTheOpenCanvas() throws {
