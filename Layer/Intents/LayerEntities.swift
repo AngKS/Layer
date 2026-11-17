@@ -19,6 +19,7 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case canvasNotReady
     case invalidStrokes(String)
     case cantGoOnScreens
+    case drawingsAreDrawn
     case invalidImage
 
     var localizedStringResource: LocalizedStringResource {
@@ -36,7 +37,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."
         case .invalidStrokes(let reason): "Layer couldn't read those strokes. \(reason)"
-        case .cantGoOnScreens: "Sticky notes stay on the open canvas; they can't go on a screen."
+        case .cantGoOnScreens: "Sticky notes and drawings stay on the open canvas; they can't go on a screen."
+        case .drawingsAreDrawn: "A drawing is made by drawing it. Draw strokes on the canvas instead of adding an element."
         case .invalidImage: "Layer couldn't read that file as a picture."
         }
     }
@@ -250,7 +252,7 @@ struct ElementEntity: AppEntity {
 // MARK: Enums
 
 enum ElementKindChoice: String, AppEnum {
-    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote, checkbox, radio, progress
+    case title, body, button, textField, image, symbol, divider, text, toggle, avatar, stickyNote, checkbox, radio, progress, drawing
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Element Kind"
     static let caseDisplayRepresentations: [ElementKindChoice: DisplayRepresentation] = [
@@ -268,6 +270,7 @@ enum ElementKindChoice: String, AppEnum {
         .checkbox: "Checkbox",
         .radio: "Radio Button",
         .progress: "Progress Bar",
+        .drawing: "Drawing",
     ]
 
     init(_ kind: ElementKind) {

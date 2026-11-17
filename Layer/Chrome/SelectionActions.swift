@@ -50,12 +50,14 @@ struct SelectionActions: View {
         @Bindable var model = model
         let isLocked = model.isSelectionLocked
         return ToolbarPill {
-            if case .ink = model.selection {
-                drawingActions
-            } else if isLocked {
+            if isLocked {
                 // Locked: nothing to do but unlock.
                 ToolButton(symbol: "lock.open", label: "Unlock") { model.setSelectionLocked(false) }
                     .keyboardShortcut("l", modifiers: .command)
+            } else if model.selectedElement?.element.kind == .drawing {
+                drawingActions
+            } else if model.selection?.isSeveral == true {
+                severalActions
             } else {
                 if let selected = model.selectedElement, selected.element.kind.hasText {
                     ToolButton(symbol: "character.cursor.ibeam", label: "Edit text", isActive: model.isEditingText) {
@@ -103,8 +105,8 @@ struct SelectionActions: View {
         .onChange(of: model.selection) { prompt = "" }
     }
 
-    /// For a drawing: a line to say what it should be, the sparkle that has it read as a
-    /// sketch and turned into that, and deleting it.
+    /// For a drawing: a line to say what it should be and the sparkle that has it read as
+    /// a sketch and turned into that; then what any element can have done to it.
     @ViewBuilder private var drawingActions: some View {
         TextField("What should this be?", text: $prompt)
             .font(.system(size: 15))
@@ -116,6 +118,47 @@ struct SelectionActions: View {
             .frame(width: 240, height: 44)
             .accessibilityLabel("Prompt")
         ToolButton(symbol: "sparkles", label: "Convert drawing") { convert() }
+        ToolButton(symbol: "plus.square.on.square", label: "Duplicate") {
+            withAnimation(.smooth(duration: 0.25)) { model.duplicateSelection() }
+        }
+        .keyboardShortcut("d", modifiers: .command)
+        ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
+            .keyboardShortcut("l", modifiers: .command)
+        ToolButton(symbol: "trash", label: "Delete selection") {
+            withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
+        }
+        .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    /// For several things at once: their settings, lining them up with one another, and
+    /// what any selection can have done to it.
+    @ViewBuilder private var severalActions: some View {
+        ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
+            withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
+        }
+        Menu {
+            ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
+                Button(alignment.name, systemImage: alignment.symbol) {
+                    withAnimation(.smooth(duration: 0.25)) { model.alignSelection(alignment) }
+                }
+            }
+            Divider()
+            ForEach(ElementLayout.Distribution.allCases, id: \.self) { distribution in
+                Button(distribution.name, systemImage: distribution.symbol) {
+                    withAnimation(.smooth(duration: 0.25)) { model.distributeSelection(distribution) }
+                }
+                .disabled(!model.canDistributeSelection)
+            }
+        } label: {
+            ToolIcon(symbol: "align.horizontal.left")
+        }
+        .accessibilityLabel("Align")
+        ToolButton(symbol: "plus.square.on.square", label: "Duplicate") {
+            withAnimation(.smooth(duration: 0.25)) { model.duplicateSelection() }
+        }
+        .keyboardShortcut("d", modifiers: .command)
+        ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
+            .keyboardShortcut("l", modifiers: .command)
         ToolButton(symbol: "trash", label: "Delete selection") {
             withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
         }

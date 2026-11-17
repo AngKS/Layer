@@ -7,7 +7,8 @@ import SwiftUI
 /// from ink to elements can be watched and screenshotted in the simulator.
 ///
 /// Launch with `-LayerDemo all` (or a comma-separated subset of
-/// `screen,button,title,image,body`). `-LayerDemoEnd` picks the closing state:
+/// `screen,button,title,image,body`; `closeCall`, `toggle`, `avatar`, `scratch` and `note`
+/// can be asked for by name too). `-LayerDemoEnd` picks the closing state:
 /// `select:<kind>`, `adjust:<kind>`, `layers` or `code`.
 @MainActor
 enum DemoScript {
@@ -68,6 +69,11 @@ enum DemoScript {
             return [SketchSamples.box(rect, radius: rect.width * 0.14)] + SketchSamples.cross(rect)
         case "body":
             return [SketchSamples.wave(onScreen(52, 588, 290, 28), humps: 8)]
+        case "closeCall":
+            // A wide box whose corners are rounder than a text field's and squarer than a
+            // button's: it is read as one, and the other is offered.
+            let rect = onScreen(30, 640, 330, 56)
+            return [SketchSamples.box(rect, radius: rect.height * 0.22)]
         case "toggle":
             let rect = onScreen(300, 640, 56, 30)
             return [SketchSamples.box(rect, radius: rect.height / 2)]

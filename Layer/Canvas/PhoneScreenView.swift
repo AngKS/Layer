@@ -248,6 +248,11 @@ struct ElementView: View {
                 }
                 .clipShape(.capsule)
 
+        case .drawing:
+            // A drawing that can be drawn on is on the ink canvas, where PencilKit draws
+            // it. Locked, it is off that canvas, out of the eraser's reach, and drawn here.
+            if element.isLocked { InkPicture(ink: element.ink) }
+
         case .toggle:
             // Drawn rather than a live `Toggle`, so that it scales with its frame.
             Capsule()

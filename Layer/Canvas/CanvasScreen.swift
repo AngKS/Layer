@@ -20,7 +20,7 @@ struct CanvasScreen: View {
                         PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
-                            .zIndex(screen.id == screenBeingDraggedFrom ? 1 : 0)
+                            .zIndex(screensBeingDraggedFrom.contains(screen.id) ? 1 : 0)
                             .transition(.blurReplace)
                     }
                     ForEach(model.store.floating) { floating in
@@ -53,7 +53,9 @@ struct CanvasScreen: View {
 
                 SelectionLayer()
                 HoverOutline()
+                SweepOutline()
                 SelectionActions()
+                SuggestionPill()
                 PenCursor(pen: model.pen)
                 EdgeGlow(accent: accent, isActive: !model.effects.isEmpty)
         }
@@ -166,9 +168,12 @@ struct CanvasScreen: View {
         )
     }
 
-    private var screenBeingDraggedFrom: DesignScreen.ID? {
-        guard model.isAdjusting, case .element(let ref) = model.selection, case .screen(let id) = ref.host else { return nil }
-        return id
+    /// The screens that hold elements being dragged, one or several of them.
+    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
+        guard model.isAdjusting, let selection = model.selection else { return [] }
+        return Set(selection.things.compactMap { thing in
+            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
+        })
     }
 }
 
@@ -209,7 +214,7 @@ private struct HoverOutline: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let target = model.hovered, target != model.selection, let rect = model.viewRect(of: target) {
+        if let target = model.hovered, model.selection?.contains(target) != true, let rect = model.viewRect(of: target) {
             let outer = rect.insetBy(dx: -3, dy: -3)
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Theme.accent.color.opacity(0.55), lineWidth: 1.5)
@@ -219,6 +224,47 @@ private struct HoverOutline: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
                 .animation(.easeOut(duration: 0.12), value: target)
+        }
+    }
+}
+
+/// The line being drawn round things to select them: the lasso's loop, dashed and closed
+/// back to where it began, as PencilKit's own lasso is drawn; or the box a finger drags out.
+private struct SweepOutline: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        switch model.sweep {
+        case .lasso(let points):
+            if let first = points.first {
+                Path { path in
+                    path.move(to: first)
+                    for point in points.dropFirst() { path.addLine(to: point) }
+                    path.closeSubpath()
+                }
+                .fill(Theme.accent.color.opacity(0.06))
+                .allowsHitTesting(false)
+                Path { path in
+                    path.move(to: first)
+                    for point in points.dropFirst() { path.addLine(to: point) }
+                }
+                .stroke(Theme.accent.color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round, dash: [6, 5]))
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityLabel("Lasso")
+            }
+        case .box(let start, let end):
+            let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Theme.accent.color.opacity(0.08))
+                .strokeBorder(Theme.accent.color.opacity(0.8), lineWidth: 1)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityLabel("Selection box")
+        case nil:
+            EmptyView()
         }
     }
 }

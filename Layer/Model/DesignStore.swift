@@ -5,6 +5,9 @@ import Observation
 /// The design on the canvas. Every change goes through here and is registered with the
 /// document's undo manager, which is also what tells the system that the document needs
 /// saving.
+///
+/// The design keeps its elements in one list (`DesignContent.elements`). `screens` and
+/// `floating` are views of that list, worked out once per change.
 @MainActor @Observable
 final class DesignStore {
     /// Points at one element: where it lives, and which one it is there.
@@ -21,11 +24,14 @@ final class DesignStore {
 
     private(set) var content: DesignContent {
         didSet {
-            if content != oldValue { onChange?(content) }
+            guard content != oldValue else { return }
+            views = nil
+            onChange?(content)
         }
     }
 
-    /// The document's undo manager, shared with PencilKit's ink. Its history is capped, so a
+    /// The document's undo manager. Ink is in its history too, as changes to the design's
+    /// drawings: PencilKit keeps none of its own here. Its history is capped, so a
     /// long sitting doesn't keep every earlier version of the design alive.
     @ObservationIgnored var undoManager: UndoManager? {
         didSet { undoManager?.levelsOfUndo = Self.undoLevels }
@@ -36,12 +42,34 @@ final class DesignStore {
     /// The content as it was when the gradual edit in progress began.
     @ObservationIgnored private var editStart: DesignContent?
 
+    /// The views of the list, and where each element is in it, for the content as it is now.
+    private struct Views {
+        var screens: [DesignScreen]
+        var floating: [FloatingElement]
+        var index: [DesignElement.ID: Int]
+    }
+    @ObservationIgnored private var views: Views?
+
     init(content: DesignContent = DesignContent()) {
         self.content = content
     }
 
-    var screens: [DesignScreen] { content.screens }
-    var floating: [FloatingElement] { content.floating }
+    private var current: Views {
+        // Read first, so that whatever draws from a view is redrawn when the content changes.
+        let content = content
+        if let views { return views }
+        let made = Views(
+            screens: content.screens, floating: content.floating,
+            index: Dictionary(content.elements.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        )
+        views = made
+        return made
+    }
+
+    /// Each screen with what is on it.
+    var screens: [DesignScreen] { current.screens }
+    /// The elements on the open canvas.
+    var floating: [FloatingElement] { current.floating }
     var title: String? { content.title }
     var canvas: CanvasSettings { content.canvas }
 
@@ -61,15 +89,22 @@ final class DesignStore {
         screen(at: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
+    /// An element, wherever it is.
+    func element(_ id: DesignElement.ID) -> DesignElement? {
+        current.index[id].map { content.elements[$0] }
+    }
+
     /// An element together with the placement that turns its frame into canvas points.
+    /// Nil when the element is gone, or no longer where `ref` says it is.
     func resolve(_ ref: ElementRef) -> (element: DesignElement, placement: Placement)? {
+        guard let element = element(ref.element) else { return nil }
         switch ref.host {
         case .screen(let id):
-            guard let screen = screen(id), let element = screen.elements.first(where: { $0.id == ref.element }) else { return nil }
+            guard element.parent == id, let screen = screen(id) else { return nil }
             return (element, screen.placement)
         case .canvas:
-            guard let floating = floating.first(where: { $0.id == ref.element }) else { return nil }
-            return (floating.element, floating.placement)
+            guard element.parent == nil else { return nil }
+            return (element, Placement(origin: .zero, scale: element.scale ?? 1))
         }
     }
 
@@ -97,7 +132,7 @@ final class DesignStore {
             name: "Screen \(screens.count + 1)", origin: placement.origin, scale: placement.scale,
             deviceID: device == .iPhone ? nil : device.id
         )
-        change { $0.screens.append(screen) }
+        change { $0.addScreen(screen) }
         return screen
     }
 
@@ -105,10 +140,16 @@ final class DesignStore {
     /// `adjust` finishes the element before it is added, in the same undoable step.
     @discardableResult
     func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
-        guard let index = screens.firstIndex(where: { $0.id == screenID }) else { return nil }
-        let local = screens[index].localRect(for: sketch)
-        let existing = screens[index].elements.filter { !$0.isHidden }
-        let laid = ElementLayout.sketched(kind, sketch: local, on: screens[index].device, among: existing.map(\.frame))
+        guard let screen = screen(screenID) else { return nil }
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
+        adjust(&element)
+        return add(element, to: screenID)
+    }
+
+    /// The element a sketch drawn on a screen stands for, laid out among `others` there.
+    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement]) -> DesignElement {
+        let existing = others.filter { !$0.isHidden }
+        let laid = ElementLayout.sketched(kind, sketch: screen.localRect(for: sketch), on: screen.device, among: existing.map(\.frame))
         var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
         element.textAlignment = laid.alignment
         // A screen's first button is its main action; any more are outlined beside or below it.
@@ -116,9 +157,29 @@ final class DesignStore {
             element.buttonLook = .bordered
             element.text = "Cancel"
         }
-        adjust(&element)
-        change { $0.screens[index].elements.append(element) }
         return element
+    }
+
+    /// Makes an element on a screen another kind of thing, as when its sketch was read as
+    /// the wrong one. It is laid out afresh from where it was sketched, as if it had been
+    /// read that way to begin with, and stays the same element: its place among the
+    /// others, its name, and any words written for it are kept. `adjust` finishes it in
+    /// the same undoable step. Returns the element as it now is, or nil when it is gone
+    /// or isn't on a screen.
+    @discardableResult
+    func changeKind(of ref: ElementRef, to kind: ElementKind, sketchedAt sketch: CGRect, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
+        guard case .screen(let screenID) = ref.host, let old = resolve(ref)?.element, let screen = screen(screenID) else { return nil }
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id })
+        element.name = old.name
+        element.isLocked = old.isLocked
+        if kind.hasText, old.kind.hasText, old.text != old.kind.placeholder { element.text = old.text }
+        adjust(&element)
+        // Everything about it but what it is and where it lives is replaced.
+        let replacement = element
+        change { content in
+            content.update(old.id) { $0 = replacement }
+        }
+        return self.element(old.id)
     }
 
     /// Adds an element sketched on the open canvas, where and about as large as it was drawn.
@@ -127,15 +188,7 @@ final class DesignStore {
         var element = Self.newElement(kind)
         let scale = looseScale
         let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
-        switch kind {
-        case .stickyNote:
-            let side = min(max(max(drawn.width, drawn.height), 100), 320).rounded()
-            element.frame.size = CGSize(width: side, height: side)
-        case .text:
-            element.frame.size.width = min(max(drawn.width, 80), 600).rounded()
-        default:
-            break
-        }
+        element.frame.size = kind.spec.looseSize.size(from: element.frame.size, drawn: drawn)
         return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
@@ -163,16 +216,12 @@ final class DesignStore {
     /// Deletes several elements as one undo step.
     func delete(_ refs: [ElementRef]) {
         let ids = Set(refs.map(\.element))
-        change { content in
-            for index in content.screens.indices {
-                content.screens[index].elements.removeAll { ids.contains($0.id) }
-            }
-            content.floating.removeAll { ids.contains($0.id) }
-        }
+        change { $0.remove(ids) }
         // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
         // deleted soon after it was made. See SketchReadingLog.
         for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
     }
+
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
     /// there, if it is the kind of thing that goes on screens, and onto the open canvas
     /// otherwise. Only the size of `element.frame` is used.
@@ -186,39 +235,29 @@ final class DesignStore {
             return CGPoint(x: (center.x - size.width / 2).rounded(), y: (center.y - size.height / 2).rounded())
         }
 
-        if element.kind.belongsOnScreens, let index = screens.lastIndex(where: { $0.canvasFrame.contains(point) }) {
-            element.frame.origin = centered(in: screens[index].placement)
-            change { $0.screens[index].elements.append(element) }
-            return ElementRef(host: .screen(screens[index].id), element: element.id)
+        if element.kind.belongsOnScreens, let screen = screens.last(where: { $0.canvasFrame.contains(point) }) {
+            element.frame.origin = centered(in: screen.placement)
+            add(element, to: screen.id)
+            return ElementRef(host: .screen(screen.id), element: element.id)
         }
         let scale = looseScale
         element.frame.origin = centered(in: Placement(origin: .zero, scale: scale))
-        change { $0.floating.append(FloatingElement(element: element, scale: scale)) }
+        add(element, to: nil, scale: scale)
         return ElementRef(host: .canvas, element: element.id)
     }
 
     /// A new element of a kind, at its starting size and look, ready to be placed.
     nonisolated static func newElement(_ kind: ElementKind, symbol: String? = nil) -> DesignElement {
-        let tint: RGBColor = switch kind {
-        case .stickyNote: Theme.stickyNote
-        case .symbol: Theme.inkTint
-        default: Theme.accent
-        }
-        return DesignElement(
+        DesignElement(
             kind: kind,
             frame: CGRect(origin: .zero, size: ElementLayout.size(for: kind, sketch: .zero)),
-            text: kind.placeholder, tint: tint, symbol: symbol
+            text: kind.placeholder, tint: kind.spec.tint, symbol: symbol
         )
     }
 
     func delete(_ ref: ElementRef) {
-        switch ref.host {
-        case .screen(let id):
-            guard let screen = screens.firstIndex(where: { $0.id == id }) else { return }
-            change { $0.screens[screen].elements.removeAll { $0.id == ref.element } }
-        case .canvas:
-            change { $0.floating.removeAll { $0.id == ref.element } }
-        }
+        guard resolve(ref) != nil else { return }
+        change { $0.remove([ref.element]) }
         // See the matching note on delete(_ refs:).
         Task { await SketchReadingLog.shared.noteDeleted(ref.element) }
     }
@@ -227,18 +266,12 @@ final class DesignStore {
     @discardableResult
     func duplicate(_ ref: ElementRef) -> ElementRef? {
         guard let (element, _) = resolve(ref) else { return nil }
-        var copy = element
+        // A drawing's copy is made of strokes of its own.
+        var copy = element.withStrokesOfItsOwn()
         copy.id = UUID()
         copy.isLocked = false
         copy.frame = element.frame.offsetBy(dx: 16, dy: 16)
-        switch ref.host {
-        case .screen(let id):
-            guard let index = screens.firstIndex(where: { $0.id == id }) else { return nil }
-            change { $0.screens[index].elements.append(copy) }
-        case .canvas:
-            guard let original = floating.first(where: { $0.id == ref.element }) else { return nil }
-            change { $0.floating.append(FloatingElement(element: copy, scale: original.scale)) }
-        }
+        add(copy, to: element.parent, scale: element.scale)
         return ElementRef(host: ref.host, element: copy.id)
     }
 
@@ -254,9 +287,10 @@ final class DesignStore {
         copy.elements = screen.elements.map { element in
             var element = element
             element.id = UUID()
+            element.parent = copy.id
             return element
         }
-        change { $0.screens.append(copy) }
+        change { $0.addScreen(copy) }
         return copy
     }
 
@@ -291,35 +325,34 @@ final class DesignStore {
         }
     }
 
+    /// The elements an element shares its screen, or the open canvas, with, itself
+    /// included, back to front.
+    private func siblings(of ref: ElementRef) -> [DesignElement.ID] {
+        switch ref.host {
+        case .screen(let id): screen(id)?.elements.map(\.id) ?? []
+        case .canvas: floating.map(\.id)
+        }
+    }
+
     /// Moves an element up or down among those it shares its screen, or the open canvas, with.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
-        func reordered<T>(_ items: inout [T], id: (T) -> UUID) {
-            guard let index = items.firstIndex(where: { id($0) == ref.element }) else { return }
-            let target = switch arrangement {
-            case .front: items.count - 1
-            case .forward: min(index + 1, items.count - 1)
-            case .backward: max(index - 1, 0)
-            case .back: 0
-            }
-            guard target != index else { return }
-            let item = items.remove(at: index)
-            items.insert(item, at: target)
+        var order = siblings(of: ref)
+        guard let index = order.firstIndex(of: ref.element) else { return }
+        let target = switch arrangement {
+        case .front: order.count - 1
+        case .forward: min(index + 1, order.count - 1)
+        case .backward: max(index - 1, 0)
+        case .back: 0
         }
-        switch ref.host {
-        case .screen(let id):
-            guard let index = screens.firstIndex(where: { $0.id == id }) else { return }
-            change { reordered(&$0.screens[index].elements, id: \.id) }
-        case .canvas:
-            change { reordered(&$0.floating, id: \.id) }
-        }
+        guard target != index else { return }
+        order.insert(order.remove(at: index), at: target)
+        let parent: DesignScreen.ID? = if case .screen(let id) = ref.host { id } else { nil }
+        change { $0.reorder(parent, to: order) }
     }
 
     /// Whether an element can go further up, or further down, among its neighbours.
     func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
-        let ids: [UUID] = switch ref.host {
-        case .screen(let id): screen(id)?.elements.map(\.id) ?? []
-        case .canvas: floating.map(\.id)
-        }
+        let ids = siblings(of: ref)
         guard let index = ids.firstIndex(of: ref.element) else { return false }
         return arrangement == .front || arrangement == .forward ? index < ids.count - 1 : index > 0
     }
@@ -331,7 +364,7 @@ final class DesignStore {
     }
 
     func deleteScreen(_ id: DesignScreen.ID) {
-        change { $0.screens.removeAll { $0.id == id } }
+        change { $0.removeScreen(id) }
     }
 
     /// Names the board. A name the app suggests itself isn't something to undo.
@@ -359,9 +392,13 @@ final class DesignStore {
     /// `replacing` is set. Returns where they now live.
     @discardableResult
     func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID, replacing: Bool) -> [ElementRef] {
-        guard let index = screens.firstIndex(where: { $0.id == screenID }) else { return [] }
+        guard screen(screenID) != nil else { return [] }
         change { content in
-            if replacing { content.screens[index].elements = elements } else { content.screens[index].elements += elements }
+            if replacing {
+                content.setChildren(of: screenID, to: elements)
+            } else {
+                for element in elements { content.add(element, to: screenID) }
+            }
         }
         return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
     }
@@ -373,43 +410,17 @@ final class DesignStore {
     func rehost(_ ref: ElementRef) -> ElementRef {
         guard let (element, placement) = resolve(ref) else { return ref }
         let frame = placement.canvasRect(for: element.frame)
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        let target = element.kind.belongsOnScreens ? screen(at: center) : nil
+        let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
         guard host != ref.host else { return ref }
-
-        // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-        let newPlacement = target?.placement ?? Placement(origin: .zero, scale: placement.scale)
-        let newCenter = newPlacement.localPoint(for: center)
-        var moved = element
-        moved.frame.origin = CGPoint(
-            x: (newCenter.x - element.frame.width / 2).rounded(),
-            y: (newCenter.y - element.frame.height / 2).rounded()
-        )
-
-        change { content in
-            switch ref.host {
-            case .screen(let id):
-                if let index = content.screens.firstIndex(where: { $0.id == id }) {
-                    content.screens[index].elements.removeAll { $0.id == element.id }
-                }
-            case .canvas:
-                content.floating.removeAll { $0.id == element.id }
-            }
-            if let target, let index = content.screens.firstIndex(where: { $0.id == target.id }) {
-                content.screens[index].elements.append(moved)
-            } else {
-                content.floating.append(FloatingElement(element: moved, scale: newPlacement.scale))
-            }
-        }
-        return ElementRef(host: host, element: element.id)
+        return move(ref, toScreen: target?.id, origin: nil) ?? ref
     }
 
     /// Puts a ready-made element on the open canvas exactly where its frame says, in points
     /// of its own drawn `scale` canvas points each.
     @discardableResult
     func addFloating(_ element: DesignElement, scale: CGFloat) -> ElementRef {
-        change { $0.floating.append(FloatingElement(element: element, scale: scale)) }
+        add(element, to: nil, scale: scale)
         return ElementRef(host: .canvas, element: element.id)
     }
 
@@ -429,34 +440,20 @@ final class DesignStore {
         // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
         let newPlacement = target?.placement ?? Placement(origin: .zero, scale: placement.scale)
 
-        var moved = element
+        var frame = element.frame
         if let origin {
-            moved.frame.origin = origin
+            frame.origin = origin
         } else {
-            let frame = placement.canvasRect(for: element.frame)
-            let center = newPlacement.localPoint(for: CGPoint(x: frame.midX, y: frame.midY))
-            moved.frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
+            let onCanvas = placement.canvasRect(for: element.frame)
+            let center = newPlacement.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
+            frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
         }
 
         if host == ref.host {
-            update(ref) { $0.frame = moved.frame }
+            update(ref) { $0.frame = frame }
             return ref
         }
-        change { content in
-            switch ref.host {
-            case .screen(let id):
-                if let index = content.screens.firstIndex(where: { $0.id == id }) {
-                    content.screens[index].elements.removeAll { $0.id == element.id }
-                }
-            case .canvas:
-                content.floating.removeAll { $0.id == element.id }
-            }
-            if let target, let index = content.screens.firstIndex(where: { $0.id == target.id }) {
-                content.screens[index].elements.append(moved)
-            } else {
-                content.floating.append(FloatingElement(element: moved, scale: newPlacement.scale))
-            }
-        }
+        change { $0.move(element.id, to: target?.id, scale: newPlacement.scale, frame: frame) }
         return ElementRef(host: host, element: element.id)
     }
 
@@ -475,24 +472,45 @@ final class DesignStore {
     }
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {
-        switch ref.host {
-        case .screen(let id):
-            guard let screen = screens.firstIndex(where: { $0.id == id }),
-                  let element = screens[screen].elements.firstIndex(where: { $0.id == ref.element })
-            else { return }
-            change { body(&$0.screens[screen].elements[element]) }
-        case .canvas:
-            guard let index = floating.firstIndex(where: { $0.id == ref.element }) else { return }
-            change { body(&$0.floating[index].element) }
-        }
+        guard resolve(ref) != nil else { return }
+        change { $0.update(ref.element, body) }
     }
 
     func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
-        guard let index = screens.firstIndex(where: { $0.id == id }) else { return }
-        change { body(&$0.screens[index]) }
+        guard screen(id) != nil else { return }
+        change { $0.updateScreen(id, body) }
+    }
+
+    // MARK: Changes worked out elsewhere
+
+    /// Applies a change to the design as one undo step. The ink canvas's changes to
+    /// drawings come this way: a stroke drawn or rubbed out there is a change to a
+    /// drawing here, undone like any other.
+    func apply(_ body: (inout DesignContent) -> Void) {
+        change(body)
+    }
+
+    /// Makes several changes one undo step. Inside a gradual edit that is already under
+    /// way they join that edit instead.
+    func asOneStep(_ body: () -> Void) {
+        guard editStart == nil else {
+            body()
+            return
+        }
+        beginEdit()
+        body()
+        endEdit()
     }
 
     // MARK: Undo
+
+    /// Adds an element to the list as its own change. Returns it as it is kept.
+    @discardableResult
+    private func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
+        var kept = element
+        change { kept = $0.add(element, to: parent, scale: scale) }
+        return kept
+    }
 
     /// Applies a change. Inside `beginEdit()`…`endEdit()` it joins that edit's undo step;
     /// on its own it is its own undo step.

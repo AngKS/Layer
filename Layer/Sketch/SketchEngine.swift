@@ -25,18 +25,6 @@ final class SketchEngine {
     private(set) var lastAttemptFailed = false
     /// True while the provider is being left alone after failing repeatedly.
     private(set) var isResting = false
-    /// The on-device log entry the most recent `read(_:)` wrote, if it wrote one — nil for
-    /// an asked reading, or one off the open canvas. Whoever creates the element this
-    /// reading became should call `SketchReadingLog.shared.link` with it, so a deletion
-    /// soon after can be recognised as a correction. Stage 0 of
-    /// `reports/Fast and slow sketch recognition.md`.
-    @ObservationIgnored private(set) var lastLogID: UUID?
-    /// A word `HandwritingRecognizer` read out of the most recent `read(_:)`'s strokes, if
-    /// it tried and found one. Whoever creates the element this reading became can use it
-    /// as the element's text, the way a prompt's own wording already becomes a label in
-    /// `readAsked`. Stage 2.
-    @ObservationIgnored private(set) var lastRecognizedText: String?
-
     @ObservationIgnored private let rules = RuleInterpreter()
     @ObservationIgnored private var hasWarmedUp = false
     @ObservationIgnored private var failuresInARow = 0
@@ -116,48 +104,58 @@ final class SketchEngine {
         }
     }
 
-    func read(_ requested: SketchRequest) async -> SketchReading {
-        lastLogID = nil
-        lastRecognizedText = nil
-        if requested.isAsked { return await readAsked(requested) }
-        let request: SketchRequest
+    func read(_ request: SketchRequest) async -> SketchReading {
+        await outcome(for: request).reading
+    }
+
+    /// Reads a sketch, and says what came with the reading: what else a close call nearly
+    /// was, the words written in it, and where the reading was logged.
+    func outcome(for requested: SketchRequest) async -> SketchOutcome {
+        if requested.isAsked { return SketchOutcome(reading: await readAsked(requested)) }
+        var withText = requested
         if Self.mightBeHandwriting(requested.observation.form) {
-            var withText = requested
             withText.recognizedText = await HandwritingRecognizer.recognize(requested.strokes)
-            lastRecognizedText = withText.recognizedText
-            request = withText
-        } else {
-            request = requested
         }
+        let request = withText
         let fallback = rules.reading(for: request)
         let escalated = rules.isCloseCall(request)
-        guard escalated else {
-            lastLogID = await log(request, chosen: fallback, escalated: false, decidedBy: "rules")
-            return fallback
+
+        func settled(_ reading: SketchReading, by decider: String, runnerUp: SketchReading? = nil) async -> SketchOutcome {
+            SketchOutcome(
+                reading: reading,
+                alternative: escalated ? Self.alternative(to: reading, in: request, runnerUp: runnerUp) : nil,
+                logID: await log(request, chosen: reading, escalated: escalated, decidedBy: decider),
+                recognizedText: request.recognizedText
+            )
         }
 
-        guard readiness == .ready, !isStillResting(), !Self.isConserving else {
-            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
-            return fallback
+        guard escalated, readiness == .ready, !isStillResting(), !Self.isConserving else {
+            return await settled(fallback, by: "rules")
         }
 
         let interpreter = provider.makeInterpreter(nil)
         let started = ContinuousClock.now
         do {
-            let reading = try await withTimeout(Self.readLimit) { try await interpreter.read(request) }
+            let decision = try await withTimeout(Self.readLimit) { try await interpreter.decide(request) }
             let elapsed = ContinuousClock.now - started
-            log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: reading), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
-            let isPossible = request.candidates.contains(reading)
+            log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: decision.chosen), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
+            let isPossible = request.candidates.contains(decision.chosen)
             record(answered: isPossible)
-            let final = isPossible ? reading : fallback
-            lastLogID = await log(request, chosen: final, escalated: true, decidedBy: isPossible ? provider.id : "rules")
-            return final
+            guard isPossible else { return await settled(fallback, by: "rules") }
+            return await settled(decision.chosen, by: provider.id, runnerUp: decision.runnerUp)
         } catch {
             log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             record(answered: false)
-            lastLogID = await log(request, chosen: fallback, escalated: true, decidedBy: "rules")
-            return fallback
+            return await settled(fallback, by: "rules")
         }
+    }
+
+    /// What else a close call nearly was: the provider's own second choice when it names
+    /// one the sketch could be, and otherwise the likeliest of the rest by the rules' scores.
+    nonisolated static func alternative(to reading: SketchReading, in request: SketchRequest, runnerUp: SketchReading?) -> SketchReading? {
+        let others = request.candidates.filter { $0 != reading }
+        if let runnerUp, others.contains(runnerUp) { return runnerUp }
+        return others.first
     }
 
     /// Writes one reading to the on-device log (Stage 0), and returns its entry id so the
@@ -301,6 +299,22 @@ final class SketchEngine {
         failuresInARow = 0
         return false
     }
+}
+
+/// What came of reading a sketch.
+struct SketchOutcome: Sendable, Equatable {
+    var reading: SketchReading
+    /// What else it nearly was, when the reading was a close call: offered to the person
+    /// as "Did you mean…", so a wrong reading is one tap from right.
+    var alternative: SketchReading? = nil
+    /// The on-device log entry written for the reading, if one was: nil for an asked
+    /// reading, or one off the open canvas. Whoever creates the element this reading
+    /// became links the two with `SketchReadingLog.shared.link`, so a correction soon
+    /// after can be recognised as one.
+    var logID: UUID? = nil
+    /// A word `HandwritingRecognizer` read out of the strokes, if it tried and found one,
+    /// to use as the element's text.
+    var recognizedText: String? = nil
 }
 
 /// Runs `work`, giving up with `CancellationError` if it takes longer than `limit`.

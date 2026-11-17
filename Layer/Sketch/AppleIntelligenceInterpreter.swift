@@ -60,9 +60,13 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
     }
 
     func read(_ request: SketchRequest) async throws -> SketchReading {
+        try await decide(request).chosen
+    }
+
+    func decide(_ request: SketchRequest) async throws -> SketchDecision {
         let candidates = request.options
         let names = candidates.map(SketchPrompt.name(for:))
-        guard names.count > 1 else { return candidates.first ?? .unknown }
+        guard names.count > 1 else { return SketchDecision(chosen: candidates.first ?? .unknown) }
 
         // System 1's own ranked, scored guesses — real evidence for the agent to read,
         // not a shape it has to re-derive from scratch. Empty for an asked drawing, whose
@@ -87,7 +91,7 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
         let chosenName = try response.content.value(String.self, forProperty: "chosen")
         let runnerUpName = try? response.content.value(String.self, forProperty: "runnerUp")
         Self.log.info("agent chose \(chosenName, privacy: .public), runner-up \(runnerUpName ?? "none", privacy: .public)")
-        return zip(names, candidates).first { $0.0 == chosenName }?.1 ?? .unknown
+        return SketchDecision(named: chosenName, runnerUp: runnerUpName, names: names, candidates: candidates)
     }
 
     /// `{chosen, runnerUp}`, both restricted to this sketch's own candidates — see the

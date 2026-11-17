@@ -17,6 +17,9 @@ swiftc \
     -target arm64-apple-macos27.0 \
     -O \
     "$REPO_ROOT/Layer/Model/Design.swift" \
+    "$REPO_ROOT/Layer/Components/ComponentSpec.swift" \
+    "$REPO_ROOT/Layer/Components/Catalogue.swift" \
+    "$REPO_ROOT/Layer/Document/JSONValue.swift" \
     "$REPO_ROOT/Layer/Debug/SketchSamples.swift" \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchAnalyzer.swift" \

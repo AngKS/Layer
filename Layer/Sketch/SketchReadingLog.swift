@@ -33,6 +33,9 @@ struct SketchReadingLogEntry: Codable, Sendable, Identifiable {
     /// yet, so the available signal is the element being deleted soon after Magic Pen
     /// created it — not the same thing as a correction, but the closest one Layer has.
     var correctedAfter: Double?
+    /// What the reading should have been, once the element it became has been changed
+    /// into another kind: that kind's raw value, as a benchmark fixture's label is.
+    var correctedTo: String?
 }
 
 /// Buffers readings in memory and appends them to an on-device log, one process-wide
@@ -77,7 +80,7 @@ actor SketchReadingLog {
         let entry = SketchReadingLogEntry(
             id: UUID(), timestamp: .now, placementKind: placementKind, existingKinds: existingKinds,
             existingFrames: existingFrames, screenSize: screenSize, strokes: strokes, candidates: candidates,
-            scores: scores, chosen: chosen, escalated: escalated, decidedBy: decidedBy, correctedAfter: nil
+            scores: scores, chosen: chosen, escalated: escalated, decidedBy: decidedBy, correctedAfter: nil, correctedTo: nil
         )
         entries[entry.id] = entry
         order.append(entry.id)
@@ -102,6 +105,15 @@ actor SketchReadingLog {
         rewrite()
     }
 
+    /// Call when the element a reading became is changed into another kind, which says
+    /// what the reading should have been. A no-op for elements that were never a reading.
+    func noteCorrected(_ elementID: UUID, to kind: String) {
+        guard let entryID = elementToEntry[elementID], var entry = entries[entryID] else { return }
+        entry.correctedTo = kind
+        entries[entryID] = entry
+        rewrite()
+    }
+
     /// Every logged reading, oldest first.
     func allEntries() -> [SketchReadingLogEntry] {
         order.compactMap { entries[$0] }
@@ -109,16 +121,17 @@ actor SketchReadingLog {
 
     /// Writes every logged reading as its own fixture-shaped JSON file, in the field
     /// layout `SketchFixtureCorpus.load` reads, so they can be copied into
-    /// `LayerTests/Fixtures` directly. What each one's kind actually should have been isn't
-    /// known here — every exported fixture is labelled "unknown" and `variant: confusable`,
-    /// a placeholder for a person to correct by hand before it's added to the real corpus.
+    /// `LayerTests/Fixtures` directly. A reading that was corrected is labelled with what
+    /// it was corrected to. What the others should have been isn't known here: they are
+    /// labelled "unknown" and `variant: confusable`, a placeholder for a person to correct
+    /// by hand before it's added to the real corpus.
     func exportAsFixtures(to directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for entry in allEntries() {
             let existing = zip(entry.existingKinds, entry.existingFrames).map { ["kind": $0, "frame": $1] as [String: Any] }
             let object: [String: Any] = [
                 "id": entry.id.uuidString,
-                "label": "unknown",
+                "label": entry.correctedTo ?? "unknown",
                 "variant": "confusable",
                 "placementKind": entry.placementKind,
                 "existing": existing,

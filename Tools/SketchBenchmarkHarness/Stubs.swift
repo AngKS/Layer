@@ -28,6 +28,22 @@ struct RGBColor: Hashable, Codable, Sendable {
     }
 }
 
+/// The three colours the component catalogue starts elements with, as in
+/// Layer/Model/Theme.swift.
+enum Theme {
+    static let accent = RGBColor(hex: 0xCD6C57)
+    static let inkTint = RGBColor(hex: 0x2B2A27)
+    static let stickyNote = RGBColor(hex: 0xFCE38A)
+}
+
+/// Just enough of a design's choice of model for `CanvasSettings` to type-check. The
+/// benchmark picks its provider itself.
+struct ModelChoice: Hashable, Codable, Sendable {}
+
+enum ModelPreferences {
+    static let defaultChoice = ModelChoice()
+}
+
 /// Just enough of `DesignContent` for `SketchPrompt.describe(board:)` to type-check. The
 /// benchmark never names boards, so this is never actually called.
 struct DesignContent: Sendable {

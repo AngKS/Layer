@@ -68,7 +68,7 @@ struct LayersPanel: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(store.screens) { screen in
-                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection == .screen(screen.id), target: .screen(screen.id)) {
+                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection?.contains(.screen(screen.id)) == true, target: .screen(screen.id)) {
                         select(.screen(screen.id))
                     }
                     // Topmost layer first, as layer lists usually read.
@@ -119,7 +119,7 @@ struct LayersPanel: View {
     }
 
     private func layerRow(_ element: DesignElement, ref: DesignStore.ElementRef) -> some View {
-        let isSelected = model.selection == .element(ref)
+        let isSelected = model.selection?.contains(.element(ref)) == true
         return HStack(spacing: 0) {
             Button {
                 // A hidden layer can still be picked here, its outline showing where it is.

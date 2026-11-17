@@ -144,7 +144,7 @@ enum DesignActions {
         let area: CGRect? = switch target {
         case .element(let ref): model.store.resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
         case .screen(let id): model.store.screen(id).map { $0.canvasFrame.union($0.labelFrame) }
-        case .ink: nil
+        case .several: model.store.canvasFrame(of: target)
         }
         if let area { model.ink?.glide(toShow: area) }
     }
@@ -367,12 +367,9 @@ enum DesignLayoutWriter {
         if element.hasShadow { info["shadow"] = true }
         if element.isLocked { info["locked"] = true }
         if element.isHidden { info["hidden"] = true }
-        switch element.kind {
-        case .toggle, .checkbox, .radio: info["on"] = element.isOn
-        case .progress: info["progress"] = element.value ?? 0.5
-        case .button: info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue
-        default: break
-        }
+        if element.hasOnState { info["on"] = element.isOn }
+        if element.hasValue { info["progress"] = element.value ?? 0.5 }
+        if element.hasButtonLooks { info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue }
         return info
     }
 
