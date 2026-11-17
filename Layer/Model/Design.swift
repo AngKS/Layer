@@ -4,6 +4,8 @@ import Foundation
 /// The kinds of thing that can sit on a screen or on the open canvas.
 enum ElementKind: String, CaseIterable, Codable, Sendable {
     case title, body, image, button, textField, divider, symbol, text, stickyNote, toggle, avatar, checkbox, radio, progress
+    /// Ink kept as it was drawn: a sketch, a figure, an arrow, a handwritten note.
+    case drawing
 
     // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
 
@@ -98,6 +100,17 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var value: Double?
     /// For buttons: filled when unset.
     var buttonLook: ButtonLook?
+    /// For drawings: the ink, as PencilKit writes a drawing out, measured from the frame's
+    /// top-left corner, so that moving the frame moves the ink and resizing it stretches
+    /// the ink. Kept beside the design in its file rather than inside it: see `DesignFile`.
+    var ink: Data?
+
+    /// Everything about an element that is saved with the design. `ink` is saved apart.
+    enum CodingKeys: String, CodingKey {
+        case id, kind, parent, scale, frame, text, tint, symbol, imageID
+        case fontSize, fontWeight, textColor, cornerRadius, opacity, textAlignment, borderColor, borderWidth, hasShadow
+        case name, isLocked, isHidden, isOn, value, buttonLook
+    }
 
     var displayName: String {
         guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return kind.layerName }

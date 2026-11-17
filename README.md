@@ -10,7 +10,7 @@ Layer is a freeform canvas for iPad. Draw a tall rectangle and it becomes an iPh
 
 - **Magic Pen.** A pen in the PencilKit palette whose strokes are read as interface elements. The full palette (pens, eraser, lasso, ruler) is there too and draws ordinary ink.
 - **Apple Intelligence first.** Built-in shape rules settle clear sketches instantly. On the close calls, such as a rounded box that could be a button or a text field, the on-device model decides from what else is on the screen. Without Apple Intelligence the rules decide everything, so Layer works on any iPad.
-- **A real canvas.** Pinch to zoom, pan, lock the canvas, zoom to fit. Frames, elements and drawings can be selected, moved and resized, with snapping and spacing guides.
+- **A real canvas.** Pinch to zoom, pan, lock the canvas, zoom to fit. Frames, elements and drawings can be selected, moved and resized, with snapping and spacing guides. A drawing is a layer like any element: it can be named, locked, hidden, copied and arranged.
 - **Add things directly.** Text, device frames (iPhone, iPhone Pro Max, iPhone SE, iPad), sticky notes, SF Symbols and images.
 - **Freeform-style objects.** A bar above the selection duplicates, locks and reorders it (⌘D, ⌘L, ⌘], ⌘[). Dragged things snap to smart guides or the grid. Layers can be named, hidden and locked. A selected drawing gets a prompt instead: type what it should be ("a button saying Sign up"), or just tap the sparkle and let the model decide.
 - **Format panel.** Position, size, fill, border, shadow, corner radius, opacity, alignment and type for the selection, plus arranging and aligning it on its screen.

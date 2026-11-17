@@ -22,6 +22,7 @@ extension ElementKind {
         case .checkbox: Catalogue.checkbox
         case .radio: Catalogue.radio
         case .progress: Catalogue.progress
+        case .drawing: Catalogue.drawing
         }
     }
 }
@@ -179,6 +180,20 @@ enum Catalogue {
         traits: [.fill, .onState],
         onName: "Selected",
         marks: .mark
+    )
+
+    /// Ink kept as it was drawn. It isn't part of a screen's interface, so it stays on the
+    /// open canvas and no code is written for it. Its size is whatever its ink covers.
+    static let drawing = ComponentSpec(
+        name: "Drawing", symbol: "scribble", promptName: "drawing",
+        writtenNames: [],
+        belongsOnScreens: false,
+        isAskedForOnScreens: false,
+        size: .fixed(CGSize(width: 120, height: 120)),
+        minimumSize: CGSize(width: 8, height: 8),
+        tint: Theme.inkTint,
+        hasEffects: false,
+        traits: []
     )
 
     static let progress = ComponentSpec(

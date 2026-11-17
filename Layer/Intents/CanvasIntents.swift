@@ -274,7 +274,8 @@ struct DrawStrokesIntent: AppIntent {
             return .result(value: Self.contents(of: model), dialog: "Drew \(paths.count) strokes.")
         }
         model.tool = .select
-        model.selection = .ink(keys)
+        // The strokes just drawn are a drawing now, or part of the one they touch.
+        model.selection = ink.drawing(owning: keys).map { .element(.init(host: .canvas, element: $0)) }
         model.convertSelection(prompt: reading)
         await model.waitForConversions()
         return .result(value: Self.contents(of: model), dialog: "Drew \(paths.count) strokes and read them as \(reading).")
@@ -341,7 +342,7 @@ struct EraseInkIntent: AppIntent {
         guard let ink = model.ink else { throw LayerIntentError.canvasNotReady }
         let keys = ink.inkKeys(touching: area)
         guard !keys.isEmpty else { return .result(dialog: "There's no ink there.") }
-        if case .ink? = model.selection { model.selection = nil }
+        if model.selectedElement?.element.kind == .drawing { model.selection = nil }
         ink.deleteInk(keys)
         return .result(dialog: "Erased \(keys.count) strokes.")
     }

@@ -1,5 +1,4 @@
 import Foundation
-import os
 import PencilKit
 import UniformTypeIdentifiers
 
@@ -230,13 +229,14 @@ extension DesignContent: Codable {
 /// On disk a design is a package, a folder that Files shows as one document:
 ///
 ///     design.json               the screens, elements, title and canvas settings
-///     drawing.data              ink drawn with PencilKit's own tools
+///     ink/<id>                  each drawing's ink, as PencilKit writes it
 ///     images/<id>               attached pictures, as they were imported
 ///     QuickLook/Thumbnail.jpg   a picture of the board, for the document browser
 ///
 /// Keeping the parts apart is what makes saving and syncing cheap. An edit rewrites the
-/// small design file; pictures, which never change once attached, are written and
-/// uploaded to iCloud once rather than on every save.
+/// small design file; a drawing's ink is rewritten only when that drawing changes; and
+/// pictures, which never change once attached, are written and uploaded to iCloud once
+/// rather than on every save.
 struct DesignFile: Sendable {
     enum ReadError: LocalizedError {
         case newerVersion(Int)
@@ -249,16 +249,18 @@ struct DesignFile: Sendable {
     }
 
     /// Version 1 was a single JSON file with the ink and pictures inside it. Version 2
-    /// made it a package, with each screen holding its own elements. Version 3 keeps the
-    /// elements in one list, each saying what it is on. Earlier versions still open, and
-    /// are saved as version 3.
+    /// made it a package, with each screen holding its own elements and all the ink as
+    /// one drawing. Version 3 keeps the elements in one list, each saying what it is on,
+    /// and the ink as drawings in that list. Earlier versions still open, and are saved
+    /// as version 3.
     static let currentVersion = 3
 
     var version = currentVersion
-    var content = DesignContent()
-    /// Ink drawn with PencilKit's own tools. Magic Pen sketches are never saved: they
+    /// The design, its drawings' ink included. Magic Pen sketches are never saved: they
     /// either become elements or disappear.
-    var drawing = PKDrawing()
+    var content = DesignContent()
+    /// All the ink that shows on the board, where it lies on the canvas.
+    var drawing: PKDrawing { content.visibleInk }
     /// Attached pictures, as image file data, by the UUID that elements refer to them with.
     var images: [String: Data] = [:]
     /// A small picture of the board, as JPEG data. Nil for a board with nothing on it.
@@ -267,9 +269,11 @@ struct DesignFile: Sendable {
     /// the file was renamed somewhere else, in Files for instance.
     var fileName: String?
 
+    /// `drawing` is ink for the board as one PencilKit drawing, which is taken in as
+    /// drawings: strokes that touch become one drawing each.
     init(content: DesignContent = DesignContent(), drawing: PKDrawing = PKDrawing(), images: [String: Data] = [:]) {
         self.content = content
-        self.drawing = drawing
+        self.content.adopt(drawing)
         self.images = images
     }
 
@@ -291,8 +295,15 @@ struct DesignFile: Sendable {
         self.init()
         content = manifest.content
         fileName = manifest.fileName
-        if let ink = parts[DesignPackage.drawing]?.regularFileContents {
-            drawing = try PKDrawing(data: ink)
+        // Each drawing's ink is beside the design, under the drawing's identifier.
+        let ink = parts[DesignPackage.ink]?.fileWrappers ?? [:]
+        for drawing in content.elements where drawing.kind == .drawing {
+            let strokes = ink[drawing.id.uuidString]?.regularFileContents
+            content.update(drawing.id) { $0.ink = strokes }
+        }
+        // Until version 3 all the ink was one drawing.
+        if manifest.version < 3, let whole = parts[DesignPackage.drawing]?.regularFileContents {
+            content.adopt(try PKDrawing(data: whole))
         }
         for (name, picture) in parts[DesignPackage.images]?.fileWrappers ?? [:] {
             images[name] = picture.regularFileContents
@@ -306,7 +317,7 @@ struct DesignFile: Sendable {
         guard old.version <= Self.currentVersion else { throw ReadError.newerVersion(old.version) }
         self.init()
         content = old.content
-        drawing = old.drawing
+        content.adopt(old.drawing)
         images = old.images ?? [:]
     }
 
@@ -323,7 +334,18 @@ struct DesignFile: Sendable {
         encoder.outputFormatting = .sortedKeys
         let manifest = Manifest(version: version, content: content, fileName: fileName)
         parts[DesignPackage.design] = Self.file(try encoder.encode(manifest), named: DesignPackage.design, onDisk: old[DesignPackage.design])
-        parts[DesignPackage.drawing] = Self.file(Self.encoded(drawing), named: DesignPackage.drawing, onDisk: old[DesignPackage.drawing])
+
+        // A drawing whose ink is on disk unchanged keeps its file.
+        let savedInk = old[DesignPackage.ink]?.fileWrappers ?? [:]
+        var ink: [String: FileWrapper] = [:]
+        for drawing in content.elements where drawing.kind == .drawing {
+            guard let strokes = drawing.ink else { continue }
+            let name = drawing.id.uuidString
+            ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
+        }
+        if !ink.isEmpty {
+            parts[DesignPackage.ink] = Self.folder(ink, named: DesignPackage.ink)
+        }
 
         let shown = Set(content.imageIDs.map(\.uuidString))
         let savedPictures = old[DesignPackage.images]?.fileWrappers ?? [:]
@@ -341,19 +363,6 @@ struct DesignFile: Sendable {
             parts[DesignPackage.quickLook] = Self.folder([DesignPackage.thumbnail: Self.file(preview, named: DesignPackage.thumbnail, onDisk: saved)], named: DesignPackage.quickLook)
         }
         return FileWrapper(directoryWithFileWrappers: parts)
-    }
-
-    /// The last drawing encoded to data, and what it encoded to. Most saves change only
-    /// the design's screens and elements, not its ink, so re-encoding the same drawing
-    /// every time would be wasted work; this lets a save reuse the bytes from the last
-    /// one when the ink hasn't changed since.
-    private static let encodedDrawingCache = OSAllocatedUnfairLock<(drawing: PKDrawing, data: Data)?>(initialState: nil)
-
-    private static func encoded(_ drawing: PKDrawing) -> Data {
-        if let cached = encodedDrawingCache.withLock({ $0 }), cached.drawing == drawing { return cached.data }
-        let data = drawing.dataRepresentation()
-        encodedDrawingCache.withLock { $0 = (drawing, data) }
-        return data
     }
 
     private static func file(_ data: Data, named name: String, onDisk saved: FileWrapper?) -> FileWrapper {

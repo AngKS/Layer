@@ -317,5 +317,13 @@ ends up on a grid.
    `children: [DesignElement]?` or a `parentID`. The layers panel, hit-testing, scratch-out
    and the stack code generator all have to understand nesting. This is the largest
    change, so leave it until last.
+   *Groundwork done:* a design keeps its elements in one list (`DesignContent.elements`)
+   and each has a `parent`, which today is always a screen or nothing. A container would
+   be an element that other elements name as their parent. The views the app reads
+   (`screens`, `floating`), the layers panel, hit-testing and the code generator still
+   assume one level, so nesting itself is not built.
 4. **Forward compatibility.** Decode an unknown `ElementKind` raw value as a placeholder
    instead of failing, so files made by a newer build still open in an older one.
+   *Done differently:* an element that can't be read is kept as the JSON it was, out of
+   sight, and written back where it was in the list. A file with a higher version
+   number is still refused.

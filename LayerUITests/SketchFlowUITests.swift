@@ -438,6 +438,53 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should be gone")
     }
 
+    func testADrawingIsALayerThatCanBeHiddenLockedAndCopied() {
+        openNewDesign()
+
+        // Two strokes with the Pen, crossing, clear of where the layers panel opens.
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 780, y: 400), CGPoint(x: 900, y: 480))
+        stroke(CGPoint(x: 900, y: 400), CGPoint(x: 780, y: 480))
+        let ink = CGPoint(x: 840, y: 440)
+        let empty = CGPoint(x: 700, y: 650)
+        control("Draw").tap()
+        point(ink).tap()
+        let readout = selectionElement
+        XCTAssertTrue(wait(for: readout, toHave: "value == 'Drawing · 2 strokes'", timeout: 5), "tapping ink should select the drawing")
+
+        // It is a layer like any other, listed under the canvas.
+        control("Layers").tap()
+        let row = app.buttons["Drawing"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the drawing should be listed as a layer")
+
+        // Hidden, its ink leaves the canvas and can't be picked there. Shown, it is back.
+        control("Hide Drawing").tap()
+        point(ink).tap()
+        XCTAssertFalse(readout.waitForExistence(timeout: 2), "a hidden drawing can't be picked on the canvas")
+        control("Show Drawing").tap()
+        point(ink).tap()
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "shown again, the drawing should be back where it was")
+
+        // Locked, it is still there to be picked, and offers only to be unlocked.
+        control("Lock").tap()
+        XCTAssertTrue(control("Unlock").waitForExistence(timeout: 5), "a locked drawing should offer to unlock")
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: readout))
+        point(ink).tap()
+        XCTAssertTrue(readout.waitForExistence(timeout: 5), "a locked drawing should still be on the canvas")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "locked-drawing"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        control("Unlock").tap()
+
+        // Copied, there are two drawings.
+        XCTAssertTrue(control("Duplicate").waitForExistence(timeout: 5))
+        control("Duplicate").tap()
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@", "Drawing"))
+        XCTAssertTrue(wait(for: rows.element(boundBy: 1), toHave: "exists == true", timeout: 5), "the copy should be listed as a layer too")
+    }
+
     func testTheReferenceDesignFitsTheCanvas() {
         // The scripted demo draws the reference design, letting each sketch convert on its
         // own after a pause, then opens the code panel.

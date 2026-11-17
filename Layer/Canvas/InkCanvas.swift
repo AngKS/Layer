@@ -1,8 +1,10 @@
 import PencilKit
 import SwiftUI
 
-/// Holds the document's ink. Its strokes go on the document's undo history, which is what
-/// makes them undoable alongside design changes and tells the system to save.
+/// Where the design's drawings are drawn on: it holds the strokes of every drawing that
+/// is neither locked nor hidden. Its strokes go on the document's undo history, which is
+/// what makes them undoable alongside design changes. The drawings themselves are kept in
+/// the design, and follow what happens here: see `DrawingSync`.
 final class DocumentCanvasView: PKCanvasView {
     var documentUndoManager: UndoManager?
     var onMoveToWindow: (() -> Void)?
@@ -109,6 +111,11 @@ struct InkCanvas: UIViewRepresentable {
         /// since `PKStroke` isn't equatable: a stroke only grows while it is being drawn,
         /// so the same point count means the same points.
         private var sketchStrokeCache: [Double: (pointCount: Int, result: SketchStroke)] = [:]
+        /// Which strokes on the document canvas belong to which of the design's drawings.
+        private var drawings = DrawingSync()
+        /// True while the document canvas is being set from the design, which is not a
+        /// change for the design to follow.
+        private var isShowingDrawings = false
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -130,7 +137,7 @@ struct InkCanvas: UIViewRepresentable {
                 canvas.scrollsToTop = false
                 canvas.delegate = self
             }
-            documentCanvas.drawing = model.document.current.drawing
+            showDrawings()
             documentCanvas.onMoveToWindow = { [weak self] in
                 guard let self else { return }
                 // On the window, to see the Pencil land on things drawn above the canvas.
@@ -407,10 +414,28 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
                 model.sketchChanged(sketch())
-            } else {
-                model.drawingChanged(canvasView.drawing)
-                model.inkSelectionMayHaveMoved()
+            } else if !isShowingDrawings {
+                followInk()
             }
+        }
+
+        // MARK: The design's drawings
+
+        /// Makes the document canvas show the design's drawings, when it doesn't already:
+        /// when a design opens, and after a drawing is moved, resized, locked, hidden or
+        /// deleted, or put back by undo.
+        func showDrawings() {
+            guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
+            isShowingDrawings = true
+            defer { isShowingDrawings = false }
+            documentCanvas.drawing = PKDrawing(strokes: strokes)
+        }
+
+        /// The strokes on the document canvas changed, drawn, erased or moved with
+        /// PencilKit's tools or put there from here: the design's drawings follow.
+        private func followInk() {
+            let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
+            model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
         }
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
@@ -433,67 +458,25 @@ struct InkCanvas: UIViewRepresentable {
             model.canvasTapped(at: recognizer.location(in: recognizer.view))
         }
 
-        // MARK: Selecting and moving document ink
+        // MARK: Picking and changing ink
 
-        /// The drawing under a canvas point: the stroke there and every stroke touching
-        /// it, directly or through others. Nil if there is no ink at the point.
-        func drawing(at point: CGPoint, tolerance: CGFloat) -> Set<Double>? {
-            let strokes = documentCanvas.drawing.strokes
-            guard let hit = strokes.last(where: { stroke in
+        /// The drawing with ink under a canvas point, among those on the document
+        /// canvas. Nil if there is no ink at the point.
+        func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
+            let hit = documentCanvas.drawing.strokes.last { stroke in
                 guard stroke.renderBounds.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
                 return stroke.path.interpolatedPoints(by: .distance(4)).contains { sample in
                     let location = sample.location.applying(stroke.transform)
                     return hypot(location.x - point.x, location.y - point.y) <= tolerance + max(sample.size.width, sample.size.height) / 2
                 }
-            }) else { return nil }
-
-            let outlines = strokes.map { stroke in
-                let bounds = stroke.renderBounds
-                return SketchStroke(key: Self.key(for: stroke), points: [bounds.origin, CGPoint(x: bounds.maxX, y: bounds.maxY)])
             }
-            let hitKey = Self.key(for: hit)
-            let group = SketchAnalyzer.cluster(outlines, reach: tolerance).first { $0.contains { $0.key == hitKey } }
-            return Set(group?.map(\.key) ?? [hitKey])
+            return hit.flatMap { drawings.drawing(owning: $0.key) }
         }
 
-        /// The area the strokes with these keys cover, or nil if none of them exist.
-        func bounds(of keys: Set<Double>) -> CGRect? {
-            let rects = documentCanvas.drawing.strokes.filter { keys.contains(Self.key(for: $0)) }.map(\.renderBounds)
-            return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
-        }
-
-        func translateInk(_ keys: Set<Double>, by delta: CGSize) {
-            let move = CGAffineTransform(translationX: delta.width, y: delta.height)
-            var drawing = documentCanvas.drawing
-            drawing.strokes = drawing.strokes.map { stroke in
-                guard keys.contains(Self.key(for: stroke)) else { return stroke }
-                var moved = stroke
-                moved.transform = stroke.transform.concatenating(move)
-                return moved
-            }
-            setDocumentDrawing(drawing)
-        }
-
-        /// Makes a finished move undoable. PencilKit only records what its own tools do.
-        func registerUndo(ofMoving keys: Set<Double>, by delta: CGSize) {
-            guard let undoManager = documentCanvas.documentUndoManager else { return }
-            undoManager.beginUndoGrouping()
-            undoManager.registerUndo(withTarget: self) { coordinator in
-                let back = CGSize(width: -delta.width, height: -delta.height)
-                coordinator.translateInk(keys, by: back)
-                coordinator.registerUndo(ofMoving: keys, by: back)
-            }
-            undoManager.endUndoGrouping()
-        }
-
-        /// The strokes with these keys, as points on the canvas, for reading as a sketch.
-        func inkStrokes(_ keys: Set<Double>) -> [SketchStroke] {
-            documentCanvas.drawing.strokes.filter { keys.contains(Self.key(for: $0)) }.map { stroke in
-                SketchStroke(
-                    key: Self.key(for: stroke),
-                    points: stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
-                )
-            }
+        /// The drawing that strokes with these keys ended up in, when they share one.
+        func drawing(owning keys: Set<Double>) -> DesignElement.ID? {
+            let owners = Set(keys.compactMap { drawings.drawing(owning: $0) })
+            return owners.count == 1 ? owners.first : nil
         }
 
         func deleteInk(_ keys: Set<Double>) {
@@ -528,8 +511,7 @@ struct InkCanvas: UIViewRepresentable {
 
         private func setDocumentDrawing(_ drawing: PKDrawing) {
             documentCanvas.drawing = drawing
-            model.drawingChanged(drawing)
-            model.inkSelectionMayHaveMoved()
+            followInk()
         }
 
         // MARK: Magic Pen sketches
@@ -632,7 +614,7 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         private static func key(for stroke: PKStroke) -> Double {
-            stroke.path.creationDate.timeIntervalSinceReferenceDate
+            stroke.key
         }
     }
 }

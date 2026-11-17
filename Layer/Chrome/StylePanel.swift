@@ -16,8 +16,6 @@ struct StylePanel: View {
                     ElementSettings(ref: selected.ref, element: selected.element)
                 } else if let screen = model.selectedScreen {
                     FrameSettings(screen: screen)
-                } else if case .ink = model.selection {
-                    PanelHeader(symbol: "scribble", title: "Drawing") { model.deleteSelection() }
                 }
             }
             .padding(.bottom, 12)
@@ -101,10 +99,12 @@ private struct ElementSettings: View {
                 if element.hasCornerRadius {
                     NumberField("R", label: "Corner radius", value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }), range: 0...999)
                 }
-                NumberField("%", label: "Opacity", value: Binding(
-                    get: { (element.resolvedOpacity * 100).rounded() },
-                    set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
-                ), range: 5...100)
+                if element.kind.spec.hasEffects {
+                    NumberField("%", label: "Opacity", value: Binding(
+                        get: { (element.resolvedOpacity * 100).rounded() },
+                        set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                    ), range: 5...100)
+                }
             }
             if case .screen = ref.host {
                 HStack(spacing: 6) {
@@ -129,7 +129,9 @@ private struct ElementSettings: View {
                     ColorField(label: "Border colour", color: Binding(get: { element.resolvedBorderColor }, set: { color in change { $0.borderColor = color } }))
                 }
             }
-            Toggle("Shadow", isOn: Binding(get: { element.hasShadow }, set: { shadow in change { $0.hasShadow = shadow } }))
+            if element.kind.spec.hasEffects {
+                Toggle("Shadow", isOn: Binding(get: { element.hasShadow }, set: { shadow in change { $0.hasShadow = shadow } }))
+            }
             if element.hasOnState {
                 Toggle(element.kind.spec.onName ?? "On",
                        isOn: Binding(get: { element.isOn }, set: { isOn in change { $0.isOn = isOn } }))

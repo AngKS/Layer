@@ -50,12 +50,12 @@ struct SelectionActions: View {
         @Bindable var model = model
         let isLocked = model.isSelectionLocked
         return ToolbarPill {
-            if case .ink = model.selection {
-                drawingActions
-            } else if isLocked {
+            if isLocked {
                 // Locked: nothing to do but unlock.
                 ToolButton(symbol: "lock.open", label: "Unlock") { model.setSelectionLocked(false) }
                     .keyboardShortcut("l", modifiers: .command)
+            } else if model.selectedElement?.element.kind == .drawing {
+                drawingActions
             } else {
                 if let selected = model.selectedElement, selected.element.kind.hasText {
                     ToolButton(symbol: "character.cursor.ibeam", label: "Edit text", isActive: model.isEditingText) {
@@ -103,8 +103,8 @@ struct SelectionActions: View {
         .onChange(of: model.selection) { prompt = "" }
     }
 
-    /// For a drawing: a line to say what it should be, the sparkle that has it read as a
-    /// sketch and turned into that, and deleting it.
+    /// For a drawing: a line to say what it should be and the sparkle that has it read as
+    /// a sketch and turned into that; then what any element can have done to it.
     @ViewBuilder private var drawingActions: some View {
         TextField("What should this be?", text: $prompt)
             .font(.system(size: 15))
@@ -116,6 +116,12 @@ struct SelectionActions: View {
             .frame(width: 240, height: 44)
             .accessibilityLabel("Prompt")
         ToolButton(symbol: "sparkles", label: "Convert drawing") { convert() }
+        ToolButton(symbol: "plus.square.on.square", label: "Duplicate") {
+            withAnimation(.smooth(duration: 0.25)) { model.duplicateSelection() }
+        }
+        .keyboardShortcut("d", modifiers: .command)
+        ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
+            .keyboardShortcut("l", modifiers: .command)
         ToolButton(symbol: "trash", label: "Delete selection") {
             withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
         }

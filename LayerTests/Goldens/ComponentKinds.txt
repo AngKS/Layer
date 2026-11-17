@@ -348,5 +348,30 @@ laid out: 20,75 353x6 alignment -
 marks: empty on true value - | dot on the right on true value 0.9 | shaded to 0.42 on true value 0.4
 layout data: colour, height, kind, name, progress, width, x, y
 
+## drawing
+name: Drawing | symbol: scribble | placeholder: 
+hasText: false | belongsOnScreens: false | prompt: drawing
+written as: 
+found by each of its written names: true
+size: 120x120 | sketched small: 120x120 | sketched large: 120x120 | sketched 90x300: 120x120
+keepsSketchedPosition: false | runsAcross: false
+sketched wide: 136.5,664 120x120 - | among others: 136.5,664 120x120 - | on iPad: 350,664 120x120 -
+sketched half-left: 136.5,364 120x120 - | among others: 136.5,364 120x120 - | on iPad: 350,364 120x120 -
+sketched narrow-right: 136.5,256 120x120 - | among others: 136.5,252 120x120 - | on iPad: 350,256 120x120 -
+sketched small-centre: 136.5,168 120x120 - | among others: 136.5,168 120x120 - | on iPad: 350,168 120x120 -
+sketched leading-text: 136.5,80 120x120 - | among others: 136.5,80 120x120 - | on iPad: 350,80 120x120 -
+sketched tall: 136.5,308 120x120 - | among others: 136.5,308 120x120 - | on iPad: 350,308 120x120 -
+sketched short-title: 136.5,67 120x120 - | among others: 136.5,67 120x120 - | on iPad: 350,64 120x120 -
+sketched big-title: 136.5,84 120x120 - | among others: 136.5,84 120x120 - | on iPad: 350,84 120x120 -
+resized to nothing: 40,40 8x8 | resized taller: 30,10 110x90 | keeping shape: 40,40 120x65 | keeping shape from top left: 20,35 120x65
+new: 120x120 tint #2B2A27 text ""
+font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
+hasFill: false | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
+loose, drawn large: 120x120 | drawn small: 120x120
+in a blueprint: 120x120 | in a row: 170x120 | at 40pt: 120x120
+laid out: 136,75 121x120 alignment -
+marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
+layout data: colour, height, kind, name, width, x, y
+
 asked for on a screen: title, bodyText, image, button, textField, divider, toggle, avatar, checkbox, radioButton, progressBar
 asked for on the open canvas: text, stickyNote, phoneScreen

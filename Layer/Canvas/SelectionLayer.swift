@@ -5,6 +5,7 @@ import SwiftUI
 /// by their corner handles. With the palette up the Pencil draws everywhere, so only
 /// what a finger has selected takes touches here. A selected screen or
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
+/// A drawing is an element, moved and resized like the rest: its ink goes with its frame.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
 /// size at any zoom. Screens and drawings that aren't selected have no handle of their
@@ -31,11 +32,6 @@ struct SelectionLayer: View {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
                     .gesture(drags.moveScreen(screen, model: model), including: screen.isLocked == true ? .subviews : .all)
             }
-            if let bounds = model.inkSelectionBounds {
-                dragArea(viewport.viewRect(for: bounds).insetBy(dx: -8, dy: -8))
-                    .gesture(drags.moveInk(model: model))
-            }
-
             // Every element's target, laid out once in canvas points and moved as one by
             // the viewport. Panning changes a single transform rather than every target.
             InViewport {
@@ -43,8 +39,9 @@ struct SelectionLayer: View {
             }
             .allowsHitTesting(model.tool == .select)
 
-            // With the palette up, the selected element is moved by its own area.
-            if model.tool == .draw, let selected = model.selectedElement {
+            // With the palette up, the selected element is moved by its own area. So is a
+            // selected drawing at any time: it has no target of its own among the elements'.
+            if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
                 dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)))
                     .gesture(
@@ -56,9 +53,6 @@ struct SelectionLayer: View {
 
             if let screen = model.selectedScreen {
                 outline(viewport.viewRect(for: screen.canvasFrame), radius: screen.device.cornerRadius * screen.scale * viewport.scale)
-            }
-            if let bounds = model.inkSelectionBounds {
-                outline(viewport.viewRect(for: bounds).insetBy(dx: -5, dy: -5), radius: 4)
             }
             if let selected = model.selectedElement {
                 let rect = viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
@@ -89,13 +83,14 @@ struct SelectionLayer: View {
 
     private var selectionSummary: String? {
         if let selected = model.selectedElement {
+            if selected.element.kind == .drawing {
+                let strokes = selected.element.strokeCount
+                return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
+            }
             return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
         }
         if let screen = model.selectedScreen {
             return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
-        }
-        if case .ink(let strokes) = model.selection {
-            return strokes.count == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes.count) strokes"
         }
         return nil
     }
@@ -159,8 +154,6 @@ final class CanvasDrags {
     /// The frame an element had when the current drag began.
     @ObservationIgnored var elementOrigin: CGRect?
     @ObservationIgnored var screenOrigin: CGPoint?
-    /// How far, in canvas points, the selected drawing has been dragged so far.
-    @ObservationIgnored var inkDragged = CGSize.zero
 
     /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
     /// its neighbours, as the canvas is set up to do.
@@ -259,21 +252,6 @@ final class CanvasDrags {
             }
     }
 
-    func moveInk(model: AppModel) -> some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .global)
-            .onChanged { [self] value in
-                let scale = model.viewport.scale
-                let total = CGSize(width: value.translation.width / scale, height: value.translation.height / scale)
-                model.moveSelectedInk(by: CGSize(width: total.width - inkDragged.width, height: total.height - inkDragged.height))
-                inkDragged = total
-                model.isAdjusting = true
-            }
-            .onEnded { [self] _ in
-                model.isAdjusting = false
-                model.finishMovingInk(movedBy: inkDragged)
-                inkDragged = .zero
-            }
-    }
 }
 
 /// The tap and drag target of every visible element, and of every screen's name, laid
@@ -298,7 +276,9 @@ private struct ElementTargets: View {
                     target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen, minimum: minimum)
                 }
             }
-            ForEach(store.floating.filter { !$0.element.isHidden }) { floating in
+            // A drawing on the ink canvas has no target here: a tap on its ink picks it, and
+            // a drag across it is free to pan the canvas.
+            ForEach(store.floating.filter { !$0.element.isHidden && $0.element.isPickedByItsFrame }) { floating in
                 target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil, minimum: minimum)
             }
         }

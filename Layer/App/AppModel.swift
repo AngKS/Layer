@@ -40,12 +40,10 @@ struct KindSuggestion: Identifiable, Equatable {
     var observation: SketchObservation
 }
 
-/// What is selected on the canvas.
+/// What is selected on the canvas. A drawing is an element like any other.
 enum CanvasSelection: Hashable, Sendable {
     case element(DesignStore.ElementRef)
     case screen(DesignScreen.ID)
-    /// A drawing: the ink strokes with these keys.
-    case ink(Set<Double>)
 }
 
 /// One open design's working state, and the path from Magic Pen sketches to elements.
@@ -103,11 +101,6 @@ final class AppModel {
 
     var selection: CanvasSelection? {
         didSet {
-            if case .ink(let keys) = selection {
-                inkSelectionBounds = ink?.bounds(of: keys)
-            } else {
-                inkSelectionBounds = nil
-            }
             if selection != oldValue { isEditingText = false }
             // The format panel is for the selection: with nothing selected it goes.
             if selection == nil, isInspectorOpen {
@@ -115,9 +108,6 @@ final class AppModel {
             }
         }
     }
-
-    /// The canvas area a selected drawing covers.
-    private(set) var inkSelectionBounds: CGRect?
 
     /// Where the canvas has scrolled to and how far it is zoomed, tracked apart: panning
     /// changes only the offset, so what depends on the zoom alone isn't redrawn by a pan.
@@ -283,6 +273,8 @@ final class AppModel {
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         store.onChange = { [weak self, document] content in
             document.update { $0.content = content }
+            // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
+            self?.ink?.showDrawings()
             self?.applyModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
@@ -574,19 +566,11 @@ final class AppModel {
         }
     }
 
-    /// What the board's picture shows, so that a board changed and changed back, or
-    /// touched without changing, isn't drawn again.
-    private struct PreviewedBoard: Equatable {
-        var content: DesignContent
-        var strokes: Int
-        var inkBounds: CGRect
-    }
-    @ObservationIgnored private var previewedBoard: PreviewedBoard?
+    /// What the board's picture shows, its ink included, so that a board changed and
+    /// changed back, or touched without changing, isn't drawn again.
+    @ObservationIgnored private var previewedBoard: DesignContent?
 
-    private var board: PreviewedBoard {
-        let file = document.current
-        return PreviewedBoard(content: file.content, strokes: file.drawing.strokes.count, inkBounds: file.drawing.bounds)
-    }
+    private var board: DesignContent { document.current.content }
 
     private var needsPreview: Bool {
         guard document.current.preview != nil else { return true }
@@ -647,16 +631,20 @@ final class AppModel {
     func canvasTapped(at viewPoint: CGPoint) {
         let point = viewport.canvasPoint(for: viewPoint)
         // With the palette up, a finger tap reaches here for elements too: their own
-        // handles stay out of the Pencil's way while it draws.
-        if tool == .draw, case .element(let ref)? = hoverTarget(at: viewPoint) {
+        // handles stay out of the Pencil's way while it draws. A drawing has no handle
+        // of its own until it is selected, so a tap on its ink always reaches here.
+        if case .element(let ref)? = hoverTarget(at: viewPoint), tool == .draw || store.resolve(ref)?.element.kind == .drawing {
             selection = .element(ref)
-        } else if let keys = ink?.drawing(at: point, tolerance: 14 / viewport.scale) {
-            selection = .ink(keys)
         } else if let screen = store.screen(at: point) {
             selection = .screen(screen.id)
         } else {
             selection = nil
         }
+    }
+
+    /// The drawing with ink at a canvas point.
+    private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
+        ink?.drawing(at: point, tolerance: 14 / viewport.scale).map { .init(host: .canvas, element: $0) }
     }
 
     /// What Apple Pencil is hovering over: on the canvas, or in the layers list. It is
@@ -668,7 +656,9 @@ final class AppModel {
     /// The topmost element or screen at a point in the view, for hover.
     func hoverTarget(at viewPoint: CGPoint) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
-        for floating in store.floating.reversed() where floating.canvasFrame.contains(point) {
+        // Ink lies over everything else, and is picked by its strokes, not the box round them.
+        if let drawing = drawing(at: point) { return .element(drawing) }
+        for floating in store.floating.reversed() where floating.canvasFrame.contains(point) && floating.element.isPickedByItsFrame {
             return .element(.init(host: .canvas, element: floating.id))
         }
         for screen in store.screens.reversed() {
@@ -690,8 +680,6 @@ final class AppModel {
             return viewport.viewRect(for: found.placement.canvasRect(for: found.element.frame))
         case .screen(let id):
             return store.screen(id).map { viewport.viewRect(for: $0.canvasFrame) }
-        case .ink(let keys):
-            return ink?.bounds(of: keys).map { viewport.viewRect(for: $0) }
         }
     }
 
@@ -700,7 +688,7 @@ final class AppModel {
         switch selection {
         case .element: selectedElement?.element.isLocked == true
         case .screen: selectedScreen?.isLocked == true
-        case .ink, nil: false
+        case nil: false
         }
     }
 
@@ -708,19 +696,14 @@ final class AppModel {
         switch selection {
         case .element(let ref): store.update(ref) { $0.isLocked = locked }
         case .screen(let id): store.updateScreen(id) { $0.isLocked = locked ? true : nil }
-        case .ink, nil: break
+        case nil: break
         }
     }
 
-    var canDuplicateSelection: Bool {
-        switch selection {
-        case .element, .screen: true
-        case .ink, nil: false
-        }
-    }
+    var canDuplicateSelection: Bool { selection != nil }
 
-    /// Elements and screens can be locked; drawings can't.
-    var canLockSelection: Bool { canDuplicateSelection }
+    /// Whatever can be selected can be locked: elements, drawings among them, and screens.
+    var canLockSelection: Bool { selection != nil }
 
     /// Copies what is selected and selects the copy.
     func duplicateSelection() {
@@ -729,7 +712,7 @@ final class AppModel {
             if let copy = store.duplicate(ref) { selection = .element(copy) }
         case .screen(let id):
             if let copy = store.duplicateScreen(id) { selection = .screen(copy.id) }
-        case .ink, nil:
+        case nil:
             break
         }
     }
@@ -767,8 +750,6 @@ final class AppModel {
         case .screen:
             guard let screen = selectedScreen else { return nil }
             return viewport.viewRect(for: screen.canvasFrame.union(screen.labelFrame))
-        case .ink:
-            return inkSelectionBounds.map { viewport.viewRect(for: $0) }
         case nil:
             return nil
         }
@@ -779,30 +760,9 @@ final class AppModel {
         switch selection {
         case .element(let ref): store.delete(ref)
         case .screen(let id): store.deleteScreen(id)
-        case .ink(let keys): ink?.deleteInk(keys)
         case nil: break
         }
         selection = nil
-    }
-
-    /// Moves the selected drawing. Call `finishMovingInk` when the drag ends, so the whole
-    /// move undoes as one step.
-    func moveSelectedInk(by delta: CGSize) {
-        guard case .ink(let keys) = selection else { return }
-        ink?.translateInk(keys, by: delta)
-        inkSelectionBounds = ink?.bounds(of: keys)
-    }
-
-    func finishMovingInk(movedBy total: CGSize) {
-        guard case .ink(let keys) = selection, total != .zero else { return }
-        ink?.registerUndo(ofMoving: keys, by: total)
-    }
-
-    /// Ink changed underneath the selection, by undo or redo: follow it, or let go of it.
-    func inkSelectionMayHaveMoved() {
-        guard case .ink(let keys) = selection else { return }
-        inkSelectionBounds = ink?.bounds(of: keys)
-        if inkSelectionBounds == nil { selection = nil }
     }
 
     private func dropSelectionOfMissingThings() {
@@ -950,10 +910,11 @@ final class AppModel {
 
     // MARK: Ink events
 
-    /// Ink drawn with PencilKit's own tools changed. It is part of the document.
-    func drawingChanged(_ drawing: PKDrawing) {
-        document.update { $0.drawing = drawing }
-        schedulePreview()
+    /// The ink drawn with PencilKit's own tools changed: the design's drawings follow it.
+    /// PencilKit keeps the undo history of its strokes, so this adds none of its own.
+    func inkChanged(_ changes: DrawingSync.Changes) {
+        guard !changes.isEmpty else { return }
+        store.follow { changes.apply(to: &$0) }
     }
 
     /// The Magic Pen's ink changed.
@@ -995,12 +956,14 @@ final class AppModel {
     /// Reads the selected drawing as a sketch, told what `prompt` says of it, and puts what
     /// it means in its place. The drawing stays if it can't be read as anything.
     func convertSelection(prompt: String) {
-        guard case .ink(let keys) = selection, let strokes = ink?.inkStrokes(keys), !strokes.isEmpty else { return }
+        guard let selected = selectedElement, selected.element.kind == .drawing else { return }
+        let strokes = selected.element.sketchStrokes
+        guard !strokes.isEmpty else { return }
         selection = nil
         let zoom = viewport.scale
         let conversion = Task { [weak self] () -> Void in
             guard let self else { return }
-            await convert(onScreen(strokes, zoom: zoom), zoom: zoom, drawing: keys, prompt: prompt)
+            await convert(onScreen(strokes, zoom: zoom), zoom: zoom, drawing: selected.ref, prompt: prompt)
         }
         conversions.append(conversion)
         Task { [weak self] in
@@ -1051,9 +1014,9 @@ final class AppModel {
     }
 
     /// Reads one sketch, given at its on-screen size, and puts what it means on the canvas.
-    /// A Magic Pen sketch is read on its own; `drawing` is set instead for ordinary ink
+    /// A Magic Pen sketch is read on its own; `drawing` is set instead for a drawing
     /// that was selected and asked to be read, with the `prompt` typed for it.
-    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: Set<Double>? = nil, prompt: String? = nil) async {
+    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: DesignStore.ElementRef? = nil, prompt: String? = nil) async {
         let keys = Set(group.map(\.key))
         let isDrawing = drawing != nil
         defer { if !isDrawing { inFlight.subtract(keys) } }
@@ -1105,6 +1068,9 @@ final class AppModel {
 
         withAnimation(.smooth(duration: 0.45)) {
             effects.removeAll { $0.id == effect.id }
+            // A drawing and what it becomes change places as one undo step.
+            if isDrawing { store.beginEdit() }
+            defer { if isDrawing { store.endEdit() } }
             var converted = false
             var added: DesignStore.ElementRef?
             switch reading {
@@ -1150,7 +1116,7 @@ final class AppModel {
                 selection = .element(added)
             }
             if converted {
-                if let drawing { ink?.deleteInk(drawing) } else { ink?.removeSketch(keys) }
+                if let drawing { store.delete(drawing) } else { ink?.removeSketch(keys) }
                 if reading != .scratchOut { suggestTitleIfNeeded() }
             } else if !isDrawing {
                 reject(keys)

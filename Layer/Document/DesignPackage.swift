@@ -3,7 +3,9 @@
 enum DesignPackage {
     /// The screens, elements, title and canvas settings.
     static let design = "design.json"
-    /// Ink drawn with PencilKit's own tools.
+    /// The folder of ink, one file for each drawing, named by the drawing's identifier.
+    static let ink = "ink"
+    /// All of a board's ink as one drawing, as it was saved until file version 3. Still read.
     static let drawing = "drawing.data"
     /// The folder of attached pictures, each named by its identifier.
     static let images = "images"

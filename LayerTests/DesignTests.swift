@@ -518,9 +518,12 @@ struct DesignFileTests {
         let url = folder.appendingPathComponent("Onboarding.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
-        for part in ["design.json", "drawing.data", "images/\(picture.uuidString)", "QuickLook/Thumbnail.jpg"] {
+        // The ink is one file for each drawing, named by the drawing.
+        let drawing = try #require(file.content.elements.first { $0.kind == .drawing })
+        for part in ["design.json", "ink/\(drawing.id.uuidString)", "images/\(picture.uuidString)", "QuickLook/Thumbnail.jpg"] {
             #expect(FileManager.default.fileExists(atPath: url.appendingPathComponent(part).path), "\(part) should be in the package")
         }
+        #expect(!FileManager.default.fileExists(atPath: url.appendingPathComponent("drawing.data").path))
         let reopened = try DesignFile(wrapper: FileWrapper(url: url))
         #expect(reopened.content == file.content)
         #expect(reopened.drawing.bounds == file.drawing.bounds)
@@ -594,12 +597,15 @@ struct DesignFileTests {
         #expect(document.current.drawing.strokes.isEmpty)
 
         model.store.addScreen(from: leftScreenSketch)
-        let drawing = sampleFile().drawing
-        model.drawingChanged(drawing)
+        // Ink drawn on the canvas becomes a drawing in the design.
+        var sync = DrawingSync()
+        let strokes = sampleFile().drawing.strokes
+        model.inkChanged(sync.changes(for: strokes, in: model.store.content))
 
         let snapshot = try document.snapshot(contentType: .layerDesign)
         #expect(snapshot.content.screens.map(\.name) == ["Screen 1"])
-        #expect(snapshot.drawing == drawing)
+        #expect(snapshot.content.floating.map(\.element.kind) == [.drawing])
+        #expect(snapshot.drawing.strokes.map(\.key) == strokes.map(\.key))
 
         // What is written to disk opens as the same design.
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)

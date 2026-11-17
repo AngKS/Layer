@@ -61,6 +61,8 @@ struct ComponentSpec: Sendable {
     var textColour = TextColour.colour(Theme.inkTint)
     var cornerRadius = Radius.none
     var textAlignment = TextAlignmentChoice.leading
+    /// Whether it can be made see-through and given a shadow. Ink can't: PencilKit draws it.
+    var hasEffects = true
     /// The settings it has.
     var traits: Traits = [.border]
     /// What its being switched on is called in the format panel.

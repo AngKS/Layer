@@ -93,11 +93,6 @@ final class DesignStore {
         current.index[id].map { content.elements[$0] }
     }
 
-    /// Where an element lives.
-    func ref(for element: DesignElement) -> ElementRef {
-        ElementRef(host: element.parent.map { .screen($0) } ?? .canvas, element: element.id)
-    }
-
     /// An element together with the placement that turns its frame into canvas points.
     /// Nil when the element is gone, or no longer where `ref` says it is.
     func resolve(_ ref: ElementRef) -> (element: DesignElement, placement: Placement)? {
@@ -482,6 +477,17 @@ final class DesignStore {
     func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
         guard screen(id) != nil else { return }
         change { $0.updateScreen(id, body) }
+    }
+
+    // MARK: Following the ink
+
+    /// Applies a change that follows something with an undo history of its own, and so
+    /// registers none here. Drawings follow the ink canvas this way: PencilKit undoes
+    /// and redoes its strokes itself, and the design's drawings are worked out from them.
+    func follow(_ body: (inout DesignContent) -> Void) {
+        // An edit under way began before this, and must not take it back when it is undone.
+        if editStart != nil { body(&editStart!) }
+        body(&content)
     }
 
     // MARK: Undo
