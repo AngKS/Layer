@@ -156,15 +156,7 @@ final class DesignStore {
         var element = Self.newElement(kind)
         let scale = looseScale
         let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
-        switch kind {
-        case .stickyNote:
-            let side = min(max(max(drawn.width, drawn.height), 100), 320).rounded()
-            element.frame.size = CGSize(width: side, height: side)
-        case .text:
-            element.frame.size.width = min(max(drawn.width, 80), 600).rounded()
-        default:
-            break
-        }
+        element.frame.size = kind.spec.looseSize.size(from: element.frame.size, drawn: drawn)
         return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
@@ -228,15 +220,10 @@ final class DesignStore {
 
     /// A new element of a kind, at its starting size and look, ready to be placed.
     nonisolated static func newElement(_ kind: ElementKind, symbol: String? = nil) -> DesignElement {
-        let tint: RGBColor = switch kind {
-        case .stickyNote: Theme.stickyNote
-        case .symbol: Theme.inkTint
-        default: Theme.accent
-        }
-        return DesignElement(
+        DesignElement(
             kind: kind,
             frame: CGRect(origin: .zero, size: ElementLayout.size(for: kind, sketch: .zero)),
-            text: kind.placeholder, tint: tint, symbol: symbol
+            text: kind.placeholder, tint: kind.spec.tint, symbol: symbol
         )
     }
 

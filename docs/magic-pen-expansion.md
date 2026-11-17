@@ -66,10 +66,13 @@ screens); screen, sticky note, text (on the open canvas); scratch-out to delete.
    to 4 pt but ignores the neighbours.
 6. **The model only gets words.** `SketchRequest.renderImage()` exists but nothing calls
    it. The prompt describes only the six forms.
-7. **Each kind is spread across ~8 switches**: `Design.swift` (name, symbol,
+7. **Each kind was spread across about 20 switches**: `Design.swift` (name, symbol,
    placeholder), `ElementStyle`, `ElementLayout`, `PhoneScreenView`,
-   `SwiftUICodeGenerator` (twice), `SketchPrompt.name`, and the `reading(namedIn:)` word
-   list. Adding 20 kinds means 160 edits.
+   `SwiftUICodeGenerator` (twice), `SketchPrompt.name`, and more. *Done in part:* the
+   per-kind data now lives in one entry per kind in `Layer/Components/Catalogue.swift`
+   (see §5.1). How a kind is drawn and how it is written as code are still switches, in
+   `ElementView` and `SwiftUICodeGenerator`, and the `reading(namedIn:)` word list is
+   still its own table because its order decides which word wins.
 
 ---
 
@@ -302,6 +305,10 @@ ends up on a grid.
    registry: name, SF Symbol, placeholder, default size and sizing rule, style defaults,
    sketch rule(s), prompt name and description, renderer, and codegen. `ElementKind` stays
    the `Codable` key. Adding a component then means one new file plus fixtures.
+   *Done for the data:* `ComponentSpec` and `Catalogue` hold each kind's names, written
+   names, sizes, placement, usual look, settings and what its inner marks mean, and
+   `LayerTests/Goldens/ComponentKinds.txt` records what every kind answers. Still to
+   fold in: the renderer, the two code emitters and the scoring rules in `ComponentRule`.
 2. **Element data for components with state.** Add optional fields, decoded with
    `decodeIfPresent` as the existing ones are: `items: [String]?` (segments, tabs, list
    rows, chips), `value: Double?` (slider, progress, rating), `selectedIndex: Int?`,

@@ -5,61 +5,19 @@ import Foundation
 enum ElementKind: String, CaseIterable, Codable, Sendable {
     case title, body, image, button, textField, divider, symbol, text, stickyNote, toggle, avatar, checkbox, radio, progress
 
-    var layerName: String {
-        switch self {
-        case .title: "Title"
-        case .body: "Body"
-        case .image: "Image"
-        case .button: "Button"
-        case .textField: "Text Field"
-        case .divider: "Divider"
-        case .symbol: "Symbol"
-        case .text: "Text"
-        case .stickyNote: "Sticky Note"
-        case .toggle: "Toggle"
-        case .avatar: "Avatar"
-        case .checkbox: "Checkbox"
-        case .radio: "Radio Button"
-        case .progress: "Progress Bar"
-        }
-    }
+    // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
 
-    var symbol: String {
-        switch self {
-        case .title: "textformat"
-        case .body: "text.alignleft"
-        case .image: "photo"
-        case .button: "capsule.fill"
-        case .textField: "character.cursor.ibeam"
-        case .divider: "minus"
-        case .symbol: "star"
-        case .text: "character.textbox"
-        case .stickyNote: "note.text"
-        case .toggle: "switch.2"
-        case .avatar: "person.crop.circle"
-        case .checkbox: "checkmark.square"
-        case .radio: "largecircle.fill.circle"
-        case .progress: "progress.indicator"
-        }
-    }
+    var layerName: String { spec.name }
+
+    var symbol: String { spec.symbol }
 
     /// The copy a new element starts with.
-    var placeholder: String {
-        switch self {
-        case .title: "Title"
-        case .body: "A short description goes here, a line or two that says what this is."
-        case .button: "Continue"
-        case .textField: "Placeholder"
-        case .text: "Text"
-        case .stickyNote: "Note"
-        case .image, .divider, .symbol, .toggle, .avatar, .checkbox, .radio, .progress: ""
-        }
-    }
+    var placeholder: String { spec.placeholder }
 
     var hasText: Bool { !placeholder.isEmpty }
 
-    /// Sticky notes are notes about a design, not part of one, so they never join a screen.
-    var belongsOnScreens: Bool { self != .stickyNote }
+    /// Whether it can join a screen, or stays on the open canvas as sticky notes do.
+    var belongsOnScreens: Bool { spec.belongsOnScreens }
 }
 
 enum TextAlignmentChoice: String, CaseIterable, Codable, Sendable {

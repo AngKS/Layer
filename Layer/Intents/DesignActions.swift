@@ -367,12 +367,9 @@ enum DesignLayoutWriter {
         if element.hasShadow { info["shadow"] = true }
         if element.isLocked { info["locked"] = true }
         if element.isHidden { info["hidden"] = true }
-        switch element.kind {
-        case .toggle, .checkbox, .radio: info["on"] = element.isOn
-        case .progress: info["progress"] = element.value ?? 0.5
-        case .button: info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue
-        default: break
-        }
+        if element.hasOnState { info["on"] = element.isOn }
+        if element.hasValue { info["progress"] = element.value ?? 0.5 }
+        if element.hasButtonLooks { info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue }
         return info
     }
 

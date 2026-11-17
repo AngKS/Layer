@@ -73,6 +73,7 @@ App Intent titles, descriptions and enum names must not contain Apple trademarks
 | `Layer/Chrome` | Top bar, panels, zoom and undo controls, share menu |
 | `Layer/Sketch` | Reading sketches: shape analysis, rules, Apple Intelligence |
 | `Layer/Model` | Screens, elements, layout and the design store with undo |
+| `Layer/Components` | The catalogue: one entry per kind of element, with its names, sizes, look and settings |
 | `Layer/Document` | The `.layer` package format, file naming and iCloud |
 | `Layer/Code` | The SwiftUI code generator and its syntax colouring |
 | `LayerThumbnails` | Quick Look extension that draws thumbnails for Files |

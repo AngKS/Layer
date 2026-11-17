@@ -131,10 +131,10 @@ private struct ElementSettings: View {
             }
             Toggle("Shadow", isOn: Binding(get: { element.hasShadow }, set: { shadow in change { $0.hasShadow = shadow } }))
             if element.hasOnState {
-                Toggle(element.kind == .toggle ? "On" : element.kind == .checkbox ? "Checked" : "Selected",
+                Toggle(element.kind.spec.onName ?? "On",
                        isOn: Binding(get: { element.isOn }, set: { isOn in change { $0.isOn = isOn } }))
             }
-            if element.kind == .progress {
+            if element.hasValue {
                 PanelRow("Progress") {
                     Slider(value: Binding(get: { element.resolvedValue }, set: { value in change { $0.value = (value * 100).rounded() / 100 } }), in: 0...1)
                     Text(element.resolvedValue, format: .percent.precision(.fractionLength(0)))
@@ -142,7 +142,7 @@ private struct ElementSettings: View {
                         .frame(width: 44, alignment: .trailing)
                 }
             }
-            if element.kind == .button {
+            if element.hasButtonLooks {
                 Picker("Button style", selection: Binding(get: { element.resolvedButtonLook }, set: { look in change { $0.buttonLook = look } })) {
                     ForEach(ButtonLook.allCases, id: \.self) { look in
                         Text(look.name).tag(look)

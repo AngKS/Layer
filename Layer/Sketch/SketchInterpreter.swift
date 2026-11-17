@@ -84,7 +84,7 @@ extension SketchRequest {
         let shaped = candidates.filter { $0 != .scratchOut }
         let rest: [SketchReading] = switch placement {
         case .openCanvas: [.element(.text), .element(.stickyNote), .screen]
-        case .onScreen: [ElementKind.title, .body, .image, .button, .textField, .divider, .toggle, .avatar, .checkbox, .radio, .progress].map(SketchReading.element)
+        case .onScreen: ElementKind.allCases.filter(\.spec.isAskedForOnScreens).map(SketchReading.element)
         }
         return shaped + rest.filter { !shaped.contains($0) }
     }
@@ -98,17 +98,15 @@ extension DesignElement {
     /// toggle's knob is at, whether a checkbox is ticked or a radio button has its dot,
     /// and how far a progress bar is shaded.
     mutating func adoptMarks(of observation: SketchObservation) {
-        guard case .enclosure(_, let inner) = observation.form else { return }
-        switch kind {
-        case .toggle:
+        guard case .enclosure(_, let inner) = observation.form, let marks = kind.spec.marks else { return }
+        switch marks {
+        case .knob:
             if let knob = observation.innerBounds { isOn = knob.midX >= 0.5 }
-        case .checkbox, .radio:
+        case .mark:
             isOn = inner != .none
-        case .progress:
+        case .shading:
             // To the nearest 5%; unshaded bars start half full.
             if let shading = observation.innerBounds { value = (Double(min(max(shading.maxX, 0), 1)) * 20).rounded() / 20 }
-        default:
-            break
         }
     }
 }
@@ -275,20 +273,7 @@ enum SketchPrompt {
     static func name(for reading: SketchReading) -> String {
         switch reading {
         case .screen: "phoneScreen"
-        case .element(.title): "title"
-        case .element(.body): "bodyText"
-        case .element(.image): "image"
-        case .element(.button): "button"
-        case .element(.textField): "textField"
-        case .element(.divider): "divider"
-        case .element(.symbol): "symbol"
-        case .element(.text): "text"
-        case .element(.stickyNote): "stickyNote"
-        case .element(.toggle): "toggle"
-        case .element(.avatar): "avatar"
-        case .element(.checkbox): "checkbox"
-        case .element(.radio): "radioButton"
-        case .element(.progress): "progressBar"
+        case .element(let kind): kind.spec.promptName
         case .scratchOut: "scratchOut"
         case .unknown: "unknown"
         }
