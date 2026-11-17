@@ -205,6 +205,84 @@ that was wrong:
 - **Something loose on the canvas was picked for a command about the screen in view**:
   "make the width 50%" resized a sticky note.
 
+## Prompt order (2026-11-18)
+
+**What was tried.** The on-device profile put the canvas between the rules and the
+tools: `Instructions(VoiceRules.compact)`, then `CanvasBrief`, then the tools. The canvas
+changes with nearly every command, so the model could keep only the rules from one
+command to the next and read the tools again each time. The change moves the canvas
+for the on-device profile to the head of each command's prompt ("The canvas now: … The
+command: …"), so the rules and the tools stay the same. Hosted profiles are unchanged.
+
+**How it was measured.** On this Mac, macOS 27.2, with the harness's new `latency` mode
+(`Tools/VoiceBenchmarkHarness/run.sh latency 6`). One session per call, set up as the
+app's on-device profile: the compact rules, 18 tools, the last two commands, greedy,
+200 tokens to answer in. Each call is warmed with `prewarm()` as a call starts, waits
+4 s, then runs eight edits in a row on the one-screen canvas, 1.5 s apart. The recorder
+changes the canvas as the app would (a look, words, a size, a copy), so each command
+after the first sees a changed canvas. Times are from the command to the first tool,
+from the last tool to the model's last word (its "Done"), and the whole. Six calls in
+each order, the order going first rotating from run to run. Accuracy is the existing
+64 commands, run twice in each order (`baseline` and `canvasfirst`); greedy, so the two
+runs gave the same answers.
+
+A third order was tried: canvas in the prompt, with `prewarm(promptPrefix:)` reading
+the starting canvas ahead too. It was slower everywhere, so it isn't used.
+
+**Latency**, median (min–max), seconds:
+
+| | Canvas in instructions (before) | Canvas in prompt (now) | Change | Canvas in prompt, warmed with it |
+|---|---|---|---|---|
+| Edit, whole (42 per order) | 2.67 (2.39–2.74) | 1.91 (1.61–2.08) | −28% | 2.69 (1.83–2.84) |
+| Edit, to the first tool | 2.22 (1.99–2.30) | 1.50 (1.22–1.65) | −32% | 2.06 (1.22–2.18) |
+| First command after warming, whole (6) | 1.36 (1.33–1.38) | 1.72 (1.69–1.73) | +26% | 2.57 (2.54–2.68) |
+| First command, to the first tool | 0.94 (0.92–0.96) | 1.30 (1.29–1.33) | +38% | 2.01 (2.00–2.12) |
+| "Done", last tool to last word (48) | 0.44 (0.38–0.47) | 0.42 (0.39–0.49) | none | 0.63 (0.54–0.78) |
+
+Each call's median edit was within 0.06 s of the others in the same order. An earlier
+pass of six calls in two orders gave the same numbers for the canvas in the instructions
+(2.67 and 1.36).
+
+- An edit is about **0.75 s quicker**. It is the larger part of a call: every command
+  after the first.
+- The **first command is 0.35 s slower**. Before, the warm-up read the whole profile,
+  canvas included, and the first command found it all read if the canvas hadn't changed.
+  Now its canvas is read with the command. Over a call of more than one command the
+  change still saves time.
+- **"Done" is unchanged.** On-device, the canvas is not told again between steps (see
+  "On an iPad"), so this step already found everything read.
+
+**Accuracy**, right tool and right arguments:
+
+| Group | Canvas in instructions | Canvas in prompt |
+|---|---|---|
+| Tuned on | 27 of 30 | 29 of 30 |
+| Held back | 5 of 8 | 5 of 8 |
+| Fresh | 7 of 12 | 8 of 12 |
+| Spoken to the iPad | 10 of 14 | 11 of 14 |
+| All | 49 of 64 | 53 of 64 |
+| Commands where more than one tool was called | 3 | 6 |
+
+The baseline is lower than the 2026-11-18 table above: there are now 18 tools (2,140
+tokens) where there were 17, and three more commands from the iPad. Four more right is
+within the noise of commands this few, so the change is not counted as more accurate,
+only as not less. What it did differently: it ended the call on "That's all, thanks",
+took "the name" as the title, and wrote the text colour as `text red` and not `red, text
+red`. Against that, on things that aren't there ("the slider", "the dropdown", "the
+checkbox") it now strings several tools together, such as `show`, then `placeElement`,
+then a resize, where before it called one wrong tool or a delete the app refused.
+
+In the calls of eight commands in a row, where earlier commands and their canvases are
+in the conversation, the canvas in the instructions got all eight right every time. With
+the canvas in the prompt, seven: "Change the title's text colour to blue", the last of
+the eight, reworded the title to "Welcome back blue" in all six calls. On its own, in the
+64, the same command was right in both orders. "Make the title red" became `text red`
+rather than `red`; for a title that is the same thing.
+
+**Kept.** The edit time improved by more than the 15% set before measuring, and accuracy
+did not drop beyond the noise: four more right on their own, one fewer in a row. The
+text-colour command in a row is one to watch on the iPad.
+
 ## Not measured here
 
 - Speech, on the Mac. The commands there were typed, so mishearing is not in its numbers.

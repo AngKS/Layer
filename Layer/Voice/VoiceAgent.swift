@@ -17,6 +17,8 @@ final class VoiceAgent: VoiceCommandRunner {
     private var session: LanguageModelSession?
     /// Set by a test, to say how the canvas is told between steps whatever the model.
     private let looksAgain: Bool?
+    /// Set by a test, to tell its stand-in the canvas in the prompt, as the on-device model is.
+    private let testCanvasInPrompt: Bool
 
     /// Whether a model is told about the canvas again after each step of a command.
     ///
@@ -73,17 +75,25 @@ final class VoiceAgent: VoiceCommandRunner {
         session.properties.voiceModel = model.modelChoice
         lookAtTheCanvas()
         VoiceLog.log.info("agent: warming \(String(describing: model.modelChoice), privacy: .public)")
+        // Only what stays the same is read ahead: on-device, the rules and the tools. Reading
+        // the canvas ahead too, as the start of the first prompt, was measured on a Mac to
+        // make every later command slower (an edit took 2.7 s, against 1.9 s), not faster.
         session.prewarm()
+    }
+
+    private func putsCanvasInPrompt(_ model: AppModel) -> Bool {
+        testModel == nil ? VoiceProfile.canvasGoesInPrompt(with: model.modelChoice) : testCanvasInPrompt
     }
 
     /// Called with what the command under way is doing now, such as "Restyling…".
     var onStep: ((String) -> Void)?
 
     /// `testModel` stands in for the design's own model, for tests and the simulator.
-    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil) {
+    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil, canvasInPrompt: Bool = false) {
         self.model = model
         self.testModel = testModel
         self.looksAgain = looksAgainBetweenSteps
+        self.testCanvasInPrompt = canvasInPrompt
         toolbox = VoiceToolbox(model: model, handles: handles)
     }
 
@@ -150,6 +160,7 @@ final class VoiceAgent: VoiceCommandRunner {
             lookAtTheCanvas()
         }
         if let hint { prompt = hint + " " + prompt }
+        if putsCanvasInPrompt(model) { prompt = VoiceProfile.canvasLeading(session.properties.canvasPicture) + prompt }
         VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")
         let began = ContinuousClock.now
         do {
@@ -186,7 +197,7 @@ final class VoiceAgent: VoiceCommandRunner {
             // Nothing more is done to a design once it has closed.
             mayRun: { @MainActor [weak model] in !Task.isCancelled && model?.isClosed == false }
         )
-        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel))
+        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel, testCanvasInPrompt: testCanvasInPrompt))
     }
 
     private func stepStarted(with tool: String) {
