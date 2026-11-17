@@ -81,6 +81,9 @@ final class VoiceAgent: VoiceCommandRunner {
     func run(_ command: String) async -> VoiceOutcome {
         guard let model else { return VoiceOutcome(problem: "The design has closed.") }
         toolbox.reset()
+        // Where the pencil pointed goes with this command and no other.
+        let hint = model.voiceHint
+        model.voiceHint = nil
         let session = session ?? makeSession()
         self.session = session
         session.properties.voiceModel = model.modelChoice
@@ -106,6 +109,7 @@ final class VoiceAgent: VoiceCommandRunner {
             prompt = "(The last change has been undone.) " + command
             lookAtTheCanvas()
         }
+        if let hint { prompt = hint + " " + prompt }
         let before = model.store.content
         defer { lastCommandChangedDesign = model.store.content != before }
         VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")

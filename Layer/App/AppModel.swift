@@ -360,7 +360,8 @@ final class AppModel {
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
         generationOwnsEdit = !partOfHeldEdit
         if generationOwnsEdit { store.beginEdit() }
-        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
+        // A command the pencil pointed at empty canvas for puts the screen where it pointed.
+        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: newScreenAnchor))
         store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
         DesignActions.reveal(.screen(screen.id), in: self)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
@@ -492,11 +493,33 @@ final class AppModel {
     /// stays that way, though the window never left.
     func windowLeftTheScreen() {
         endVoiceCall()
+        pencilVoiceIfMade?.stopListening()
     }
+
+    /// Where a new screen goes while a command the pencil pointed at empty canvas for is
+    /// running, in canvas points. Nil the rest of the time, when screens go where they
+    /// always have.
+    @ObservationIgnored var newScreenAnchor: CGPoint?
+    /// A line told to the model ahead of the next spoken command, about where the pencil
+    /// pointed. The agent takes it, and clears it, as it asks.
+    @ObservationIgnored var voiceHint: String?
+
+    /// Apple Pencil Pro's push-to-talk, made when first asked for. A test puts its own in.
+    var pencilVoice: PencilVoice {
+        get {
+            if let pencilVoiceIfMade { return pencilVoiceIfMade }
+            let made = PencilVoice(model: self)
+            pencilVoiceIfMade = made
+            return made
+        }
+        set { pencilVoiceIfMade = newValue }
+    }
+
+    @ObservationIgnored private var pencilVoiceIfMade: PencilVoice?
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
     /// the names of the screens and what their elements say.
-    private var voiceVocabulary: [String] {
+    var voiceVocabulary: [String] {
         var seen: Set<String> = []
         let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
         return words
@@ -534,6 +557,8 @@ final class AppModel {
     func close() {
         isClosed = true
         voice?.end()
+        // Listening stops, but a pencil command already running is left to finish.
+        pencilVoiceIfMade?.stopListening()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
@@ -873,11 +898,15 @@ final class AppModel {
     var isHoveringList = false
 
     /// The topmost element or screen at a point in the view, for hover.
-    func hoverTarget(at viewPoint: CGPoint) -> CanvasSelection? {
+    ///
+    /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
+    /// change a drawing.
+    func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
-        if let drawing = drawing(at: point) { return .element(drawing) }
+        if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
         for floating in store.floating.reversed() where floating.canvasFrame.contains(point) && floating.element.isPickedByItsFrame {
+            if skippingDrawings, floating.element.kind == .drawing { continue }
             return .element(.init(host: .canvas, element: floating.id))
         }
         for screen in store.screens.reversed() {

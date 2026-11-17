@@ -762,6 +762,40 @@ struct VoiceCallTests {
         call.end()
     }
 
+    @Test func aSendBeforeTheRouteCanHearSaysSo() async {
+        // A hold let go of before the microphone came on: nothing was heard, and the
+        // person is told so rather than left waiting.
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); r.holdsStart = true; routes.append(r); return r }, runner: runner)
+        await call.start()
+        let listening = Task { await call.listen(for: nil) }
+        #expect(await eventually { routes.count == 1 })
+        call.send()
+        #expect(call.caption == VoiceCall.Caption(kind: .problem, text: "Didn't catch that. Wait for the tap, then speak."))
+        #expect(routes[0].isStopped && !call.isHearing && !call.isListeningAsAsked)
+        routes[0].holdsStart = false
+        await listening.value
+        #expect(!call.isHearing && !call.isListeningAsAsked && runner.commands.isEmpty)
+        call.end()
+    }
+
+    @Test func onlyTheOpenListenFillsTheWaveform() async {
+        var routes: [FakeRoute] = []
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: FakeRunner())
+        await call.start()
+        await call.listen(for: nil)
+        #expect(call.isListeningAsAsked)
+        call.send()
+        #expect(!call.isListeningAsAsked && call.isHearing)
+        // The sent route, still settling, is no longer what the waveform shows.
+        routes[0].send(.level(0.5))
+        await call.listen(for: nil)
+        routes[1].send(.level(0.8))
+        #expect(await eventually { call.levels == [0.8] })
+        call.end()
+    }
+
     @Test func aPencilCallAndAPhoneCallCoexist() async {
         let (phone, phoneRoute, _) = makeCall()
         let pencil = VoiceCall(listening: .onRequest { FakeRoute() }, runner: FakeRunner())

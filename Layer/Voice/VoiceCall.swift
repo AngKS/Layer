@@ -77,6 +77,9 @@ final class VoiceCall {
     /// Whether a route asked for is open, from its starting until it stops. Only a call
     /// that listens on request has these.
     private(set) var isHearing = false
+    /// Whether the route asked for last can hear, and hasn't been told the command is
+    /// over. Unlike `isHearing`, a route sent and still settling doesn't count.
+    private(set) var isListeningAsAsked = false
 
     /// How long a caption stays once there is nothing more to add to it.
     @ObservationIgnored var captionTimes: (done: Duration, problem: Duration) = (.seconds(3), .seconds(6))
@@ -174,6 +177,7 @@ final class VoiceCall {
         open = nil
         finishing.removeAll()
         isHearing = false
+        isListeningAsAsked = false
         listening?.cancel()
         running?.cancel()
         worker?.cancel()
@@ -193,6 +197,8 @@ final class VoiceCall {
     private final class Ear {
         let route: any VoiceRoute
         let target: VoiceTarget?
+        /// Whether its route has started, and so could have heard anything.
+        var hasStarted = false
         var events: Task<Void, Never>?
         var deadline: Task<Void, Never>?
 
@@ -216,6 +222,7 @@ final class VoiceCall {
         if let open { close(open) }
         let ear = Ear(route: makeRoute(), target: target)
         open = ear
+        isListeningAsAsked = false
         do {
             let events = try await ear.route.start(vocabulary: vocabulary())
             // Let go of, or the call ended, while the route was getting ready.
@@ -224,7 +231,9 @@ final class VoiceCall {
                 return
             }
             VoiceLog.log.info("call: listening, as asked")
+            ear.hasStarted = true
             isHearing = true
+            isListeningAsAsked = true
             ear.events = Task { [weak self, weak ear] in
                 for await event in events {
                     guard let self, let ear else { return }
@@ -247,7 +256,16 @@ final class VoiceCall {
     /// once it has, or after `finishWait` if nothing comes.
     func send() {
         guard let ear = open else { return }
+        guard ear.hasStarted else {
+            // Let go of before the microphone came on, so nothing was heard. Said, rather
+            // than dropped in silence, or the person waits for a command that never comes.
+            VoiceLog.log.info("call: sent before the route could hear")
+            close(ear)
+            show(.problem, "Didn't catch that. Wait for the tap, then speak.")
+            return
+        }
         open = nil
+        isListeningAsAsked = false
         finishing.append(ear)
         ear.route.finish()
         let wait = finishWait
@@ -267,7 +285,10 @@ final class VoiceCall {
 
     private func close(_ ear: Ear) {
         ear.close()
-        if open === ear { open = nil }
+        if open === ear {
+            open = nil
+            isListeningAsAsked = false
+        }
         finishing.removeAll { $0 === ear }
         isHearing = open != nil || !finishing.isEmpty
     }
@@ -275,6 +296,8 @@ final class VoiceCall {
     private func handle(_ event: VoiceRouteEvent, from ear: Ear) {
         // Something heard after the listening was let go of is not to be acted on.
         guard open === ear || finishing.contains(where: { $0 === ear }) else { return }
+        // The waveform is for what is being listened to now, not a sent route settling.
+        if case .level = event, open !== ear { return }
         if case .failed(let reason) = event {
             // As when it can't start: this listen is over, and the call stays up.
             close(ear)

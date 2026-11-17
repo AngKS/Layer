@@ -102,6 +102,7 @@
 		528C0029C832681E7AD098C4 /* VoiceAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 624D93A1FDF26289B861D388 /* VoiceAgentTests.swift */; };
 		52D0E757FF88AE6B826D54BA /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13116FD862E660E5BE098CF /* ModelSettingsView.swift */; };
 		52D3ED38C02DB3840D1C430D /* VoiceHandles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60371249C0F94DB75A00F668 /* VoiceHandles.swift */; };
+		5366C1AC84EBB37F5F78B29B /* PencilVoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94018B0CE474C089DF26FFB /* PencilVoiceTests.swift */; };
 		54A68555300666BC78765A6E /* SelectionActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5452CD081F6C2087ED80C9C4 /* SelectionActions.swift */; };
 		559C6A230578664E0579BF7E /* divider_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = C95AF62786EE1A26726943AD /* divider_jittered_2a.json */; };
 		561366E388C494F40DC6401C /* radio_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = C3C9F24C5DD5F1A298A32B71 /* radio_clean_2.json */; };
@@ -250,6 +251,7 @@
 		CEF2BEFD5E7785E6232D94C8 /* DesignActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E9F8475057548E87E66556 /* DesignActions.swift */; };
 		CF4671A31E77EEA21DCFA5F9 /* screen_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = F537D2FDDEF17BADA58A8636 /* screen_jittered_1b.json */; };
 		CF9F3B8C3003209A64C3249C /* SiriIntentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFEFB654B701753D17A905FE /* SiriIntentsTests.swift */; };
+		D145658BBD6C2E131C865FD8 /* PencilVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BD7C010B0BC879191EAB904 /* PencilVoice.swift */; };
 		D27047D66FD7BB932DEFAFD5 /* progress_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = EF6B6A8D905D4BA8ACE0771F /* progress_jittered_2a.json */; };
 		D2F444550187A4D8362DA410 /* button_textField_textField_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 5B0F5DA2A3FD075C29339026 /* button_textField_textField_3.json */; };
 		D414B9D52993D0B7F38AFBF0 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = FCF81A42DC1853F2DD4AB403 /* AppIcon.icon */; };
@@ -377,6 +379,7 @@
 		2635FEAE6E6657C7B97B1E77 /* ImageLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLibrary.swift; sourceTree = "<group>"; };
 		29F8C2525F9DB616AB0A57D1 /* divider_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_noisy_2.json; sourceTree = "<group>"; };
 		2BBD16E9EF710487B95B09E5 /* image_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_jittered_1a.json; sourceTree = "<group>"; };
+		2BD7C010B0BC879191EAB904 /* PencilVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilVoice.swift; sourceTree = "<group>"; };
 		2CCCD4E360669834469F422F /* body_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_clean_2.json; sourceTree = "<group>"; };
 		2CFDCF2FE12D75FF22A1DD6A /* SketchFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchFlowUITests.swift; sourceTree = "<group>"; };
 		2FB07F1ED5A60A893C3B0105 /* divider_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_clean_1.json; sourceTree = "<group>"; };
@@ -565,6 +568,7 @@
 		C6185A374D6A12454DD66923 /* button_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_1a.json; sourceTree = "<group>"; };
 		C7251FAEF5B5DCCDEA0C4642 /* HostedProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedProvider.swift; sourceTree = "<group>"; };
 		C729E511A28042897902A214 /* divider_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_1b.json; sourceTree = "<group>"; };
+		C94018B0CE474C089DF26FFB /* PencilVoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilVoiceTests.swift; sourceTree = "<group>"; };
 		C95AF62786EE1A26726943AD /* divider_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_2a.json; sourceTree = "<group>"; };
 		C965BB35D27442237C7828A8 /* stickyNote_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_1a.json; sourceTree = "<group>"; };
 		C9CBBF0FBECCD252AE3E5B57 /* radio_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_jittered_2a.json; sourceTree = "<group>"; };
@@ -674,6 +678,7 @@
 				FA9D1A371A248345351D6D6A /* CanvasPicture+Capture.swift */,
 				EE54558C303693792ED4E2B5 /* DictationRoute.swift */,
 				5EB239428396D7072334A272 /* MicrophoneTap.swift */,
+				2BD7C010B0BC879191EAB904 /* PencilVoice.swift */,
 				ADBED814500825C7C9D467D7 /* VoiceAgent.swift */,
 				3094A5EBA18C9078BE1DE192 /* VoiceCall.swift */,
 				60371249C0F94DB75A00F668 /* VoiceHandles.swift */,
@@ -805,6 +810,7 @@
 				FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
+				C94018B0CE474C089DF26FFB /* PencilVoiceTests.swift */,
 				A85EF7EB01015117DC8F76E0 /* PerformanceTests.swift */,
 				800E83124DC63477FF49470B /* ScreenGenerationTests.swift */,
 				ED047D577FD94F4FA71A0E68 /* SiriIntentsLiveTests.swift */,
@@ -1431,6 +1437,7 @@
 				B40438032782589250C74E31 /* HostedToolCallingTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
+				5366C1AC84EBB37F5F78B29B /* PencilVoiceTests.swift in Sources */,
 				F997EC4625D66DA01E70C75A /* PerformanceTests.swift in Sources */,
 				31B81AF7B11953438E382C6B /* ScreenGenerationTests.swift in Sources */,
 				FAEC2C0ABF27693D3B9C1B2E /* SiriIntentsLiveTests.swift in Sources */,
@@ -1505,6 +1512,7 @@
 				52D0E757FF88AE6B826D54BA /* ModelSettingsView.swift in Sources */,
 				241EEF700A965CE22C52D81A /* OnscreenContext.swift in Sources */,
 				EB2BD5345F2BE29AC7B7AC46 /* OpenDesigns.swift in Sources */,
+				D145658BBD6C2E131C865FD8 /* PencilVoice.swift in Sources */,
 				E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */,
 				470B186DA4E978F8D2114110 /* PromptOverrides.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,

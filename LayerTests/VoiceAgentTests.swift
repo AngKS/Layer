@@ -53,6 +53,18 @@ struct VoiceAgentTests {
         #expect(steps == ["Restyling…", "Rewording…"])
     }
 
+    /// Where the pencil pointed is told with the command it was pointed for, and only that one.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aHintFromThePencilGoesWithItsCommandOnly() async throws {
+        let bench = bench([:])
+        bench.app.voiceHint = "(Pointed at empty canvas.)"
+        _ = await bench.agent.run("a settings screen")
+        #expect(bench.recorder.requests.last?.prompts.last == "(Pointed at empty canvas.) a settings screen")
+        #expect(bench.app.voiceHint == nil)
+        _ = await bench.agent.run("zoom out")
+        #expect(bench.recorder.requests.last?.prompts.last == "zoom out")
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aCommandIsOneUndoStep() async throws {
         let bench = bench(["make the button blue and say ahoy": Self.blueAndAhoy])
