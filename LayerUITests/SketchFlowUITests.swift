@@ -205,6 +205,47 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(label.exists)
     }
 
+    /// A change made just before the app goes to the background reaches the disk with the
+    /// save the system makes as the app goes, in SwiftUI's own document, not only in a
+    /// plain `UIDocument` as the unit tests check. The app is then ended without coming back.
+    func testAChangeIsKeptWhenTheAppGoesToTheBackgroundAndIsEnded() {
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        addFrame("iPhone")
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 5))
+
+        // Named, so the browser can find it again.
+        let name = "Kept \(Int(Date().timeIntervalSince1970) % 100_000)"
+        let title = control("Board title")
+        title.tap()
+        let field = app.textFields["Board name"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "tapping the name should offer to change it")
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).tap()
+        let old = field.value as? String ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + name + "\n")
+        XCTAssertTrue(waitForDisappearance(of: field), "finishing the name should close the menu")
+        XCTAssertTrue(wait(for: title, toHave: "value == '\(name)'"))
+
+        // A second frame, moments before the app goes: well inside the system's 15 s or so
+        // before an autosave, so only the save on leaving can write it.
+        addFrame("iPad")
+        XCTAssertTrue(app.staticTexts["Screen 2"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.terminate()
+
+        app.launch()
+        if !control("Draw").waitForExistence(timeout: 5) {
+            XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 45))
+            let listed = app.cells.matching(labelContaining(name)).firstMatch
+            XCTAssertTrue(listed.waitForExistence(timeout: 20), "the browser should list the design as \(name)")
+            sleep(2)
+            listed.tap()
+        }
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 20), "the design should open")
+        XCTAssertTrue(app.staticTexts["Screen 2"].waitForExistence(timeout: 5), "the frame added just before leaving should have been saved")
+    }
+
     func testWithAPencilAroundAFingerSelectsAndPansWhileThePaletteIsUp() {
         // As once Apple Pencil has been seen: the Pencil draws and a finger doesn't.
         app.launchArguments += ["-fingerDraws", "NO"]
