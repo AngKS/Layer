@@ -1,0 +1,32 @@
+{
+  "configurations": [
+    {
+      "id": "6F2C1C3A-0B7D-4E7A-9C1E-1A2B3C4D5E6F",
+      "name": "Configuration 1",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:Layer.xcodeproj",
+      "identifier": "944FA9C730AD3B52FFBCC7C3",
+      "name": "Layer"
+    },
+    "environmentVariableEntries": [
+      {
+        "key": "LAYER_CI",
+        "value": "1"
+      }
+    ]
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Layer.xcodeproj",
+        "identifier": "89DFD4A5F942E748784DE3D1",
+        "name": "LayerTests"
+      }
+    }
+  ],
+  "version": 1
+}

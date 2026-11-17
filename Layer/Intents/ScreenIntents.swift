@@ -12,7 +12,7 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
     )
     static let supportedModes: IntentModes = .foreground
 
-    @Parameter(title: "Device", description: "The device the screen is drawn as: iPhone, iPhone Pro Max, iPhone SE or iPad.", default: .iPhone)
+    @Parameter(title: "Device", description: "The device the screen is drawn as: phone, large phone, small phone or tablet.", default: .iPhone)
     var device: DeviceChoice
 
     @Parameter(title: "Name", description: "What to call the screen, such as Login or Settings. Numbered like Screen 3 if not given.")
@@ -69,7 +69,7 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Name", description: "What to call the new screen, such as Login. Ignored when rebuilding an existing screen.")
     var name: String?
 
-    @Parameter(title: "Device", description: "The device for a new screen. iPhone if not given.", default: .iPhone)
+    @Parameter(title: "Device", description: "The device for a new screen. A phone if not given.", default: .iPhone)
     var device: DeviceChoice
 
     @Parameter(title: "Rebuild Screen", description: "An existing screen to replace the contents of. A new screen is added if not given.")
@@ -188,7 +188,7 @@ struct RenameScreenIntent: AppIntent, UndoableIntent {
 struct ChangeScreenDeviceIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Change Screen Device"
     static let description = IntentDescription(
-        "Changes the device a screen in a Layer design is drawn as, such as from iPhone to iPad. Its elements keep their positions.",
+        "Changes the device a screen in a Layer design is drawn as, such as from a phone to a tablet. Its elements keep their positions.",
         categoryName: "Screens"
     )
     static let supportedModes: IntentModes = .foreground
@@ -196,7 +196,7 @@ struct ChangeScreenDeviceIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Screen", description: "The screen to change. The selected or newest screen if not given.")
     var screen: ScreenEntity?
 
-    @Parameter(title: "Device", description: "iPhone, iPhone Pro Max, iPhone SE or iPad.")
+    @Parameter(title: "Device", description: "Phone, large phone, small phone or tablet.")
     var device: DeviceChoice
 
     static var parameterSummary: some ParameterSummary {

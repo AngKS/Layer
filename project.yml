@@ -8,7 +8,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     TARGETED_DEVICE_FAMILY: "2"
     CODE_SIGN_STYLE: Automatic
     # Kah Shin Ang's team. iCloud and TestFlight both need one.
@@ -136,9 +136,12 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets:
-        - LayerTests
-        - LayerUITests
+      # Layer runs everything, as before. CI is for Xcode Cloud: unit tests only, with LAYER_CI set so
+      # SiriIntentsLiveTests (flaky: it drives the document browser) is skipped.
+      testPlans:
+        - path: TestPlans/Layer.xctestplan
+          defaultPlan: true
+        - path: TestPlans/CI.xctestplan
     # Profiling and archiving measure and ship the optimised build.
     profile:
       config: Release

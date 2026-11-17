@@ -278,10 +278,12 @@ enum DeviceChoice: String, AppEnum {
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Device"
     static let caseDisplayRepresentations: [DeviceChoice: DisplayRepresentation] = [
-        .iPhone: "iPhone",
-        .iPhoneProMax: "iPhone Pro Max",
-        .iPhoneSE: "iPhone SE",
-        .iPad: "iPad",
+        // App Store Connect rejects Apple trademarks (iPhone, iPad, Siri…) in App Intent
+        // metadata (ITMS-90626), so Siri and Shortcuts see generic device names.
+        .iPhone: "Phone",
+        .iPhoneProMax: "Large phone",
+        .iPhoneSE: "Small phone",
+        .iPad: "Tablet",
     ]
 
     init(_ device: DeviceFrame) {

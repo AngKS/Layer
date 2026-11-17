@@ -1,0 +1,33 @@
+{
+  "configurations": [
+    {
+      "id": "6F2C1C3A-0B7D-4E7A-9C1E-1A2B3C4D5E6F",
+      "name": "Configuration 1",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:Layer.xcodeproj",
+      "identifier": "944FA9C730AD3B52FFBCC7C3",
+      "name": "Layer"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Layer.xcodeproj",
+        "identifier": "89DFD4A5F942E748784DE3D1",
+        "name": "LayerTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Layer.xcodeproj",
+        "identifier": "C475A3DDF64A8AC403F590E5",
+        "name": "LayerUITests"
+      }
+    }
+  ],
+  "version": 1
+}

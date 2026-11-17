@@ -81,7 +81,7 @@ struct ZoomToFitIntent: AppIntent {
 
 struct UndoIntent: AppIntent {
     static let title: LocalizedStringResource = "Undo in Layer"
-    static let description = IntentDescription("Undoes the last change to the design at the front, whether made by hand or by Siri.", categoryName: "History")
+    static let description = IntentDescription("Undoes the last change to the design at the front, whether made by hand or by voice.", categoryName: "History")
     static let supportedModes: IntentModes = .foreground
 
     @MainActor
