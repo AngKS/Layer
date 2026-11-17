@@ -115,6 +115,12 @@ library's search: a search that finds nothing becomes a request for a screen.
 - It's unknown whether PencilKit's own squeeze handling (palette at the tip) fires in select mode
   while `PKCanvasView` is first responder. That's checked on the device first, before the rest is
   built on it.
+- **Checked on the iPad mini, 2026-11-18 (Task 1):**
+  - With Draw off, a squeeze reaches the canvas's `.onPencilSqueeze`, and no PencilKit palette appears. The system preference was 5 (`showContextualPalette`), and the app still gets the squeeze.
+  - `.active` fires repeatedly for one squeeze (about every 10–20 ms), so the start must be acted on once, as `Scrubber` does.
+  - Measured lengths: quick squeezes 0.18–0.23 s; holds 1.75 s and 2.3 s. The 0.35 s threshold separates them.
+  - Every logged squeeze carried a hover pose. The user's squeeze with the pen held away produced no event at all, so a squeeze out of hover range probably never arrives. A toggle left open with the pen away is ended by the next in-range squeeze, a tap on the bubble, or the 20 s timeout.
+  - Azimuth with the user's grip was about 0.06–0.17 rad (barrel pointing right of the tip), which puts the bubble to the left.
 - Swift 6 main-actor isolation: framework callbacks off the main thread (microphone tap) must
   stay `nonisolated`/`@Sendable`, the crash the first device run found.
 - Speech recognition and Apple Intelligence fail in the simulator. Logic is unit-tested with the
