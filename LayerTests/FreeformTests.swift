@@ -239,21 +239,6 @@ struct MoreMagicPenTests {
         #expect(observation.form == .wave(humps: 3))
     }
 
-    @Test func aScratchOutDeletesWhatItCovers() throws {
-        let title = element(.title, 82, 112, 228, 40)
-        var locked = element(.button, 20, 744, 353, 50)
-        locked.isLocked = true
-        var content = DesignContent()
-        content.screens = [screenWith([title, locked])]
-        let (store, _) = makeStore(content)
-
-        #expect(store.elements(scratchedOutBy: CGRect(x: 150, y: 110, width: 100, height: 40)).map(\.element) == [title.id])
-        // Locked elements stay, even under a scratch.
-        #expect(store.elements(scratchedOutBy: CGRect(x: 100, y: 740, width: 200, height: 60)).isEmpty)
-        store.delete(store.elements(scratchedOutBy: CGRect(x: 150, y: 110, width: 100, height: 40)))
-        #expect(store.screens[0].elements.map(\.id) == [locked.id])
-    }
-
     @Test func aSmallPillOnAScreenIsAToggle() throws {
         let rect = CGRect(x: 300, y: 300, width: 56, height: 30)
         let reading = rules.reading(for: try request([SketchSamples.box(rect, radius: 15)], local: rect))

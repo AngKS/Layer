@@ -56,8 +56,6 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Convert After a Pause", description: "Whether Magic Pen sketches are read on their own once the pen rests. Applies to every design.")
     var convertsAutomatically: Bool?
 
-    @Parameter(title: "Scratch Out to Delete", description: "Whether scribbling over an element with the Magic Pen deletes it. Applies to every design.")
-    var scratchOutDeletes: Bool?
 
     @Parameter(title: "Design", description: "The design to change. The design at the front if not given.")
     var design: DesignEntity?
@@ -78,7 +76,6 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
             \.$includesPreview
             \.$usesNavigationTitle
             \.$convertsAutomatically
-            \.$scratchOutDeletes
             \.$design
         }
     }
@@ -105,7 +102,6 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
         }
         // App-wide preferences, outside the design's undo history.
         if let convertsAutomatically { model.convertsAutomatically = convertsAutomatically }
-        if let scratchOutDeletes { model.scratchOutDeletes = scratchOutDeletes }
         return .result()
     }
 }

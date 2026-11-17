@@ -77,23 +77,6 @@ final class SketchFlowUITests: XCTestCase {
     func testPaletteInkIsOrdinaryInkSharesUndoAndIsSaved() throws {
         openNewDesign()
         XCTAssertFalse(control("Format").exists, "with nothing selected there is nothing to format")
-        let discard = app.buttons["Discard Sketch"]
-
-        // A Magic Pen sketch that means nothing can be discarded, or fades away on its own.
-        stroke(CGPoint(x: 380, y: 300), CGPoint(x: 460, y: 330))
-        openMagicPenSettings()
-        XCTAssertTrue(wait(for: discard, toHave: "isEnabled == true"))
-        discard.tap()
-        XCTAssertTrue(waitForDisappearance(of: discard), "discarding should close the menu")
-        openMagicPenSettings()
-        XCTAssertTrue(wait(for: discard, toHave: "isEnabled == false"))
-        closeMenu()
-        stroke(CGPoint(x: 380, y: 300), CGPoint(x: 460, y: 330))
-        convert()
-        sleep(2)
-        openMagicPenSettings()
-        XCTAssertTrue(wait(for: discard, toHave: "isEnabled == false", timeout: 10), "an unreadable sketch should dissolve")
-        closeMenu()
 
         box(sketch)
         convert()
@@ -102,10 +85,8 @@ final class SketchFlowUITests: XCTestCase {
         // The palette's Pen draws ordinary ink: the same zigzag is not a sketch to convert.
         choosePaletteTool("Pen")
         zigzag()
-        openMagicPenSettings()
-        XCTAssertFalse(app.buttons["Convert Sketch Now"].isEnabled, "ink from the Pen is not a Magic Pen sketch")
-        closeMenu()
-        XCTAssertFalse(app.staticTexts["Title"].exists)
+        convert()
+        XCTAssertFalse(app.staticTexts["Title"].exists, "ink from the Pen is not a Magic Pen sketch")
 
         // One undo history covers ink strokes and design changes alike.
         let undo = app.buttons.matching(identifier: "arrow.uturn.backward").firstMatch
@@ -820,14 +801,18 @@ final class SketchFlowUITests: XCTestCase {
         for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
     }
 
-    /// Reads the sketch on the canvas, from the Magic Pen tab of the board's menu, which
-    /// then closes.
+    /// Reads the sketch on the canvas. The tests draw with conversion after a pause off;
+    /// turning it on in the board's Magic Pen tab reads what is there, and it is turned
+    /// off again for the next sketch.
     private func convert() {
-        let button = app.buttons["Convert Sketch Now"]
-        if !button.exists { openMagicPenSettings() }
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "the board menu should offer to convert the sketch")
-        button.tap()
-        XCTAssertTrue(waitForDisappearance(of: button), "converting should close the menu")
+        let toggle = app.switches["Convert After a Pause"]
+        if !toggle.exists { openMagicPenSettings() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the board menu should have the conversion setting")
+        toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap()
+        // A pause of 0.9 s, and the reading itself.
+        sleep(2)
+        if (toggle.value as? String) == "1" { toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap() }
+        closeMenu()
     }
 
     /// Opens the board's menu at its Magic Pen tab.

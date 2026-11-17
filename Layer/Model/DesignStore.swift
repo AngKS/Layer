@@ -192,27 +192,6 @@ final class DesignStore {
         return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
-    /// The elements a scratch-out drawn over `sketch`, in canvas points, crosses out:
-    /// those, not locked or hidden, whose middle it covers.
-    func elements(scratchedOutBy sketch: CGRect) -> [ElementRef] {
-        let area = sketch.insetBy(dx: -6, dy: -6)
-        func isCrossedOut(_ element: DesignElement, _ placement: Placement) -> Bool {
-            guard !element.isLocked, !element.isHidden else { return false }
-            let frame = placement.canvasRect(for: element.frame)
-            return area.contains(CGPoint(x: frame.midX, y: frame.midY))
-        }
-        var found: [ElementRef] = []
-        for screen in screens {
-            for element in screen.elements where isCrossedOut(element, screen.placement) {
-                found.append(ElementRef(host: .screen(screen.id), element: element.id))
-            }
-        }
-        for floating in floating where isCrossedOut(floating.element, floating.placement) {
-            found.append(ElementRef(host: .canvas, element: floating.id))
-        }
-        return found
-    }
-
     /// Deletes several elements as one undo step.
     func delete(_ refs: [ElementRef]) {
         let ids = Set(refs.map(\.element))
