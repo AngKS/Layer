@@ -465,4 +465,31 @@ struct InkFollowedAtTheEndTests {
         #expect(model.store.floating.isEmpty)
         coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
     }
+
+    /// Undo mid-rub takes back the whole rub so far, and redo puts all of it back.
+    @Test func redoAfterUndoMidUsePutsBackEverything() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.documentCanvas.documentUndoManager = undo
+        coordinator.watchHistory(undo)
+        defer { coordinator.stopWatchingHistory() }
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+        undo.redo()
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+    }
 }
+

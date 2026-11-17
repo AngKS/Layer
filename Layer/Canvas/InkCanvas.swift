@@ -604,9 +604,9 @@ struct InkCanvas: UIViewRepresentable {
             followInkNotYetFollowed()
         }
 
-        /// The document's history, watched so that undo or redo pressed mid-use drops the ink
-        /// not yet followed: it belongs to the use's step, which undo is taking back. Kept, it
-        /// would be followed at the tool's end over what undo put back.
+        /// The document's history, watched so that the ink not yet followed goes into the
+        /// use's step as an undo or redo begins: undo then takes back the whole use so far,
+        /// and redo puts all of it back. Dropped instead, redo lost the rubbing out.
         private var watchedHistory: UndoManager?
         private var historyObservers: [NSObjectProtocol] = []
 
@@ -617,9 +617,22 @@ struct InkCanvas: UIViewRepresentable {
             guard let history else { return }
             historyObservers = [Notification.Name.NSUndoManagerWillUndoChange, .NSUndoManagerWillRedoChange].map { name in
                 NotificationCenter.default.addObserver(forName: name, object: history, queue: nil) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.hasInkToFollow = false }
+                    MainActor.assumeIsolated { self?.followBeforeHistoryMoves() }
                 }
             }
+        }
+
+        /// Undo or redo is about to begin. The history already says it is undoing by then, so
+        /// `followInk` would skip the ink. It can still join the use's step, which is in the
+        /// history since the use's first change and registers nothing more: the canvas still
+        /// holds what the tool did, not yet what undo puts back. Without that step (an edit
+        /// not open, or no change followed yet), registering now would be taken for undo's
+        /// own, so the ink is dropped, as part of what undo takes back.
+        private func followBeforeHistoryMoves() {
+            guard hasInkToFollow else { return }
+            hasInkToFollow = false
+            guard hasFollowedThisUse, model.store.isEditing else { return }
+            followInk(evenWhileTheHistoryMoves: true)
         }
 
         func stopWatchingHistory() {
@@ -647,9 +660,9 @@ struct InkCanvas: UIViewRepresentable {
         /// The strokes on the document canvas changed, drawn, erased or moved with
         /// PencilKit's tools or put there from here: the design's drawings change to
         /// match, which is the step that undo takes back.
-        private func followInk() {
+        private func followInk(evenWhileTheHistoryMoves: Bool = false) {
             // While the design is being put back by undo or redo it is the one to follow.
-            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
+            if !evenWhileTheHistoryMoves, let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
             model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
             // PencilKit's own record of the change is not the one that is kept.

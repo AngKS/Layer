@@ -677,6 +677,32 @@ struct CanvasDragTests {
         #expect(board.store.historyMark == mark + 1)
     }
 
+    /// A drag whose cancel was never heard is ended when what it moves is locked or taken
+    /// away, when the tool changes, and when the design closes: left live, it would stop
+    /// every other drag.
+    @Test(arguments: ["lock", "delete", "tool", "close"])
+    func aDragLeftLiveIsEnded(by event: String) async throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: CanvasDrags.Owner())
+        #expect(drags.isDragging)
+
+        switch event {
+        case "lock": board.store.update(board.note) { $0.isLocked = true }
+        case "delete": board.store.delete(board.note)
+        case "tool": board.model.tool = .draw
+        default: board.model.close()
+        }
+        for _ in 0..<5 { await Task.yield() }
+
+        #expect(!drags.isDragging)
+        #expect(!board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+    }
+
     @Test func aNewTouchOnTheSameViewIsANewDrag() throws {
         let board = Board()
         board.store.updateCanvas { $0.snapsToGuides = false }

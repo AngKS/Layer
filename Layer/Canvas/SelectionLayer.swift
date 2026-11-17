@@ -97,6 +97,8 @@ struct SelectionLayer: View {
             }
 
         }
+        // The model ends a drag left live: see `CanvasDrags.endAny`.
+        .onAppear { model.drags = drags }
     }
 
     /// How round a selected thing's corners are, in canvas points.
@@ -242,6 +244,27 @@ final class CanvasDrags {
 
     var isDragging: Bool { session != nil }
 
+    /// What the drag under way moves.
+    @ObservationIgnored private var dragged: [CanvasSelection] = []
+
+    /// Ends the drag under way, whoever's it is. A backstop for a cancel SwiftUI didn't
+    /// report: while a drag is live every other is ignored, so one left live would stop all
+    /// dragging. Called as the design closes and when the tool changes.
+    func endAny(model: AppModel) {
+        guard session != nil else { return }
+        endAbandoned(model: model)
+    }
+
+    /// Ends the drag under way if what it moves has been locked or taken away, by a spoken
+    /// command for instance: its gesture is disabled or its view gone, which may not be heard.
+    func endIfDraggedIsGone(model: AppModel) {
+        guard session != nil else { return }
+        let store = model.store
+        if dragged.contains(where: { store.canvasFrame(of: $0) == nil || store.isLocked($0) }) {
+            endAbandoned(model: model)
+        }
+    }
+
     private enum Turn { case new, continuing, ignored }
 
     /// Whether a drag is new, goes on, or is to be left alone. Another view's drag under way
@@ -282,6 +305,7 @@ final class CanvasDrags {
     private func finish(model: AppModel) {
         if let session { lastOwner = session.owner }
         session = nil
+        dragged = []
         elementOrigin = nil
         screenOrigin = nil
         groupOrigins = nil
@@ -344,6 +368,7 @@ final class CanvasDrags {
         guard turn != .ignored else { return }
         if turn == .new {
             model.store.beginEdit()
+            dragged = [.element(ref)]
             model.selection = .element(ref)
             elementOrigin = frame
             rule = makeRule()
@@ -391,6 +416,7 @@ final class CanvasDrags {
                 origins[thing] = model.store.canvasFrame(of: thing)
             }
             groupOrigins = origins
+            dragged = Array(origins.keys)
             model.isAdjusting = true
         }
         guard let origins = groupOrigins,
@@ -439,6 +465,7 @@ final class CanvasDrags {
         guard turn != .ignored else { return }
         if turn == .new {
             model.store.beginEdit()
+            dragged = [.screen(screen.id)]
             model.selection = .screen(screen.id)
             screenOrigin = screen.origin
             model.isAdjusting = true

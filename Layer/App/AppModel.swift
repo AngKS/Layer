@@ -98,9 +98,13 @@ final class AppModel {
     /// tell the person once.
     var keptVersionsNotice: String?
 
+    /// The canvas's drags, so that one left live by a cancel nobody heard can be ended.
+    @ObservationIgnored weak var drags: CanvasDrags?
+
     var tool: Tool = .draw {
         didSet {
             guard tool != oldValue else { return }
+            drags?.endAny(model: self)
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
@@ -292,6 +296,13 @@ final class AppModel {
             document.update { $0.content = content }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
+            // After this change is done with: ending a drag ends the edit it is part of.
+            if self?.drags?.isDragging == true {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    drags?.endIfDraggedIsGone(model: self)
+                }
+            }
             self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
@@ -618,6 +629,7 @@ final class AppModel {
         // Ink a pen or the eraser has changed and that is waiting for the tool to be put
         // down goes into the design now, while it can still be saved.
         ink?.flushPendingInk()
+        drags?.endAny(model: self)
         // A change made in the format panel moments ago is still an edit waiting for the
         // panel's pause to end it: it ends now, while the design can still be saved.
         adjustmentEnd?.cancel()
