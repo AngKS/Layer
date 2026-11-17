@@ -307,11 +307,14 @@ final class AppModel {
         var description: String
         var elementCount = 0
         var phase = Phase.writing
+        /// True until the model starts writing its answer.
+        var isThinking = true
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
     private(set) var generation: ScreenGeneration?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
+    @ObservationIgnored private var generationDismissal: Task<Void, Never>?
 
     var isGenerating: Bool { generation?.phase == .writing }
 
@@ -321,6 +324,7 @@ final class AppModel {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating else { return }
         generationTask?.cancel()
+        generationDismissal?.cancel()
 
         let device = store.canvas.sketchDevice
         store.beginEdit()
@@ -332,12 +336,18 @@ final class AppModel {
         let choice = modelChoice
         generationTask = Task { [weak self] in
             do {
-                for try await blueprint in ScreenGenerator.stream(prompt, using: choice) {
+                for try await update in ScreenGenerator.stream(prompt, using: choice) {
                     guard let self, let current = store.screen(screen.id) else { return }
-                    withAnimation(.snappy(duration: 0.25)) {
-                        _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                    switch update {
+                    case .startedWriting:
+                        generation?.isThinking = false
+                    case .screen(let blueprint):
+                        withAnimation(.snappy(duration: 0.25)) {
+                            _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                        }
+                        generation?.isThinking = false
+                        generation?.elementCount = blueprint.itemCount
                     }
-                    generation?.elementCount = blueprint.itemCount
                 }
                 self?.finishGeneration(error: nil)
             } catch {
@@ -362,12 +372,22 @@ final class AppModel {
         // A screen nothing was written on isn't left behind.
         if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
         store.endEdit()
+        finished.isThinking = false
         generation = finished
+        // Success says so briefly; a failure stays until it is dismissed.
+        if finished.phase == .finished {
+            generationDismissal = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                withAnimation(.smooth(duration: 0.3)) { self?.dismissGeneration() }
+            }
+        }
     }
 
     /// Clears a finished generation's outcome.
     func dismissGeneration() {
         guard !isGenerating else { return }
+        generationDismissal?.cancel()
         generation = nil
     }
 
@@ -403,6 +423,7 @@ final class AppModel {
         previewRefresh?.cancel()
         fileCheck?.cancel()
         generationTask?.cancel()
+        generationDismissal?.cancel()
         settle?.cancel()
         adjustmentEnd?.cancel()
         for conversion in conversions { conversion.cancel() }

@@ -63,25 +63,40 @@ enum ScreenGenerator {
         return first.uppercased() + trimmed.dropFirst()
     }
 
-    /// Writes a screen described in `description` with `choice`'s model. Each value is the
-    /// screen as far as it has been written, and has more elements than the one before.
-    static func stream(_ description: String, using choice: ModelChoice) -> AsyncThrowingStream<ScreenBlueprint, any Error> {
+    /// How far a screen has got.
+    enum Update: Equatable, Sendable {
+        /// The model has begun its answer. Until then it is thinking: a model that
+        /// reasons first can spend most of the time there, and Foundation Models sends no
+        /// update until the answer itself starts.
+        case startedWriting
+        /// The screen as far as it has been written.
+        case screen(ScreenBlueprint)
+    }
+
+    /// Writes a screen described in `description` with `choice`'s model. Each screen
+    /// update has more elements than the one before.
+    static func stream(_ description: String, using choice: ModelChoice) -> AsyncThrowingStream<Update, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let session = makeSession(for: choice)
                     var text = ""
                     var count = 0
+                    var hasStarted = false
                     for try await snapshot in session.streamResponse(to: description) {
                         text = snapshot.content
+                        if !hasStarted, !text.isEmpty {
+                            hasStarted = true
+                            continuation.yield(.startedWriting)
+                        }
                         if let blueprint = blueprint(ofFinishedLinesIn: text, isComplete: false), blueprint.itemCount > count {
                             count = blueprint.itemCount
-                            continuation.yield(blueprint)
+                            continuation.yield(.screen(blueprint))
                         }
                     }
                     if let blueprint = blueprint(ofFinishedLinesIn: text, isComplete: true), blueprint.itemCount > count {
                         count = blueprint.itemCount
-                        continuation.yield(blueprint)
+                        continuation.yield(.screen(blueprint))
                     }
                     if count == 0 { throw GenerationError.nothingWritten }
                     continuation.finish()

@@ -91,8 +91,12 @@ enum SSE {
         return lines.map { "event: x\n\($0)\n" }.joined(separator: "\n")
     }
 
-    static func openAI(text pieces: [String]) -> String {
+    static func openAI(text pieces: [String], thinking: [String] = []) -> String {
         var lines: [String] = []
+        for thought in thinking {
+            let escaped = String(data: try! JSONSerialization.data(withJSONObject: [thought], options: .fragmentsAllowed), encoding: .utf8)!.dropFirst().dropLast()
+            lines.append(#"data: {"choices":[{"delta":{"reasoning_content":\#(escaped)}}]}"#)
+        }
         for piece in pieces {
             let escaped = String(data: try! JSONSerialization.data(withJSONObject: [piece], options: .fragmentsAllowed), encoding: .utf8)!.dropFirst().dropLast()
             lines.append(#"data: {"choices":[{"delta":{"content":\#(escaped)}}]}"#)
@@ -212,12 +216,14 @@ final class HostedModelTests {
 
         app.generateScreen(from: "a sign-in screen")
         #expect(app.isGenerating)
+        #expect(app.generation?.isThinking == true, "nothing is written yet, so it is thinking")
         let screenID = try #require(app.generation?.screenID)
         #expect(app.store.screen(screenID)?.name == "A sign-in screen")
         let deadline = ContinuousClock.now + .seconds(10)
         while app.isGenerating, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
 
         #expect(app.generation?.phase == .finished)
+        #expect(app.generation?.isThinking == false)
         #expect(app.generation?.elementCount == 4)
         let screen = try #require(app.store.screen(screenID))
         #expect(screen.elements.map(\.kind) == [.title, .textField, .textField, .button])
@@ -233,6 +239,20 @@ final class HostedModelTests {
         // One undo takes the whole generated screen away.
         undo.undo()
         #expect(app.store.screens.count == screensBefore)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func aModelIsThinkingUntilItsAnswerStarts() async throws {
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Hi\n", "button: Go\n"], thinking: ["The user wants", " a short screen."])))
+        var updates: [ScreenGenerator.Update] = []
+        for try await update in ScreenGenerator.stream("a tiny screen", using: .hosted(.openAI, model: "m")) {
+            updates.append(update)
+        }
+        // Its reasoning isn't the answer: writing starts with the first line, once.
+        #expect(updates.first == .startedWriting)
+        #expect(updates.filter { $0 == .startedWriting }.count == 1)
+        let counts = updates.compactMap { if case .screen(let blueprint) = $0 { blueprint.itemCount } else { nil } }
+        #expect(counts.last == 2)
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
