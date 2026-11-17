@@ -8,6 +8,9 @@ enum VoiceRouteEvent: Sendable, Equatable {
     case hearing(String)
     /// A finished command: the speaker has paused.
     case command(String)
+    /// Told to finish, the route heard nothing that makes a command. Nothing more is
+    /// coming from this utterance, so there is nothing to wait for.
+    case nothingHeard
     /// The route can't go on. The call ends, and says why.
     case failed(String)
 }
@@ -16,19 +19,24 @@ enum VoiceRouteEvent: Sendable, Equatable {
 /// that listens for itself is another. Either way a call is handed the same events.
 @MainActor
 protocol VoiceRoute: AnyObject {
+    /// Gets whatever the route needs ready ahead of time, without the microphone: the
+    /// language to listen for and the recogniser's model. Starting does it too, if this
+    /// hasn't, so it only saves the wait.
+    func prepare() async
     /// Starts listening. `vocabulary` is words the speaker is likely to say that a
     /// recogniser might otherwise mishear: the names of screens, the words on elements.
     func start(vocabulary: [String]) async throws -> AsyncStream<VoiceRouteEvent>
     /// Stops listening and lets go of the microphone. The stream then ends.
     func stop()
     /// Ends the command being spoken now, without waiting for a pause: what has been
-    /// heard is settled and sent as one `.command`, or nothing if no words were heard.
+    /// heard is settled and sent as one `.command`, or as `.nothingHeard` if no words were.
     /// The route keeps listening afterwards, until `stop()`. For routes that end a
     /// command only when told to; one that ends on a pause has no use for it.
     func finish()
 }
 
 extension VoiceRoute {
+    func prepare() async {}
     func finish() {}
 }
 
@@ -82,6 +90,8 @@ struct UtteranceAssembler {
         case settle
         /// A finished command.
         case command(String)
+        /// Told to finish, and nothing was said: there is no command coming.
+        case nothingHeard
     }
 
     private let pause: Duration
@@ -143,16 +153,19 @@ struct UtteranceAssembler {
         (settledPhrases + (unsettled.isEmpty ? [] : [unsettled])).joined(separator: " ")
     }
 
-    /// Takes in how loud the room is, from 0 to 1.
+    /// Takes in how loud the room is, from 0 to 1, `now` being when the sound was made.
+    /// Sound can arrive a little late, and out of turn.
     mutating func sound(level: Float, at now: ContinuousClock.Instant) {
         guard level >= loudness else { return }
-        lastLoud = now
+        if lastLoud.map({ now > $0 }) != false { lastLoud = now }
         hasSpoken = true
         // Speaking again: the command isn't over after all. Unless the room was never
         // quiet to begin with: then this is the room, not the speaker, and the command
         // that ended on its words going stale stays ended. Otherwise it would be called
-        // back ten times a second and never taken.
+        // back ten times a second and never taken. Sound made before the recogniser was
+        // asked to settle is the end of what was said, not more of it.
         guard !endedOnStaleWords, !isFinishing else { return }
+        if let askedToSettle, now < askedToSettle { return }
         askedToSettle = nil
         settledAt = nil
     }
@@ -188,19 +201,21 @@ struct UtteranceAssembler {
 
     /// The command is over, whatever the room sounds like: the speaker said so. The next
     /// `next(at:)` goes down the same path a pause does, so the recogniser is asked to
-    /// settle, with the same patience if it never does. Nothing heard, nothing to end.
+    /// settle, with the same patience if it never does. That happens even when nothing
+    /// seems to have been said: soft speech never sounds loud, and the recogniser's first
+    /// words can be a second behind the voice, so it may still hold the command. If it
+    /// doesn't, `next` says `.nothingHeard`, so that nobody waits for one.
     mutating func finishNow(at now: ContinuousClock.Instant) {
         // Already settling: the command is on its way, and a second ask must not make
         // a second command.
         guard askedToSettle == nil else { return }
-        guard !settledPhrases.isEmpty || !unsettled.isEmpty || hasSpoken else { return }
         isFinishing = true
     }
 
     /// What to do now. Asked often, about ten times a second.
     mutating func next(at now: ContinuousClock.Instant) -> Step {
         let hasWords = !settledPhrases.isEmpty || !unsettled.isEmpty
-        guard hasWords || hasSpoken else { return .wait }
+        guard hasWords || hasSpoken || isFinishing else { return .wait }
 
         if let askedToSettle {
             if let settledAt {
@@ -223,9 +238,11 @@ struct UtteranceAssembler {
     }
 
     /// Takes what has been heard as a command and starts afresh. A noise that turned out
-    /// to have no words in it is just forgotten.
+    /// to have no words in it is just forgotten, unless the speaker said they were done:
+    /// then they are told nothing was heard.
     private mutating func take() -> Step {
         let command = hearing
+        let wasFinishing = isFinishing
         settledPhrases = []
         unsettled = ""
         lastHeard = nil
@@ -234,7 +251,8 @@ struct UtteranceAssembler {
         settledAt = nil
         endedOnStaleWords = false
         isFinishing = false
-        return command.isEmpty ? .wait : .command(command)
+        if command.isEmpty { return wasFinishing ? .nothingHeard : .wait }
+        return .command(command)
     }
 
     /// Whether two phrases are one, give or take the capitals, the punctuation and a last

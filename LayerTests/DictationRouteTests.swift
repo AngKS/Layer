@@ -59,12 +59,26 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     var startError: (any Error)?
     var prepareError: (any Error)?
     private var holding = false
+    private var holdingStart = false
+    private var holdingSettle = false
     private var started = false
 
     /// While set, getting ready waits, as it does while what speech needs is fetched.
     var holdsPrepare: Bool {
         get { state.withLock { holding } }
         set { state.withLock { holding = newValue } }
+    }
+
+    /// While set, starting to listen waits, as loading the model for it does.
+    var holdsStart: Bool {
+        get { state.withLock { holdingStart } }
+        set { state.withLock { holdingStart = newValue } }
+    }
+
+    /// While set, settling never comes back, as a recogniser stuck finalising wouldn't.
+    var holdsSettle: Bool {
+        get { state.withLock { holdingSettle } }
+        set { state.withLock { holdingSettle = newValue } }
     }
 
     /// Whether it was ever asked to listen.
@@ -86,6 +100,7 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     var chunksHeard: Int { state.withLock { chunks } }
 
     func start(sound: AsyncStream<AudioChunk>, format: AVAudioFormat, vocabulary: [String]) async throws -> AsyncThrowingStream<HeardPhrase, any Error> {
+        while holdsStart { try? await Task.sleep(for: .milliseconds(5)) }
         if let startError { throw startError }
         let (phrases, continuation) = AsyncThrowingStream<HeardPhrase, any Error>.makeStream()
         state.withLock {
@@ -106,6 +121,7 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
             return (self.continuation, heldBack)
         }
         for phrase in phrases { continuation?.yield(phrase) }
+        while holdsSettle { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
     func stop() async {
@@ -372,6 +388,7 @@ struct DictationRouteTests {
     @Test func wordsBecomeACommandAfterAPause() async throws {
         let bench = bench()
         let stream = try await bench.route.start(vocabulary: [])
+        #expect(await eventually { bench.recogniser.wasStarted })
         bench.recogniser.hear("make the button", isFinal: false)
         bench.recogniser.hear("Make the button blue", isFinal: true)
         let seen = await events(from: stream) { [self] in !commands(in: $0).isEmpty }
@@ -413,6 +430,7 @@ struct DictationRouteTests {
     @Test func twoCommandsWithAPauseBetweenAreTwo() async throws {
         let bench = bench()
         let stream = try await bench.route.start(vocabulary: [])
+        #expect(await eventually { bench.recogniser.wasStarted })
         bench.recogniser.hear("zoom out", isFinal: true)
         try await Task.sleep(for: .milliseconds(700))
         bench.recogniser.hear("show me the first screen", isFinal: true)
@@ -437,7 +455,7 @@ struct DictationRouteTests {
     @Test func theRecogniserIsToldTheWordsOnTheCanvas() async throws {
         let bench = bench()
         _ = try await bench.route.start(vocabulary: ["Login", "Sign in"])
-        #expect(bench.recogniser.vocabulary == ["Login", "Sign in"])
+        #expect(await eventually { bench.recogniser.vocabulary == ["Login", "Sign in"] })
         bench.route.stop()
     }
 
@@ -461,18 +479,21 @@ struct DictationRouteTests {
         #expect(!bench.audio.wasStarted)
     }
 
+    /// The route hears from the moment the microphone is on, so a recogniser that then
+    /// can't start ends the route with its reason, and lets go of the microphone.
     @Test func aRecogniserThatCannotStartLetsGoOfTheMicrophone() async throws {
         let bench = bench()
         bench.recogniser.startError = DictationRoute.Failure.speechUnavailable
-        await #expect(throws: DictationRoute.Failure.speechUnavailable) {
-            _ = try await bench.route.start(vocabulary: [])
-        }
+        let stream = try await bench.route.start(vocabulary: [])
+        let seen = await events(from: stream) { $0.contains { if case .failed = $0 { true } else { false } } }
+        #expect(seen.last == .failed(DictationRoute.Failure.speechUnavailable.errorDescription ?? ""))
         #expect(bench.audio.isStopped)
     }
 
     @Test func aRecogniserThatFailsEndsTheRouteWithItsReason() async throws {
         let bench = bench()
         let stream = try await bench.route.start(vocabulary: [])
+        #expect(await eventually { bench.recogniser.wasStarted })
         bench.recogniser.fail(with: DictationRoute.Failure.speechUnavailable)
         let seen = await events(from: stream) { $0.contains { if case .failed = $0 { true } else { false } } }
         #expect(seen.last == .failed(DictationRoute.Failure.speechUnavailable.errorDescription ?? ""))
@@ -489,6 +510,7 @@ struct DictationRouteTests {
     @Test func stoppingLetsGoOfEverything() async throws {
         let bench = bench()
         let stream = try await bench.route.start(vocabulary: [])
+        #expect(await eventually { bench.recogniser.wasStarted })
         bench.recogniser.hear("make the", isFinal: false)
         bench.route.stop()
         #expect(bench.audio.isStopped)
@@ -558,10 +580,15 @@ struct DictationRouteTests {
         #expect(assembler.next(at: t0 + .milliseconds(10_300)) == .command("make the header"))
     }
 
-    @Test func finishWithNothingHeardSendsNothing() {
+    /// Nothing loud and no words yet: the recogniser is still asked, since it may hold
+    /// soft speech, and when it has nothing either, nothing heard is said at once.
+    @Test func finishWithNothingHeardSaysSo() {
         var assembler = UtteranceAssembler(endsOnPause: false)
         let t0 = ContinuousClock.now
         assembler.finishNow(at: t0)
+        #expect(assembler.next(at: t0) == .settle)
+        assembler.settled(at: t0 + .milliseconds(100))
+        #expect(assembler.next(at: t0 + .milliseconds(400)) == .nothingHeard)
         #expect(assembler.next(at: t0 + .seconds(3)) == .wait)
         // And it isn't held over to end the next command the moment it is heard.
         assembler.sound(level: 0.5, at: t0 + .seconds(4))
@@ -610,6 +637,7 @@ struct DictationRouteTests {
         let recogniser = FakeRecogniser()
         let route = DictationRoute(endsOnPause: false, source: audio, recogniser: recogniser)
         let events = try await route.start(vocabulary: [])
+        #expect(await eventually { recogniser.wasStarted })
         let received = Received()
         let collecting = Task { @MainActor in
             for await event in events {
@@ -626,5 +654,93 @@ struct DictationRouteTests {
         route.stop()
         route.finish()
         collecting.cancel()
+    }
+    // MARK: - Routes that always end
+
+    /// A hold route: only `finish()` ends a command, and the recogniser is given a tenth
+    /// of a second to settle, so a test needn't wait the shipping second and a half.
+    private func holdBench() -> Bench {
+        let audio = FakeAudioSource()
+        let recogniser = FakeRecogniser()
+        let assembler = UtteranceAssembler(endsOnPause: false, patience: .milliseconds(100), settling: .milliseconds(50))
+        return Bench(route: DictationRoute(source: audio, recogniser: recogniser, assembler: assembler), audio: audio, recogniser: recogniser)
+    }
+
+    /// A microphone that throws once its tap is in leaves the hardware half on. The
+    /// route is the only one left that can let go of it.
+    @Test func aFinishWithNothingHeardSaysSoAtOnce() async throws {
+        let bench = holdBench()
+        let stream = try await bench.route.start(vocabulary: [])
+        let asked = ContinuousClock.now
+        bench.route.finish()
+        let seen = await events(from: stream) { $0.contains(.nothingHeard) }
+        #expect(seen.contains(.nothingHeard))
+        // Well before the call would give up on it.
+        #expect(ContinuousClock.now - asked < .seconds(1))
+        bench.route.stop()
+    }
+
+    @Test func aMicrophoneThatFailsToStartIsLetGoOf() async throws {
+        let bench = bench()
+        bench.audio.startError = DictationRoute.Failure.microphoneUnavailable
+        await #expect(throws: DictationRoute.Failure.microphoneUnavailable) {
+            _ = try await bench.route.start(vocabulary: [])
+        }
+        #expect(bench.audio.isStopped)
+    }
+
+    /// A recogniser that never finishes settling mustn't hold the command hostage: once
+    /// its patience runs out, what was heard is the command.
+    @Test func aRecogniserThatNeverSettlesStillGivesTheCommand() async throws {
+        let bench = holdBench()
+        bench.recogniser.holdsSettle = true
+        let stream = try await bench.route.start(vocabulary: [])
+        #expect(await eventually { bench.recogniser.wasStarted })
+        bench.audio.play(amplitude: 0.5)
+        bench.recogniser.hear("make the header", isFinal: false)
+        #expect(await eventually { bench.recogniser.chunksHeard == 1 })
+        bench.route.finish()
+        let seen = await events(from: stream) { [self] in !commands(in: $0).isEmpty }
+        #expect(commands(in: seen) == ["make the header"])
+        bench.recogniser.holdsSettle = false
+        bench.route.stop()
+    }
+
+    /// Soft speech, let go of before the recogniser has said a word: the room never got
+    /// loud and no words are in. The finish still asks the recogniser for what it has.
+    @Test func aFinishBeforeTheFirstWordsArriveStillSendsThem() async throws {
+        let bench = holdBench()
+        let stream = try await bench.route.start(vocabulary: [])
+        bench.recogniser.holdBack("make it red")
+        bench.route.finish()
+        let seen = await events(from: stream) { [self] in !commands(in: $0).isEmpty }
+        #expect(commands(in: seen) == ["make it red"])
+        bench.route.stop()
+    }
+
+    /// The route can hear once the microphone is on. Loading the recogniser's model
+    /// takes a moment more, and the sound waits for it rather than the person.
+    @Test func theRouteHearsOnceTheMicrophoneIsOn() async throws {
+        let bench = bench()
+        bench.recogniser.holdsStart = true
+        let returned = Received()
+        let starting = Task {
+            let stream = try await bench.route.start(vocabulary: ["Login"])
+            returned.events.append(.hearing(""))
+            return stream
+        }
+        #expect(await eventually(within: .seconds(1)) { bench.audio.isRunning })
+        // Spoken while the recogniser is still getting ready.
+        bench.audio.play(amplitude: 0.5)
+        let hearsAtOnce = await eventually(within: .milliseconds(500)) { !returned.events.isEmpty }
+        let recogniserHadStarted = bench.recogniser.wasStarted
+        bench.recogniser.holdsStart = false
+        _ = try await starting.value
+        #expect(hearsAtOnce)
+        #expect(!recogniserHadStarted)
+        // Nothing said in the meantime is lost.
+        #expect(await eventually { bench.recogniser.chunksHeard == 1 })
+        #expect(bench.recogniser.vocabulary == ["Login"])
+        bench.route.stop()
     }
 }

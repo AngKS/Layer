@@ -66,6 +66,9 @@ final class VoiceCall {
     /// Said when a listen is sent before its route could hear anything.
     static let tooSoon = "Didn't catch that. Wait for the tap, then speak."
 
+    /// Said when a listen was sent with words heard, and its command never came.
+    static let missedTheEnd = "Didn't catch the end of that."
+
     /// How many microphone levels are kept, which is how many bars the waveform has.
     static let levelCount = 28
 
@@ -111,6 +114,8 @@ final class VoiceCall {
     @ObservationIgnored private var queue: [(text: String, target: VoiceTarget?)] = []
     /// The route asked for and not yet told the command is over.
     @ObservationIgnored private var open: Ear?
+    /// A route made and prepared as the call started, never started, for the first listen.
+    @ObservationIgnored private var spare: (any VoiceRoute)?
     /// Routes told the command is over, waiting for it to arrive.
     @ObservationIgnored private var finishing: [Ear] = []
     @ObservationIgnored private var listening: Task<Void, Never>?
@@ -138,9 +143,17 @@ final class VoiceCall {
     func start() async {
         guard phase == .starting, listening == nil else { return }
         guard case .continuous(let route) = listeningStyle else {
-            // Nothing to hear until asked, but the model can get ready all the same. There
-            // is no microphone to wait on here, and warming up only starts the model off,
-            // so it is awaited.
+            // Nothing to hear until asked, but speech recognition can get ready all the
+            // same, so that the first squeeze doesn't wait on it. That is the language and
+            // the recogniser's model, never the microphone.
+            // The route is kept for the first listen.
+            if case .onRequest(let makeRoute) = listeningStyle {
+                let route = makeRoute()
+                spare = route
+                Task { await route.prepare() }
+            }
+            // The model too. There is no microphone to wait on here, and warming up only
+            // starts the model off, so it is awaited.
             await runner.warmUp()
             VoiceLog.log.info("call: listening when asked")
             phase = .listening
@@ -188,6 +201,7 @@ final class VoiceCall {
         if case .continuous(let route) = listeningStyle { route.stop() }
         for ear in [open].compactMap({ $0 }) + finishing { ear.close() }
         open = nil
+        spare = nil
         finishing.removeAll()
         isHearing = false
         isListeningAsAsked = false
@@ -213,6 +227,8 @@ final class VoiceCall {
         let target: VoiceTarget?
         /// Whether its route has started, and so could have heard anything.
         var hasStarted = false
+        /// Whether its route has reported any words.
+        var heardWords = false
         var events: Task<Void, Never>?
         var deadline: Task<Void, Never>?
 
@@ -234,8 +250,11 @@ final class VoiceCall {
     func listen(for target: VoiceTarget?) async {
         guard case .onRequest(let makeRoute) = listeningStyle, phase == .listening || phase == .working else { return }
         if let open { close(open) }
-        let ear = Ear(route: makeRoute(), target: target)
+        let ear = Ear(route: spare ?? makeRoute(), target: target)
+        spare = nil
         open = ear
+        // The waveform is this listen's alone.
+        levels = []
         isListeningAsAsked = false
         hasOpenListen = true
         do {
@@ -285,10 +304,15 @@ final class VoiceCall {
         finishing.append(ear)
         ear.route.finish()
         let wait = finishWait
+        // The route ends every finish with a command or with nothing heard, well within
+        // this. Only a route that is stuck gets here.
         ear.deadline = Task { [weak self, weak ear] in
             try? await Task.sleep(for: wait)
             guard !Task.isCancelled, let self, let ear else { return }
+            VoiceLog.log.error("call: a sent route didn't finish in time")
             self.close(ear)
+            // Words were heard and are now lost. Said, so that nobody waits on them.
+            if ear.heardWords { self.show(.problem, Self.missedTheEnd) }
         }
     }
 
@@ -315,7 +339,19 @@ final class VoiceCall {
         guard open === ear || finishing.contains(where: { $0 === ear }) else { return }
         // The waveform is for what is being listened to now, not a sent route settling.
         if case .level = event, open !== ear { return }
-        if case .failed(let reason) = event {
+        if case .hearing(let words) = event {
+            if !words.isEmpty { ear.heardWords = true }
+            // A sent route revising its words while the next listen is open: those words
+            // are the last command's, and shown now they would be taken for this one's.
+            if let open, open !== ear { return }
+        }
+        if case .nothingHeard = event {
+            // Told to finish, it had nothing. There is nothing to wait for, so the
+            // microphone is let go of now.
+            guard finishing.contains(where: { $0 === ear }) else { return }
+            close(ear)
+            if open == nil, caption?.kind == .hearing { caption = nil }
+        } else if case .failed(let reason) = event {
             // As when it can't start: this listen is over, and the call stays up.
             close(ear)
             show(.problem, reason)
@@ -339,6 +375,8 @@ final class VoiceCall {
             if !words.isEmpty { show(.hearing, words) }
         case .command(let command):
             received(command, target: target)
+        case .nothingHeard:
+            break
         case .failed(let reason):
             end(because: reason)
         }

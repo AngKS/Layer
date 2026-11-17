@@ -315,7 +315,8 @@ struct PencilVoiceTests {
         bench.pencil.hovered()
         #expect(await eventually { bench.runner.warmUps == 1 })
         try? await Task.sleep(for: .milliseconds(50))
-        #expect(bench.runner.warmUps == 1 && bench.routes.isEmpty)
+        // Speech may be made ready, but no route is started: hovering never turns the microphone on.
+        #expect(bench.runner.warmUps == 1 && !bench.routes.contains { $0.wasStarted })
         bench.end()
     }
 
@@ -329,7 +330,7 @@ struct PencilVoiceTests {
         bench.now += .milliseconds(200)
         bench.pencil.squeezeEnded()
         try? await Task.sleep(for: .milliseconds(50))
-        #expect(bench.state == .gettingReady && bench.routes.isEmpty)
+        #expect(bench.state == .gettingReady && !bench.routes.contains { $0.wasStarted })
         slow.holdsWarmUp = false
         #expect(await eventually { bench.state == .listening && bench.routes.count == 1 })
         bench.end()
