@@ -41,6 +41,13 @@ final class DesignStore {
     @ObservationIgnored var onChange: ((DesignContent) -> Void)?
     /// The content as it was when the gradual edit in progress began.
     @ObservationIgnored private var editStart: DesignContent?
+    /// Whether the gradual edit in progress has put its step in the history yet. It does
+    /// at its first change, not at its end, so that undo and redo pressed while it is still
+    /// open act on it like any other step: see `change(_:)`.
+    @ObservationIgnored private var editIsInHistory = false
+    /// Moves on whenever the history does: a step made, undone or redone. A spoken
+    /// correction checks it to be sure the step on top is still its command's.
+    @ObservationIgnored private(set) var historyMark = 0
 
     /// The views of the list, and where each element is in it, for the content as it is now.
     private struct Views {
@@ -463,7 +470,7 @@ final class DesignStore {
     /// until `endEdit()` undoes as one step.
     func beginEdit() {
         if isHoldingEdit { isEditingByHandInHold = true }
-        if editStart == nil { editStart = content }
+        if editStart == nil { openEdit() }
     }
 
     func endEdit() {
@@ -474,7 +481,15 @@ final class DesignStore {
         }
         guard let start = editStart else { return }
         editStart = nil
-        if start != content { registerUndo(restoring: start) }
+        // A change that isn't undoable on its own, such as a suggested name, still joins
+        // the step of an edit it was made in.
+        if !editIsInHistory, start != content { registerUndo(restoring: start) }
+        editIsInHistory = false
+    }
+
+    private func openEdit() {
+        editStart = content
+        editIsInHistory = false
     }
 
     /// Whether an edit is being held open: see `beginHeldEdit()`.
@@ -492,7 +507,7 @@ final class DesignStore {
         guard !isHoldingEdit else { return }
         // An edit already under way goes on inside the hold.
         isEditingByHandInHold = editStart != nil
-        if editStart == nil { editStart = content }
+        if editStart == nil { openEdit() }
         isHoldingEdit = true
     }
 
@@ -550,24 +565,38 @@ final class DesignStore {
 
     /// Applies a change. Inside `beginEdit()`…`endEdit()` it joins that edit's undo step;
     /// on its own it is its own undo step.
+    ///
+    /// An edit's step goes in the history at its first change, and restores the content
+    /// as it was when the edit began. Undo takes the content as it is then, so the step
+    /// still undoes everything the edit went on to do. Put in at the end instead, an undo
+    /// pressed meanwhile (the toolbar's, while a spoken command or a generation holds its
+    /// step open) took back the step before, lost the edit's changes so far, and was
+    /// itself undone when the edit closed.
     private func change(_ body: (inout DesignContent) -> Void) {
-        guard editStart == nil else {
+        guard let start = editStart else {
+            let before = content
             body(&content)
+            if before != content { registerUndo(restoring: before) }
             return
         }
-        let before = content
         body(&content)
-        if before != content { registerUndo(restoring: before) }
+        if !editIsInHistory, content != start {
+            editIsInHistory = true
+            registerUndo(restoring: start)
+        }
     }
 
     private func registerUndo(restoring previous: DesignContent) {
         guard let undoManager else { return }
+        historyMark += 1
         undoManager.beginUndoGrouping()
         undoManager.registerUndo(withTarget: self) { store in
             let current = store.content
             store.content = previous
             // Registering while undoing makes this the redo step, and the reverse.
             store.registerUndo(restoring: current)
+            // An edit still open goes on from here, as a step of its own.
+            if store.editStart != nil { store.openEdit() }
         }
         undoManager.endUndoGrouping()
     }

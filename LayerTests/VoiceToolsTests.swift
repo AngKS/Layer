@@ -746,10 +746,12 @@ struct VoiceToolsTests {
         let undo = try #require(bench.app.store.undoManager)
         bench.app.store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
+        let mark = bench.app.store.historyMark
         _ = bench.box.setText(element: "E2", text: "Continue")
         _ = bench.box.alignElement(element: "E3", alignment: "centre")
-        // Nothing can be undone piecemeal while the command is still under way.
-        #expect(!undo.canUndo)
+        // Nothing is a step of its own while the command is still under way: it is one
+        // step from its first change, which undo would take back whole.
+        #expect(bench.app.store.historyMark == mark)
         bench.app.store.endHeldEdit()
         #expect(bench.app.store.content != before)
         undo.undo()
@@ -775,13 +777,14 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
+        let mark = store.historyMark
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
         store.endHeldEdit()
         store.update(image) { $0.frame.origin.x = 60 }
         store.update(image) { $0.frame.origin.x = 80 }
         // No move is a step of its own while the finger is still down.
-        #expect(!undo.canUndo)
+        #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
         #expect(store.content == before)
@@ -796,11 +799,12 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
+        let mark = store.historyMark
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         store.update(image) { $0.frame.origin.x = 60 }
-        #expect(!undo.canUndo)
+        #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
         #expect(store.content == before)
@@ -844,11 +848,11 @@ struct VoiceToolsTests {
         store.beginHeldEdit()
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
+        let mark = store.historyMark
         store.endEdit()
-        #expect(!undo.canUndo)
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        #expect(undo.canUndo)
+        #expect(store.historyMark == mark, "the drag and the command are the command's one step")
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)

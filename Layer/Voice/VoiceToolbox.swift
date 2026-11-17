@@ -577,15 +577,11 @@ final class VoiceToolbox: VoiceActing {
         stepThroughHistory(isUndo: false)
     }
 
-    /// Undo and redo act on whole steps, so what the command has done so far is closed
-    /// off as a step of its own first, and the command goes on in a new one afterwards.
+    /// Undo and redo act on whole steps. What the command has done so far is a step
+    /// already, and the command goes on in a new one afterwards: the store sees to both.
     private func stepThroughHistory(isUndo: Bool) -> String {
         guard let model else { return gone }
-        let store = model.store
-        let wasHeld = store.isHoldingEdit
-        if wasHeld { store.endHeldEdit() }
-        defer { if wasHeld { store.beginHeldEdit() } }
-        guard let history = store.undoManager, isUndo ? history.canUndo : history.canRedo else {
+        guard let history = model.store.undoManager, isUndo ? history.canUndo : history.canRedo else {
             return failed(isUndo ? "There is nothing to undo." : "There is nothing to redo.")
         }
         if isUndo { history.undo() } else { history.redo() }

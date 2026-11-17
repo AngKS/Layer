@@ -188,6 +188,66 @@ struct DesignStoreTests {
         #expect(store.screens[0].elements[0].frame.minY == 132)
     }
 
+    /// Undo pressed while a spoken command or a generation holds its step open. It used to
+    /// take back the step before, and lose the command's first change with it; the command's
+    /// close then put that earlier step back, so undo behaved as redo.
+    @Test func undoWhileAnEditIsHeldTakesBackWhatItHasDoneSoFar() throws {
+        let (store, undo) = makeStore()
+        let screen = store.addScreen(from: leftScreenSketch)
+        let title = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let before = store.content
+
+        store.beginHeldEdit()
+        store.update(ref) { $0.text = "One" }
+        undo.undo()
+        // The command's change so far is what goes; the title added before it stays.
+        #expect(store.content == before)
+        store.update(ref) { $0.text = "Two" }
+        store.endHeldEdit()
+        #expect(store.resolve(ref)?.element.text == "Two")
+
+        undo.undo()
+        #expect(store.content == before)
+        undo.undo()
+        #expect(store.screens.first?.elements.isEmpty == true)
+    }
+
+    @Test func redoWhileAnEditIsHeldStillRedoes() throws {
+        let (store, undo) = makeStore()
+        let screen = store.addScreen(from: leftScreenSketch)
+        _ = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let withTitle = store.content
+        undo.undo()
+
+        store.beginHeldEdit()
+        undo.redo()
+        #expect(store.content == withTitle)
+        store.updateScreen(screen.id) { $0.name = "Renamed" }
+        store.endHeldEdit()
+        undo.undo()
+        #expect(store.content == withTitle)
+    }
+
+    /// The history moves on with every step made, undone or redone, and not otherwise.
+    @Test func theHistoryMarkMovesWithEveryStep() throws {
+        let (store, undo) = makeStore()
+        let start = store.historyMark
+        let screen = store.addScreen(from: leftScreenSketch)
+        let afterAdd = store.historyMark
+        #expect(afterAdd != start)
+        store.setTitle("Quiet", undoable: false)
+        #expect(store.historyMark == afterAdd)
+        store.beginHeldEdit()
+        store.updateScreen(screen.id) { $0.name = "One" }
+        let inEdit = store.historyMark
+        store.updateScreen(screen.id) { $0.name = "Two" }
+        store.endHeldEdit()
+        #expect(store.historyMark == inEdit, "a held edit is one step, however many changes")
+        undo.undo()
+        #expect(store.historyMark != inEdit)
+    }
+
     @Test func anEditThatChangesNothingLeavesNoUndoStep() {
         let (store, undo) = makeStore()
         store.beginEdit()
