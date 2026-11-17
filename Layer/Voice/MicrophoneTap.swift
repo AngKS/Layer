@@ -6,24 +6,37 @@ import os
 @MainActor
 final class MicrophoneTap: VoiceAudioSource {
     private let microphone: Microphone
-    private var listener: Microphone.Listener?
+    private let askForAccess: @Sendable () async -> Bool
+    /// Read in `deinit` as well, which belongs to no actor; a `UUID` is safe to read there.
+    nonisolated(unsafe) private var listener: Microphone.Listener?
     /// Whether `stop()` came while `start()` was still under way.
     private var stoppedWhileStarting = false
     private(set) var format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
-    init(microphone: Microphone = .shared) {
+    /// `askForAccess` is for tests, which have no one to answer the alert.
+    init(microphone: Microphone = .shared, askForAccess: @escaping @Sendable () async -> Bool = MicrophoneTap.requestAccess) {
         self.microphone = microphone
+        self.askForAccess = askForAccess
     }
 
-    /// Asks to use the microphone, the first time, and says whether it may be used.
-    static func requestAccess() async -> Bool {
-        await AVAudioApplication.requestRecordPermission()
+    /// A route let go of without being stopped mustn't keep the microphone on for everyone.
+    deinit {
+        if let listener { microphone.stopListening(listener) }
+    }
+
+    /// Asks to use the microphone, the first time, and says whether it may be used. Once
+    /// allowed, there is nothing to ask, and no wait on every squeeze for the answer.
+    @Sendable static func requestAccess() async -> Bool {
+        if AVAudioApplication.shared.recordPermission == .granted { return true }
+        return await AVAudioApplication.requestRecordPermission()
     }
 
     /// Starts the microphone, asking to use it the first time.
     func start() async throws -> AsyncStream<AudioChunk> {
         stoppedWhileStarting = false
-        guard await Self.requestAccess() else { throw DictationRoute.Failure.microphoneRefused }
+        guard await askForAccess() else { throw DictationRoute.Failure.microphoneRefused }
+        // Let go of while the alert was up: the microphone mustn't come on even for a moment.
+        guard !stoppedWhileStarting else { throw CancellationError() }
         let (listener, sound, format) = try await microphone.listen()
         guard !stoppedWhileStarting else {
             microphone.stopListening(listener)
@@ -75,8 +88,11 @@ final class Microphone: @unchecked Sendable {
     private let queue = DispatchQueue(label: "Layer.Microphone", qos: .userInitiated)
     private let listeners = OSAllocatedUnfairLock<[Listener: AsyncStream<AudioChunk>.Continuation]>(initialState: [:])
     /// The format the hardware is giving sound in, while it is on. Touched only on `queue`,
-    /// which is what makes the class safe to share.
+    /// as is `generation`, which is what makes the class safe to share.
     private var format: AVAudioFormat?
+    /// Which turning on this is. The microphone going away is told with the generation it
+    /// went away in, so that news of one that is long off can't turn off the next.
+    private var generation = 0
 
     init(hardware: any MicrophoneHardware) {
         self.hardware = hardware
@@ -118,9 +134,11 @@ final class Microphone: @unchecked Sendable {
         if let format { return format }
         // Everyone who asked has gone already.
         guard listenerCount > 0 else { throw CancellationError() }
+        generation += 1
+        let generation = generation
         let format = try hardware.start(hearing: Self.handOut(to: listeners), lost: { [weak self] in
             guard let self else { return }
-            self.queue.async { self.lost() }
+            self.queue.async { self.lost(in: generation) }
         })
         VoiceLog.log.info("microphone: on")
         self.format = format
@@ -136,8 +154,8 @@ final class Microphone: @unchecked Sendable {
 
     /// The microphone went away: everyone listening hears the sound end, which is how a
     /// route learns of it.
-    private func lost() {
-        guard format != nil else { return }
+    private func lost(in generation: Int) {
+        guard format != nil, generation == self.generation else { return }
         hardware.stop()
         format = nil
         let all = listeners.withLock { listeners in

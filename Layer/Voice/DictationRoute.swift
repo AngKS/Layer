@@ -37,6 +37,11 @@ final class DictationRoute: VoiceRoute {
     private var settling: Task<Void, Never>?
     /// Which settle this is, so that a late one isn't taken for the next.
     private var settleRound = 0
+    /// The recogniser starting, which comes after the microphone: the phrases it will
+    /// give, or nil if it never listens.
+    private var recogniserStarting: Task<AsyncThrowingStream<HeardPhrase, any Error>?, Never>?
+    /// Whether the recogniser has started listening.
+    private var recogniserIsListening = false
 
     /// `assembler` decides where one command ends and the next begins; its own
     /// defaults are the ones for a person speaking to an iPad. With `endsOnPause` false
@@ -108,7 +113,7 @@ final class DictationRoute: VoiceRoute {
         // The route hears from the moment the microphone is on. The recogniser's model
         // takes a moment more to load, and the sound waits for it in `forRecogniser`.
         let recogniser = recogniser, format = source.format
-        tasks.append(Task { [weak self] in
+        let starting = Task { [weak self] () -> AsyncThrowingStream<HeardPhrase, any Error>? in
             let phrases: AsyncThrowingStream<HeardPhrase, any Error>
             do {
                 phrases = try await recogniser.start(sound: forRecogniser, format: format, vocabulary: vocabulary)
@@ -119,16 +124,22 @@ final class DictationRoute: VoiceRoute {
                 await recogniser.stop()
                 VoiceLog.log.error("route: the recogniser couldn't start: \(String(reflecting: error), privacy: .public)")
                 self?.fail(saying: (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription)
-                return
+                return nil
             }
             // Stopped while it was starting: the stop may have reached it before it had
             // anything to stop, so it is told again.
             guard let route = self, !route.isStopped else {
                 recogniserInput.finish()
                 await recogniser.stop()
-                return
+                return nil
             }
+            route.recogniserIsListening = true
             VoiceLog.log.info("route: recogniser listening after \(Self.milliseconds(since: asked), privacy: .public) ms")
+            return phrases
+        }
+        recogniserStarting = starting
+        tasks.append(Task { [weak self] in
+            guard let phrases = await starting.value else { return }
             do {
                 for try await phrase in phrases {
                     self?.heard(phrase)
@@ -156,6 +167,8 @@ final class DictationRoute: VoiceRoute {
         source.stop()
         for task in tasks { task.cancel() }
         tasks = []
+        recogniserStarting?.cancel()
+        recogniserStarting = nil
         settling?.cancel()
         settling = nil
         let recogniser = recogniser
@@ -193,17 +206,25 @@ final class DictationRoute: VoiceRoute {
             // Not waited for here. A recogniser slow to settle, or one that never does,
             // would stop the ticking, and with it the assembler's patience, which is what
             // takes the words as they are when settling runs late.
+            // A recogniser still starting has nothing to settle yet: the settle waits for
+            // it, which the same patience bounds.
             settleRound += 1
-            let round = settleRound, recogniser = recogniser
+            let round = settleRound, recogniser = recogniser, starting = recogniserStarting
             settling?.cancel()
             settling = Task { [weak self] in
-                await recogniser.settle()
+                if let starting, await starting.value == nil { return }
+                guard await recogniser.settle() else { return }
                 self?.recogniserSettled(round)
             }
         case .command(let command):
             lastHearing = ""
             VoiceLog.log.info("route: a command of \(command.count) characters ended")
             continuation?.yield(.command(command))
+        case .nothingHeard where !recogniserIsListening:
+            // Let go of before the recogniser could listen. Words may have been spoken,
+            // and nothing could hear them: that is said, not passed off as silence.
+            VoiceLog.log.info("route: finished before the recogniser was listening")
+            fail(saying: VoiceCall.tooSoon)
         case .nothingHeard:
             lastHearing = ""
             VoiceLog.log.info("route: finished with nothing heard")
@@ -236,3 +257,4 @@ final class DictationRoute: VoiceRoute {
         stop()
     }
 }
+

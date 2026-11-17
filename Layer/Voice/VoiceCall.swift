@@ -304,8 +304,8 @@ final class VoiceCall {
         finishing.append(ear)
         ear.route.finish()
         let wait = finishWait
-        // The route ends every finish with a command or with nothing heard, well within
-        // this. Only a route that is stuck gets here.
+        // The route ends every finish within its patience (one and a half seconds as it
+        // ships), with a command, nothing heard, or why. Only a route that is stuck gets here.
         ear.deadline = Task { [weak self, weak ear] in
             try? await Task.sleep(for: wait)
             guard !Task.isCancelled, let self, let ear else { return }

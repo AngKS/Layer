@@ -21,6 +21,9 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
     private let locale: Locale
     private var prepared: Prepared?
     private var analyzer: SpeechAnalyzer?
+    /// Whether `analyzer` has started, and so has anything to settle. It is set before it
+    /// starts, and the actor can be asked to settle in between.
+    private var isAnalysing = false
     private var input: AsyncStream<AnalyzerInput>.Continuation?
     private var work: [Task<Void, Never>] = []
 
@@ -113,6 +116,8 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
         let (inputs, input) = AsyncStream<AnalyzerInput>.makeStream()
         self.input = input
         try await analyzer.start(inputSequence: inputs)
+        // Stopped while it was starting: the analyzer is no longer this one's.
+        if self.analyzer === analyzer { isAnalysing = true }
 
         let (phrases, heard) = AsyncThrowingStream<HeardPhrase, any Error>.makeStream()
         work.append(Task {
@@ -144,8 +149,15 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
         return phrases
     }
 
-    func settle() async {
-        try? await analyzer?.finalize(through: nil)
+    func settle() async -> Bool {
+        guard isAnalysing, let analyzer else { return false }
+        do {
+            try await analyzer.finalize(through: nil)
+            return true
+        } catch {
+            VoiceLog.log.error("speech: couldn't settle: \(String(reflecting: error), privacy: .public)")
+            return false
+        }
     }
 
     func stop() async {
@@ -153,6 +165,7 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
         work = []
         input?.finish()
         input = nil
+        isAnalysing = false
         await analyzer?.cancelAndFinishNow()
         analyzer = nil
     }

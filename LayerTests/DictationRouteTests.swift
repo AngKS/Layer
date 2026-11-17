@@ -114,14 +114,17 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
         return phrases
     }
 
-    func settle() async {
-        let (continuation, phrases) = state.withLock {
+    func settle() async -> Bool {
+        let (continuation, phrases, started) = state.withLock {
             settles += 1
             defer { heldBack = [] }
-            return (self.continuation, heldBack)
+            return (self.continuation, heldBack, self.started)
         }
+        // Not listening yet, as a real one isn't: nothing to settle.
+        guard started else { return false }
         for phrase in phrases { continuation?.yield(phrase) }
         while holdsSettle { try? await Task.sleep(for: .milliseconds(5)) }
+        return true
     }
 
     func stop() async {
@@ -259,6 +262,51 @@ struct MicrophoneTapTests {
         #expect(microphone.listenerCount == 0)
     }
 
+    /// News that an earlier engine went away, arriving after the microphone was turned
+    /// off and on again, must not stop the engine that is on now.
+    @Test func aLateLossOfAnEarlierMicrophoneIsIgnored() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        let first = try await microphone.listen()
+        microphone.stopListening(first.listener)
+        #expect(await eventuallyOff { hardware.stops == 1 })
+        let second = try await microphone.listen()
+        #expect(hardware.starts == 2)
+        hardware.loseIt(fromStart: 0)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(hardware.stops == 1 && microphone.listenerCount == 1)
+        microphone.stopListening(second.listener)
+    }
+
+    /// A route dropped without being stopped lets go of the microphone all the same.
+    @Test @MainActor func aTapLetGoOfWithoutStoppingLetsGoOfTheMicrophone() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        var tap: MicrophoneTap? = MicrophoneTap(microphone: microphone, askForAccess: { true })
+        _ = try await tap?.start()
+        #expect(microphone.listenerCount == 1)
+        tap = nil
+        #expect(microphone.listenerCount == 0)
+        #expect(await eventuallyOff { hardware.stops == 1 })
+    }
+
+    /// Let go of while the alert asking for the microphone was up: it never comes on.
+    @Test @MainActor func aTapStoppedWhileAskingNeverTurnsTheMicrophoneOn() async throws {
+        let hardware = FakeHardware()
+        let microphone = Microphone(hardware: hardware)
+        let answer = AsyncStream<Bool>.makeStream()
+        let tap = MicrophoneTap(microphone: microphone, askForAccess: {
+            for await allowed in answer.stream { return allowed }
+            return false
+        })
+        let starting = Task { try await tap.start() }
+        try await Task.sleep(for: .milliseconds(30))
+        tap.stop()
+        answer.continuation.yield(true)
+        await #expect(throws: CancellationError.self) { _ = try await starting.value }
+        #expect(hardware.starts == 0 && microphone.listenerCount == 0)
+    }
+
     private func eventuallyOff(_ condition: @Sendable () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(2)
         while !condition() {
@@ -277,6 +325,8 @@ final class FakeHardware: MicrophoneHardware, @unchecked Sendable {
     private var failure: (any Error)?
     private var hearing: (@Sendable (AudioChunk) -> Void)?
     private var lost: (@Sendable () -> Void)?
+    /// What each start was told to call if the microphone went away, in order.
+    private var losts: [@Sendable () -> Void] = []
 
     var starts: Int { state.withLock { started } }
     var stops: Int { state.withLock { stopped } }
@@ -291,6 +341,7 @@ final class FakeHardware: MicrophoneHardware, @unchecked Sendable {
             started += 1
             self.hearing = hearing
             self.lost = lost
+            losts.append(lost)
         }
         return AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
     }
@@ -309,6 +360,11 @@ final class FakeHardware: MicrophoneHardware, @unchecked Sendable {
 
     func loseIt() {
         state.withLock { lost }?()
+    }
+
+    /// The microphone of an earlier start reporting it went away, late.
+    func loseIt(fromStart index: Int) {
+        state.withLock { losts[index] }()
     }
 }
 
@@ -666,8 +722,6 @@ struct DictationRouteTests {
         return Bench(route: DictationRoute(source: audio, recogniser: recogniser, assembler: assembler), audio: audio, recogniser: recogniser)
     }
 
-    /// A microphone that throws once its tap is in leaves the hardware half on. The
-    /// route is the only one left that can let go of it.
     @Test func aFinishWithNothingHeardSaysSoAtOnce() async throws {
         let bench = holdBench()
         let stream = try await bench.route.start(vocabulary: [])
@@ -680,6 +734,8 @@ struct DictationRouteTests {
         bench.route.stop()
     }
 
+    /// A microphone that throws once its tap is in leaves the hardware half on. The
+    /// route is the only one left that can let go of it.
     @Test func aMicrophoneThatFailsToStartIsLetGoOf() async throws {
         let bench = bench()
         bench.audio.startError = DictationRoute.Failure.microphoneUnavailable
@@ -742,5 +798,80 @@ struct DictationRouteTests {
         #expect(await eventually { bench.recogniser.chunksHeard == 1 })
         #expect(bench.recogniser.vocabulary == ["Login"])
         bench.route.stop()
+    }
+    // MARK: - Let go of before the recogniser listens
+
+    /// A route whose recogniser takes a while to start, as its model loading does, with
+    /// half a second of patience.
+    private func slowRecogniserBench() -> Bench {
+        let audio = FakeAudioSource()
+        let recogniser = FakeRecogniser()
+        recogniser.holdsStart = true
+        let assembler = UtteranceAssembler(endsOnPause: false, patience: .milliseconds(500), settling: .milliseconds(50))
+        return Bench(route: DictationRoute(source: audio, recogniser: recogniser, assembler: assembler), audio: audio, recogniser: recogniser)
+    }
+
+    /// Spoken and let go of while the recogniser was still starting. It starts within
+    /// the patience, and the words are the command.
+    @Test func aFinishBeforeTheRecogniserListensWaitsForIt() async throws {
+        let bench = slowRecogniserBench()
+        let stream = try await bench.route.start(vocabulary: [])
+        bench.audio.play(amplitude: 0.5)
+        bench.recogniser.holdBack("make it red")
+        bench.route.finish()
+        try await Task.sleep(for: .milliseconds(150))
+        bench.recogniser.holdsStart = false
+        let seen = await events(from: stream) { [self] in !commands(in: $0).isEmpty || $0.contains(.nothingHeard) }
+        #expect(commands(in: seen) == ["make it red"])
+        bench.route.stop()
+    }
+
+    /// The recogniser never started in time: whatever was said, nothing heard it. That is
+    /// said, not passed off as silence.
+    @Test func aFinishTheRecogniserNeverListenedForIsSaid() async throws {
+        let bench = slowRecogniserBench()
+        let stream = try await bench.route.start(vocabulary: [])
+        bench.audio.play(amplitude: 0.5)
+        bench.route.finish()
+        let seen = await events(from: stream) { $0.contains { if case .failed = $0 { true } else { $0 == .nothingHeard } } }
+        #expect(!seen.contains(.nothingHeard))
+        #expect(seen.contains(.failed(VoiceCall.tooSoon)))
+        #expect(bench.audio.isStopped)
+        bench.recogniser.holdsStart = false
+    }
+
+    // MARK: - Settling has an end
+
+    /// Speech after the release keeps bringing words. They don't keep the command open
+    /// past the patience.
+    @Test func wordsAfterSettlingDoNotKeepTheCommandOpen() {
+        var assembler = UtteranceAssembler(endsOnPause: false)
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        assembler.heard("make it", isFinal: true, at: t0)
+        assembler.finishNow(at: t0)
+        #expect(assembler.next(at: t0) == .settle)
+        assembler.settled(at: t0 + .milliseconds(100))
+        var step = UtteranceAssembler.Step.wait
+        var moment = 200
+        while moment <= 1500, step == .wait {
+            assembler.heard("and then some more \(moment)", isFinal: false, at: t0 + .milliseconds(moment))
+            step = assembler.next(at: t0 + .milliseconds(moment))
+            moment += 100
+        }
+        #expect(step == .command("make it and then some more 1500"))
+    }
+
+    /// A pause began settling, and then the route was told to finish. With nothing heard,
+    /// it still says so, as every finish does.
+    @Test func finishDuringAPauseSettleStillSaysNothingWasHeard() {
+        var assembler = UtteranceAssembler(pause: .milliseconds(200), settling: .milliseconds(50))
+        let t0 = ContinuousClock.now
+        assembler.sound(level: 0.5, at: t0)
+        #expect(assembler.next(at: t0 + .milliseconds(300)) == .settle)
+        assembler.finishNow(at: t0 + .milliseconds(310))
+        #expect(assembler.next(at: t0 + .milliseconds(320)) == .wait)
+        assembler.settled(at: t0 + .milliseconds(330))
+        #expect(assembler.next(at: t0 + .milliseconds(400)) == .nothingHeard)
     }
 }

@@ -205,10 +205,11 @@ struct UtteranceAssembler {
     /// seems to have been said: soft speech never sounds loud, and the recogniser's first
     /// words can be a second behind the voice, so it may still hold the command. If it
     /// doesn't, `next` says `.nothingHeard`, so that nobody waits for one.
+    ///
+    /// Asked while a pause is already settling, the same settle carries on: there is
+    /// never a second one, so never a second command. It still counts as finished, so
+    /// that a settle ending with nothing says so.
     mutating func finishNow(at now: ContinuousClock.Instant) {
-        // Already settling: the command is on its way, and a second ask must not make
-        // a second command.
-        guard askedToSettle == nil else { return }
         isFinishing = true
     }
 
@@ -219,8 +220,12 @@ struct UtteranceAssembler {
 
         if let askedToSettle {
             if let settledAt {
-                // A moment after it settled, and after the last words it brought out.
-                guard now - settledAt >= settling, lastHeard.map({ now - $0 >= settling }) != false else { return .wait }
+                // A moment after it settled, and after the last words it brought out. Words
+                // that keep coming, as speech after the release does, wait no longer than
+                // the patience: they would otherwise grow the command for as long as they came.
+                let isSettled = now - settledAt >= settling && lastHeard.map({ now - $0 >= settling }) != false
+                guard isSettled || now - askedToSettle >= patience else { return .wait }
+                if !isSettled, !unsettled.isEmpty { takenUnsettled = unsettled }
                 return take()
             }
             guard now - askedToSettle >= patience else { return .wait }
