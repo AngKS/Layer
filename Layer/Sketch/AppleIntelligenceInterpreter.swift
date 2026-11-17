@@ -1,4 +1,4 @@
-import FoundationModels
+@_weakLinked import FoundationModels
 import os
 
 /// Reads sketches with the on-device Apple Intelligence model — a sketch agent (Stage 4,
@@ -96,7 +96,7 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
     /// vary with the candidates: `@Guide`'s `.anyOf` works only for a fixed, compile-time
     /// list, which a sketch's candidates never are — the same reason this type already
     /// built a dynamic schema for a plain enum answer before this.
-    private static func agentSchema(for names: [String]) throws -> GenerationSchema {
+    static func agentSchema(for names: [String]) throws -> GenerationSchema {
         let chosen = DynamicGenerationSchema.Property(
             name: "chosen", description: "Which of the candidates this sketch actually is.",
             schema: DynamicGenerationSchema(name: "Chosen", anyOf: names)

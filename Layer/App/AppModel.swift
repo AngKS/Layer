@@ -49,7 +49,7 @@ final class AppModel {
 
     let document: LayerDocument
     let store: DesignStore
-    let engine = SketchEngine()
+    let engine: SketchEngine
     let pen = PenTracker()
     let images: ImageLibrary
     /// Where the design is saved, when the system has said.
@@ -265,13 +265,130 @@ final class AppModel {
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
+        engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         store.onChange = { [weak self, document] content in
             document.update { $0.content = content }
+            self?.applyModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
         }
+    }
+
+    // MARK: The model
+
+    /// The model this design uses, as saved in its file or the app's default.
+    var modelChoice: ModelChoice { store.content.canvas.resolvedModel }
+
+    /// Changes the model this design uses, saved in its file. Undoable like any setting.
+    func setModelChoice(_ choice: ModelChoice) {
+        guard store.canvas.model != choice else { return }
+        store.updateCanvas { $0.model = choice }
+    }
+
+    /// Points the sketch engine at this design's model. Cheap when nothing changed, so it
+    /// runs on every change to the design and whenever the app's model settings change.
+    func applyModelChoice() {
+        engine.use(modelChoice.sketchProvider)
+    }
+
+    // MARK: Generating screens
+
+    /// A screen being written by the design's model, element by element.
+    struct ScreenGeneration: Equatable {
+        enum Phase: Equatable {
+            case writing
+            case finished
+            case failed(String)
+        }
+
+        var screenID: DesignScreen.ID
+        var description: String
+        var elementCount = 0
+        var phase = Phase.writing
+        /// True until the model starts writing its answer.
+        var isThinking = true
+    }
+
+    /// The screen being generated, or the last one while its outcome is shown.
+    private(set) var generation: ScreenGeneration?
+    @ObservationIgnored private var generationTask: Task<Void, Never>?
+    @ObservationIgnored private var generationDismissal: Task<Void, Never>?
+
+    var isGenerating: Bool { generation?.phase == .writing }
+
+    /// Adds a new screen and has the design's model write it from `description`. Its
+    /// elements appear as the model writes them; the whole screen is one undo step.
+    func generateScreen(from description: String) {
+        let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !isGenerating else { return }
+        generationTask?.cancel()
+        generationDismissal?.cancel()
+
+        let device = store.canvas.sketchDevice
+        store.beginEdit()
+        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
+        store.updateScreen(screen.id) { $0.name = ScreenGenerator.name(for: prompt) }
+        DesignActions.reveal(.screen(screen.id), in: self)
+        generation = ScreenGeneration(screenID: screen.id, description: prompt)
+
+        let choice = modelChoice
+        generationTask = Task { [weak self] in
+            do {
+                for try await update in ScreenGenerator.stream(prompt, using: choice) {
+                    guard let self, let current = store.screen(screen.id) else { return }
+                    switch update {
+                    case .startedWriting:
+                        generation?.isThinking = false
+                    case .screen(let blueprint):
+                        withAnimation(.snappy(duration: 0.25)) {
+                            _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                        }
+                        generation?.isThinking = false
+                        generation?.elementCount = blueprint.itemCount
+                    }
+                }
+                self?.finishGeneration(error: nil)
+            } catch {
+                self?.finishGeneration(error: error is CancellationError ? nil : error)
+            }
+        }
+    }
+
+    /// Stops the model; what it has written so far stays.
+    func stopGenerating() {
+        generationTask?.cancel()
+    }
+
+    private func finishGeneration(error: (any Error)?) {
+        generationTask = nil
+        guard var finished = generation else { return }
+        if let error {
+            finished.phase = .failed(error.localizedDescription)
+        } else {
+            finished.phase = finished.elementCount > 0 ? .finished : .failed(ScreenGenerator.GenerationError.nothingWritten.localizedDescription)
+        }
+        // A screen nothing was written on isn't left behind.
+        if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
+        store.endEdit()
+        finished.isThinking = false
+        generation = finished
+        // Success says so briefly; a failure stays until it is dismissed.
+        if finished.phase == .finished {
+            generationDismissal = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                withAnimation(.smooth(duration: 0.3)) { self?.dismissGeneration() }
+            }
+        }
+    }
+
+    /// Clears a finished generation's outcome.
+    func dismissGeneration() {
+        guard !isGenerating else { return }
+        generationDismissal?.cancel()
+        generation = nil
     }
 
     // MARK: The file
@@ -305,6 +422,8 @@ final class AppModel {
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
         fileCheck?.cancel()
+        generationTask?.cancel()
+        generationDismissal?.cancel()
         settle?.cancel()
         adjustmentEnd?.cancel()
         for conversion in conversions { conversion.cancel() }

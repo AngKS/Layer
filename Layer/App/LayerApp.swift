@@ -25,6 +25,8 @@ struct LayerApp: App {
             NewDocumentButton("New Design")
         } background: {
             CanvasGrid()
+                // The cog for Layer's settings, among the browser's own buttons.
+                .task { await SettingsButton.install() }
         }
     }
 }
@@ -65,6 +67,11 @@ private struct DesignEditor: View {
                       saved.fileURL.standardizedFileURL == model.fileURL?.standardizedFileURL
                 else { return }
                 model.checkFile()
+            }
+            // A key added or a default changed in Settings can change what this design uses.
+            .onReceive(NotificationCenter.default.publisher(for: ModelPreferences.changed)) { _ in
+                model.applyModelChoice()
+                model.engine.prepare()
             }
             .preferredColorScheme(.light)
             .toolbar(.hidden, for: .navigationBar)

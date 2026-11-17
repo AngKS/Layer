@@ -72,6 +72,13 @@ struct CanvasScreen: View {
             if model.hovered != target { model.hovered = target }
         }
         .ignoresSafeArea()
+        // A screen being generated says how it is getting on, clear of the screen itself.
+        .overlay(alignment: .bottom) {
+            GenerationStatus()
+                .reportsChromeFrame("generation", to: model)
+                .padding(.bottom, 20)
+                .animation(.smooth(duration: 0.3), value: model.generation == nil)
+        }
         .overlay(alignment: .top) {
             VStack(spacing: 12) {
                 TopBar()

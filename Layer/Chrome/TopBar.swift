@@ -159,6 +159,7 @@ private struct ToolsBar: View {
     @State private var isPickingSymbol = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
+    @State private var isGenerating = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -180,6 +181,12 @@ private struct ToolsBar: View {
                     ToolIcon(symbol: "iphone")
                 }
                 .accessibilityLabel("Frames")
+                ToolButton(symbol: "wand.and.sparkles", label: "Generate Screen", isActive: isGenerating || model.isGenerating) {
+                    isGenerating = true
+                }
+                .popover(isPresented: $isGenerating) {
+                    GenerateScreenPanel()
+                }
                 ToolButton(symbol: "note.text", label: "Sticky note") {
                     withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
                 }
@@ -208,6 +215,7 @@ private struct ToolsBar: View {
 /// The tools folded into one button, for a window too narrow to lay them out.
 private struct ToolsMenu: View {
     @Environment(AppModel.self) private var model
+    @State private var isGeneratingScreen = false
     @State private var isPickingSymbol = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
@@ -227,6 +235,7 @@ private struct ToolsMenu: View {
             Menu("Frames", systemImage: "iphone") {
                 FrameChoices()
             }
+            Button("Generate Screen", systemImage: "wand.and.sparkles") { isGeneratingScreen = true }
             Button("Sticky Note", systemImage: "note.text") {
                 withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
             }
@@ -238,6 +247,9 @@ private struct ToolsMenu: View {
             ToolIcon(symbol: "ellipsis")
         }
         .accessibilityLabel("Tools")
+        .popover(isPresented: $isGeneratingScreen) {
+            GenerateScreenPanel()
+        }
         .popover(isPresented: $isPickingSymbol) {
             SymbolPicker { name in
                 isPickingSymbol = false

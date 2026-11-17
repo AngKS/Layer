@@ -19,7 +19,7 @@ final class SketchEngine {
     static let failuresBeforeResting = 2
     static let rest: Duration = .seconds(120)
 
-    let provider: SketchProvider
+    private(set) var provider: SketchProvider
     private(set) var readiness: ProviderReadiness
     /// True when the provider's most recent attempt failed or gave an impossible answer.
     private(set) var lastAttemptFailed = false
@@ -49,6 +49,22 @@ final class SketchEngine {
     init(provider: SketchProvider = .appleIntelligence) {
         self.provider = provider
         readiness = provider.readiness()
+    }
+
+    /// Switches to another provider, as when a design's model is changed: whatever was
+    /// known about the last one (its failures, its rest) is dropped, and the new one is
+    /// prepared and checked.
+    func use(_ newProvider: SketchProvider) {
+        guard newProvider.id != provider.id else { return }
+        check?.cancel()
+        check = nil
+        provider = newProvider
+        failuresInARow = 0
+        restingUntil = nil
+        isResting = false
+        lastAttemptFailed = false
+        hasWarmedUp = false
+        prepare()
     }
 
     /// One line for the UI saying what is reading sketches right now.

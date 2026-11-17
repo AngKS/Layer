@@ -33,6 +33,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Layer uses no encryption of its own, which App Store Connect asks about for every build.
         ITSAppUsesNonExemptEncryption: false
+        # Plain http only on the local network, for a model served by LM Studio.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Layer connects to LM Studio on your computer when you choose one of its models.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationLandscapeLeft
