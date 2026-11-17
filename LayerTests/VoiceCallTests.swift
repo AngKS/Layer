@@ -6,7 +6,8 @@ import Testing
 /// Designs for the voice tests to work on.
 @MainActor
 enum VoiceFixture {
-    /// A design with one iPhone screen named Login: a title, a "Sign in" button and an image.
+    /// A design with one iPhone screen named Login. From the top: a title, a "Sign in"
+    /// button and an image, which a call knows as E1, E2 and E3 on S1.
     static func login() -> (app: AppModel, screen: DesignScreen.ID) {
         let app = AppModel(document: LayerDocument())
         let screen = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4000, y: 4000), scale: 0.6))
@@ -14,9 +15,18 @@ enum VoiceFixture {
         _ = app.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
-            DesignElement(kind: .image, frame: CGRect(x: 20, y: 140, width: 200, height: 200), text: "", tint: Theme.accent),
+            DesignElement(kind: .image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
         ], on: screen.id, replacing: true)
         return (app, screen.id)
+    }
+
+    /// The login design with an undo history of its own, starting empty.
+    static func undoableLogin() -> (app: AppModel, screen: DesignScreen.ID) {
+        let fixture = login()
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        fixture.app.store.undoManager = undo
+        return fixture
     }
 }
 

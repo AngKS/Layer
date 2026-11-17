@@ -469,9 +469,26 @@ final class DesignStore {
     }
 
     func endEdit() {
-        guard let start = editStart else { return }
+        guard !isHoldingEdit, let start = editStart else { return }
         editStart = nil
         if start != content { registerUndo(restoring: start) }
+    }
+
+    /// Whether an edit is being held open: see `beginHeldEdit()`.
+    @ObservationIgnored private(set) var isHoldingEdit = false
+
+    /// Starts an edit that stays open until `endHeldEdit()`, whatever begins and ends
+    /// inside it. A spoken command makes several changes, each through code that opens
+    /// and closes an edit of its own; held, they undo as the one step the command was.
+    func beginHeldEdit() {
+        beginEdit()
+        isHoldingEdit = true
+    }
+
+    func endHeldEdit() {
+        guard isHoldingEdit else { return }
+        isHoldingEdit = false
+        endEdit()
     }
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {

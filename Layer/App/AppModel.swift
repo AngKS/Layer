@@ -356,6 +356,11 @@ final class AppModel {
         generationTask?.cancel()
     }
 
+    /// Returns once the screen being generated has finished, failed or been stopped.
+    func waitForGeneration() async {
+        await generationTask?.value
+    }
+
     private func finishGeneration(error: (any Error)?) {
         generationTask = nil
         guard var finished = generation else { return }
