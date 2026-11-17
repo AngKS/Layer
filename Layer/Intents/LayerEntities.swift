@@ -16,6 +16,10 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case invalidBlueprint
     case imagePlaygroundUnavailable
     case notAnImage
+    case canvasNotReady
+    case invalidStrokes(String)
+    case cantGoOnScreens
+    case invalidImage
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -30,6 +34,10 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .invalidBlueprint: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
         case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
+        case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."
+        case .invalidStrokes(let reason): "Layer couldn't read those strokes. \(reason)"
+        case .cantGoOnScreens: "Sticky notes stay on the open canvas; they can't go on a screen."
+        case .invalidImage: "Layer couldn't read that file as a picture."
         }
     }
 }
@@ -385,4 +393,47 @@ enum ColourOption: String, AppEnum {
         guard let colour = ColourWords.parse(hex) else { throw LayerIntentError.invalidColour(hex) }
         return colour
     }
+}
+
+enum ButtonLookOption: String, AppEnum {
+    case filled, bordered, plain
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Button Style"
+    static let caseDisplayRepresentations: [ButtonLookOption: DisplayRepresentation] = [
+        .filled: "Filled", .bordered: "Outlined", .plain: "Plain Text",
+    ]
+
+    var look: ButtonLook { ButtonLook(rawValue: rawValue) ?? .filled }
+}
+
+enum CodeLayoutOption: String, AppEnum {
+    case stack, absolute
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Code Layout"
+    static let caseDisplayRepresentations: [CodeLayoutOption: DisplayRepresentation] = [
+        .stack: "Stack", .absolute: "Exact Positions",
+    ]
+
+    var layout: CodeSettings.Layout { CodeSettings.Layout(rawValue: rawValue) ?? .stack }
+}
+
+/// What strokes are drawn with: the Magic Pen, whose sketches become elements, or one of
+/// PencilKit's pens, whose ink stays as drawn.
+enum InkPenOption: String, AppEnum {
+    case magicPen, pen, monoline, marker, pencil
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Pen"
+    static let caseDisplayRepresentations: [InkPenOption: DisplayRepresentation] = [
+        .magicPen: "Magic Pen", .pen: "Pen", .monoline: "Monoline", .marker: "Marker", .pencil: "Pencil",
+    ]
+}
+
+/// Which points stroke coordinates are given in.
+enum StrokeSpaceOption: String, AppEnum {
+    case screen, canvas
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Coordinates"
+    static let caseDisplayRepresentations: [StrokeSpaceOption: DisplayRepresentation] = [
+        .screen: "Screen Points", .canvas: "Canvas Points",
+    ]
 }

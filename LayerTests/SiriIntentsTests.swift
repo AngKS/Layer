@@ -288,3 +288,191 @@ struct ImagePlaygroundTests {
         #expect(model.store.resolve(ref)?.element.imageID == nil)
     }
 }
+
+@Suite("Stroke scripts")
+struct StrokeScriptTests {
+    private func observation(_ paths: [[CGPoint]]) -> SketchObservation? {
+        SketchAnalyzer.observe(paths.enumerated().map { SketchStroke(key: Double($0.offset), points: $0.element) })
+    }
+
+    @Test func readsFreehandPointsAndFillsThemIn() throws {
+        let strokes = try StrokeScript.parse("20,40 120,40 120,90")
+        #expect(strokes.count == 1)
+        let stroke = strokes[0]
+        #expect(stroke.first == CGPoint(x: 20, y: 40))
+        #expect(stroke.last == CGPoint(x: 120, y: 90))
+        // Filled in no more than three points apart, so PencilKit doesn't round the corner off.
+        for (a, b) in zip(stroke, stroke.dropFirst()) {
+            #expect(hypot(b.x - a.x, b.y - a.y) <= 3.01)
+        }
+        #expect(stroke.contains(CGPoint(x: 120, y: 40)))
+    }
+
+    @Test func readsShapesCommentsAndSemicolons() throws {
+        let strokes = try StrokeScript.parse("""
+        # an image placeholder
+        box 34 186 326 364 radius 40
+        cross 34 186 326 364
+        // and a title
+        wave 150 112 96 40 3; tick 300 640 24 24
+        """)
+        // The cross is two strokes.
+        #expect(strokes.count == 5)
+        let box = strokes[0]
+        let xs = box.map(\.x), ys = box.map(\.y)
+        #expect(abs((xs.min() ?? 0) - 34) < 3 && abs((xs.max() ?? 0) - 360) < 3)
+        #expect(abs((ys.min() ?? 0) - 186) < 3 && abs((ys.max() ?? 0) - 550) < 3)
+    }
+
+    @Test func readsNegativeAndDecimalNumbers() {
+        #expect(StrokeScript.numbers(in: "line -10.5 4 20,-3") == [-10.5, 4, 20, -3])
+    }
+
+    @Test func readsJSON() throws {
+        let pairs = try StrokeScript.parse("[[[0, 0], [30, 0]], [{\"x\": 5, \"y\": 5}, {\"x\": 5, \"y\": 50}]]")
+        #expect(pairs.count == 2)
+        #expect(pairs[1].first == CGPoint(x: 5, y: 5))
+        #expect(pairs[1].last == CGPoint(x: 5, y: 50))
+        let wrapped = try StrokeScript.parse("{\"strokes\": [[[0, 0], [10, 10]]]}")
+        #expect(wrapped.count == 1)
+    }
+
+    @Test func saysWhichLineItCouldNotRead() {
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("box 1 2 3 4\ntriangle 1 2 3") }
+        do {
+            _ = try StrokeScript.parse("box 1 2 3 4\ntriangle 1 2 3")
+        } catch let error as StrokeScript.ParseError {
+            #expect(error.line == 2)
+            #expect(error.text == "triangle 1 2 3")
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("10,10 20") }
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("[[[0, 0]]]") }
+    }
+
+    @Test func aScriptedBoxIsReadLikeADrawnOne() throws {
+        let observed = try #require(observation(try StrokeScript.parse("box 100 80 260 560 10")))
+        guard case .enclosure = observed.form else {
+            Issue.record("expected an enclosure, got \(observed.form)")
+            return
+        }
+        let pill = try #require(observation(try StrokeScript.parse("pill 40 500 220 40")))
+        guard case .enclosure(let roundness, _) = pill.form else {
+            Issue.record("expected an enclosure, got \(pill.form)")
+            return
+        }
+        #expect(roundness > 0.75)
+    }
+}
+
+@Suite("Look words")
+struct LookWordTests {
+    @Test func controlsTakeTheirState() throws {
+        let blueprint = try #require(ScreenBlueprint.parse("""
+        checkbox [off]
+        radio [selected]
+        progress [40%]
+        button: Skip [plain, centre, shadow, border red, opacity 50%]
+        """))
+        let elements = blueprint.layout(on: .iPhone)
+        #expect(elements.map(\.kind) == [.checkbox, .radio, .progress, .button])
+        #expect(elements[0].isOn == false)
+        #expect(elements[1].isOn == true)
+        #expect(elements[2].value == 0.4)
+        let skip = elements[3]
+        #expect(skip.buttonLook == .plain)
+        #expect(skip.textAlignment == .center)
+        #expect(skip.hasShadow)
+        #expect(skip.borderColor == ColourWords.named["red"])
+        #expect(skip.borderWidth == 1)
+        #expect(skip.opacity == 0.5)
+    }
+
+    @Test func aLookCanBeGivenToAnElementAlone() {
+        var element = DesignStore.newElement(.button)
+        var item = ScreenBlueprint.Item(kind: .button, text: element.text)
+        ScreenBlueprint.applyLook(["Bordered", " #112233", "20pt", "border 3"], to: &item)
+        item.applyLook(to: &element)
+        #expect(element.buttonLook == .bordered)
+        #expect(element.tint == RGBColor(hex: 0x112233))
+        #expect(element.fontSize == 20)
+        #expect(element.borderWidth == 3)
+    }
+}
+
+@Suite("Moving things from code")
+@MainActor
+struct MovingTests {
+    private func model() -> AppModel {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        return model
+    }
+
+    @Test func anElementMovesToAnotherScreenAndBack() throws {
+        let model = model()
+        let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5))
+        let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 0), scale: 0.5))
+        var button = DesignStore.newElement(.button)
+        button.frame = CGRect(x: 20, y: 700, width: 353, height: 50)
+        let ref = model.store.setElements([button], on: first.id, replacing: false)[0]
+
+        let moved = try #require(model.store.move(ref, toScreen: second.id, origin: CGPoint(x: 20, y: 100)))
+        #expect(moved.host == .screen(second.id))
+        #expect(model.store.screen(first.id)?.elements.isEmpty == true)
+        #expect(model.store.resolve(moved)?.element.frame == CGRect(x: 20, y: 100, width: 353, height: 50))
+
+        model.store.undoManager?.undo()
+        #expect(model.store.resolve(ref)?.element.frame == button.frame)
+        #expect(model.store.screen(second.id)?.elements.isEmpty == true)
+    }
+
+    @Test func offAScreenItKeepsItsPlaceAndSize() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
+        var title = DesignStore.newElement(.title)
+        title.frame = CGRect(x: 40, y: 80, width: 200, height: 40)
+        let ref = model.store.setElements([title], on: screen.id, replacing: false)[0]
+        let before = try #require(model.store.resolve(ref)).placement.canvasRect(for: title.frame)
+
+        let moved = try #require(model.store.move(ref, toScreen: nil, origin: nil))
+        #expect(moved.host == .canvas)
+        let after = try #require(model.store.resolve(moved))
+        #expect(after.placement.canvasRect(for: after.element.frame) == before)
+    }
+
+    @Test func stickyNotesStayOffScreens() {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let note = model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 1)
+        #expect(model.store.move(note, toScreen: screen.id, origin: .zero) == nil)
+        #expect(model.store.floating.count == 1)
+    }
+
+    @Test func theLayoutReadsBackAsJSON() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 10, y: 20), scale: 0.5))
+        let blueprint = try #require(ScreenBlueprint.parse("title: Hello\ntoggle [off]"))
+        model.store.setElements(blueprint.layout(on: screen.device), on: screen.id, replacing: true)
+        model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 0.5)
+        let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.content, modified: nil)
+
+        let json = DesignLayoutWriter.json(for: snapshot, ink: (count: 3, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)))
+        let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let screens = try #require(root["screens"] as? [[String: Any]])
+        #expect(screens.count == 1)
+        #expect(screens[0]["x"] as? Double == 10)
+        #expect(screens[0]["scale"] as? Double == 50)
+        let elements = try #require(screens[0]["elements"] as? [[String: Any]])
+        #expect(elements.map { $0["kind"] as? String } == ["title", "toggle"])
+        #expect(elements[0]["text"] as? String == "Hello")
+        #expect(elements[1]["on"] as? Bool == false)
+        let id = try #require(elements[0]["id"] as? String)
+        #expect(EntityKey.parseElement(id)?.design == "local:Test.layer")
+        #expect((root["canvasElements"] as? [[String: Any]])?.count == 1)
+        #expect((root["ink"] as? [String: Any])?["strokes"] as? Int == 3)
+    }
+}

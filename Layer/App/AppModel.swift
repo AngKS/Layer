@@ -835,6 +835,17 @@ final class AppModel {
         }
     }
 
+    /// Waits until every sketch that is being read has been placed, or `limit` passes. For
+    /// actions that draw and then report what the drawing became.
+    func waitForConversions(limit: Duration = .seconds(30)) async {
+        let deadline = ContinuousClock.now + limit
+        // Give a conversion just started time to register before checking it has settled.
+        try? await Task.sleep(for: .milliseconds(300))
+        while isBusy || !conversions.isEmpty, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// Throws away all Magic Pen ink that hasn't become anything.
     func discardSketch() {
         settle?.cancel()
