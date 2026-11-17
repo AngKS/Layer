@@ -178,11 +178,6 @@ final class AppModel {
             scheduleConversion()
         }
     }
-    /// Whether a zigzag scrubbed over an element with the Magic Pen deletes it.
-    /// Remembered between launches.
-    var scratchOutDeletes = UserDefaults.standard.object(forKey: "scratchOutDeletes") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(scratchOutDeletes, forKey: "scratchOutDeletes") }
-    }
     /// The size of the view the canvas is shown in, which is the size of the window.
     var canvasSize: CGSize = .zero {
         didSet { if fitsOnePanel, isLayersOpen, isInspectorOpen { isLayersOpen = false } }
@@ -1379,13 +1374,8 @@ final class AppModel {
                 if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
                     offer(KindSuggestion(ref: added, kind: other, sketch: bounds, observation: observation))
                 }
-            case .scratchOut:
-                let crossedOut = scratchOutDeletes ? store.elements(scratchedOutBy: bounds) : []
-                if !crossedOut.isEmpty {
-                    store.delete(crossedOut)
-                    converted = true
-                }
-            case .unknown:
+            case .scratchOut, .unknown:
+                // A scribble deletes nothing: scratching out is no longer a way to delete.
                 break
             }
             // Words the prompt gave for the element go on it, and a drawing read on request

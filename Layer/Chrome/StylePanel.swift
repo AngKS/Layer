@@ -533,25 +533,8 @@ private struct MagicPenTab: View {
     var body: some View {
         @Bindable var model = model
 
-        // What is drawn with the Magic Pen and not yet read. Either closes the menu.
-        PanelSection {
-            Group {
-                Button("Convert Sketch Now", systemImage: "wand.and.sparkles") {
-                    model.isBoardMenuOpen = false
-                    model.convertNow()
-                }
-                Button("Discard Sketch", systemImage: "eraser") {
-                    model.isBoardMenuOpen = false
-                    model.discardSketch()
-                }
-            }
-            .disabled(!model.hasSketch)
-            .opacity(model.hasSketch ? 1 : 0.35)
-        }
-
         PanelSection {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
-            Toggle("Scratch Out to Delete", isOn: $model.scratchOutDeletes)
             Toggle("Draw with Finger", isOn: Binding(get: { model.fingerDraws }, set: { model.setFingerDraws($0) }))
             HStack {
                 Text("New Screens")
