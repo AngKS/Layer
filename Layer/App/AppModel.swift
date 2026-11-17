@@ -393,14 +393,6 @@ final class AppModel {
 
     // MARK: Voice mode
 
-    /// Stands in for the voice agent until it is connected: a call can be started and
-    /// spoken to, and says that nothing can be done with what it hears yet.
-    private final class UnconnectedRunner: VoiceCommandRunner {
-        func run(_ command: String) async -> VoiceOutcome {
-            VoiceOutcome(problem: "Voice commands aren't connected yet.")
-        }
-    }
-
     /// The call that is up in this design, if one is.
     private(set) var voice: VoiceCall?
     /// Why a call couldn't start or couldn't go on, to tell the person once.
@@ -411,7 +403,7 @@ final class AppModel {
     /// Starts a call: the phone button's action.
     func startVoiceCall() {
         guard voice == nil else { return }
-        Task { await startVoiceCall(route: DictationRoute(), runner: UnconnectedRunner()) }
+        Task { await startVoiceCall(route: DictationRoute(), runner: VoiceAgent(model: self)) }
     }
 
     /// Starts a call that hears through `route` and acts through `runner`. Returns once
@@ -421,6 +413,8 @@ final class AppModel {
         // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
         tool = .select
         let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        // What the agent is doing, tool by tool, is what the pill says while it works.
+        (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }
         call.onEnd = { [weak self, weak call] in
             guard let self, let call, self.voice === call else { return }
             self.voiceNotice = call.endReason

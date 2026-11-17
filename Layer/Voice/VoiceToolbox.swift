@@ -18,6 +18,8 @@ final class VoiceToolbox: VoiceActing {
     private(set) var failures: [String] = []
     /// Whether the command asked to hang up.
     private(set) var endsCall = false
+    /// Whether the last thing tried was one that couldn't be done.
+    private(set) var lastFailed = false
 
     init(model: AppModel, handles: VoiceHandles) {
         self.model = model
@@ -29,6 +31,7 @@ final class VoiceToolbox: VoiceActing {
         lines = []
         failures = []
         endsCall = false
+        lastFailed = false
     }
 
     // MARK: Screens
@@ -349,11 +352,13 @@ final class VoiceToolbox: VoiceActing {
 
     private func done(_ line: String) -> String {
         lines.append(line)
+        lastFailed = false
         return line
     }
 
     private func failed(_ line: String) -> String {
         failures.append(line)
+        lastFailed = true
         return line
     }
 

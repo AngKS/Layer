@@ -216,6 +216,51 @@ extension HostedModelTests {
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
+    func aSpokenCommandRunsThroughTheDesignsHostedModel() async throws {
+        let (app, screen) = VoiceFixture.undoableLogin()
+        // Choosing a model has the sketch engine try it out. That request is let through
+        // first, so that the replies below go to the command's own two.
+        StubProvider.answer(with: .init(body: SSE.anthropic(text: ["ok"])))
+        app.setModelChoice(.hosted(.anthropic, model: "claude-test"))
+        try await Task.sleep(for: .milliseconds(400))
+        StubProvider.answer(with: [
+            .init(body: SSE.anthropicToolCall(id: "toolu_1", name: "styleElement", json: [#"{"element":"E2","#, #""look":"green"}"#])),
+            .init(body: SSE.anthropic(text: ["Done."])),
+        ])
+        let agent = VoiceAgent(model: app)
+
+        let outcome = await agent.run("make the sign in button green")
+
+        #expect(outcome.problem == nil)
+        #expect(outcome.lines == ["Restyled the button “Sign in”."])
+        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        // The model was sent the rules, the whole canvas and every tool, as Anthropic takes them.
+        let first = try body(ofRequest: 0)
+        let system = try #require(first["system"] as? String)
+        #expect(system.contains(VoiceRules.full))
+        #expect(system.contains(#"E2 button "Sign in" x20 y420 w353 h50"#))
+        #expect((first["tools"] as? [[String: Any]])?.count == 15)
+        #expect(first["model"] as? String == "claude-test")
+        // Its second look at the canvas is after the change.
+        let second = try #require(try body(ofRequest: 1)["system"] as? String)
+        #expect(second.contains("colour green"))
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aHostedModelThatCannotBeReachedIsSaidInWords() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        StubProvider.failNextRequests()
+        let before = app.store.content
+        let outcome = await VoiceAgent(model: app).run("make the button green")
+        #expect(outcome.problem == HostedModelError.offline.errorDescription)
+        #expect(app.store.content == before)
+        #expect(!app.store.isHoldingEdit)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
     func aSpokenScreenIsWrittenByTheDesignsModel() async throws {
         StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
         let (app, _) = VoiceFixture.undoableLogin()

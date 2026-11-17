@@ -69,6 +69,30 @@ final class VoiceModeUITests: XCTestCase {
         }
     }
 
+    /// The real agent and its tools, with a model that calls the tools the script names.
+    func testASpokenCommandChangesTheCanvas() {
+        let spoken = "make the sign in button green and say ahoy => styleElement element=E2 look=green && setText element=E2 text=Ahoy"
+        openNewDesign(arguments: [
+            "-convertsAutomatically", "NO", "-LayerVoiceDemoDesign", "login",
+            "-LayerVoiceDemo", spoken, "-LayerVoiceDemoFreeze", "done",
+        ])
+        resizeWindow(toWidth: 375)
+        XCTAssertTrue(control("End voice mode").waitForExistence(timeout: 15), "the call should be up")
+        // The pill says what the last tool did, and the canvas shows it.
+        XCTAssertTrue(wait(for: caption, toHave: "label CONTAINS %@", "Reworded the button"), "the pill should say what was done")
+        XCTAssertTrue(app.staticTexts["Ahoy"].waitForExistence(timeout: 5), "the button on the canvas should say Ahoy")
+        sleep(1)
+        shoot("narrow-command-done")
+        control("End voice mode").tap()
+        XCTAssertTrue(control("Start voice mode").waitForExistence(timeout: 5))
+        // One undo takes the whole command back: both its changes.
+        XCTAssertTrue(control("Undo").waitForExistence(timeout: 5), "a spoken command should be undoable")
+        control("Undo").tap()
+        XCTAssertTrue(app.staticTexts["Sign in"].waitForExistence(timeout: 5), "undo should put the button's words back")
+        XCTAssertFalse(app.staticTexts["Ahoy"].exists)
+        shoot("narrow-command-undone")
+    }
+
     func testThePillOnADarkCanvas() {
         openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerVoiceDemo", script, "-LayerVoiceDemoFreeze", "done", "-LayerVoiceDemoDark", "YES"])
         resizeWindow(toWidth: 375)

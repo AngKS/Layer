@@ -359,6 +359,129 @@ struct VoiceCallTests {
         #expect(app.voiceNotice == nil)
     }
 
+    // MARK: With the agent
+
+    private static let needsOwnModels = Comment(rawValue: "Foundation Models runs models of the app's own from iPadOS 27.2")
+
+    /// The login design in a call whose model follows `script`.
+    private func call(_ script: [String: [ScriptedLanguageModel.Step]]) async -> (AppModel, DesignScreen.ID, FakeRoute) {
+        let (app, screen) = VoiceFixture.undoableLogin()
+        let route = FakeRoute()
+        await app.startVoiceCall(route: route, runner: VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: script)))
+        return (app, screen, route)
+    }
+
+    private func button(in app: AppModel, _ screen: DesignScreen.ID) -> DesignElement? {
+        app.store.screen(screen)?.elements.first { $0.kind == .button }
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func aSpokenCommandChangesTheDesignAndSaysSo() async throws {
+        let (app, screen, route) = await call(["make the button green": [.init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)]])
+        route.send(.command("Make the button green"))
+        #expect(await eventually { app.voice?.caption?.kind == .done })
+        #expect(app.voice?.caption?.text == "Restyled the button “Sign in”.")
+        #expect(button(in: app, screen)?.tint == ColourWords.parse("green"))
+        app.endVoiceCall()
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func theStepUnderWayIsShown() async throws {
+        // The tool runs after the model has taken its time; the step shows as it starts.
+        let (app, _, route) = await call(["make the button green": [.init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .milliseconds(200))]])
+        var captions: [VoiceCall.Caption] = []
+        let call = try #require(app.voice)
+        let watching = Task {
+            while !Task.isCancelled {
+                if let caption = call.caption, captions.last != caption { captions.append(caption) }
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+        }
+        route.send(.command("make the button green"))
+        #expect(await eventually { call.caption?.kind == .done })
+        watching.cancel()
+        #expect(captions.first == VoiceCall.Caption(kind: .working, text: "Thinking…"))
+        #expect(captions.last?.kind == .done)
+        app.endVoiceCall()
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func whatTheAgentIsDoingReachesThePill() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let agent = VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: [
+            "make the button green": [.init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .seconds(5))],
+        ]))
+        let route = FakeRoute()
+        await app.startVoiceCall(route: route, runner: agent)
+        route.send(.command("make the button green"))
+        #expect(await eventually { app.voice?.phase == .working })
+        // The agent says what it is doing through the call it was started in.
+        agent.onStep?("Restyling…")
+        #expect(app.voice?.caption == VoiceCall.Caption(kind: .working, text: "Restyling…"))
+        app.endVoiceCall()
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func stopWithAQueueKeepsOneUndoStep() async throws {
+        let (app, screen, route) = await call([
+            "two things": [
+                .init(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#),
+                .init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .seconds(5)),
+            ],
+            "another": [.init(tool: "setText", arguments: #"{"element":"E2","text":"Another"}"#)],
+        ])
+        let before = app.store.content
+        route.send(.command("two things"))
+        route.send(.command("another"))
+        #expect(await eventually { self.button(in: app, screen)?.text == "One" })
+        #expect(app.voice?.queuedCount == 1)
+        route.send(.command("stop"))
+        #expect(await eventually { app.voice?.phase == .listening })
+        #expect(app.voice?.caption == VoiceCall.Caption(kind: .done, text: "Stopped"))
+        #expect(app.voice?.queuedCount == 0)
+        try await Task.sleep(for: .milliseconds(150))
+        // The command waiting never ran, and the one stopped went no further.
+        #expect(button(in: app, screen)?.text == "One")
+        #expect(button(in: app, screen)?.tint == Theme.accent)
+        // What it had done is one step.
+        #expect(!app.store.isHoldingEdit)
+        let undo = try #require(app.store.undoManager)
+        undo.undo()
+        #expect(app.store.content == before)
+        #expect(!undo.canUndo)
+        app.endVoiceCall()
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func endingMidCommandLeavesOneUndoStep() async throws {
+        let (app, screen, route) = await call(["two things": [
+            .init(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#),
+            .init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .seconds(5)),
+        ]])
+        let before = app.store.content
+        route.send(.command("two things"))
+        #expect(await eventually { self.button(in: app, screen)?.text == "One" })
+        app.endVoiceCall()
+        #expect(app.voice == nil)
+        #expect(route.isStopped)
+        // The command lets go of the design as it is cancelled, a moment later.
+        #expect(await eventually { !app.store.isHoldingEdit })
+        #expect(button(in: app, screen)?.tint == Theme.accent)
+        let undo = try #require(app.store.undoManager)
+        undo.undo()
+        #expect(app.store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
+    func hangingUpByAskingTheModelEndsTheCall() async throws {
+        let (app, _, route) = await call(["that is all for today": [.init(tool: "endCall", arguments: "{}")]])
+        route.send(.command("That is all for today"))
+        #expect(await eventually { app.voice == nil })
+        #expect(route.isStopped)
+        #expect(app.voiceNotice == nil)
+    }
+
     @Test func onlyOneCallStartsInADesign() async {
         let (app, _) = VoiceFixture.login()
         let first = FakeRoute()
@@ -369,6 +492,42 @@ struct VoiceCallTests {
         #expect(app.voice === call)
         #expect(!first.isStopped)
         app.endVoiceCall()
+    }
+}
+
+@Suite("The scripted call for the simulator")
+@MainActor
+struct VoiceDemoTests {
+    private func arguments(_ step: ScriptedLanguageModel.Step) throws -> [String: String] {
+        try #require(try JSONSerialization.jsonObject(with: Data(step.arguments.utf8)) as? [String: String])
+    }
+
+    @Test func aScriptIsReadIntoWhatIsSaidAndWhatComesOfIt() {
+        let lines = VoiceDemo.lines(from: "make it blue => Made it blue; show me the first screen => !No connection.")
+        #expect(lines == [
+            VoiceDemo.Line(spoken: "make it blue", result: "Made it blue"),
+            VoiceDemo.Line(spoken: "show me the first screen", result: "!No connection."),
+        ])
+    }
+
+    @Test func aResultThatNamesAToolIsStepsForTheModel() throws {
+        let steps = try #require(VoiceDemo.steps(from: "styleElement element=E2 look=text white, bold"))
+        #expect(steps.count == 1)
+        #expect(steps[0].tool == "styleElement")
+        #expect(try arguments(steps[0]) == ["element": "E2", "look": "text white, bold"])
+
+        let two = try #require(VoiceDemo.steps(from: "setText element=E2 text=Ahoy there && alignElement element=E3 alignment=centre"))
+        #expect(two.map(\.tool) == ["setText", "alignElement"])
+        #expect(try arguments(two[0]) == ["element": "E2", "text": "Ahoy there"])
+        #expect(try arguments(two[1]) == ["element": "E3", "alignment": "centre"])
+
+        let bare = try #require(VoiceDemo.steps(from: "undo"))
+        #expect(bare[0].arguments == "{}")
+    }
+
+    @Test func aResultInPlainWordsIsNotSteps() {
+        #expect(VoiceDemo.steps(from: "Made the button blue") == nil)
+        #expect(VoiceDemo.steps(from: "!No connection to the internet.") == nil)
     }
 }
 
