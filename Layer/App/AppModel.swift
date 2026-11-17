@@ -101,6 +101,8 @@ final class AppModel {
     var tool: Tool = .draw {
         didSet {
             guard tool != oldValue else { return }
+            // Drawing chosen in a narrow window is kept, whatever the width does next.
+            if tool == .draw { drawingWaitsForAWiderWindow = false }
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
@@ -192,7 +194,30 @@ final class AppModel {
     /// then rise from the bottom edge, which is how the panels open, and the pencil
     /// palette is a bar fixed across the bottom rather than one that floats.
     var isCompactSizeClass = false {
-        didSet { if fitsOnePanel, isLayersOpen, isInspectorOpen { isLayersOpen = false } }
+        didSet {
+            if fitsOnePanel, isLayersOpen, isInspectorOpen { isLayersOpen = false }
+            windowWidthChanged()
+        }
+    }
+    /// Whether the window has said how wide it is yet: the first time is the design opening.
+    private var hasSeenWindowWidth = false
+    /// Drawing was left off because the design opened in a narrow window. It comes on when
+    /// the window widens, unless something else was chosen meanwhile.
+    private var drawingWaitsForAWiderWindow = false
+
+    /// A design opened in a narrow window, or on a phone, starts with Draw off: the pencil
+    /// bar would take the bottom of a small screen before anything was drawn. The palette
+    /// comes when the window widens, or when Draw is turned on.
+    private func windowWidthChanged() {
+        if !hasSeenWindowWidth {
+            hasSeenWindowWidth = true
+            guard isCompactSizeClass, tool == .draw else { return }
+            tool = .select
+            drawingWaitsForAWiderWindow = true
+        } else if !isCompactSizeClass, drawingWaitsForAWiderWindow {
+            drawingWaitsForAWiderWindow = false
+            if tool == .select { tool = .draw }
+        }
     }
     /// Whether there is only room for one panel at a time.
     private var fitsOnePanel: Bool { isCompactSizeClass || (canvasSize.width > 0 && canvasSize.width < 680) }

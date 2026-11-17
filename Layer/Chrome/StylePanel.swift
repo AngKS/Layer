@@ -390,6 +390,8 @@ struct BoardMenu: View {
     /// In a narrow window the menu fills a sheet rather than a popover.
     var isSheet = false
     @State private var draft = ""
+    /// What the field said when the menu opened, to tell whether anything was typed.
+    @State private var shown = ""
     @AppStorage("boardMenuTab") private var tab = Tab.canvas
 
     var body: some View {
@@ -437,7 +439,10 @@ struct BoardMenu: View {
         .frame(width: isSheet ? nil : 360, alignment: .top)
         .frame(maxWidth: isSheet ? .infinity : nil, maxHeight: isSheet ? .infinity : nil, alignment: .top)
         .foregroundStyle(.primary)
-        .onAppear { draft = model.store.title ?? "" }
+        .onAppear {
+            draft = model.store.title ?? ""
+            shown = draft
+        }
         .onDisappear(perform: rename)
     }
 
@@ -452,10 +457,12 @@ struct BoardMenu: View {
         .padding(.bottom, 12)
     }
 
-    /// Names the board what was typed, once typing ends or the menu closes.
+    /// Names the board what was typed, once typing ends or the menu closes. Only if
+    /// something was typed: a board named while its menu was open (its first screen
+    /// read, say) kept "Untitled" when the menu closed, as the field still said it.
     private func rename() {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard typed != (model.store.title ?? "") else { return }
+        guard draft != shown, typed != (model.store.title ?? "") else { return }
         model.store.setTitle(typed)
     }
 }

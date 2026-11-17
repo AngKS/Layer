@@ -221,11 +221,11 @@ final class VoiceCall {
     static func localAction(for command: String) -> LocalAction? {
         let words = command.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty && !["please", "ok", "okay"].contains($0) }
+            .filter { !$0.isEmpty && !["please", "ok", "okay", "thank", "thanks", "you", "cool"].contains($0) }
             .joined(separator: " ")
         switch words {
         case "stop", "cancel", "stop that", "cancel that", "stop it", "cancel it": return .stop
-        case "hang up", "end call", "end the call", "goodbye": return .hangUp
+        case "hang up", "end call", "end the call", "goodbye", "bye", "bye bye": return .hangUp
         default: return nil
         }
     }
@@ -266,6 +266,8 @@ final class VoiceCall {
     private static let noises: Set<String> = [
         "so", "um", "uh", "er", "erm", "hmm", "mm", "ah", "oh", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "well",
         "right", "like", "and", "then", "but", "the", "a", "an", "you", "please", "hey", "hi", "hello",
+        // Said to the iPad as it works, not to it: "cool, cool, cool" was taken for undo.
+        "cool", "nice", "great", "awesome", "perfect", "good", "alright", "sure", "wow", "thanks", "thank",
     ]
 
     private static let commandsOfOneWord: Set<String> = [
