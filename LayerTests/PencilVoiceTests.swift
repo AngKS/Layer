@@ -87,6 +87,12 @@ private final class Bench {
         return true
     }
 
+    /// The open route hears some words, and the call shows them.
+    func hear(_ words: String, on route: Int = 0) async -> Bool {
+        routes[route].send(.hearing(words))
+        return await eventually { self.pencil.call?.caption?.kind == .hearing && self.pencil.call?.caption?.text == words }
+    }
+
     func end() {
         pencil.call?.end()
         app.endVoiceCall()
@@ -104,6 +110,7 @@ struct PencilVoiceTests {
         bench.pencil.squeezeEnded()
         #expect(await eventually { bench.state == .listening })
         #expect(bench.routes.count == 1 && bench.routes[0].finishCount == 0)
+        #expect(await bench.hear("make it blue"))
 
         // The second squeeze sends; letting go of it does nothing more.
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: .radians(0.1))
@@ -134,6 +141,7 @@ struct PencilVoiceTests {
     @Test func theSecondSqueezeSendsWithoutAHoverPose() async {
         let bench = Bench()
         #expect(await bench.toggle())
+        #expect(await bench.hear("make it blue"))
         // The pen drifted out of hover range: the squeeze still ends the toggle.
         bench.pencil.squeezeBegan(at: nil, azimuth: nil)
         #expect(bench.routes[0].finishCount == 1)
@@ -366,6 +374,118 @@ struct PencilVoiceTests {
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.runner.cancelled.isEmpty)
         bench.runner.holds = false
+        bench.end()
+    }
+
+    // MARK: Fix round 1
+
+    @Test func anEarlierCommandsProblemDoesNotEndAListenThatIsStarting() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        bench.runner.outcomes = [VoiceOutcome(problem: "Can't reach the internet.")]
+        // A runs, on the button.
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        // B is squeezed for over the title while its microphone is still coming on.
+        bench.routesHoldStart = true
+        bench.pencil.squeezeBegan(at: Bench.overTitle, azimuth: nil)
+        #expect(await eventually { bench.routes.count == 2 })
+        // A ends with a problem in the meantime.
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .problem })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.state == .gettingReady)
+        // B's microphone comes on, and letting go sends B, about the title.
+        bench.routes[1].holdsStart = false
+        #expect(await eventually { bench.state == .listening })
+        bench.now += .seconds(1)
+        bench.pencil.squeezeEnded()
+        #expect(bench.routes[1].finishCount == 1)
+        bench.routes[1].send(.command("make it red"))
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] })
+        #expect(bench.app.selection == bench.title)
+        bench.end()
+    }
+
+    @Test func leavingWhileTheMicrophoneComesOnTurnsItOff() async {
+        let bench = Bench()
+        bench.routesHoldStart = true
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.routes.count == 1 })
+        bench.pencil.call?.captionTimes = (.seconds(60), .seconds(60))
+        bench.app.windowLeftTheScreen()
+        #expect(bench.routes[0].isStopped && bench.pencil.bubble == nil)
+        bench.end()
+    }
+
+    @Test func theSameProblemTwiceIsStillShown() async {
+        let bench = Bench()
+        bench.routesHoldStart = true
+        let problem = PencilVoice.State.problem("Didn't catch that. Wait for the tap, then speak.")
+        for attempt in 1...2 {
+            bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+            #expect(await eventually { bench.routes.count == attempt })
+            bench.now += .seconds(1)
+            bench.pencil.squeezeEnded()
+            #expect(await eventually { bench.state == problem })
+            try? await Task.sleep(for: .milliseconds(50))
+            #expect(bench.state == problem)
+        }
+        bench.end()
+    }
+
+    @Test func aToggleWithNothingSaidClosesAtOnce() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        bench.pencil.call?.finishWait = .seconds(60)
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(bench.pencil.bubble == nil && bench.routes[0].isStopped)
+        bench.pencil.squeezeEnded()
+        #expect(bench.runner.commands.isEmpty && !(bench.pencil.call?.isHearing ?? true))
+        bench.end()
+    }
+
+    @Test func aPencilCallIsLetGoOf() async {
+        let (app, _) = VoiceFixture.login()
+        var pencil: PencilVoice? = PencilVoice(model: app, makeRoute: { FakeRoute() }, makeRunner: { _ in FakeRunner() })
+        pencil?.readiness = { .ready }
+        pencil?.hovered()
+        #expect(await eventually { pencil?.call?.phase == .listening })
+        try? await Task.sleep(for: .milliseconds(50))
+        weak var call = pencil?.call
+        pencil = nil
+        #expect(await eventually { call == nil })
+    }
+
+    @Test func closingTheDesignEndsThePencilCallOnceIdle() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        let call = bench.pencil.call
+        bench.app.close()
+        try? await Task.sleep(for: .milliseconds(50))
+        // The running command is left to finish, and then the call ends.
+        #expect(call?.phase == .working && bench.runner.cancelled.isEmpty)
+        bench.runner.holds = false
+        #expect(await eventually { call?.phase == .ended && bench.pencil.call == nil })
+        // An idle call ends at once.
+        let idle = Bench()
+        idle.pencil.hovered()
+        #expect(await eventually { idle.pencil.call?.phase == .listening })
+        let idleCall = idle.pencil.call
+        idle.app.close()
+        #expect(idleCall?.phase == .ended)
+    }
+
+    @Test func hoveringDuringAPhoneCallMakesNoPencilCall() async {
+        let bench = Bench()
+        await bench.app.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        bench.pencil.hovered()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call == nil && bench.runner.warmUps == 0)
         bench.end()
     }
 }

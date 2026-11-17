@@ -54,7 +54,17 @@ final class VoiceCall {
 
         var kind: Kind
         var text: String
+        /// Which showing of a line this is, so that the same words shown twice can be
+        /// told apart. Not part of what the line says, so not part of `==`.
+        var id = UUID()
+
+        static func == (lhs: Caption, rhs: Caption) -> Bool {
+            lhs.kind == rhs.kind && lhs.text == rhs.text
+        }
     }
+
+    /// Said when a listen is sent before its route could hear anything.
+    static let tooSoon = "Didn't catch that. Wait for the tap, then speak."
 
     /// How many microphone levels are kept, which is how many bars the waveform has.
     static let levelCount = 28
@@ -80,6 +90,9 @@ final class VoiceCall {
     /// Whether the route asked for last can hear, and hasn't been told the command is
     /// over. Unlike `isHearing`, a route sent and still settling doesn't count.
     private(set) var isListeningAsAsked = false
+    /// Whether the route asked for last is still open, starting or hearing, and not sent.
+    /// When it goes false without being sent or let go of, that listen failed.
+    private(set) var hasOpenListen = false
 
     /// How long a caption stays once there is nothing more to add to it.
     @ObservationIgnored var captionTimes: (done: Duration, problem: Duration) = (.seconds(3), .seconds(6))
@@ -178,6 +191,7 @@ final class VoiceCall {
         finishing.removeAll()
         isHearing = false
         isListeningAsAsked = false
+        hasOpenListen = false
         listening?.cancel()
         running?.cancel()
         worker?.cancel()
@@ -223,6 +237,7 @@ final class VoiceCall {
         let ear = Ear(route: makeRoute(), target: target)
         open = ear
         isListeningAsAsked = false
+        hasOpenListen = true
         do {
             let events = try await ear.route.start(vocabulary: vocabulary())
             // Let go of, or the call ended, while the route was getting ready.
@@ -261,11 +276,12 @@ final class VoiceCall {
             // than dropped in silence, or the person waits for a command that never comes.
             VoiceLog.log.info("call: sent before the route could hear")
             close(ear)
-            show(.problem, "Didn't catch that. Wait for the tap, then speak.")
+            show(.problem, Self.tooSoon)
             return
         }
         open = nil
         isListeningAsAsked = false
+        hasOpenListen = false
         finishing.append(ear)
         ear.route.finish()
         let wait = finishWait
@@ -288,6 +304,7 @@ final class VoiceCall {
         if open === ear {
             open = nil
             isListeningAsAsked = false
+            hasOpenListen = false
         }
         finishing.removeAll { $0 === ear }
         isHearing = open != nil || !finishing.isEmpty
@@ -527,7 +544,7 @@ final class VoiceCall {
         }
         captionClearing = Task { [weak self] in
             try? await Task.sleep(for: time)
-            guard !Task.isCancelled, let self, self.caption == shown else { return }
+            guard !Task.isCancelled, let self, self.caption?.id == shown.id else { return }
             self.caption = nil
         }
     }

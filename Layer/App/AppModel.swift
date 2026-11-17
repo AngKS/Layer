@@ -558,7 +558,7 @@ final class AppModel {
         isClosed = true
         voice?.end()
         // Listening stops, but a pencil command already running is left to finish.
-        pencilVoiceIfMade?.stopListening()
+        pencilVoiceIfMade?.designClosed()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
