@@ -9,8 +9,10 @@ import Foundation
 /// written against this protocol rather than the app, so that the same tools can be
 /// measured against a model with nothing but a recorder behind them.
 protocol VoiceActing: AnyObject, Sendable {
-    @MainActor func createScreen(description: String) async throws -> String
-    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String
+    @MainActor func createScreen(name: String?, description: String) async throws -> String
+    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String
+    @MainActor func stackElements(elements: String, direction: String) -> String
+    @MainActor func placeElement(element: String, relation: String, target: String) -> String
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
     @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String
@@ -21,10 +23,18 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func renameScreen(screen: String, name: String) -> String
     @MainActor func deleteScreen(screen: String, named: String?) -> String
     @MainActor func show(target: String) -> String
+    @MainActor func pan(direction: String) -> String
     @MainActor func zoom(to level: String) -> String
     @MainActor func undo() -> String
     @MainActor func redo() -> String
     @MainActor func endCall() -> String
+}
+
+extension VoiceActing {
+    /// Adds an element where new elements go: below the rest.
+    @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
+        addElement(screen: screen, kind: kind, text: text, look: look, relation: nil, target: nil)
+    }
 }
 
 /// Whether the word a person used for something fits the thing a model took it to mean.
@@ -101,9 +111,9 @@ enum VoiceTools {
         [
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
-            DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
+            StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor),
-            ShowTool(actor: actor), ZoomTool(actor: actor),
+            ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
             UndoTool(actor: actor), RedoTool(actor: actor), EndCallTool(actor: actor),
         ]
     }
@@ -125,10 +135,13 @@ enum VoiceTools {
         case "styleElement": "Restyling…"
         case "moveElement": "Resizing…"
         case "alignElement": "Aligning…"
+        case "stackElements": "Stacking…"
+        case "placeElement": "Placing…"
         case "duplicateElement": "Duplicating…"
         case "deleteElement", "deleteScreen": "Deleting…"
         case "renameScreen": "Renaming…"
         case "show": "Showing…"
+        case "pan": "Moving the view…"
         case "zoom": "Zooming…"
         case "undo": "Undoing…"
         case "redo": "Redoing…"
@@ -145,12 +158,14 @@ struct CreateScreenTool: Tool {
 
     @Generable
     struct Arguments {
+        @Guide(description: "A short name for the screen, such as Login or Checkout.")
+        var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await actor.createScreen(description: arguments.description)
+        try await actor.createScreen(name: arguments.name, description: arguments.description)
     }
 }
 
@@ -169,10 +184,17 @@ struct AddElementTool: Tool {
         var text: String?
         @Guide(description: "Optional look words, comma separated, such as: blue, bold, 18pt, radius 12, text white, bordered.")
         var look: String?
+        @Guide(description: "Where to put it, if the person said it goes next to another element: below, above, left of or right of.")
+        var relation: String?
+        @Guide(description: "The handle of that other element, such as E1.")
+        var target: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.addElement(screen: arguments.screen, kind: arguments.kind, text: arguments.text, look: arguments.look)
+        await actor.addElement(
+            screen: arguments.screen, kind: arguments.kind, text: arguments.text, look: arguments.look,
+            relation: arguments.relation, target: arguments.target
+        )
     }
 }
 
@@ -250,11 +272,11 @@ struct MoveElementTool: Tool {
 struct AlignElementTool: Tool {
     let actor: any VoiceActing
     let name = "alignElement"
-    let description = "Lines an element up with an edge or the centre of its screen. “Centre”, “centrally” and “middle” all mean centred from side to side."
+    let description = "Lines an element up with an edge or the centre of its screen, or several elements up with one another. “Centre”, “centrally” and “middle” all mean centred from side to side."
 
     @Generable
     struct Arguments {
-        @Guide(description: "The element's handle, such as E3.")
+        @Guide(description: "The element's handle, such as E3. Two or more, comma separated, are lined up with one another.")
         var element: String
         @Guide(description: "One of: left, centre, right, top, bottom, or vertical centre for centred from top to bottom.")
         var alignment: String
@@ -262,6 +284,44 @@ struct AlignElementTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.alignElement(element: arguments.element, alignment: arguments.alignment)
+    }
+}
+
+struct StackElementsTool: Tool {
+    let actor: any VoiceActing
+    let name = "stackElements"
+    let description = "Puts several elements one after another so that none overlap: in a column, one under another, or in a row, side by side."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The handles of the elements, comma separated, such as E3, E4, E5.")
+        var elements: String
+        @Guide(description: "column or row.")
+        var direction: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.stackElements(elements: arguments.elements, direction: arguments.direction)
+    }
+}
+
+struct PlaceElementTool: Tool {
+    let actor: any VoiceActing
+    let name = "placeElement"
+    let description = "Puts an element next to another element: below, above, left of or right of it. Use it for “below the title”, “beside the image” and “under the button”. For an edge of the screen, use alignElement."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The handle of the element to move, such as E3.")
+        var element: String
+        @Guide(description: "below, above, left of or right of.")
+        var relation: String
+        @Guide(description: "The handle of the element it goes next to, such as E1.")
+        var target: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.placeElement(element: arguments.element, relation: arguments.relation, target: arguments.target)
     }
 }
 
@@ -348,6 +408,22 @@ struct ShowTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.show(target: arguments.target)
+    }
+}
+
+struct PanTool: Tool {
+    let actor: any VoiceActing
+    let name = "pan"
+    let description = "Moves the view of the canvas up, down, left or right, when no screen or element is named. Use it for “move down a bit”, “scroll up” and “go left”."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "up, down, left or right. Add “a bit” for a small move.")
+        var direction: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.pan(direction: arguments.direction)
     }
 }
 

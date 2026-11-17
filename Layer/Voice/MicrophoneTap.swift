@@ -35,13 +35,22 @@ final class MicrophoneTap: VoiceAudioSource {
         // The underscored name is the one iOS 27's SDK gives the call that reports a
         // failure; the plain one is deprecated and has no Swift name of its own yet.
         // Its error parameter sits before the block, so Swift keeps an empty place for it.
-        try input.__installTap(onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format, error: ()) { buffer, _ in
-            continuation.yield(AudioChunk(buffer: buffer))
-        }
+        try input.__installTap(
+            onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format, error: (), block: Self.tapBlock(into: continuation)
+        )
         engine.prepare()
         try engine.start()
         watchForLosingTheMicrophone()
         return sound
+    }
+
+    /// The block the engine hands its sound to. The engine calls it on a thread of its
+    /// own, so it must belong to no actor, which is why this is `nonisolated` and the
+    /// block `@Sendable`. Written in place in `start()`, as it first was, the block is
+    /// taken for the main actor's, and Swift stops the app the moment the first sound
+    /// arrives on the engine's thread. Only a real microphone shows it.
+    nonisolated static func tapBlock(into continuation: AsyncStream<AudioChunk>.Continuation) -> AVAudioNodeTapBlock {
+        { @Sendable buffer, _ in continuation.yield(AudioChunk(buffer: buffer)) }
     }
 
     func stop() {
@@ -62,9 +71,13 @@ final class MicrophoneTap: VoiceAudioSource {
         watching = [
             center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
                 let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
-                if began { MainActor.assumeIsolated { self?.stop() } }
+                if began {
+                    VoiceLog.log.info("microphone: interrupted")
+                    MainActor.assumeIsolated { self?.stop() }
+                }
             },
             center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+                VoiceLog.log.info("microphone: the audio route changed")
                 MainActor.assumeIsolated { self?.stop() }
             },
         ]

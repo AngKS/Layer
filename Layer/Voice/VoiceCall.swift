@@ -88,10 +88,16 @@ final class VoiceCall {
         Self.current = self
         // Asking for the microphone, or fetching what speech recognition needs, can take a while.
         show(.working, "Getting ready to listen…")
+        VoiceLog.log.info("call: getting ready")
+        // A model's first answer in a conversation is its slowest by far, so it gets
+        // ready while the microphone does and the person draws breath.
+        let runner = runner
+        Task { await runner.warmUp() }
         do {
             let events = try await route.start(vocabulary: vocabulary())
             // Hung up while it was getting ready.
             guard phase == .starting else { return }
+            VoiceLog.log.info("call: listening")
             phase = .listening
             startedAt = .now
             caption = nil
@@ -101,6 +107,7 @@ final class VoiceCall {
                 }
             }
         } catch {
+            VoiceLog.log.error("call: couldn't start: \(String(reflecting: error), privacy: .public)")
             end(because: (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
@@ -112,6 +119,7 @@ final class VoiceCall {
 
     private func end(because reason: String?) {
         guard phase != .ended else { return }
+        VoiceLog.log.info("call: ended, \(reason ?? "hung up", privacy: .public)")
         phase = .ended
         endReason = reason
         route.stop()
@@ -119,6 +127,7 @@ final class VoiceCall {
         running?.cancel()
         worker?.cancel()
         captionClearing?.cancel()
+        letGoOfFragment()
         queue.removeAll()
         queuedCount = 0
         caption = nil
@@ -146,7 +155,10 @@ final class VoiceCall {
     private func received(_ command: String) {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
-        switch Self.localAction(for: command) {
+        let action = Self.localAction(for: command)
+        VoiceLog.log.info("call: heard a command of \(command.count) characters\(action == nil ? "" : ", acted on here", privacy: .public): \(command, privacy: .private)")
+        if action != nil { letGoOfFragment() }
+        switch action {
         case .stop:
             // The command under way reports that it was stopped, which is what is shown.
             queue.removeAll()
@@ -155,10 +167,52 @@ final class VoiceCall {
         case .hangUp:
             end()
         case nil:
-            queue.append(command)
-            queuedCount = queue.count
-            startWorker()
+            var command = command
+            // The rest of a sentence that stopped mid-way.
+            if let held = heldFragment {
+                command = held + " " + command
+                letGoOfFragment()
+            }
+            // Only something worth asking about is waited on: "So" alone is let go at once.
+            if Self.endsMidSentence(command), Self.isWorthAsking(command) {
+                hold(command)
+            } else {
+                take(command)
+            }
         }
+    }
+
+    private func take(_ command: String) {
+        guard Self.isWorthAsking(command) else {
+            VoiceLog.log.info("call: let go, it is no command")
+            // The words were shown as they were heard, and aren't to be acted on.
+            if caption?.kind == .hearing { caption = nil }
+            return
+        }
+        queue.append(command)
+        queuedCount = queue.count
+        startWorker()
+    }
+
+    /// Keeps a sentence that stopped mid-way for the rest of it, and takes it as it is if
+    /// nothing follows.
+    private func hold(_ fragment: String) {
+        VoiceLog.log.info("call: waiting for the rest of a sentence")
+        heldFragment = fragment
+        show(.hearing, fragment)
+        let wait = fragmentWait
+        fragmentTimer = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self, let held = self.heldFragment, self.phase != .ended else { return }
+            self.letGoOfFragment()
+            self.take(held)
+        }
+    }
+
+    private func letGoOfFragment() {
+        heldFragment = nil
+        fragmentTimer?.cancel()
+        fragmentTimer = nil
     }
 
     /// "Stop" and "hang up" are acted on here, so that they work at once and whatever the
@@ -175,6 +229,48 @@ final class VoiceCall {
         default: return nil
         }
     }
+
+    /// Whether what was heard is worth putting to a model. A pause for thought can leave
+    /// a noise or a single word on its own, "So" or the "make" of a sentence not yet
+    /// said, and a model handed one does something all the same. Only a word that is a
+    /// command by itself is taken alone; anything of two words that mean something is.
+    /// How long a sentence stopped mid-way waits for the rest before it is taken as it is.
+    @ObservationIgnored var fragmentWait: Duration = .seconds(4)
+    @ObservationIgnored private var heldFragment: String?
+    @ObservationIgnored private var fragmentTimer: Task<Void, Never>?
+
+    /// Whether what was heard stops in the middle of a sentence, on a word that needs
+    /// more after it: "I want a screen to". A pause there is a thought, not the end.
+    static func endsMidSentence(_ command: String) -> Bool {
+        let words = command.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        guard let last = words.last else { return false }
+        return needsMore.contains(last)
+    }
+
+    /// Words a sentence doesn't end on. Not "in", "on", "up" and the like, which end
+    /// "zoom in" and "turn it on"; nor "this" and "that", which end "undo that".
+    private static let needsMore: Set<String> = [
+        "to", "the", "a", "an", "and", "or", "but", "of", "for", "with", "into", "onto", "at", "by", "from", "my", "your",
+        "its", "their", "then", "than", "as", "is", "are", "be", "so", "because", "about", "below", "above", "beside",
+        "under", "between", "make", "put", "move", "set", "change", "add", "give", "want", "can", "could", "would",
+    ]
+
+    static func isWorthAsking(_ command: String) -> Bool {
+        let words = command.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty && !noises.contains($0) }
+        return words.count > 1 || (words.count == 1 && commandsOfOneWord.contains(words[0]))
+    }
+
+    /// Words that fill a pause or start a sentence, and say nothing by themselves.
+    private static let noises: Set<String> = [
+        "so", "um", "uh", "er", "erm", "hmm", "mm", "ah", "oh", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "well",
+        "right", "like", "and", "then", "but", "the", "a", "an", "you", "please", "hey", "hi", "hello",
+    ]
+
+    private static let commandsOfOneWord: Set<String> = [
+        "undo", "redo", "delete", "duplicate", "bigger", "larger", "smaller", "bold", "centre", "center",
+    ]
 
     // MARK: Working
 
@@ -195,6 +291,11 @@ final class VoiceCall {
                 self.running = nil
                 guard self.phase != .ended else { break }
                 self.show(outcome)
+                // Stopped or gone wrong, the model starts afresh for the next command.
+                // Warmed now, the next one doesn't wait on that.
+                if outcome.wasCancelled || outcome.problem != nil {
+                    Task { await runner.warmUp() }
+                }
                 if outcome.endsCall {
                     self.end()
                     break
@@ -213,6 +314,10 @@ final class VoiceCall {
     }
 
     private func show(_ outcome: VoiceOutcome) {
+        VoiceLog.log.info("""
+            call: command over. steps \(outcome.lines.count), stopped \(outcome.wasCancelled), \
+            problem: \(outcome.problem ?? "none", privacy: .private), said: \(outcome.said, privacy: .private)
+            """)
         if outcome.wasCancelled {
             show(.done, "Stopped")
         } else if let problem = outcome.problem {

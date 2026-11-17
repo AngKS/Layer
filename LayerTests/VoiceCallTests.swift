@@ -67,6 +67,12 @@ final class FakeRunner: VoiceCommandRunner {
     private(set) var cancelled: [String] = []
     var outcomes: [VoiceOutcome] = []
     var holds = false
+    /// How many times it was asked to get its model ready.
+    private(set) var warmUps = 0
+
+    func warmUp() async {
+        warmUps += 1
+    }
 
     func run(_ command: String) async -> VoiceOutcome {
         commands.append(command)
@@ -129,12 +135,12 @@ struct VoiceCallTests {
         let (call, route, runner) = makeCall()
         runner.holds = true
         await call.start()
-        route.send(.command("first"))
-        route.send(.command("second"))
-        #expect(await eventually { runner.commands == ["first"] && call.queuedCount == 1 })
+        route.send(.command("make it blue"))
+        route.send(.command("make it bold"))
+        #expect(await eventually { runner.commands == ["make it blue"] && call.queuedCount == 1 })
         #expect(call.phase == .working)
         runner.holds = false
-        #expect(await eventually { runner.commands == ["first", "second"] && call.phase == .listening })
+        #expect(await eventually { runner.commands == ["make it blue", "make it bold"] && call.phase == .listening })
         #expect(call.queuedCount == 0)
         call.end()
     }
@@ -143,15 +149,15 @@ struct VoiceCallTests {
         let (call, route, runner) = makeCall()
         runner.holds = true
         await call.start()
-        route.send(.command("first"))
-        route.send(.command("second"))
-        #expect(await eventually { runner.commands == ["first"] && call.queuedCount == 1 })
+        route.send(.command("make it blue"))
+        route.send(.command("make it bold"))
+        #expect(await eventually { runner.commands == ["make it blue"] && call.queuedCount == 1 })
         route.send(.command("Stop."))
-        #expect(await eventually { runner.cancelled == ["first"] && call.queuedCount == 0 && call.phase == .listening })
+        #expect(await eventually { runner.cancelled == ["make it blue"] && call.queuedCount == 0 && call.phase == .listening })
         runner.holds = false
         try? await Task.sleep(for: .milliseconds(100))
         // The second command never ran, and "stop" itself was never handed to a model.
-        #expect(runner.commands == ["first"])
+        #expect(runner.commands == ["make it blue"])
         call.end()
     }
 
@@ -177,8 +183,8 @@ struct VoiceCallTests {
         let (call, route, runner) = makeCall()
         await call.start()
         route.send(.command("  "))
-        route.send(.command("real"))
-        #expect(await eventually { runner.commands == ["real"] })
+        route.send(.command("make it green"))
+        #expect(await eventually { runner.commands == ["make it green"] })
         call.end()
     }
 
@@ -273,15 +279,15 @@ struct VoiceCallTests {
         let (call, route, runner) = makeCall()
         runner.holds = true
         await call.start()
-        route.send(.command("first"))
-        #expect(await eventually { runner.commands == ["first"] })
+        route.send(.command("make it blue"))
+        #expect(await eventually { runner.commands == ["make it blue"] })
         var ended = false
         call.onEnd = { ended = true }
         call.end()
         #expect(call.phase == .ended)
         #expect(route.isStopped)
         #expect(ended)
-        #expect(await eventually { runner.cancelled == ["first"] })
+        #expect(await eventually { runner.cancelled == ["make it blue"] })
     }
 
     @Test func aRouteThatFailsEndsTheCallWithItsReason() async {
@@ -308,6 +314,129 @@ struct VoiceCallTests {
         #expect(VoiceCall.localAction(for: "End the call") == .hangUp)
         #expect(VoiceCall.localAction(for: "stop the button from being blue") == nil)
         #expect(VoiceCall.localAction(for: "make it blue") == nil)
+    }
+
+    // MARK: Warming the model
+
+    /// A model's first answer in a conversation is its slowest by far: on an iPad the
+    /// first command of a call waited fourteen seconds. The model is got ready as the
+    /// call starts, while the person is still drawing breath.
+    @Test func startingACallWarmsTheModel() async {
+        let (call, _, runner) = makeCall()
+        await call.start()
+        #expect(await eventually { runner.warmUps == 1 })
+        call.end()
+    }
+
+    /// A command that was stopped leaves the model to start afresh, which is the slow
+    /// start over again unless it is warmed for the next command.
+    @Test func afterACommandIsStoppedTheModelIsWarmedAgain() async {
+        let (call, route, runner) = makeCall()
+        runner.holds = true
+        await call.start()
+        route.send(.command("make the button blue"))
+        #expect(await eventually { call.phase == .working })
+        route.send(.command("stop"))
+        #expect(await eventually { runner.warmUps == 2 })
+        call.end()
+    }
+
+    @Test func afterACommandGoesWrongTheModelIsWarmedAgain() async {
+        let (call, route, runner) = makeCall()
+        runner.outcomes = [VoiceOutcome(problem: "Can't reach the internet.")]
+        await call.start()
+        route.send(.command("make the button blue"))
+        #expect(await eventually { runner.warmUps == 2 })
+        call.end()
+    }
+
+    // MARK: Fragments
+
+    /// A pause for thought can leave a word on its own: "So", or the "make" of a
+    /// sentence not yet said. A model handed one does something all the same: on an iPad
+    /// "So" sent the canvas off to another screen. They are let go.
+    @Test func aWordOnItsOwnThatIsNoCommandIsNotSentToTheModel() async {
+        let (call, route, runner) = makeCall()
+        await call.start()
+        for fragment in ["So", "make.", "Um, okay.", "you..."] {
+            route.send(.command(fragment))
+        }
+        route.send(.command("Undo."))
+        #expect(await eventually { runner.commands == ["Undo."] })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(runner.commands == ["Undo."])
+        call.end()
+    }
+
+    @Test func whatIsWorthAskingAModel() {
+        // A word that is a command by itself.
+        for command in ["Undo.", "redo", "Delete", "Duplicate.", "bigger", "Smaller", "Bold", "centre"] {
+            #expect(VoiceCall.isWorthAsking(command), "\(command)")
+        }
+        // Two words or more that say something.
+        for command in ["Zoom out.", "make it blue", "Show me the second screen", "undo that", "So make it red"] {
+            #expect(VoiceCall.isWorthAsking(command), "\(command)")
+        }
+        // Noises, and the start of something.
+        for command in ["So", "um", "make.", "the", "Okay, so.", "Yeah", "and then", "you", "I", ""] {
+            #expect(!VoiceCall.isWorthAsking(command), "\(command)")
+        }
+    }
+
+    // MARK: A sentence cut short
+
+    /// A pause in the middle of a sentence ends what was heard on "to" or "the". On an
+    /// iPad "I want a screen to" made a screen. It waits for the rest instead.
+    @Test func aSentenceStoppedMidWayWaitsForTheRest() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .seconds(5)
+        await call.start()
+        route.send(.command("I want a screen to"))
+        route.send(.command("view my baby photos"))
+        #expect(await eventually { runner.commands == ["I want a screen to view my baby photos"] })
+        call.end()
+    }
+
+    @Test func aSentenceStoppedMidWayIsTakenAsItIsIfNothingFollows() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .milliseconds(100)
+        await call.start()
+        route.send(.command("make the image bigger and"))
+        #expect(await eventually { runner.commands == ["make the image bigger and"] })
+        call.end()
+    }
+
+    @Test func stopLetsGoOfASentenceStoppedMidWay() async {
+        let (call, route, runner) = makeCall()
+        call.fragmentWait = .milliseconds(100)
+        await call.start()
+        route.send(.command("make the image bigger and"))
+        route.send(.command("stop"))
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(runner.commands.isEmpty)
+        call.end()
+    }
+
+    @Test func whatIsASentenceStoppedMidWay() {
+        for said in ["I want a screen to", "Inc increase the width of it to", "With to 80% of the", "make it bigger and",
+                     "put the image below", "Can you make"] {
+            #expect(VoiceCall.endsMidSentence(said), "\(said)")
+        }
+        for said in ["Zoom out.", "zoom in", "make it blue", "Move it down to the bottom.", "turn it on", "Undo."] {
+            #expect(!VoiceCall.endsMidSentence(said), "\(said)")
+        }
+    }
+
+    /// The words were shown as they were heard. Let go, they are taken down again.
+    @Test func aFragmentLetGoIsTakenOffThePill() async {
+        let (call, route, _) = makeCall()
+        await call.start()
+        route.send(.hearing("So"))
+        #expect(await eventually { call.caption?.text == "So" })
+        route.send(.command("So"))
+        // At once: a command that was run would leave its own line up for seconds.
+        #expect(await eventually(within: .milliseconds(300)) { call.caption == nil })
+        call.end()
     }
 
     /// Said to a person, "stop" comes with a "please" or an "it" as often as not. Those
@@ -461,11 +590,11 @@ struct VoiceCallTests {
                 .init(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#),
                 .init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .seconds(5)),
             ],
-            "another": [.init(tool: "setText", arguments: #"{"element":"E2","text":"Another"}"#)],
+            "make it wider": [.init(tool: "setText", arguments: #"{"element":"E2","text":"Another"}"#)],
         ])
         let before = app.store.content
         route.send(.command("two things"))
-        route.send(.command("another"))
+        route.send(.command("make it wider"))
         #expect(await eventually { self.button(in: app, screen)?.text == "One" })
         #expect(app.voice?.queuedCount == 1)
         route.send(.command("stop"))
@@ -544,8 +673,31 @@ struct UtteranceAssemblerTests {
         }
     }
 
-    @Test func quietAfterSpeechEndsACommand() {
+    /// As it ships. Someone thinking between words isn't finished: on an iPad, pauses of
+    /// under a second kept cutting sentences in two.
+    @Test func aPauseForThoughtDoesNotEndACommand() {
         var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 1000)
+        assembler.heard("I want a screen", isFinal: true, at: at(900))
+        // Quiet for 1.7 s: still thinking. At 1.2 s, on an iPad, "I want a screen to"
+        // was taken as a whole command.
+        #expect(assembler.next(at: at(2700)) == .wait)
+        // Quiet for 1.8 s: finished.
+        #expect(assembler.next(at: at(2800)) == .settle)
+    }
+
+    /// Where the room never goes quiet, words unchanged for 2.5 s end the command: longer
+    /// than the pause, so that it is the pause that ends a command wherever it can.
+    @Test func inANoisyRoomWordsUnchangedFor2Point5SecondsEndACommand() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 6000)
+        assembler.heard("zoom out", isFinal: true, at: at(1000))
+        #expect(assembler.next(at: at(3400)) == .wait)
+        #expect(assembler.next(at: at(3500)) == .settle)
+    }
+
+    @Test func quietAfterSpeechEndsACommand() {
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("make the button blue", isFinal: true, at: at(900))
         #expect(assembler.hearing == "make the button blue")
@@ -566,7 +718,7 @@ struct UtteranceAssemblerTests {
     /// A recogniser hands words over in bursts about a second apart. A second without
     /// new words, in the middle of a sentence, is not the end of it.
     @Test func aGapBetweenBurstsOfWordsDoesNotCutACommandShort() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 3000)
         assembler.heard("Make the button half width and", isFinal: false, at: at(1500))
         assembler.heard("Make the button half width, and align", isFinal: true, at: at(1600))
@@ -581,7 +733,7 @@ struct UtteranceAssemblerTests {
 
     /// A word or two is over before the recogniser has reported anything.
     @Test func aShortCommandIsFlushedOutOfTheRecogniser() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 400)
         #expect(assembler.next(at: at(1000)) == .wait)
         #expect(assembler.next(at: at(1200)) == .settle)
@@ -591,7 +743,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func noiseWithoutWordsIsNothing() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.sound(level: 0.9, at: at(0))
         #expect(assembler.next(at: at(800)) == .settle)
         assembler.settled(at: at(850))
@@ -602,7 +754,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func speakingAgainBeforeItIsTakenGoesOnWithTheCommand() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("make the button", isFinal: true, at: at(900))
         #expect(assembler.next(at: at(1800)) == .settle)
@@ -619,7 +771,7 @@ struct UtteranceAssemblerTests {
 
     /// Where the room is never quiet, words going stale are what ends a command.
     @Test func inANoisyRoomWordsGoingStaleEndTheCommand() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 4000)
         assembler.heard("zoom out", isFinal: true, at: at(1000))
         #expect(assembler.next(at: at(2500)) == .wait)
@@ -632,7 +784,7 @@ struct UtteranceAssemblerTests {
     /// to do next, turn and turn about, ten times a second. Loudness that never stops
     /// must not keep calling the command back from being taken.
     @Test func inARoomThatIsNeverQuietStaleWordsStillEndTheCommand() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.sound(level: 0.6, at: at(0))
         assembler.heard("zoom out", isFinal: false, at: at(100))
         var steps: [UtteranceAssembler.Step] = []
@@ -647,7 +799,7 @@ struct UtteranceAssemblerTests {
 
     /// Speech too soft to tell from the room is still heard by its words.
     @Test func softSpeechIsKnownByItsWords() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         for moment in stride(from: 0, through: 3000, by: 100) { assembler.sound(level: 0.05, at: at(moment)) }
         assembler.heard("zoom out", isFinal: true, at: at(500))
         #expect(assembler.next(at: at(2400)) == .wait)
@@ -657,7 +809,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func volatileTextIsShownButReplaced() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard("make the", isFinal: false, at: at(0))
         #expect(assembler.hearing == "make the")
         assembler.heard("make the button", isFinal: false, at: at(200))
@@ -670,7 +822,7 @@ struct UtteranceAssemblerTests {
 
     /// Between commands a recogniser can settle a phrase that is only punctuation.
     @Test func punctuationAloneIsNotWords() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard(",...", isFinal: true, at: at(0))
         assembler.heard(".", isFinal: false, at: at(100))
         #expect(assembler.hearing == "")
@@ -683,7 +835,7 @@ struct UtteranceAssemblerTests {
 
     /// The quiet before a command can come out as punctuation at the start of it.
     @Test func punctuationBeforeTheFirstWordIsDropped() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         assembler.heard(",... Show me the 1st screen.", isFinal: true, at: at(0))
         #expect(assembler.hearing == "Show me the 1st screen.")
         assembler.heard(".. make it blue", isFinal: false, at: at(100))
@@ -693,7 +845,7 @@ struct UtteranceAssemblerTests {
     /// A recogniser runs behind the speaker. Asked to settle, it brings out the words it
     /// was still working on; those are the end of this command, not the speaker going on.
     @Test func wordsTheRecogniserBringsOutOnSettlingDoNotRestartTheWait() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 1000)
         assembler.heard("show me the", isFinal: false, at: at(900))
         #expect(assembler.next(at: at(1800)) == .settle)
@@ -707,7 +859,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func wordsThatNeverSettleAreTakenAsTheyAre() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         speak(&assembler, from: 0, to: 600)
         assembler.heard("show me the first screen", isFinal: false, at: at(500))
         #expect(assembler.next(at: at(1400)) == .settle)
@@ -727,7 +879,7 @@ struct UtteranceAssemblerTests {
     }
 
     @Test func silenceGivesNothing() {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(pause: .milliseconds(800), staleness: .seconds(2))
         for moment in stride(from: 0, through: 5000, by: 100) { assembler.sound(level: 0, at: at(moment)) }
         #expect(assembler.next(at: at(5000)) == .wait)
         assembler.heard("   ", isFinal: true, at: at(6000))

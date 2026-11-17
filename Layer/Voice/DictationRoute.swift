@@ -49,11 +49,13 @@ final class DictationRoute: VoiceRoute {
         // The recogniser first: where speech can't be recognised there is nothing to
         // listen for, and the microphone stays off.
         try await recogniser.prepare()
+        VoiceLog.log.info("route: speech is ready")
         // Each of these waits can be a long one: fetching what speech needs, the alert
         // that asks for the microphone. Hung up in the meantime, the route goes no
         // further, and lets go of whatever it had got as far as turning on.
         guard !isStopped else { throw CancellationError() }
         let sound = try await source.start()
+        VoiceLog.log.info("route: microphone on, \(self.source.format.sampleRate, privacy: .public) Hz, \(self.source.format.channelCount, privacy: .public) channel(s)")
         guard !isStopped else {
             source.stop()
             throw CancellationError()
@@ -95,6 +97,7 @@ final class DictationRoute: VoiceRoute {
                     self?.heard(phrase)
                 }
             } catch {
+                VoiceLog.log.error("route: the recogniser stopped: \(String(reflecting: error), privacy: .public)")
                 self?.fail(saying: (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
         })
@@ -144,6 +147,7 @@ final class DictationRoute: VoiceRoute {
             assembler.settled(at: .now)
         case .command(let command):
             lastHearing = ""
+            VoiceLog.log.info("route: a pause ended a command of \(command.count) characters")
             continuation?.yield(.command(command))
         }
     }
@@ -156,6 +160,7 @@ final class DictationRoute: VoiceRoute {
 
     private func fail(saying reason: String) {
         guard !isStopped else { return }
+        VoiceLog.log.error("route: failed, \(reason, privacy: .public)")
         continuation?.yield(.failed(reason))
         stop()
     }

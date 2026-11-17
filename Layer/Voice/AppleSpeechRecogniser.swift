@@ -32,6 +32,7 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
             if heard == nil { heard = await SpeechTranscriber.supportedLocale(equivalentTo: english) }
             if let heard {
                 let transcriber = SpeechTranscriber(locale: heard, preset: .progressiveTranscription)
+                VoiceLog.log.info("speech: SpeechTranscriber for \(heard.identifier, privacy: .public)")
                 try await makeReady(transcriber)
                 module = .speech(transcriber)
                 return
@@ -39,7 +40,11 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
         }
         var heard = await DictationTranscriber.supportedLocale(equivalentTo: locale)
         if heard == nil { heard = await DictationTranscriber.supportedLocale(equivalentTo: english) }
-        guard let heard else { throw DictationRoute.Failure.speechUnavailable }
+        guard let heard else {
+            VoiceLog.log.error("speech: no recogniser for \(self.locale.identifier, privacy: .public) or English")
+            throw DictationRoute.Failure.speechUnavailable
+        }
+        VoiceLog.log.info("speech: DictationTranscriber for \(heard.identifier, privacy: .public)")
         let transcriber = DictationTranscriber(
             locale: heard, contentHints: [.shortForm, .farField], transcriptionOptions: [],
             reportingOptions: [.volatileResults, .frequentFinalization], attributeOptions: []
@@ -52,10 +57,15 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
     /// first time, and checks that it can then take sound at all.
     private func makeReady(_ module: some SpeechModule) async throws {
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
+            VoiceLog.log.info("speech: fetching what the recogniser needs")
             try await request.downloadAndInstall()
+            VoiceLog.log.info("speech: fetched")
         }
         // With no model for it here, a recogniser has no kind of sound it can take.
-        guard await !module.availableCompatibleAudioFormats.isEmpty else { throw DictationRoute.Failure.speechUnavailable }
+        guard await !module.availableCompatibleAudioFormats.isEmpty else {
+            VoiceLog.log.error("speech: the recogniser takes no kind of sound here")
+            throw DictationRoute.Failure.speechUnavailable
+        }
     }
 
     func start(sound: AsyncStream<AudioChunk>, format: AVAudioFormat, vocabulary: [String]) async throws -> AsyncThrowingStream<HeardPhrase, any Error> {
@@ -98,6 +108,7 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
                 }
                 input.finish()
             } catch {
+                VoiceLog.log.error("speech: sound couldn't be passed on: \(String(reflecting: error), privacy: .public)")
                 heard.finish(throwing: error)
             }
         })
@@ -108,6 +119,7 @@ actor AppleSpeechRecogniser: PhraseRecogniser {
                 }
                 heard.finish()
             } catch {
+                VoiceLog.log.error("speech: results stopped: \(String(reflecting: error), privacy: .public)")
                 heard.finish(throwing: error)
             }
         })

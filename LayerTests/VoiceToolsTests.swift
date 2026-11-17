@@ -293,6 +293,278 @@ struct VoiceToolsTests {
         #expect(bench.box.deleteScreen(screen: "S1", named: "sign in screen") == "There is no S1.")
     }
 
+    // MARK: Panning
+
+    /// "Move down a bit" has nothing to be shown: it is the view that moves.
+    @Test func theViewPansByDirection() throws {
+        let down = try #require(VoiceToolbox.pan(named: "down"))
+        #expect(down.name == "down")
+        #expect(down.shift == CGVector(dx: 0, dy: 0.6))
+        #expect(VoiceToolbox.pan(named: "Up a bit")?.shift == CGVector(dx: 0, dy: -0.3))
+        #expect(VoiceToolbox.pan(named: "pan left")?.shift == CGVector(dx: -0.6, dy: 0))
+        #expect(VoiceToolbox.pan(named: "scroll right a little")?.shift == CGVector(dx: 0.3, dy: 0))
+        // A handle, a word that isn't a direction, and a direction that is part of a name.
+        #expect(VoiceToolbox.pan(named: "S2") == nil)
+        #expect(VoiceToolbox.pan(named: "all") == nil)
+        #expect(VoiceToolbox.pan(named: "the left button") == nil)
+        // Down by 0.6 of what is in view puts the middle that much lower on the canvas.
+        let view = CGRect(x: 100, y: 200, width: 400, height: 600)
+        #expect(VoiceToolbox.centre(of: view, panned: down.shift) == CGPoint(x: 300, y: 860))
+    }
+
+    @Test func panningChangesNothingInTheDesign() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.pan(direction: "down") == "Moved the view down.")
+        #expect(bench.box.pan(direction: "Up a bit") == "Moved the view up a little.")
+        // A model that asks to be shown a direction is taken to mean the same.
+        #expect(bench.box.show(target: "down") == "Moved the view down.")
+        #expect(bench.box.show(target: "left a bit") == "Moved the view left a little.")
+        #expect(bench.app.store.content == before)
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    @Test func panningNeedsAWayToGo() {
+        let bench = bench()
+        #expect(bench.box.pan(direction: "sideways") == "I can move the view up, down, left or right, not “sideways”.")
+        #expect(bench.box.failures.count == 1)
+    }
+
+    // MARK: Stacking
+
+    /// "Stack them into a column": one under another from the top one down, in the order
+    /// they already stand, left edges together and 12 points apart.
+    @Test func stackingPutsElementsOneUnderAnother() throws {
+        let bench = bench()
+        let before = bench.app.store.content
+        let undo = try #require(bench.app.store.undoManager)
+
+        let line = bench.box.stackElements(elements: "E3, E1, E2", direction: "column")
+
+        #expect(try #require(bench.element("E1")).frame == CGRect(x: 20, y: 75, width: 353, height: 41))
+        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 128, width: 353, height: 50))
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 190, width: 200, height: 200))
+        #expect(line == "Stacked 3 elements in a column.")
+        #expect(bench.box.failures.isEmpty)
+        // All of them are selected afterwards, so that "them" stays them.
+        #expect(bench.app.selectedElements.count == 3)
+        // And it is one thing to undo.
+        undo.undo()
+        #expect(bench.app.store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    /// Things left on top of one another, as four new images lined up on one line were
+    /// on an iPad, come apart in the order they were named.
+    @Test func thingsOnTopOfOneAnotherAreStackedInTheOrderNamed() throws {
+        let bench = bench()
+        _ = bench.box.moveElement(element: "E1", x: nil, y: "300", width: nil, height: nil)
+        _ = bench.box.moveElement(element: "E2", x: nil, y: "300", width: nil, height: nil)
+        _ = bench.box.stackElements(elements: "E2 E1", direction: "column")
+        #expect(try #require(bench.element("E2")).frame.minY == 300)
+        #expect(try #require(bench.element("E1")).frame.minY == 362)
+    }
+
+    @Test func stackingInARowGoesAcrossWithTopsTogether() throws {
+        let bench = bench()
+        _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "100", height: nil)
+        _ = bench.box.moveElement(element: "E3", x: nil, y: nil, width: "100", height: "100")
+        let line = bench.box.stackElements(elements: "E2, E3", direction: "row")
+        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 420, width: 100, height: 50))
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 132, y: 420, width: 100, height: 100))
+        #expect(line == "Stacked 2 elements in a row.")
+    }
+
+    @Test func stackingNeedsSeveralThingsItCanFind() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.stackElements(elements: "E1", direction: "column") == "Name two or more elements to stack.")
+        #expect(bench.box.stackElements(elements: "E1, E99", direction: "column") == "There is no E99.")
+        #expect(bench.box.stackElements(elements: "E1, E2", direction: "pile") == "I can stack in a column or a row, not “pile”.")
+        #expect(bench.app.store.content == before)
+    }
+
+    // MARK: Placing one thing by another
+
+    /// "Move this image below the title": the image goes under it, left edges together,
+    /// 12 points apart. Above, left of and right of go the same way.
+    @Test func placingPutsOneElementByAnother() throws {
+        let bench = bench()
+        let line = bench.box.placeElement(element: "E3", relation: "below", target: "E1")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 128, width: 200, height: 200))
+        #expect(line == "Put the image below the title “Welcome back”.")
+
+        _ = bench.box.placeElement(element: "E3", relation: "above", target: "E2")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 208, width: 200, height: 200))
+        _ = bench.box.placeElement(element: "E3", relation: "right of", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        _ = bench.box.placeElement(element: "E3", relation: "beside", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        _ = bench.box.placeElement(element: "E3", relation: "left of", target: "E2")
+        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: -192, y: 420))
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    /// Asked for "the image to the top", the on-device model reached for this tool and
+    /// named the screen. Next to a screen it is in is an edge of it.
+    @Test func placingByAScreenIsAligningToItsEdge() throws {
+        let bench = bench()
+        #expect(bench.box.placeElement(element: "E3", relation: "above", target: "S1").hasPrefix("Aligned the image to the top"))
+        #expect(bench.box.placeElement(element: "E3", relation: "left of", target: "S1").hasPrefix("Aligned the image to the left"))
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    /// "Move the image to the top" went to this tool, "above the title". Unless something
+    /// was said of one thing by another, it is an edge of the screen that was meant.
+    @Test func placingNeedsToHaveBeenAskedFor() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Move the image to the top"
+        #expect(bench.box.placeElement(element: "E3", relation: "above", target: "E1").hasPrefix("Aligned the image to the top"))
+        bench.box.spokenCommand = "Move this image below the title."
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E1") == "Put the image below the title “Welcome back”.")
+        #expect(VoiceToolbox.asksToPlace("put the image next to the button"))
+        #expect(VoiceToolbox.asksToPlace("Put it to the left of the title"))
+        #expect(!VoiceToolbox.asksToPlace("Put the avatar on the left"))
+        #expect(!VoiceToolbox.asksToPlace("move it to the top"))
+    }
+
+    /// "Add an image below the title": on an iPad the model could only try to place an
+    /// image that wasn't there yet. Adding takes where to put it.
+    @Test func anElementIsAddedNextToAnother() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Can you add an image below the title?"
+        let line = bench.box.addElement(screen: "S1", kind: "image", text: nil, look: nil, relation: "below", target: "E1")
+        let added = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        #expect(added.kind == .image)
+        #expect(added.frame.minX == 20)
+        #expect(added.frame.minY == 128)
+        #expect(line.hasPrefix("Added an image as E4."))
+        #expect(bench.box.lines.last == "Put the image below the title “Welcome back”.")
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    @Test func placingNeedsTwoThingsAndAWay() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E3").hasPrefix("Name two different elements."))
+        #expect(bench.box.placeElement(element: "E3", relation: "inside", target: "E1")
+            == "I can put it above, below, left of or right of another, not “inside”.")
+        #expect(bench.box.placeElement(element: "E3", relation: "below", target: "E99") == "There is no E99.")
+        #expect(bench.app.store.content == before)
+    }
+
+    // MARK: Aligning several with one another
+
+    /// "Align the image and the avatar": with two or more named, they line up with one
+    /// another, not each with the screen.
+    @Test func aligningSeveralLinesThemUpWithOneAnother() throws {
+        let bench = bench()
+        let line = bench.box.alignElement(element: "E1, E3", alignment: "centre")
+        // Through the middle of the area they cover together, 20 to 373 across.
+        // The store puts each on a whole point of its own, so within half a point.
+        #expect(abs(try #require(bench.element("E3")).frame.midX - 196.5) <= 1)
+        #expect(try #require(bench.element("E1")).frame.minX == 20)
+        #expect(line == "Lined up 2 elements by their centres.")
+        _ = bench.box.alignElement(element: "E2 E3", alignment: "top")
+        #expect(try #require(bench.element("E3")).frame.minY == 420)
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    // MARK: Deleting only when asked to
+
+    /// Three times the on-device model answered a command that said nothing of removing
+    /// with a delete: "Can you edit the image to be a section?" deleted the image. A
+    /// delete now goes ahead only if what was said asks for one.
+    @Test func nothingIsDeletedUnlessRemovingWasAskedFor() throws {
+        let bench = bench()
+        bench.box.spokenCommand = "Can you edit the image to be a section?"
+        #expect(bench.box.deleteElement(element: "E3", named: "image") == "That would have deleted something you didn't ask to remove, so nothing was changed.")
+        #expect(bench.element("E3") != nil)
+        #expect(bench.box.deleteScreen(screen: "S1", named: "login screen").hasPrefix("That would have deleted something"))
+        #expect(bench.app.store.screens.count == 1)
+
+        bench.box.spokenCommand = "get rid of the image"
+        _ = bench.box.deleteElement(element: "E3", named: "image")
+        #expect(bench.element("E3") == nil)
+    }
+
+    @Test func whatAsksForSomethingToBeRemoved() {
+        for said in ["Delete the image", "remove it", "get rid of the button", "erase that", "take the title out",
+                     "Clear the screen", "bin it", "lose the avatar", "Deleting the logo please", "scrap that screen"] {
+            #expect(VoiceToolbox.asksToRemove(said), "\(said)")
+        }
+        for said in ["Can you edit the image to be a section?", "Make the checkbox blue", "make the dropdown bigger",
+                     "move it down", "Take a look at the title"] {
+            #expect(!VoiceToolbox.asksToRemove(said), "\(said)")
+        }
+    }
+
+    // MARK: In the person's words
+
+    /// Handles are between the app and the model. What reaches the pill has none.
+    @Test func whatIsShownToThePersonHasNoHandles() throws {
+        let bench = bench()
+        let made = bench.box.duplicateElement(element: "E2")
+        // The model is told the copy's handle, to go on with.
+        #expect(made == "Duplicated the button “Sign in” as E4.")
+        #expect(bench.box.lines.last == "Duplicated the button “Sign in”.")
+        let added = bench.box.addElement(screen: "S1", kind: "image", text: nil, look: nil)
+        #expect(added == "Added an image as E5.")
+        #expect(bench.box.lines.last == "Added an image.")
+    }
+
+    /// With no name to give, the on-device model called new screens "S7" and "S8": the
+    /// handles they were about to get. Those and "new" or "another" are no name at all,
+    /// and the screen is then named from its description as before.
+    @Test func aScreenIsNotNamedByAHandleOrByNothing() {
+        #expect(VoiceToolbox.screenName("S7") == nil)
+        #expect(VoiceToolbox.screenName(" s 8 ") == nil)
+        #expect(VoiceToolbox.screenName("New screen") == nil)
+        #expect(VoiceToolbox.screenName("another") == nil)
+        #expect(VoiceToolbox.screenName("Screen") == nil)
+        #expect(VoiceToolbox.screenName("") == nil)
+        #expect(VoiceToolbox.screenName(nil) == nil)
+        #expect(VoiceToolbox.screenName("Panda Showcase") == "Panda Showcase")
+        #expect(VoiceToolbox.screenName("the Welcome screen") == "Welcome")
+        #expect(VoiceToolbox.screenName("new arrivals") == "New arrivals")
+    }
+
+    /// The model puts a handle in quotes, or after the word "screen", as often as bare.
+    /// On an iPad the pill read: New screen “the screen “S7”” created.
+    @Test func aHandleInQuotesOrAfterItsKindReadsNaturally() {
+        let bench = bench()
+        #expect(bench.box.inWords("New screen “S1” created.") == "New screen “Login” created.")
+        #expect(bench.box.inWords("New screen \"S1\" created.") == "New screen “Login” created.")
+        #expect(bench.box.inWords("Screen S1 is now shown.") == "Screen “Login” is now shown.")
+        #expect(bench.box.inWords("I changed “E2”.") == "I changed the button “Sign in”.")
+    }
+
+    /// Something loose on the canvas has no screen to be half of. Told "50%" wasn't
+    /// understood, and to try "50%", the model made a sticky note 180 points wide.
+    @Test func aShareOfTheScreenIsRefusedPlainlyForSomethingOnNoScreen() throws {
+        let bench = bench()
+        let note = DesignElement(kind: .stickyNote, frame: CGRect(x: 0, y: 0, width: 200, height: 120), text: "A note", tint: Theme.accent)
+        bench.app.store.addFloating(note, scale: 1)
+        let handle = bench.handles.handle(forElement: note.id)
+        let line = bench.box.moveElement(element: handle, x: nil, y: nil, width: "50%", height: nil)
+        #expect(line == "That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
+        #expect(bench.app.store.floating.first?.element.frame.width == 200)
+        // In points it is resized as anything else is.
+        _ = bench.box.moveElement(element: handle, x: nil, y: nil, width: "150", height: nil)
+        #expect(bench.app.store.floating.first?.element.frame.width == 150)
+    }
+
+    /// A model asked "Which element should I change—E24, E25, or E26?" on an iPad.
+    @Test func whatAModelSaysIsPutInThePersonsWords() {
+        let bench = bench()
+        #expect(bench.box.inWords("Which element should I change—E1, E2, or E3?")
+            == "Which element should I change—the title “Welcome back”, the button “Sign in”, or the image?")
+        #expect(bench.box.inWords("S1 has three elements.") == "The screen “Login” has three elements.")
+        // A handle for nothing is left as it came, and so are words that only look like one.
+        #expect(bench.box.inWords("There is no E99.") == "There is no E99.")
+        #expect(bench.box.inWords("Done.") == "Done.")
+    }
+
     @Test func showingSelectsWhatIsShown() throws {
         let bench = bench()
         _ = bench.box.show(target: "S1")

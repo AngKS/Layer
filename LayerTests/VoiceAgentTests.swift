@@ -74,7 +74,7 @@ struct VoiceAgentTests {
         #expect(told.instructions.contains(VoiceRules.full))
         #expect(told.instructions.contains(#"S1 "Login" 393x852"#))
         #expect(told.instructions.contains(#"E2 button "Sign in""#))
-        #expect(told.tools.count == 15)
+        #expect(told.tools.count == 18)
         #expect(Set(told.tools).isSuperset(of: ["createScreen", "styleElement", "moveElement", "show", "undo", "endCall"]))
     }
 
@@ -94,6 +94,115 @@ struct VoiceAgentTests {
         #expect(!requests[0].instructions.contains("E4"))
         #expect(requests[1].instructions.contains(#"E4 button "Sign in""#))
         #expect(requests[2].instructions.contains(#"E4 button "Copy""#))
+    }
+
+    /// The on-device model is told about the canvas once for a command. Told again after
+    /// each step, it has to read the whole of it again before it can say "Done": three
+    /// seconds on an iPad, after every command.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func onTheDeviceTheCanvasIsDescribedOnceForACommand() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let recorder = ScriptRecorder()
+        let model = ScriptedLanguageModel(
+            script: ["make the button green": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)]], recorder: recorder
+        )
+        let agent = VoiceAgent(model: app, testModel: model, looksAgainBetweenSteps: false)
+
+        let outcome = await agent.run("make the button green")
+
+        #expect(outcome.lines == ["Restyled the button “Sign in”."])
+        let requests = recorder.requests
+        #expect(requests.count == 2)
+        #expect(requests[1].instructions == requests[0].instructions)
+    }
+
+    @Test func whichModelsAreToldAboutTheCanvasAgainBetweenSteps() {
+        #expect(!VoiceAgent.looksAgainBetweenSteps(with: .appleIntelligence))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")))
+    }
+
+    /// Getting the model ready asks it nothing, and leaves it ready to be asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aWarmedAgentHasAskedNothingAndStillTakesCommands() async throws {
+        let bench = bench(["make the button green": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)]])
+        await bench.agent.warmUp()
+        #expect(bench.recorder.requests.isEmpty)
+        let outcome = await bench.agent.run("make the button green")
+        #expect(outcome.problem == nil)
+        #expect(bench.button?.tint == ColourWords.parse("green"))
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func whatTheModelSaysReachesThePersonWithoutHandles() async throws {
+        let bench = bench([:], closing: "Which one should I change, E1 or E2?")
+        let outcome = await bench.agent.run("make it bigger")
+        #expect(outcome.said == "Which one should I change, the title “Welcome back” or the button “Sign in”?")
+    }
+
+    // MARK: Corrections
+
+    /// "Make the image bigger" resized a checkbox; "Not the check marks" then resized
+    /// the image and left the checkbox as it was. A correction undoes the last change
+    /// first, and the model is told it has.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionUndoesTheLastChangeFirst() async throws {
+        let bench = bench([
+            "make the image green": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)],
+            "(the last change has been undone.) not the button, the title": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"green"}"#)],
+        ])
+        _ = await bench.agent.run("make the image green")
+        #expect(bench.button?.tint == ColourWords.parse("green"))
+
+        let outcome = await bench.agent.run("Not the button, the title")
+
+        #expect(outcome.problem == nil)
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == ColourWords.parse("green"))
+        #expect(bench.recorder.requests.last?.prompts.last == "(The last change has been undone.) Not the button, the title")
+        // And the two together are one step to undo, back to before either.
+        bench.undo?.undo()
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == Theme.accent)
+    }
+
+    /// "No, undo revert." undid twice. A correction that says nothing more is the undo
+    /// alone, and the model isn't asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionAloneIsOneUndo() async throws {
+        let bench = bench(["make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)]])
+        _ = await bench.agent.run("make the button say ahoy")
+        let asked = bench.recorder.requests.count
+
+        let outcome = await bench.agent.run("No, undo revert.")
+
+        #expect(bench.button?.text == "Sign in")
+        #expect(outcome.lines == ["Undid the last change."])
+        #expect(bench.recorder.requests.count == asked)
+    }
+
+    /// After a command that changed nothing, there is nothing of its to undo.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionAfterNothingChangedUndoesNothing() async throws {
+        let bench = bench([
+            "make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)],
+            "show me the first screen": [Step(tool: "show", arguments: #"{"target":"S1"}"#)],
+        ])
+        _ = await bench.agent.run("make the button say ahoy")
+        _ = await bench.agent.run("show me the first screen")
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.text == "Ahoy")
+    }
+
+    @Test func whatIsACorrection() {
+        #expect(VoiceAgent.correction(in: "Not the check marks.") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No, make it red") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "That's wrong, the title") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No, that's wrong.") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "No, undo revert.") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "wrong one") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "Now make it red") == nil)
+        #expect(VoiceAgent.correction(in: "Notes screen please") == nil)
+        #expect(VoiceAgent.correction(in: "undo") == nil)
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))

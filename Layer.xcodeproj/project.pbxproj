@@ -268,6 +268,7 @@
 		E360FD91E14B5EFDD4503E50 /* body_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 9A373E7C69DAD824CE8C64EA /* body_clean_1.json */; };
 		E381038909D053900CB81A28 /* SettingsButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B53B86609548F6683ECF34 /* SettingsButton.swift */; };
 		E3E795222CAC89D8AF3428A5 /* checkbox_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 6E3D79A431C12ABD640C0A83 /* checkbox_noisy_1.json */; };
+		E59E668B1F449DEFC59F914B /* VoiceLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA7AFAE8CD0B02098ABEE57 /* VoiceLog.swift */; };
 		E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D91D32C8960E072A4A7C5AA /* PhoneScreenView.swift */; };
 		E64E655881D8EA9045675A5F /* checkbox_image_checkbox_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 8B58233F4E9A0EF2ABC44DD1 /* checkbox_image_checkbox_2.json */; };
 		E798BFC2A9574FE65D0C4562 /* toggle_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = E9F0B5812BDDAD1996295A16 /* toggle_noisy_1.json */; };
@@ -621,6 +622,7 @@
 		FA837C44409075331387E5B4 /* CorrectedReadingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectedReadingTests.swift; sourceTree = "<group>"; };
 		FA9D1A371A248345351D6D6A /* CanvasPicture+Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CanvasPicture+Capture.swift"; sourceTree = "<group>"; };
 		FAA74337707D430698806465 /* DesignLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignLibrary.swift; sourceTree = "<group>"; };
+		FAA7AFAE8CD0B02098ABEE57 /* VoiceLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceLog.swift; sourceTree = "<group>"; };
 		FACAA2404D2218B0BB196272 /* image_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_jittered_2b.json; sourceTree = "<group>"; };
 		FACAC487BC44BE04C958F730 /* stickyNote_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_2a.json; sourceTree = "<group>"; };
 		FBA2EA20C0A640CC214D6D82 /* RuleInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleInterpreter.swift; sourceTree = "<group>"; };
@@ -675,6 +677,7 @@
 				ADBED814500825C7C9D467D7 /* VoiceAgent.swift */,
 				3094A5EBA18C9078BE1DE192 /* VoiceCall.swift */,
 				60371249C0F94DB75A00F668 /* VoiceHandles.swift */,
+				FAA7AFAE8CD0B02098ABEE57 /* VoiceLog.swift */,
 				9DAF2CA41D09836E5965BFD5 /* VoiceProfile.swift */,
 				7F2BF93CE41926C0591EE8B7 /* VoiceRoute.swift */,
 				8C283B28595251A583DB87B0 /* VoiceRules.swift */,
@@ -1539,6 +1542,7 @@
 				5F06ADFAD01FFA5A562095E6 /* VoiceCall.swift in Sources */,
 				1F855C838C62373BB478BB08 /* VoiceDemo.swift in Sources */,
 				52D3ED38C02DB3840D1C430D /* VoiceHandles.swift in Sources */,
+				E59E668B1F449DEFC59F914B /* VoiceLog.swift in Sources */,
 				A0FDE499089200912E1E3E18 /* VoiceProfile.swift in Sources */,
 				1513DD1E51F249D8D73DD482 /* VoiceRoute.swift in Sources */,
 				C6970FCA4ED3171193B1F7D6 /* VoiceRules.swift in Sources */,

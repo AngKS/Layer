@@ -43,11 +43,11 @@ final class Recorder: VoiceActing {
         return line
     }
 
-    func createScreen(description: String) async throws -> String {
-        note("createScreen", ["description": description], saying: "Made the screen as S9, with 6 elements.")
+    func createScreen(name: String?, description: String) async throws -> String {
+        note("createScreen", ["name": name, "description": description], saying: "Made the screen as S9, with 6 elements.")
     }
 
-    func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
+    func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
         note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look], saying: "Added a \(kind) as E20.")
     }
 
@@ -99,6 +99,18 @@ final class Recorder: VoiceActing {
             return note("deleteScreen", ["screen": screen, "named": named], saying: "There is no \(named) here. \(screen) is “\(found.name)”.")
         }
         return note("deleteScreen", ["screen": screen, "named": named], saying: "Deleted \(screen).")
+    }
+
+    func stackElements(elements: String, direction: String) -> String {
+        note("stackElements", ["elements": elements, "direction": direction], saying: "Stacked the elements in a \(direction).")
+    }
+
+    func placeElement(element: String, relation: String, target: String) -> String {
+        note("placeElement", ["element": element, "relation": relation, "target": target], saying: "Put \(element) \(relation) \(target).")
+    }
+
+    func pan(direction: String) -> String {
+        note("pan", ["direction": direction], saying: "Moved the view \(direction).")
     }
 
     func show(target: String) -> String {
@@ -178,6 +190,8 @@ struct Case {
     /// Whether the command was written after the rules were settled, and only ever run to
     /// be counted.
     var isFresh = false
+    /// Whether the command is one a person spoke to an iPad, written as it was heard.
+    var isFromTheIPad = false
 }
 
 private func has(_ key: String, _ words: String...) -> ([String: String]) -> Bool {
@@ -254,6 +268,26 @@ let cases: [Case] = [
     Case(canvas: .three, command: "Delete the log out button", tools: ["deleteElement"], isRight: has("element", "E8"), isFresh: true),
     Case(canvas: .three, command: "Undo that", tools: ["undo"], isFresh: true),
     Case(canvas: .empty, command: "Build me an onboarding screen", tools: ["createScreen"], isRight: has("description", "onboarding"), isFresh: true),
+
+    // Spoken to an iPad on 2026-11-18, as the recogniser heard them, and run here after
+    // the tools were changed for what that session showed: panning, stacking, and a
+    // name for a new screen. Run once and counted as they came.
+    Case(canvas: .empty, command: "Make the privacy statement screen.", tools: ["createScreen"], isRight: has("name", "privacy"), isFromTheIPad: true),
+    Case(canvas: .three, command: "Now give me another screen for cashier.", tools: ["createScreen"], isRight: has("name", "cashier"), isFromTheIPad: true),
+    Case(canvas: .one, command: "Can you move down a bit?", tools: ["pan", "show"], isRight: { ($0["direction"] ?? $0["target"] ?? "").lowercased().contains("down") }, isFromTheIPad: true),
+    Case(canvas: .one, command: "Zoom out the screen so I can see the view.", tools: ["zoom"], isRight: has("level", "out"), isFromTheIPad: true),
+    Case(canvas: .one, command: "Stack the title, the button and the image into a column.", tools: ["stackElements"], isRight: { ($0["direction"] ?? "").lowercased().contains("column") && ["E1", "E2", "E3"].allSatisfy(($0["elements"] ?? "").contains) }, isFromTheIPad: true),
+    Case(canvas: .one, command: "make the title bigger and red.", tools: ["styleElement"], isRight: both(has("element", "E1"), has("look", "red")), isFromTheIPad: true),
+    Case(canvas: .one, command: "No, undo revert.", tools: ["undo"], isFromTheIPad: true),
+    Case(canvas: .three, command: "Show me the 2nd screen.", tools: ["show"], isRight: has("target", "S2"), isFromTheIPad: true),
+    Case(canvas: .three, command: "Show me the next screen.", tools: ["show"], isRight: has("target", "S3"), isFromTheIPad: true),
+    // From the second session on the iPad, after placing and aligning together were added.
+    Case(canvas: .one, command: "Move this image below the title.", tools: ["placeElement"], isRight: { $0["element"] == "E3" && $0["target"] == "E1" && ($0["relation"] ?? "").lowercased().contains("below") }, isFromTheIPad: true),
+    Case(canvas: .one, command: "Put the image beside the button.", tools: ["placeElement"], isRight: { $0["element"] == "E3" && $0["target"] == "E2" }, isFromTheIPad: true),
+    Case(canvas: .one, command: "Align the image and the title together.", tools: ["alignElement"], isRight: { ["E1", "E3"].allSatisfy(($0["element"] ?? "").contains) }, isFromTheIPad: true),
+    // Heard wrongly or not clear. The right thing is to do nothing and say so.
+    Case(canvas: .one, command: "Can you edit the image to be a section?", tools: [], isFromTheIPad: true),
+    Case(canvas: .one, command: "make the baby photo title rate.", tools: [], isFromTheIPad: true),
 ]
 
 /// The on-device branch of the app's `VoiceProfile`, with optional changes to try.
@@ -301,6 +335,7 @@ struct Outcome {
     var canvas: Canvas
     var isHeldBack: Bool
     var isFresh: Bool
+    var isFromTheIPad: Bool
     var calls: [Recorder.Call]
     /// How many of the calls the app would have turned down.
     var refusals: Int
@@ -339,7 +374,7 @@ func run(_ testCase: Case, variant: BenchProfile.Variant) async -> Outcome {
         right = rightTool && calls.count == 1 && testCase.isRight(calls[0].arguments)
     }
     return Outcome(
-        command: testCase.command, canvas: testCase.canvas, isHeldBack: testCase.isHeldBack, isFresh: testCase.isFresh, calls: calls, refusals: recorder.refusals, reply: reply,
+        command: testCase.command, canvas: testCase.canvas, isHeldBack: testCase.isHeldBack, isFresh: testCase.isFresh, isFromTheIPad: testCase.isFromTheIPad, calls: calls, refusals: recorder.refusals, reply: reply,
         seconds: seconds, error: failure, rightTool: rightTool, right: right
     )
 }
@@ -393,7 +428,7 @@ struct Main {
             let did = (outcome.calls.isEmpty ? "no tool" : outcome.calls.map(\.description).joined(separator: "; "))
                 + (outcome.refusals > 0 ? " [\(outcome.refusals) turned down by the app]" : "")
             let said = outcome.error.map { "ERROR \($0)" } ?? "said “\(outcome.reply.prefix(80))”"
-            print("\(mark) \(String(format: "%5.1f", outcome.seconds))s [\(outcome.canvas.rawValue)\(outcome.isHeldBack ? ", held back" : "")\(outcome.isFresh ? ", fresh" : "")] “\(outcome.command)” -> \(did) | \(said)")
+            print("\(mark) \(String(format: "%5.1f", outcome.seconds))s [\(outcome.canvas.rawValue)\(outcome.isHeldBack ? ", held back" : "")\(outcome.isFresh ? ", fresh" : "")\(outcome.isFromTheIPad ? ", iPad" : "")] “\(outcome.command)” -> \(did) | \(said)")
         }
 
         let times = outcomes.map(\.seconds).sorted()
@@ -405,9 +440,10 @@ struct Main {
             print("\(label): right tool and arguments \(right)/\(group.count) (\(Int((Double(right) / Double(group.count) * 100).rounded()))%), right tool \(rightTool)/\(group.count)")
         }
         print("")
-        score("commands the rules were tuned on", outcomes.filter { !$0.isHeldBack && !$0.isFresh })
+        score("commands the rules were tuned on", outcomes.filter { !$0.isHeldBack && !$0.isFresh && !$0.isFromTheIPad })
         score("commands held back", outcomes.filter(\.isHeldBack))
         score("fresh commands", outcomes.filter(\.isFresh))
+        score("commands spoken to an iPad", outcomes.filter(\.isFromTheIPad))
         print(String(format: "latency: p50 %.1f s, p95 %.1f s, longest %.1f s", percentile(0.5), percentile(0.95), times.last ?? 0))
         let severalAtOnce = outcomes.filter { $0.calls.count > 1 }.count
         print("commands where more than one tool was called: \(severalAtOnce)")

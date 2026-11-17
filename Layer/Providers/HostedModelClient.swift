@@ -1,3 +1,4 @@
+import os
 import Foundation
 
 /// A conversation as hosted providers take it: an optional system prompt, then turns.
@@ -135,8 +136,27 @@ enum HostedModelClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try streamingRequest(conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature, provider: provider, model: model, key: key)
-                    let lines = try await openStream(request, for: provider)
+                    let sendsTools = schema == nil && !conversation.tools.isEmpty
+                    var reasoningOff = sendsTools && modelsThatThinkWithoutTools.withLock { $0.contains(model) }
+                    var request = try streamingRequest(
+                        conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature,
+                        provider: provider, model: model, key: key, reasoningOff: reasoningOff
+                    )
+                    let lines: AsyncLineSequence<URLSession.AsyncBytes>
+                    do {
+                        lines = try await openStream(request, for: provider)
+                    } catch let error where sendsTools && !reasoningOff && provider == .openAI && refusesToolsWhileReasoning(error) {
+                        // Some of OpenAI's models take tools only with reasoning off, and
+                        // say so. Asked again with it off, they answer; and from then on
+                        // they are asked that way at once.
+                        reasoningOff = true
+                        modelsThatThinkWithoutTools.withLock { _ = $0.insert(model) }
+                        request = try streamingRequest(
+                            conversation, schema: schema, maximumTokens: maximumTokens, temperature: temperature,
+                            provider: provider, model: model, key: key, reasoningOff: true
+                        )
+                        lines = try await openStream(request, for: provider)
+                    }
                     var parser = StreamParser(provider: provider, answersInTool: schema != nil)
                     for try await line in lines {
                         for event in try parser.events(forLine: line) { continuation.yield(event) }
@@ -170,9 +190,19 @@ enum HostedModelClient {
         return reply
     }
 
+    /// OpenAI models found to take tools only with reasoning off.
+    private static let modelsThatThinkWithoutTools = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+
+    /// Whether OpenAI turned a request down because it had tools and the model reasons:
+    /// "Function tools with reasoning_effort are not supported for … set reasoning_effort to 'none'."
+    static func refusesToolsWhileReasoning(_ error: any Error) -> Bool {
+        guard case HostedModelError.server(.openAI, 400, let message?) = error else { return false }
+        return message.contains("reasoning_effort") && message.contains("'none'")
+    }
+
     static func streamingRequest(
         _ conversation: HostedConversation, schema: Data?, maximumTokens: Int?, temperature: Double?,
-        provider: HostedProvider, model: String, key: String?
+        provider: HostedProvider, model: String, key: String?, reasoningOff: Bool = false
     ) throws -> URLRequest {
         let schemaObject = try schema.map { try JSONSerialization.jsonObject(with: $0) }
         var request: URLRequest
@@ -223,6 +253,7 @@ enum HostedModelClient {
                 }
                 // One tool at a time, as for Anthropic.
                 body["parallel_tool_calls"] = false
+                if reasoningOff { body["reasoning_effort"] = "none" }
                 if conversation.requiresTool { body["tool_choice"] = "required" }
             }
             request = URLRequest(url: provider.baseURL.appending(path: "chat/completions"))
