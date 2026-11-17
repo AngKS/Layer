@@ -129,6 +129,16 @@ struct VoiceToolsTests {
         #expect(bench.box.failures.isEmpty)
     }
 
+    /// A model can write "nan" where a number goes. A frame with that in it can't be laid out.
+    @Test func aSizeThatIsNotANumberIsRefused() throws {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.moveElement(element: "E3", x: "nan", y: nil, width: nil, height: nil).hasPrefix("I didn't understand the size"))
+        #expect(bench.box.moveElement(element: "E3", x: nil, y: nil, width: "inf", height: nil).hasPrefix("I didn't understand the size"))
+        #expect(bench.box.moveElement(element: "E3", x: nil, y: "infinity%", width: nil, height: nil).hasPrefix("I didn't understand the size"))
+        #expect(bench.app.store.content == before)
+    }
+
     @Test func resizingAcceptsAShareOfTheScreen() throws {
         let bench = bench()
         _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "50%", height: nil)
@@ -282,7 +292,7 @@ struct VoiceToolsTests {
         let bench = bench()
         let before = bench.app.store.content
         let refused = bench.box.deleteElement(element: "E2", named: "dropdown")
-        #expect(refused == "There is no dropdown here. E2 is the button “Sign in”.")
+        #expect(refused == "There is no dropdown here. That is the button “Sign in”.")
         #expect(bench.box.deleteElement(element: "E2", named: "dropdown button").hasPrefix("There is no dropdown button here."))
         #expect(bench.box.deleteElement(element: "E3", named: "map").hasPrefix("There is no map here."))
         #expect(bench.app.store.content == before)
@@ -306,7 +316,7 @@ struct VoiceToolsTests {
 
     @Test func deletingAScreenNeedsANameThatFits() {
         let bench = bench()
-        #expect(bench.box.deleteScreen(screen: "S1", named: "checkout screen") == "There is no checkout screen here. S1 is “Login”.")
+        #expect(bench.box.deleteScreen(screen: "S1", named: "checkout screen") == "There is no checkout screen here. That screen is “Login”.")
         #expect(bench.app.store.screens.count == 1)
         // "This screen", "the first screen" and the like name it by where it is.
         #expect(VoiceNaming.fits("this screen", names: ["login"], words: "Login"))
@@ -329,6 +339,51 @@ struct VoiceToolsTests {
         #expect(!VoiceNaming.fits("dropdown button", names: button, words: "Sign in"))
         #expect(!VoiceNaming.fits("slider", names: ["image", "photo", "picture"], words: ""))
         #expect(!VoiceNaming.fits("title", names: button, words: "Sign in"))
+    }
+
+    /// What something is like, where it is and which one it is don't name it, so they
+    /// can't make a right delete wrong.
+    @Test func describingWordsAndNumbersDoNotStopARightDelete() {
+        let button = ["button", "primary button", "cta"]
+        #expect(VoiceNaming.fits("blue button", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("the big button", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("left button", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("button 2", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("screen two", names: [], words: "Settings"))
+        #expect(VoiceNaming.fits("screen 2", names: [], words: "Settings"))
+        #expect(VoiceNaming.fits("the fourth screen", names: [], words: "Settings"))
+        // But they don't make a wrong one right.
+        #expect(!VoiceNaming.fits("blue dropdown", names: button, words: "Sign in"))
+        #expect(!VoiceNaming.fits("second map", names: ["image", "photo"], words: ""))
+    }
+
+    /// Speech recognition writes "login" or "log in" as it pleases.
+    @Test func wordsRunTogetherOrApartAreTheSameName() {
+        #expect(VoiceNaming.fits("login screen", names: [], words: "Log in"))
+        #expect(VoiceNaming.fits("log in screen", names: [], words: "Login"))
+        #expect(VoiceNaming.fits("signin button", names: ["button"], words: "Sign in"))
+        #expect(!VoiceNaming.fits("logout screen", names: [], words: "Log in"))
+    }
+
+    @Test func aHandleGivenAsTheNameIsNoNameAtAll() throws {
+        let bench = bench()
+        _ = bench.box.deleteElement(element: "E3", named: "E3")
+        #expect(bench.element("E3") == nil)
+        _ = bench.box.deleteScreen(screen: "S1", named: "S1")
+        #expect(bench.app.store.screens.isEmpty)
+    }
+
+    /// A field is a field whatever is typed in it: "password field" names the one that
+    /// says Password, and no other.
+    @Test func aFieldIsNotNamedByWhatAnotherFieldIsFor() throws {
+        let bench = bench()
+        _ = bench.box.addElement(screen: "S1", kind: "text field", text: "Email", look: nil)
+        let field = try #require(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .textField })
+        let handle = bench.handles.handle(forElement: field.id)
+        #expect(bench.box.deleteElement(element: handle, named: "password field").hasPrefix("There is no password field here."))
+        #expect(bench.element(handle) != nil)
+        _ = bench.box.deleteElement(element: handle, named: "the email field")
+        #expect(bench.element(handle) == nil)
     }
 
     // MARK: What can't be done
@@ -397,6 +452,95 @@ struct VoiceToolsTests {
         _ = bench.box.show(target: "S1")
         bench.app.store.endHeldEdit()
         #expect(try #require(bench.app.store.undoManager).canUndo == false)
+    }
+
+    /// A finger can be dragging something while a command runs. When the command ends
+    /// first the drag is still one step: it isn't left to make a step of every move.
+    @Test func aDragBegunDuringACommandIsOneStepWhenTheCommandEndsFirst() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let undo = try #require(store.undoManager)
+        let before = store.content
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.beginHeldEdit()
+        _ = bench.box.styleElement(element: "E2", look: "green")
+        store.beginEdit()
+        store.update(image) { $0.frame.origin.x = 40 }
+        store.endHeldEdit()
+        store.update(image) { $0.frame.origin.x = 60 }
+        store.update(image) { $0.frame.origin.x = 80 }
+        // No move is a step of its own while the finger is still down.
+        #expect(!undo.canUndo)
+        store.endEdit()
+        undo.undo()
+        #expect(store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    @Test func aDragBegunBeforeACommandAndEndedAfterItIsOneStep() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let undo = try #require(store.undoManager)
+        let before = store.content
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.beginEdit()
+        store.update(image) { $0.frame.origin.x = 40 }
+        store.beginHeldEdit()
+        _ = bench.box.styleElement(element: "E2", look: "green")
+        store.endHeldEdit()
+        store.update(image) { $0.frame.origin.x = 60 }
+        #expect(!undo.canUndo)
+        store.endEdit()
+        undo.undo()
+        #expect(store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    /// A slider opens its edit with every move and closes it once, a moment after the
+    /// last. Moved and let go while a command runs, it leaves the step to the command.
+    @Test func aSliderMovedAndLetGoDuringACommandLeavesTheStepToTheCommand() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let undo = try #require(store.undoManager)
+        let before = store.content
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.beginHeldEdit()
+        for width in [180, 160, 140] {
+            store.beginEdit()
+            store.update(image) { $0.frame.size.width = CGFloat(width) }
+        }
+        store.endEdit()
+        _ = bench.box.styleElement(element: "E2", look: "green")
+        store.endHeldEdit()
+        // The step is closed: a change made next is a step of its own.
+        #expect(undo.canUndo)
+        store.update(image) { $0.frame.origin.y = 520 }
+        undo.undo()
+        #expect(try #require(bench.element("E3")).frame.origin.y == 500)
+        #expect(try #require(bench.element("E3")).frame.size.width == 140)
+        undo.undo()
+        #expect(store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    /// A drag that is over before the command is leaves the step to the command.
+    @Test func aDragThatEndsDuringACommandLeavesTheStepToTheCommand() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let undo = try #require(store.undoManager)
+        let before = store.content
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.beginHeldEdit()
+        store.beginEdit()
+        store.update(image) { $0.frame.origin.x = 40 }
+        store.endEdit()
+        #expect(!undo.canUndo)
+        _ = bench.box.styleElement(element: "E2", look: "green")
+        store.endHeldEdit()
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(store.content == before)
+        #expect(!undo.canUndo)
     }
 
     @Test func undoInsideACommandUndoesTheLastCommand() throws {

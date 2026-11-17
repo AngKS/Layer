@@ -326,4 +326,37 @@ extension HostedModelTests {
         // The canvas's own notice isn't left up: the call's pill has said it.
         #expect(app.generation == nil)
     }
+
+    /// Someone can be dragging an element while a spoken screen is written. The screen
+    /// being finished must not close the step under the finger: every move after it
+    /// would then be an undo step of its own, and push the earlier history out.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
+    func aDragHeldThroughASpokenScreenIsStillOneStep() async throws {
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
+        let (app, screen) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        let undo = try #require(app.store.undoManager)
+        undo.removeAllActions()
+        let before = app.store.content
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        let image = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screen(screen)?.elements.last).id)
+
+        app.store.beginHeldEdit()                  // the spoken command starts
+        app.store.beginEdit()                      // a finger starts to drag the image
+        app.store.update(image) { $0.frame.origin.x = 40 }
+        _ = try await box.createScreen(description: "a simple login screen")
+        app.store.endHeldEdit()                    // the command is over; the finger is still down
+        app.store.update(image) { $0.frame.origin.x = 60 }
+        app.store.update(image) { $0.frame.origin.x = 80 }
+
+        #expect(app.store.screens.count == 2)
+        #expect(!undo.canUndo)
+        app.store.endEdit()                        // the finger lifts
+        undo.undo()
+        #expect(app.store.content == before)
+        #expect(!undo.canUndo)
+    }
 }

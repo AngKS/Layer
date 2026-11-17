@@ -41,7 +41,8 @@ final class VoiceToolbox: VoiceActing {
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isGenerating else { return failed("A screen is already being written.") }
-        model.generateScreen(from: description)
+        // Inside a command the screen is part of the command's own undo step.
+        model.generateScreen(from: description, partOfHeldEdit: model.store.isHoldingEdit)
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
@@ -78,8 +79,10 @@ final class VoiceToolbox: VoiceActing {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
             let handle = handles.handle(forScreen: found.id)
-            if let named, !VoiceNaming.fits(named, names: [], words: found.name) {
-                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. \(handle) is “\(found.name)”.")
+            // Only what the person named goes: see `VoiceNaming`. A handle given as the
+            // name is no name at all.
+            if let named, VoiceHandles.tidied(named) == nil, !VoiceNaming.fits(named, names: [], words: found.name) {
+                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That screen is “\(found.name)”.")
             }
             guard found.isLocked != true else { return failed("\(handle) is locked.") }
             model.store.deleteScreen(found.id)
@@ -218,9 +221,10 @@ final class VoiceToolbox: VoiceActing {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
             let handle = handles.handle(forElement: found.element.id)
-            // Only what the person named goes: see `VoiceNaming`.
-            if let named, !Self.fits(named, found.element) {
-                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. \(handle) is \(Self.describe(found.element)).")
+            // Only what the person named goes: see `VoiceNaming`. A handle given as the
+            // name is no name at all.
+            if let named, VoiceHandles.tidied(named) == nil, !Self.fits(named, found.element) {
+                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That is \(Self.describe(found.element)).")
             }
             guard !found.element.isLocked else { return failed("\(handle) is locked.") }
             model.store.delete(found.ref)
@@ -395,7 +399,10 @@ final class VoiceToolbox: VoiceActing {
     /// Whether what the person called something fits an element: by what its kind is
     /// called, by the words on it, or by its own name.
     private static func fits(_ named: String, _ element: DesignElement) -> Bool {
-        let kindNames = (ScreenBlueprint.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
+        var kindNames = (ScreenBlueprint.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
+        // "Email field" and the like say what a field is for, not what it is. That is for
+        // the words on the field to bear out, or any field would answer to "password field".
+        if element.kind == .textField { kindNames.removeAll { ["search field", "email field", "password field"].contains($0) } }
         // Anything with words on it can be called "the text".
         let loose = element.kind.hasText ? ["text", "words", "label", "copy"] : []
         return VoiceNaming.fits(named, names: kindNames + loose, words: "\(element.text) \(element.name ?? "") \(element.symbol ?? "")")
@@ -415,15 +422,17 @@ final class VoiceToolbox: VoiceActing {
     /// A length as written: points (`180`, `44pt`) or a share of `extent` (`50%`).
     private static func length(_ written: String, of extent: CGFloat?) -> CGFloat? {
         var text = written.lowercased().trimmingCharacters(in: .whitespaces)
+        // "nan" and "inf" read as numbers. A frame with either in it can't be laid out.
         if text.hasSuffix("%") {
-            guard let extent, let share = Double(text.dropLast().trimmingCharacters(in: .whitespaces)) else { return nil }
+            guard let extent, let share = Double(text.dropLast().trimmingCharacters(in: .whitespaces)), share.isFinite else { return nil }
             return (extent * CGFloat(share) / 100).rounded()
         }
         for unit in ["points", "point", "pts", "pt"] where text.hasSuffix(unit) {
             text = String(text.dropLast(unit.count)).trimmingCharacters(in: .whitespaces)
             break
         }
-        return Double(text).map { CGFloat($0) }
+        guard let value = Double(text), value.isFinite else { return nil }
+        return CGFloat(value)
     }
 
     private static func alignment(named word: String) -> (ElementLayout.Alignment, String)? {

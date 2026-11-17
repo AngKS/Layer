@@ -31,6 +31,9 @@ final class VoiceCall {
             case hearing
             case working
             case done
+            /// What the model said when it did nothing: why it couldn't, most often.
+            /// Never shown as done, because nothing was.
+            case said
             case problem
         }
 
@@ -159,14 +162,15 @@ final class VoiceCall {
     }
 
     /// "Stop" and "hang up" are acted on here, so that they work at once and whatever the
-    /// model is doing. Only the bare phrases count: "stop the button being blue" is a command.
+    /// model is doing. Only the bare phrases count: "stop the button being blue" is a
+    /// command. A "please" or an "OK" with them is still the bare phrase.
     static func localAction(for command: String) -> LocalAction? {
         let words = command.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !["please", "ok", "okay"].contains($0) }
             .joined(separator: " ")
         switch words {
-        case "stop", "cancel", "stop that", "cancel that": return .stop
+        case "stop", "cancel", "stop that", "cancel that", "stop it", "cancel it": return .stop
         case "hang up", "end call", "end the call", "goodbye": return .hangUp
         default: return nil
         }
@@ -216,7 +220,8 @@ final class VoiceCall {
         } else if let line = outcome.lines.last {
             show(.done, line)
         } else if !outcome.said.isEmpty {
-            show(.done, outcome.said)
+            // Nothing was done, so no tick, whatever the model says it did.
+            show(.said, outcome.said)
         } else {
             caption = nil
         }
@@ -230,7 +235,7 @@ final class VoiceCall {
         let time: Duration
         switch kind {
         case .done: time = captionTimes.done
-        case .problem: time = captionTimes.problem
+        case .problem, .said: time = captionTimes.problem
         case .hearing, .working: return
         }
         captionClearing = Task { [weak self] in

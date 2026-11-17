@@ -152,6 +152,10 @@ private struct CaptionLine: View {
             case .done:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
+            case .said:
+                // The model's own words, with nothing done: no tick.
+                Image(systemName: "text.bubble.fill")
+                    .foregroundStyle(.secondary)
             case .problem:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

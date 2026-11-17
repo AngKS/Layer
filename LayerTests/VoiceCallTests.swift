@@ -210,12 +210,28 @@ struct VoiceCallTests {
         call.end()
     }
 
-    @Test func wordsTheModelSaidAreShownWhenNothingWasDone() async {
+    /// Words with nothing done are the model's own, and never get the tick that says a
+    /// change was made: a model that can't call tools will say it has done what it hasn't.
+    @Test func wordsTheModelSaidAreShownWhenNothingWasDoneAndNotAsDone() async {
         let (call, route, runner) = makeCall()
         runner.outcomes = [VoiceOutcome(said: "There's no button on this screen.")]
         await call.start()
         route.send(.command("make the button blue"))
-        #expect(await eventually { call.caption == VoiceCall.Caption(kind: .done, text: "There's no button on this screen.") })
+        #expect(await eventually { call.caption?.text == "There's no button on this screen." })
+        #expect(call.caption?.kind == .said)
+        call.end()
+    }
+
+    /// They stay as long as a problem does, being as much to read.
+    @Test func wordsTheModelSaidStayAsLongAsAProblem() async {
+        let (call, route, runner) = makeCall()
+        call.captionTimes = (done: .milliseconds(20), problem: .seconds(30))
+        runner.outcomes = [VoiceOutcome(said: "Sure, the button is blue now.")]
+        await call.start()
+        route.send(.command("make the button blue"))
+        #expect(await eventually { call.caption?.text == "Sure, the button is blue now." })
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(call.caption?.text == "Sure, the button is blue now.")
         call.end()
     }
 
@@ -292,6 +308,20 @@ struct VoiceCallTests {
         #expect(VoiceCall.localAction(for: "End the call") == .hangUp)
         #expect(VoiceCall.localAction(for: "stop the button from being blue") == nil)
         #expect(VoiceCall.localAction(for: "make it blue") == nil)
+    }
+
+    /// Said to a person, "stop" comes with a "please" or an "it" as often as not. Those
+    /// must stop the work at once too, not wait their turn behind it.
+    @Test func stopIsHeardHoweverPolitelyItIsSaid() {
+        #expect(VoiceCall.localAction(for: "Please stop.") == .stop)
+        #expect(VoiceCall.localAction(for: "Stop it") == .stop)
+        #expect(VoiceCall.localAction(for: "stop, please") == .stop)
+        #expect(VoiceCall.localAction(for: "Cancel it.") == .stop)
+        #expect(VoiceCall.localAction(for: "OK stop") == .stop)
+        #expect(VoiceCall.localAction(for: "please hang up") == .hangUp)
+        // Still only the bare phrase: anything more is a command for the model.
+        #expect(VoiceCall.localAction(for: "please stop the title being bold") == nil)
+        #expect(VoiceCall.localAction(for: "please") == nil)
     }
 
     // MARK: In a design
@@ -596,6 +626,23 @@ struct UtteranceAssemblerTests {
         #expect(assembler.next(at: at(3000)) == .settle)
         assembler.settled(at: at(3050))
         #expect(assembler.next(at: at(3300)) == .command("zoom out"))
+    }
+
+    /// The same, the way a route really meets it: loud sound and a question about what
+    /// to do next, turn and turn about, ten times a second. Loudness that never stops
+    /// must not keep calling the command back from being taken.
+    @Test func inARoomThatIsNeverQuietStaleWordsStillEndTheCommand() {
+        var assembler = UtteranceAssembler()
+        assembler.sound(level: 0.6, at: at(0))
+        assembler.heard("zoom out", isFinal: false, at: at(100))
+        var steps: [UtteranceAssembler.Step] = []
+        for moment in stride(from: 200, through: 4000, by: 100) {
+            assembler.sound(level: 0.6, at: at(moment))
+            let step = assembler.next(at: at(moment + 50))
+            if step == .settle { assembler.settled(at: at(moment + 60)) }
+            if step != .wait { steps.append(step) }
+        }
+        #expect(steps == [.settle, .command("zoom out")])
     }
 
     /// Speech too soft to tell from the room is still heard by its words.

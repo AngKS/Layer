@@ -34,13 +34,27 @@ protocol VoiceActing: AnyObject, Sendable {
 /// slips are plain to see and one "undo" away. A delete is the one that isn't let
 /// through: the model passes on the person's own word, and the delete goes ahead only if
 /// every word of it that names anything is one of the thing's own.
+///
+/// Words that only point at a thing, or say where it is, which one it is or what it is
+/// like, name nothing and are passed over: "the big blue button on the left" names a
+/// button, and "screen 2" names nothing at all. So the guard catches a wrong kind of
+/// thing and a wrong label, and leaves the choice among things of the right kind to the model.
 enum VoiceNaming {
-    /// Words that point at something without naming it: "it", "this one", "the first screen".
-    private static let pointing: Set<String> = [
+    private static let notNaming: Set<String> = [
+        // Pointing at it.
         "the", "a", "an", "my", "our", "this", "that", "these", "those", "it", "its", "one", "thing", "element", "item",
-        "selected", "selection", "current", "screen", "page", "view", "first", "second", "third", "last", "newest",
-        "latest", "other", "new", "old", "top", "bottom", "on", "in", "of", "at", "to", "here", "there", "please",
-        "whole", "entire", "all",
+        "selected", "selection", "current", "screen", "page", "view", "other", "new", "old", "newest", "latest", "last",
+        "on", "in", "of", "at", "to", "here", "there", "please", "whole", "entire", "all",
+        // Where it is.
+        "top", "bottom", "left", "right", "middle", "centre", "center", "upper", "lower", "above", "below", "under", "next",
+        // Which one it is.
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "number",
+        "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        // What it is like.
+        "big", "bigger", "biggest", "large", "larger", "largest", "small", "smaller", "smallest", "little", "tiny", "huge",
+        "wide", "narrow", "tall", "short", "long", "bold", "dark", "light", "bright",
+        "black", "white", "gray", "grey", "red", "orange", "yellow", "green", "blue", "purple", "pink", "teal", "brown",
+        "mint", "indigo", "cyan", "accent",
     ]
 
     /// - Parameters:
@@ -48,10 +62,25 @@ enum VoiceNaming {
     ///   - names: What a thing of its kind is called, such as "button" and "cta".
     ///   - words: The words on it, or its own name.
     static func fits(_ named: String, names: [String], words: String) -> Bool {
-        let naming = tokens(named).filter { !pointing.contains($0) }.map(singular).filter { !pointing.contains($0) }
-        guard !naming.isEmpty else { return true }
-        let own = Set((names.flatMap(tokens) + tokens(words)).map(singular))
-        return naming.allSatisfy(own.contains)
+        let said = tokens(named)
+        // The thing's own words, and each pair of them run together: speech recognition
+        // writes "login" or "log in" as it pleases.
+        let phrases = (names + [words]).map(tokens)
+        var own = Set(phrases.joined().map(singular))
+        for phrase in phrases {
+            for (one, next) in zip(phrase, phrase.dropFirst()) { own.insert(one + next) }
+        }
+        var isOwn = said.map { own.contains($0) || own.contains(singular($0)) }
+        // And the other way about: two words said where the thing has one.
+        for index in said.indices.dropLast() where own.contains(said[index] + said[index + 1]) {
+            isOwn[index] = true
+            isOwn[index + 1] = true
+        }
+        return said.indices.allSatisfy { isOwn[$0] || namesNothing(said[$0]) }
+    }
+
+    private static func namesNothing(_ word: String) -> Bool {
+        notNaming.contains(word) || notNaming.contains(singular(word)) || word.allSatisfy(\.isNumber)
     }
 
     /// The words of some text, in lower case.

@@ -341,8 +341,11 @@ final class HostedModelTests {
     }
 }
 
-@Suite("API keys in the Keychain", .serialized)
-struct APIKeyStoreTests {
+/// API keys in the Keychain. In the same suite as the tests above, which run one at a
+/// time: the Keychain is one place for the whole process, every one of those tests puts
+/// a key for OpenAI there as it starts, and suites run side by side. As a suite of its
+/// own this failed now and then, finding their key where it had just put "first".
+extension HostedModelTests {
     @Test func aKeyIsSavedReplacedAndRemoved() throws {
         let provider = HostedProvider.openAI
         try APIKeyStore.setKey("  first  ", for: provider)

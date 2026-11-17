@@ -90,6 +90,10 @@ struct VoiceAgentLiveTests {
         let outcome = await say("Make the slider wider", to: agent)
         #expect(app.store.content.screens == before.screens)
         #expect(outcome.lines.isEmpty)
+        // Said by the model, in words: a model that couldn't be reached leaves the
+        // design alone too, and must not pass for one that declined.
+        #expect(outcome.problem == nil)
+        #expect(!outcome.said.isEmpty)
     }
 
     @Test func aNewScreenIsWrittenFromADescription() async throws {

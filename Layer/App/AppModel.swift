@@ -313,16 +313,25 @@ final class AppModel {
 
     var isGenerating: Bool { generation?.phase == .writing }
 
+    /// Whether the screen being generated opened an undo step of its own to close.
+    @ObservationIgnored private var generationOwnsEdit = true
+
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
-    func generateScreen(from description: String) {
+    ///
+    /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
+    /// is already being held open and the screen is part of it, so it opens none of its
+    /// own. That is also how an edit by hand made in the meantime is told from it: see
+    /// `DesignStore.endHeldEdit()`.
+    func generateScreen(from description: String, partOfHeldEdit: Bool = false) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
         let device = store.canvas.sketchDevice
-        store.beginEdit()
+        generationOwnsEdit = !partOfHeldEdit
+        if generationOwnsEdit { store.beginEdit() }
         let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
         store.updateScreen(screen.id) { $0.name = ScreenGenerator.name(for: prompt) }
         DesignActions.reveal(.screen(screen.id), in: self)
@@ -371,7 +380,7 @@ final class AppModel {
         }
         // A screen nothing was written on isn't left behind.
         if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
-        store.endEdit()
+        if generationOwnsEdit { store.endEdit() }
         finished.isThinking = false
         generation = finished
         // Success says so briefly; a failure stays until it is dismissed.

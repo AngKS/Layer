@@ -86,6 +86,9 @@ struct UtteranceAssembler {
     private var hasSpoken = false
     private var askedToSettle: ContinuousClock.Instant?
     private var settledAt: ContinuousClock.Instant?
+    /// Whether it was the words going stale that ended the command, in a room that
+    /// hadn't gone quiet. Loudness says nothing in such a room.
+    private var endedOnStaleWords = false
     /// Words taken as a command before they were settled, so that they aren't taken for
     /// a second command if the recogniser settles them late.
     private var takenUnsettled: String?
@@ -118,7 +121,11 @@ struct UtteranceAssembler {
         guard level >= loudness else { return }
         lastLoud = now
         hasSpoken = true
-        // Speaking again: the command isn't over after all.
+        // Speaking again: the command isn't over after all. Unless the room was never
+        // quiet to begin with: then this is the room, not the speaker, and the command
+        // that ended on its words going stale stays ended. Otherwise it would be called
+        // back ten times a second and never taken.
+        guard !endedOnStaleWords else { return }
         askedToSettle = nil
         settledAt = nil
     }
@@ -173,6 +180,7 @@ struct UtteranceAssembler {
         let isStale = hasWords && lastHeard.map { now - $0 >= staleness } == true
         guard isQuiet || isStale else { return .wait }
         askedToSettle = now
+        endedOnStaleWords = !isQuiet
         return .settle
     }
 
@@ -186,6 +194,7 @@ struct UtteranceAssembler {
         hasSpoken = false
         askedToSettle = nil
         settledAt = nil
+        endedOnStaleWords = false
         return command.isEmpty ? .wait : .command(command)
     }
 

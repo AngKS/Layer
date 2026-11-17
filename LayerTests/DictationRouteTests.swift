@@ -9,19 +9,26 @@ final class FakeAudioSource: VoiceAudioSource {
     private var continuation: AsyncStream<AudioChunk>.Continuation?
     private(set) var isStopped = false
     private(set) var wasStarted = false
+    /// Whether the microphone is on: started, and not stopped since.
+    private(set) var isRunning = false
     var startError: (any Error)?
+    /// While set, starting waits, as it does with the alert that asks for the microphone up.
+    var holdsStart = false
     let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
 
     func start() async throws -> AsyncStream<AudioChunk> {
         wasStarted = true
+        while holdsStart { try? await Task.sleep(for: .milliseconds(5)) }
         if let startError { throw startError }
         let (sound, continuation) = AsyncStream<AudioChunk>.makeStream()
         self.continuation = continuation
+        isRunning = true
         return sound
     }
 
     func stop() {
         isStopped = true
+        isRunning = false
         continuation?.finish()
     }
 
@@ -51,8 +58,20 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     private var heldBack: [HeardPhrase] = []
     var startError: (any Error)?
     var prepareError: (any Error)?
+    private var holding = false
+    private var started = false
+
+    /// While set, getting ready waits, as it does while what speech needs is fetched.
+    var holdsPrepare: Bool {
+        get { state.withLock { holding } }
+        set { state.withLock { holding = newValue } }
+    }
+
+    /// Whether it was ever asked to listen.
+    var wasStarted: Bool { state.withLock { started } }
 
     func prepare() async throws {
+        while holdsPrepare { try? await Task.sleep(for: .milliseconds(5)) }
         if let prepareError { throw prepareError }
     }
 
@@ -72,6 +91,7 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
         state.withLock {
             self.continuation = continuation
             told = vocabulary
+            started = true
         }
         Task {
             for await _ in sound { self.state.withLock { self.chunks += 1 } }
@@ -276,5 +296,50 @@ struct DictationRouteTests {
         let seen = await events(from: stream) { _ in false }
         #expect(commands(in: seen).isEmpty)
         #expect(!seen.contains { if case .failed = $0 { true } else { false } })
+    }
+
+    // MARK: Hung up while still getting ready
+
+    /// Getting ready can take a while the first time: what speech needs is fetched. A
+    /// call hung up in that time must never go on to turn the microphone on.
+    @Test func hangingUpWhileSpeechIsMadeReadyLeavesTheMicrophoneOff() async throws {
+        let bench = bench()
+        bench.recogniser.holdsPrepare = true
+        let starting = Task { try await bench.route.start(vocabulary: []) }
+        try await Task.sleep(for: .milliseconds(40))
+        bench.route.stop()
+        bench.recogniser.holdsPrepare = false
+        await #expect(throws: CancellationError.self) { _ = try await starting.value }
+        #expect(!bench.audio.wasStarted)
+        #expect(!bench.recogniser.wasStarted)
+    }
+
+    /// The same while the alert that asks for the microphone is up: once it is answered
+    /// the microphone comes on, and has to be let go of again.
+    @Test func hangingUpWhileTheMicrophoneIsAskedForTurnsItOffAgain() async throws {
+        let bench = bench()
+        bench.audio.holdsStart = true
+        let starting = Task { try await bench.route.start(vocabulary: []) }
+        #expect(await eventually { bench.audio.wasStarted })
+        bench.route.stop()
+        bench.audio.holdsStart = false
+        await #expect(throws: CancellationError.self) { _ = try await starting.value }
+        #expect(!bench.audio.isRunning)
+        #expect(!bench.recogniser.wasStarted)
+    }
+
+    /// And through the call itself, which is what the red button ends.
+    @Test func aCallHungUpWhileGettingReadyNeverListens() async throws {
+        let bench = bench()
+        bench.recogniser.holdsPrepare = true
+        let call = VoiceCall(route: bench.route, runner: FakeRunner())
+        let starting = Task { await call.start() }
+        #expect(await eventually { call.caption?.text == "Getting ready to listen…" })
+        call.end()
+        bench.recogniser.holdsPrepare = false
+        await starting.value
+        #expect(call.phase == .ended)
+        #expect(!bench.audio.wasStarted)
+        #expect(!bench.audio.isRunning)
     }
 }

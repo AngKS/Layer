@@ -49,7 +49,15 @@ final class DictationRoute: VoiceRoute {
         // The recogniser first: where speech can't be recognised there is nothing to
         // listen for, and the microphone stays off.
         try await recogniser.prepare()
+        // Each of these waits can be a long one: fetching what speech needs, the alert
+        // that asks for the microphone. Hung up in the meantime, the route goes no
+        // further, and lets go of whatever it had got as far as turning on.
+        guard !isStopped else { throw CancellationError() }
         let sound = try await source.start()
+        guard !isStopped else {
+            source.stop()
+            throw CancellationError()
+        }
         let (forRecogniser, recogniserInput) = AsyncStream<AudioChunk>.makeStream(bufferingPolicy: .bufferingNewest(128))
         let phrases: AsyncThrowingStream<HeardPhrase, any Error>
         do {
@@ -57,6 +65,12 @@ final class DictationRoute: VoiceRoute {
         } catch {
             source.stop()
             throw error
+        }
+        guard !isStopped else {
+            source.stop()
+            recogniserInput.finish()
+            await recogniser.stop()
+            throw CancellationError()
         }
         let (events, continuation) = AsyncStream<VoiceRouteEvent>.makeStream(bufferingPolicy: .bufferingNewest(512))
         self.continuation = continuation
