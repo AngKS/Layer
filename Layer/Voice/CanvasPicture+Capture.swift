@@ -9,16 +9,26 @@ extension CanvasPicture {
     @MainActor
     static func capture(from model: AppModel, handles: VoiceHandles) -> CanvasPicture {
         let visible = model.canvasSize == .zero ? CGRect.null : model.viewport.visibleRect(in: model.canvasSize)
-        let selectedElement = model.selectedElement?.element.id
-        let selectedScreen = model.selectedScreen?.id
+        // With several things selected, "these" are all of them.
+        let selectedElements = Set(model.selectedElements.map(\.element.id))
+        let selectedScreens = Set(model.selectedThings.compactMap { thing -> DesignScreen.ID? in
+            if case .screen(let id) = thing { id } else { nil }
+        })
 
         func picture(of element: DesignElement, frame: CGRect?) -> Element {
             Element(
                 handle: handles.handle(forElement: element.id), kind: element.kind.layerName.lowercased(),
                 text: element.kind == .symbol ? (element.symbol ?? "") : element.text.trimmingCharacters(in: .whitespacesAndNewlines),
                 frame: frame, look: look(of: element),
-                isSelected: element.id == selectedElement, isLocked: element.isLocked, isHidden: element.isHidden
+                isSelected: selectedElements.contains(element.id), isLocked: element.isLocked, isHidden: element.isHidden
             )
+        }
+
+        /// Ink is an element like any other in the design, and a board can hold hundreds
+        /// of drawings. They are the Pencil's: a model is told nothing of them, so it has
+        /// no handle to change one by, and the on-device model's room isn't spent on them.
+        func isForAModel(_ element: DesignElement) -> Bool {
+            element.kind != .drawing
         }
 
         var whole = CanvasPicture()
@@ -28,14 +38,14 @@ extension CanvasPicture {
             let share = shown.isNull || frame.isEmpty ? 0 : Double(shown.width * shown.height / (frame.width * frame.height))
             // The handle of the screen comes before those of what is on it.
             let handle = handles.handle(forScreen: screen.id)
-            let fromTheTop = screen.elements.sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
+            let fromTheTop = screen.elements.filter(isForAModel).sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
             whole.screens.append(Screen(
                 handle: handle, name: screen.name, size: screen.size, visibleShare: share,
-                isSelected: screen.id == selectedScreen, isLocked: screen.isLocked == true,
+                isSelected: selectedScreens.contains(screen.id), isLocked: screen.isLocked == true,
                 elements: fromTheTop.map { picture(of: $0, frame: $0.frame) }
             ))
         }
-        whole.loose = model.store.floating.map { picture(of: $0.element, frame: nil) }
+        whole.loose = model.store.floating.map(\.element).filter(isForAModel).map { picture(of: $0, frame: nil) }
         return whole
     }
 

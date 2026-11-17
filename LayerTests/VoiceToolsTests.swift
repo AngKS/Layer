@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PencilKit
 import Testing
 @testable import Layer
 
@@ -49,6 +50,44 @@ struct CanvasPictureTests {
         #expect(lines.contains { $0.contains(#"E2 button "Sign in" x20 y420 w353 h50"#) && $0.contains("[selected]") })
         #expect(lines.contains { $0.contains("E3 image x20 y500 w200 h200") })
         #expect(lines.filter { $0.contains("[selected]") }.count == 1)
+    }
+
+    /// Ink is an element like any other in the design, and a board can hold hundreds of
+    /// drawings. They are the Pencil's: a model is told nothing of them, so it has no
+    /// handle to change one by, and the on-device model's little room isn't spent on them.
+    @Test func drawingsAreLeftOutOfWhatAModelIsTold() throws {
+        let (app, _) = VoiceFixture.login()
+        let points: [PKStrokePoint] = (0...10).map { (step: Int) -> PKStrokePoint in
+            let along = CGFloat(100 + step * 6)
+            return PKStrokePoint(
+                location: CGPoint(x: along, y: along), timeOffset: TimeInterval(step) * 0.01,
+                size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2
+            )
+        }
+        let stroke = PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: Date()))
+        app.store.addFloating(try #require(DesignElement.drawing([stroke])), scale: 1)
+        #expect(app.store.floating.count == 1)
+
+        let handles = VoiceHandles()
+        let picture = CanvasPicture.capture(from: app, handles: handles)
+
+        #expect(picture.loose.isEmpty)
+        #expect(picture.screens.first?.elements.map(\.kind) == ["title", "button", "image"])
+        #expect(!picture.text(.full).contains("drawing"))
+        // Nothing was given the next handle on the quiet.
+        #expect(handles.element("E4") == nil)
+    }
+
+    /// With several things selected, "these" are all of them.
+    @Test func everythingSelectedIsMarkedSelected() throws {
+        let (app, screen) = VoiceFixture.login()
+        let elements = try #require(app.store.screen(screen)?.elements)
+        app.selection = .several([
+            .element(.init(host: .screen(screen), element: elements[0].id)),
+            .element(.init(host: .screen(screen), element: elements[2].id)),
+        ])
+        let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
+        #expect(picture.screens.first?.elements.map(\.isSelected) == [true, false, true])
     }
 
     @Test func elementsAreListedFromTheTopWhateverOrderTheyWereMadeIn() throws {
