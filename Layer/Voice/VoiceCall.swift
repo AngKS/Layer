@@ -88,10 +88,12 @@ final class VoiceCall {
         Self.current = self
         // Asking for the microphone, or fetching what speech recognition needs, can take a while.
         show(.working, "Getting ready to listen…")
+        VoiceLog.log.info("call: getting ready")
         do {
             let events = try await route.start(vocabulary: vocabulary())
             // Hung up while it was getting ready.
             guard phase == .starting else { return }
+            VoiceLog.log.info("call: listening")
             phase = .listening
             startedAt = .now
             caption = nil
@@ -101,6 +103,7 @@ final class VoiceCall {
                 }
             }
         } catch {
+            VoiceLog.log.error("call: couldn't start: \(String(reflecting: error), privacy: .public)")
             end(because: (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
@@ -112,6 +115,7 @@ final class VoiceCall {
 
     private func end(because reason: String?) {
         guard phase != .ended else { return }
+        VoiceLog.log.info("call: ended, \(reason ?? "hung up", privacy: .public)")
         phase = .ended
         endReason = reason
         route.stop()
@@ -146,7 +150,9 @@ final class VoiceCall {
     private func received(_ command: String) {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
-        switch Self.localAction(for: command) {
+        let action = Self.localAction(for: command)
+        VoiceLog.log.info("call: heard a command of \(command.count) characters\(action == nil ? "" : ", acted on here", privacy: .public): \(command, privacy: .private)")
+        switch action {
         case .stop:
             // The command under way reports that it was stopped, which is what is shown.
             queue.removeAll()
@@ -213,6 +219,10 @@ final class VoiceCall {
     }
 
     private func show(_ outcome: VoiceOutcome) {
+        VoiceLog.log.info("""
+            call: command over. steps \(outcome.lines.count), stopped \(outcome.wasCancelled), \
+            problem: \(outcome.problem ?? "none", privacy: .private), said: \(outcome.said, privacy: .private)
+            """)
         if outcome.wasCancelled {
             show(.done, "Stopped")
         } else if let problem = outcome.problem {

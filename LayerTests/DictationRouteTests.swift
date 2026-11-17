@@ -125,6 +125,42 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     }
 }
 
+/// Something handed to another thread on the test's own say-so.
+private struct Handed<Value>: @unchecked Sendable {
+    let value: Value
+}
+
+@Suite("The microphone")
+struct MicrophoneTapTests {
+    /// The audio engine hands over its sound on a thread of its own. The block it calls
+    /// must belong to no actor: written in place inside the main-actor class it was
+    /// taken for the main actor's, and the first sound to arrive stopped the app. That
+    /// happened on an iPad, the only place the microphone had ever really run.
+    ///
+    /// This test is not on the main actor, and takes the block without waiting: it only
+    /// builds while the block belongs to no actor.
+    @Test func soundIsTakenOnWhateverThreadTheEngineBringsItOn() async {
+        let (sound, continuation) = AsyncStream<AudioChunk>.makeStream()
+        let block = Handed(value: MicrophoneTap.tapBlock(into: continuation))
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
+        buffer.frameLength = 160
+        let handed = Handed(value: buffer)
+
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue(label: "a thread of the engine's").async {
+                block.value(handed.value, AVAudioTime(hostTime: 0))
+                done.resume()
+            }
+        }
+        continuation.finish()
+
+        var chunks = 0
+        for await _ in sound { chunks += 1 }
+        #expect(chunks == 1)
+    }
+}
+
 @Suite("Hearing commands through the microphone", .serialized)
 @MainActor
 struct DictationRouteTests {

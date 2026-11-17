@@ -369,12 +369,14 @@ final class VoiceToolbox: VoiceActing {
     // MARK: Results
 
     private func done(_ line: String) -> String {
+        VoiceLog.log.info("tool: done. \(line, privacy: .private)")
         lines.append(line)
         lastFailed = false
         return line
     }
 
     private func failed(_ line: String) -> String {
+        VoiceLog.log.info("tool: couldn't. \(line, privacy: .private)")
         failures.append(line)
         lastFailed = true
         return line

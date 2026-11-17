@@ -39,6 +39,8 @@ final class VoiceAgent: VoiceCommandRunner {
         defer { model.store.endHeldEdit() }
 
         var outcome = VoiceOutcome()
+        VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")
+        let began = ContinuousClock.now
         do {
             let response = try await session.respond(to: command)
             outcome.said = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -46,6 +48,8 @@ final class VoiceAgent: VoiceCommandRunner {
             // A conversation cut off part way, with a tool asked for and never answered,
             // isn't one to build the next command on. The next starts afresh.
             self.session = nil
+            // The pill gets plain words; the log gets what the error really was.
+            VoiceLog.log.error("agent: \(String(reflecting: error), privacy: .public)")
             if Task.isCancelled || Self.isCancellation(error) {
                 outcome.wasCancelled = true
             } else {
@@ -59,6 +63,7 @@ final class VoiceAgent: VoiceCommandRunner {
         if outcome.problem == nil, !outcome.wasCancelled, toolbox.lastFailed, let failure = toolbox.failures.last {
             outcome.problem = failure
         }
+        VoiceLog.log.info("agent: answered in \((ContinuousClock.now - began).formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1))), privacy: .public)")
         return outcome
     }
 
@@ -72,6 +77,7 @@ final class VoiceAgent: VoiceCommandRunner {
     }
 
     private func stepStarted(with tool: String) {
+        VoiceLog.log.info("agent: tool \(tool, privacy: .public)")
         onStep?(VoiceTools.step(for: tool))
     }
 
