@@ -398,6 +398,47 @@ struct VoiceToolsTests {
         #expect(bench.box.lines.last == "Added an image.")
     }
 
+    /// With no name to give, the on-device model called new screens "S7" and "S8": the
+    /// handles they were about to get. Those and "new" or "another" are no name at all,
+    /// and the screen is then named from its description as before.
+    @Test func aScreenIsNotNamedByAHandleOrByNothing() {
+        #expect(VoiceToolbox.screenName("S7") == nil)
+        #expect(VoiceToolbox.screenName(" s 8 ") == nil)
+        #expect(VoiceToolbox.screenName("New screen") == nil)
+        #expect(VoiceToolbox.screenName("another") == nil)
+        #expect(VoiceToolbox.screenName("Screen") == nil)
+        #expect(VoiceToolbox.screenName("") == nil)
+        #expect(VoiceToolbox.screenName(nil) == nil)
+        #expect(VoiceToolbox.screenName("Panda Showcase") == "Panda Showcase")
+        #expect(VoiceToolbox.screenName("the Welcome screen") == "Welcome")
+        #expect(VoiceToolbox.screenName("new arrivals") == "New arrivals")
+    }
+
+    /// The model puts a handle in quotes, or after the word "screen", as often as bare.
+    /// On an iPad the pill read: New screen “the screen “S7”” created.
+    @Test func aHandleInQuotesOrAfterItsKindReadsNaturally() {
+        let bench = bench()
+        #expect(bench.box.inWords("New screen “S1” created.") == "New screen “Login” created.")
+        #expect(bench.box.inWords("New screen \"S1\" created.") == "New screen “Login” created.")
+        #expect(bench.box.inWords("Screen S1 is now shown.") == "Screen “Login” is now shown.")
+        #expect(bench.box.inWords("I changed “E2”.") == "I changed the button “Sign in”.")
+    }
+
+    /// Something loose on the canvas has no screen to be half of. Told "50%" wasn't
+    /// understood, and to try "50%", the model made a sticky note 180 points wide.
+    @Test func aShareOfTheScreenIsRefusedPlainlyForSomethingOnNoScreen() throws {
+        let bench = bench()
+        let note = DesignElement(kind: .stickyNote, frame: CGRect(x: 0, y: 0, width: 200, height: 120), text: "A note", tint: Theme.accent)
+        bench.app.store.addFloating(note, scale: 1)
+        let handle = bench.handles.handle(forElement: note.id)
+        let line = bench.box.moveElement(element: handle, x: nil, y: nil, width: "50%", height: nil)
+        #expect(line == "That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
+        #expect(bench.app.store.floating.first?.element.frame.width == 200)
+        // In points it is resized as anything else is.
+        _ = bench.box.moveElement(element: handle, x: nil, y: nil, width: "150", height: nil)
+        #expect(bench.app.store.floating.first?.element.frame.width == 150)
+    }
+
     /// A model asked "Which element should I change—E24, E25, or E26?" on an iPad.
     @Test func whatAModelSaysIsPutInThePersonsWords() {
         let bench = bench()

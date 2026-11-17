@@ -169,8 +169,41 @@ down a bit" with a screen. As a tool of its own it did.
   removing in it.
 - "No, undo revert." was one undo on the iPad and two on the Mac.
 - "Red" was heard as "rate", and the title was reworded to "rate".
-- Whether the warm start and the shorter "Done" do on an iPad what the log says they
-  should has not been measured yet.
+
+**A second session on the iPad, the same night, with those changes:** one call of four
+and a half minutes and about forty commands.
+
+| | Before | After |
+|---|---|---|
+| First command of a call | 14 s and 19 s | 0.7 s |
+| A command that changed the design, end of speech to done | 5.1 to 5.6 s | 1.9 to 3.3 s |
+| Of that, from the change to "done" | about 3 s | 0.4 to 0.6 s |
+| A new screen | 5.3 to 6.3 s | 4.0 to 5.3 s |
+
+A new screen still takes two seconds to say "done": the screen is written by the same
+model in a conversation of its own, and the first one has to find its place again.
+
+"Okay." and "to." were let go. Stacking was used unprompted, three times. What it showed
+that was wrong:
+
+- **Screens named "S7" and "S8".** Asked for "another screen", the model had no name to
+  give and gave the handle the screen was about to get. Fixed: a handle, or a word like
+  "new", is no name, and the screen is named from its description as before.
+- **"New screen “the screen “S7”” created."** A handle the model had put in quotes was
+  put into words inside them. Fixed.
+- **A sentence cut by a pause still runs if what is left has two words.** "I want a
+  screen to" made a screen; "Inc increase the width of it to" made the image 171 points.
+- **Putting one thing below or beside another has no tool.** "Move this image below the
+  title", "align the avatar beside it" and "move the name and location fields down as
+  well" were answered with what there is: a guess at a position, or an edge of the
+  screen, which put two fields on top of each other.
+- **"Align the image and the avatar"** lined each up with the screen, not with each
+  other, and the model's try at naming both in one call was refused.
+- **A correction leaves the mistake.** "Make the image bigger" resized a checkbox. "Not
+  the check marks" then resized the image, and the checkbox stayed as it was. "No,
+  that's wrong" was answered by doing the wrong thing again with another number.
+- **Something loose on the canvas was picked for a command about the screen in view**:
+  "make the width 50%" resized a sticky note.
 
 ## Not measured here
 

@@ -130,22 +130,33 @@ final class VoiceToolbox: VoiceActing {
         var rest = text[...]
         while let match = rest.firstMatch(of: /\b[ES]\d+\b/) {
             let handle = String(match.output)
+            var before = rest[..<match.range.lowerBound]
+            var after = rest[match.range.upperBound...]
+            // A model puts a handle in quotes as often as not. The quotes go with it.
+            let isQuoted = before.last.map("“\"'‘".contains) == true && after.first.map("”\"'’".contains) == true
             var words: String?
             if let id = handles.screen(handle), let screen = model.store.screen(id) {
-                words = "the screen “\(screen.name)”"
+                // "Screen S2" and “S2” already say it is a screen.
+                let isCalledAScreen = before.lowercased().hasSuffix("screen ") || (isQuoted && before.dropLast().lowercased().hasSuffix("screen "))
+                words = isCalledAScreen ? "“\(screen.name)”" : "the screen “\(screen.name)”"
             } else if case .success(let found) = find(element: handle) {
                 words = Self.describe(found.element)
             }
-            said += rest[..<match.range.lowerBound]
-            if var words {
-                // At the start of a sentence it takes the capital the handle had.
-                let before = said.trimmingCharacters(in: .whitespaces)
-                if before.isEmpty || ".!?".contains(before.last ?? " ") { words = words.prefix(1).uppercased() + words.dropFirst() }
-                said += words
-            } else {
-                said += handle
+            guard var words else {
+                said += before + handle
+                rest = after
+                continue
             }
-            rest = rest[match.range.upperBound...]
+            if isQuoted {
+                before = before.dropLast()
+                after = after.dropFirst()
+            }
+            said += before
+            // At the start of a sentence it takes the capital the handle had.
+            let sofar = said.trimmingCharacters(in: .whitespaces)
+            if sofar.isEmpty || ".!?".contains(sofar.last ?? " ") { words = words.prefix(1).uppercased() + words.dropFirst() }
+            said += words
+            rest = after
         }
         return said + rest
     }
@@ -285,6 +296,11 @@ final class VoiceToolbox: VoiceActing {
                     continue
                 }
                 let extent = index.isMultiple(of: 2) ? screenSize?.width : screenSize?.height
+                // Said plainly: told only that "50%" wasn't understood, a model tries
+                // some other number of its own.
+                if extent == nil, written.hasSuffix("%") {
+                    return failed("That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
+                }
                 guard let value = Self.length(written, of: extent), index < 2 || value >= 1 else {
                     return failed("I didn't understand the size “\(written)”. Give points, such as 180, or a share of the screen, such as 50%.")
                 }
@@ -534,7 +550,10 @@ final class VoiceToolbox: VoiceActing {
             name = String(name.dropLast(kind.count))
         }
         name = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
-        guard let first = name.first else { return nil }
+        // With no name to give, a small model gives the handle the screen is about to
+        // get, or a word that says only that it is new. Neither is a name.
+        let noName: Set<String> = ["new", "another", "next", "other", "untitled", "screen", "page", "view"]
+        guard let first = name.first, VoiceHandles.tidied(name) == nil, !noName.contains(name.lowercased()) else { return nil }
         return first.uppercased() + name.dropFirst()
     }
 
