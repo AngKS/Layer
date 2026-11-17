@@ -4,7 +4,8 @@
 # measured here instead, compiling the app's own voice rules, tools and canvas picture for
 # macOS. Those three files need nothing else from the app.
 #
-# Usage: Tools/VoiceBenchmarkHarness/run.sh [baseline|sampled|required|examples]
+# Usage: Tools/VoiceBenchmarkHarness/run.sh [baseline|sampled|required|examples|canvasfirst]
+#        Tools/VoiceBenchmarkHarness/run.sh latency [runs] [instructions,prompt,promptwarm]   (commands in a row)
 # Results and what they led to: docs/benchmarks/voice-on-device.md
 set -eu
 cd "$(dirname "$0")/../.."

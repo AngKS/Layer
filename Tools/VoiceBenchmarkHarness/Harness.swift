@@ -6,6 +6,10 @@
 // Each command is put to a fresh session set up as the app's on-device profile is: the
 // compact rules, the compact picture of the canvas, the tools that fit the canvas, and a
 // short limit on the reply. What the model asks the tools to do is recorded and graded.
+//
+// `latency` instead runs a call's commands in a row in one warmed session, the canvas
+// changing as they go, and times each: to the first tool, from the last tool to the
+// model's last word (its "Done"), and the whole.
 import Foundation
 // Imported as the app's own files import it, which the compiler wants to be the same throughout.
 @_weakLinked import FoundationModels
@@ -25,7 +29,12 @@ final class Recorder: VoiceActing {
     private(set) var calls: [Call] = []
     /// How many of those calls the app would have turned down, changing nothing.
     private(set) var refusals = 0
-    private let picture: CanvasPicture
+    /// The canvas, changed as the app would change it, so that a command in a row sees
+    /// what the one before it did.
+    private(set) var picture: CanvasPicture
+    /// When the first and the last tool of the command under way ran.
+    var firstToolAt: ContinuousClock.Instant?
+    var lastToolAt: ContinuousClock.Instant?
 
     /// What a thing of each kind is called, as the app's own table has it.
     private static let kindNames: [String: [String]] = [
@@ -40,15 +49,34 @@ final class Recorder: VoiceActing {
 
     private func note(_ tool: String, _ arguments: [String: String?], saying line: String) -> String {
         calls.append(Call(tool: tool, arguments: arguments.compactMapValues { $0 }))
+        let now = ContinuousClock.now
+        if firstToolAt == nil { firstToolAt = now }
+        lastToolAt = now
         return line
     }
+
+    /// Changes an element as the app roughly would, so that the canvas text changes.
+    private func change(_ handle: String, _ edit: (inout CanvasPicture.Element) -> Void) {
+        for screen in picture.screens.indices {
+            if let index = picture.screens[screen].elements.firstIndex(where: { $0.handle == handle }) {
+                edit(&picture.screens[screen].elements[index])
+                return
+            }
+        }
+    }
+
+    private var made = 20
 
     func createScreen(name: String?, description: String) async throws -> String {
         note("createScreen", ["name": name, "description": description], saying: "Made the screen as S9, with 6 elements.")
     }
 
     func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
-        note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look], saying: "Added a \(kind) as E20.")
+        made += 1
+        if !picture.screens.isEmpty {
+            picture.screens[0].elements.append(.init(handle: "E\(made)", kind: kind, text: text ?? "", frame: CGRect(x: 20, y: 720, width: 353, height: 44)))
+        }
+        return note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look], saying: "Added a \(kind) as E\(made).")
     }
 
     func setText(element: String, text: String) -> String {
@@ -58,25 +86,43 @@ final class Recorder: VoiceActing {
             if words.hasPrefix("text ") { words = String(words.dropFirst(5)) }
             if Self.colours.contains(words) { return styleElement(element: element, look: "text \(words)") }
         }
+        change(element) { $0.text = text }
         return note("setText", ["element": element, "text": text], saying: "Reworded \(element) to “\(text)”.")
     }
 
     private static let colours: Set<String> = ["black", "white", "gray", "grey", "red", "orange", "yellow", "green", "blue", "purple", "pink", "teal", "brown"]
 
     func styleElement(element: String, look: String) -> String {
-        note("styleElement", ["element": element, "look": look], saying: "Restyled \(element).")
+        change(element) { $0.look.append(look) }
+        return note("styleElement", ["element": element, "look": look], saying: "Restyled \(element).")
     }
 
     func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String {
-        note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height], saying: "Resized \(element).")
+        change(element) {
+            guard var frame = $0.frame else { return }
+            if width != nil { frame.size.width /= 2 }
+            if height != nil { frame.size.height *= 2 }
+            if y != nil { frame.origin.y = 60 }
+            $0.frame = frame
+        }
+        return note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height], saying: "Resized \(element).")
     }
 
     func alignElement(element: String, alignment: String) -> String {
-        note("alignElement", ["element": element, "alignment": alignment], saying: "Aligned \(element) to the \(alignment).")
+        change(element) { $0.frame?.origin.x = 96 }
+        return note("alignElement", ["element": element, "alignment": alignment], saying: "Aligned \(element) to the \(alignment).")
     }
 
     func duplicateElement(element: String) -> String {
-        note("duplicateElement", ["element": element], saying: "Duplicated \(element) as E21.")
+        made += 1
+        if let found = picture.screens.flatMap(\.elements).first(where: { $0.handle == element }), !picture.screens.isEmpty {
+            var copy = found
+            copy.handle = "E\(made)"
+            copy.isSelected = false
+            copy.frame?.origin.y += 60
+            picture.screens[0].elements.append(copy)
+        }
+        return note("duplicateElement", ["element": element], saying: "Duplicated \(element) as E\(made).")
     }
 
     func deleteElement(element: String, named: String?) -> String {
@@ -299,12 +345,26 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
     enum Variant: String {
         /// The model's own sampling, which varies from run to run.
         case sampled
-        /// Always the likeliest answer, so a run can be repeated. As the app has it.
+        /// Always the likeliest answer, so a run can be repeated, with the canvas in the
+        /// instructions, as the app had it until 2026-11-18.
         case baseline
         /// The model must call a tool.
         case required
         /// Two worked examples added to the rules.
         case examples
+        /// The canvas at the head of the prompt instead of in the instructions, so that the
+        /// rules and the tools are the same from one command to the next. As the app has
+        /// it since 2026-11-18 ("Prompt order" in docs/benchmarks/voice-on-device.md).
+        case canvasfirst
+    }
+
+    /// What the model is asked, with the canvas in front of the command where it goes there.
+    static func prompt(_ command: String, picture: CanvasPicture, canvasFirst: Bool) -> String {
+        canvasFirst ? canvasPrefix(picture) + command : command
+    }
+
+    static func canvasPrefix(_ picture: CanvasPicture) -> String {
+        "The canvas now:\n\(picture.text(.compact))\n\nThe command: "
     }
 
     private static let examples = """
@@ -317,7 +377,9 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
             Instructions(VoiceRules.compact + (variant == .examples ? Self.examples : ""))
-            Instructions("The canvas now:\n\(picture.text(.compact))")
+            if variant != .canvasfirst {
+                Instructions("The canvas now:\n\(picture.text(.compact))")
+            }
             if picture.hasScreens {
                 VoiceTools.all(actor)
             } else {
@@ -356,7 +418,7 @@ func run(_ testCase: Case, variant: BenchProfile.Variant) async -> Outcome {
     var reply = ""
     var failure: String?
     do {
-        reply = try await session.respond(to: testCase.command).content
+        reply = try await session.respond(to: BenchProfile.prompt(testCase.command, picture: testCase.canvas.picture, canvasFirst: variant == .canvasfirst)).content
     } catch {
         failure = String(describing: error).prefix(160).description
     }
@@ -377,6 +439,117 @@ func run(_ testCase: Case, variant: BenchProfile.Variant) async -> Outcome {
         command: testCase.command, canvas: testCase.canvas, isHeldBack: testCase.isHeldBack, isFresh: testCase.isFresh, isFromTheIPad: testCase.isFromTheIPad, calls: calls, refusals: recorder.refusals, reply: reply,
         seconds: seconds, error: failure, rightTool: rightTool, right: right
     )
+}
+
+
+// MARK: Commands in a row
+
+extension SessionPropertyValues {
+    /// The canvas as the app writes it before each command.
+    @SessionPropertyEntry var benchCanvas: CanvasPicture = .empty
+}
+
+/// The canvas in the instructions, read afresh before every request, as `CanvasBrief` has it.
+struct BenchBrief: DynamicInstructions {
+    @SessionProperty(\.benchCanvas) private var picture
+
+    var body: some DynamicInstructions {
+        Instructions("The canvas now:\n\(picture.text(.compact))")
+    }
+}
+
+/// The app's on-device profile for a call, in one of two orders: the canvas between the
+/// rules and the tools, as `VoiceProfile` had it, or at the head of each command's prompt.
+struct CallProfile: LanguageModelSession.DynamicProfile {
+    @SessionProperty(\.benchCanvas) private var picture
+    let actor: any VoiceActing
+    let canvasFirst: Bool
+
+    var body: some LanguageModelSession.DynamicProfile {
+        Profile {
+            Instructions(VoiceRules.compact)
+            if !canvasFirst {
+                BenchBrief()
+            }
+            if picture.hasScreens {
+                VoiceTools.all(actor)
+            } else {
+                VoiceTools.forEmptyCanvas(actor)
+            }
+        }
+        .historyTransform { Self.trimmed($0, keepingCommands: 2) }
+        .maximumResponseTokens(200)
+        .samplingMode(.greedy)
+    }
+
+    /// As `VoiceProfile.trimmed`.
+    static func trimmed(_ entries: [Transcript.Entry], keepingCommands count: Int) -> [Transcript.Entry] {
+        let prompts = entries.indices.filter { if case .prompt = entries[$0] { true } else { false } }
+        guard count > 0, prompts.count > count else { return entries }
+        let start = prompts[prompts.count - count]
+        let instructions = entries[..<start].filter { if case .instructions = $0 { true } else { false } }
+        return instructions + entries[start...]
+    }
+}
+
+/// Where the canvas goes: in the instructions (as the app had it), at the head of the
+/// prompt with only the rules and tools read ahead, or at the head of the prompt with the
+/// starting canvas read ahead too.
+enum CallOrder: String, CaseIterable {
+    case instructions, prompt, promptwarm
+}
+
+/// A call's commands in a row on the one-screen canvas, each changing it.
+let callCommands = [
+    "Make the sign in button green",
+    "Make the title bold",
+    "Change the button text to Continue",
+    "Make the image half width",
+    "Make the title red",
+    "Align the image centrally",
+    "Duplicate the button",
+    "Change the title's text colour to blue",
+]
+
+private func seconds(_ duration: Duration) -> Double {
+    Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+}
+
+/// One call: the session is made and warmed as the app does when a call starts, a pause
+/// stands in for the person speaking, and then the commands run one after another. For
+/// each, the time to the first tool, the time from the last tool to the model's last word
+/// (its "Done"), and the whole. Printed one line a command, for adding up elsewhere.
+@MainActor
+func call(_ order: CallOrder, run: Int) async {
+    let canvasFirst = order != .instructions
+    let recorder = Recorder(picture: Canvas.one.picture)
+    let session = LanguageModelSession(profile: CallProfile(actor: recorder, canvasFirst: canvasFirst))
+    session.properties.benchCanvas = recorder.picture
+    // `promptwarm` also reads ahead the canvas as the call starts, as the start of the
+    // first command's prompt.
+    session.prewarm(promptPrefix: order == .promptwarm ? Prompt(BenchProfile.canvasPrefix(recorder.picture)) : nil)
+    try? await Task.sleep(for: .seconds(4))
+    for (index, command) in callCommands.enumerated() {
+        // The app takes the canvas as it is before each command.
+        session.properties.benchCanvas = recorder.picture
+        recorder.firstToolAt = nil
+        recorder.lastToolAt = nil
+        let callsBefore = recorder.calls.count
+        let start = ContinuousClock.now
+        var failure = ""
+        do {
+            _ = try await session.respond(to: BenchProfile.prompt(command, picture: recorder.picture, canvasFirst: canvasFirst))
+        } catch {
+            failure = " ERROR \(String(describing: error).prefix(100))"
+        }
+        let end = ContinuousClock.now
+        let firstTool = recorder.firstToolAt.map { seconds($0 - start) } ?? -1
+        let done = recorder.lastToolAt.map { seconds(end - $0) } ?? -1
+        let did = recorder.calls[callsBefore...].map(\.description).joined(separator: "; ")
+        print(String(format: "T %@ run%d cmd%d total %.3f first-tool %.3f done %.3f | %@ | %@%@", order.rawValue, run, index, seconds(end - start), firstTool, done, command, did, failure))
+        // A short pause between commands, as there is in a call while the person speaks.
+        try? await Task.sleep(for: .seconds(1.5))
+    }
 }
 
 @main
@@ -405,6 +578,18 @@ struct Main {
         guard isReady else {
             print("Giving up: the model would not run. Free some memory and run this again.")
             exit(3)
+        }
+        if CommandLine.arguments.dropFirst().first == "latency" {
+            // Calls in each order, which goes first rotating from run to run, so that none
+            // is favoured by the Mac warming or by a cache left by another.
+            let runs = CommandLine.arguments.dropFirst(2).first.flatMap(Int.init) ?? 5
+            let orders = CommandLine.arguments.dropFirst(3).first.map { $0.split(separator: ",").compactMap { CallOrder(rawValue: String($0)) } } ?? CallOrder.allCases
+            for run in 1...runs {
+                for step in orders.indices {
+                    await call(orders[(step + run) % orders.count], run: run)
+                }
+            }
+            return
         }
         print("variant: \(variant.rawValue)")
         print("context size: \(model.contextSize) tokens")
