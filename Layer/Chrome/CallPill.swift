@@ -47,7 +47,8 @@ struct CallPill: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         CallTimer(startedAt: call.startedAt)
-                        CallWaveform(levels: call.levels)
+                        // Read in a view of its own, so that only the bars redraw with each level.
+                        CallLevels(call: call)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Voice mode with \(model.modelChoice.displayName)")
@@ -174,5 +175,15 @@ private struct CaptionLine: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("call caption")
+    }
+}
+
+/// The call's waveform. The levels change about twenty times a second; read here, they
+/// redraw this and not the whole pill.
+private struct CallLevels: View {
+    let call: VoiceCall
+
+    var body: some View {
+        CallWaveform(levels: call.levels)
     }
 }
