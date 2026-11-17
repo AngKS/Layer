@@ -104,6 +104,7 @@ final class AppModel {
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
+                pencilVoiceIfMade?.drawTurnedOn()
             } else {
                 settle?.cancel()
             }

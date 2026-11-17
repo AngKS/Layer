@@ -36,12 +36,42 @@ final class PencilVoice {
     /// How long a toggle left listening waits for words before it gives up, sending nothing.
     static let silenceTimeout: Duration = .seconds(20)
 
+    /// How long a hover waits before asking again whether an unavailable model can be
+    /// used now. Asking can read the Keychain, and the pen hovers many times a second.
+    static let readinessRetry: Duration = .seconds(2)
+
     /// What the model is told with a command the pencil pointed at empty canvas for.
     static let canvasHint = "(The person pointed at empty canvas: a description of a screen means a new screen there.)"
 
     private(set) var bubble: Bubble?
     /// The pencil's call, from the first hover or squeeze.
     private(set) var call: VoiceCall?
+    /// A squeeze during a phone call, which only moved what the next command is about: the
+    /// pencil taps where it was, since no bubble opens to say so.
+    struct Retarget: Equatable {
+        var point: CGPoint
+        var id = UUID()
+    }
+
+    private(set) var retarget: Retarget?
+
+    /// Whether the squeeze under way, or the next one, is the pencil's to send with: a
+    /// toggle is listening, or a squeeze has just sent one and hasn't been let go of. The
+    /// format panel's scrubber leaves such a squeeze alone, whichever of them hears it first.
+    var ownsSqueeze: Bool {
+        if endIsIgnored { return true }
+        if case .listening(_, toggled: true, _) = mode { return true }
+        return false
+    }
+
+    /// The words heard so far for this listen, for the bubble to show if asked. Words the
+    /// call still shows from an earlier listen aren't these.
+    var wordsHeard: String? {
+        guard case .listening(_, _, let stale) = mode, let caption = call?.caption,
+              caption.id != stale, caption.kind == .hearing else { return nil }
+        return caption.text
+    }
+
     /// The microphone levels of what is being listened to now, newest last, for the waveform.
     var levels: [Float] {
         guard let call, call.isListeningAsAsked else { return [] }
@@ -89,6 +119,9 @@ final class PencilVoice {
     /// When words were last heard by a toggle, and which.
     @ObservationIgnored private var lastHeard: (at: ContinuousClock.Instant, caption: UUID?)?
     @ObservationIgnored private var closing: Task<Void, Never>?
+    /// When a hover last asked whether the model can be used, while it couldn't.
+    @ObservationIgnored private var lastReadinessCheck: ContinuousClock.Instant?
+    @ObservationIgnored nonisolated(unsafe) private var preferencesObserver: (any NSObjectProtocol)?
 
     init(
         model: AppModel,
@@ -101,6 +134,14 @@ final class PencilVoice {
         self.makeRunner = makeRunner
         self.clock = clock
         readiness = { [weak model] in model?.modelChoice.sketchProvider.readiness() ?? .ready }
+        // A key added or a model chosen in Settings may have made the model usable.
+        preferencesObserver = NotificationCenter.default.addObserver(forName: ModelPreferences.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lastReadinessCheck = nil }
+        }
+    }
+
+    deinit {
+        if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }
     }
 
     // MARK: The pencil
@@ -109,7 +150,13 @@ final class PencilVoice {
     /// first squeeze doesn't wait on it. Nothing listens.
     func hovered() {
         // A phone call hears everything while it is up: the pencil's own isn't needed.
-        guard call == nil, model?.voice == nil, case .ready = readiness() else { return }
+        guard call == nil, model?.voice == nil else { return }
+        if let lastReadinessCheck, clock() - lastReadinessCheck < Self.readinessRetry { return }
+        guard case .ready = readiness() else {
+            lastReadinessCheck = clock()
+            return
+        }
+        lastReadinessCheck = nil
         startCall()
     }
 
@@ -126,7 +173,10 @@ final class PencilVoice {
         let target = target(at: viewPoint, in: model)
         select(target, in: model)
         // The phone call hears the command: the squeeze only said what it is about.
-        guard model.voice == nil else { return }
+        guard model.voice == nil else {
+            retarget = Retarget(point: viewPoint)
+            return
+        }
         if case .unavailable(let reason) = readiness() {
             open(at: viewPoint, azimuth: azimuth, .problem(reason))
             say()
@@ -149,6 +199,17 @@ final class PencilVoice {
             startSilenceTimer()
         } else {
             send()
+        }
+    }
+
+    /// Draw came on, which takes the squeeze for PencilKit's palette: a squeeze under way
+    /// will never be heard to end, so whatever it was listening to is let go of, unsent.
+    /// A command already sent is left to finish.
+    func drawTurnedOn() {
+        endIsIgnored = false
+        if case .listening = mode {
+            stopHearing()
+            close()
         }
     }
 

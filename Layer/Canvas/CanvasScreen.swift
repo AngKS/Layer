@@ -247,12 +247,60 @@ private struct PanelSheet<Content: View>: View {
 
     var body: some View {
         content
+            // The sheet is chrome too: a pencil over it isn't over the canvas beneath. In
+            // window points, which a sheet's own global space may not be.
+            .background { WindowFrameReporter(name: "panel sheet", model: model) }
             .environment(model)
             .environment(model.images)
             .preferredColorScheme(.light)
             .presentationDetents([.medium, .large], selection: $detent)
             .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             .presentationDragIndicator(.visible)
+    }
+}
+
+/// Tells the model where a view is in its window's points, for a view that may sit in a
+/// presentation of its own, such as a sheet, where SwiftUI's global space is the sheet's.
+private struct WindowFrameReporter: UIViewRepresentable {
+    let name: String
+    let model: AppModel
+
+    func makeUIView(context: Context) -> ReportingView {
+        let view = ReportingView()
+        view.isUserInteractionEnabled = false
+        view.report = { [weak model] frame in model?.chromeFrames[name] = frame }
+        return view
+    }
+
+    func updateUIView(_ view: ReportingView, context: Context) {
+        view.reportFrame()
+    }
+
+    static func dismantleUIView(_ view: ReportingView, coordinator: ()) {
+        view.report(nil)
+    }
+
+    final class ReportingView: UIView {
+        var report: (CGRect?) -> Void = { _ in }
+        private var reported: CGRect?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            reportFrame()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            reportFrame()
+        }
+
+        func reportFrame() {
+            // The canvas fills its window, so the window's points are the canvas's.
+            let frame = window.map { convert(bounds, to: $0) }
+            guard frame != reported else { return }
+            reported = frame
+            report(frame)
+        }
     }
 }
 
@@ -280,20 +328,28 @@ private struct SqueezeToSpeak: ViewModifier {
     @State private var isSqueezing = false
 
     func body(content: Content) -> some View {
-        if isOn {
-            content.onPencilSqueeze { phase in
-                switch phase {
-                case .active(let value):
-                    guard !isSqueezing else { return }
-                    isSqueezing = true
-                    pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
-                case .ended, .failed:
-                    isSqueezing = false
-                    pencil.squeezeEnded()
-                }
+        Group {
+            if isOn {
+                squeezable(content)
+            } else {
+                content
             }
-        } else {
-            content
+        }
+        // Draw coming on mid-squeeze means its end never arrives here.
+        .onChange(of: isOn) { isSqueezing = false }
+    }
+
+    private func squeezable(_ content: Content) -> some View {
+        content.onPencilSqueeze { phase in
+            switch phase {
+            case .active(let value):
+                guard !isSqueezing else { return }
+                isSqueezing = true
+                pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
+            case .ended, .failed:
+                isSqueezing = false
+                pencil.squeezeEnded()
+            }
         }
     }
 }

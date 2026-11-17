@@ -17,7 +17,7 @@ struct PencilVoiceLayer: View {
         .animation(.spring(duration: 0.35, bounce: 0.3), value: pencil.bubble == nil)
         // Behind the bubble and the size of the canvas, so the taps are felt at the tip's point.
         .background {
-            PencilVoiceFeedback(bubble: pencil.bubble)
+            PencilVoiceFeedback(bubble: pencil.bubble, retarget: pencil.retarget)
                 .allowsHitTesting(false)
         }
     }
@@ -36,11 +36,12 @@ struct PencilVoiceBubble: View {
     @AppStorage("pencilVoice.showsWords") private var showsWords = false
     /// Measured once laid out. Until then, about the size it opens at.
     @State private var size = CGSize(width: 190, height: 52)
+    @State private var isMeasured = false
 
     /// How far the bubble keeps from the tip.
-    static let gap: CGFloat = 28
+    nonisolated static let gap: CGFloat = 28
     /// How far it keeps from the window's edges.
-    static let margin: CGFloat = 12
+    nonisolated static let margin: CGFloat = 12
 
     /// The bubble's top-left: `gap` from the tip in the direction away from the barrel, or
     /// below the tip when the pencil's angle isn't known, and kept inside `bounds` and clear
@@ -87,8 +88,17 @@ struct PencilVoiceBubble: View {
         .glassEffect(.regular.tint(canvas.resolvedBackground.color.opacity(0.7)).interactive(), in: .rect(cornerRadius: 26, style: .continuous))
         .environment(\.colorScheme, canvas.isDark ? .dark : .light)
         .fixedSize()
-        .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
-        .animation(.snappy(duration: 0.25), value: bubble.state)
+        .onGeometryChange(for: CGSize.self, of: \.size) { measured in
+            // A bubble that grows or shrinks moves with it, so that its edge keeps its
+            // distance from the tip: the move is animated as the change of size is. The first
+            // measurement only corrects the guess, before anything is seen.
+            if isMeasured {
+                withAnimation(.snappy(duration: 0.25)) { size = measured }
+            } else {
+                size = measured
+                isMeasured = true
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Listening with \(model.modelChoice.displayName)")
         .accessibilityValue(accessibilityValue)
@@ -99,6 +109,9 @@ struct PencilVoiceBubble: View {
         // Laid out across the whole canvas, so that the tip is a point of it to swivel round.
         // Only the bubble itself takes touches.
         .frame(width: bounds.width, height: bounds.height, alignment: .topLeading)
+        // Outside the offset, so the place and the contents change together.
+        .animation(.snappy(duration: 0.25), value: bubble.state)
+        .animation(.snappy(duration: 0.25), value: wordsShown)
         .transition(.modifier(
             active: Swivel(scale: 0.2, angle: .degrees(-12), opacity: 0, anchor: tip),
             identity: Swivel(scale: 1, angle: .zero, opacity: 1, anchor: tip)
@@ -118,8 +131,8 @@ struct PencilVoiceBubble: View {
                     PencilVoiceWaveform(pencil: pencil)
                         // Dim until the microphone is on: words now would be lost.
                         .opacity(bubble.state == .gettingReady ? 0.4 : 1)
-                    if showsWords, let caption = pencil.call?.caption, caption.kind == .hearing {
-                        Text(caption.text)
+                    if let words = wordsShown {
+                        Text(words)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -154,6 +167,11 @@ struct PencilVoiceBubble: View {
                     .accessibilityLabel("\(queued) more waiting")
             }
         }
+    }
+
+    /// The words heard for this listen, when Settings asks for them.
+    private var wordsShown: String? {
+        showsWords ? pencil.wordsHeard : nil
     }
 
     private var accessibilityValue: String {
@@ -197,6 +215,7 @@ private struct Swivel: ViewModifier {
 /// there feels them.
 private struct PencilVoiceFeedback: UIViewRepresentable {
     let bubble: PencilVoice.Bubble?
+    let retarget: PencilVoice.Retarget?
 
     func makeUIView(context: Context) -> FeedbackView {
         FeedbackView()
@@ -204,15 +223,24 @@ private struct PencilVoiceFeedback: UIViewRepresentable {
 
     func updateUIView(_ view: FeedbackView, context: Context) {
         view.update(to: bubble)
+        view.update(to: retarget)
     }
 
     final class FeedbackView: UIView {
         private var feedback: UICanvasFeedbackGenerator?
         private var last: PencilVoice.State?
+        private var lastRetarget: PencilVoice.Retarget?
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
             feedback = window == nil ? nil : UICanvasFeedbackGenerator(view: self)
+        }
+
+        /// A squeeze during a phone call moved what the command is about: one tap there.
+        func update(to retarget: PencilVoice.Retarget?) {
+            defer { lastRetarget = retarget }
+            guard let retarget, retarget != lastRetarget else { return }
+            feedback?.alignmentOccurred(at: retarget.point)
         }
 
         func update(to bubble: PencilVoice.Bubble?) {

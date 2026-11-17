@@ -194,6 +194,8 @@ struct PencilVoiceTests {
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.app.selection == bench.button)
         #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        // The pencil taps where it squeezed, to say the target moved.
+        #expect(bench.pencil.retarget?.point == Bench.overButton)
         bench.end()
     }
 
@@ -542,5 +544,80 @@ struct PencilVoiceTests {
         let tip = CGPoint(x: 500, y: 400)
         let frame = Self.bubbleFrame(at: tip, azimuth: nil)
         #expect(frame.origin == CGPoint(x: 400, y: 428))
+    }
+
+    // MARK: Fix round 1 of the bubble
+
+    @Test func theSqueezeIsThePencilsWhileAToggleIsOpenOrBeingSent() async {
+        let bench = Bench()
+        #expect(!bench.pencil.ownsSqueeze)
+        // A held squeeze over the canvas isn't one the panel could have.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(!bench.pencil.ownsSqueeze)
+        bench.now += .milliseconds(200)
+        bench.pencil.squeezeEnded()
+        #expect(await eventually { bench.state == .listening })
+        // A toggle is open: the next squeeze is the pencil's, wherever the pen is.
+        #expect(bench.pencil.ownsSqueeze)
+        #expect(await bench.hear("make it blue"))
+        bench.pencil.squeezeBegan(at: CGPoint(x: 10, y: 10), azimuth: nil)
+        #expect(bench.state == .working && bench.pencil.ownsSqueeze)
+        bench.pencil.squeezeEnded()
+        #expect(!bench.pencil.ownsSqueeze)
+        bench.end()
+    }
+
+    @Test func turningOnDrawMidSqueezeStopsListening() async {
+        let bench = Bench()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        // Draw comes on, and the squeeze's end never arrives.
+        bench.app.tool = .draw
+        #expect(bench.pencil.bubble == nil && bench.routes[0].isStopped)
+        #expect(!bench.pencil.ownsSqueeze)
+        // Back in Select, the next squeeze starts afresh.
+        bench.app.tool = .select
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.routes.count == 2 })
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+    }
+
+    @Test func theBubbleShowsOnlyWordsHeardForThisListen() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        // An earlier listen's words are still the call's caption when the next begins.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        #expect(await bench.hear("make it"))
+        #expect(bench.pencil.wordsHeard == "make it")
+        // Let go of, so it is sent, with the words still the call's caption.
+        bench.now += .seconds(1)
+        bench.pencil.squeezeEnded()
+        #expect(bench.state == .working && bench.pencil.wordsHeard == nil)
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(bench.pencil.call?.caption?.kind == .hearing && bench.pencil.call?.caption?.text == "make it")
+        #expect(bench.pencil.wordsHeard == nil)
+        #expect(await eventually { bench.state == .listening })
+        #expect(await bench.hear("make it red", on: 1))
+        #expect(bench.pencil.wordsHeard == "make it red")
+        bench.runner.holds = false
+        bench.end()
+    }
+
+    @Test func hoveringWhileTheModelIsUnavailableChecksSeldom() async {
+        let bench = Bench()
+        var checks = 0
+        bench.pencil.readiness = { checks += 1; return .unavailable("No key.") }
+        for _ in 0..<50 { bench.pencil.hovered() }
+        #expect(checks == 1)
+        bench.now += PencilVoice.readinessRetry
+        bench.pencil.hovered()
+        #expect(checks == 2)
+        // A change in Settings is looked at on the next hover.
+        NotificationCenter.default.post(name: ModelPreferences.changed, object: nil)
+        bench.pencil.hovered()
+        #expect(checks == 3)
+        bench.end()
     }
 }
