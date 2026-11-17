@@ -162,10 +162,12 @@ enum PencilDemo {
         // The canvas already shows this instance and keeps to it, so the script goes into
         // it rather than replacing it. There is no hover in the simulator, so no call yet.
         let pencil = model.pencilVoice
-        pencil.makeRoute = { DemoRoute(lines: lines, freeze: freeze, endsWhenTold: true, isBusy: { false }) }
-        pencil.makeRunner = { model in
-            VoiceDemo.runner(for: lines, freeze: freeze, model: model) { [weak model] step in model?.pencilVoice.call?.showStep(step) }
-        }
+        pencil.script(
+            route: { DemoRoute(lines: lines, freeze: freeze, endsWhenTold: true, isBusy: { false }) },
+            runner: { model in
+                VoiceDemo.runner(for: lines, freeze: freeze, model: model) { [weak model] step in model?.pencilVoice.call?.showStep(step) }
+            }
+        )
         // Neither the model nor the system's squeeze setting has a say: the squeeze is scripted.
         pencil.readiness = { .ready }
         pencil.squeezeIsOff = { false }

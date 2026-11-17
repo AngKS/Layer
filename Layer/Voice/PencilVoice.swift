@@ -105,11 +105,9 @@ final class PencilVoice {
     }
 
     @ObservationIgnored private weak var model: AppModel?
-    /// How each listen hears, and what carries a command out. Settable so that the
-    /// simulator's scripted squeeze can put its own into the instance the canvas already
-    /// shows; a change reaches the next call, not one already up.
-    @ObservationIgnored var makeRoute: @MainActor () -> any VoiceRoute
-    @ObservationIgnored var makeRunner: @MainActor (AppModel) -> any VoiceCommandRunner
+    /// How each listen hears, and what carries a command out.
+    @ObservationIgnored private(set) var makeRoute: @MainActor () -> any VoiceRoute
+    @ObservationIgnored private(set) var makeRunner: @MainActor (AppModel) -> any VoiceCommandRunner
     @ObservationIgnored private let clock: () -> ContinuousClock.Instant
     @ObservationIgnored private var mode: Mode?
     /// The call getting ready, which a squeeze waits on before it listens.
@@ -151,6 +149,15 @@ final class PencilVoice {
             MainActor.assumeIsolated { self?.lastReadinessCheck = nil }
         }
     }
+
+    #if DEBUG
+    /// Puts the simulator's scripted squeeze into the instance the canvas already shows,
+    /// which keeps to the one it first read. Reaches the next call, not one already up.
+    func script(route makeRoute: @escaping @MainActor () -> any VoiceRoute, runner makeRunner: @escaping @MainActor (AppModel) -> any VoiceCommandRunner) {
+        self.makeRoute = makeRoute
+        self.makeRunner = makeRunner
+    }
+    #endif
 
     deinit {
         if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }
