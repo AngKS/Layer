@@ -283,6 +283,7 @@ final class AppModel {
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
+        appliedModel = .some(file.content.canvas.model)
         store.onChange = { [weak self, document] content in
             // A command or generation still unwinding after the design closed doesn't
             // write to a document the browser has already let go of.
@@ -290,7 +291,7 @@ final class AppModel {
             document.update { $0.content = content }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
-            self?.applyModelChoice()
+            self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
             self?.schedulePreview()
@@ -312,7 +313,19 @@ final class AppModel {
     /// Points the sketch engine at this design's model. Cheap when nothing changed, so it
     /// runs on every change to the design and whenever the app's model settings change.
     func applyModelChoice() {
+        appliedModel = .some(store.canvas.model)
         engine.use(modelChoice.sketchProvider)
+    }
+
+    /// The design's own choice of model as it was last applied. Every change to the design,
+    /// each frame of a drag among them, used to apply the choice again, which reads the
+    /// app's default and its lists of models from the user's defaults and decodes them.
+    @ObservationIgnored private var appliedModel: ModelChoice??
+
+    /// Applies the model choice if the design's own has changed. A change to the app's
+    /// default applies it through `applyModelChoice()`, on `ModelPreferences.changed`.
+    private func followModelChoice() {
+        if appliedModel != .some(store.canvas.model) { applyModelChoice() }
     }
 
     // MARK: Generating screens
