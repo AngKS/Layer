@@ -72,12 +72,16 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    func deleteScreen(screen: String) -> String {
+    func deleteScreen(screen: String, named: String?) -> String {
         guard let model else { return gone }
         switch find(screen: screen) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
-            guard found.isLocked != true else { return failed("\(handles.handle(forScreen: found.id)) is locked.") }
+            let handle = handles.handle(forScreen: found.id)
+            if let named, !VoiceNaming.fits(named, names: [], words: found.name) {
+                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. \(handle) is “\(found.name)”.")
+            }
+            guard found.isLocked != true else { return failed("\(handle) is locked.") }
             model.store.deleteScreen(found.id)
             return done("Deleted the screen “\(found.name)”.")
         }
@@ -116,6 +120,11 @@ final class VoiceToolbox: VoiceActing {
         switch find(element: element) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
+            // Asked for a text colour, a small model will hand the colour over as the
+            // words. A colour on its own, in lower case, is taken as the words' colour.
+            if let colour = Self.colourMeantAsWords(text) {
+                return styleElement(element: element, look: "text \(colour)")
+            }
             guard found.element.kind.hasText else {
                 return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
             }
@@ -203,12 +212,17 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    func deleteElement(element: String) -> String {
+    func deleteElement(element: String, named: String?) -> String {
         guard let model else { return gone }
         switch find(element: element) {
         case .failure(let refusal): return failed(refusal.line)
         case .success(let found):
-            guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
+            let handle = handles.handle(forElement: found.element.id)
+            // Only what the person named goes: see `VoiceNaming`.
+            if let named, !Self.fits(named, found.element) {
+                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. \(handle) is \(Self.describe(found.element)).")
+            }
+            guard !found.element.isLocked else { return failed("\(handle) is locked.") }
             model.store.delete(found.ref)
             return done("Deleted \(Self.describe(found.element)).")
         }
@@ -369,6 +383,24 @@ final class VoiceToolbox: VoiceActing {
         "\(article) \(DesignDescriber.describe(element))"
     }
 
+    /// The colour that new "words" really are: `blue` or `text blue`, in lower case, as a
+    /// model writes a colour and not as anyone writes a label.
+    private static func colourMeantAsWords(_ text: String) -> String? {
+        var words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, words == words.lowercased() else { return nil }
+        if words.hasPrefix("text ") { words = String(words.dropFirst(5)) }
+        return ColourWords.named[words] != nil ? words : nil
+    }
+
+    /// Whether what the person called something fits an element: by what its kind is
+    /// called, by the words on it, or by its own name.
+    private static func fits(_ named: String, _ element: DesignElement) -> Bool {
+        let kindNames = (ScreenBlueprint.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
+        // Anything with words on it can be called "the text".
+        let loose = element.kind.hasText ? ["text", "words", "label", "copy"] : []
+        return VoiceNaming.fits(named, names: kindNames + loose, words: "\(element.text) \(element.name ?? "") \(element.symbol ?? "")")
+    }
+
     /// Gives an element the look some words describe. False if none of them meant anything.
     @discardableResult
     private static func apply(look: String, to element: inout DesignElement) -> Bool {
@@ -397,10 +429,11 @@ final class VoiceToolbox: VoiceActing {
     private static func alignment(named word: String) -> (ElementLayout.Alignment, String)? {
         switch word.lowercased().trimmingCharacters(in: .whitespaces) {
         case "left", "leading": (.left, "left")
-        case "centre", "center", "centred", "centered", "centrally", "horizontal centre", "horizontal center": (.centerX, "centre")
+        // "Middle" is how people say centred, so it is side to side like "centre".
+        case "centre", "center", "centred", "centered", "centrally", "middle", "horizontal centre", "horizontal center": (.centerX, "centre")
         case "right", "trailing": (.right, "right")
         case "top": (.top, "top")
-        case "middle", "vertical centre", "vertical center": (.centerY, "middle")
+        case "vertical centre", "vertical center", "vertical middle", "vertically", "centre vertically", "center vertically": (.centerY, "vertical centre")
         case "bottom": (.bottom, "bottom")
         default: nil
         }

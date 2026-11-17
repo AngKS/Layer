@@ -221,6 +221,7 @@
 		C2D4710D41C98E3B8A5A28BE /* text_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = D8A0ED4000CA77AC468621C0 /* text_jittered_1b.json */; };
 		C37E511386117A33F84CBA21 /* text_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = A7C94F9F1A4A0E56BD698177 /* text_clean_2.json */; };
 		C559EF710ADD70B1712B8510 /* title_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2F385AFF6DCE21B19FDE7B /* title_jittered_2a.json */; };
+		C6970FCA4ED3171193B1F7D6 /* VoiceRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C283B28595251A583DB87B0 /* VoiceRules.swift */; };
 		CA4E304A9F506A55F73D2545 /* DictationRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE54558C303693792ED4E2B5 /* DictationRoute.swift */; };
 		CBC29CEF1E24055A29FFE027 /* CloudFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F5F98FB298DC2DB506114B /* CloudFile.swift */; };
 		CCF3579CCC9B5F73AF2D2398 /* title_body_body_4.json in Resources */ = {isa = PBXBuildFile; fileRef = AFFD8DEA54ED93E2B871A4F9 /* title_body_body_4.json */; };
@@ -241,6 +242,7 @@
 		DF4B7DF0EF197EAC75AB7E8C /* scratchOut_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 628D793BEF215C004356BB14 /* scratchOut_jittered_1a.json */; };
 		E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */; };
 		E0BF751C7B54340FF45DA691 /* screen_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 44881224CD104B4E6B77BDE5 /* screen_noisy_2.json */; };
+		E1B93645A57500E5F8D96327 /* CanvasPicture+Capture.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA9D1A371A248345351D6D6A /* CanvasPicture+Capture.swift */; };
 		E2A7932B71CE67616BAE044B /* SelectionLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B54C441B9B6BAC1F17E8276 /* SelectionLayer.swift */; };
 		E360FD91E14B5EFDD4503E50 /* body_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 9A373E7C69DAD824CE8C64EA /* body_clean_1.json */; };
 		E381038909D053900CB81A28 /* SettingsButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B53B86609548F6683ECF34 /* SettingsButton.swift */; };
@@ -451,6 +453,7 @@
 		8B7F6B0BD58C2E5DA1D3D045 /* LayerEntities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerEntities.swift; sourceTree = "<group>"; };
 		8BCFE9B8274F2FCE4E0CA064 /* checkbox_image_image_4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_image_image_4.json; sourceTree = "<group>"; };
 		8BD5D8739E8A8C84058A8045 /* CanvasIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasIntents.swift; sourceTree = "<group>"; };
+		8C283B28595251A583DB87B0 /* VoiceRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRules.swift; sourceTree = "<group>"; };
 		8C2FF162861264B625FFEBEE /* button_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_2b.json; sourceTree = "<group>"; };
 		8CA71CEDBBD286B0C46D1361 /* toggle_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_noisy_2.json; sourceTree = "<group>"; };
 		8E4F18ED8A42B00E288A3B65 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
@@ -572,6 +575,7 @@
 		F9668A83B61816A59A8CA63B /* unknown_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_clean_1.json; sourceTree = "<group>"; };
 		FA0088127F1C2F44AF204829 /* VoiceCallTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallTests.swift; sourceTree = "<group>"; };
 		FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedToolCallingTests.swift; sourceTree = "<group>"; };
+		FA9D1A371A248345351D6D6A /* CanvasPicture+Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CanvasPicture+Capture.swift"; sourceTree = "<group>"; };
 		FAA74337707D430698806465 /* DesignLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignLibrary.swift; sourceTree = "<group>"; };
 		FACAA2404D2218B0BB196272 /* image_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_jittered_2b.json; sourceTree = "<group>"; };
 		FACAC487BC44BE04C958F730 /* stickyNote_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_2a.json; sourceTree = "<group>"; };
@@ -619,6 +623,7 @@
 				67E058E7CD5CAC405B9BB005 /* AppleSpeechRecogniser.swift */,
 				64285F161FD6A296212059CB /* AudioChunk.swift */,
 				A2F6B8D8DE32A50687E15648 /* CanvasPicture.swift */,
+				FA9D1A371A248345351D6D6A /* CanvasPicture+Capture.swift */,
 				EE54558C303693792ED4E2B5 /* DictationRoute.swift */,
 				5EB239428396D7072334A272 /* MicrophoneTap.swift */,
 				ADBED814500825C7C9D467D7 /* VoiceAgent.swift */,
@@ -626,6 +631,7 @@
 				60371249C0F94DB75A00F668 /* VoiceHandles.swift */,
 				9DAF2CA41D09836E5965BFD5 /* VoiceProfile.swift */,
 				7F2BF93CE41926C0591EE8B7 /* VoiceRoute.swift */,
+				8C283B28595251A583DB87B0 /* VoiceRules.swift */,
 				5342BB161C044BA5BAE9A8C8 /* VoiceToolbox.swift */,
 				7C6A13CD630171868587E394 /* VoiceTools.swift */,
 			);
@@ -1358,6 +1364,7 @@
 				AAA7B18F0A3EFFBE3BFB86A7 /* CallPill.swift in Sources */,
 				56E2C167C42464D78B45B228 /* CanvasEffects.swift in Sources */,
 				FCAE14F54F8B4ED5BBDF902C /* CanvasIntents.swift in Sources */,
+				E1B93645A57500E5F8D96327 /* CanvasPicture+Capture.swift in Sources */,
 				F862E71019C3B17F7AE5B644 /* CanvasPicture.swift in Sources */,
 				42552151F70C3DD69852E3C0 /* CanvasScreen.swift in Sources */,
 				CBC29CEF1E24055A29FFE027 /* CloudFile.swift in Sources */,
@@ -1430,6 +1437,7 @@
 				52D3ED38C02DB3840D1C430D /* VoiceHandles.swift in Sources */,
 				A0FDE499089200912E1E3E18 /* VoiceProfile.swift in Sources */,
 				1513DD1E51F249D8D73DD482 /* VoiceRoute.swift in Sources */,
+				C6970FCA4ED3171193B1F7D6 /* VoiceRules.swift in Sources */,
 				9D435F457CD9DD7DAC4BDCF7 /* VoiceToolbox.swift in Sources */,
 				5C0F89DA7FFC1CD890E521BD /* VoiceTools.swift in Sources */,
 			);

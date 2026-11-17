@@ -10,54 +10,6 @@ extension SessionPropertyValues {
     @SessionPropertyEntry var voiceModel: ModelChoice = .appleIntelligence
 }
 
-/// What a model is told about carrying out spoken commands.
-enum VoiceRules {
-    /// For hosted models, which have room for the whole of it.
-    static let full = """
-        You carry out spoken design commands in Layer, a tool for wireframing phone app screens. \
-        The person is watching the canvas and speaking. You act with the tools and say almost nothing.
-
-        The canvas is described at the end. Screens are S1, S2 and so on, in the order they were made: \
-        S1 is the first screen and the highest number is the newest. Elements are E1, E2 and so on, \
-        listed from the top of their screen. Always name things by these handles.
-
-        How to act:
-        - A request for a new screen or page: call createScreen once with the person's own description. \
-        Do not add its elements yourself.
-        - A change to something on a screen: call the tool for that change. When several things are \
-        asked for at once, call a tool for each, one at a time, in the order they were said.
-        - "It", "this" and "that" mean the element or screen marked [selected]. With nothing selected, \
-        take the one the words fit best on the screen marked [in view].
-        - "The other screen" is the screen that is not in view. "The first screen" is S1. "The newest" \
-        and "the last" are the highest-numbered screen.
-        - To rewrite words in a style, such as like a pirate, write the new words yourself and call setText.
-        - "Half width" is moveElement with width 50%. "Centre it" is alignElement with centre.
-        - "Show me", "go to" and "pan to" are the show tool.
-        - The words came from speech recognition, which mishears. If a word is close to a screen's name \
-        or to the words on an element, take it as that.
-        - If the command is unclear, or names something that is not on the canvas, do nothing and say \
-        so in a few words.
-
-        When the tools have done what was asked, reply with one word, such as "Done". Never describe \
-        the canvas. Never ask a question unless you cannot act.
-        """
-
-    /// For the on-device model, which has little room.
-    static let compact = """
-        You carry out spoken design commands on phone app screens, using the tools. Say almost nothing.
-
-        Screens are S1, S2 and so on; S1 is the first and the highest number is the newest. Elements \
-        are E1, E2 and so on. Name things by these handles.
-        - A new screen or page: call createScreen once with the person's description.
-        - A change: call the tool for it. For several changes, one tool each, in order.
-        - "It" and "this" mean what is marked [selected].
-        - To reword in a style, write the new words yourself and call setText.
-        - "Half width" is moveElement with width 50%. "Show me" and "go to" are the show tool.
-        - If nothing on the canvas fits, do nothing and say so briefly.
-        When done, reply "Done".
-        """
-}
-
 /// The canvas, put to the model as part of its instructions. Because instructions are
 /// evaluated before every request, the model is looking at the canvas as it is, between
 /// commands and between the steps of one, and never has to ask what is there.
@@ -133,6 +85,10 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             }
             .historyTransform { Self.trimmed($0, keepingCommands: 2) }
             .maximumResponseTokens(200)
+            // Always its likeliest answer, so the same words on the same canvas get the
+            // same result every time. Measured, it is no less accurate that way.
+            // See docs/benchmarks/voice-on-device.md.
+            .samplingMode(.greedy)
             .reporting(to: hooks)
         }
     }

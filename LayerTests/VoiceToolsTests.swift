@@ -155,6 +155,15 @@ struct VoiceToolsTests {
         #expect(try #require(bench.element("E3")).frame.minX == 97)
         _ = bench.box.alignElement(element: "E3", alignment: "Right")
         #expect(try #require(bench.element("E3")).frame.maxX == 393)
+        // "Middle" and "centrally" are how people say centred, and mean side to side
+        // as "centre" does. Top to bottom has to be asked for.
+        _ = bench.box.alignElement(element: "E3", alignment: "middle")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 97, y: 500, width: 200, height: 200))
+        _ = bench.box.alignElement(element: "E3", alignment: "left")
+        _ = bench.box.alignElement(element: "E3", alignment: "centrally")
+        #expect(try #require(bench.element("E3")).frame.minX == 97)
+        _ = bench.box.alignElement(element: "E3", alignment: "vertical centre")
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 97, y: 326, width: 200, height: 200))
         let before = bench.app.store.content
         let line = bench.box.alignElement(element: "E3", alignment: "sideways")
         #expect(bench.app.store.content == before)
@@ -165,6 +174,35 @@ struct VoiceToolsTests {
         let bench = bench()
         _ = bench.box.setText(element: "E2", text: "Board the ship")
         #expect(try #require(bench.element("E2")).text == "Board the ship")
+    }
+
+    /// Measured with the on-device model: asked to change an element's text colour, it
+    /// hands the colour over as the element's new words. A colour, in lower case and on
+    /// its own, is taken as the colour of the words.
+    @Test func aColourGivenAsTheWordsColoursTheWords() throws {
+        let bench = bench()
+        _ = bench.box.setText(element: "E1", text: "blue")
+        var title = try #require(bench.element("E1"))
+        #expect(title.text == "Welcome back")
+        #expect(title.textColor == ColourWords.parse("blue"))
+        _ = bench.box.setText(element: "E1", text: "text white")
+        title = try #require(bench.element("E1"))
+        #expect(title.text == "Welcome back")
+        #expect(title.textColor == ColourWords.parse("white"))
+        #expect(bench.box.failures.isEmpty)
+
+        // Written as a label would be, it is the label.
+        _ = bench.box.setText(element: "E2", text: "Blue")
+        #expect(try #require(bench.element("E2")).text == "Blue")
+        _ = bench.box.setText(element: "E2", text: "blue skies ahead")
+        #expect(try #require(bench.element("E2")).text == "blue skies ahead")
+    }
+
+    @Test func theTextColourHasAnArgumentOfItsOwn() {
+        #expect(StyleElementTool.look("bold, 18pt", textColour: "blue") == "bold, 18pt, text blue")
+        #expect(StyleElementTool.look(nil, textColour: "white") == "text white")
+        #expect(StyleElementTool.look("green", textColour: nil) == "green")
+        #expect(StyleElementTool.look(nil, textColour: " ") == "")
     }
 
     @Test func addingAnElementPutsItBelowTheRest() throws {
@@ -191,19 +229,19 @@ struct VoiceToolsTests {
         #expect(bench.app.store.screen(bench.screen)?.elements.count == 4)
         #expect(line.contains("E4"))
         #expect(try #require(bench.element("E4")).text == "Sign in")
-        _ = bench.box.deleteElement(element: "E4")
+        _ = bench.box.deleteElement(element: "E4", named: "button")
         #expect(bench.app.store.screen(bench.screen)?.elements.count == 3)
         // What is gone can't be named again.
-        #expect(bench.box.deleteElement(element: "E4") == "There is no E4.")
+        #expect(bench.box.deleteElement(element: "E4", named: "button") == "There is no E4.")
     }
 
     @Test func renamingAndDeletingAScreen() {
         let bench = bench()
         _ = bench.box.renameScreen(screen: "S1", name: "Sign In")
         #expect(bench.app.store.screen(bench.screen)?.name == "Sign In")
-        _ = bench.box.deleteScreen(screen: "S1")
+        _ = bench.box.deleteScreen(screen: "S1", named: "sign in screen")
         #expect(bench.app.store.screens.isEmpty)
-        #expect(bench.box.deleteScreen(screen: "S1") == "There is no S1.")
+        #expect(bench.box.deleteScreen(screen: "S1", named: "sign in screen") == "There is no S1.")
     }
 
     @Test func showingSelectsWhatIsShown() throws {
@@ -235,6 +273,64 @@ struct VoiceToolsTests {
         #expect(bench.box.endsCall)
     }
 
+    // MARK: Deleting only what was named
+
+    /// A small model asked about something that isn't there will sometimes act on
+    /// something else. A delete is the one that can't be allowed through: it goes ahead
+    /// only when the person's own word for the thing fits the thing.
+    @Test func deletingNeedsANameThatFits() throws {
+        let bench = bench()
+        let before = bench.app.store.content
+        let refused = bench.box.deleteElement(element: "E2", named: "dropdown")
+        #expect(refused == "There is no dropdown here. E2 is the button “Sign in”.")
+        #expect(bench.box.deleteElement(element: "E2", named: "dropdown button").hasPrefix("There is no dropdown button here."))
+        #expect(bench.box.deleteElement(element: "E3", named: "map").hasPrefix("There is no map here."))
+        #expect(bench.app.store.content == before)
+        #expect(bench.box.failures.count == 3)
+        #expect(bench.box.lines.isEmpty)
+
+        // Its kind, the words on it, another word for its kind, or "it" all fit.
+        _ = bench.box.deleteElement(element: "E2", named: "the Sign In button")
+        #expect(bench.element("E2") == nil)
+        _ = bench.box.deleteElement(element: "E3", named: "picture")
+        #expect(bench.element("E3") == nil)
+        _ = bench.box.deleteElement(element: "E1", named: "it")
+        #expect(bench.element("E1") == nil)
+    }
+
+    @Test func aModelThatGivesNoNameIsTakenAtItsWord() throws {
+        let bench = bench()
+        _ = bench.box.deleteElement(element: "E3", named: nil)
+        #expect(bench.element("E3") == nil)
+    }
+
+    @Test func deletingAScreenNeedsANameThatFits() {
+        let bench = bench()
+        #expect(bench.box.deleteScreen(screen: "S1", named: "checkout screen") == "There is no checkout screen here. S1 is “Login”.")
+        #expect(bench.app.store.screens.count == 1)
+        // "This screen", "the first screen" and the like name it by where it is.
+        #expect(VoiceNaming.fits("this screen", names: ["login"], words: "Login"))
+        #expect(VoiceNaming.fits("the first page", names: ["login"], words: "Login"))
+        _ = bench.box.deleteScreen(screen: "S1", named: "the login page")
+        #expect(bench.app.store.screens.isEmpty)
+    }
+
+    @Test func aNameFitsByKindByWordsOrByBeingNoNameAtAll() {
+        let button = ["button", "primary button", "cta"]
+        #expect(VoiceNaming.fits("button", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("the sign in button", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("Sign-in", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("CTA", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("that one", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("", names: button, words: "Sign in"))
+        #expect(VoiceNaming.fits("text field", names: ["text field", "field", "input"], words: "Email"))
+        // A word that is neither its kind nor on it doesn't, whatever else is said with it.
+        #expect(!VoiceNaming.fits("dropdown", names: button, words: "Sign in"))
+        #expect(!VoiceNaming.fits("dropdown button", names: button, words: "Sign in"))
+        #expect(!VoiceNaming.fits("slider", names: ["image", "photo", "picture"], words: ""))
+        #expect(!VoiceNaming.fits("title", names: button, words: "Sign in"))
+    }
+
     // MARK: What can't be done
 
     @Test func anUnknownHandleChangesNothing() {
@@ -258,7 +354,7 @@ struct VoiceToolsTests {
         for line in [
             bench.box.moveElement(element: "E2", x: nil, y: nil, width: "50%", height: nil),
             bench.box.alignElement(element: "E2", alignment: "left"),
-            bench.box.deleteElement(element: "E2"),
+            bench.box.deleteElement(element: "E2", named: "button"),
         ] {
             #expect(line.contains("locked"))
         }

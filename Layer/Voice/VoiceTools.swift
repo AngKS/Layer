@@ -16,14 +16,53 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String
     @MainActor func alignElement(element: String, alignment: String) -> String
     @MainActor func duplicateElement(element: String) -> String
-    @MainActor func deleteElement(element: String) -> String
+    /// `named` is the person's own word for what is to go. See `VoiceNaming`.
+    @MainActor func deleteElement(element: String, named: String?) -> String
     @MainActor func renameScreen(screen: String, name: String) -> String
-    @MainActor func deleteScreen(screen: String) -> String
+    @MainActor func deleteScreen(screen: String, named: String?) -> String
     @MainActor func show(target: String) -> String
     @MainActor func zoom(to level: String) -> String
     @MainActor func undo() -> String
     @MainActor func redo() -> String
     @MainActor func endCall() -> String
+}
+
+/// Whether the word a person used for something fits the thing a model took it to mean.
+///
+/// Asked about something that isn't on the canvas, a small model will sometimes act on
+/// something that is: measured, "make the dropdown bigger" deleted a button. Most such
+/// slips are plain to see and one "undo" away. A delete is the one that isn't let
+/// through: the model passes on the person's own word, and the delete goes ahead only if
+/// every word of it that names anything is one of the thing's own.
+enum VoiceNaming {
+    /// Words that point at something without naming it: "it", "this one", "the first screen".
+    private static let pointing: Set<String> = [
+        "the", "a", "an", "my", "our", "this", "that", "these", "those", "it", "its", "one", "thing", "element", "item",
+        "selected", "selection", "current", "screen", "page", "view", "first", "second", "third", "last", "newest",
+        "latest", "other", "new", "old", "top", "bottom", "on", "in", "of", "at", "to", "here", "there", "please",
+        "whole", "entire", "all",
+    ]
+
+    /// - Parameters:
+    ///   - named: What the person called it.
+    ///   - names: What a thing of its kind is called, such as "button" and "cta".
+    ///   - words: The words on it, or its own name.
+    static func fits(_ named: String, names: [String], words: String) -> Bool {
+        let naming = tokens(named).filter { !pointing.contains($0) }.map(singular).filter { !pointing.contains($0) }
+        guard !naming.isEmpty else { return true }
+        let own = Set((names.flatMap(tokens) + tokens(words)).map(singular))
+        return naming.allSatisfy(own.contains)
+    }
+
+    /// The words of some text, in lower case.
+    private static func tokens(_ text: String) -> [String] {
+        text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    }
+
+    /// A word with a plural's "s" taken off, so that "buttons" is "button".
+    private static func singular(_ word: String) -> String {
+        word.count > 3 && word.hasSuffix("s") ? String(word.dropLast()) : word
+    }
 }
 
 /// The tools a model is handed during a call. There are few of them, each with a few flat
@@ -111,7 +150,7 @@ struct AddElementTool: Tool {
 struct SetTextTool: Tool {
     let actor: any VoiceActing
     let name = "setText"
-    let description = "Changes the words on an element. To rewrite words in a style, write the new words yourself."
+    let description = "Replaces the words an element shows with different words, such as changing Sign in to Continue. To rewrite words in a style, write the new words yourself. Not for text colour, bold or size: those are styleElement."
 
     @Generable
     struct Arguments {
@@ -129,18 +168,29 @@ struct SetTextTool: Tool {
 struct StyleElementTool: Tool {
     let actor: any VoiceActing
     let name = "styleElement"
-    let description = "Changes how an element looks: its colour, text colour, text size and weight, corners, border, shadow, or a toggle's state."
+    let description = "Changes how an element looks: its colour, its text colour, bold, text size, corners, border, shadow, or a toggle's state."
 
     @Generable
     struct Arguments {
         @Guide(description: "The element's handle, such as E2.")
         var element: String
-        @Guide(description: "Look words, comma separated. A colour name or hex sets the fill; “text blue” the text colour; also bold, 18pt, radius 12, border red, shadow, opacity 50%, on, off, bordered, plain, left, centre, right (text alignment).")
-        var look: String
+        @Guide(description: "The text colour: the colour of its words, such as blue. Leave out to keep it.")
+        var textColour: String?
+        @Guide(description: "Other look words, comma separated. A colour name or hex sets the fill; also bold, 18pt, radius 12, border red, shadow, opacity 50%, on, off, bordered, plain, left, centre, right (text alignment).")
+        var look: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.styleElement(element: arguments.element, look: arguments.look)
+        await actor.styleElement(element: arguments.element, look: Self.look(arguments.look, textColour: arguments.textColour))
+    }
+
+    /// The look words as one list. The text colour has an argument of its own because a
+    /// small model takes "text colour" for the words themselves unless it is spelt out.
+    static func look(_ look: String?, textColour: String?) -> String {
+        let colour = textColour?.trimmingCharacters(in: .whitespaces) ?? ""
+        return [look ?? "", colour.isEmpty ? "" : "text \(colour)"]
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .joined(separator: ", ")
     }
 }
 
@@ -171,13 +221,13 @@ struct MoveElementTool: Tool {
 struct AlignElementTool: Tool {
     let actor: any VoiceActing
     let name = "alignElement"
-    let description = "Lines an element up with an edge or the middle of its screen. “Centre” is side to side; “middle” is top to bottom."
+    let description = "Lines an element up with an edge or the centre of its screen. “Centre”, “centrally” and “middle” all mean centred from side to side."
 
     @Generable
     struct Arguments {
         @Guide(description: "The element's handle, such as E3.")
         var element: String
-        @Guide(description: "One of: left, centre, right, top, middle, bottom.")
+        @Guide(description: "One of: left, centre, right, top, bottom, or vertical centre for centred from top to bottom.")
         var alignment: String
     }
 
@@ -211,10 +261,12 @@ struct DeleteElementTool: Tool {
     struct Arguments {
         @Guide(description: "The element's handle, such as E2.")
         var element: String
+        @Guide(description: "The person's own word for what to delete, such as image or sign in button.")
+        var named: String
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.deleteElement(element: arguments.element)
+        await actor.deleteElement(element: arguments.element, named: arguments.named)
     }
 }
 
@@ -245,10 +297,12 @@ struct DeleteScreenTool: Tool {
     struct Arguments {
         @Guide(description: "The screen's handle, such as S2.")
         var screen: String
+        @Guide(description: "The person's own words for the screen to delete, such as settings screen or this screen.")
+        var named: String
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.deleteScreen(screen: arguments.screen)
+        await actor.deleteScreen(screen: arguments.screen, named: arguments.named)
     }
 }
 
