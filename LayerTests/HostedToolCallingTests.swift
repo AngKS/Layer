@@ -275,6 +275,23 @@ extension HostedModelTests {
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
+    func aCallDoesNotStartWithoutAUsableModel() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
+        try APIKeyStore.removeKey(for: .openAI)
+        app.tool = .draw
+
+        app.startVoiceCall()
+
+        // Told why, in the words the model settings use, and nothing else has changed.
+        #expect(app.voice == nil)
+        #expect(app.voiceNotice == HostedModelError.missingKey(.openAI).errorDescription)
+        #expect(app.tool == .draw)
+        try APIKeyStore.setKey("test-key-openai", for: .openAI)
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    @MainActor
     func aHostedModelThatCannotBeReachedIsSaidInWords() async throws {
         let (app, _) = VoiceFixture.undoableLogin()
         app.setModelChoice(.hosted(.openAI, model: "gpt-test"))

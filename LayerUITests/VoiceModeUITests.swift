@@ -37,6 +37,29 @@ final class VoiceModeUITests: XCTestCase {
         resizeWindow(toWidth: 375)
     }
 
+    #if targetEnvironment(simulator)
+    /// The simulator has no speech recognition. Tapping the phone button there says so,
+    /// and leaves no call up and no microphone on.
+    func testThePhoneButtonSaysWhenTheSimulatorCannotHear() {
+        openNewDesign(arguments: ["-convertsAutomatically", "NO"])
+        resizeWindow(toWidth: 375)
+        // A new design opens with Draw on, and the pencil bar lies over the corner.
+        if app.buttons["Magic Pen"].firstMatch.waitForExistence(timeout: 3) { chooseTool("Draw") }
+        XCTAssertTrue(control("Start voice mode").waitForExistence(timeout: 5))
+        control("Start voice mode").tap()
+        // The system asks about the microphone the first time.
+        allowWhatTheSystemAsks(within: 4)
+        let notice = app.alerts["Voice Mode"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 20), "the call should say why it can't start")
+        XCTAssertTrue(notice.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Speech recognition")).firstMatch.exists)
+        shoot("narrow-no-speech")
+        notice.buttons["OK"].tap()
+        XCTAssertTrue(control("Start voice mode").waitForExistence(timeout: 5), "the phone button should be back")
+        XCTAssertFalse(control("End voice mode").exists)
+        XCTAssertTrue(control("Zoom").exists)
+    }
+    #endif
+
     func testThePillShowsEachMomentOfACall() {
         for moment in ["listening", "hearing", "working", "done", "problem"] {
             openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerVoiceDemo", script, "-LayerVoiceDemoFreeze", moment])
@@ -119,6 +142,16 @@ final class VoiceModeUITests: XCTestCase {
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
+    /// Says yes to the system's questions about the microphone, however many are waiting.
+    private func allowWhatTheSystemAsks(within seconds: TimeInterval) {
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons.matching(NSPredicate(format: "label == %@", "Allow")).firstMatch
+        var wait = seconds
+        for _ in 0..<6 where allow.waitForExistence(timeout: wait) {
+            allow.tap()
+            wait = 1
+        }
+    }
+
     /// Turns a tool on or off, from the bar when there is room for it or from the "…" menu.
     private func chooseTool(_ name: String) {
         let inBar = control(name)
@@ -135,6 +168,8 @@ final class VoiceModeUITests: XCTestCase {
     private func openNewDesign(arguments: [String]) {
         app.launchArguments = arguments
         app.launch()
+        // A question about the microphone left over from an earlier run would be in the way.
+        allowWhatTheSystemAsks(within: 2)
         // A design left open by the last launch comes back; otherwise the browser does.
         if !control("Board title").waitForExistence(timeout: 8) {
             XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 45), "the document browser should appear at launch")

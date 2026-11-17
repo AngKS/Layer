@@ -504,25 +504,106 @@ struct UtteranceAssemblerTests {
         start + .milliseconds(milliseconds)
     }
 
-    @Test func aPauseEndsACommand() {
-        var assembler = UtteranceAssembler()
-        assembler.heard("make the button blue", isFinal: true, at: at(0))
-        #expect(assembler.hearing == "make the button blue")
-        #expect(assembler.next(at: at(500)) == .wait)
-        #expect(assembler.next(at: at(900)) == .command("make the button blue"))
-        // Said once, carried out once.
-        #expect(assembler.hearing == "")
-        #expect(assembler.next(at: at(3000)) == .wait)
+    /// Someone speaking from one moment to another: loud sound, a tenth of a second at a time.
+    private func speak(_ assembler: inout UtteranceAssembler, from begin: Int, to end: Int) {
+        for moment in stride(from: begin, through: end, by: 100) {
+            assembler.sound(level: 0.6, at: at(moment))
+        }
     }
 
-    @Test func speechThatContinuesIsOneCommand() {
+    @Test func quietAfterSpeechEndsACommand() {
         var assembler = UtteranceAssembler()
-        assembler.heard("make the button", isFinal: true, at: at(0))
-        assembler.heard("half width", isFinal: true, at: at(500))
-        #expect(assembler.hearing == "make the button half width")
-        // Only 400 ms since the last words.
-        #expect(assembler.next(at: at(900)) == .wait)
-        #expect(assembler.next(at: at(1400)) == .command("make the button half width"))
+        speak(&assembler, from: 0, to: 1000)
+        assembler.heard("make the button blue", isFinal: true, at: at(900))
+        #expect(assembler.hearing == "make the button blue")
+        // Quiet for half a second: perhaps only a breath.
+        #expect(assembler.next(at: at(1500)) == .wait)
+        // Quiet for 0.8 s: the recogniser is asked to settle whatever it still holds.
+        #expect(assembler.next(at: at(1800)) == .settle)
+        #expect(assembler.next(at: at(1820)) == .wait)
+        assembler.settled(at: at(1850))
+        // Its last phrases are given a moment to arrive, and then the command is taken.
+        #expect(assembler.next(at: at(1900)) == .wait)
+        #expect(assembler.next(at: at(2100)) == .command("make the button blue"))
+        // Said once, carried out once.
+        #expect(assembler.hearing == "")
+        #expect(assembler.next(at: at(6000)) == .wait)
+    }
+
+    /// A recogniser hands words over in bursts about a second apart. A second without
+    /// new words, in the middle of a sentence, is not the end of it.
+    @Test func aGapBetweenBurstsOfWordsDoesNotCutACommandShort() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 3000)
+        assembler.heard("Make the button half width and", isFinal: false, at: at(1500))
+        assembler.heard("Make the button half width, and align", isFinal: true, at: at(1600))
+        // A full second with no new words, while the speaker is still speaking.
+        #expect(assembler.next(at: at(2600)) == .wait)
+        assembler.heard("the image centrally", isFinal: true, at: at(2700))
+        #expect(assembler.next(at: at(3500)) == .wait)
+        #expect(assembler.next(at: at(3800)) == .settle)
+        assembler.settled(at: at(3850))
+        #expect(assembler.next(at: at(4100)) == .command("Make the button half width, and align the image centrally"))
+    }
+
+    /// A word or two is over before the recogniser has reported anything.
+    @Test func aShortCommandIsFlushedOutOfTheRecogniser() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 400)
+        #expect(assembler.next(at: at(1000)) == .wait)
+        #expect(assembler.next(at: at(1200)) == .settle)
+        assembler.heard("Undo.", isFinal: true, at: at(1260))
+        assembler.settled(at: at(1300))
+        #expect(assembler.next(at: at(1550)) == .command("Undo."))
+    }
+
+    @Test func noiseWithoutWordsIsNothing() {
+        var assembler = UtteranceAssembler()
+        assembler.sound(level: 0.9, at: at(0))
+        #expect(assembler.next(at: at(800)) == .settle)
+        assembler.settled(at: at(850))
+        #expect(assembler.next(at: at(1100)) == .wait)
+        #expect(assembler.hearing == "")
+        // And it isn't asked about again.
+        #expect(assembler.next(at: at(5000)) == .wait)
+    }
+
+    @Test func speakingAgainBeforeItIsTakenGoesOnWithTheCommand() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 1000)
+        assembler.heard("make the button", isFinal: true, at: at(900))
+        #expect(assembler.next(at: at(1800)) == .settle)
+        assembler.settled(at: at(1850))
+        // The speaker goes on before the command is taken.
+        speak(&assembler, from: 1900, to: 2600)
+        #expect(assembler.next(at: at(2300)) == .wait)
+        assembler.heard("half width", isFinal: true, at: at(2700))
+        #expect(assembler.next(at: at(3000)) == .wait)
+        #expect(assembler.next(at: at(3400)) == .settle)
+        assembler.settled(at: at(3450))
+        #expect(assembler.next(at: at(3700)) == .command("make the button half width"))
+    }
+
+    /// Where the room is never quiet, words going stale are what ends a command.
+    @Test func inANoisyRoomWordsGoingStaleEndTheCommand() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 4000)
+        assembler.heard("zoom out", isFinal: true, at: at(1000))
+        #expect(assembler.next(at: at(2500)) == .wait)
+        #expect(assembler.next(at: at(3000)) == .settle)
+        assembler.settled(at: at(3050))
+        #expect(assembler.next(at: at(3300)) == .command("zoom out"))
+    }
+
+    /// Speech too soft to tell from the room is still heard by its words.
+    @Test func softSpeechIsKnownByItsWords() {
+        var assembler = UtteranceAssembler()
+        for moment in stride(from: 0, through: 3000, by: 100) { assembler.sound(level: 0.05, at: at(moment)) }
+        assembler.heard("zoom out", isFinal: true, at: at(500))
+        #expect(assembler.next(at: at(2400)) == .wait)
+        #expect(assembler.next(at: at(2500)) == .settle)
+        assembler.settled(at: at(2550))
+        #expect(assembler.next(at: at(2800)) == .command("zoom out"))
     }
 
     @Test func volatileTextIsShownButReplaced() {
@@ -537,45 +618,67 @@ struct UtteranceAssemblerTests {
         #expect(assembler.hearing == "Make the button blue. and bold")
     }
 
-    @Test func aCommandWaitsForItsLastWordsToSettle() {
+    /// Between commands a recogniser can settle a phrase that is only punctuation.
+    @Test func punctuationAloneIsNotWords() {
         var assembler = UtteranceAssembler()
-        assembler.heard("make the button", isFinal: false, at: at(0))
-        // After the pause the recogniser is asked to settle what it has, once.
-        #expect(assembler.next(at: at(900)) == .settle)
-        #expect(assembler.next(at: at(950)) == .wait)
-        // Its settled words are the command, at once: the pause has already been taken.
-        assembler.heard("Make the button blue", isFinal: true, at: at(1000))
-        #expect(assembler.next(at: at(1000)) == .command("Make the button blue"))
+        assembler.heard(",...", isFinal: true, at: at(0))
+        assembler.heard(".", isFinal: false, at: at(100))
+        #expect(assembler.hearing == "")
+        #expect(assembler.next(at: at(5000)) == .wait)
+        speak(&assembler, from: 5000, to: 5500)
+        assembler.heard(",...", isFinal: true, at: at(5600))
+        assembler.heard("Show me the first screen.", isFinal: true, at: at(5700))
+        #expect(assembler.hearing == "Show me the first screen.")
     }
 
-    @Test func speakingAgainWhileSettlingGoesOnWithTheSameCommand() {
+    /// The quiet before a command can come out as punctuation at the start of it.
+    @Test func punctuationBeforeTheFirstWordIsDropped() {
         var assembler = UtteranceAssembler()
-        assembler.heard("make the button", isFinal: false, at: at(0))
-        #expect(assembler.next(at: at(900)) == .settle)
-        assembler.heard("make the button half", isFinal: false, at: at(1000))
-        #expect(assembler.next(at: at(1100)) == .wait)
-        assembler.heard("make the button half width", isFinal: true, at: at(1300))
-        #expect(assembler.next(at: at(1500)) == .wait)
-        #expect(assembler.next(at: at(2200)) == .command("make the button half width"))
+        assembler.heard(",... Show me the 1st screen.", isFinal: true, at: at(0))
+        #expect(assembler.hearing == "Show me the 1st screen.")
+        assembler.heard(".. make it blue", isFinal: false, at: at(100))
+        #expect(assembler.hearing == "Show me the 1st screen. make it blue")
+    }
+
+    /// A recogniser runs behind the speaker. Asked to settle, it brings out the words it
+    /// was still working on; those are the end of this command, not the speaker going on.
+    @Test func wordsTheRecogniserBringsOutOnSettlingDoNotRestartTheWait() {
+        var assembler = UtteranceAssembler()
+        speak(&assembler, from: 0, to: 1000)
+        assembler.heard("show me the", isFinal: false, at: at(900))
+        #expect(assembler.next(at: at(1800)) == .settle)
+        assembler.heard("show me the first", isFinal: false, at: at(1900))
+        #expect(assembler.next(at: at(1950)) == .wait)
+        assembler.heard("Show me the first screen.", isFinal: true, at: at(2000))
+        assembler.settled(at: at(2050))
+        // Not asked to settle a second time, and taken a moment after its last words.
+        #expect(assembler.next(at: at(2200)) == .wait)
+        #expect(assembler.next(at: at(2300)) == .command("Show me the first screen."))
     }
 
     @Test func wordsThatNeverSettleAreTakenAsTheyAre() {
         var assembler = UtteranceAssembler()
-        assembler.heard("show me the first screen", isFinal: false, at: at(0))
-        #expect(assembler.next(at: at(900)) == .settle)
+        speak(&assembler, from: 0, to: 600)
+        assembler.heard("show me the first screen", isFinal: false, at: at(500))
+        #expect(assembler.next(at: at(1400)) == .settle)
+        // The recogniser never says it has settled. It is given a second and a half.
         #expect(assembler.next(at: at(2000)) == .wait)
-        #expect(assembler.next(at: at(2400)) == .command("show me the first screen"))
+        #expect(assembler.next(at: at(2900)) == .command("show me the first screen"))
         // Settled late, the same words aren't a second command.
-        assembler.heard("Show me the first screen.", isFinal: true, at: at(2600))
+        assembler.heard("Show me the first screen.", isFinal: true, at: at(3100))
         #expect(assembler.hearing == "")
-        #expect(assembler.next(at: at(5000)) == .wait)
+        #expect(assembler.next(at: at(8000)) == .wait)
         // But the next thing said is.
-        assembler.heard("zoom out", isFinal: true, at: at(6000))
-        #expect(assembler.next(at: at(6900)) == .command("zoom out"))
+        speak(&assembler, from: 9000, to: 9500)
+        assembler.heard("zoom out", isFinal: true, at: at(9600))
+        #expect(assembler.next(at: at(10300)) == .settle)
+        assembler.settled(at: at(10350))
+        #expect(assembler.next(at: at(10600)) == .command("zoom out"))
     }
 
     @Test func silenceGivesNothing() {
         var assembler = UtteranceAssembler()
+        for moment in stride(from: 0, through: 5000, by: 100) { assembler.sound(level: 0, at: at(moment)) }
         #expect(assembler.next(at: at(5000)) == .wait)
         assembler.heard("   ", isFinal: true, at: at(6000))
         assembler.heard("", isFinal: false, at: at(6100))
@@ -640,10 +743,10 @@ struct CallPillPartsTests {
     }
 
     @Test func silenceIsNoLevelAndAVoiceIsSome() {
-        #expect(MicrophoneTap.level(of: buffer(amplitude: 0)) == 0)
-        let quiet = MicrophoneTap.level(of: buffer(amplitude: 0.02))
-        let speaking = MicrophoneTap.level(of: buffer(amplitude: 0.2))
-        let loud = MicrophoneTap.level(of: buffer(amplitude: 1))
+        #expect(AudioLevel.level(of: buffer(amplitude: 0)) == 0)
+        let quiet = AudioLevel.level(of: buffer(amplitude: 0.02))
+        let speaking = AudioLevel.level(of: buffer(amplitude: 0.2))
+        let loud = AudioLevel.level(of: buffer(amplitude: 1))
         #expect(quiet > 0 && quiet < speaking)
         #expect(speaking > 0.5 && speaking < 1)
         #expect(loud == 1)
@@ -654,7 +757,7 @@ struct CallPillPartsTests {
         let half = buffer(amplitude: 1)
         let samples = half.floatChannelData![0]
         for index in 800..<1600 { samples[index] = 0 }
-        #expect(MicrophoneTap.levels(of: half, count: 2) == [1, 0])
-        #expect(MicrophoneTap.levels(of: half, count: 1).count == 1)
+        #expect(AudioLevel.levels(of: half, count: 2) == [1, 0])
+        #expect(AudioLevel.levels(of: half, count: 1).count == 1)
     }
 }

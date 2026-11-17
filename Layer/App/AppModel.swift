@@ -400,9 +400,14 @@ final class AppModel {
 
     var isInVoiceCall: Bool { voice != nil }
 
-    /// Starts a call: the phone button's action.
+    /// Starts a call: the phone button's action. A call with no model to act on what it
+    /// hears would be no use, so one that can't be used is said so instead.
     func startVoiceCall() {
         guard voice == nil else { return }
+        if case .unavailable(let reason) = modelChoice.sketchProvider.readiness() {
+            voiceNotice = reason
+            return
+        }
         Task { await startVoiceCall(route: DictationRoute(), runner: VoiceAgent(model: self)) }
     }
 
