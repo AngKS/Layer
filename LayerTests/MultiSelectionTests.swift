@@ -633,6 +633,8 @@ struct CanvasDragTests {
         let board = Board()
         board.store.updateCanvas { $0.snapsToGuides = false }
         let drags = CanvasDrags()
+        // Cut short: it has stopped moving by the time the next drag begins.
+        drags.staleAfter = .zero
         let titleBefore = board.canvasFrame(board.title)
         move(board, drags, board.title, by: 20, from: CGPoint(x: 1, y: 1), owner: CanvasDrags.Owner())
 
@@ -649,6 +651,29 @@ struct CanvasDragTests {
         #expect(board.canvasFrame(board.title) != titleBefore)
         board.undo.undo()
         #expect(board.canvasFrame(board.title) == titleBefore)
+    }
+
+    /// Two fingers on two elements at once: each frame of either used to end the other's
+    /// drag, and every frame was a step of its own. The second is left alone instead.
+    @Test func aSecondFingerDoesNotTakeOverADragUnderWay() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let (first, second) = (CanvasDrags.Owner(), CanvasDrags.Owner())
+        let noteBefore = board.canvasFrame(board.note)
+        let titleBefore = board.canvasFrame(board.title)
+        let mark = board.store.historyMark
+        for step in 1...5 {
+            move(board, drags, board.note, by: CGFloat(step) * 4, from: CGPoint(x: 1, y: 1), owner: first)
+            move(board, drags, board.title, by: CGFloat(step) * 4, from: CGPoint(x: 600, y: 600), owner: second)
+        }
+        drags.dropElement(board.title, findsNewHome: true, owner: second, model: board.model)
+        #expect(board.store.isEditing)
+        drags.dropElement(board.note, findsNewHome: true, owner: first, model: board.model)
+
+        #expect(board.canvasFrame(board.note) == noteBefore.offsetBy(dx: 20, dy: 0))
+        #expect(board.canvasFrame(board.title) == titleBefore)
+        #expect(board.store.historyMark == mark + 1)
     }
 
     @Test func aNewTouchOnTheSameViewIsANewDrag() throws {
