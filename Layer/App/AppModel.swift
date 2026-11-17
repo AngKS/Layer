@@ -25,6 +25,21 @@ struct InkGhost: Identifiable, Equatable {
     var strokes: [[CGPoint]]
 }
 
+/// A close call the Magic Pen settled, offered again as what it nearly was: "Did you mean
+/// Text Field?"
+struct KindSuggestion: Identifiable, Equatable {
+    let id = UUID()
+    /// The element the sketch became.
+    var ref: DesignStore.ElementRef
+    /// What it nearly was instead.
+    var kind: ElementKind
+    /// Where it was sketched, in canvas points, so that the other kind is laid out from
+    /// the same drawing.
+    var sketch: CGRect
+    /// What the sketch looked like, for what the marks inside it say.
+    var observation: SketchObservation
+}
+
 /// What is selected on the canvas.
 enum CanvasSelection: Hashable, Sendable {
     case element(DesignStore.ElementRef)
@@ -426,6 +441,7 @@ final class AppModel {
         generationDismissal?.cancel()
         settle?.cancel()
         adjustmentEnd?.cancel()
+        suggestionExpiry?.cancel()
         for conversion in conversions { conversion.cancel() }
         conversions.removeAll()
         // A rename under way finishes: stopping it halfway would leave the file misnamed.
@@ -795,6 +811,45 @@ final class AppModel {
         case .screen(let id) where store.screen(id) == nil: selection = nil
         default: break
         }
+        if let suggestion, store.resolve(suggestion.ref) == nil { dismissSuggestion() }
+    }
+
+    // MARK: Did you mean
+
+    /// What the last close call nearly was, while that is on offer.
+    private(set) var suggestion: KindSuggestion?
+    @ObservationIgnored private var suggestionExpiry: Task<Void, Never>?
+    /// How long a suggestion stays up when it is left alone.
+    static let suggestionLifetime: Duration = .seconds(8)
+
+    /// Offers to make what a sketch became into what it nearly was. One offer shows at a
+    /// time, and goes by itself after a while.
+    func offer(_ suggestion: KindSuggestion) {
+        suggestionExpiry?.cancel()
+        self.suggestion = suggestion
+        suggestionExpiry = Task { [weak self] in
+            try? await Task.sleep(for: Self.suggestionLifetime)
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.25)) { self?.dismissSuggestion() }
+        }
+    }
+
+    /// Makes the element what was suggested, as one undo step, and notes the correction
+    /// against the reading it corrects.
+    func acceptSuggestion() {
+        guard let suggestion else { return }
+        dismissSuggestion()
+        let changed = store.changeKind(of: suggestion.ref, to: suggestion.kind, sketchedAt: suggestion.sketch) {
+            $0.adoptMarks(of: suggestion.observation)
+        }
+        guard changed != nil else { return }
+        Task { await SketchReadingLog.shared.noteCorrected(suggestion.ref.element, to: suggestion.kind.rawValue) }
+    }
+
+    func dismissSuggestion() {
+        suggestionExpiry?.cancel()
+        suggestionExpiry = nil
+        suggestion = nil
     }
 
     /// True while a number field is being scrubbed.
@@ -1032,14 +1087,15 @@ final class AppModel {
 
         // Let the re-trace play out even when the reading comes back at once.
         async let minimum: Void? = try? Task.sleep(for: .milliseconds(750))
-        let reading = await engine.read(request)
+        let outcome = await engine.outcome(for: request)
+        let reading = outcome.reading
         // Stage 0 instrumentation (reports/Fast and slow sketch recognition.md): if this
-        // reading became an element below, linking it here lets a deletion soon after be
-        // recognised as a likely correction of this specific reading.
-        let readingLogID = engine.lastLogID
+        // reading became an element below, linking it here lets a deletion or a change of
+        // kind soon after be recognised as a correction of this specific reading.
+        let readingLogID = outcome.logID
         // Stage 2: a word PencilKit's handwriting recognizer read out of these same
         // strokes, such as "Sign in" inside a box, which becomes the element's label below.
-        let recognizedText = engine.lastRecognizedText
+        let recognizedText = outcome.recognizedText
         _ = await minimum
         // Closed while the sketch was being read: nothing is put on a design that has gone.
         guard !isClosed, !Task.isCancelled else {
@@ -1071,6 +1127,10 @@ final class AppModel {
                 }
                 if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
                     store.update(added) { $0.text = recognizedText }
+                }
+                // A close call says what else it nearly was, in case that is what was meant.
+                if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
+                    offer(KindSuggestion(ref: added, kind: other, sketch: bounds, observation: observation))
                 }
             case .scratchOut:
                 let crossedOut = scratchOutDeletes ? store.elements(scratchedOutBy: bounds) : []

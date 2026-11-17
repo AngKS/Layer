@@ -465,6 +465,29 @@ final class SketchFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testACloseCallOffersWhatItNearlyWasAndBecomesThatWhenTapped() {
+        // The scripted demo draws a screen, then a wide box whose corners are between a
+        // text field's and a button's.
+        app.launchArguments = ["-LayerDemo", "screen,closeCall"]
+        openNewDesign()
+
+        let suggestion = app.buttons.matching(labelBeginning("Did you mean")).firstMatch
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 40), "a close call should offer what it nearly was")
+        // Which of the two it was read as depends on how large it was drawn; the other is offered.
+        let offersTextField = suggestion.label.contains("Text Field")
+        let (read, offered) = offersTextField ? ("Continue", "Placeholder") : ("Placeholder", "Continue")
+        XCTAssertTrue(app.staticTexts[read].exists, "the box should have become a button or a text field")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "did-you-mean"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        suggestion.tap()
+        XCTAssertTrue(app.staticTexts[offered].waitForExistence(timeout: 5), "taking the suggestion should make it what was offered")
+        XCTAssertFalse(app.staticTexts[read].exists, "what it was read as should be gone")
+        XCTAssertTrue(waitForDisappearance(of: suggestion), "the suggestion should go once it is taken")
+    }
+
     // MARK: Documents
 
     /// Launches into the document browser and creates a design, ending on its canvas with

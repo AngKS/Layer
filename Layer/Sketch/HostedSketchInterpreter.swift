@@ -16,9 +16,13 @@ struct HostedSketchInterpreter: SketchInterpreter {
     }
 
     func read(_ request: SketchRequest) async throws -> SketchReading {
+        try await decide(request).chosen
+    }
+
+    func decide(_ request: SketchRequest) async throws -> SketchDecision {
         let candidates = request.options
         let names = candidates.map(SketchPrompt.name(for:))
-        guard names.count > 1 else { return candidates.first ?? .unknown }
+        guard names.count > 1 else { return SketchDecision(chosen: candidates.first ?? .unknown) }
 
         let scored = request.scoredReadings
         let rankedLine = scored.isEmpty ? nil : "The rules' own ranked guesses, most likely first: "
@@ -30,8 +34,9 @@ struct HostedSketchInterpreter: SketchInterpreter {
         // its own reasoning, and a tight one can leave nothing for the answer.
         let response = try await session.respond(to: prompt, schema: try Self.decisionSchema(for: names), options: GenerationOptions(temperature: 0))
         let chosenName = try response.content.value(String.self, forProperty: "chosen")
+        let runnerUpName = try? response.content.value(String.self, forProperty: "runnerUp")
         Self.log.info("\(model.provider.rawValue, privacy: .public) \(model.model, privacy: .public) chose \(chosenName, privacy: .public)")
-        return zip(names, candidates).first { $0.0 == chosenName }?.1 ?? .unknown
+        return SketchDecision(named: chosenName, runnerUp: runnerUpName, names: names, candidates: candidates)
     }
 
     func suggestTitle(for board: String) async throws -> String {

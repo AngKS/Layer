@@ -106,9 +106,16 @@ final class DesignStore {
     @discardableResult
     func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard let index = screens.firstIndex(where: { $0.id == screenID }) else { return nil }
-        let local = screens[index].localRect(for: sketch)
-        let existing = screens[index].elements.filter { !$0.isHidden }
-        let laid = ElementLayout.sketched(kind, sketch: local, on: screens[index].device, among: existing.map(\.frame))
+        var element = Self.sketchedElement(kind, from: sketch, on: screens[index], among: screens[index].elements)
+        adjust(&element)
+        change { $0.screens[index].elements.append(element) }
+        return element
+    }
+
+    /// The element a sketch drawn on a screen stands for, laid out among `others` there.
+    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement]) -> DesignElement {
+        let existing = others.filter { !$0.isHidden }
+        let laid = ElementLayout.sketched(kind, sketch: screen.localRect(for: sketch), on: screen.device, among: existing.map(\.frame))
         var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
         element.textAlignment = laid.alignment
         // A screen's first button is its main action; any more are outlined beside or below it.
@@ -116,8 +123,30 @@ final class DesignStore {
             element.buttonLook = .bordered
             element.text = "Cancel"
         }
+        return element
+    }
+
+    /// Makes an element on a screen another kind of thing, as when its sketch was read as
+    /// the wrong one. It is laid out afresh from where it was sketched, as if it had been
+    /// read that way to begin with, and stays the same element: its place among the
+    /// others, its name, and any words written for it are kept. `adjust` finishes it in
+    /// the same undoable step. Returns the element as it now is, or nil when it is gone
+    /// or isn't on a screen.
+    @discardableResult
+    func changeKind(of ref: ElementRef, to kind: ElementKind, sketchedAt sketch: CGRect, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
+        guard case .screen(let screenID) = ref.host,
+              let screen = screens.firstIndex(where: { $0.id == screenID }),
+              let index = screens[screen].elements.firstIndex(where: { $0.id == ref.element })
+        else { return nil }
+        let old = screens[screen].elements[index]
+        let others = screens[screen].elements.filter { $0.id != old.id }
+        var element = Self.sketchedElement(kind, from: sketch, on: screens[screen], among: others)
+        element.id = old.id
+        element.name = old.name
+        element.isLocked = old.isLocked
+        if kind.hasText, old.kind.hasText, old.text != old.kind.placeholder { element.text = old.text }
         adjust(&element)
-        change { $0.screens[index].elements.append(element) }
+        change { $0.screens[screen].elements[index] = element }
         return element
     }
 

@@ -123,13 +123,40 @@ enum SketchReading: Sendable, Equatable {
     case unknown
 }
 
+/// What an interpreter made of a sketch: its reading and, when it names one, its second choice.
+struct SketchDecision: Sendable, Equatable {
+    var chosen: SketchReading
+    var runnerUp: SketchReading? = nil
+}
+
+extension SketchDecision {
+    /// A model's answer, given as the names it was offered, turned back into readings.
+    /// `names` and `candidates` run in step. A name that wasn't offered reads as unknown,
+    /// or as no second choice.
+    init(named chosen: String, runnerUp: String?, names: [String], candidates: [SketchReading]) {
+        func reading(named name: String?) -> SketchReading? {
+            zip(names, candidates).first { $0.0 == name }?.1
+        }
+        self.init(chosen: reading(named: chosen) ?? .unknown, runnerUp: reading(named: runnerUp))
+    }
+}
+
 /// Something that can read sketches and name boards. Given a sketch, it returns one of
 /// the request's `candidates`. Apple Intelligence is the built-in one; a hosted model is
 /// added by writing another conforming type and listing it in `SketchProvider.all`.
 protocol SketchInterpreter: Sendable {
     func read(_ request: SketchRequest) async throws -> SketchReading
+    /// The reading together with a second choice. An interpreter that only gives a
+    /// reading need not write this.
+    func decide(_ request: SketchRequest) async throws -> SketchDecision
     /// A short name for a board, given `SketchPrompt.describe(board:)` of its design.
     func suggestTitle(for board: String) async throws -> String
+}
+
+extension SketchInterpreter {
+    func decide(_ request: SketchRequest) async throws -> SketchDecision {
+        SketchDecision(chosen: try await read(request))
+    }
 }
 
 enum ProviderReadiness: Equatable, Sendable {

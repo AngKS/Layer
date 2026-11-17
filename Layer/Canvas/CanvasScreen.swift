@@ -54,6 +54,7 @@ struct CanvasScreen: View {
                 SelectionLayer()
                 HoverOutline()
                 SelectionActions()
+                SuggestionPill()
                 PenCursor(pen: model.pen)
                 EdgeGlow(accent: accent, isActive: !model.effects.isEmpty)
         }
