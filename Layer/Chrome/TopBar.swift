@@ -159,7 +159,6 @@ private struct ToolsBar: View {
     @State private var isLibraryOpen = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
-    @State private var isGenerating = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -176,12 +175,6 @@ private struct ToolsBar: View {
                 .disabled(model.isInVoiceCall)
                 ToolButton(symbol: "character.textbox", label: "Text") {
                     withAnimation(.smooth(duration: 0.3)) { model.addText() }
-                }
-                ToolButton(symbol: "wand.and.sparkles", label: "Generate Screen", isActive: isGenerating || model.isGenerating) {
-                    isGenerating = true
-                }
-                .popover(isPresented: $isGenerating) {
-                    GenerateScreenPanel()
                 }
                 ToolButton(symbol: "note.text", label: "Sticky note") {
                     withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
@@ -208,7 +201,6 @@ private struct ToolsBar: View {
 /// The tools folded into one button, for a window too narrow to lay them out.
 private struct ToolsMenu: View {
     @Environment(AppModel.self) private var model
-    @State private var isGeneratingScreen = false
     @State private var isLibraryOpen = false
     @State private var isAttaching = false
     @State private var isPickingPhoto = false
@@ -228,7 +220,6 @@ private struct ToolsMenu: View {
             Button("Text", systemImage: "character.textbox") {
                 withAnimation(.smooth(duration: 0.3)) { model.addText() }
             }
-            Button("Generate Screen", systemImage: "wand.and.sparkles") { isGeneratingScreen = true }
             Button("Sticky Note", systemImage: "note.text") {
                 withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
             }
@@ -240,9 +231,6 @@ private struct ToolsMenu: View {
             ToolIcon(symbol: "ellipsis")
         }
         .accessibilityLabel("Tools")
-        .popover(isPresented: $isGeneratingScreen) {
-            GenerateScreenPanel()
-        }
         .popover(isPresented: $isLibraryOpen) {
             LibraryPopover(isPresented: $isLibraryOpen)
         }
@@ -267,6 +255,9 @@ private struct LibraryPopover: View {
                 try? await Task.sleep(for: .milliseconds(250))
                 isPresented = false
             }
+        } onGenerate: { description in
+            isPresented = false
+            model.generateScreen(from: description)
         }
         .environment(model)
         .environment(model.images)

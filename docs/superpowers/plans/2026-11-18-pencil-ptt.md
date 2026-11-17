@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- Work in `.claude/worktrees/pencil-ptt` on `feature/pencil-ptt`. Simulator: "Layer iPad Pro 11 (voice-mode)" `F6BEC5BF-CAB3-4186-9904-5362B20E582D`.
-- Unit tests: `xcodebuild -project Layer.xcodeproj -scheme Layer -testPlan CI -destination "platform=iOS Simulator,id=F6BEC5BF-CAB3-4186-9904-5362B20E582D" -only-testing:LayerTests/<Suite> test`.
+- Work in `.claude/worktrees/pencil-ptt` on `feature/pencil-ptt`. Simulator: "Layer iPad Pro 11 (pencil-ptt)" `D46460E1-5CC0-42B2-B134-D5C21174380D`.
+- Unit tests: `xcodebuild -project Layer.xcodeproj -scheme Layer -testPlan CI -destination "platform=iOS Simulator,id=D46460E1-5CC0-42B2-B134-D5C21174380D" -only-testing:LayerTests/<Suite> test`.
 - Run `xcodegen generate` after adding or removing files, and commit `Layer.xcodeproj`.
 - Callbacks from system frameworks off the main thread are made in `nonisolated` functions and marked `@Sendable` (the device crash on main-actor closures handed to `AVAudioEngine`).
 - The microphone is on only between a squeeze and its send or cancel. Hovering never turns it on.

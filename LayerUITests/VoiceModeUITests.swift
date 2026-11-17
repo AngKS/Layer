@@ -16,6 +16,28 @@ final class VoiceModeUITests: XCTestCase {
         app = XCUIApplication()
     }
 
+    func testTmpLibraryShots() {
+        openNewDesign(arguments: ["-convertsAutomatically", "NO"])
+        if app.buttons["Magic Pen"].firstMatch.waitForExistence(timeout: 3) { chooseTool("Draw") }
+        control("Library").tap()
+        let field = app.textFields["Search the library"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("mac")
+        sleep(1)
+        shoot("mac")
+        field.clearText()
+        field.typeText("a checkout screen with apple pay and a summary")
+        sleep(1)
+        shoot("empty-state")
+        app.keyboards.buttons["Go"].firstMatch.tap()
+        sleep(2)
+        shoot("after-return")
+        print("TMP generation status exists:", app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "generation.")).firstMatch.waitForExistence(timeout: 10))
+        sleep(1)
+        shoot("generating")
+    }
+
     func testThePhoneButtonStartsACallInANarrowWindow() {
         openNewDesign(arguments: ["-convertsAutomatically", "NO"])
         // The window comes back the size it was left. Full screen there is no phone
@@ -241,5 +263,12 @@ final class VoiceModeUITests: XCTestCase {
         let picture = XCUIScreen.main.screenshot().pngRepresentation
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         try? picture.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(name).png"))
+    }
+}
+
+extension XCUIElement {
+    func clearText() {
+        guard let v = value as? String else { return }
+        typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: v.count))
     }
 }
