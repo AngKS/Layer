@@ -265,13 +265,35 @@ final class VoiceToolbox: VoiceActing {
         return said + rest
     }
 
-    func createScreen(name: String?, description: String) async throws -> String {
+    /// The device some words name: "MacBook", "an iPad screen", "iPhone SE". Nil if they
+    /// name none.
+    static func device(named words: String) -> DeviceFrame? {
+        let said = " " + words.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: " ") + " "
+        let kinds: [(words: [String], id: String)] = [
+            ([" macbook pro ", " mac book pro "], "macbook-pro-16"),
+            ([" macbook ", " mac book ", " laptop ", " mac "], "macbook-air"),
+            ([" imac ", " desktop "], "imac"),
+            ([" ipad mini "], "ipad-mini"),
+            ([" ipad pro "], "ipad-pro-13"),
+            ([" ipad ", " tablet "], "ipad"),
+            ([" pro max "], "iphone-pro-max"),
+            ([" iphone se "], "iphone-se"),
+            ([" iphone ", " phone ", " mobile "], "iphone"),
+        ]
+        guard let kind = kinds.first(where: { $0.words.contains(where: said.contains) }) else { return nil }
+        return DeviceFrame.all.first { $0.id == kind.id }
+    }
+
+    func createScreen(name: String?, description: String, device: String?) async throws -> String {
         guard let model else { throw CancellationError() }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isGenerating else { return failed("A screen is already being written.") }
         // Inside a command the screen is part of the command's own undo step.
-        model.generateScreen(from: description, named: Self.screenName(name), partOfHeldEdit: model.store.isHoldingEdit)
+        // The device the model named, or else the one the person did: on an iPad the
+        // model left it out, and "on the MacBook" got a phone screen.
+        let frame = device.flatMap(Self.device(named:)) ?? spokenCommand.flatMap(Self.device(named:))
+        model.generateScreen(from: description, named: Self.screenName(name), device: frame, partOfHeldEdit: model.store.isHoldingEdit)
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {

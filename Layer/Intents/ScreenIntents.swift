@@ -56,7 +56,7 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
             }
             return screen
         }
-        DesignActions.reveal(.screen(screen.id), in: model)
+        DesignActions.reveal(.screen(screen.id), in: model, selecting: false)
         guard let entity = DesignActions.entity(for: screen, in: model) else { throw LayerIntentError.screenNotFound }
         return .result(value: entity, dialog: "Added \(screen.name).")
     }
@@ -133,7 +133,7 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
             model.store.setElements(blueprint.layout(on: host.device), on: host.id, replacing: true)
             return model.store.screen(host.id) ?? host
         }
-        DesignActions.reveal(.screen(built.id), in: model)
+        DesignActions.reveal(.screen(built.id), in: model, selecting: false)
         guard let entity = DesignActions.entity(for: built, in: model) else { throw LayerIntentError.screenNotFound }
         let count = built.elements.count
         return .result(value: entity, dialog: "Built \(built.name) with \(count == 1 ? "1 element" : "\(count) elements").")

@@ -343,18 +343,19 @@ final class AppModel {
     /// elements appear as the model writes them; the whole screen is one undo step.
     ///
     /// `name` is what to call the screen; without one it is named from the description.
+    /// `device` is what it is a screen of; without one, the canvas's own device.
     ///
     /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
     /// is already being held open and the screen is part of it, so it opens none of its
     /// own. That is also how an edit by hand made in the meantime is told from it: see
     /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, named name: String? = nil, partOfHeldEdit: Bool = false) {
+    func generateScreen(from description: String, named name: String? = nil, device chosen: DeviceFrame? = nil, partOfHeldEdit: Bool = false) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
-        let device = store.canvas.sketchDevice
+        let device = chosen ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
@@ -362,7 +363,8 @@ final class AppModel {
         if generationOwnsEdit { store.beginEdit() }
         let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
         store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
-        DesignActions.reveal(.screen(screen.id), in: self)
+        // Shown, not selected: a new screen comes in without selection handles round it.
+        DesignActions.reveal(.screen(screen.id), in: self, selecting: false)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
 
         let choice = modelChoice
@@ -1171,7 +1173,8 @@ final class AppModel {
         let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
         let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
         tool = .select
-        selection = .screen(screen.id)
+        // A new frame comes in unselected.
+        selection = nil
         suggestTitleIfNeeded()
         return screen
     }
@@ -1354,9 +1357,8 @@ final class AppModel {
             var added: DesignStore.ElementRef?
             switch reading {
             case .screen:
-                let screen = store.addScreen(from: bounds)
+                _ = store.addScreen(from: bounds)
                 converted = true
-                if isDrawing { selection = .screen(screen.id) }
             case .element(let kind):
                 if let host {
                     if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {

@@ -389,7 +389,9 @@ struct AppModelTests {
 
         let iPad = try #require(DeviceFrame.all.first { $0.id == "ipad" })
         model.addFrame(iPad)
-        let frame = try #require(model.selectedScreen)
+        let frame = try #require(model.store.screens.last)
+        // A frame, unlike text, a note or a picture, comes in unselected.
+        #expect(model.selection == nil)
         #expect(model.tool == .select)
         #expect(isClose(center(frame.canvasFrame), middle, within: 2))
         #expect(frame.canvasFrame.height <= 834 - 200, "the frame should fit in the view")

@@ -123,7 +123,9 @@ struct AddingAssetsTests {
         let model = makeModel()
         let iMac = try #require(AssetLibrary.asset(id: "frame:imac"))
         model.addAsset(iMac)
-        let screen = try #require(model.selectedScreen)
+        let screen = try #require(model.store.screens.last)
+        // New frames come in unselected.
+        #expect(model.selection == nil)
         #expect(screen.device.family == .desktop)
         #expect(screen.canvasFrame.height <= 834 - 200, "even an iMac fits in the view")
     }
@@ -132,7 +134,7 @@ struct AddingAssetsTests {
         let model = makeModel()
         let iPad = try #require(AssetLibrary.asset(id: "frame:ipad"))
         model.addAsset(iPad, at: CGPoint(x: 500, y: 420))
-        let frame = try #require(model.selectedScreen).canvasFrame
+        let frame = try #require(model.store.screens.last).canvasFrame
         #expect(abs(frame.midX - 500) <= 1 && abs(frame.midY - 420) <= 1)
     }
 }

@@ -43,8 +43,8 @@ final class Recorder: VoiceActing {
         return line
     }
 
-    func createScreen(name: String?, description: String) async throws -> String {
-        note("createScreen", ["name": name, "description": description], saying: "Made the screen as S9, with 6 elements.")
+    func createScreen(name: String?, description: String, device: String?) async throws -> String {
+        note("createScreen", ["name": name, "description": description, "device": device], saying: "Made the screen as S9, with 6 elements.")
     }
 
     func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
