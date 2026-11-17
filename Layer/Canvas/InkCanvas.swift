@@ -245,6 +245,9 @@ struct InkCanvas: UIViewRepresentable {
 
         private var viewSize: CGSize { documentCanvas.bounds.size }
 
+        /// The window this canvas is showing in, as the system knows it.
+        var windowScene: UIWindowScene? { documentCanvas.window?.windowScene }
+
         /// Arranges the viewport for the view's size whenever that changes. A new design
         /// opens in the middle of the canvas; one with content opens showing all of it.
         /// The view passes through other sizes on its way in, so the design is framed

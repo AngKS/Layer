@@ -169,9 +169,11 @@ private struct ToolsBar: View {
                 }
             }
             ToolbarPill {
+                // Not during a call: the pencil bar would lie over the pill.
                 ToolButton(symbol: "pencil.tip.crop.circle", label: "Draw", isActive: model.tool == .draw) {
                     model.tool = model.tool == .draw ? .select : .draw
                 }
+                .disabled(model.isInVoiceCall)
                 ToolButton(symbol: "character.textbox", label: "Text") {
                     withAnimation(.smooth(duration: 0.3)) { model.addText() }
                 }
@@ -224,10 +226,13 @@ private struct ToolsMenu: View {
         @Bindable var model = model
         Menu {
             Toggle("Layers", systemImage: "square.3.layers.3d", isOn: $model.isLayersOpen)
+            // Draw puts the pencil bar up and takes it away again. Not during a call: the
+            // bar would lie over the pill.
             Toggle("Draw", systemImage: "pencil.tip.crop.circle", isOn: Binding(
                 get: { model.tool == .draw },
                 set: { model.tool = $0 ? .draw : .select }
             ))
+            .disabled(model.isInVoiceCall)
             Divider()
             Button("Text", systemImage: "character.textbox") {
                 withAnimation(.smooth(duration: 0.3)) { model.addText() }

@@ -9,7 +9,9 @@ struct CanvasScreen: View {
 
     var body: some View {
         let accent = Theme.accent.color
+        let isCompact = model.isCompactWidth
         let usesSheets = model.isCompactSizeClass
+        let isInCall = model.isInVoiceCall
         ZStack(alignment: .topLeading) {
                 // Its own view, so that scrolling redraws the grid and not this whole screen.
                 LiveCanvasGrid()
@@ -72,11 +74,14 @@ struct CanvasScreen: View {
         }
         .ignoresSafeArea()
         // A screen being generated says how it is getting on, clear of the screen itself.
+        // During a call the pill says it instead.
         .overlay(alignment: .bottom) {
-            GenerationStatus()
-                .reportsChromeFrame("generation", to: model)
-                .padding(.bottom, 20)
-                .animation(.smooth(duration: 0.3), value: model.generation == nil)
+            if !isInCall {
+                GenerationStatus()
+                    .reportsChromeFrame("generation", to: model)
+                    .padding(.bottom, 20)
+                    .animation(.smooth(duration: 0.3), value: model.generation == nil)
+            }
         }
         .overlay(alignment: .top) {
             VStack(spacing: 12) {
@@ -118,8 +123,40 @@ struct CanvasScreen: View {
         }
         .overlay {
             // Undo and redo join the zoom at any width, which leaves the other corner free.
-            ViewControls()
-                .modifier(BottomCorner(edge: .leading))
+            // A call's pill takes their place along the bottom while it is up.
+            if !isInCall {
+                ViewControls()
+                    .modifier(BottomCorner(edge: .leading))
+                    .transition(.opacity)
+            }
+        }
+        .overlay {
+            // The free corner of a narrow window is where voice mode starts.
+            if isCompact, usesSheets, !isInCall, !model.isLayersOpen, !model.isInspectorOpen {
+                PhoneButton()
+                    .modifier(BottomCorner(edge: .trailing))
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            CallPill()
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+        }
+        // Layer only listens while it is in front.
+        .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { note in
+            if let scene = note.object as? UIScene, scene === model.ink?.windowScene { model.windowLeftTheScreen() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            model.windowLeftTheScreen()
+        }
+        .alert("Voice Mode", isPresented: Binding(
+            get: { model.voiceNotice != nil },
+            set: { if !$0 { model.voiceNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.voiceNotice ?? "")
         }
         .background(model.store.canvas.resolvedBackground.color)
         // What is on the canvas, for Siri and Apple Intelligence: see `OnscreenContext`.
@@ -141,6 +178,7 @@ struct CanvasScreen: View {
             model.engine.prepare()
             #if DEBUG
             await DemoScript.runIfRequested(on: model)
+            await VoiceDemo.runIfRequested(on: model)
             #endif
         }
     }

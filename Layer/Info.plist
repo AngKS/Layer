@@ -48,6 +48,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Layer connects to LM Studio on your computer when you choose one of its models.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Layer listens while voice mode is on, so you can design by speaking.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Layer turns what you say in voice mode into text on this iPad.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.kahshin.Layer</key>

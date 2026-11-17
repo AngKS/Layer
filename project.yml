@@ -37,6 +37,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Layer connects to LM Studio on your computer when you choose one of its models.
+        NSMicrophoneUsageDescription: Layer listens while voice mode is on, so you can design by speaking.
+        NSSpeechRecognitionUsageDescription: Layer turns what you say in voice mode into text on this iPad.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationLandscapeLeft

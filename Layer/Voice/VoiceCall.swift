@@ -83,12 +83,15 @@ final class VoiceCall {
         guard phase == .starting, listening == nil else { return }
         if let other = Self.current, other !== self { other.end() }
         Self.current = self
+        // Asking for the microphone, or fetching what speech recognition needs, can take a while.
+        show(.working, "Getting ready to listen…")
         do {
             let events = try await route.start(vocabulary: vocabulary())
             // Hung up while it was getting ready.
             guard phase == .starting else { return }
             phase = .listening
             startedAt = .now
+            caption = nil
             listening = Task { [weak self] in
                 for await event in events {
                     self?.handle(event)

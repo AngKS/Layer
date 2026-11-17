@@ -386,6 +386,69 @@ final class AppModel {
         generation = nil
     }
 
+    // MARK: Voice mode
+
+    /// Stands in for the voice agent until it is connected: a call can be started and
+    /// spoken to, and says that nothing can be done with what it hears yet.
+    private final class UnconnectedRunner: VoiceCommandRunner {
+        func run(_ command: String) async -> VoiceOutcome {
+            VoiceOutcome(problem: "Voice commands aren't connected yet.")
+        }
+    }
+
+    /// The call that is up in this design, if one is.
+    private(set) var voice: VoiceCall?
+    /// Why a call couldn't start or couldn't go on, to tell the person once.
+    var voiceNotice: String?
+
+    var isInVoiceCall: Bool { voice != nil }
+
+    /// Starts a call: the phone button's action.
+    func startVoiceCall() {
+        guard voice == nil else { return }
+        Task { await startVoiceCall(route: DictationRoute(), runner: UnconnectedRunner()) }
+    }
+
+    /// Starts a call that hears through `route` and acts through `runner`. Returns once
+    /// the call is listening, or has ended because it couldn't.
+    func startVoiceCall(route: any VoiceRoute, runner: any VoiceCommandRunner) async {
+        guard voice == nil else { return }
+        // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
+        tool = .select
+        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        call.onEnd = { [weak self, weak call] in
+            guard let self, let call, self.voice === call else { return }
+            self.voiceNotice = call.endReason
+            withAnimation(.smooth(duration: 0.3)) { self.voice = nil }
+        }
+        withAnimation(.smooth(duration: 0.3)) { voice = call }
+        await call.start()
+    }
+
+    func endVoiceCall() {
+        voice?.end()
+    }
+
+    /// Layer only listens while it is in front: a call ends when its window leaves the
+    /// screen. The window's own scene says when that is. SwiftUI's scene phase can't be
+    /// used for it: it reads as in the background while a window is being resized, and
+    /// stays that way, though the window never left.
+    func windowLeftTheScreen() {
+        endVoiceCall()
+    }
+
+    /// The words on the canvas, which are the ones most likely to be spoken and misheard:
+    /// the names of the screens and what their elements say.
+    private var voiceVocabulary: [String] {
+        var seen: Set<String> = []
+        let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
+        return words
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 60 && seen.insert($0).inserted }
+            .prefix(100)
+            .map { $0 }
+    }
+
     // MARK: The file
 
     @ObservationIgnored private var renaming: Task<Void, Never>?
@@ -413,6 +476,7 @@ final class AppModel {
 
     func close() {
         isClosed = true
+        voice?.end()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
