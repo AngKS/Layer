@@ -495,6 +495,95 @@ struct VoiceCallTests {
     }
 }
 
+@Suite("Commands from recognised speech")
+struct UtteranceAssemblerTests {
+    private let start = ContinuousClock.now
+
+    /// A moment so many milliseconds into the call.
+    private func at(_ milliseconds: Int) -> ContinuousClock.Instant {
+        start + .milliseconds(milliseconds)
+    }
+
+    @Test func aPauseEndsACommand() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("make the button blue", isFinal: true, at: at(0))
+        #expect(assembler.hearing == "make the button blue")
+        #expect(assembler.next(at: at(500)) == .wait)
+        #expect(assembler.next(at: at(900)) == .command("make the button blue"))
+        // Said once, carried out once.
+        #expect(assembler.hearing == "")
+        #expect(assembler.next(at: at(3000)) == .wait)
+    }
+
+    @Test func speechThatContinuesIsOneCommand() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("make the button", isFinal: true, at: at(0))
+        assembler.heard("half width", isFinal: true, at: at(500))
+        #expect(assembler.hearing == "make the button half width")
+        // Only 400 ms since the last words.
+        #expect(assembler.next(at: at(900)) == .wait)
+        #expect(assembler.next(at: at(1400)) == .command("make the button half width"))
+    }
+
+    @Test func volatileTextIsShownButReplaced() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("make the", isFinal: false, at: at(0))
+        #expect(assembler.hearing == "make the")
+        assembler.heard("make the button", isFinal: false, at: at(200))
+        #expect(assembler.hearing == "make the button")
+        assembler.heard("Make the button blue.", isFinal: true, at: at(400))
+        #expect(assembler.hearing == "Make the button blue.")
+        assembler.heard("and bold", isFinal: false, at: at(600))
+        #expect(assembler.hearing == "Make the button blue. and bold")
+    }
+
+    @Test func aCommandWaitsForItsLastWordsToSettle() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("make the button", isFinal: false, at: at(0))
+        // After the pause the recogniser is asked to settle what it has, once.
+        #expect(assembler.next(at: at(900)) == .settle)
+        #expect(assembler.next(at: at(950)) == .wait)
+        // Its settled words are the command, at once: the pause has already been taken.
+        assembler.heard("Make the button blue", isFinal: true, at: at(1000))
+        #expect(assembler.next(at: at(1000)) == .command("Make the button blue"))
+    }
+
+    @Test func speakingAgainWhileSettlingGoesOnWithTheSameCommand() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("make the button", isFinal: false, at: at(0))
+        #expect(assembler.next(at: at(900)) == .settle)
+        assembler.heard("make the button half", isFinal: false, at: at(1000))
+        #expect(assembler.next(at: at(1100)) == .wait)
+        assembler.heard("make the button half width", isFinal: true, at: at(1300))
+        #expect(assembler.next(at: at(1500)) == .wait)
+        #expect(assembler.next(at: at(2200)) == .command("make the button half width"))
+    }
+
+    @Test func wordsThatNeverSettleAreTakenAsTheyAre() {
+        var assembler = UtteranceAssembler()
+        assembler.heard("show me the first screen", isFinal: false, at: at(0))
+        #expect(assembler.next(at: at(900)) == .settle)
+        #expect(assembler.next(at: at(2000)) == .wait)
+        #expect(assembler.next(at: at(2400)) == .command("show me the first screen"))
+        // Settled late, the same words aren't a second command.
+        assembler.heard("Show me the first screen.", isFinal: true, at: at(2600))
+        #expect(assembler.hearing == "")
+        #expect(assembler.next(at: at(5000)) == .wait)
+        // But the next thing said is.
+        assembler.heard("zoom out", isFinal: true, at: at(6000))
+        #expect(assembler.next(at: at(6900)) == .command("zoom out"))
+    }
+
+    @Test func silenceGivesNothing() {
+        var assembler = UtteranceAssembler()
+        #expect(assembler.next(at: at(5000)) == .wait)
+        assembler.heard("   ", isFinal: true, at: at(6000))
+        assembler.heard("", isFinal: false, at: at(6100))
+        #expect(assembler.hearing == "")
+        #expect(assembler.next(at: at(9000)) == .wait)
+    }
+}
+
 @Suite("The scripted call for the simulator")
 @MainActor
 struct VoiceDemoTests {
