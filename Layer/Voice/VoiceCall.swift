@@ -89,6 +89,10 @@ final class VoiceCall {
         // Asking for the microphone, or fetching what speech recognition needs, can take a while.
         show(.working, "Getting ready to listen…")
         VoiceLog.log.info("call: getting ready")
+        // A model's first answer in a conversation is its slowest by far, so it gets
+        // ready while the microphone does and the person draws breath.
+        let runner = runner
+        Task { await runner.warmUp() }
         do {
             let events = try await route.start(vocabulary: vocabulary())
             // Hung up while it was getting ready.
@@ -161,6 +165,12 @@ final class VoiceCall {
         case .hangUp:
             end()
         case nil:
+            guard Self.isWorthAsking(command) else {
+                VoiceLog.log.info("call: let go, it is no command")
+                // The words were shown as they were heard, and aren't to be acted on.
+                if caption?.kind == .hearing { caption = nil }
+                return
+            }
             queue.append(command)
             queuedCount = queue.count
             startWorker()
@@ -182,6 +192,27 @@ final class VoiceCall {
         }
     }
 
+    /// Whether what was heard is worth putting to a model. A pause for thought can leave
+    /// a noise or a single word on its own, "So" or the "make" of a sentence not yet
+    /// said, and a model handed one does something all the same. Only a word that is a
+    /// command by itself is taken alone; anything of two words that mean something is.
+    static func isWorthAsking(_ command: String) -> Bool {
+        let words = command.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty && !noises.contains($0) }
+        return words.count > 1 || (words.count == 1 && commandsOfOneWord.contains(words[0]))
+    }
+
+    /// Words that fill a pause or start a sentence, and say nothing by themselves.
+    private static let noises: Set<String> = [
+        "so", "um", "uh", "er", "erm", "hmm", "mm", "ah", "oh", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "well",
+        "right", "like", "and", "then", "but", "the", "a", "an", "you", "please", "hey", "hi", "hello",
+    ]
+
+    private static let commandsOfOneWord: Set<String> = [
+        "undo", "redo", "delete", "duplicate", "bigger", "larger", "smaller", "bold", "centre", "center",
+    ]
+
     // MARK: Working
 
     /// Carries the waiting commands out, one at a time and in the order they were spoken.
@@ -201,6 +232,11 @@ final class VoiceCall {
                 self.running = nil
                 guard self.phase != .ended else { break }
                 self.show(outcome)
+                // Stopped or gone wrong, the model starts afresh for the next command.
+                // Warmed now, the next one doesn't wait on that.
+                if outcome.wasCancelled || outcome.problem != nil {
+                    Task { await runner.warmUp() }
+                }
                 if outcome.endsCall {
                     self.end()
                     break

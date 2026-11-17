@@ -9,7 +9,8 @@ import Foundation
 /// written against this protocol rather than the app, so that the same tools can be
 /// measured against a model with nothing but a recorder behind them.
 protocol VoiceActing: AnyObject, Sendable {
-    @MainActor func createScreen(description: String) async throws -> String
+    @MainActor func createScreen(name: String?, description: String) async throws -> String
+    @MainActor func stackElements(elements: String, direction: String) -> String
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
@@ -21,6 +22,7 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func renameScreen(screen: String, name: String) -> String
     @MainActor func deleteScreen(screen: String, named: String?) -> String
     @MainActor func show(target: String) -> String
+    @MainActor func pan(direction: String) -> String
     @MainActor func zoom(to level: String) -> String
     @MainActor func undo() -> String
     @MainActor func redo() -> String
@@ -101,9 +103,9 @@ enum VoiceTools {
         [
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
-            DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
+            StackElementsTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor),
-            ShowTool(actor: actor), ZoomTool(actor: actor),
+            ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
             UndoTool(actor: actor), RedoTool(actor: actor), EndCallTool(actor: actor),
         ]
     }
@@ -125,10 +127,12 @@ enum VoiceTools {
         case "styleElement": "Restyling…"
         case "moveElement": "Resizing…"
         case "alignElement": "Aligning…"
+        case "stackElements": "Stacking…"
         case "duplicateElement": "Duplicating…"
         case "deleteElement", "deleteScreen": "Deleting…"
         case "renameScreen": "Renaming…"
         case "show": "Showing…"
+        case "pan": "Moving the view…"
         case "zoom": "Zooming…"
         case "undo": "Undoing…"
         case "redo": "Redoing…"
@@ -145,12 +149,14 @@ struct CreateScreenTool: Tool {
 
     @Generable
     struct Arguments {
+        @Guide(description: "A short name for the screen, such as Login or Checkout.")
+        var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await actor.createScreen(description: arguments.description)
+        try await actor.createScreen(name: arguments.name, description: arguments.description)
     }
 }
 
@@ -265,6 +271,24 @@ struct AlignElementTool: Tool {
     }
 }
 
+struct StackElementsTool: Tool {
+    let actor: any VoiceActing
+    let name = "stackElements"
+    let description = "Puts several elements one after another so that none overlap: in a column, one under another, or in a row, side by side."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The handles of the elements, comma separated, such as E3, E4, E5.")
+        var elements: String
+        @Guide(description: "column or row.")
+        var direction: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.stackElements(elements: arguments.elements, direction: arguments.direction)
+    }
+}
+
 struct DuplicateElementTool: Tool {
     let actor: any VoiceActing
     let name = "duplicateElement"
@@ -348,6 +372,22 @@ struct ShowTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.show(target: arguments.target)
+    }
+}
+
+struct PanTool: Tool {
+    let actor: any VoiceActing
+    let name = "pan"
+    let description = "Moves the view of the canvas up, down, left or right, when no screen or element is named. Use it for “move down a bit”, “scroll up” and “go left”."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "up, down, left or right. Add “a bit” for a small move.")
+        var direction: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.pan(direction: arguments.direction)
     }
 }
 

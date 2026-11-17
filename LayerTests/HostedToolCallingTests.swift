@@ -266,7 +266,7 @@ extension HostedModelTests {
         let system = try #require(first["system"] as? String)
         #expect(system.contains(VoiceRules.full))
         #expect(system.contains(#"E2 button "Sign in" x20 y420 w353 h50"#))
-        #expect((first["tools"] as? [[String: Any]])?.count == 15)
+        #expect((first["tools"] as? [[String: Any]])?.count == 17)
         #expect(first["model"] as? String == "claude-test")
         // Its second look at the canvas is after the change.
         let second = try #require(try body(ofRequest: 1)["system"] as? String)
@@ -313,16 +313,20 @@ extension HostedModelTests {
         _ = CanvasPicture.capture(from: app, handles: handles)
         let box = VoiceToolbox(model: app, handles: handles)
 
-        let line = try await box.createScreen(description: "a simple login screen")
+        let line = try await box.createScreen(name: "the Welcome screen", description: "a simple login screen")
 
         #expect(app.store.screens.count == 2)
         let made = try #require(app.store.screens.last)
         #expect(made.elements.map(\.kind) == [.title, .button])
+        // Named as the model named it, without the words that say it is a screen.
+        #expect(made.name == "Welcome")
         // The model is told what to call the new screen, and how much is on it.
         #expect(line.contains("S2"))
         #expect(line.contains("2 elements"))
         #expect(handles.screen("S2") == made.id)
-        #expect(box.lines == [line])
+        #expect(line == "Made the screen “Welcome” as S2, with 2 elements.")
+        // The pill is told the same without the handle.
+        #expect(box.lines == ["Made the screen “Welcome”, with 2 elements."])
         // The canvas's own notice isn't left up: the call's pill has said it.
         #expect(app.generation == nil)
     }
@@ -347,7 +351,7 @@ extension HostedModelTests {
         app.store.beginHeldEdit()                  // the spoken command starts
         app.store.beginEdit()                      // a finger starts to drag the image
         app.store.update(image) { $0.frame.origin.x = 40 }
-        _ = try await box.createScreen(description: "a simple login screen")
+        _ = try await box.createScreen(name: nil, description: "a simple login screen")
         app.store.endHeldEdit()                    // the command is over; the finger is still down
         app.store.update(image) { $0.frame.origin.x = 60 }
         app.store.update(image) { $0.frame.origin.x = 80 }

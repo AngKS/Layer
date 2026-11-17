@@ -353,6 +353,25 @@ Each is the author's call and can be overturned.
 - A local server that rejects tools gets a plain message, not a retry without them.
 - New screens asked for over live audio are written by the design's chosen chat model.
 
+## Changed after the first session on an iPad (2026-11-18)
+
+The first real use, logged and written up in `docs/benchmarks/voice-on-device.md`, led
+to five changes the user asked for. Where they differ from the design above, these stand.
+
+- **The model is warmed as a call starts**, and again after a command is stopped or
+  fails, so the first command doesn't wait on it.
+- **A command ends after 1.2 s of quiet**, not 0.8 s, and a word alone that is no command
+  ("So", "make") is let go. Only "undo", "redo", "delete", "duplicate", "bigger",
+  "larger", "smaller", "bold" and "centre" are commands in one word.
+- **Handles stay between the app and the model.** What the model says, and what the
+  pill shows, has each handle put as the thing it stands for. A new screen is given a
+  short name by the model.
+- **Two more tools:** `pan` (up, down, left, right, or "a bit" of any) and
+  `stackElements` (a column or a row, 12 points apart). Seventeen in all.
+- **The on-device model is told about the canvas once for a command**, not again after
+  each step, which is what made its closing word take three seconds. A hosted model is
+  still told again after each step.
+
 ## Sources
 
 - iPhoneOS 27.2 SDK: `FoundationModels.swiftinterface` (`LanguageModelSession.DynamicProfile`,

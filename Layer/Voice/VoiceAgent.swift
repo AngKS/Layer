@@ -15,14 +15,42 @@ final class VoiceAgent: VoiceCommandRunner {
     private let toolbox: VoiceToolbox
     private let testModel: (any LanguageModel)?
     private var session: LanguageModelSession?
+    /// Set by a test, to say how the canvas is told between steps whatever the model.
+    private let looksAgain: Bool?
+
+    /// Whether a model is told about the canvas again after each step of a command.
+    ///
+    /// A hosted model is: it may go on to act on what a step made. The on-device model is
+    /// told once for the command. It asks for all its tools in one answer and then only
+    /// says it is done, and to say so it has to read again whatever it was told had
+    /// changed: measured on an iPad, three seconds after every command, against well
+    /// under one where the canvas was the same. A step that makes something still hands
+    /// back its handle, which is what a further step needs.
+    static func looksAgainBetweenSteps(with choice: ModelChoice) -> Bool {
+        choice.hostedProvider != nil
+    }
+
+    /// Gets the model ready to be asked: the conversation is made, told the rules, the
+    /// tools and the canvas, and the model is given them to read ahead of the first
+    /// command. On an iPad that reading was fourteen seconds of the first command's wait.
+    func warmUp() async {
+        guard session == nil, let model else { return }
+        let session = makeSession()
+        self.session = session
+        session.properties.voiceModel = model.modelChoice
+        lookAtTheCanvas()
+        VoiceLog.log.info("agent: warming \(String(describing: model.modelChoice), privacy: .public)")
+        session.prewarm()
+    }
 
     /// Called with what the command under way is doing now, such as "Restyling…".
     var onStep: ((String) -> Void)?
 
     /// `testModel` stands in for the design's own model, for tests and the simulator.
-    init(model: AppModel, testModel: (any LanguageModel)? = nil) {
+    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil) {
         self.model = model
         self.testModel = testModel
+        self.looksAgain = looksAgainBetweenSteps
         toolbox = VoiceToolbox(model: model, handles: handles)
     }
 
@@ -43,7 +71,8 @@ final class VoiceAgent: VoiceCommandRunner {
         let began = ContinuousClock.now
         do {
             let response = try await session.respond(to: command)
-            outcome.said = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Handles are between the app and the model; the person is told in words.
+            outcome.said = toolbox.inWords(response.content.trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
             // A conversation cut off part way, with a tool asked for and never answered,
             // isn't one to build the next command on. The next starts afresh.
@@ -70,7 +99,7 @@ final class VoiceAgent: VoiceCommandRunner {
     private func makeSession() -> LanguageModelSession {
         let hooks = VoiceHooks(
             willRun: { [weak self] tool in await self?.stepStarted(with: tool) },
-            didRun: { [weak self] in await self?.lookAtTheCanvas() },
+            didRun: { [weak self] in await self?.stepFinished() },
             mayRun: { !Task.isCancelled }
         )
         return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel))
@@ -79,6 +108,14 @@ final class VoiceAgent: VoiceCommandRunner {
     private func stepStarted(with tool: String) {
         VoiceLog.log.info("agent: tool \(tool, privacy: .public)")
         onStep?(VoiceTools.step(for: tool))
+    }
+
+    private func stepFinished() {
+        guard let model else { return }
+        // A test's stand-in is told again, as a hosted model is, unless the test says not.
+        if looksAgain ?? (testModel != nil || Self.looksAgainBetweenSteps(with: model.modelChoice)) {
+            lookAtTheCanvas()
+        }
     }
 
     /// Takes the canvas as it is now for the model's next look at it.

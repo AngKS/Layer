@@ -293,6 +293,122 @@ struct VoiceToolsTests {
         #expect(bench.box.deleteScreen(screen: "S1", named: "sign in screen") == "There is no S1.")
     }
 
+    // MARK: Panning
+
+    /// "Move down a bit" has nothing to be shown: it is the view that moves.
+    @Test func theViewPansByDirection() throws {
+        let down = try #require(VoiceToolbox.pan(named: "down"))
+        #expect(down.name == "down")
+        #expect(down.shift == CGVector(dx: 0, dy: 0.6))
+        #expect(VoiceToolbox.pan(named: "Up a bit")?.shift == CGVector(dx: 0, dy: -0.3))
+        #expect(VoiceToolbox.pan(named: "pan left")?.shift == CGVector(dx: -0.6, dy: 0))
+        #expect(VoiceToolbox.pan(named: "scroll right a little")?.shift == CGVector(dx: 0.3, dy: 0))
+        // A handle, a word that isn't a direction, and a direction that is part of a name.
+        #expect(VoiceToolbox.pan(named: "S2") == nil)
+        #expect(VoiceToolbox.pan(named: "all") == nil)
+        #expect(VoiceToolbox.pan(named: "the left button") == nil)
+        // Down by 0.6 of what is in view puts the middle that much lower on the canvas.
+        let view = CGRect(x: 100, y: 200, width: 400, height: 600)
+        #expect(VoiceToolbox.centre(of: view, panned: down.shift) == CGPoint(x: 300, y: 860))
+    }
+
+    @Test func panningChangesNothingInTheDesign() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.pan(direction: "down") == "Moved the view down.")
+        #expect(bench.box.pan(direction: "Up a bit") == "Moved the view up a little.")
+        // A model that asks to be shown a direction is taken to mean the same.
+        #expect(bench.box.show(target: "down") == "Moved the view down.")
+        #expect(bench.box.show(target: "left a bit") == "Moved the view left a little.")
+        #expect(bench.app.store.content == before)
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    @Test func panningNeedsAWayToGo() {
+        let bench = bench()
+        #expect(bench.box.pan(direction: "sideways") == "I can move the view up, down, left or right, not “sideways”.")
+        #expect(bench.box.failures.count == 1)
+    }
+
+    // MARK: Stacking
+
+    /// "Stack them into a column": one under another from the top one down, in the order
+    /// they already stand, left edges together and 12 points apart.
+    @Test func stackingPutsElementsOneUnderAnother() throws {
+        let bench = bench()
+        let before = bench.app.store.content
+        let undo = try #require(bench.app.store.undoManager)
+
+        let line = bench.box.stackElements(elements: "E3, E1, E2", direction: "column")
+
+        #expect(try #require(bench.element("E1")).frame == CGRect(x: 20, y: 75, width: 353, height: 41))
+        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 128, width: 353, height: 50))
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 190, width: 200, height: 200))
+        #expect(line == "Stacked 3 elements in a column.")
+        #expect(bench.box.failures.isEmpty)
+        // All of them are selected afterwards, so that "them" stays them.
+        #expect(bench.app.selectedElements.count == 3)
+        // And it is one thing to undo.
+        undo.undo()
+        #expect(bench.app.store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    /// Things left on top of one another, as four new images lined up on one line were
+    /// on an iPad, come apart in the order they were named.
+    @Test func thingsOnTopOfOneAnotherAreStackedInTheOrderNamed() throws {
+        let bench = bench()
+        _ = bench.box.moveElement(element: "E1", x: nil, y: "300", width: nil, height: nil)
+        _ = bench.box.moveElement(element: "E2", x: nil, y: "300", width: nil, height: nil)
+        _ = bench.box.stackElements(elements: "E2 E1", direction: "column")
+        #expect(try #require(bench.element("E2")).frame.minY == 300)
+        #expect(try #require(bench.element("E1")).frame.minY == 362)
+    }
+
+    @Test func stackingInARowGoesAcrossWithTopsTogether() throws {
+        let bench = bench()
+        _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "100", height: nil)
+        _ = bench.box.moveElement(element: "E3", x: nil, y: nil, width: "100", height: "100")
+        let line = bench.box.stackElements(elements: "E2, E3", direction: "row")
+        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 420, width: 100, height: 50))
+        #expect(try #require(bench.element("E3")).frame == CGRect(x: 132, y: 420, width: 100, height: 100))
+        #expect(line == "Stacked 2 elements in a row.")
+    }
+
+    @Test func stackingNeedsSeveralThingsItCanFind() {
+        let bench = bench()
+        let before = bench.app.store.content
+        #expect(bench.box.stackElements(elements: "E1", direction: "column") == "Name two or more elements to stack.")
+        #expect(bench.box.stackElements(elements: "E1, E99", direction: "column") == "There is no E99.")
+        #expect(bench.box.stackElements(elements: "E1, E2", direction: "pile") == "I can stack in a column or a row, not “pile”.")
+        #expect(bench.app.store.content == before)
+    }
+
+    // MARK: In the person's words
+
+    /// Handles are between the app and the model. What reaches the pill has none.
+    @Test func whatIsShownToThePersonHasNoHandles() throws {
+        let bench = bench()
+        let made = bench.box.duplicateElement(element: "E2")
+        // The model is told the copy's handle, to go on with.
+        #expect(made == "Duplicated the button “Sign in” as E4.")
+        #expect(bench.box.lines.last == "Duplicated the button “Sign in”.")
+        let added = bench.box.addElement(screen: "S1", kind: "image", text: nil, look: nil)
+        #expect(added == "Added an image as E5.")
+        #expect(bench.box.lines.last == "Added an image.")
+    }
+
+    /// A model asked "Which element should I change—E24, E25, or E26?" on an iPad.
+    @Test func whatAModelSaysIsPutInThePersonsWords() {
+        let bench = bench()
+        #expect(bench.box.inWords("Which element should I change—E1, E2, or E3?")
+            == "Which element should I change—the title “Welcome back”, the button “Sign in”, or the image?")
+        #expect(bench.box.inWords("S1 has three elements.") == "The screen “Login” has three elements.")
+        // A handle for nothing is left as it came, and so are words that only look like one.
+        #expect(bench.box.inWords("There is no E99.") == "There is no E99.")
+        #expect(bench.box.inWords("Done.") == "Done.")
+    }
+
     @Test func showingSelectsWhatIsShown() throws {
         let bench = bench()
         _ = bench.box.show(target: "S1")

@@ -110,10 +110,71 @@ the context.
 **A name that could be two things.** "Change the name to Sam Lee", with a profile screen
 in view, renamed the screen and not the title that held the name.
 
+## On an iPad, 2026-11-18
+
+Voice mode then ran on an iPad mini (A20 Pro) with Apple Intelligence: two calls and
+about thirty spoken commands by one person, followed from the Mac through the app's log.
+One session is not a benchmark, but it is the only time any of this has run on a device.
+
+**It worked, after one fix.** The first try stopped the app as the microphone started;
+that is fixed (see the commit that adds `MicrophoneTap.tapBlock`). After it, speech was
+recognised on the iPad (`SpeechTranscriber`, en_SG, from a 48 kHz microphone) and the
+model made screens, added, restyled, reworded and deleted elements, undid, zoomed and
+went to screens.
+
+**How long things took:**
+
+| | Time |
+|---|---|
+| First command of a call | 14 s and 19 s |
+| A command that changed the design, from the end of speech to done | 5.1 to 5.6 s |
+| Of that, until the change was on the canvas | about 2 s |
+| A command that changed nothing on the canvas (zoom) | 2.7 s |
+
+The three seconds between the change and "done" were the model saying "Done". After a
+step the app told it about the canvas again, and to say anything it had to read all it
+was told again. Where the canvas was as before, the same closing word took 0.6 s.
+
+**What went wrong in use**, and what was changed for it:
+
+| Seen on the iPad | Change |
+|---|---|
+| The first command of each call waited 14 to 19 s | The model is warmed as the call starts, and again after a command is stopped or fails |
+| A pause for thought cut a sentence into commands, and a leftover "So" or "make" was acted on | The pause that ends a command is 1.2 s, was 0.8 s; a word alone that is no command is let go |
+| Three seconds to say "Done" after every change | The on-device model is told about the canvas once for a command, not again after each step |
+| "Which element should I change—E24, E25, or E26?" | Handles in what the model says, and in what the pill shows, are put as the things they stand for |
+| Screens named "A cashier screen with" | The model gives a new screen a short name |
+| "Move down a bit" went to another screen | A tool to pan up, down, left or right |
+| "Stack them into a column" put four images on top of one another | A tool to stack elements in a column or a row |
+
+**Measured again on the Mac** with the seventeen tools as they now are, and eleven of
+the commands from the iPad as the recogniser heard them:
+
+| Group | Right tool and arguments |
+|---|---|
+| Tuned on | 28 of 30 |
+| Held back | 5 of 8 |
+| Fresh | 9 of 12 |
+| Spoken to the iPad | 7 of 11 |
+
+The profile is now 2,278 tokens with a screen on the canvas (tools 1,886). Panning as
+one more thing `show` could be asked for did not work: the model still answered "move
+down a bit" with a screen. As a tool of its own it did.
+
+**Still wrong, and not changed:**
+
+- "Can you edit the image to be a section?" deleted the image, on the iPad and on the
+  Mac. With the dropdown and the checkbox above, that is three commands answered with a
+  delete nobody asked for. A delete could be refused unless the command has a word for
+  removing in it.
+- "No, undo revert." was one undo on the iPad and two on the Mac.
+- "Red" was heard as "rate", and the title was reworded to "rate".
+- Whether the warm start and the shorter "Done" do on an iPad what the log says they
+  should has not been measured yet.
+
 ## Not measured here
 
-- An iPad. This is the Mac's on-device model; the iPad's has not been run.
-- Speech. The commands were typed, so mishearing is not in these numbers.
+- Speech, on the Mac. The commands there were typed, so mishearing is not in its numbers.
 - The app carrying the commands out. That is covered by the app's own tests, with a
   scripted model, and by the live run in [voice-agent.md](voice-agent.md).
 - Commands in a row. Each command here started a new conversation.

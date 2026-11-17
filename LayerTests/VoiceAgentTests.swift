@@ -74,7 +74,7 @@ struct VoiceAgentTests {
         #expect(told.instructions.contains(VoiceRules.full))
         #expect(told.instructions.contains(#"S1 "Login" 393x852"#))
         #expect(told.instructions.contains(#"E2 button "Sign in""#))
-        #expect(told.tools.count == 15)
+        #expect(told.tools.count == 17)
         #expect(Set(told.tools).isSuperset(of: ["createScreen", "styleElement", "moveElement", "show", "undo", "endCall"]))
     }
 
@@ -94,6 +94,50 @@ struct VoiceAgentTests {
         #expect(!requests[0].instructions.contains("E4"))
         #expect(requests[1].instructions.contains(#"E4 button "Sign in""#))
         #expect(requests[2].instructions.contains(#"E4 button "Copy""#))
+    }
+
+    /// The on-device model is told about the canvas once for a command. Told again after
+    /// each step, it has to read the whole of it again before it can say "Done": three
+    /// seconds on an iPad, after every command.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func onTheDeviceTheCanvasIsDescribedOnceForACommand() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let recorder = ScriptRecorder()
+        let model = ScriptedLanguageModel(
+            script: ["make the button green": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)]], recorder: recorder
+        )
+        let agent = VoiceAgent(model: app, testModel: model, looksAgainBetweenSteps: false)
+
+        let outcome = await agent.run("make the button green")
+
+        #expect(outcome.lines == ["Restyled the button “Sign in”."])
+        let requests = recorder.requests
+        #expect(requests.count == 2)
+        #expect(requests[1].instructions == requests[0].instructions)
+    }
+
+    @Test func whichModelsAreToldAboutTheCanvasAgainBetweenSteps() {
+        #expect(!VoiceAgent.looksAgainBetweenSteps(with: .appleIntelligence))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")))
+    }
+
+    /// Getting the model ready asks it nothing, and leaves it ready to be asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aWarmedAgentHasAskedNothingAndStillTakesCommands() async throws {
+        let bench = bench(["make the button green": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#)]])
+        await bench.agent.warmUp()
+        #expect(bench.recorder.requests.isEmpty)
+        let outcome = await bench.agent.run("make the button green")
+        #expect(outcome.problem == nil)
+        #expect(bench.button?.tint == ColourWords.parse("green"))
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func whatTheModelSaysReachesThePersonWithoutHandles() async throws {
+        let bench = bench([:], closing: "Which one should I change, E1 or E2?")
+        let outcome = await bench.agent.run("make it bigger")
+        #expect(outcome.said == "Which one should I change, the title “Welcome back” or the button “Sign in”?")
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))

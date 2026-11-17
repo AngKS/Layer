@@ -342,11 +342,13 @@ final class AppModel {
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
     ///
+    /// `name` is what to call the screen; without one it is named from the description.
+    ///
     /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
     /// is already being held open and the screen is part of it, so it opens none of its
     /// own. That is also how an edit by hand made in the meantime is told from it: see
     /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, partOfHeldEdit: Bool = false) {
+    func generateScreen(from description: String, named name: String? = nil, partOfHeldEdit: Bool = false) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating else { return }
         generationTask?.cancel()
@@ -356,7 +358,7 @@ final class AppModel {
         generationOwnsEdit = !partOfHeldEdit
         if generationOwnsEdit { store.beginEdit() }
         let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
-        store.updateScreen(screen.id) { $0.name = ScreenGenerator.name(for: prompt) }
+        store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
         DesignActions.reveal(.screen(screen.id), in: self)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
 

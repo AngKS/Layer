@@ -36,13 +36,127 @@ final class VoiceToolbox: VoiceActing {
 
     // MARK: Screens
 
-    func createScreen(description: String) async throws -> String {
+    /// Puts several elements one after another, none overlapping: down a column with
+    /// their left edges together, or along a row with their tops together, 12 points
+    /// apart. They keep the order they stand in; those on top of one another, which have
+    /// none, take the order they were named in. It starts where the first of them is.
+    func stackElements(elements: String, direction: String) -> String {
+        guard let model else { return gone }
+        let isColumn: Bool
+        switch direction.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "column", "vertical", "vertically", "down": isColumn = true
+        case "row", "horizontal", "horizontally", "across": isColumn = false
+        default: return failed("I can stack in a column or a row, not “\(direction)”.")
+        }
+        let named = elements.components(separatedBy: CharacterSet(charactersIn: ",;")).flatMap { part -> [String] in
+            // "E2 E1" names two; "E 2" is one, written loosely.
+            let words = part.split(separator: " ").map(String.init)
+            return words.allSatisfy { VoiceHandles.tidied($0) != nil } ? words : [part]
+        }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var found: [FoundElement] = []
+        for handle in named {
+            switch find(element: handle) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let one):
+                guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
+                if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
+            }
+        }
+        guard found.count > 1 else { return failed("Name two or more elements to stack.") }
+        guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
+
+        // Worked out on the canvas, where the store puts things, in the points of the
+        // screen they are on: a gap of 12 of those is less on a screen drawn small.
+        let store = model.store
+        let scale = store.resolve(found[0].ref)?.placement.scale ?? 1
+        let gap = 12 * scale
+        var placed: [(ref: DesignStore.ElementRef, frame: CGRect)] = found.compactMap { one in
+            store.canvasFrame(of: .element(one.ref)).map { (one.ref, $0) }
+        }
+        guard placed.count == found.count else { return failed("Those couldn't be stacked.") }
+        // A stable sort: things at the same place keep the order they were named in.
+        placed = placed.enumerated().sorted { a, b in
+            let (one, other) = isColumn ? (a.element.frame.minY, b.element.frame.minY) : (a.element.frame.minX, b.element.frame.minX)
+            return abs(one - other) > 0.5 ? one < other : a.offset < b.offset
+        }.map(\.element)
+        let left = placed.map(\.frame.minX).min() ?? 0
+        let top = placed.map(\.frame.minY).min() ?? 0
+        var next = isColumn ? top : left
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for (ref, frame) in placed {
+            origins[.element(ref)] = isColumn ? CGPoint(x: left, y: next) : CGPoint(x: next, y: top)
+            next += (isColumn ? frame.height : frame.width) + gap
+        }
+        DesignActions.reveal(.element(placed[0].ref), in: model)
+        store.position(origins)
+        // All of them stay selected, so that "them" goes on meaning them.
+        model.selection = .several(Set(placed.map { .element($0.ref) }))
+        return done("Stacked \(placed.count) elements in a \(isColumn ? "column" : "row").")
+    }
+
+    /// The way to pan that some words ask for, and how far, as a share of what is in
+    /// view: "down" is most of a view, "down a bit" half of that. Nil for anything that
+    /// isn't only a direction: a handle, or a name with "left" in it.
+    static func pan(named target: String) -> (name: String, shift: CGVector)? {
+        let said = target.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let little: Set<String> = ["bit", "little", "slightly", "touch"]
+        let empty: Set<String> = ["pan", "scroll", "move", "go", "the", "view", "canvas", "a", "to", "it"]
+        let ways = said.filter { !little.contains($0) && !empty.contains($0) }
+        guard ways.count == 1 else { return nil }
+        let isLittle = said.contains(where: little.contains)
+        let share: CGFloat = isLittle ? 0.3 : 0.6
+        let way: String
+        let shift: CGVector
+        switch ways[0] {
+        case "up", "upward", "upwards": (way, shift) = ("up", CGVector(dx: 0, dy: -share))
+        case "down", "downward", "downwards": (way, shift) = ("down", CGVector(dx: 0, dy: share))
+        case "left": (way, shift) = ("left", CGVector(dx: -share, dy: 0))
+        case "right": (way, shift) = ("right", CGVector(dx: share, dy: 0))
+        default: return nil
+        }
+        return (isLittle ? "\(way) a little" : way, shift)
+    }
+
+    /// Where the middle of the view goes when it is panned by a share of itself.
+    static func centre(of visible: CGRect, panned shift: CGVector) -> CGPoint {
+        CGPoint(x: visible.midX + shift.dx * visible.width, y: visible.midY + shift.dy * visible.height)
+    }
+
+    /// What a model said, with each handle in it put as the thing it stands for. Handles
+    /// are between the app and the model: a person asked "E24, E25 or E26?" can't answer.
+    func inWords(_ text: String) -> String {
+        guard let model else { return text }
+        var said = ""
+        var rest = text[...]
+        while let match = rest.firstMatch(of: /\b[ES]\d+\b/) {
+            let handle = String(match.output)
+            var words: String?
+            if let id = handles.screen(handle), let screen = model.store.screen(id) {
+                words = "the screen “\(screen.name)”"
+            } else if case .success(let found) = find(element: handle) {
+                words = Self.describe(found.element)
+            }
+            said += rest[..<match.range.lowerBound]
+            if var words {
+                // At the start of a sentence it takes the capital the handle had.
+                let before = said.trimmingCharacters(in: .whitespaces)
+                if before.isEmpty || ".!?".contains(before.last ?? " ") { words = words.prefix(1).uppercased() + words.dropFirst() }
+                said += words
+            } else {
+                said += handle
+            }
+            rest = rest[match.range.upperBound...]
+        }
+        return said + rest
+    }
+
+    func createScreen(name: String?, description: String) async throws -> String {
         guard let model else { throw CancellationError() }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isGenerating else { return failed("A screen is already being written.") }
         // Inside a command the screen is part of the command's own undo step.
-        model.generateScreen(from: description, partOfHeldEdit: model.store.isHoldingEdit)
+        model.generateScreen(from: description, named: Self.screenName(name), partOfHeldEdit: model.store.isHoldingEdit)
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
@@ -241,6 +355,8 @@ final class VoiceToolbox: VoiceActing {
             model.ink?.zoomToFit()
             return done("Showing everything.")
         }
+        // "Down a bit" has nothing to show: it is the view that moves.
+        if Self.pan(named: target) != nil { return pan(direction: target) }
         if case .success(let screen) = find(screen: target) {
             DesignActions.reveal(.screen(screen.id), in: model)
             return done("Showing “\(screen.name)”.")
@@ -254,6 +370,20 @@ final class VoiceToolbox: VoiceActing {
             if VoiceHandles.tidied(target)?.hasPrefix("S") == true { return failed("There is no \(VoiceHandles.tidied(target) ?? target).") }
             return failed(refusal.line)
         }
+    }
+
+    /// Moves the view up, down, left or right by most of what is in it, or by half of
+    /// that for "a bit".
+    func pan(direction: String) -> String {
+        guard let model else { return gone }
+        guard let pan = Self.pan(named: direction) else {
+            return failed("I can move the view up, down, left or right, not “\(direction)”.")
+        }
+        if model.canvasSize != .zero {
+            let visible = model.viewport.visibleRect(in: model.canvasSize)
+            model.ink?.glide(toCenter: Self.centre(of: visible, panned: pan.shift), scale: model.viewport.scale)
+        }
+        return done("Moved the view \(pan.name).")
     }
 
     func zoom(to level: String) -> String {
@@ -370,7 +500,8 @@ final class VoiceToolbox: VoiceActing {
 
     private func done(_ line: String) -> String {
         VoiceLog.log.info("tool: done. \(line, privacy: .private)")
-        lines.append(line)
+        // The model is told the handle of what was made, to go on with. The pill isn't.
+        lines.append(line.replacing(#/ as [ES]\d+/#, with: ""))
         lastFailed = false
         return line
     }
@@ -386,7 +517,25 @@ final class VoiceToolbox: VoiceActing {
 
     /// "the button “Sign in”", or "a text field “Email”".
     private static func describe(_ element: DesignElement, article: String = "the") -> String {
-        "\(article) \(DesignDescriber.describe(element))"
+        let what = DesignDescriber.describe(element)
+        // "An image", not "a image".
+        let isVowel = what.first.map { "aeiou".contains($0.lowercased()) } == true
+        return "\(article == "a" && isVowel ? "an" : article) \(what)"
+    }
+
+    /// A screen's name as a model gave it, without the words that only say it is a
+    /// screen: "the Welcome screen" is Welcome. Nil if nothing is left to call it by.
+    static func screenName(_ given: String?) -> String? {
+        var name = (given ?? "").trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        for article in ["the ", "a ", "an "] where name.lowercased().hasPrefix(article) {
+            name = String(name.dropFirst(article.count))
+        }
+        for kind in [" screen", " page", " view"] where name.lowercased().hasSuffix(kind) {
+            name = String(name.dropLast(kind.count))
+        }
+        name = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
+        guard let first = name.first else { return nil }
+        return first.uppercased() + name.dropFirst()
     }
 
     /// The colour that new "words" really are: `blue` or `text blue`, in lower case, as a
