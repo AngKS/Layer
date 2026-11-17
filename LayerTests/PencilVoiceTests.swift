@@ -644,6 +644,37 @@ struct PencilVoiceTests {
         #expect(sides.count == 1)
     }
 
+    @Test func inATightSpotTheSideIsTheOneForTheBubblesActualSize() {
+        // A narrow window, the pencil held level, chrome close above and below the tip:
+        // the widest planned bubble can't be kept off both the tip and the chrome.
+        let bounds = CGRect(x: 0, y: 0, width: 330, height: 800)
+        let tip = CGPoint(x: 165, y: 400)
+        let chrome = [CGRect(x: 0, y: 300, width: 330, height: 60), CGRect(x: 0, y: 440, width: 330, height: 60)]
+        let working = CGSize(width: 80, height: 48)
+        let sizes = PencilVoiceBubble.plannedSizes(showsWords: false, largestMeasured: .zero)
+        let planned = PencilVoiceBubble.turn(anchor: tip, azimuth: .degrees(0), sizes: sizes, in: bounds, topInset: 80, avoiding: chrome)
+        let plannedFrame = CGRect(origin: PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(0), turn: planned, size: working, in: bounds, topInset: 80), size: working)
+        #expect(Self.distance(from: tip, to: plannedFrame) < 14 || chrome.contains { $0.intersects(plannedFrame) })
+        // With the actual size given, the bubble is clear of both.
+        let turn = PencilVoiceBubble.turn(anchor: tip, azimuth: .degrees(0), sizes: sizes, actual: working, in: bounds, topInset: 80, avoiding: chrome)
+        let frame = CGRect(origin: PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(0), turn: turn, size: working, in: bounds, topInset: 80), size: working)
+        #expect(Self.distance(from: tip, to: frame) >= 14 - 0.01)
+        #expect(!chrome.contains { $0.intersects(frame) })
+        // And the side it was given isn't then taken for blocked.
+        #expect(!PencilVoiceBubble.isBlocked(turn: turn, anchor: tip, azimuth: .degrees(0), size: working, in: bounds, topInset: 80, avoiding: chrome))
+    }
+
+    @Test func aSideOnWhatIsSpokenAboutIsBlockedOnlyIfAnotherSideMissesIt() {
+        let tip = CGPoint(x: 500, y: 400)
+        let size = CGSize(width: 200, height: 52)
+        let opposite = CGRect(origin: PencilVoiceBubble.origin(anchor: tip, azimuth: .degrees(45), turn: 0, size: size, in: Self.bounds, topInset: 80), size: size)
+        // Something spoken about where the bubble went, which another side misses.
+        #expect(PencilVoiceBubble.isBlocked(turn: 0, anchor: tip, azimuth: .degrees(45), size: size, in: Self.bounds, topInset: 80, avoiding: [], subject: opposite))
+        // A whole screen round the tip, which no side misses, blocks nothing.
+        let screen = CGRect(x: 100, y: 0, width: 800, height: 800)
+        #expect(!PencilVoiceBubble.isBlocked(turn: 0, anchor: tip, azimuth: .degrees(45), size: size, in: Self.bounds, topInset: 80, avoiding: [], subject: screen))
+    }
+
     @Test func theBubbleShowsTheNewestWholeWords() {
         #expect(PencilVoiceBubble.newestWords(of: "make it blue") == "make it blue")
         let said = "make the sign in button blue and give it a little more space above"

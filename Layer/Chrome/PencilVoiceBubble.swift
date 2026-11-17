@@ -82,17 +82,27 @@ struct PencilVoiceBubble: View {
     /// Which way round the tip a bubble goes that will be each of `sizes` in turn: the
     /// first side that does for all of them. A smaller bubble sits nearer the tip, so a
     /// side clear for the largest isn't always clear for the smallest.
+    ///
+    /// In a tight spot (a narrow window, chrome hugging the tip) no side may do as well
+    /// for all the sizes as one does for the bubble's `actual` size. Then the side is the
+    /// one for the actual size, as if only it were planned for: it may change with the
+    /// state, but it is never left over the tip or on chrome that could have been missed.
     nonisolated static func turn(
-        anchor: CGPoint, azimuth: Angle?, sizes: [CGSize], in bounds: CGRect, topInset: CGFloat,
+        anchor: CGPoint, azimuth: Angle?, sizes: [CGSize], actual: CGSize? = nil, in bounds: CGRect, topInset: CGFloat,
         avoiding obstacles: [CGRect] = [], subject: CGRect? = nil
     ) -> Double {
-        let places = turns.map { turn in
-            (turn: turn, frames: sizes.map { place(towards: away(azimuth) + turn, anchor: anchor, size: $0, in: bounds, topInset: topInset) })
+        func clearness(_ turn: Double, _ size: CGSize) -> Clearness {
+            let frame = place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset)
+            return Self.clearness(of: frame, anchor: anchor, obstacles: obstacles, subject: subject)
         }
-        let clearOfTip = places.filter { $0.frames.allSatisfy { isClear(of: anchor, $0) } }
-        let clearOfChrome = clearOfTip.filter { place in place.frames.allSatisfy { frame in !obstacles.contains { $0.intersects(frame) } } }
-        let clear = clearOfChrome.first { place in subject.map { subject in place.frames.allSatisfy { !subject.intersects($0) } } ?? true }
-        return (clear ?? clearOfChrome.first ?? clearOfTip.first ?? places[0]).turn
+        let planned = turns.map { turn in (turn: turn, clearness: sizes.map { clearness(turn, $0) }.max() ?? .clear) }
+        let bestPlanned = planned.map(\.clearness).min() ?? .clear
+        if let actual {
+            let now = turns.map { (turn: $0, clearness: clearness($0, actual)) }
+            let bestNow = now.map(\.clearness).min() ?? .clear
+            if bestNow < bestPlanned, let side = now.first(where: { $0.clearness == bestNow }) { return side.turn }
+        }
+        return planned.first { $0.clearness == bestPlanned }?.turn ?? turns[0]
     }
 
     /// The top-left of a bubble of `size` that has gone `turn` round the tip.
@@ -100,13 +110,39 @@ struct PencilVoiceBubble: View {
         place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset).origin
     }
 
-    /// Whether the side `turn` no longer does for a bubble of `size`: kept inside the
-    /// window it comes over the tip, or chrome has come in the way.
+    /// Whether the side `turn` no longer does for a bubble of `size`: another side would
+    /// keep it clearer, of the tip, of chrome or of what is spoken about, judged as the
+    /// side is chosen. A subject no side can miss blocks nothing.
     nonisolated static func isBlocked(
-        turn: Double, anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat, avoiding obstacles: [CGRect]
+        turn: Double, anchor: CGPoint, azimuth: Angle?, size: CGSize, in bounds: CGRect, topInset: CGFloat,
+        avoiding obstacles: [CGRect], subject: CGRect? = nil
     ) -> Bool {
-        let frame = place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset)
-        return !isClear(of: anchor, frame) || obstacles.contains { $0.intersects(frame) }
+        func clearness(_ turn: Double) -> Clearness {
+            let frame = place(towards: away(azimuth) + turn, anchor: anchor, size: size, in: bounds, topInset: topInset)
+            return Self.clearness(of: frame, anchor: anchor, obstacles: obstacles, subject: subject)
+        }
+        return clearness(turn) > (turns.map(clearness).min() ?? .clear)
+    }
+
+    /// How well a place keeps clear, best first. A side is chosen for the best it can get.
+    nonisolated enum Clearness: Int, Comparable {
+        /// Clear of the tip, the chrome and what is spoken about.
+        case clear
+        /// Clear of the tip and the chrome, on what is spoken about.
+        case onSubject
+        /// Clear of the tip, on chrome.
+        case onChrome
+        /// Over the tip.
+        case onTip
+
+        static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+    }
+
+    nonisolated private static func clearness(of frame: CGRect, anchor: CGPoint, obstacles: [CGRect], subject: CGRect?) -> Clearness {
+        if !isClear(of: anchor, frame) { return .onTip }
+        if obstacles.contains(where: { $0.intersects(frame) }) { return .onChrome }
+        if let subject, subject.intersects(frame) { return .onSubject }
+        return .clear
     }
 
     /// The sizes the side is chosen for: about as small as the bubble gets (working or
@@ -147,15 +183,19 @@ struct PencilVoiceBubble: View {
         let canvas = model.store.canvas
         // The other chrome on the canvas, such as the actions over what the squeeze selected.
         let chrome = model.chromeFrames.filter { $0.key != "pencil bubble" }.map(\.value)
+        let subject = model.selectionViewRect
         // The side is the one chosen when it opened here, for every size it takes, so that
         // it doesn't swap sides from state to state. Only something in the way chooses again.
         let turn: Double = if let chosenTurn, chosenFor == bubble.anchor,
-            !Self.isBlocked(turn: chosenTurn, anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset, avoiding: chrome) {
+            !Self.isBlocked(
+                turn: chosenTurn, anchor: bubble.anchor, azimuth: bubble.azimuth, size: size, in: bounds, topInset: topInset,
+                avoiding: chrome, subject: subject
+            ) {
             chosenTurn
         } else {
             Self.turn(
                 anchor: bubble.anchor, azimuth: bubble.azimuth, sizes: Self.plannedSizes(showsWords: showsWords, largestMeasured: largest),
-                in: bounds, topInset: topInset, avoiding: chrome, subject: model.selectionViewRect
+                actual: size, in: bounds, topInset: topInset, avoiding: chrome, subject: subject
             )
         }
         let origin = Self.origin(anchor: bubble.anchor, azimuth: bubble.azimuth, turn: turn, size: size, in: bounds, topInset: topInset)
