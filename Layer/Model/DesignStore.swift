@@ -491,32 +491,23 @@ final class DesignStore {
     /// Whether a gradual edit is under way.
     var isEditing: Bool { editStart != nil }
 
-    /// Counts every `beginEdit()` and `beginHeldEdit()`, so that whatever began an edit can
-    /// tell whether anything else has joined it since. Edits don't nest: any end ends them.
+    /// Counts every `beginEdit()`, so that whatever began an edit can tell whether anything
+    /// else has joined it since. Edits don't nest: any end ends them.
     @ObservationIgnored private(set) var editBegins = 0
 
     /// Tells the system the document has changes to save, without a step in the history.
-    /// The system marks a document as changed only when its undo manager closes a group,
-    /// so a change made without an undo step (a name the app settles on, the file's name,
-    /// the picture for the document browser, or the rest of an edit after an autosave)
+    /// The system marks a document as changed when its undo manager is about to close a
+    /// group, so a change made without an undo step (a name the app settles on, the file's
+    /// name, the picture for the document browser, or the rest of an edit after an autosave)
     /// would otherwise never be written if nothing else changed before the design closed.
     ///
-    /// A no-op step is put in a group of its own and taken out again. The undo manager
-    /// groups by event, which would hold the group open until the run loop turns and then
-    /// leave it on the stack empty: outside any group, it is told to group by hand.
+    /// It is told as the undo manager would tell it, by the notice alone. Registering a step,
+    /// even one taken straight out again, clears redo and, with a full history, pushes the
+    /// oldest step out.
     func markNeedsSaving() {
         guard let undoManager else { return }
-        let groupsByEvent = undoManager.groupsByEvent
-        if undoManager.groupingLevel == 0 { undoManager.groupsByEvent = false }
-        undoManager.beginUndoGrouping()
-        undoManager.registerUndo(withTarget: saveMarker) { _ in }
-        undoManager.endUndoGrouping()
-        undoManager.removeAllActions(withTarget: saveMarker)
-        undoManager.groupsByEvent = groupsByEvent
+        NotificationCenter.default.post(name: .NSUndoManagerWillCloseUndoGroup, object: undoManager)
     }
-
-    @ObservationIgnored private let saveMarker = SaveMarker()
-    private final class SaveMarker {}
 
     private func openEdit() {
         editStart = content
@@ -536,7 +527,8 @@ final class DesignStore {
     /// `beginEdit()`: that is how an edit by hand is told from it.
     func beginHeldEdit() {
         guard !isHoldingEdit else { return }
-        editBegins += 1
+        // Not counted in `editBegins`: inside the hold, an end only notes that the edit by
+        // hand is over, so whoever began that edit by hand may still end it.
         // An edit already under way goes on inside the hold.
         isEditingByHandInHold = editStart != nil
         if editStart == nil { openEdit() }

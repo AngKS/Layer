@@ -1112,6 +1112,29 @@ struct ClosingTests {
         #expect(!system.hasUnsavedChanges)
     }
 
+    /// Going to the background tells the system about the picture it drew, without
+    /// touching the history: the redo stack and the oldest step of a full one are kept.
+    @Test func leavingTheScreenKeepsRedoAndTheOldestStep() throws {
+        let model = AppModel(document: LayerDocument())
+        let (system, undo) = systemDocument(for: model)
+        let start = model.store.content
+        for step in 0..<DesignStore.undoLevels {
+            model.store.setTitle("Board \(step)")
+        }
+        undo.undo()
+        #expect(undo.canRedo)
+        try autosave(model, system)
+        model.document.update { $0.fileName = "Board" }
+
+        model.leavingTheScreen()
+
+        #expect(system.hasUnsavedChanges)
+        #expect(undo.canRedo)
+        undo.redo()
+        for _ in 0..<DesignStore.undoLevels { undo.undo() }
+        #expect(model.store.content == start)
+    }
+
     /// The undo manager the system gives a design groups changes by event. Told outside any
     /// group, the system has to know at once, and undo must not gain an empty step.
     @Test func tellingTheSystemToSaveAddsNoStepToUndo() throws {
@@ -1166,6 +1189,32 @@ struct FormatPanelEditTests {
 
         undo.undo()
         #expect(model.store.content == before)
+    }
+
+    /// A spoken command holds its step open. A panel change made just before it, or during
+    /// it, used to leave the step open for good once the command ended: the panel's pause
+    /// didn't end what it took for another's edit, and the hold left the step for the "edit
+    /// by hand" the panel had begun. Every later change then joined that one step.
+    @Test(arguments: [true, false])
+    func aPanelChangeAroundASpokenCommandLeavesNoEditOpen(panelFirst: Bool) async throws {
+        let (model, _, screen) = makeModel()
+        let panel = { model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } } }
+        if panelFirst {
+            panel()
+            model.store.beginHeldEdit()
+        } else {
+            model.store.beginHeldEdit()
+            panel()
+        }
+        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        try await Task.sleep(for: .milliseconds(150))
+        model.store.endHeldEdit()
+        #expect(!model.store.isEditing)
+
+        // The next change is a step of its own.
+        let mark = model.store.historyMark
+        model.store.updateScreen(screen.id) { $0.origin.y += 10 }
+        #expect(model.store.historyMark == mark + 1)
     }
 
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {

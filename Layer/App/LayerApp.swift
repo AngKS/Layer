@@ -62,8 +62,10 @@ private struct DesignEditor: View {
                     // devices' edits, and Apple Intelligence gets turned on or finishes downloading.
                     model.checkFile()
                     model.engine.prepare()
-                } else {
+                } else if phase == .background {
                     model.leavingTheScreen()
+                } else {
+                    model.refreshPreview()
                 }
             }
             // The system's own document object says when a save finishes or a conflict turns up.

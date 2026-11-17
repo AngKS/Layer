@@ -798,9 +798,10 @@ final class AppModel {
         document.update { $0.preview = picture }
     }
 
-    /// The app is leaving the screen, and the system saves the design as it goes. The
-    /// board's picture is drawn for it, and, written without an undo step, has to be
-    /// announced to be saved.
+    /// The app has gone to the background, and the system saves the design as it goes.
+    /// The board's picture is drawn for it, and, written without an undo step, has to be
+    /// announced to be saved. (Only drawn, not announced, when the app is merely inactive:
+    /// Control Center or an alert over it.)
     func leavingTheScreen() {
         refreshPreview()
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
@@ -1174,6 +1175,9 @@ final class AppModel {
     /// begun just after a colour was tapped lost its step halfway, and each later move was
     /// a step of its own.
     @ObservationIgnored private var adjustmentOwnsEditAt: Int?
+    /// How many edits the store had seen begun at the panel's last change: while it is the
+    /// same, nothing else has begun one since.
+    @ObservationIgnored private var adjustmentLastBegin: Int?
 
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
@@ -1182,6 +1186,7 @@ final class AppModel {
         let ownsEdit = !store.isEditing || adjustmentOwnsEditAt == store.editBegins
         store.beginEdit()
         adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
+        adjustmentLastBegin = store.editBegins
         body()
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
@@ -1189,8 +1194,14 @@ final class AppModel {
         adjustmentEnd = Task { [weak self] in
             try? await Task.sleep(for: self?.adjustmentPause ?? .zero)
             guard !Task.isCancelled, let self else { return }
-            if adjustmentOwnsEditAt == store.editBegins { store.endEdit() }
+            // Its own edit, or, inside a spoken command's hold, its own part of it: there
+            // an end only says the panel's edit by hand is over, and the command then
+            // closes its step. Left, the hold would wait for an end that never comes.
+            if adjustmentLastBegin == store.editBegins, adjustmentOwnsEditAt != nil || store.isHoldingEdit {
+                store.endEdit()
+            }
             adjustmentOwnsEditAt = nil
+            adjustmentLastBegin = nil
         }
     }
 
