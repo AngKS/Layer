@@ -1,6 +1,7 @@
 # Rotation: design
 
-Date: 2026-11-18. Status: awaiting approval. Branch: `feature/rotation` (worktree
+Date: 2026-11-18. Status: approved by the user on 2026-11-18. Plan:
+`docs/superpowers/plans/2026-11-18-rotation.md`. Branch: `feature/rotation` (worktree
 `.claude/worktrees/rotation`).
 
 Background research: `reports/Rotation grouping selection and zoom.md` and its notes in
