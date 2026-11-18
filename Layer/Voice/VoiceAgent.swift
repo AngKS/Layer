@@ -54,13 +54,22 @@ final class VoiceAgent: VoiceCommandRunner {
         return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
     }
 
-    /// Whether the last command changed the design, and so has a change a correction undoes.
-    private var lastCommandChangedDesign = false
+    /// The history mark the last command left, when it changed the design: its step is on
+    /// top of the history for as long as the mark hasn't moved, and only then does a
+    /// correction undo it. A drag by hand since, or another call's command, moves it.
+    private var lastCommandStep: Int?
+
+    /// How many commands a session takes before the next starts a fresh one. The model is
+    /// sent only the last two anyway (`VoiceProfile`), but the session keeps every word,
+    /// tool call and answer, and the pencil's lives as long as the design is open.
+    var commandsPerSession = 40
+    private var commandsInSession = 0
 
     func warmUp() async {
-        guard session == nil, let model else { return }
+        guard session == nil, let model, !model.isClosed else { return }
         let session = makeSession()
         self.session = session
+        commandsInSession = 0
         session.properties.voiceModel = model.modelChoice
         lookAtTheCanvas()
         VoiceLog.log.info("agent: warming \(String(describing: model.modelChoice), privacy: .public)")
@@ -70,35 +79,84 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Called with what the command under way is doing now, such as "Restyling…".
     var onStep: ((String) -> Void)?
 
+    /// Whether the model may end the call. The pencil's call has no voice mode to end, so
+    /// it isn't handed the tool: given it, a model said "Hanging up." and nothing hung up.
+    let canEndCall: Bool
+
     /// `testModel` stands in for the design's own model, for tests and the simulator.
-    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil) {
+    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil, canEndCall: Bool = true) {
         self.model = model
         self.testModel = testModel
         self.looksAgain = looksAgainBetweenSteps
+        self.canEndCall = canEndCall
         toolbox = VoiceToolbox(model: model, handles: handles)
     }
 
     func run(_ command: String) async -> VoiceOutcome {
-        guard let model else { return VoiceOutcome(problem: "The design has closed.") }
+        await run(command, about: nil)
+    }
+
+    /// What the model is told with a command the pencil pointed at empty canvas for.
+    static let canvasHint = "(The person pointed at empty canvas: a description of a screen means a new screen there.)"
+
+    /// What the model is told with a command the pencil pointed at a thing for.
+    static func thingHint(_ pointed: String) -> String {
+        "(The person is pointing at \(pointed). \"This\", \"it\", \"that\" and a change that names nothing mean what is pointed at, and nothing else.)"
+    }
+
+    func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
+        guard let model, !model.isClosed else { return VoiceOutcome(problem: AppModel.closedProblem) }
         toolbox.reset()
+        // Where the pencil pointed goes with this command and no other: a new screen goes
+        // there, and the model is told so.
+        var hint: String?
+        if case .canvas(let point) = target {
+            hint = Self.canvasHint
+            toolbox.newScreenAnchor = point
+        }
+        if session == nil { commandsInSession = 0 }
+        commandsInSession += 1
         let session = session ?? makeSession()
         self.session = session
         session.properties.voiceModel = model.modelChoice
         lookAtTheCanvas()
+        // Pointed at a thing: said outright, as a model left to find "[selected]" in the
+        // canvas restyled the avatar for "the phone" and deleted what "it" was before (iPad).
+        if case .thing = target, let pointed = session.properties.canvasPicture.selectionInWords {
+            hint = Self.thingHint(pointed)
+        }
 
         // Everything the command changes is one step to undo, whatever becomes of it.
         model.store.beginHeldEdit()
-        defer { model.store.endHeldEdit() }
-        toolbox.spokenCommand = command
+        correctedTo = nil
+        let before = model.store.content
+        let outcome = await carryOut(command, hint: hint, in: session, on: model)
+        model.store.endHeldEdit()
+        // A correction's own undo isn't a change of the command's to correct again.
+        lastCommandStep = model.store.content != (correctedTo ?? before) ? model.store.historyMark : nil
+        if commandsInSession >= commandsPerSession {
+            // Made ready now, so that the next command doesn't wait on a cold session.
+            VoiceLog.log.info("agent: a fresh session after \(self.commandsInSession) commands")
+            self.session = nil
+            Task { [weak self] in await self?.warmUp() }
+        }
+        return outcome
+    }
 
+    /// The design as a correction's undo left it, for the command under way.
+    private var correctedTo: DesignContent?
+
+    private func carryOut(_ command: String, hint: String?, in session: LanguageModelSession, on model: AppModel) async -> VoiceOutcome {
+        toolbox.spokenCommand = command
         var outcome = VoiceOutcome()
         // "Not the check marks": the last change is undone before what was meant is done.
         // Left to the model, it did what was meant and left the mistake.
         var prompt = command
-        if let correction = Self.correction(in: command), lastCommandChangedDesign {
+        if let correction = Self.correction(in: command), let step = lastCommandStep, model.store.historyMark == step {
             VoiceLog.log.info("agent: a correction, so the last change is undone first")
             _ = toolbox.undo()
-            lastCommandChangedDesign = false
+            lastCommandStep = nil
+            correctedTo = model.store.content
             if correction == .undoOnly {
                 outcome.lines = toolbox.lines
                 return outcome
@@ -106,8 +164,10 @@ final class VoiceAgent: VoiceCommandRunner {
             prompt = "(The last change has been undone.) " + command
             lookAtTheCanvas()
         }
-        let before = model.store.content
-        defer { lastCommandChangedDesign = model.store.content != before }
+        if let hint {
+            prompt = hint + " " + prompt
+            VoiceLog.log.info("agent: told \(hint, privacy: .public)")
+        }
         VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")
         let began = ContinuousClock.now
         do {
@@ -141,9 +201,10 @@ final class VoiceAgent: VoiceCommandRunner {
         let hooks = VoiceHooks(
             willRun: { [weak self] tool in await self?.stepStarted(with: tool) },
             didRun: { [weak self] in await self?.stepFinished() },
-            mayRun: { !Task.isCancelled }
+            // Nothing more is done to a design once it has closed.
+            mayRun: { @MainActor [weak model] in !Task.isCancelled && model?.isClosed == false }
         )
-        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel))
+        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel, canEndCall: canEndCall))
     }
 
     private func stepStarted(with tool: String) {

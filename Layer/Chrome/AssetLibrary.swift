@@ -38,6 +38,17 @@ struct Asset: Identifiable, Hashable, Sendable {
     let section: String
     /// Lower-case words a search finds it by: its name's words and other words for it.
     let terms: [String]
+    /// The words of its name, split once rather than on every search.
+    let nameWords: [String]
+
+    init(content: Content, name: String, tab: AssetTab, section: String, terms: [String]) {
+        self.content = content
+        self.name = name
+        self.tab = tab
+        self.section = section
+        self.terms = terms
+        nameWords = AssetLibrary.words(in: name)
+    }
 
     /// What a drag carries, and what the canvas reads back when it is dropped.
     var id: String {
@@ -133,6 +144,11 @@ enum AssetLibrary {
 
     private static let byID: [String: Asset] = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+    /// Each tab's assets, in order.
+    private static let byTab: [AssetTab: [Asset]] = Dictionary(grouping: all, by: \.tab)
+
+    private static func assets(in tab: AssetTab) -> [Asset] { byTab[tab] ?? [] }
+
     /// The asset a drag carried, from its id. A symbol that isn't in the catalogue is still
     /// one, as long as SF Symbols has it.
     static func asset(id: String) -> Asset? {
@@ -192,11 +208,14 @@ enum AssetLibrary {
     /// start one of an asset's words. A word that is a whole word of its name counts for
     /// most. With nothing searched, everything in the tab, in order.
     static func matching(_ search: String, in tab: AssetTab) -> [Asset] {
-        let candidates = all.filter { $0.tab == tab }
-        guard !words(in: search).isEmpty else { return candidates }
-        var found = scored(search, among: candidates).map(\.asset)
+        guard !words(in: search).isEmpty else { return assets(in: tab) }
+        return matching(search, in: tab, scored: scored(search, among: assets(in: tab)), exactSymbol: tab == .icons ? customSymbol(search) : nil)
+    }
+
+    private static func matching(_ search: String, in tab: AssetTab, scored: [(asset: Asset, score: Int)], exactSymbol: Asset?) -> [Asset] {
+        var found = scored.map(\.asset)
         // A symbol named exactly, from beyond the catalogue, comes first.
-        if tab == .icons, let exact = customSymbol(search), !found.contains(where: { $0.id == exact.id }) {
+        if tab == .icons, let exact = exactSymbol, !found.contains(where: { $0.id == exact.id }) {
             found.insert(exact, at: 0)
         }
         return found
@@ -211,12 +230,12 @@ enum AssetLibrary {
 
     /// The strongest score `search` has in `tab`, or nil when nothing there matches.
     static func topScore(for search: String, in tab: AssetTab) -> Int? {
-        scored(search, among: all.filter { $0.tab == tab }).first?.score
+        scored(search, among: assets(in: tab)).first?.score
     }
 
     static func bestMatch(for search: String) -> (tab: AssetTab, score: Int)? {
         var best = AssetTab.allCases
-            .compactMap { tab in scored(search, among: all.filter { $0.tab == tab }).first.map { (tab: tab, score: $0.score) } }
+            .compactMap { tab in scored(search, among: assets(in: tab)).first.map { (tab: tab, score: $0.score) } }
         // A symbol's exact name: certain when it is dotted, as in cloud.sun.rain; a plain
         // word such as "hexagon" is a symbol too, but more likely means the shape.
         if customSymbol(search) != nil {
@@ -225,12 +244,77 @@ enum AssetLibrary {
         return best.max { $0.score < $1.score }
     }
 
+    /// One tab's share of a search.
+    struct ResultGroup: Equatable {
+        let tab: AssetTab
+        let assets: [Asset]
+    }
+
+    /// What `search` finds in every tab at once, the tab with the strongest match first:
+    /// "mac" is an icon and a family of wireframes, and the library shows both. Tabs that
+    /// find nothing are left out.
+    static func searchEverywhere(_ search: String) -> [ResultGroup] {
+        guard !words(in: search).isEmpty else { return [] }
+        // Looked up once: asking SF Symbols for a name loads its image.
+        let exactSymbol = customSymbol(search)
+        let groups: [(group: ResultGroup, score: Int)] = AssetTab.allCases.compactMap { tab in
+            // Each tab is scored once, for both what it finds and how well.
+            let scored = scored(search, among: assets(in: tab))
+            let assets = matching(search, in: tab, scored: scored, exactSymbol: exactSymbol)
+            guard !assets.isEmpty else { return nil }
+            var score = scored.first?.score ?? 0
+            // The exact symbol counts as the Icons group's score, as `bestMatch` scores it.
+            if tab == .icons, exactSymbol != nil {
+                score = max(score, search.contains(".") ? 10_000 : 250)
+            }
+            return (ResultGroup(tab: tab, assets: assets), score)
+        }
+        // A stable sort: tabs with equal scores stay in the order the tabs are shown.
+        return groups.enumerated()
+            .sorted { $0.element.score != $1.element.score ? $0.element.score > $1.element.score : $0.offset < $1.offset }
+            .map(\.element.group)
+    }
+
+    /// Whether a search is worth offering to write a screen for: it has words, and nothing
+    /// in the library answers it.
+    static func offersGeneration(for search: String) -> Bool {
+        !words(in: search).isEmpty && searchEverywhere(search).isEmpty
+    }
+
+    /// What Return in the search field does.
+    enum SubmitAction: Equatable {
+        /// Puts the best match on the canvas.
+        case place(Asset)
+        /// Writes the screen the words describe.
+        case generate(String)
+        case nothing
+    }
+
+    /// Return places the best match; when nothing matches, it writes the screen the words
+    /// describe, where the library can, and not while a screen is already being written.
+    static func submitAction(for search: String, firstResult: Asset?, canGenerate: Bool, isGenerating: Bool) -> SubmitAction {
+        if let firstResult { return .place(firstResult) }
+        guard canGenerate, !words(in: search).isEmpty, !isGenerating else { return .nothing }
+        return .generate(search.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// What the library lists: a search's finds from every tab, or the open tab's things.
+    enum Listing: Equatable {
+        case searchResults
+        case tab(AssetTab)
+    }
+
+    /// A search doesn't change the open tab, so clearing it lists that tab again.
+    static func listing(for search: String, openTab: AssetTab) -> Listing {
+        words(in: search).isEmpty ? .tab(openTab) : .searchResults
+    }
+
     /// The assets among `candidates` that match `search`, scored and best first.
     private static func scored(_ search: String, among candidates: [Asset]) -> [(asset: Asset, score: Int)] {
         let query = words(in: search)
         var scored: [(asset: Asset, score: Int, index: Int)] = []
         for (index, asset) in candidates.enumerated() {
-            let nameWords = words(in: asset.name)
+            let nameWords = asset.nameWords
             var score = 0
             var matchesAll = true
             for word in query {
@@ -343,7 +427,7 @@ enum AssetLibrary {
             (["mention", "handle"], ["at"]),
             (["announcement", "broadcast", "promo"], ["megaphone"]),
             (["phone", "mobile", "device"], ["iphone"]),
-            (["computer", "desktop"], ["laptopcomputer", "desktopcomputer"]),
+            (["computer", "desktop", "mac", "laptop"], ["laptopcomputer", "desktopcomputer"]),
         ]
         var synonyms: [String: [String]] = [:]
         for group in groups {
@@ -357,34 +441,46 @@ enum AssetLibrary {
 
 /// The library: icons, wireframes, shapes and components, in tabs under one search field.
 /// Tapping a thing hands it back; dragging it puts it on the canvas where it is dropped.
+/// A search looks in every tab at once; one that finds nothing offers to write the screen.
 struct AssetLibraryView: View {
     let onPick: (Asset) -> Void
     /// A drag has started. A popover catches drops on the canvas behind it, so whoever
     /// presents the library puts it away here.
     var onDragStart: () -> Void = {}
+    /// Writes a screen from what was searched for. Without it, a search that finds nothing
+    /// only says so.
+    var onGenerate: ((String) -> Void)?
+    @Environment(AppModel.self) private var model
     @Environment(ImageLibrary.self) private var images
     @AppStorage("assetLibrary.tab") private var tab = AssetTab.icons
     @AppStorage(AssetLibrary.recentsKey) private var storedRecents = ""
     @State private var search = ""
+    /// The last search and what it found. The body is worked out again for other reasons,
+    /// a generation starting for one, and the library isn't searched again for those.
+    @State private var lastSearch = LastSearch()
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        let results = AssetLibrary.matching(search, in: tab)
+        let groups = lastSearch.groups(for: search)
         VStack(spacing: 0) {
-            searchField(firstResult: results.first)
+            searchField(firstResult: groups.first?.assets.first)
+            // The tabs stay where they are while searching, so the layout doesn't jump, but
+            // they don't filter: a search looks in all of them, and clearing it returns to
+            // the tab that was open.
             Picker("Library", selection: $tab) {
                 ForEach(AssetTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(isSearching)
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if isSearching {
-                        searchResults(results)
+                        searchResults(groups)
                     } else {
                         browsing
                     }
@@ -395,19 +491,19 @@ struct AssetLibraryView: View {
             .scrollDismissesKeyboard(.immediately)
         }
         .foregroundStyle(.primary)
-        // Searching for something only another tab has goes to that tab.
-        .onChange(of: search) { _, search in
-            // When the tab shown has nothing, or another has a clearly better kind of
-            // match: a name rather than another word for it.
-            guard !AssetLibrary.words(in: search).isEmpty, let best = AssetLibrary.bestMatch(for: search), best.tab != tab else { return }
-            if let here = AssetLibrary.topScore(for: search, in: tab), best.score < here + 100 { return }
-            tab = best.tab
-        }
         // The size of its popover. In a narrow window it is a sheet instead, and fills it.
         .frame(idealWidth: 380, maxWidth: .infinity, idealHeight: 480, maxHeight: .infinity)
     }
 
-    private var isSearching: Bool { !AssetLibrary.words(in: search).isEmpty }
+    private var isSearching: Bool { AssetLibrary.listing(for: search, openTab: tab) == .searchResults }
+
+    private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Whether to offer to write a screen for the search: there are words, and nothing
+    /// was found. Every group found has at least one asset, so the first is enough to tell.
+    private func offersGeneration(_ firstResult: Asset?) -> Bool {
+        isSearching && firstResult == nil
+    }
 
     // MARK: Search
 
@@ -418,10 +514,17 @@ struct AssetLibraryView: View {
             TextField("Search the library", text: $search)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .submitLabel(.done)
+                .submitLabel(onGenerate != nil && offersGeneration(firstResult) ? .go : .done)
                 .focused($isSearchFocused)
-                // Return puts the best match on the canvas.
-                .onSubmit { if let firstResult { onPick(firstResult) } }
+                // Return puts the best match on the canvas; when nothing matches, it writes
+                // the screen the words describe.
+                .onSubmit {
+                    switch AssetLibrary.submitAction(for: search, firstResult: firstResult, canGenerate: onGenerate != nil, isGenerating: model.isGenerating) {
+                    case .place(let asset): onPick(asset)
+                    case .generate(let query): onGenerate?(query)
+                    case .nothing: break
+                    }
+                }
             if !search.isEmpty {
                 Button {
                     search = ""
@@ -442,19 +545,27 @@ struct AssetLibraryView: View {
     }
 
     @ViewBuilder
-    private func searchResults(_ results: [Asset]) -> some View {
-        if results.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Nothing matches “\(search.trimmingCharacters(in: .whitespaces))”.")
-                    .font(.system(size: 13, weight: .medium))
-                Text("Try another word, such as “settings” or “arrow”, or type an SF Symbol's exact name, such as cloud.sun.rain.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+    private func searchResults(_ groups: [AssetLibrary.ResultGroup]) -> some View {
+        if groups.isEmpty {
+            if let onGenerate {
+                GenerateEmptyState(query: query, modelName: model.modelChoice.displayName, isGenerating: model.isGenerating) {
+                    onGenerate(query)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nothing matches “\(query)”.")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Try another word, such as “settings” or “arrow”, or type an SF Symbol's exact name, such as cloud.sun.rain.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 20)
             }
-            .padding(.vertical, 20)
         } else {
-            sectionHeader(results.count == 1 ? "1 match" : "\(results.count) matches")
-            grid(results)
+            ForEach(groups, id: \.tab) { group in
+                sectionHeader("\(group.tab.title)  \(group.assets.count)")
+                grid(group.assets, in: group.tab)
+            }
         }
     }
 
@@ -467,12 +578,12 @@ struct AssetLibraryView: View {
             .filter { $0.tab == tab }
         if !recents.isEmpty {
             sectionHeader("Recent")
-            grid(recents)
+            grid(recents, in: tab)
         }
         let assets = AssetLibrary.matching("", in: tab)
         ForEach(sections(of: assets), id: \.name) { section in
             sectionHeader(section.name)
-            grid(section.assets)
+            grid(section.assets, in: tab)
         }
     }
 
@@ -495,8 +606,8 @@ struct AssetLibraryView: View {
 
     // MARK: Tiles
 
-    private func grid(_ assets: [Asset]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 6)], spacing: 6) {
+    private func grid(_ assets: [Asset], in tab: AssetTab) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth(of: tab)), spacing: 6)], spacing: 6) {
             ForEach(assets) { asset in
                 Button {
                     onPick(asset)
@@ -520,11 +631,99 @@ struct AssetLibraryView: View {
         }
     }
 
-    private var tileWidth: CGFloat {
+    private func tileWidth(of tab: AssetTab) -> CGFloat {
         switch tab {
         case .icons: 44
         case .shapes: 60
         case .wireframes, .components: 96
+        }
+    }
+}
+
+/// What a search that finds nothing shows: a sketch of what happens next, and the way to do it.
+private struct GenerateEmptyState: View {
+    let query: String
+    let modelName: String
+    let isGenerating: Bool
+    let generate: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            diagram
+            if isGenerating {
+                Text("A screen is being written. Stop it, or wait for it to finish, to start another.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Press Return to generate this screen with \(modelName)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button(action: generate) {
+                Label("Generate Screen", systemImage: "wand.and.sparkles")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isGenerating)
+        }
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The query, a library with no component for it, and the screen it becomes instead.
+    private var diagram: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(query)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(3)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: 110)
+                .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 10))
+                .frame(height: 44)
+            arrow
+            step("No component") {
+                Image(systemName: "square.on.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    // The strike: nothing in the library is this.
+                    .overlay {
+                        Rectangle()
+                            .fill(.red.opacity(0.8))
+                            .frame(width: 34, height: 2)
+                            .rotationEffect(.degrees(-35))
+                    }
+            }
+            arrow
+            step("New screen") {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(.primary, lineWidth: 1.5)
+                    .frame(width: 26, height: 44)
+                    .overlay(alignment: .top) {
+                        Capsule().fill(.primary).frame(width: 8, height: 2).padding(.top, 4)
+                    }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("“\(query)” is not a component. It becomes a new screen.")
+    }
+
+    private var arrow: some View {
+        Image(systemName: "arrow.right")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(height: 44)
+    }
+
+    private func step(_ title: String, @ViewBuilder picture: () -> some View) -> some View {
+        VStack(spacing: 4) {
+            picture().frame(width: 40, height: 44)
+            Text(title)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -632,5 +831,20 @@ private struct TemplatePreview: View {
         .scaleEffect(scale, anchor: .topLeading)
         .frame(width: device.size.width * scale, height: height, alignment: .topLeading)
         .allowsHitTesting(false)
+    }
+}
+
+/// What the library's search last found, kept for the search it was.
+@MainActor
+private final class LastSearch {
+    private var search: String?
+    private var found: [AssetLibrary.ResultGroup] = []
+
+    func groups(for search: String) -> [AssetLibrary.ResultGroup] {
+        if search != self.search {
+            self.search = search
+            found = AssetLibrary.searchEverywhere(search)
+        }
+        return found
     }
 }

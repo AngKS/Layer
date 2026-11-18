@@ -6,6 +6,29 @@ import UIKit
 
 @Suite("The asset library")
 struct AssetLibraryTests {
+    @Test func macFindsTheIconAndTheWireframes() {
+        let groups = AssetLibrary.searchEverywhere("mac")
+        #expect(groups.contains { $0.tab == .icons && !$0.assets.isEmpty })
+        #expect(groups.contains { $0.tab == .wireframes && !$0.assets.isEmpty })
+        #expect(groups.allSatisfy { !$0.assets.isEmpty })
+    }
+
+    @Test func groupsAreOrderedByTheirStrongestMatch() {
+        // "toggle" is a component by name, and only a term elsewhere.
+        #expect(AssetLibrary.searchEverywhere("toggle").first?.tab == .components)
+    }
+
+    @Test func aSentenceWithNoMatchOffersAScreen() {
+        #expect(AssetLibrary.searchEverywhere("a checkout screen with apple pay and a summary").isEmpty)
+        #expect(AssetLibrary.offersGeneration(for: "a checkout screen with apple pay and a summary"))
+        #expect(!AssetLibrary.offersGeneration(for: "   "))
+    }
+
+    @Test func aSymbolNameIsAMatchNotAScreen() {
+        #expect(AssetLibrary.searchEverywhere("cloud.sun.rain").first?.tab == .icons)
+        #expect(!AssetLibrary.offersGeneration(for: "cloud.sun.rain"))
+    }
+
     @Test func everyTabHasThingsAndEveryIDLeadsBackToItsAsset() {
         for tab in AssetTab.allCases {
             #expect(!AssetLibrary.matching("", in: tab).isEmpty, "\(tab) is empty")
@@ -58,6 +81,38 @@ struct AssetLibraryTests {
         #expect(AssetLibrary.matching(name, in: .icons).first?.content == .symbol(name))
         #expect(AssetLibrary.asset(id: "symbol:\(name)")?.name == name)
         #expect(AssetLibrary.customSymbol("not.a.real.symbol.at.all") == nil)
+    }
+
+    /// Return in the search field places the best match; with nothing found it writes the
+    /// screen the words describe, but not while one is being written already.
+    @Test func returnPlacesTheFirstResultWhenThereAreMatches() throws {
+        let first = try #require(AssetLibrary.searchEverywhere("toggle").first?.assets.first)
+        #expect(AssetLibrary.submitAction(for: "toggle", firstResult: first, canGenerate: true, isGenerating: false) == .place(first))
+        // Placing doesn't wait on a generation.
+        #expect(AssetLibrary.submitAction(for: "toggle", firstResult: first, canGenerate: true, isGenerating: true) == .place(first))
+    }
+
+    @Test func returnGeneratesWhenNothingMatches() {
+        let search = "  a checkout page with saved cards "
+        #expect(AssetLibrary.searchEverywhere(search).isEmpty)
+        #expect(AssetLibrary.submitAction(for: search, firstResult: nil, canGenerate: true, isGenerating: false) == .generate("a checkout page with saved cards"))
+        // Where the library can't write a screen, Return does nothing.
+        #expect(AssetLibrary.submitAction(for: search, firstResult: nil, canGenerate: false, isGenerating: false) == .nothing)
+        // Nor with nothing searched.
+        #expect(AssetLibrary.submitAction(for: "   ", firstResult: nil, canGenerate: true, isGenerating: false) == .nothing)
+    }
+
+    @Test func returnDoesNothingWhileAScreenIsBeingWritten() {
+        #expect(AssetLibrary.submitAction(for: "a checkout page with saved cards", firstResult: nil, canGenerate: true, isGenerating: true) == .nothing)
+    }
+
+    @Test func clearingTheSearchReturnsToTheTabThatWasOpen() {
+        #expect(AssetLibrary.listing(for: "", openTab: .shapes) == .tab(.shapes))
+        // A search lists every tab's finds, whichever tab its best match is in…
+        #expect(AssetLibrary.bestTab(for: "mac") != .shapes)
+        #expect(AssetLibrary.listing(for: "mac", openTab: .shapes) == .searchResults)
+        // …and cleared, or left with only spaces, the tab that was open is back.
+        #expect(AssetLibrary.listing(for: "  ", openTab: .shapes) == .tab(.shapes))
     }
 
     @Test func recentlyUsedThingsLeadAndArentRepeated() throws {

@@ -428,13 +428,15 @@ struct TurningOneElementTests {
         let frame = try #require(board.store.resolve(board.note)).element.frame
         board.model.beginTurn()
         board.model.turnSelection(by: 10, snaps: false)
+        // The one step, in the history from the turn's first change.
+        let mark = board.store.historyMark
         // A second finger starts dragging a handle, and is still dragging when the knob is let go.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.size.width += 20 }
         board.model.endTurn()
         board.store.update(board.note) { $0.frame.size.width += 20 }
         board.store.update(board.note) { $0.frame.size.width += 20 }
-        #expect(!board.undo.canUndo, "nothing is a step of its own while the finger is still down")
+        #expect(board.store.historyMark == mark, "nothing is a step of its own while the finger is still down")
         board.store.endEdit()
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
@@ -448,12 +450,14 @@ struct TurningOneElementTests {
         // (`AppModel.generateScreen`), with each streamed update made in between.
         board.store.beginEdit()
         board.store.update(board.title) { $0.frame.origin.x += 10 }
+        // The one step, in the history from the edit's first change.
+        let mark = board.store.historyMark
         board.model.beginTurn()
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         board.store.update(board.title) { $0.frame.origin.x += 10 }
         board.store.update(board.title) { $0.frame.origin.x += 10 }
-        #expect(!board.undo.canUndo, "nothing is a step of its own while the screen is still being written")
+        #expect(board.store.historyMark == mark, "nothing is a step of its own while the screen is still being written")
         board.store.endEdit()
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
@@ -468,6 +472,8 @@ struct TurningOneElementTests {
         // drag ends as the turn begins.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.origin.x += 3 }
+        // The one step, in the history from the drag's first change.
+        let mark = board.store.historyMark
         board.model.beginTurn()
         board.store.endEdit()
         // A command starts during the turn, and is still working when the turn ends.
@@ -477,12 +483,52 @@ struct TurningOneElementTests {
         #expect(board.store.isHoldingEdit, "the command's step must still be open")
         board.store.update(board.title) { $0.frame.origin.x += 10 }
         board.store.update(board.title) { $0.frame.origin.x += 10 }
-        #expect(!board.undo.canUndo)
+        #expect(board.store.historyMark == mark)
         board.store.endHeldEdit()
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.note)?.element.frame == frame)
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+    }
+
+    /// The format panel's pause ends its own part of the step, made just before a turn or
+    /// during it: the turn's end leaves a part by hand open, so a panel that took the turn
+    /// for another's edit by hand left the step open for good once the turn ended.
+    @Test(arguments: [true, false])
+    func aPanelChangeAroundATurnLeavesNoEditOpen(panelFirst: Bool) async throws {
+        let board = TurnBoard()
+        board.model.adjustmentPause = .milliseconds(20)
+        board.model.selection = .element(board.note)
+        let before = board.store.content
+        let panel = { board.model.adjusting { board.store.update(board.title) { $0.frame.origin.x += 10 } } }
+        if panelFirst {
+            panel()
+            board.model.beginTurn()
+        } else {
+            board.model.beginTurn()
+            panel()
+        }
+        board.model.turnSelection(by: 20, snaps: false)
+        try await Task.sleep(for: .milliseconds(150))
+        board.model.endTurn()
+        for _ in 0..<100 where board.store.isEditing {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!board.store.isEditing)
+        board.undo.undo()
+        #expect(board.store.content == before, "the panel's change and the turn are one step")
+    }
+
+    /// A turn the knob left live as the design closes is ended with it, as a drag is.
+    @Test func closingMidTurnEndsTheTurn() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.close()
+        #expect(!board.model.isTurning)
+        #expect(!board.store.isEditing)
+        #expect(board.model.document.current.content.element(board.note.element)?.rotation == 20)
     }
 
     @Test func resettingTheTurnStandsItUpright() {

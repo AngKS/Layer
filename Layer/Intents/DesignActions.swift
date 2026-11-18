@@ -151,8 +151,25 @@ enum DesignActions {
     }
 
     /// Where a new screen goes: to the right of the others, at the newest screen's scale.
-    static func placementForNewScreen(_ device: DeviceFrame, in model: AppModel) -> Placement {
+    ///
+    /// With a `point`, in canvas points, the screen's top-left corner goes there instead,
+    /// moved right past any screen it would lie over.
+    static func placementForNewScreen(_ device: DeviceFrame, in model: AppModel, near point: CGPoint? = nil) -> Placement {
         let scale = model.store.screens.last?.scale ?? 0.6
+        if let point {
+            // The screen with its name above it, which is what mustn't lie over another.
+            let nameHeight = 34 * scale
+            let top = point.y.rounded()
+            var taken = CGRect(
+                x: point.x.rounded(), y: top - nameHeight,
+                width: device.size.width * scale, height: device.size.height * scale + nameHeight
+            )
+            // Each move clears one screen and only goes rightwards, so this ends.
+            while let blocking = model.store.screens.map({ $0.canvasFrame.union($0.labelFrame) }).first(where: { $0.intersects(taken) }) {
+                taken.origin.x = (blocking.maxX + 60).rounded()
+            }
+            return Placement(origin: CGPoint(x: taken.minX, y: top), scale: scale)
+        }
         if let rightmost = model.store.screens.max(by: { $0.canvasFrame.maxX < $1.canvasFrame.maxX }) {
             return Placement(origin: CGPoint(x: (rightmost.canvasFrame.maxX + 60).rounded(), y: rightmost.origin.y), scale: scale)
         }

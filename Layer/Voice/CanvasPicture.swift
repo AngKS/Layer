@@ -70,16 +70,37 @@ struct CanvasPicture: Sendable, Equatable {
         return lines.joined(separator: "\n")
     }
 
-    /// The screen the person is most likely talking about: the one mostly in view, or
-    /// else the one selected or holding the selection, or else the newest.
+    /// The screen the person is most likely talking about: the one selected or holding the
+    /// selection, which the pencil points at, or else the one mostly in view, or else the
+    /// newest. Pointed at, a screen not mostly in view must still be told in full.
     private var focusedScreen: String? {
-        if let inView = screens.filter({ $0.visibleShare > 0.3 }).max(by: { $0.visibleShare < $1.visibleShare }) {
-            return inView.handle
-        }
         if let selected = screens.first(where: { $0.isSelected || $0.elements.contains(where: \.isSelected) }) {
             return selected.handle
         }
+        if let inView = screens.filter({ $0.visibleShare > 0.3 }).max(by: { $0.visibleShare < $1.visibleShare }) {
+            return inView.handle
+        }
         return screens.last?.handle
+    }
+
+    /// What is selected, in words a model can't mistake, such as `E42, the button "Save" on
+    /// S3`; nil when nothing is.
+    var selectionInWords: String? {
+        var things: [String] = []
+        for screen in screens {
+            if screen.isSelected { things.append("\(screen.handle), the screen \"\(screen.name)\"") }
+            for element in screen.elements where element.isSelected {
+                things.append(Self.words(for: element) + " on \(screen.handle)")
+            }
+        }
+        things += loose.filter(\.isSelected).map(Self.words(for:))
+        return things.isEmpty ? nil : things.joined(separator: "; ")
+    }
+
+    private static func words(for element: Element) -> String {
+        let text = element.text.replacingOccurrences(of: "\n", with: " ")
+        guard !text.isEmpty else { return "\(element.handle), the \(element.kind)" }
+        return "\(element.handle), the \(element.kind) \"\(text.count > 48 ? text.prefix(45) + "…" : text)\""
     }
 
     private static func line(for screen: Screen, isBrief: Bool) -> String {

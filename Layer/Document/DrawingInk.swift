@@ -27,7 +27,7 @@ extension DesignElement {
     /// to it if the frame has been resized since they were drawn, and then turned about
     /// the frame's middle by the drawing's angle.
     var canvasStrokes: [PKStroke] {
-        guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink), !drawing.strokes.isEmpty else { return [] }
+        guard kind == .drawing, let ink, let drawing = DecodedInk.drawing(id, ink: ink), !drawing.strokes.isEmpty else { return [] }
         let natural = drawing.bounds
         func stretch(_ now: CGFloat, _ then: CGFloat) -> CGFloat {
             // Ink that covers no width or height, a straight line for instance, has nothing to stretch.
@@ -70,7 +70,7 @@ extension DesignElement {
 
     /// How many strokes a drawing is made of.
     var strokeCount: Int {
-        guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink) else { return 0 }
+        guard kind == .drawing, let ink, let drawing = DecodedInk.drawing(id, ink: ink) else { return 0 }
         return drawing.strokes.count
     }
 
@@ -115,6 +115,39 @@ private func turn(_ degrees: Double, about centre: CGPoint) -> CGAffineTransform
     return CGAffineTransform(translationX: -centre.x, y: -centre.y)
         .concatenating(CGAffineTransform(rotationAngle: radians))
         .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
+}
+
+/// Drawings' ink as PencilKit strokes, kept from one decoding to the next. A drawing's ink
+/// is decoded whenever it is shown on the ink canvas, counted for the selection's summary,
+/// or drawn in a picture, and that happened on every frame of a drag or a pan: for every
+/// drawing on the board, while one was moved. Kept by drawing, and good while its ink is
+/// the same bytes. Locked, since pictures of the board are drawn off the main thread.
+enum DecodedInk {
+    struct Drawing {
+        var strokes: [PKStroke]
+        /// The area the strokes cover, as PencilKit measures a drawing.
+        var bounds: CGRect
+    }
+
+    private struct Entry {
+        var ink: Data
+        var drawing: Drawing
+    }
+
+    /// Enough for every drawing on a busy board. Past it, the cache starts again.
+    private static let capacity = 256
+    private static let cache = OSAllocatedUnfairLock<[UUID: Entry]>(uncheckedState: [:])
+
+    static func drawing(_ id: UUID, ink: Data) -> Drawing? {
+        if let kept = cache.withLockUnchecked({ $0[id] }), kept.ink == ink { return kept.drawing }
+        guard let decoded = try? PKDrawing(data: ink) else { return nil }
+        let drawing = Drawing(strokes: decoded.strokes, bounds: decoded.bounds)
+        cache.withLockUnchecked { cache in
+            if cache.count >= capacity { cache.removeAll(keepingCapacity: true) }
+            cache[id] = Entry(ink: ink, drawing: drawing)
+        }
+        return drawing
+    }
 }
 
 enum InkGeometry {

@@ -123,6 +123,32 @@ struct CanvasPictureTests {
         #expect(picture.text(.full).contains("Edit profile"))
     }
 
+    /// The pencil points at an element on a screen that isn't the one mostly in view: that
+    /// screen is the one told in full, or the model can't see what it was pointed at.
+    @Test func theCompactPictureShowsThePointedAtScreenInFull() throws {
+        var picture = CanvasPicture()
+        picture.screens = [
+            .init(handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), visibleShare: 0.9, elements: [
+                .init(handle: "E1", kind: "title", text: "Welcome back"),
+            ]),
+            .init(handle: "S2", name: "Trip", size: CGSize(width: 393, height: 852), visibleShare: 0.1, elements: [
+                .init(handle: "E2", kind: "button", text: "Save itinerary", isSelected: true),
+            ]),
+        ]
+        let compact = picture.text(.compact)
+        #expect(compact.contains(#"E2 button "Save itinerary""#))
+        #expect(!compact.contains("Welcome back"))
+        #expect(picture.selectionInWords == #"E2, the button "Save itinerary" on S2"#)
+    }
+
+    @Test func aSelectedScreenIsToldByName() {
+        var picture = CanvasPicture()
+        picture.screens = [.init(handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), isSelected: true)]
+        #expect(picture.selectionInWords == #"S1, the screen "Login""#)
+        picture.screens[0].isSelected = false
+        #expect(picture.selectionInWords == nil)
+    }
+
     @Test func anEmptyCanvasSaysSo() {
         let picture = CanvasPicture.capture(from: AppModel(document: LayerDocument()), handles: VoiceHandles())
         #expect(!picture.hasScreens)
@@ -754,6 +780,35 @@ struct VoiceToolsTests {
         #expect(app.store.content.screens.isEmpty)
     }
 
+    // MARK: After close, and where new screens go
+
+    /// No screen is started on a design that has closed: its generation would run on with
+    /// nothing to stop it, writing to a file the browser has let go of (B-I4).
+    @Test func noScreenIsMadeOnceTheDesignHasClosed() async throws {
+        let bench = bench()
+        bench.app.close()
+        let line = try await bench.box.createScreen(name: "Settings", description: "a settings screen")
+        #expect(line == AppModel.closedProblem)
+        #expect(bench.app.generation == nil && bench.app.store.screens.count == 1)
+    }
+
+    /// The command's own anchor puts its screen where the pencil pointed, and only its own:
+    /// the next command's screen goes where screens always go (B-M4).
+    @Test func aNewScreenGoesWhereItsCommandPointed() async throws {
+        let bench = bench()
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        bench.app.screenStream = { _, _, _ in stream }
+        let point = CGPoint(x: 9000, y: 9000)
+        bench.box.newScreenAnchor = point
+        let making = Task { try await bench.box.createScreen(name: "Settings", description: "a settings screen") }
+        #expect(await eventually { bench.app.isGenerating })
+        #expect(bench.app.store.screens.last?.origin == point)
+        feed.finish()
+        _ = try await making.value
+        bench.box.reset()
+        #expect(bench.box.newScreenAnchor == nil)
+    }
+
     // MARK: Undo
 
     @Test func aHeldEditIsOneUndoStep() throws {
@@ -762,10 +817,12 @@ struct VoiceToolsTests {
         let undo = try #require(bench.app.store.undoManager)
         bench.app.store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
+        let mark = bench.app.store.historyMark
         _ = bench.box.setText(element: "E2", text: "Continue")
         _ = bench.box.alignElement(element: "E3", alignment: "centre")
-        // Nothing can be undone piecemeal while the command is still under way.
-        #expect(!undo.canUndo)
+        // Nothing is a step of its own while the command is still under way: it is one
+        // step from its first change, which undo would take back whole.
+        #expect(bench.app.store.historyMark == mark)
         bench.app.store.endHeldEdit()
         #expect(bench.app.store.content != before)
         undo.undo()
@@ -791,13 +848,14 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
+        let mark = store.historyMark
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
         store.endHeldEdit()
         store.update(image) { $0.frame.origin.x = 60 }
         store.update(image) { $0.frame.origin.x = 80 }
         // No move is a step of its own while the finger is still down.
-        #expect(!undo.canUndo)
+        #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
         #expect(store.content == before)
@@ -812,11 +870,12 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
+        let mark = store.historyMark
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         store.update(image) { $0.frame.origin.x = 60 }
-        #expect(!undo.canUndo)
+        #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
         #expect(store.content == before)
@@ -860,11 +919,11 @@ struct VoiceToolsTests {
         store.beginHeldEdit()
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
+        let mark = store.historyMark
         store.endEdit()
-        #expect(!undo.canUndo)
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        #expect(undo.canUndo)
+        #expect(store.historyMark == mark, "the drag and the command are the command's one step")
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)

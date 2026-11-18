@@ -205,9 +205,202 @@ that was wrong:
 - **Something loose on the canvas was picked for a command about the screen in view**:
   "make the width 50%" resized a sticky note.
 
+## Prompt order (2026-11-18)
+
+**Not kept.** Moving the canvas into the prompt makes an edit about 0.7 s quicker. In
+every form tried, though, commands in a row went wrong in ways the canvas in the
+instructions doesn't. The worst was "turn the toggle off", which deleted the toggle. The
+app keeps the canvas in the instructions. The first pass is below, then the round that
+tried to fix what it showed.
+
+**What was tried.** The on-device profile puts the canvas between the rules and the
+tools: `Instructions(VoiceRules.compact)`, then `CanvasBrief`, then the tools. The canvas
+changes with nearly every command, so the model can keep only the rules from one
+command to the next and reads the tools again each time. The change moved the canvas
+for the on-device profile to the head of each command's prompt ("The canvas now: … The
+command: …"), so the rules and the tools stayed the same. Hosted profiles were unchanged.
+
+**How it was measured.** On this Mac, macOS 27.2, with the harness's new `latency` mode
+(`Tools/VoiceBenchmarkHarness/run.sh latency 6`). One session per call, set up as the
+app's on-device profile: the compact rules, 18 tools, the last two commands, greedy,
+200 tokens to answer in. Each call is warmed with `prewarm()` as a call starts, waits
+4 s, then runs eight edits in a row on the one-screen canvas, 1.5 s apart. The recorder
+changes the canvas as the app would (a look, words, a size, a copy), so each command
+after the first sees a changed canvas. Times are from the command to the first tool,
+from the last tool to the model's last word (its "Done"), and the whole. Six calls in
+each order, the order going first rotating from run to run. Accuracy is the existing
+64 commands, run twice in each order (`baseline` and `canvasfirst`); greedy, so the two
+runs gave the same answers.
+
+A third order was tried: canvas in the prompt, with `prewarm(promptPrefix:)` reading
+the starting canvas ahead too. It was slower everywhere, so it isn't used.
+
+The canvas was not tried after the tools, in the instructions. A profile's instructions
+are one transcript entry, its text first and the tool definitions after it
+(`Transcript.Instructions(segments:toolDefinitions:)`), so an instruction can't be put
+after the tools. The first place after them is the prompt.
+
+**Latency**, median (min–max), seconds:
+
+| | Canvas in instructions | Canvas in prompt | Change | Canvas in prompt, warmed with it |
+|---|---|---|---|---|
+| Edit, whole (42 per order) | 2.67 (2.39–2.74) | 1.91 (1.61–2.08) | −28% | 2.69 (1.83–2.84) |
+| Edit, to the first tool | 2.22 (1.99–2.30) | 1.50 (1.22–1.65) | −32% | 2.06 (1.22–2.18) |
+| First command after warming, whole (6) | 1.36 (1.33–1.38) | 1.72 (1.69–1.73) | +26% | 2.57 (2.54–2.68) |
+| First command, to the first tool | 0.94 (0.92–0.96) | 1.30 (1.29–1.33) | +38% | 2.01 (2.00–2.12) |
+| "Done", last tool to last word (48) | 0.44 (0.38–0.47) | 0.42 (0.39–0.49) | none | 0.63 (0.54–0.78) |
+
+Each call's median edit was within 0.06 s of the others in the same order. An earlier
+pass of six calls in two orders, the canvas in the instructions against the canvas in
+the prompt warmed with it (its raw output labels the second "prompt"), gave the same
+numbers for both: 2.67 and 1.36 s for the first, 2.72 and 2.59 s for the second.
+
+- An edit is about **0.75 s quicker**. It is the larger part of a call: every command
+  after the first.
+- The **first command is 0.35 s slower**. Before, the warm-up read the whole profile,
+  canvas included, and the first command found it all read if the canvas hadn't changed.
+  Now its canvas is read with the command. Over a call of more than one command the
+  change still saves time.
+- **"Done" is unchanged.** On-device, the canvas is not told again between steps (see
+  "On an iPad"), so this step already found everything read.
+
+**Accuracy**, right tool and right arguments:
+
+| Group | Canvas in instructions | Canvas in prompt |
+|---|---|---|
+| Tuned on | 27 of 30 | 29 of 30 |
+| Held back | 5 of 8 | 5 of 8 |
+| Fresh | 7 of 12 | 8 of 12 |
+| Spoken to the iPad | 10 of 14 | 11 of 14 |
+| All | 49 of 64 | 53 of 64 |
+| Commands where more than one tool was called | 3 | 6 |
+
+The baseline is lower than the 2026-11-18 table above: there are now 18 tools (2,140
+tokens) where there were 17, and three more commands from the iPad. Four more right is
+within the noise of commands this few, so the change is not counted as more accurate,
+only as not less. What it did differently: it ended the call on "That's all, thanks",
+took "the name" as the title, and wrote the text colour as `text red` and not `red, text
+red`. Against that, on things that aren't there ("the slider", "the dropdown", "the
+checkbox") it now strings several tools together, such as `show`, then `placeElement`,
+then a resize, where before it called one wrong tool or a delete the app refused.
+
+In the calls of eight commands in a row, where earlier commands and their canvases are
+in the conversation, the canvas in the instructions got all eight right every time. With
+the canvas in the prompt, seven: "Change the title's text colour to blue", the last of
+the eight, reworded the title to "Welcome back blue" in all six calls. On its own, in the
+64, the same command was right in both orders. "Make the title red" became `text red`
+rather than `red`; for a title that is the same thing.
+
+After the first pass the change was kept, then reviewed. The review asked for more
+commands in a row and for fixes to what they showed.
+
+### Fix round 1
+
+**What was added to the harness.** Three sequences of eight commands, graded by the
+same `Case.isRight` as the single commands, not by eye:
+
+- **Edits:** the eight above.
+- **Screens:** three screens; moving between them changes which one is in view and so
+  what the canvas lists; a slider that isn't there; a rename.
+- **Views:** zoom in and out, which leave the canvas as it is; a rename; a correction,
+  "No, make the button bigger instead"; and a checkbox that isn't there. As in the app,
+  the correction undoes the last change first and the model is told so.
+
+The recorder now also deletes, renames and shows as the app would. A call that a build
+or test run (`xcodebuild`) overlapped is thrown away and run again. Another agent was
+testing on the simulator during these runs, and seven calls were run again for it.
+
+**The forms tried** (`PromptForm` in the harness):
+
+| Form | What the prompt is |
+|---|---|
+| instructions | The canvas in the instructions; the prompt is the command. As the app has it. |
+| plain | The first pass: "The canvas now:\n…\n\nThe command: …" |
+| quoted | "The canvas now (for reference only):\n…", then the app's notes, then `The person said: "…"`. Older prompts lose their canvas (`historyTransform`). |
+| quotedkeep | As quoted, but older prompts keep their canvas. |
+| commandfirst | The person's words in quotes, then the canvas. Older prompts lose theirs. |
+| quotedrule | As quoted, with the note "(Act only on what the canvas lists. If they name something it doesn't list, call no tool and say it isn't there.)" before the words. |
+| quotedonly | As quoted, with the canvas headed "Only what is listed here exists". |
+
+Each form ran in two calls of each sequence. Greedy answers were the same in both runs
+of every form. The 64 single commands ran once each.
+
+**Edits in a row** (the first sequence, after its first command), median (min–max), s:
+
+| Form | Edit | To the first tool | First command | "Done" |
+|---|---|---|---|---|
+| instructions | 2.66 (2.43–2.73) | 2.24 | 1.34 | 0.47 |
+| plain | 1.93 (1.64–2.11) | 1.51 | 1.73 | 0.50 |
+| quoted | 2.03 (1.87–2.17) | 1.44 | 1.83 | 0.57 |
+| quotedkeep | 2.14 (1.77–2.31) | 1.55 | 1.84 | 0.58 |
+| commandfirst | 2.05 (1.92–2.18) | 1.46 | 2.00 | 0.59 |
+| quotedrule | 2.14 (1.97–2.38) | 1.54 | 1.87 | 0.60 |
+| quotedonly | 2.00 (1.95–2.18) | 1.46 | 1.85 | 0.46 |
+
+The instructions form measured 2.68 in a second batch run alongside the last two forms.
+
+**Right, in a row** (of 8, the same in both runs):
+
+| Form | Edits | Screens | Views | All | What went wrong |
+|---|---|---|---|---|---|
+| instructions | 8 | 7 | 7 | 22/24 | Slider: `pan right`. Checkbox: `styleElement` on "checkbox", which isn't a handle, so the app refuses it. Neither changes the design. |
+| plain | 7 | 6 | 8 | 21/24 | Text colour reworded the title. **Toggle deleted.** Slider resized the avatar. |
+| quoted | 8 | 6 | 7 | 21/24 | **Toggle deleted.** Slider made a new screen and added to it. Checkbox: a delete of E4, which isn't there, refused. |
+| quotedkeep | 8 | 6 | 8 | 22/24 | **Toggle deleted.** Slider resized the avatar. |
+| commandfirst | 8 | 5 | 7 | 20/24 | **Toggle and the log out button deleted.** Slider and checkbox changed the button. |
+| quotedrule | 7 | 6 | 7 | 20/24 | Text colour reworded the title. Slider resized the avatar. Renamed the wrong screen. Checkbox: stacked the three elements. |
+| quotedonly | 8 | 6 | 8 | 22/24 | **Toggle deleted.** Slider made a new screen. |
+
+**The 64 single commands**, right tool and arguments:
+
+| Form | Tuned on | Held back | Fresh | iPad | All | More than one tool |
+|---|---|---|---|---|---|---|
+| instructions | 27 | 5 | 7 | 10 | 49 | 3 |
+| plain | 29 | 5 | 8 | 11 | 53 | 6 |
+| quoted | 29 | 4 | 9 | 10 | 52 | 7 |
+| commandfirst | 28 | 4 | 8 | 9 | 49 | 5 |
+| quotedrule | 29 | 6 | 9 | 11 | 55 | 4 |
+| quotedonly | 29 | 4 | 9 | 10 | 52 | 6 |
+
+**Things that aren't there**, on their own: what each form did, and what the app would
+then do. In the app, a handle that doesn't exist and a delete whose word doesn't fit are
+both refused.
+
+| Command | instructions | plain | quoted | quotedrule | quotedonly | commandfirst |
+|---|---|---|---|---|---|---|
+| Make the dropdown bigger | Delete of the button, refused: **nothing** | Moves and resizes the button | Moves and resizes the button | No tool, says so: **nothing** | Delete refused: **nothing** | Restyles the button |
+| Make the checkbox blue | Show and delete of E4, which isn't there: **nothing** | Place and restyle E4: **nothing** | **Deletes the sign in button** | Restyles the image | Adds a checkbox | Restyles the button |
+| Make the slider wider | Resizes the image | Moves and resizes the image | Moves and resizes the button | Shows the screen: **nothing** | Moves and resizes the button | Resizes the button |
+| Make the map taller | Zooms in: **nothing** | Zooms in: **nothing** | Resizes the image | Resizes the image | Resizes the image | Resizes two elements |
+
+**What it comes to.**
+
+- Every form with the canvas in the prompt is 0.6–0.7 s quicker per edit. The first
+  command is 0.4–0.7 s slower.
+- None keeps the instructions form's behaviour in a row.
+  - Five of the six delete the toggle when asked to turn it off, after "show me the
+    settings screen". The instructions form never did.
+  - quotedrule doesn't delete the toggle, but it is the worst of all in a row: the
+    reworded title is back, and it renames the wrong screen.
+- On their own, quotedrule scores best (55 of 64) and turns down the dropdown and the
+  slider. It still restyles the image for the checkbox.
+- Quoting the person's words and taking old canvases out of the history fixed the
+  reworded title in a row; the absent things were still acted on.
+- The reworded title is borderline rather than settled. The plain form reworded it in
+  every clean call, 6 of 6 and then 2 of 2. It got it right once, in a call a build
+  overlapped and that was then thrown away. Greedy answers seem to depend on the state
+  the model was left in, not only on the words.
+
+**Not kept.** The canvas stays in the instructions. Speed would be bought with real
+edits nobody asked for, the deleted toggle above all. Reading the tools again each
+command costs about 0.7 s per edit, and it stays. Two ways back to this:
+
+- Guards in the app: refuse a delete unless the command has a word for removing in it
+  (already noted above), and refuse tools for a kind of thing the canvas doesn't have.
+- Rules that hold with the canvas in the prompt, tuned on commands kept apart from these.
+
 ## Not measured here
 
 - Speech, on the Mac. The commands there were typed, so mishearing is not in its numbers.
 - The app carrying the commands out. That is covered by the app's own tests, with a
   scripted model, and by the live run in [voice-agent.md](voice-agent.md).
-- Commands in a row. Each command here started a new conversation.

@@ -31,7 +31,12 @@ struct StylePanel: View {
             .overlay { ScrubberOverlay() }
             .background { PencilBridge(scrubber: scrubber) }
             .coordinateSpace(.named(Scrubber.space))
-            .onPencilSqueeze { scrubber.squeeze($0) }
+            .onPencilSqueeze { phase in
+                // A squeeze that sends what the pencil is listening for isn't one for the
+                // ruler, even when the pen has drifted over a field.
+                if case .active = phase, model.pencilVoice.ownsSqueeze, scrubber.target == nil { return }
+                scrubber.squeeze(phase)
+            }
             .environment(scrubber)
             .onAppear {
                 // A scrub undoes as one step, however long it takes.

@@ -460,3 +460,172 @@ struct TurnedDrawingTests {
         #expect(redrawn.count == 2)
     }
 }
+
+/// The Magic Pen's canvas stops taking the Pencil mid-stroke when Draw goes off, by a
+/// palette flick, a call or a spoken command. PencilKit may never say that stroke ended,
+/// and while the pen was thought down nothing was read again (C-M5).
+@Suite("The Magic Pen put away mid-stroke")
+@MainActor
+struct MagicPenPutAwayTests {
+    @Test func thePenIsUpOnceItsCanvasStopsTakingIt() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        coordinator.apply(.draw)
+        coordinator.canvasViewDidBeginUsingTool(coordinator.sketchCanvas)
+        #expect(model.isPenDown)
+
+        coordinator.apply(.select)
+        #expect(!model.isPenDown)
+        // And the end, if it does come, changes nothing.
+        coordinator.canvasViewDidEndUsingTool(coordinator.sketchCanvas)
+        #expect(!model.isPenDown)
+    }
+}
+
+/// One use of a tool on the document canvas, a pen stroke or a rub of the eraser, is
+/// followed at its first change and then once more when it ends: the eraser changes the strokes many times on the way, and
+/// each change wrote the whole drawing out again (C-M6).
+@Suite("Ink followed once a tool is put down")
+@MainActor
+struct InkFollowedAtTheEndTests {
+    @Test func changesDuringAToolUseAreFollowedWhenItEnds() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        let mark = model.store.historyMark
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        // The first change is followed at once, for the use's step; the rest wait.
+        #expect(model.store.floating.first?.element.strokeCount == 1, "followed once more only when the tool is put down")
+
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        #expect(model.store.floating.count == 1)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        #expect(model.store.historyMark == mark + 1)
+    }
+
+    /// The design changing mid-use (a spoken command, say) shows its drawings on the canvas:
+    /// the ink not yet followed is followed first, not drawn over.
+    @Test func inkNotYetFollowedIsKeptWhenTheDesignChangesMidUse() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: cross(at: CGPoint(x: 100, y: 100)))
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+
+        model.store.addScreen(from: CGRect(x: 600, y: 100, width: 200, height: 400))
+        #expect(coordinator.documentCanvas.drawing.strokes.count == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+    }
+
+    /// The design closes, or the app goes, mid-stroke: the tool's end may never be heard.
+    @Test func inkNotYetFollowedGoesIntoTheDesignWhenItCloses() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: cross(at: CGPoint(x: 100, y: 100)))
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+
+        model.close()
+        #expect(model.document.current.content.floating.first?.element.strokeCount == 2)
+    }
+
+    /// Undo pressed mid-rub takes back the rub so far, and only that, as it did when every
+    /// change was followed at once. The ink waiting was dropped, and undo took back the
+    /// step before instead.
+    @Test func undoMidUseTakesBackTheToolUseSoFar() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.documentCanvas.documentUndoManager = undo
+        coordinator.watchHistory(undo)
+        defer { coordinator.stopWatchingHistory() }
+        model.store.addScreen(from: CGRect(x: 600, y: 100, width: 200, height: 400))
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: cross(at: CGPoint(x: 100, y: 100)))
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        undo.undo()
+
+        #expect(model.store.screens.count == 1, "the screen added before stays")
+        #expect(model.store.floating.isEmpty)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+    }
+
+    /// Undo mid-rub takes back the whole rub so far, and redo puts all of it back.
+    @Test func redoAfterUndoMidUsePutsBackEverything() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.documentCanvas.documentUndoManager = undo
+        coordinator.watchHistory(undo)
+        defer { coordinator.stopWatchingHistory() }
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+        undo.redo()
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+    }
+
+    /// Undo mid-use opens a fresh edit with no step in the history yet. Ink drawn after it
+    /// and not yet followed can't join a step as redo begins: registered then, it would be
+    /// taken for redo's own. It is dropped, and redo puts back what undo took (final fix 14).
+    @Test func inkAfterAnUndoMidUseIsNotTakenForRedosStep() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.documentCanvas.documentUndoManager = undo
+        coordinator.watchHistory(undo)
+        defer { coordinator.stopWatchingHistory() }
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+        #expect(model.store.isEditing && !model.store.editIsInHistory)
+
+        // Still in use: more ink, waiting to be followed, and then redo.
+        let later = cross(at: CGPoint(x: 600, y: 600))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: later)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        undo.redo()
+        #expect(model.store.floating.count == 1)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        // Undo once more takes back the use, and nothing else is left in the history.
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+    }
+}
+

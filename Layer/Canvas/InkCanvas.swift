@@ -120,6 +120,7 @@ struct InkCanvas: UIViewRepresentable {
 
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.documentCanvas.documentUndoManager = undoManager
+        context.coordinator.watchHistory(undoManager)
         context.coordinator.apply(tool)
         context.coordinator.setLocked(isLocked)
         context.coordinator.setHidesPalette(hidesPalette)
@@ -130,6 +131,8 @@ struct InkCanvas: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.flushPendingInk()
+        coordinator.stopWatchingHistory()
         coordinator.hidePalette()
     }
 
@@ -181,6 +184,12 @@ struct InkCanvas: UIViewRepresentable {
         /// True while the document canvas is being set from the design, which is not a
         /// change for the design to follow.
         private var isShowingDrawings = false
+        /// Each stroke on the document canvas with the area it covers, for finding the ink
+        /// under the Pencil as it hovers. Worked out once after the strokes change, rather
+        /// than for every stroke on every hover event.
+        private var inkAreas: [(stroke: PKStroke, area: CGRect)]?
+        /// Whether the Magic Pen is drawing a stroke on the sketch canvas.
+        private var isSketchPenDown = false
 
         var canvases: [PKCanvasView] { [documentCanvas, sketchCanvas] }
 
@@ -237,7 +246,7 @@ struct InkCanvas: UIViewRepresentable {
             box.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             pencilDetector.onPencil = { [weak self] touch in
                 guard let self, let container = documentCanvas.superview else { return }
-                model.pencilTouched(at: touch.location(in: container))
+                model.pencilTouched(at: touch.location(in: container), elsewhere: Self.isInAnotherPresentation(touch.view, than: container))
             }
             model.restingFingers = { [weak self] in
                 guard let self, let container = documentCanvas.superview else { return [] }
@@ -280,6 +289,12 @@ struct InkCanvas: UIViewRepresentable {
             // With the lasso in hand a loop selects things here, rather than strokes in PencilKit.
             let isLasso = isDrawing && palette.selectedToolItem is PKToolPickerLassoItem
             sketchCanvas.isUserInteractionEnabled = isDrawing && isMagicPen
+            // Put away mid-stroke, the canvas may never say the stroke ended; until it is
+            // up, the pen is thought down and nothing is read.
+            if !sketchCanvas.isUserInteractionEnabled, isSketchPenDown {
+                isSketchPenDown = false
+                model.penUp()
+            }
             // The Magic Pen's canvas is put away while it isn't in use and holds nothing, so
             // PencilKit doesn't keep tiling and scrolling a second canvas the size of the board.
             let showsSketch = (isDrawing && isMagicPen) || !sketchCanvas.drawing.strokes.isEmpty
@@ -292,6 +307,11 @@ struct InkCanvas: UIViewRepresentable {
                 sketchCanvas.isHidden = !showsSketch
             }
             documentCanvas.isDrawingEnabled = isDrawing && !isLasso
+            // Put away mid-use, the tool's changes so far are followed now.
+            if !documentCanvas.isDrawingEnabled, isUsingDocumentTool {
+                isUsingDocumentTool = false
+                followInkNotYetFollowed()
+            }
             // With the palette up, a finger that doesn't draw taps to select. The Pencil's
             // taps are its own: dots and strokes.
             tap.isEnabled = !isDrawing || !fingerDraws
@@ -542,9 +562,83 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
                 model.sketchChanged(sketch())
-            } else if !isShowingDrawings {
-                followInk()
+                return
             }
+            inkAreas = nil
+            guard !isShowingDrawings else { return }
+            // While a tool is in use, its changes are followed once it is put down: the
+            // eraser changes the strokes many times in one rub, and each change wrote the
+            // whole drawing out again. PencilKit always says when a tool use ends.
+            // The first change of a use is followed at once, which puts the use's step in
+            // the history: undo pressed mid-use then takes back the use so far, as it did when
+            // every change was followed, and not the step before.
+            if isUsingDocumentTool, hasFollowedThisUse {
+                hasInkToFollow = true
+                return
+            }
+            if isUsingDocumentTool { hasFollowedThisUse = true }
+            followInk()
+        }
+
+        /// Whether the tool in use has had a change followed yet.
+        private var hasFollowedThisUse = false
+
+        /// Whether a pen or the eraser is in use on the document canvas, and whether it has
+        /// changed the strokes yet.
+        private var isUsingDocumentTool = false
+        private var hasInkToFollow = false
+
+        /// Follows the ink a tool in use has changed, now rather than when it is put down.
+        /// Not while the design is being put back by undo or redo, which drops it as it begins
+        /// (see `watchHistory`).
+        private func followInkNotYetFollowed() {
+            guard hasInkToFollow else { return }
+            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
+            hasInkToFollow = false
+            followInk()
+        }
+
+        /// Puts ink a tool in use has changed into the design now: the design is closing, or
+        /// the app is leaving the screen, and may not be back to hear the tool put down.
+        func flushPendingInk() {
+            followInkNotYetFollowed()
+        }
+
+        /// The document's history, watched so that the ink not yet followed goes into the
+        /// use's step as an undo or redo begins: undo then takes back the whole use so far,
+        /// and redo puts all of it back. Dropped instead, redo lost the rubbing out.
+        private var watchedHistory: UndoManager?
+        private var historyObservers: [NSObjectProtocol] = []
+
+        func watchHistory(_ history: UndoManager?) {
+            guard history !== watchedHistory else { return }
+            stopWatchingHistory()
+            watchedHistory = history
+            guard let history else { return }
+            historyObservers = [Notification.Name.NSUndoManagerWillUndoChange, .NSUndoManagerWillRedoChange].map { name in
+                NotificationCenter.default.addObserver(forName: name, object: history, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.followBeforeHistoryMoves() }
+                }
+            }
+        }
+
+        /// Undo or redo is about to begin. The history already says it is undoing by then, so
+        /// `followInk` would skip the ink. It can still join the use's step, which is in the
+        /// history since the use's first change and registers nothing more: the canvas still
+        /// holds what the tool did, not yet what undo puts back. Without that step (an edit
+        /// not open, or no change followed yet), registering now would be taken for undo's
+        /// own, so the ink is dropped, as part of what undo takes back.
+        private func followBeforeHistoryMoves() {
+            guard hasInkToFollow else { return }
+            hasInkToFollow = false
+            guard hasFollowedThisUse, model.store.editIsInHistory else { return }
+            followInk(evenWhileTheHistoryMoves: true)
+        }
+
+        func stopWatchingHistory() {
+            for observer in historyObservers { NotificationCenter.default.removeObserver(observer) }
+            historyObservers = []
+            watchedHistory = nil
         }
 
         // MARK: The design's drawings
@@ -553,18 +647,22 @@ struct InkCanvas: UIViewRepresentable {
         /// when a design opens, and after a drawing is moved, resized, locked, hidden or
         /// deleted, or put back by undo.
         func showDrawings() {
+            // The design changed while a tool is in use (a spoken command, say): what the tool
+            // has done so far is followed first, not drawn over.
+            followInkNotYetFollowed()
             guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
             isShowingDrawings = true
             defer { isShowingDrawings = false }
             documentCanvas.drawing = PKDrawing(strokes: strokes)
+            inkAreas = nil
         }
 
         /// The strokes on the document canvas changed, drawn, erased or moved with
         /// PencilKit's tools or put there from here: the design's drawings change to
         /// match, which is the step that undo takes back.
-        private func followInk() {
+        private func followInk(evenWhileTheHistoryMoves: Bool = false) {
             // While the design is being put back by undo or redo it is the one to follow.
-            if let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
+            if !evenWhileTheHistoryMoves, let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
             model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
             // PencilKit's own record of the change is not the one that is kept.
@@ -574,18 +672,24 @@ struct InkCanvas: UIViewRepresentable {
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
             if canvasView === sketchCanvas {
+                isSketchPenDown = true
                 model.penDown()
             } else {
                 // One use of a tool is one undo step, however many times it changes the
                 // strokes on the way, as rubbing out does.
+                isUsingDocumentTool = true
+                hasFollowedThisUse = false
                 model.store.beginEdit()
             }
         }
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             if canvasView === sketchCanvas {
+                isSketchPenDown = false
                 model.penUp()
             } else {
+                isUsingDocumentTool = false
+                followInkNotYetFollowed()
                 model.store.endEdit()
             }
         }
@@ -647,19 +751,36 @@ struct InkCanvas: UIViewRepresentable {
             gestureRecognizer === lasso && canvases.contains { other === $0.panGestureRecognizer || other === $0.pinchGestureRecognizer }
         }
 
+        /// Whether a view the Pencil touched is in a presentation of its own over the canvas,
+        /// such as a panel's sheet, a popover or an alert, rather than on the canvas or the
+        /// controls laid over it. The detector is on the window, which they share; what is
+        /// presented sits in its own branch under the window, apart from the canvas's.
+        static func isInAnotherPresentation(_ touched: UIView?, than canvas: UIView) -> Bool {
+            guard let touched, let window = canvas.window, touched.window === window else { return false }
+            func branch(of view: UIView) -> UIView? {
+                var view = view
+                while let parent = view.superview, parent !== window { view = parent }
+                return view.superview === window ? view : nil
+            }
+            guard let canvasBranch = branch(of: canvas) else { return false }
+            return branch(of: touched) !== canvasBranch
+        }
+
         // MARK: Picking and changing ink
 
         /// The drawing with ink under a canvas point, among those on the document
         /// canvas. Nil if there is no ink at the point.
         func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
-            let hit = documentCanvas.drawing.strokes.last { stroke in
-                guard stroke.renderBounds.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
+            let areas = inkAreas ?? documentCanvas.drawing.strokes.map { ($0, $0.renderBounds) }
+            inkAreas = areas
+            let hit = areas.last { stroke, area in
+                guard area.insetBy(dx: -tolerance, dy: -tolerance).contains(point) else { return false }
                 return stroke.path.interpolatedPoints(by: .distance(4)).contains { sample in
                     let location = sample.location.applying(stroke.transform)
                     return hypot(location.x - point.x, location.y - point.y) <= tolerance + max(sample.size.width, sample.size.height) / 2
                 }
             }
-            return hit.flatMap { drawings.drawing(owning: $0.key) }
+            return hit.flatMap { drawings.drawing(owning: $0.stroke.key) }
         }
 
         /// The drawing that strokes with these keys ended up in, when they share one.
@@ -679,7 +800,12 @@ struct InkCanvas: UIViewRepresentable {
         /// Sets the strokes on the document canvas from here. The design's drawings
         /// change to match, and that change is what undo takes back.
         private func setDocumentDrawing(_ drawing: PKDrawing) {
+            // PencilKit tells its delegate of a drawing set in code too, which would follow
+            // the ink once there and again here.
+            isShowingDrawings = true
             documentCanvas.drawing = drawing
+            isShowingDrawings = false
+            inkAreas = nil
             followInk()
         }
 

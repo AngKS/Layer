@@ -80,9 +80,24 @@ struct DrawingSync {
         let held = Dictionary(current.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var placed: [Double: PKStroke] = [:]
         var order: [Double] = []
+        let wasShown = shown
+        let hadMarks = marks
         owner = [:]
         marks = [:]
         for drawing in drawings {
+            // A drawing shown as it is, its strokes all still on the canvas where they were
+            // put: kept as they are, without working them out again. Moving one drawing
+            // across a busy board used to redo every drawing's ink on every frame.
+            if wasShown[drawing.id] == wanted[drawing.id], let kept = hadMarks[drawing.id],
+               let strokes = Self.strokes(kept, in: held) {
+                for stroke in strokes {
+                    placed[stroke.key] = stroke
+                    order.append(stroke.key)
+                    owner[stroke.key] = drawing.id
+                }
+                marks[drawing.id] = kept
+                continue
+            }
             var drawingMarks: [Mark] = []
             for stroke in drawing.canvasStrokes {
                 // A stroke already on the canvas where it should be is kept as it is. One
@@ -101,6 +116,18 @@ struct DrawingSync {
         let staying = current.compactMap { placed[$0.key] }
         let stayingKeys = Set(staying.map(\.key))
         return staying + order.filter { !stayingKeys.contains($0) }.compactMap { placed[$0] }
+    }
+
+    /// The strokes on the canvas that a drawing's marks name, if they are all there as
+    /// marked.
+    private static func strokes(_ marks: [Mark], in held: [Double: PKStroke]) -> [PKStroke]? {
+        var strokes: [PKStroke] = []
+        strokes.reserveCapacity(marks.count)
+        for mark in marks {
+            guard let stroke = held[mark.key], Self.mark(stroke) == mark else { return nil }
+            strokes.append(stroke)
+        }
+        return strokes
     }
 
     /// What the design's drawings become now that the canvas holds `strokes`. A new

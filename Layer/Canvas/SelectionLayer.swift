@@ -22,18 +22,10 @@ struct SelectionLayer: View {
         let store = model.store
         let viewport = model.viewport
         ZStack(alignment: .topLeading) {
-            // What is selected and its size, for VoiceOver and automation rather than the eye.
-            if let summary = selectionSummary {
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .accessibilityElement()
-                    .accessibilityLabel("Selection")
-                    .accessibilityValue(summary)
-                    .accessibilityIdentifier("Selection")
-            }
+            SelectionSummary()
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
-                    .gesture(drags.moveScreen(screen, model: model), including: screen.isLocked == true ? .subviews : .all)
+                    .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
             }
             // Every element's target, laid out once in canvas points and moved as one by
             // the viewport. Panning changes a single transform rather than every target.
@@ -47,11 +39,11 @@ struct SelectionLayer: View {
             if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
                 dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
-                    .gesture(
-                        drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model,
-                                     apply: drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)),
-                        isEnabled: !selected.element.isLocked
-                    )
+                    .canvasDrag(drags, model: model, isEnabled: !selected.element.isLocked) { owner in
+                        drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model, owner: owner) {
+                            drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)
+                        }
+                    }
             }
 
             // Several things at once: each is outlined on its turned shape, any of them
@@ -64,7 +56,7 @@ struct SelectionLayer: View {
                     if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
                         dragArea(shape.rect, degrees: shape.degrees)
                             .onTapGesture { model.pick(thing) }
-                            .gesture(drags.moveSelection(model: model), isEnabled: !isLocked)
+                            .canvasDrag(drags, model: model, isEnabled: !isLocked) { drags.moveSelection(model: model, owner: $0) }
                     }
                 }
                 if model.isAdjusting {
@@ -115,6 +107,8 @@ struct SelectionLayer: View {
         }
         // A tick as a turn snaps to the 45s; none as it leaves.
         .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
+        // The model ends a drag left live: see `CanvasDrags.endAny`.
+        .onAppear { model.drags = drags }
     }
 
     /// How round a selected thing's corners are, in canvas points.
@@ -139,23 +133,6 @@ struct SelectionLayer: View {
             .rotationEffect(.degrees(shape.degrees))
             .position(x: outer.midX, y: outer.midY)
             .allowsHitTesting(false)
-    }
-
-    private var selectionSummary: String? {
-        if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
-            return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
-        }
-        if let selected = model.selectedElement {
-            if selected.element.kind == .drawing {
-                let strokes = selected.element.strokeCount
-                return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
-            }
-            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
-        }
-        if let screen = model.selectedScreen {
-            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
-        }
-        return nil
     }
 
     // MARK: Pieces
@@ -187,9 +164,13 @@ struct SelectionLayer: View {
             .frame(width: 36, height: 36)
             .contentShape(Rectangle())
             .position(point)
-            .gesture(drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model) { origin, translation in
-                (ElementLayout.resizedTurned(origin, degrees: element.resolvedRotation, from: corner, by: translation, kind: element.kind), [])
-            })
+            .canvasDrag(drags, model: model) { owner in
+                drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model, owner: owner) {
+                    { origin, translation in
+                        (ElementLayout.resizedTurned(origin, degrees: element.resolvedRotation, from: corner, by: translation, kind: element.kind), [])
+                    }
+                }
+            }
     }
 
     /// The selection's outline round a box, turned `degrees` about its centre.
@@ -206,26 +187,151 @@ struct SelectionLayer: View {
 }
 
 
+/// What is selected and its size, for VoiceOver and automation rather than the eye. A view
+/// of its own, so that it isn't worked out again on every frame of a pan, as the outlines are.
+private struct SelectionSummary: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let summary {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityLabel("Selection")
+                .accessibilityValue(summary)
+                .accessibilityIdentifier("Selection")
+        }
+    }
+
+    private var summary: String? {
+        if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
+            return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
+        }
+        if let selected = model.selectedElement {
+            if selected.element.kind == .drawing {
+                let strokes = selected.element.strokeCount
+                return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
+            }
+            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
+        }
+        if let screen = model.selectedScreen {
+            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
+        }
+        return nil
+    }
+}
+
 /// Where a drag on the canvas started, and what a dragged element has snapped to. Kept in
 /// an object of its own so that the element targets, which draw in a separate view, and the
 /// handles share one drag at a time.
+///
+/// SwiftUI doesn't call `onEnded` for a drag it cancels: when the view carrying it leaves
+/// mid-drag (the Pencil lands on what a finger is dragging, or a command changes the
+/// selection or the tool), or a system gesture takes the touch. Each view with a drag
+/// therefore has an `Owner`, and the drag under way is ended when its owner's gesture
+/// state resets or the view goes (see `canvasDrag`), or when a drag starts that isn't it.
 @MainActor @Observable
 final class CanvasDrags {
+    /// Moves a dragged element: from its frame as the drag began, by the translation in its
+    /// own points, to its new frame and the lines it snapped to.
+    typealias Rule = (_ origin: CGRect, _ translation: CGSize) -> (CGRect, [SnapGuide])
+
+    /// Stands for one view that carries a drag.
+    final class Owner {}
+
     /// The lines the dragged element has snapped to, and the placement of their points.
     var guides: [SnapGuide] = []
     var guidePlacement = Placement(origin: .zero, scale: 1)
+    /// The drag under way: whose it is, and where on the glass it began.
+    @ObservationIgnored private var session: (owner: Owner, start: CGPoint)?
     /// The frame an element had when the current drag began.
-    @ObservationIgnored var elementOrigin: CGRect?
-    @ObservationIgnored var screenOrigin: CGPoint?
+    @ObservationIgnored private(set) var elementOrigin: CGRect?
+    @ObservationIgnored private(set) var screenOrigin: CGPoint?
     /// Where each of several selected things was on the canvas when the drag that moves
     /// them all began.
-    @ObservationIgnored var groupOrigins: [CanvasSelection: CGRect]?
+    @ObservationIgnored private(set) var groupOrigins: [CanvasSelection: CGRect]?
+    /// How the dragged element moves, worked out as its drag begins rather than whenever
+    /// the targets are drawn.
+    @ObservationIgnored private var rule: Rule?
+
+    var isDragging: Bool { session != nil }
+
+    /// What the drag under way moves.
+    @ObservationIgnored private var dragged: [CanvasSelection] = []
+
+    /// Ends the drag under way, whoever's it is. A backstop for a cancel SwiftUI didn't
+    /// report: while a drag is live every other is ignored, so one left live would stop all
+    /// dragging. Called as the design closes and when the tool changes.
+    func endAny(model: AppModel) {
+        guard session != nil else { return }
+        endAbandoned(model: model)
+    }
+
+    /// Ends the drag under way if what it moves has been locked or taken away, by a spoken
+    /// command for instance: its gesture is disabled or its view gone, which may not be heard.
+    func endIfDraggedIsGone(model: AppModel) {
+        guard session != nil else { return }
+        let store = model.store
+        if dragged.contains(where: { store.canvasFrame(of: $0) == nil || store.isLocked($0) }) {
+            endAbandoned(model: model)
+        }
+    }
+
+    private enum Turn { case new, continuing, ignored }
+
+    /// Whether a drag is new, goes on, or is to be left alone. Another view's drag under way
+    /// is a second finger, and the new one is left alone: taking over, the two made every
+    /// frame a step. A drag SwiftUI cancelled has already been ended by its owner's gesture
+    /// state resetting, or its view going (see `canvasDrag`). A new touch on the same view
+    /// means the one before was cancelled: it is ended first, leaving nothing behind.
+    private func begins(_ owner: Owner, at start: CGPoint, model: AppModel) -> Turn {
+        if let session {
+            guard session.owner === owner else { return .ignored }
+            if session.start == start { return .continuing }
+            endAbandoned(model: model)
+        }
+        session = (owner, start)
+        return .new
+    }
+
+    /// Ends the drag under way where it is, if it is this owner's: SwiftUI cancelled it.
+    func cancel(_ owner: Owner, model: AppModel) {
+        guard session?.owner === owner else { return }
+        endAbandoned(model: model)
+    }
+
+    private func endAbandoned(model: AppModel) {
+        finish(model: model)
+        model.store.endEdit()
+    }
+
+    /// Whether `onEnded` belongs to the drag under way, or to the one just ended.
+    private func ends(_ owner: Owner) -> Bool {
+        session?.owner === owner || (session == nil && lastOwner === owner)
+    }
+
+    /// Whose the last drag was, after it ended: its `onEnded` may come after it was already
+    /// ended as cancelled. A second finger's drag, left alone, never was a drag here.
+    @ObservationIgnored private weak var lastOwner: Owner?
+
+    private func finish(model: AppModel) {
+        if let session { lastOwner = session.owner }
+        session = nil
+        dragged = []
+        elementOrigin = nil
+        screenOrigin = nil
+        groupOrigins = nil
+        rule = nil
+        if !guides.isEmpty { guides = [] }
+        model.isAdjusting = false
+    }
 
     /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
-    /// its neighbours, as the canvas is set up to do.
-    func moveRule(for element: DesignElement, placement: Placement, on screen: DesignScreen?, model: AppModel) -> (CGRect, CGSize) -> (CGRect, [SnapGuide]) {
+    /// its neighbours, as the canvas is set up to do. Worked out once, as the drag begins.
+    func moveRule(for element: DesignElement, placement: Placement, on screen: DesignScreen?, model: AppModel) -> Rule {
         let canvas = model.store.canvas
-        let zoom = model.viewport.scale
+        // Only the zoom: the viewport would make whatever builds this depend on panning too.
+        let zoom = model.zoomScale
         // What the element can line up with, in its own host's points.
         let others: [CGRect] = if let screen {
             screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
@@ -255,127 +361,189 @@ final class CanvasDrags {
 
     /// A drag that moves or resizes an element. The translation is measured against the
     /// window, which stays put while the element moves, and converted to the element's
-    /// own points.
+    /// own points. `rule` is asked for once, when the drag begins.
     func adjust(
         _ ref: DesignStore.ElementRef,
         from frame: CGRect,
         placement: Placement,
         findsNewHome: Bool,
         model: AppModel,
-        apply: @escaping (_ origin: CGRect, _ translation: CGSize) -> (CGRect, [SnapGuide])
+        owner: Owner,
+        rule: @escaping () -> Rule
     ) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
-                if elementOrigin == nil {
-                    model.store.beginEdit()
-                    model.selection = .element(ref)
-                    elementOrigin = frame
-                    model.isAdjusting = true
-                }
-                guard let elementOrigin else { return }
-                let scale = placement.scale * model.viewport.scale
-                let translation = CGSize(width: value.translation.width / scale, height: value.translation.height / scale)
-                let (frame, snappedTo) = apply(elementOrigin, translation)
-                if guides != snappedTo { guides = snappedTo }
-                guidePlacement = placement
-                model.store.update(ref) { $0.frame = frame }
+                moveElement(ref, from: frame, placement: placement, by: value.translation, startingAt: value.startLocation, owner: owner, model: model, rule: rule)
             }
             .onEnded { [self] _ in
-                elementOrigin = nil
-                guides = []
-                model.isAdjusting = false
-                if findsNewHome {
-                    // Dropped somewhere new, the element belongs to whatever it now lies on.
-                    model.selection = .element(model.store.rehost(ref))
-                }
-                model.store.endEdit()
+                dropElement(ref, findsNewHome: findsNewHome, owner: owner, model: model)
             }
+    }
+
+    func moveElement(
+        _ ref: DesignStore.ElementRef, from frame: CGRect, placement: Placement, by glassTranslation: CGSize,
+        startingAt start: CGPoint, owner: Owner, model: AppModel, rule makeRule: () -> Rule
+    ) {
+        let turn = begins(owner, at: start, model: model)
+        guard turn != .ignored else { return }
+        if turn == .new {
+            model.store.beginEdit()
+            dragged = [.element(ref)]
+            model.selection = .element(ref)
+            elementOrigin = frame
+            rule = makeRule()
+            model.isAdjusting = true
+        }
+        guard let elementOrigin, let rule else { return }
+        let scale = placement.scale * model.zoomScale
+        let translation = CGSize(width: glassTranslation.width / scale, height: glassTranslation.height / scale)
+        let (frame, snappedTo) = rule(elementOrigin, translation)
+        if guides != snappedTo { guides = snappedTo }
+        guidePlacement = placement
+        model.store.update(ref) { $0.frame = frame }
+    }
+
+    func dropElement(_ ref: DesignStore.ElementRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
+        guard ends(owner) else { return }
+        finish(model: model)
+        if findsNewHome {
+            // Dropped somewhere new, the element belongs to whatever it now lies on.
+            model.selection = .element(model.store.rehost(ref))
+        }
+        model.store.endEdit()
     }
 
     /// A drag that moves everything selected, each thing by the same distance across the
     /// canvas. Together they go to the grid's marks, or line up with what is around them,
     /// as one element does; and dropped, each element belongs to whatever it then lies on.
     /// What they have been turned about goes with them.
-    func moveSelection(model: AppModel) -> some Gesture {
+    func moveSelection(model: AppModel, owner: Owner) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
-                if groupOrigins == nil {
-                    model.store.beginEdit()
-                    model.selectionWillMove()
-                    var origins: [CanvasSelection: CGRect] = [:]
-                    for thing in model.selectedThings where !model.store.isLocked(thing) {
-                        origins[thing] = model.store.canvasFrame(of: thing)
-                    }
-                    groupOrigins = origins
-                    model.isAdjusting = true
-                }
-                guard let origins = groupOrigins,
-                      let area = origins.values.dropFirst().reduce(origins.values.first, { $0?.union($1) })
-                else { return }
-                let zoom = max(model.viewport.scale, 0.01)
-                var delta = CGSize(width: value.translation.width / zoom, height: value.translation.height / zoom)
-                let moved = area.offsetBy(dx: delta.width, dy: delta.height)
-                let canvas = model.store.canvas
-                var snappedTo: [SnapGuide] = []
-                if canvas.snapsToGrid, canvas.gridSpacing > 0 {
-                    delta.width += (moved.minX / canvas.gridSpacing).rounded() * canvas.gridSpacing - moved.minX
-                    delta.height += (moved.minY / canvas.gridSpacing).rounded() * canvas.gridSpacing - moved.minY
-                } else if canvas.snapsToGuides {
-                    let others = model.store.canvasFrames(besides: Set(origins.keys))
-                    let (snapped, lines) = ElementLayout.snapped(moved, to: others, in: nil, threshold: 6 / zoom)
-                    delta.width += snapped.minX - moved.minX
-                    delta.height += snapped.minY - moved.minY
-                    snappedTo = lines
-                }
-                if guides != snappedTo { guides = snappedTo }
-                // The lines are in canvas points, as the things lined up are.
-                guidePlacement = Placement(origin: .zero, scale: 1)
-                model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
-                model.selectionMoved(by: delta)
+                moveGroup(by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
             }
             .onEnded { [self] _ in
-                groupOrigins = nil
-                guides = []
-                model.isAdjusting = false
-                model.rehostSelection()
-                model.store.endEdit()
+                dropGroup(owner: owner, model: model)
             }
     }
 
-    func moveScreen(_ screen: DesignScreen, model: AppModel) -> some Gesture {
+    func moveGroup(by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
+        let turn = begins(owner, at: start, model: model)
+        guard turn != .ignored else { return }
+        if turn == .new {
+            model.store.beginEdit()
+            model.selectionWillMove()
+            var origins: [CanvasSelection: CGRect] = [:]
+            for thing in model.selectedThings where !model.store.isLocked(thing) {
+                origins[thing] = model.store.canvasFrame(of: thing)
+            }
+            groupOrigins = origins
+            dragged = Array(origins.keys)
+            model.isAdjusting = true
+        }
+        guard let origins = groupOrigins,
+              let area = origins.values.dropFirst().reduce(origins.values.first, { $0?.union($1) })
+        else { return }
+        let zoom = max(model.zoomScale, 0.01)
+        var delta = CGSize(width: translation.width / zoom, height: translation.height / zoom)
+        let moved = area.offsetBy(dx: delta.width, dy: delta.height)
+        let canvas = model.store.canvas
+        var snappedTo: [SnapGuide] = []
+        if canvas.snapsToGrid, canvas.gridSpacing > 0 {
+            delta.width += (moved.minX / canvas.gridSpacing).rounded() * canvas.gridSpacing - moved.minX
+            delta.height += (moved.minY / canvas.gridSpacing).rounded() * canvas.gridSpacing - moved.minY
+        } else if canvas.snapsToGuides {
+            let others = model.store.canvasFrames(besides: Set(origins.keys))
+            let (snapped, lines) = ElementLayout.snapped(moved, to: others, in: nil, threshold: 6 / zoom)
+            delta.width += snapped.minX - moved.minX
+            delta.height += snapped.minY - moved.minY
+            snappedTo = lines
+        }
+        if guides != snappedTo { guides = snappedTo }
+        // The lines are in canvas points, as the things lined up are.
+        guidePlacement = Placement(origin: .zero, scale: 1)
+        model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
+        model.selectionMoved(by: delta)
+    }
+
+    func dropGroup(owner: Owner, model: AppModel) {
+        guard ends(owner) else { return }
+        finish(model: model)
+        model.rehostSelection()
+        model.store.endEdit()
+    }
+
+    func moveScreen(_ screen: DesignScreen, model: AppModel, owner: Owner) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
-                if screenOrigin == nil {
-                    model.store.beginEdit()
-                    model.selection = .screen(screen.id)
-                    screenOrigin = screen.origin
-                    model.isAdjusting = true
-                }
-                guard let screenOrigin else { return }
-                let scale = model.viewport.scale
-                let canvas = model.store.canvas
-                var origin = CGPoint(
-                    x: (screenOrigin.x + value.translation.width / scale).rounded(),
-                    y: (screenOrigin.y + value.translation.height / scale).rounded()
-                )
-                if canvas.snapsToGrid, canvas.gridSpacing > 0 {
-                    origin.x = (origin.x / canvas.gridSpacing).rounded() * canvas.gridSpacing
-                    origin.y = (origin.y / canvas.gridSpacing).rounded() * canvas.gridSpacing
-                } else if canvas.snapsToGuides {
-                    // Screens line up with each other's edges, as frames do in Freeform.
-                    let others = model.store.screens.filter { $0.id != screen.id }.map(\.canvasFrame)
-                    let frame = CGRect(origin: origin, size: screen.canvasFrame.size)
-                    origin = ElementLayout.snapped(frame, to: others, in: nil, threshold: 8 / scale).frame.origin
-                }
-                model.store.updateScreen(screen.id) { $0.origin = origin }
+                moveScreen(screen, by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
             }
             .onEnded { [self] _ in
-                screenOrigin = nil
-                model.isAdjusting = false
-                model.store.endEdit()
+                dropScreen(owner: owner, model: model)
             }
     }
 
+    func moveScreen(_ screen: DesignScreen, by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
+        let turn = begins(owner, at: start, model: model)
+        guard turn != .ignored else { return }
+        if turn == .new {
+            model.store.beginEdit()
+            dragged = [.screen(screen.id)]
+            model.selection = .screen(screen.id)
+            screenOrigin = screen.origin
+            model.isAdjusting = true
+        }
+        guard let screenOrigin else { return }
+        let scale = model.zoomScale
+        let canvas = model.store.canvas
+        var origin = CGPoint(
+            x: (screenOrigin.x + translation.width / scale).rounded(),
+            y: (screenOrigin.y + translation.height / scale).rounded()
+        )
+        if canvas.snapsToGrid, canvas.gridSpacing > 0 {
+            origin.x = (origin.x / canvas.gridSpacing).rounded() * canvas.gridSpacing
+            origin.y = (origin.y / canvas.gridSpacing).rounded() * canvas.gridSpacing
+        } else if canvas.snapsToGuides {
+            // Screens line up with each other's edges, as frames do in Freeform.
+            let others = model.store.screens.filter { $0.id != screen.id }.map(\.canvasFrame)
+            let frame = CGRect(origin: origin, size: screen.canvasFrame.size)
+            origin = ElementLayout.snapped(frame, to: others, in: nil, threshold: 8 / scale).frame.origin
+        }
+        model.store.updateScreen(screen.id) { $0.origin = origin }
+    }
+
+    func dropScreen(owner: Owner, model: AppModel) {
+        guard ends(owner) else { return }
+        finish(model: model)
+        model.store.endEdit()
+    }
+}
+
+extension View {
+    /// Attaches one of the canvas's drags, made for this view's owner, and ends the drag
+    /// if SwiftUI cancels it: its gesture state resets without `onEnded`, or the view goes.
+    func canvasDrag<G: Gesture>(_ drags: CanvasDrags, model: AppModel, isEnabled: Bool = true, _ make: @escaping (CanvasDrags.Owner) -> G) -> some View {
+        modifier(CanvasDragModifier(drags: drags, model: model, isEnabled: isEnabled, make: make))
+    }
+}
+
+private struct CanvasDragModifier<G: Gesture>: ViewModifier {
+    let drags: CanvasDrags
+    let model: AppModel
+    let isEnabled: Bool
+    let make: (CanvasDrags.Owner) -> G
+    @State private var owner = CanvasDrags.Owner()
+    @GestureState private var isDragging = false
+
+    func body(content: Content) -> some View {
+        content
+            // Disabled, the drag gives way to the gestures inside, a tap to select for one.
+            .gesture(make(owner).updating($isDragging) { _, dragging, _ in dragging = true }, including: isEnabled ? .all : .subviews)
+            .onChange(of: isDragging) { _, dragging in
+                if !dragging { drags.cancel(owner, model: model) }
+            }
+            .onDisappear { drags.cancel(owner, model: model) }
+    }
 }
 
 /// The tap and drag target of every visible element, and of every screen's name, laid
@@ -394,7 +562,7 @@ private struct ElementTargets: View {
                 if store.canvas.showsFrameNames {
                     area(screen.labelFrame, minimum: minimum)
                         .onTapGesture { model.pick(.screen(screen.id)) }
-                        .gesture(drags.moveScreen(screen, model: model), including: screen.isLocked == true ? .subviews : .all)
+                        .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
                 }
                 ForEach(screen.elements.filter { !$0.isHidden }) { element in
                     target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen, minimum: minimum)
@@ -422,11 +590,11 @@ private struct ElementTargets: View {
     private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?, minimum: CGFloat) -> some View {
         area(placement.canvasRect(for: element.frame), degrees: element.resolvedRotation, minimum: minimum)
             .onTapGesture { model.pick(.element(ref)) }
-            .gesture(
-                drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: true, model: model,
-                             apply: drags.moveRule(for: element, placement: placement, on: screen, model: model)),
-                isEnabled: !element.isLocked
-            )
+            .canvasDrag(drags, model: model, isEnabled: !element.isLocked) { owner in
+                drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: true, model: model, owner: owner) {
+                    drags.moveRule(for: element, placement: placement, on: screen, model: model)
+                }
+            }
     }
 }
 
