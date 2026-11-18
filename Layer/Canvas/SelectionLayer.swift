@@ -7,8 +7,8 @@ import SwiftUI
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
 /// A drawing is an element, moved and resized like the rest: its ink goes with its frame.
 /// A selected element is outlined and handled on its turned box, and turned by its knob
-/// (`RotateKnob`). When several things are selected, each is outlined and dragging any one
-/// moves them all.
+/// (`RotateKnob`). When several things are selected, each is outlined, dragging any one
+/// moves them all, and the knob turns them all as one piece.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
 /// size at any zoom. Screens and drawings that aren't selected have no handle of their
@@ -54,14 +54,15 @@ struct SelectionLayer: View {
                     )
             }
 
-            // Several things at once: each is outlined, any of them drags them all, and a
-            // tap on one picks it out. They have no handles: together they aren't resized.
+            // Several things at once: each is outlined on its turned shape, any of them
+            // drags them all, and a tap on one picks it out. They have no handles: together
+            // they aren't resized, but they turn as one by the knob.
             if case .several = model.selection {
                 let things = model.selectedThings
                 let isLocked = model.isSelectionLocked
                 ForEach(things, id: \.self) { thing in
-                    if let frame = store.canvasFrame(of: thing) {
-                        dragArea(viewport.viewRect(for: frame))
+                    if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
+                        dragArea(shape.rect, degrees: shape.degrees)
                             .onTapGesture { model.pick(thing) }
                             .gesture(drags.moveSelection(model: model), isEnabled: !isLocked)
                     }
@@ -70,12 +71,12 @@ struct SelectionLayer: View {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
                 ForEach(things, id: \.self) { thing in
-                    if let frame = store.canvasFrame(of: thing) {
-                        outline(viewport.viewRect(for: frame), radius: cornerRadius(of: thing) * viewport.scale)
+                    if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
+                        outline(shape.rect, degrees: shape.degrees, radius: cornerRadius(of: thing) * viewport.scale)
                     }
                 }
-                if let area = model.selectionViewRect {
-                    groupOutline(area)
+                if let shape = model.selectionShape {
+                    groupOutline(viewport.viewShape(for: shape))
                 }
             }
 
@@ -128,12 +129,14 @@ struct SelectionLayer: View {
         }
     }
 
-    /// A light dashed box round everything selected, which shows several things as one selection.
-    private func groupOutline(_ rect: CGRect) -> some View {
-        let outer = rect.insetBy(dx: -9, dy: -9)
+    /// A light dashed box round everything selected, which shows several things as one
+    /// selection. It is turned as their outline is, and goes round with them as they turn.
+    private func groupOutline(_ shape: TurnedRect) -> some View {
+        let outer = shape.rect.insetBy(dx: -9, dy: -9)
         return RoundedRectangle(cornerRadius: 8, style: .continuous)
             .strokeBorder(Theme.accent.color.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             .frame(width: outer.width, height: outer.height)
+            .rotationEffect(.degrees(shape.degrees))
             .position(x: outer.midX, y: outer.midY)
             .allowsHitTesting(false)
     }
@@ -292,11 +295,13 @@ final class CanvasDrags {
     /// A drag that moves everything selected, each thing by the same distance across the
     /// canvas. Together they go to the grid's marks, or line up with what is around them,
     /// as one element does; and dropped, each element belongs to whatever it then lies on.
+    /// What they have been turned about goes with them.
     func moveSelection(model: AppModel) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
                 if groupOrigins == nil {
                     model.store.beginEdit()
+                    model.selectionWillMove()
                     var origins: [CanvasSelection: CGRect] = [:]
                     for thing in model.selectedThings where !model.store.isLocked(thing) {
                         origins[thing] = model.store.canvasFrame(of: thing)
@@ -326,6 +331,7 @@ final class CanvasDrags {
                 // The lines are in canvas points, as the things lined up are.
                 guidePlacement = Placement(origin: .zero, scale: 1)
                 model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
+                model.selectionMoved(by: delta)
             }
             .onEnded { [self] _ in
                 groupOrigins = nil

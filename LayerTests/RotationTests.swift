@@ -538,3 +538,273 @@ struct TurningOneElementTests {
         #expect(abs(rect.width - 30) < 0.01 && abs(rect.height - 168.5) < 0.01)
     }
 }
+
+/// An element's frame, in its host's points, and its angle, as the design keeps them.
+private struct Placed: Equatable {
+    var frame: CGRect
+    var rotation: Double?
+}
+
+private extension TurnBoard {
+    func placed(_ refs: [DesignStore.ElementRef]) -> [Placed?] {
+        refs.map { ref in store.resolve(ref).map { Placed(frame: $0.element.frame, rotation: $0.element.rotation) } }
+    }
+
+    /// The middle of an element on the canvas, which it turns about on its own.
+    func centre(of ref: DesignStore.ElementRef) -> CGPoint {
+        store.canvasShape(of: .element(ref))?.centre ?? CGPoint(x: CGFloat.nan, y: .nan)
+    }
+
+    /// An element's own frame on the canvas, before it is turned.
+    func canvasRect(_ ref: DesignStore.ElementRef) -> CGRect {
+        store.canvasShape(of: .element(ref))?.rect ?? .null
+    }
+
+    /// Selects several elements together, as a lasso round them would.
+    func select(_ refs: [DesignStore.ElementRef]) {
+        model.selection = CanvasSelection(refs.map { .element($0) })
+    }
+
+    /// One turn of the knob: taken hold of, turned through each angle in turn (each the
+    /// whole turn since it was taken hold of), and let go.
+    func knobTurn(_ angles: Double...) {
+        model.beginTurn()
+        for angle in angles { model.turnSelection(by: angle, snaps: true) }
+        model.endTurn()
+    }
+
+    /// A drawing on the open canvas off whole points: where it is doesn't survive the
+    /// arithmetic of being turned there and back unless it is put back exactly.
+    func addDrawing() -> DesignStore.ElementRef {
+        store.addFloating(element(.drawing, 612.37, 288.91, 87.13, 41.77), scale: 1)
+    }
+}
+
+private func isClose(_ a: CGPoint, _ b: CGPoint, within slack: CGFloat = 1) -> Bool {
+    abs(a.x - b.x) <= slack && abs(a.y - b.y) <= slack
+}
+
+@MainActor
+@Suite("Turning several things")
+struct TurningSeveralThingsTests {
+    @Test func turningSeveralThingsAndBackPutsEverythingExactlyWhereItWas() throws {
+        let board = TurnBoard()
+        // Two on the half-size screen, a note and a drawing on the open canvas.
+        let things = [board.title, board.button, board.note, board.addDrawing()]
+        board.select(things)
+        let before = board.placed(things)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 37, snaps: true)
+        for (ref, was) in zip(things, before) {
+            #expect(board.rotation(of: ref) == 37)
+            // Each has gone round the middle of them all, not stayed about its own.
+            #expect(board.placed([ref])[0]?.frame != was?.frame)
+        }
+        board.model.turnSelection(by: 0, snaps: true)
+        board.model.endTurn()
+        #expect(board.placed(things) == before)
+    }
+
+    @Test func manySmallTurnsDoNotDrift() {
+        let board = TurnBoard()
+        let things = [board.title, board.button, board.note, board.addDrawing()]
+        board.select(things)
+        let before = board.placed(things)
+        board.model.beginTurn()
+        for step in 1...90 { board.model.turnSelection(by: Double(step), snaps: true) }
+        board.model.endTurn()
+        #expect(things.allSatisfy { board.rotation(of: $0) == 90 })
+        for _ in 0..<3 { board.knobTurn(30) }
+        #expect(things.allSatisfy { board.rotation(of: $0) == 180 })
+        board.knobTurn(-180)
+        board.model.resetSelectionTurn()
+        #expect(board.placed(things) == before)
+    }
+
+    @Test func severalThingsTurnAboutTheMiddleOfTheirOutline() throws {
+        let board = TurnBoard()
+        // Two notes of different sizes, neither in the middle of the pair.
+        let other = board.store.addFloating(element(.stickyNote, 720, 330, 100, 60), scale: 1)
+        let things = [board.note, other]
+        board.select(things)
+        let outline = board.canvasFrame(board.note).union(board.canvasFrame(other))
+        let middle = CGPoint(x: outline.midX, y: outline.midY)
+        #expect(isClose(try #require(board.model.selectionShape).centre, middle, within: 0.001))
+        let centres = things.map(board.centre(of:))
+        board.knobTurn(180)
+        for (ref, centre) in zip(things, centres) {
+            #expect(board.rotation(of: ref) == 180)
+            #expect(isClose(board.centre(of: ref), CGPoint(x: 2 * middle.x - centre.x, y: 2 * middle.y - centre.y)))
+        }
+    }
+
+    @Test func aLockedMemberStaysWhileTheRestTurn() {
+        let board = TurnBoard()
+        board.store.update(board.note) { $0.isLocked = true }
+        board.select([board.title, board.button, board.note])
+        let note = board.placed([board.note])
+        // The note is far to the right: the middle the others turn about is pulled towards it.
+        let outline = board.canvasFrame(board.title).union(board.canvasFrame(board.button)).union(board.canvasFrame(board.note))
+        let pivot = CGPoint(x: outline.midX, y: outline.midY)
+        let turning = [board.title, board.button]
+        let centres = turning.map(board.centre(of:))
+        #expect(board.model.canTurnSelection)
+        board.knobTurn(50)
+        #expect(board.placed([board.note]) == note)
+        for (ref, centre) in zip(turning, centres) {
+            #expect(board.rotation(of: ref) == 50)
+            #expect(isClose(board.centre(of: ref), Rotation.rotate(centre, about: pivot, by: 50)))
+        }
+    }
+
+    @Test func turningNeverMovesAnElementOffItsScreen() throws {
+        let board = TurnBoard()
+        let far = board.store.addFloating(element(.stickyNote, 1200, 600, 140, 130), scale: 1)
+        board.select([board.button, far])
+        let outline = board.canvasFrame(board.button).union(board.canvasFrame(far))
+        let wanted = Rotation.rotate(board.centre(of: board.button), about: CGPoint(x: outline.midX, y: outline.midY), by: 90)
+        // A quarter turn swings the button's middle well off its screen.
+        let screen = try #require(board.store.screen(board.screen))
+        #expect(!screen.canvasFrame.contains(wanted))
+        board.knobTurn(90)
+        #expect(board.rotation(of: board.button) == 90)
+        #expect(isClose(board.centre(of: board.button), wanted))
+        // It still belongs to the screen, overhanging it.
+        #expect(board.store.element(board.button.element)?.parent == board.screen)
+        #expect(board.model.selection == CanvasSelection([.element(board.button), .element(far)]))
+    }
+
+    @Test func afterAMoveTheyTurnAboutTheirNewMiddle() throws {
+        let board = TurnBoard()
+        // Angles that differ, so that after the turn their outline, formed afresh, would be
+        // upright with another middle: only the pivot moved with them turns them back.
+        board.turn(board.note, to: 20)
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        let before = things.map(board.canvasRect)
+        board.knobTurn(30)
+        #expect(board.rotation(of: board.title) == 30 && board.rotation(of: board.note) == 50)
+
+        board.model.selectionWillMove()
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for ref in things {
+            let box = board.canvasFrame(ref)
+            origins[.element(ref)] = CGPoint(x: box.minX + 100, y: box.minY)
+        }
+        board.store.position(origins)
+        board.model.selectionMoved(by: CGSize(width: 100, height: 0))
+        #expect(board.model.selectionTurn == 30)
+
+        board.knobTurn(-30)
+        for (ref, was) in zip(things, before) {
+            let now = board.canvasRect(ref)
+            #expect(isClose(now.origin, CGPoint(x: was.minX + 100, y: was.minY)) && now.size == was.size)
+        }
+        #expect(board.rotation(of: board.title) == nil && board.rotation(of: board.button) == nil && board.rotation(of: board.note) == 20)
+    }
+
+    @Test func afterAMoveOffWholePointsTheyTurnBackOntoWholePoints() {
+        let board = TurnBoard()
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        let before = things.map(board.canvasRect)
+        board.knobTurn(30)
+        // A finger's drag is seldom a whole number of points.
+        let delta = CGSize(width: 33.3, height: 12.7)
+        board.model.selectionWillMove()
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for ref in things {
+            let box = board.canvasFrame(ref)
+            origins[.element(ref)] = CGPoint(x: box.minX + delta.width, y: box.minY + delta.height)
+        }
+        board.store.position(origins)
+        board.model.selectionMoved(by: delta)
+        board.knobTurn(-30)
+        for (ref, was) in zip(things, before) {
+            let frame = board.placed([ref])[0]?.frame ?? .null
+            // Back upright, each is on whole points of its own, as if it had been moved upright.
+            #expect(frame.minX == frame.minX.rounded() && frame.minY == frame.minY.rounded())
+            #expect(isClose(board.canvasRect(ref).origin, CGPoint(x: was.minX + delta.width, y: was.minY + delta.height)))
+        }
+    }
+
+    @Test func undoAfterATurnFormsTheNextTurnFromWhereThingsAre() {
+        let board = TurnBoard()
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        let before = board.placed(things)
+        board.knobTurn(40)
+        #expect(things.allSatisfy { board.rotation(of: $0) == 40 })
+        board.undo.undo()
+        #expect(board.placed(things) == before)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 0, snaps: true)
+        board.model.endTurn()
+        #expect(board.placed(things) == before)
+        #expect(board.model.selectionTurn == 0)
+    }
+
+    @Test func theKnobsDoubleTapReturnsEverythingToWhereTheSelectionFormed() {
+        let board = TurnBoard()
+        // One of them is turned already: it goes back to its own angle, not upright.
+        board.turn(board.note, to: 15)
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        let before = board.placed(things)
+        board.knobTurn(30)
+        board.knobTurn(20)
+        #expect(board.model.selectionTurn == 50)
+        #expect(things.map(board.rotation(of:)) == [50, 50, 65])
+        let turned = board.placed(things)
+        board.model.resetSelectionTurn()
+        #expect(board.placed(things) == before)
+        #expect(board.model.selectionTurn == 0)
+        board.undo.undo()
+        #expect(board.placed(things) == turned)
+    }
+
+    @Test func aSelectionWithAScreenCannotTurn() throws {
+        let board = TurnBoard()
+        let selection = CanvasSelection.several([.screen(board.screen), .element(board.note)])
+        #expect(TurnSession.form(for: selection, in: board.store) == nil)
+        board.model.selection = selection
+        let before = board.store.content
+        #expect(!board.model.canTurnSelection)
+        #expect(board.model.knobViewPoint == nil)
+        #expect(!board.model.beginTurn())
+        #expect(!board.model.turnSelection(by: 30, snaps: false))
+        board.model.endTurn()
+        board.model.rotateSelection(by: 15)
+        board.model.resetSelectionTurn()
+        #expect(board.store.content == before)
+        #expect(!board.store.isHoldingEdit)
+        // It is still outlined, upright, round everything in it.
+        let area = try #require(board.store.canvasFrame(of: selection))
+        #expect(board.model.selectionShape == TurnedRect(rect: area, degrees: 0))
+
+        // Without the screen, the same sort of selection turns.
+        board.select([board.title, board.note])
+        #expect(board.model.canTurnSelection)
+        #expect(board.model.knobViewPoint != nil)
+        #expect(board.model.beginTurn())
+        board.model.endTurn()
+    }
+
+    @Test func theOutlineTurnsWhenEveryMemberSharesAnAngle() throws {
+        let board = TurnBoard()
+        let other = board.store.addFloating(element(.stickyNote, 720, 330, 100, 60), scale: 1)
+        board.select([board.note, other])
+        let pivot = try #require(board.model.selectionShape).centre
+        board.knobTurn(30)
+        board.model.selection = nil
+        board.select([board.note, other])
+        let shape = try #require(board.model.selectionShape)
+        #expect(shape.degrees == 30)
+        #expect(isClose(shape.centre, pivot))
+        // Selected again, the selection has formed anew: its knob starts from 0.
+        #expect(board.model.selectionTurn == 0)
+        // Once their angles differ, the outline stands upright round them.
+        board.store.update(other) { $0.setRotation(45) }
+        #expect(try #require(board.model.selectionShape).degrees == 0)
+    }
+}

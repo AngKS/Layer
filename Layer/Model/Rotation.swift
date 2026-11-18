@@ -11,6 +11,12 @@ enum Rotation {
         return kept >= 360 ? 0 : kept
     }
 
+    /// The angle as an element keeps it: from 0 up to 360, and nothing when upright.
+    static func kept(_ degrees: Double) -> Double? {
+        let kept = normalized(degrees)
+        return kept < 0.0001 || kept > 360 - 0.0001 ? nil : kept
+    }
+
     /// The angle pulled to the nearest multiple of `step` when it is within `tolerance` of
     /// one, and left alone otherwise. Always returns the normalised angle.
     static func snapped(_ degrees: Double, every step: Double = 45, within tolerance: Double = 4) -> (degrees: Double, isSnapped: Bool) {
@@ -115,8 +121,7 @@ extension DesignElement {
 
     /// Turns it to `degrees`, kept from 0 up to 360. An upright element stores nothing.
     mutating func setRotation(_ degrees: Double) {
-        let kept = Rotation.normalized(degrees)
-        rotation = kept < 0.0001 || kept > 360 - 0.0001 ? nil : kept
+        rotation = Rotation.kept(degrees)
     }
 
     /// The upright box round the turned frame, in its host's points. The frame itself when upright.

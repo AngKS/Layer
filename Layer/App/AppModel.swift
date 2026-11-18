@@ -114,7 +114,12 @@ final class AppModel {
 
     var selection: CanvasSelection? {
         didSet {
-            if selection != oldValue { isEditingText = false }
+            if selection != oldValue {
+                isEditingText = false
+                // Several things turn about a pivot fixed as they are selected, and forgotten
+                // when the selection changes: selected again, they form a new one.
+                turnSession = nil
+            }
             // The format panel is for the selection: with nothing selected it goes.
             if selection == nil, isInspectorOpen {
                 withAnimation(.smooth(duration: 0.3)) { isInspectorOpen = false }
@@ -980,18 +985,16 @@ final class AppModel {
     }
 
     /// Where what is selected is, in the view's own points: for a turned element, the box
-    /// round its turned shape; for several things, the area they cover together. When it
-    /// can turn, the knob's touch target is included, so that the popover, which places
-    /// itself against this, never covers the knob.
+    /// round its turned shape; for several things, the box round the outline they turn
+    /// within, which covers them all. When it can turn, the knob's touch target is
+    /// included, so that the popover, which places itself against this, never covers the knob.
     var selectionViewRect: CGRect? {
         let area: CGRect?
         switch selection {
-        case .element:
+        case .element, .several:
             area = selectionShape.map { viewport.viewShape(for: $0).bounds }
         case .screen:
             area = selectedScreen.map { viewport.viewRect(for: $0.canvasFrame.union($0.labelFrame)) }
-        case .several(let things):
-            area = store.canvasFrame(of: .several(things)).map(viewport.viewRect(for:))
         case nil:
             return nil
         }
@@ -1019,8 +1022,19 @@ final class AppModel {
     /// The angle a turn has snapped to, while it is held there; nil between the 45s. A
     /// tick plays as it snaps.
     private(set) var snappedTurn: Double?
-    /// The element being turned, and the angle it had when the turn began.
-    @ObservationIgnored private var turnStart: (ref: DesignStore.ElementRef, degrees: Double)?
+
+    /// What the turn under way turns, and how far it was turned when the turn began.
+    private enum TurnStart {
+        /// One element, and its angle.
+        case element(DesignStore.ElementRef, degrees: Double)
+        /// Several things, and how far their session had turned them.
+        case several(turned: Double)
+    }
+    @ObservationIgnored private var turnStart: TurnStart?
+    /// Several things selected, as their last turn or move left them: see `severalTurn`.
+    @ObservationIgnored private var turnSession: TurnSession?
+    /// That session as it was when the drag moving them began, if it held then.
+    @ObservationIgnored private var moveStart: TurnSession?
 
     /// The one element selected, unless it is locked: what a turn turns.
     private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
@@ -1028,17 +1042,34 @@ final class AppModel {
         return (selected.ref, selected.element)
     }
 
+    /// What turns several things selected: the session kept from their last turn or move,
+    /// while it is for what is selected and each of them is as it left them; otherwise one
+    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
+    /// are selected, or when a screen is among them.
+    private var severalTurn: TurnSession? {
+        guard let selection, selection.isSeveral else { return nil }
+        if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
+        return TurnSession.form(for: selection, in: store)
+    }
+
     /// Starts turning what is selected. Everything until `endTurn()` undoes as one step.
     /// Returns whether a turn began: none does while another is under way, or when what
     /// is selected can't turn.
     @discardableResult
     func beginTurn() -> Bool {
-        guard !isTurning, let turnable = turnableElement else { return false }
+        guard !isTurning, canTurnSelection else { return false }
+        if let turnable = turnableElement {
+            turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
+        } else if let session = severalTurn {
+            turnSession = session
+            turnStart = .several(turned: session.turned)
+        } else {
+            return false
+        }
         // The turn's own part of the step: a drag, a command or a screen being generated
         // that is under way, or that begins or ends meanwhile, shares the step without
         // closing it while the turn goes on, and the turn doesn't close theirs.
         store.beginEdit(by: .turn)
-        turnStart = (turnable.ref, turnable.element.resolvedRotation)
         isAdjusting = true
         isTurning = true
         return true
@@ -1046,16 +1077,30 @@ final class AppModel {
 
     /// Turns what is selected `degrees` clockwise from the angle it had when the turn
     /// began: the whole turn so far, not the latest step of it. With `snaps`, an angle
-    /// close to a multiple of 45° goes to it. Returns whether it did.
+    /// close to a multiple of 45° goes to it. Returns whether it did. Several things turn
+    /// as one about their pivot, and it is their outline's angle that snaps.
     @discardableResult
     func turnSelection(by degrees: Double, snaps: Bool) -> Bool {
-        guard let turnStart, selection == .element(turnStart.ref) else { return false }
-        let turned = turnStart.degrees + degrees
-        let (angle, isSnapped) = snaps ? Rotation.snapped(turned) : (Rotation.normalized(turned), false)
-        store.update(turnStart.ref) { $0.setRotation(angle) }
-        let snapped = isSnapped ? angle : nil
+        let snapped: Double?
+        switch turnStart {
+        case .element(let ref, let start)?:
+            guard selection == .element(ref) else { return false }
+            let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
+            store.update(ref) { $0.setRotation(angle) }
+            snapped = isSnapped ? angle : nil
+        case .several(let start)?:
+            // Changed by something else meanwhile, they are left as that left them.
+            guard var session = turnSession, session.selection == selection, session.matches(store) else { return false }
+            var turned = Rotation.normalized(start + degrees)
+            let (angle, isSnapped) = snaps ? Rotation.snapped(session.outline.degrees + turned) : (0, false)
+            if isSnapped { turned = Rotation.normalized(angle - session.outline.degrees) }
+            turn(&session, to: turned)
+            snapped = isSnapped ? angle : nil
+        case nil:
+            return false
+        }
         if snappedTurn != snapped { snappedTurn = snapped }
-        return isSnapped
+        return snapped != nil
     }
 
     /// Ends the turn, and its step with it unless something else still has the step open.
@@ -1071,24 +1116,55 @@ final class AppModel {
 
     /// Turns what is selected `degrees` clockwise in one step, without snapping.
     func rotateSelection(by degrees: Double) {
-        guard let turnable = turnableElement else { return }
-        store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+        if let turnable = turnableElement {
+            store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+        } else if canTurnSelection, var session = severalTurn {
+            turn(&session, to: Rotation.normalized(session.turned + degrees))
+        }
     }
 
-    /// Stands what is selected upright again, in one step.
+    /// Stands what is selected upright again, in one step. Several things go back exactly
+    /// to where they were, and to the angles they had, when they were selected.
     func resetSelectionTurn() {
-        guard let turnable = turnableElement else { return }
-        store.update(turnable.ref) { $0.setRotation(0) }
+        if let turnable = turnableElement {
+            store.update(turnable.ref) { $0.setRotation(0) }
+        } else if canTurnSelection, var session = severalTurn {
+            turn(&session, to: 0)
+        }
     }
 
-    /// How far what is selected is turned, for the readout beside the knob.
+    /// Puts several things where their session turned `degrees` places them, as one change,
+    /// and keeps the session.
+    private func turn(_ session: inout TurnSession, to degrees: Double) {
+        session.turned = degrees
+        let placed = session.placed(turnedBy: degrees)
+        store.apply { content in
+            for (ref, place) in placed {
+                content.update(ref.element) {
+                    $0.frame = place.frame
+                    $0.rotation = place.rotation
+                }
+            }
+        }
+        session.expect(store)
+        turnSession = session
+    }
+
+    /// How far what is selected is turned, for the readout beside the knob: one element's
+    /// angle, or how far several things have turned since they were selected.
     var selectionTurn: Double? {
-        selectedElement?.element.resolvedRotation
+        if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
+        return selectedElement?.element.resolvedRotation
     }
 
-    /// The shape of what is selected, in canvas points, turned as it is. Nil for several things.
+    /// The shape of what is selected, in canvas points, turned as it is. For several
+    /// things, the outline they turn within (`TurnSession.shape`), or, with a screen
+    /// among them, the upright box round them all.
     var selectionShape: TurnedRect? {
-        selection.flatMap(store.canvasShape(of:))
+        guard let selection else { return nil }
+        guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        if let session = severalTurn { return session.shape }
+        return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
     }
 
     /// How far the knob hangs below the selection's bottom edge, to its centre, in the
@@ -1105,6 +1181,25 @@ final class AppModel {
         let shape = viewport.viewShape(for: canvas)
         let reach = shape.rect.height / 2 + Self.knobStem
         return CGPoint(x: shape.centre.x + shape.down.dx * reach, y: shape.centre.y + shape.down.dy * reach)
+    }
+
+    /// Several things selected are about to be dragged. If they are as their last turn
+    /// left them, their pivot goes with them: see `selectionMoved(by:)`.
+    func selectionWillMove() {
+        moveStart = nil
+        guard let turnSession, turnSession.selection == selection, turnSession.matches(store) else { return }
+        moveStart = turnSession
+    }
+
+    /// Several things selected have been dragged `canvasDelta` across the canvas in all
+    /// since `selectionWillMove()`. Their pivot, their outline and where each started go
+    /// with them, so that turned back they land where they were dragged to. Called as the
+    /// drag goes, so that their outline goes rigidly with them.
+    func selectionMoved(by canvasDelta: CGSize) {
+        guard var session = moveStart, session.selection == selection else { return }
+        session.translate(by: canvasDelta)
+        session.expect(store)
+        turnSession = session
     }
 
     /// Deletes what is selected. Of several things, those that are locked are left.
