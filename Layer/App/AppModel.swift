@@ -380,13 +380,16 @@ final class AppModel {
     /// is already being held open and the screen is part of it, so it opens none of its
     /// own. That is also how an edit by hand made in the meantime is told from it: see
     /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, partOfHeldEdit: Bool = false) {
+    ///
+    /// `device` is the device a spoken command named, such as an iPad for "a product page
+    /// on iPad"; without one the screen is the design's usual device.
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, partOfHeldEdit: Bool = false, device: DeviceFrame? = nil) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
-        let device = store.canvas.sketchDevice
+        let device = device ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)

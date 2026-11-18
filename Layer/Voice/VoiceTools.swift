@@ -9,7 +9,8 @@ import Foundation
 /// written against this protocol rather than the app, so that the same tools can be
 /// measured against a model with nothing but a recorder behind them.
 protocol VoiceActing: AnyObject, Sendable {
-    @MainActor func createScreen(name: String?, description: String) async throws -> String
+    /// `device` is the person's word for the device, such as iPad or webpage; nil for the design's usual one.
+    @MainActor func createScreen(name: String?, description: String, device: String?) async throws -> String
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String
     @MainActor func stackElements(elements: String, direction: String) -> String
     @MainActor func placeElement(element: String, relation: String, target: String) -> String
@@ -22,6 +23,9 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func deleteElement(element: String, named: String?) -> String
     @MainActor func renameScreen(screen: String, name: String) -> String
     @MainActor func deleteScreen(screen: String, named: String?) -> String
+    /// `screen` nil, or an element's handle, is the screen pointed at.
+    @MainActor func tidyScreen(screen: String?) -> String
+    @MainActor func changeScreenDevice(screen: String?, device: String) -> String
     @MainActor func show(target: String) -> String
     @MainActor func pan(direction: String) -> String
     @MainActor func zoom(to level: String) -> String
@@ -31,6 +35,11 @@ protocol VoiceActing: AnyObject, Sendable {
 }
 
 extension VoiceActing {
+    /// A new screen on the design's usual device.
+    @MainActor func createScreen(name: String?, description: String) async throws -> String {
+        try await createScreen(name: name, description: description, device: nil)
+    }
+
     /// Adds an element where new elements go: below the rest.
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
         addElement(screen: screen, kind: kind, text: text, look: look, relation: nil, target: nil)
@@ -114,7 +123,7 @@ enum VoiceTools {
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
             StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
-            RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor),
+            RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor), TidyScreenTool(actor: actor), ChangeScreenDeviceTool(actor: actor),
             ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
             UndoTool(actor: actor), RedoTool(actor: actor),
         ]
@@ -144,6 +153,8 @@ enum VoiceTools {
         case "duplicateElement": "Duplicating…"
         case "deleteElement", "deleteScreen": "Deleting…"
         case "renameScreen": "Renaming…"
+        case "tidyScreen": "Tidying…"
+        case "changeScreenDevice": "Changing the device…"
         case "show": "Showing…"
         case "pan": "Moving the view…"
         case "zoom": "Zooming…"
@@ -158,7 +169,7 @@ enum VoiceTools {
 struct CreateScreenTool: Tool {
     let actor: any VoiceActing
     let name = "createScreen"
-    let description = "Adds a new phone screen and designs it from a description, such as “a simple login screen”. Use it for any request for a new screen or page."
+    let description = "Adds a new screen and designs it from a description, such as “a simple login screen”. Use it for any request for a new screen or page, on any device."
 
     @Generable
     struct Arguments {
@@ -166,10 +177,12 @@ struct CreateScreenTool: Tool {
         var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
+        @Guide(description: "Only if the person names one: iPhone, iPad, Mac or webpage.")
+        var device: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await actor.createScreen(name: arguments.name, description: arguments.description)
+        try await actor.createScreen(name: arguments.name, description: arguments.description, device: arguments.device)
     }
 }
 
@@ -276,7 +289,7 @@ struct MoveElementTool: Tool {
 struct AlignElementTool: Tool {
     let actor: any VoiceActing
     let name = "alignElement"
-    let description = "Lines an element up with an edge or the centre of its screen, or several elements up with one another. “Centre”, “centrally” and “middle” all mean centred from side to side."
+    let description = "Lines up specific elements: one with an edge or the centre of its screen, or several with one another. “Centre” and “middle” mean side to side. Not for tidying a whole screen."
 
     @Generable
     struct Arguments {
@@ -396,6 +409,40 @@ struct DeleteScreenTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.deleteScreen(screen: arguments.screen, named: arguments.named)
+    }
+}
+
+struct TidyScreenTool: Tool {
+    let actor: any VoiceActing
+    let name = "tidyScreen"
+    let description = "Tidies a whole screen's layout: consistent margins, spacing and alignment, keeping the order. Use for “align everything”, “tidy up”, “make it look nice”, “clean up the layout”."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The screen's handle, such as S1. Leave out for this screen.")
+        var screen: String?
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.tidyScreen(screen: arguments.screen)
+    }
+}
+
+struct ChangeScreenDeviceTool: Tool {
+    let actor: any VoiceActing
+    let name = "changeScreenDevice"
+    let description = "Makes a screen another device's, such as an iPad screen, and lays it out for that size."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The screen's handle, such as S1. Leave out for this screen.")
+        var screen: String?
+        @Guide(description: "iPhone, iPad, Mac or webpage.")
+        var device: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.changeScreenDevice(screen: arguments.screen, device: arguments.device)
     }
 }
 

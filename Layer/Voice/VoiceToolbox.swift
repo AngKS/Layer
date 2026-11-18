@@ -270,14 +270,20 @@ final class VoiceToolbox: VoiceActing {
         return said + rest
     }
 
-    func createScreen(name: String?, description: String) async throws -> String {
+    func createScreen(name: String?, description: String, device: String?) async throws -> String {
         guard let model else { throw CancellationError() }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isClosed else { return failed(AppModel.closedProblem) }
         guard !model.isGenerating else { return failed("A screen is already being written.") }
+        // A device word that isn't one is passed over: the screen is still wanted, and
+        // the design's usual device is the likeliest one meant.
+        let usual = model.store.canvas.sketchDevice
+        let frame = device.flatMap { Self.device(named: $0, preferring: usual) }
+        // What the voice model asked for, so that a session log shows it beside the screen made.
+        VoiceLog.log.info("tool: createScreen \"\(description, privacy: .public)\" on \((frame ?? usual).id, privacy: .public) (said \(device ?? "nothing", privacy: .public))")
         // Inside a command the screen is part of the command's own undo step.
-        model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, partOfHeldEdit: model.store.isHoldingEdit)
+        model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, partOfHeldEdit: model.store.isHoldingEdit, device: frame)
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
@@ -327,6 +333,125 @@ final class VoiceToolbox: VoiceActing {
             model.store.deleteScreen(found.id)
             return done("Deleted the screen “\(found.name)”.")
         }
+    }
+
+    /// Lays a whole screen out again with design sense: see `ScreenTidy`. One change, so
+    /// one undo puts it back.
+    func tidyScreen(screen: String?) -> String {
+        guard let model else { return gone }
+        switch screenMeant(screen, in: model) {
+        case .failure(let refusal): return failed(refusal.line)
+        case .success(let found):
+            let frames = ScreenTidy.frames(for: found.elements, on: found.device)
+            let handle = handles.handle(forScreen: found.id)
+            guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+            DesignActions.reveal(.screen(found.id), in: model)
+            model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
+            return done("Tidied the layout of \(handle).")
+        }
+    }
+
+    /// Makes a screen another device's and lays what is on it out again for that size,
+    /// so that it looks made for it rather than a phone's layout in a tablet's corner.
+    func changeScreenDevice(screen: String?, device: String) -> String {
+        guard let model else { return gone }
+        guard let frame = Self.device(named: device, preferring: model.store.canvas.sketchDevice) else {
+            return failed("I can make it an iPhone, iPad or Mac screen, not “\(device)”.")
+        }
+        switch screenMeant(screen, in: model) {
+        case .failure(let refusal): return failed(refusal.line)
+        case .success(let found):
+            let handle = handles.handle(forScreen: found.id)
+            let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(Int(frame.size.width)) × \(Int(frame.size.height)))"
+            guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
+            let frames = ScreenTidy.frames(for: found.elements, on: frame, from: found.device)
+            model.store.updateScreen(found.id) { screen in
+                // An iPhone is kept as no device at all, as the Siri action keeps it.
+                screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
+                Self.apply(frames, to: &screen)
+            }
+            DesignActions.reveal(.screen(found.id), in: model)
+            return done("Made \(handle) \(named).")
+        }
+    }
+
+    private static func apply(_ frames: [DesignElement.ID: CGRect], to screen: inout DesignScreen) {
+        for index in screen.elements.indices {
+            if let frame = frames[screen.elements[index].id] { screen.elements[index].frame = frame }
+        }
+    }
+
+    private static func article(for name: String) -> String {
+        name.first.map { "aeiouAEIOU".contains($0) } == true ? "an" : "a"
+    }
+
+    /// The device some words name: "iPad", "iPhone Pro Max", "a webpage", "laptop". A
+    /// word that names only a family, such as "phone", "tablet" or "Mac", is `usual` when
+    /// that is of the family, so a design made on an iPad mini goes on with iPad minis.
+    static func device(named words: String, preferring usual: DeviceFrame = .iPhone) -> DeviceFrame? {
+        let said = words.lowercased()
+            .replacingOccurrences(of: "web page", with: "webpage").replacingOccurrences(of: "web site", with: "website")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let all = Set(said)
+        func frame(_ id: String) -> DeviceFrame? { DeviceFrame.all.first { $0.id == id } }
+        func family(_ family: DeviceFrame.Family, _ id: String) -> DeviceFrame? {
+            usual.family == family ? usual : frame(id)
+        }
+        let iPad = all.contains("ipad") || all.contains("tablet")
+        let mac = !all.isDisjoint(with: ["mac", "macbook", "imac", "desktop", "laptop", "computer", "web", "webpage", "website", "browser", "site"])
+        let phone = !all.isDisjoint(with: ["iphone", "phone", "mobile", "smartphone"])
+        if iPad {
+            if all.contains("mini") { return frame("ipad-mini") }
+            if all.contains("pro") { return frame("ipad-pro-13") }
+            return family(.tablet, "ipad")
+        }
+        if mac {
+            if all.contains("imac") { return frame("imac") }
+            if all.contains("macbook"), all.contains("pro") { return frame("macbook-pro-16") }
+            if all.contains("macbook") || all.contains("air") { return frame("macbook-air") }
+            return family(.desktop, "macbook-air")
+        }
+        if phone {
+            if !all.isDisjoint(with: ["max", "plus", "large", "big"]) { return frame("iphone-pro-max") }
+            if !all.isDisjoint(with: ["se", "small", "mini"]) { return frame("iphone-se") }
+            return family(.phone, "iphone")
+        }
+        return nil
+    }
+
+    /// The screen a screen tool means. A handle names it, and an element's handle the
+    /// screen it is on: pointed at an element, "this screen" is the element's screen, and
+    /// the model is told the element's handle. With no handle, or words that aren't one,
+    /// it is the screen pointed at: the one selected or holding the selection, else the
+    /// one mostly in view, else the newest.
+    private func screenMeant(_ given: String?, in model: AppModel) -> Result<DesignScreen, Refusal> {
+        if let given, let tidy = VoiceHandles.tidied(given) {
+            if tidy.hasPrefix("E") {
+                switch find(element: tidy) {
+                case .failure(let refusal): return .failure(refusal)
+                case .success(let found):
+                    guard let screen = found.screen else { return .failure(Refusal(line: "\(tidy) isn't on a screen.")) }
+                    return .success(screen)
+                }
+            }
+            return find(screen: tidy)
+        }
+        if let selected = model.selectedScreen { return .success(selected) }
+        let holding = Set(model.selectedElements.compactMap { found -> DesignScreen.ID? in
+            if case .screen(let id) = found.ref.host { id } else { nil }
+        })
+        if holding.count == 1, let id = holding.first, let screen = model.store.screen(id) { return .success(screen) }
+        if model.canvasSize != .zero {
+            let visible = model.viewport.visibleRect(in: model.canvasSize)
+            let inView = model.store.screens.map { screen -> (DesignScreen, CGFloat) in
+                let shown = screen.canvasFrame.intersection(visible)
+                let frame = screen.canvasFrame
+                return (screen, shown.isNull || frame.isEmpty ? 0 : shown.width * shown.height / (frame.width * frame.height))
+            }.filter { $0.1 > 0.3 }.max { $0.1 < $1.1 }
+            if let inView { return .success(inView.0) }
+        }
+        guard let newest = model.store.screens.last else { return .failure(Refusal(line: "There is no screen yet.")) }
+        return .success(newest)
     }
 
     // MARK: Elements
