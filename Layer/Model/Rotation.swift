@@ -4,8 +4,10 @@ import Foundation
 /// Angles for turning things on the board. Degrees, clockwise on screen (the y axis points
 /// down), shown to the user as 0 to 359.
 enum Rotation {
-    /// The same angle, kept from 0 up to but not including 360.
+    /// The same angle, kept from 0 up to but not including 360. An angle that isn't a
+    /// number (or is infinite) is upright, so that it can't be saved and break the file.
     static func normalized(_ degrees: Double) -> Double {
+        guard degrees.isFinite else { return 0 }
         let wrapped = degrees.truncatingRemainder(dividingBy: 360)
         let kept = wrapped < 0 ? wrapped + 360 : wrapped
         return kept >= 360 ? 0 : kept

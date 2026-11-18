@@ -16,14 +16,22 @@ final class Scrubber {
         var range: ClosedRange<CGFloat>
         var get: () -> CGFloat
         var set: (CGFloat) -> Void
+        /// How far a finger slides for each step.
+        var pointsPerStep: CGFloat = Scrubber.pointsPerStep
+        /// How far the pencil's barrel turns for each step.
+        var degreesPerStep: Double = Scrubber.degreesPerStep
+        /// Whether going past one end of the range comes out at the other, as an angle does.
+        var wraps = false
+        /// Only every this-many units is a mark on the ruler, and felt as a tick.
+        var ticksEvery = 1
     }
 
     /// The coordinate space field frames and the ruler share: the panel's.
     static let space = "scrubber"
     /// How far a finger slides for each step.
-    static let pointsPerStep: CGFloat = 8
+    nonisolated static let pointsPerStep: CGFloat = 8
     /// How far the pencil's barrel turns for each step.
-    static let degreesPerStep = 10.0
+    nonisolated static let degreesPerStep = 10.0
 
     /// The field being scrubbed.
     private(set) var target: Target?
@@ -58,11 +66,13 @@ final class Scrubber {
     func scrub(to steps: Int) {
         guard let target, steps != self.steps else { return }
         self.steps = steps
-        let new = Self.value(from: start, steps: steps, in: target.range)
+        let new = Self.value(from: start, steps: steps, in: target.range, wraps: target.wraps)
         guard new != value else { return }
         value = new
         target.set(new)
-        onStep(CGPoint(x: target.frame.midX, y: target.frame.midY))
+        if Int(new.rounded()).isMultiple(of: target.ticksEvery) {
+            onStep(CGPoint(x: target.frame.midX, y: target.frame.midY))
+        }
     }
 
     func end() {
@@ -98,21 +108,34 @@ final class Scrubber {
         guard target != nil else { return }
         if let lastRoll { rolled += Self.turn(from: lastRoll, to: roll) }
         lastRoll = roll
-        scrub(to: Self.steps(forRoll: rolled))
+        scrub(to: Self.steps(forRoll: rolled, degreesPerStep: target?.degreesPerStep ?? Self.degreesPerStep))
     }
 
     // MARK: The arithmetic
 
-    static func value(from start: CGFloat, steps: Int, in range: ClosedRange<CGFloat>) -> CGFloat {
-        min(max(start + CGFloat(steps), range.lowerBound), range.upperBound)
+    /// The value `steps` units from `start`: stopped at the ends of the range, or, when it
+    /// wraps, carried round from one end to the other (so 5 steps back from 2 is 357 in
+    /// 0...360). The top of a wrapping range is the same place as the bottom, and reads as it.
+    static func value(from start: CGFloat, steps: Int, in range: ClosedRange<CGFloat>, wraps: Bool = false) -> CGFloat {
+        typed(start + CGFloat(steps), in: range, wraps: wraps)
     }
 
-    static func steps(forDrag width: CGFloat) -> Int {
+    /// A number typed in: wrapped into the range, or stopped at its ends.
+    static func typed(_ value: CGFloat, in range: ClosedRange<CGFloat>, wraps: Bool) -> CGFloat {
+        guard wraps else { return min(max(value, range.lowerBound), range.upperBound) }
+        let span = range.upperBound - range.lowerBound
+        let offset = (value - range.lowerBound).truncatingRemainder(dividingBy: span)
+        return range.lowerBound + (offset < 0 ? offset + span : offset)
+    }
+
+    static func steps(forDrag width: CGFloat, pointsPerStep: CGFloat = pointsPerStep) -> Int {
         Int((width / pointsPerStep).rounded(.towardZero))
     }
 
-    static func steps(forRoll turn: Angle) -> Int {
-        Int((turn.degrees / degreesPerStep).rounded(.towardZero))
+    static func steps(forRoll turn: Angle, degreesPerStep: Double = degreesPerStep) -> Int {
+        // Angle keeps radians, so 30 degrees can read back as 29.999999999999996.
+        let exact = (turn.degrees / degreesPerStep * 1e6).rounded() / 1e6
+        return Int(exact.rounded(.towardZero))
     }
 
     /// The turn from one roll to the next, the short way round, so that passing the point
@@ -127,10 +150,14 @@ final class Scrubber {
 // MARK: The ruler
 
 /// The ruler shown while a field is scrubbed: ticks that slide under a fixed needle, one
-/// per unit, longer every ten, with the value above the needle.
+/// per unit, longer every ten (or at the field's own marks), with the value above the needle.
 struct ScrubberRuler: View {
     let value: CGFloat
     let unit: String
+    /// How far apart the ticks are.
+    var spacing = Scrubber.pointsPerStep
+    /// A longer tick comes this often.
+    var majorEvery = 10
 
     var body: some View {
         VStack(spacing: 2) {
@@ -138,13 +165,12 @@ struct ScrubberRuler: View {
                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 .contentTransition(.numericText(value: value))
             Canvas { context, size in
-                let spacing = Scrubber.pointsPerStep
                 let middle = size.width / 2
                 let reach = Int(middle / spacing) + 1
                 let first = Int(value.rounded()) - reach
                 for unit in first...(first + reach * 2) {
                     let x = middle + (CGFloat(unit) - value) * spacing
-                    let isMajor = unit.isMultiple(of: 10)
+                    let isMajor = unit.isMultiple(of: majorEvery)
                     let height: CGFloat = isMajor ? 14 : 7
                     // Ticks fade towards the ends of the ruler.
                     let fade = 1 - min(abs(x - middle) / middle, 1)
@@ -171,7 +197,10 @@ struct ScrubberOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             if let target = scrubber.target {
-                ScrubberRuler(value: scrubber.value, unit: target.unit)
+                ScrubberRuler(
+                    value: scrubber.value, unit: target.unit,
+                    spacing: target.pointsPerStep, majorEvery: target.ticksEvery > 1 ? target.ticksEvery : 10
+                )
                     .frame(width: proxy.size.width - 24)
                     .position(x: proxy.size.width / 2, y: max(target.frame.minY - 30, 30))
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))

@@ -914,3 +914,70 @@ struct TurningSeveralThingsTests {
         }
     }
 }
+
+@MainActor
+@Suite("The Rotation field")
+struct RotationFieldTests {
+    @Test func aWrappingValuePassesRoundThe360() {
+        #expect(Scrubber.value(from: 350, steps: 15, in: 0...360, wraps: true) == 5)
+        #expect(Scrubber.value(from: 5, steps: -10, in: 0...360, wraps: true) == 355)
+        #expect(Scrubber.value(from: 350, steps: 15, in: 0...360) == 360)
+    }
+
+    @Test func theRotationRulerTakesTwoPointsADegree() {
+        #expect(Scrubber.steps(forDrag: 90, pointsPerStep: 2) == 45)
+        #expect(Scrubber.steps(forDrag: 90) == 11)
+    }
+
+    @Test func theBarrelTurnsItOneToOne() {
+        #expect(Scrubber.steps(forRoll: .degrees(30), degreesPerStep: 1) == 30)
+        #expect(Scrubber.steps(forRoll: .degrees(30)) == 3)
+    }
+
+    @Test func aTypedAngleWrapsRatherThanStops() {
+        #expect(Scrubber.typed(-90, in: 0...360, wraps: true) == 270)
+        #expect(Scrubber.typed(450, in: 0...360, wraps: true) == 90)
+        #expect(Scrubber.typed(5000, in: 1...4000, wraps: false) == 4000)
+    }
+
+    @Test func aScrubStepOnlyTicksOnTheMarks() {
+        let scrubber = Scrubber()
+        var value: CGFloat = 0
+        var ticks: [CGFloat] = []
+        scrubber.onStep = { _ in ticks.append(value) }
+        scrubber.begin(Scrubber.Target(
+            label: "Rotation", unit: "°", frame: .zero, range: 0...360,
+            get: { value }, set: { value = $0 },
+            pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15
+        ))
+        for steps in 1...31 { scrubber.scrub(to: steps) }
+        #expect(ticks == [15, 30])
+        scrubber.end()
+        // Wrapping back past zero.
+        scrubber.begin(Scrubber.Target(
+            label: "Rotation", unit: "°", frame: .zero, range: 0...360,
+            get: { 3 }, set: { value = $0 },
+            wraps: true
+        ))
+        scrubber.scrub(to: -5)
+        #expect(value == 358)
+    }
+
+    @Test func settingTheAngleOfSeveralSetsEachOnItsOwn() {
+        let board = TurnBoard()
+        board.store.update(board.note) { $0.setRotation(10) }
+        board.select([board.title, board.note])
+        let before = [board.title, board.note].map(board.canvasRect)
+        board.model.changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(30) }
+        #expect(board.rotation(of: board.title) == 30 && board.rotation(of: board.note) == 30)
+        #expect([board.title, board.note].map(board.canvasRect) == before)
+    }
+
+    @Test func anAngleThatIsNotANumberIsUpright() {
+        #expect(Rotation.normalized(.nan) == 0)
+        #expect(Rotation.normalized(.infinity) == 0)
+        #expect(Rotation.normalized(-.infinity) == 0)
+        #expect(Rotation.kept(.nan) == nil)
+        #expect(Rotation.normalized(-90) == 270)
+    }
+}

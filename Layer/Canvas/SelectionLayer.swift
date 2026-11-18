@@ -200,6 +200,13 @@ private struct SelectionSummary: View {
                 .accessibilityLabel("Selection")
                 .accessibilityValue(summary)
                 .accessibilityIdentifier("Selection")
+                .accessibilityActions {
+                    if model.canTurnSelection {
+                        Button("Rotate 15° clockwise") { model.rotateSelection(by: 15) }
+                        Button("Rotate 15° counterclockwise") { model.rotateSelection(by: -15) }
+                        Button("Reset rotation") { model.resetSelectionTurn() }
+                    }
+                }
         }
     }
 
