@@ -1300,3 +1300,74 @@ struct FileCheckTests {
         #expect(model.keptVersionsNotice?.contains("Board (from iPad)") == true)
     }
 }
+
+/// Generated code for elements that are turned.
+struct TurnedCodeTests {
+    private func lines(of screen: DesignScreen, settings: CodeSettings = CodeSettings(includesPreview: false)) -> [String] {
+        SwiftUICodeGenerator.code(for: screen, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func screen(_ elements: [DesignElement]) -> DesignScreen {
+        DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: elements)
+    }
+
+    private func turned(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, by degrees: Double?) -> DesignElement {
+        var item = element(kind, x, y, width, height)
+        item.rotation = degrees
+        return item
+    }
+
+    @Test func anUprightElementHasNoTurnInItsCode() {
+        let screen = screen([element(.button, 40, 300, 200, 50)])
+        for layout in [CodeSettings.Layout.stack, .absolute] {
+            let code = SwiftUICodeGenerator.code(for: screen, settings: CodeSettings(layout: layout, includesPreview: false))
+            #expect(!code.contains(".rotationEffect"))
+        }
+    }
+
+    @Test func exactPositionsTurnBetweenTheFrameAndTheOffset() throws {
+        let lines = lines(of: screen([turned(.button, 40, 300, 200, 50, by: 30)]), settings: CodeSettings(layout: .absolute, includesPreview: false))
+        #expect(lines.filter { $0.hasPrefix(".rotationEffect") } == [".rotationEffect(.degrees(30))"])
+        let frame = try #require(lines.firstIndex { $0.hasPrefix(".frame(width:") })
+        let turn = try #require(lines.firstIndex(of: ".rotationEffect(.degrees(30))"))
+        let offset = try #require(lines.firstIndex { $0.hasPrefix(".offset(x:") })
+        #expect(frame < turn && turn < offset)
+    }
+
+    @Test func aStackTurnsAnElementInPlaceBeforeItIsPlaced() throws {
+        // A full-width title sets the margin at 20, so the button is inset from it.
+        let lines = lines(of: screen([element(.title, 20, 100, 353, 40), turned(.button, 60, 300, 200, 50, by: 15)]))
+        let frame = try #require(lines.firstIndex { $0.hasPrefix(".frame(width:") })
+        let turn = try #require(lines.firstIndex(of: ".rotationEffect(.degrees(15))"))
+        let placement = try #require(lines.firstIndex { $0.hasPrefix(".padding(.leading,") })
+        #expect(frame < turn && turn < placement)
+    }
+
+    @Test func aFullWidthElementStillTurnsInAStack() {
+        let lines = lines(of: screen([turned(.button, 0, 300, 393, 50, by: 5)]))
+        #expect(lines.filter { $0 == ".rotationEffect(.degrees(5))" }.count == 1)
+    }
+
+    @Test func elementsSideBySideTurnInTheirRow() throws {
+        let lines = lines(of: screen([
+            turned(.button, 20, 300, 150, 50, by: 10),
+            element(.button, 220, 300, 150, 50),
+        ]))
+        #expect(lines.filter { $0 == ".rotationEffect(.degrees(10))" }.count == 1)
+        // Each line's own indent tells where the HStack block ends.
+        let raw = SwiftUICodeGenerator.code(for: screen([
+            turned(.button, 20, 300, 150, 50, by: 10),
+            element(.button, 220, 300, 150, 50),
+        ]), settings: CodeSettings(includesPreview: false)).split(separator: "\n").map(String.init)
+        let open = try #require(raw.firstIndex { $0.trimmingCharacters(in: .whitespaces).hasPrefix("HStack") })
+        let indent = raw[open].prefix { $0 == " " }
+        let close = try #require(raw[open...].firstIndex { $0 == indent + "}" })
+        let turn = try #require(raw.firstIndex { $0.contains(".rotationEffect(.degrees(10))") })
+        #expect(open < turn && turn < close)
+    }
+
+    @Test func aHalfDegreeIsWrittenAsItIs() {
+        let lines = lines(of: screen([turned(.button, 40, 300, 200, 50, by: 22.5)]), settings: CodeSettings(layout: .absolute, includesPreview: false))
+        #expect(lines.contains(".rotationEffect(.degrees(22.5))"))
+    }
+}
