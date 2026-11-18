@@ -807,4 +807,64 @@ struct TurningSeveralThingsTests {
         board.store.update(other) { $0.setRotation(45) }
         #expect(try #require(board.model.selectionShape).degrees == 0)
     }
+
+    @Test func aMemberLockedAfterATurnStaysWhereItIs() {
+        let board = TurnBoard()
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        board.knobTurn(30)
+        // Locked from its row in the layers list, which leaves the selection as it is.
+        board.model.toggleLock(board.button)
+        let button = board.placed([board.button])
+        board.knobTurn(20)
+        #expect(board.placed([board.button]) == button)
+        #expect(board.rotation(of: board.title) == 50 && board.rotation(of: board.note) == 50)
+        board.model.resetSelectionTurn()
+        #expect(board.placed([board.button]) == button)
+        #expect(board.rotation(of: board.title) == 30 && board.rotation(of: board.note) == 30)
+    }
+
+    @Test func aMemberUnlockedAfterATurnTurnsWithTheRest() {
+        let board = TurnBoard()
+        board.store.update(board.button) { $0.isLocked = true }
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        board.knobTurn(30)
+        #expect(things.map(board.rotation(of:)) == [30, nil, 30])
+        board.model.toggleLock(board.button)
+        board.knobTurn(20)
+        #expect(things.map(board.rotation(of:)) == [50, 20, 50])
+    }
+
+    @Test func aMemberDroppedOffItsScreenKeepsTurningWithTheRest() {
+        let board = TurnBoard()
+        let far = board.store.addFloating(element(.stickyNote, 1200, 600, 140, 130), scale: 1)
+        let things = [board.button, far]
+        board.select(things)
+        let before = things.map(board.canvasRect)
+        // The quarter turn swings the button's middle off its screen (see
+        // `turningNeverMovesAnElementOffItsScreen`); dragged a little and dropped there, it
+        // belongs to the open canvas.
+        board.knobTurn(90)
+        let delta = CGSize(width: 10, height: 6)
+        board.model.selectionWillMove()
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for ref in things {
+            let box = board.canvasFrame(ref)
+            origins[.element(ref)] = CGPoint(x: box.minX + delta.width, y: box.minY + delta.height)
+        }
+        board.store.position(origins)
+        board.model.selectionMoved(by: delta)
+        board.model.rehostSelection()
+        let button = DesignStore.ElementRef(host: .canvas, element: board.button.element)
+        #expect(board.model.selection == CanvasSelection([.element(button), .element(far)]))
+        // Still the same turn: the knob reads it, and a double tap undoes it.
+        #expect(board.model.selectionTurn == 90)
+        board.model.resetSelectionTurn()
+        for (ref, was) in zip([button, far], before) {
+            let now = board.canvasRect(ref)
+            #expect(isClose(now.origin, CGPoint(x: was.minX + delta.width, y: was.minY + delta.height)) && now.size == was.size)
+            #expect(board.rotation(of: ref) == nil)
+        }
+    }
 }

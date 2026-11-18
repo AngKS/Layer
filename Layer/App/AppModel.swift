@@ -882,10 +882,16 @@ final class AppModel {
         store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
     }
 
-    /// Gives every element selected to whatever it now lies on, after a drag.
+    /// Gives every element selected to whatever it now lies on, after a drag. Several
+    /// things being turned go on turning about the same pivot: an element given to another
+    /// host is still the same thing, though the selection now names it differently.
     func rehostSelection() {
         guard let selection else { return }
-        self.selection = store.rehost(selection)
+        let session = turnSession.flatMap { $0.selection == selection && $0.matches(store) ? $0 : nil }
+        let rehosted = store.rehost(selection)
+        self.selection = rehosted
+        // The new selection let go of the session as it was set; it is the same one.
+        if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
 
     /// The drawing with ink at a canvas point.
