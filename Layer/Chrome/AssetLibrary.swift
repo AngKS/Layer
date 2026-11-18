@@ -281,6 +281,34 @@ enum AssetLibrary {
         !words(in: search).isEmpty && searchEverywhere(search).isEmpty
     }
 
+    /// What Return in the search field does.
+    enum SubmitAction: Equatable {
+        /// Puts the best match on the canvas.
+        case place(Asset)
+        /// Writes the screen the words describe.
+        case generate(String)
+        case nothing
+    }
+
+    /// Return places the best match; when nothing matches, it writes the screen the words
+    /// describe, where the library can, and not while a screen is already being written.
+    static func submitAction(for search: String, firstResult: Asset?, canGenerate: Bool, isGenerating: Bool) -> SubmitAction {
+        if let firstResult { return .place(firstResult) }
+        guard canGenerate, !words(in: search).isEmpty, !isGenerating else { return .nothing }
+        return .generate(search.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// What the library lists: a search's finds from every tab, or the open tab's things.
+    enum Listing: Equatable {
+        case searchResults
+        case tab(AssetTab)
+    }
+
+    /// A search doesn't change the open tab, so clearing it lists that tab again.
+    static func listing(for search: String, openTab: AssetTab) -> Listing {
+        words(in: search).isEmpty ? .tab(openTab) : .searchResults
+    }
+
     /// The assets among `candidates` that match `search`, scored and best first.
     private static func scored(_ search: String, among candidates: [Asset]) -> [(asset: Asset, score: Int)] {
         let query = words(in: search)
@@ -467,7 +495,7 @@ struct AssetLibraryView: View {
         .frame(idealWidth: 380, maxWidth: .infinity, idealHeight: 480, maxHeight: .infinity)
     }
 
-    private var isSearching: Bool { !AssetLibrary.words(in: search).isEmpty }
+    private var isSearching: Bool { AssetLibrary.listing(for: search, openTab: tab) == .searchResults }
 
     private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -491,10 +519,10 @@ struct AssetLibraryView: View {
                 // Return puts the best match on the canvas; when nothing matches, it writes
                 // the screen the words describe.
                 .onSubmit {
-                    if let firstResult {
-                        onPick(firstResult)
-                    } else if let onGenerate, offersGeneration(firstResult), !model.isGenerating {
-                        onGenerate(query)
+                    switch AssetLibrary.submitAction(for: search, firstResult: firstResult, canGenerate: onGenerate != nil, isGenerating: model.isGenerating) {
+                    case .place(let asset): onPick(asset)
+                    case .generate(let query): onGenerate?(query)
+                    case .nothing: break
                     }
                 }
             if !search.isEmpty {

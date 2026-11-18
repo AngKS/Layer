@@ -83,6 +83,38 @@ struct AssetLibraryTests {
         #expect(AssetLibrary.customSymbol("not.a.real.symbol.at.all") == nil)
     }
 
+    /// Return in the search field places the best match; with nothing found it writes the
+    /// screen the words describe, but not while one is being written already.
+    @Test func returnPlacesTheFirstResultWhenThereAreMatches() throws {
+        let first = try #require(AssetLibrary.searchEverywhere("toggle").first?.assets.first)
+        #expect(AssetLibrary.submitAction(for: "toggle", firstResult: first, canGenerate: true, isGenerating: false) == .place(first))
+        // Placing doesn't wait on a generation.
+        #expect(AssetLibrary.submitAction(for: "toggle", firstResult: first, canGenerate: true, isGenerating: true) == .place(first))
+    }
+
+    @Test func returnGeneratesWhenNothingMatches() {
+        let search = "  a checkout page with saved cards "
+        #expect(AssetLibrary.searchEverywhere(search).isEmpty)
+        #expect(AssetLibrary.submitAction(for: search, firstResult: nil, canGenerate: true, isGenerating: false) == .generate("a checkout page with saved cards"))
+        // Where the library can't write a screen, Return does nothing.
+        #expect(AssetLibrary.submitAction(for: search, firstResult: nil, canGenerate: false, isGenerating: false) == .nothing)
+        // Nor with nothing searched.
+        #expect(AssetLibrary.submitAction(for: "   ", firstResult: nil, canGenerate: true, isGenerating: false) == .nothing)
+    }
+
+    @Test func returnDoesNothingWhileAScreenIsBeingWritten() {
+        #expect(AssetLibrary.submitAction(for: "a checkout page with saved cards", firstResult: nil, canGenerate: true, isGenerating: true) == .nothing)
+    }
+
+    @Test func clearingTheSearchReturnsToTheTabThatWasOpen() {
+        #expect(AssetLibrary.listing(for: "", openTab: .shapes) == .tab(.shapes))
+        // A search lists every tab's finds, whichever tab its best match is in…
+        #expect(AssetLibrary.bestTab(for: "mac") != .shapes)
+        #expect(AssetLibrary.listing(for: "mac", openTab: .shapes) == .searchResults)
+        // …and cleared, or left with only spaces, the tab that was open is back.
+        #expect(AssetLibrary.listing(for: "  ", openTab: .shapes) == .tab(.shapes))
+    }
+
     @Test func recentlyUsedThingsLeadAndArentRepeated() throws {
         let defaults = try #require(UserDefaults(suiteName: "AssetLibraryTests-\(UUID().uuidString)"))
         let star = try #require(AssetLibrary.asset(id: "symbol:star"))
