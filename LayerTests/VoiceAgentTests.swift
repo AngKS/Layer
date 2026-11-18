@@ -126,44 +126,6 @@ struct VoiceAgentTests {
         #expect(requests[1].instructions == requests[0].instructions)
     }
 
-    /// The on-device model is told the canvas at the head of each command's prompt, so the
-    /// rules and the tools it reads first stay the same from one command to the next, even
-    /// after a command changed the canvas. With the canvas between them, it read all the
-    /// tools again for every command (B-I5).
-    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
-    func onTheDeviceTheCanvasLeadsThePromptAndTheInstructionsStayTheSame() async throws {
-        let (app, _) = VoiceFixture.undoableLogin()
-        let recorder = ScriptRecorder()
-        let model = ScriptedLanguageModel(
-            script: ["copy the button": [Step(tool: "duplicateElement", arguments: #"{"element":"E2"}"#)]], recorder: recorder
-        )
-        let agent = VoiceAgent(model: app, testModel: model, looksAgainBetweenSteps: false, canvasInPrompt: true)
-
-        _ = await agent.run("copy the button")
-        _ = await agent.run("zoom out")
-
-        let requests = recorder.requests
-        #expect(requests.count == 3)
-        // The copy the first command made is in the second command's prompt, and the
-        // instructions are as they were.
-        #expect(Set(requests.map(\.instructions)).count == 1)
-        #expect(!requests[0].instructions.contains(#"E2 button "Sign in""#))
-        let first = try #require(requests[0].prompts.last)
-        #expect(first.hasPrefix("The canvas now:"))
-        #expect(first.contains(#"E2 button "Sign in""#))
-        #expect(first.hasSuffix(VoiceProfile.commandMarker + "copy the button"))
-        let second = try #require(requests[2].prompts.last)
-        #expect(second.contains(#"E4 button "Sign in""#))
-        #expect(second.hasSuffix(VoiceProfile.commandMarker + "zoom out"))
-    }
-
-    @Test func whichModelsGetTheCanvasInThePrompt() {
-        #expect(VoiceProfile.canvasGoesInPrompt(with: .appleIntelligence))
-        // A hosted model is told it in its instructions, afresh between steps; where one
-        // can't run, the on-device model stands in for it.
-        #expect(VoiceProfile.canvasGoesInPrompt(with: .hosted(.anthropic, model: "claude-test")) == !HostedLanguageModel.isSupported)
-    }
-
     @Test func whichModelsAreToldAboutTheCanvasAgainBetweenSteps() {
         #expect(!VoiceAgent.looksAgainBetweenSteps(with: .appleIntelligence))
         #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")))

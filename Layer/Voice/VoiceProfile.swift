@@ -44,44 +44,18 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
     private let hooks: VoiceHooks
     /// A stand-in for the design's model, for tests and the simulator.
     private let testModel: (any LanguageModel)?
-    /// Whether the stand-in is told the canvas in the prompt, as the on-device model is.
-    private let testCanvasInPrompt: Bool
 
-    init(actor: any VoiceActing, hooks: VoiceHooks, testModel: (any LanguageModel)? = nil, testCanvasInPrompt: Bool = false) {
+    init(actor: any VoiceActing, hooks: VoiceHooks, testModel: (any LanguageModel)? = nil) {
         self.actor = actor
         self.hooks = hooks
         self.testModel = testModel
-        self.testCanvasInPrompt = testCanvasInPrompt
     }
-
-    /// Whether the canvas goes at the head of each command's prompt rather than in the
-    /// instructions: for the on-device model, which is what the profile below falls back
-    /// to wherever a hosted model can't run.
-    ///
-    /// Its rules and tools are then the same from one command to the next, and the model
-    /// reads them once. With the canvas between them, as it was, every command after a
-    /// change read all the tools again: measured on a Mac, an edit took 2.7 s, now 1.9 s.
-    /// The first command of a call is a third of a second slower, as its canvas is no
-    /// longer read ahead. See "Prompt order" in docs/benchmarks/voice-on-device.md.
-    static func canvasGoesInPrompt(with choice: ModelChoice) -> Bool {
-        choice.sketchProvider.id == SketchProvider.appleIntelligence.id
-    }
-
-    /// What goes before a command where the canvas is in the prompt.
-    static func canvasLeading(_ picture: CanvasPicture) -> String {
-        "The canvas now:\n\(picture.text(.compact))\n\n\(commandMarker)"
-    }
-
-    /// Where the command itself starts in such a prompt.
-    static let commandMarker = "The command: "
 
     var body: some LanguageModelSession.DynamicProfile {
         if let testModel {
             Profile {
                 Instructions(VoiceRules.full)
-                if !testCanvasInPrompt {
-                    CanvasBrief(detail: .full)
-                }
+                CanvasBrief(detail: .full)
                 VoiceTools.all(actor)
             }
             .model(testModel)
@@ -99,11 +73,10 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             .reporting(to: hooks)
         } else {
             // The on-device model has little: one screen in full, the tools that make
-            // sense for the canvas as it is, and only the last couple of commands. The
-            // canvas is told in each command's prompt (`canvasGoesInPrompt`), so that the
-            // rules and the tools stay the same and are read once.
+            // sense for the canvas as it is, and only the last couple of commands.
             Profile {
                 Instructions(VoiceRules.compact)
+                CanvasBrief(detail: .compact)
                 if picture.hasScreens {
                     VoiceTools.all(actor)
                 } else {

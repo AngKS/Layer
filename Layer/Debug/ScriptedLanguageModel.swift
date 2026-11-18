@@ -102,10 +102,7 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
             tools: request.enabledToolDefinitions.map(\.name)
         ))
 
-        // Where the canvas leads the prompt, as for the on-device model, the command follows it.
-        var said = prompts.last ?? ""
-        if let marker = said.range(of: VoiceProfile.commandMarker) { said = String(said[marker.upperBound...]) }
-        let command = said.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = (prompts.last ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let steps = configuration.script[command] ?? []
         guard stepsTaken < steps.count else {
             await channel.send(.response(action: .appendText(configuration.closing, tokenCount: 1)))
