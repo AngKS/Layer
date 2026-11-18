@@ -683,10 +683,11 @@ struct PencilVoiceTests {
         #expect(PencilVoiceBubble.newestWords(of: "make it blue") == "make it blue")
         let said = "make the sign in button blue and give it a little more space above"
         let shown = PencilVoiceBubble.newestWords(of: said)
-        #expect(shown == "…it a little more space above")
-        // Whole words only: what is shown begins where a word does.
-        #expect(said.hasSuffix(" " + shown.dropFirst()))
-        #expect(shown.count <= PencilVoiceBubble.wordsLength)
+        // The newest eight words, between ellipses, as the person asked: "…words…".
+        #expect(shown == "…and give it a little more space above…")
+        #expect(shown.dropFirst().dropLast().split(separator: " ").count == PencilVoiceBubble.wordLimit)
+        // Exactly the limit is shown whole.
+        #expect(PencilVoiceBubble.newestWords(of: "one two three four five six seven eight") == "one two three four five six seven eight")
     }
 
     // MARK: Fix round 1 of the bubble
