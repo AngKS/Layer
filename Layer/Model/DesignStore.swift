@@ -339,7 +339,13 @@ final class DesignStore {
     /// Lines an element on a screen up with an edge or the middle of that screen.
     func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
         guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
-        update(ref) { $0.frame = ElementLayout.aligned($0.frame, alignment, in: screen.size) }
+        // A turned element lines up by the box round its shape; its frame moves with it.
+        update(ref) {
+            let box = $0.shapeBounds
+            let aligned = ElementLayout.aligned(box, alignment, in: screen.size)
+            $0.frame.origin.x += aligned.minX - box.minX
+            $0.frame.origin.y += aligned.minY - box.minY
+        }
     }
 
     func deleteScreen(_ id: DesignScreen.ID) {

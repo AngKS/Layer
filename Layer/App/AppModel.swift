@@ -899,11 +899,11 @@ final class AppModel {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         if let drawing = drawing(at: point) { return .element(drawing) }
-        for floating in store.floating.reversed() where floating.canvasFrame.contains(point) && floating.element.isPickedByItsFrame {
+        for floating in store.floating.reversed() where floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
             return .element(.init(host: .canvas, element: floating.id))
         }
         for screen in store.screens.reversed() {
-            for element in screen.elements.reversed() where screen.placement.canvasRect(for: element.frame).contains(point) {
+            for element in screen.elements.reversed() where TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
                 return .element(.init(host: .screen(screen.id), element: element.id))
             }
             if screen.canvasFrame.contains(point) || screen.labelFrame.contains(point) {

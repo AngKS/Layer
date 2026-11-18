@@ -31,6 +31,7 @@ struct PhoneScreenView: View {
             ForEach(screen.elements.filter { !$0.isHidden }) { element in
                 ElementView(element: element)
                     .frame(width: element.frame.width, height: element.frame.height)
+                    .rotationEffect(.degrees(element.resolvedRotation))
                     .offset(x: element.frame.minX, y: element.frame.minY)
                     .transition(.blurReplace)
             }
@@ -120,6 +121,7 @@ struct FloatingElementView: View {
             .frame(width: frame.width, height: frame.height)
             .scaleEffect(floating.scale, anchor: .topLeading)
             .frame(width: frame.width * floating.scale, height: frame.height * floating.scale, alignment: .topLeading)
+            .rotationEffect(.degrees(floating.element.resolvedRotation))
             .offset(x: floating.canvasFrame.minX, y: floating.canvasFrame.minY)
     }
 }

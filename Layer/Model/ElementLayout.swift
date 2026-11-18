@@ -368,8 +368,8 @@ struct SpacingGuides: Equatable, Sendable {
     var gaps: [Gap] { [top, left, bottom, right] }
 
     static func measure(_ element: DesignElement, in screen: DesignScreen) -> SpacingGuides {
-        let frame = element.frame
-        let others = screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.frame)
+        let frame = element.shapeBounds
+        let others = screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
         let beside = others.filter { $0.maxY > frame.minY && $0.minY < frame.maxY }
         let stacked = others.filter { $0.maxX > frame.minX && $0.minX < frame.maxX }
 

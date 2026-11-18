@@ -216,20 +216,28 @@ final class CanvasDrags {
         let zoom = model.viewport.scale
         // What the element can line up with, in its own host's points.
         let others: [CGRect] = if let screen {
-            screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.frame)
+            screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
         } else {
-            model.store.floating.filter { $0.id != element.id && !$0.element.isHidden }.map { placement.localRect(for: $0.canvasFrame) }
+            model.store.floating.filter { $0.id != element.id && !$0.element.isHidden }.map { placement.localRect(for: $0.placement.canvasRect(for: $0.element.shapeBounds)) }
         }
         let container = screen.map { CGRect(origin: .zero, size: $0.size) }
+        // A turned element snaps by the box round its shape; its frame moves with the box.
+        let box = element.shapeBounds
+        let shift = CGSize(width: box.minX - element.frame.minX, height: box.minY - element.frame.minY)
         return { origin, translation in
-            let moved = ElementLayout.moved(origin, by: translation, snapsToCenter: false)
-            if canvas.snapsToGrid {
-                return (ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement), [])
+            let start = CGRect(x: origin.minX + shift.width, y: origin.minY + shift.height, width: box.width, height: box.height)
+            func framed(_ box: CGRect) -> CGRect {
+                CGRect(x: box.minX - shift.width, y: box.minY - shift.height, width: origin.width, height: origin.height)
             }
-            guard canvas.snapsToGuides else { return (moved, []) }
+            let moved = ElementLayout.moved(start, by: translation, snapsToCenter: false)
+            if canvas.snapsToGrid {
+                return (framed(ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement)), [])
+            }
+            guard canvas.snapsToGuides else { return (framed(moved), []) }
             // Close enough is the same few points on the glass at any zoom.
             let threshold = 6 / max(placement.scale * zoom, 0.01)
-            return ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
+            let (snapped, lines) = ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
+            return (framed(snapped), lines)
         }
     }
 
@@ -387,16 +395,17 @@ private struct ElementTargets: View {
     }
 
     /// An invisible area in canvas points that takes touches.
-    private func area(_ rect: CGRect, minimum: CGFloat) -> some View {
+    private func area(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -> some View {
         Color.clear
             .contentShape(Rectangle())
             .frame(width: max(rect.width, minimum), height: max(rect.height, minimum))
+            .rotationEffect(.degrees(degrees))
             .position(x: rect.midX, y: rect.midY)
     }
 
     /// `screen` is the screen the element is on, or nil on the open canvas.
     private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?, minimum: CGFloat) -> some View {
-        area(placement.canvasRect(for: element.frame), minimum: minimum)
+        area(placement.canvasRect(for: element.frame), degrees: element.resolvedRotation, minimum: minimum)
             .onTapGesture { model.pick(.element(ref)) }
             .gesture(
                 drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: true, model: model,
