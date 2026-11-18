@@ -124,8 +124,8 @@ enum VoiceDemo {
 ///
 /// `-LayerVoiceDemoFreeze` holds the bubble at `listening` (never sent), `working`,
 /// `done` or `problem`. A hold left listening still stops after `PencilVoice.maximumHold`,
-/// a minute; a toggle stays. `-LayerPencilDemoWords YES` shows the words heard, as the setting
-/// does, and anything else hides them. `-LayerVoiceDemoDark` and `-LayerVoiceDemoDesign`
+/// a minute; a toggle stays. The words heard show, as the setting's default does;
+/// `-LayerPencilDemoWords NO` hides them. `-LayerVoiceDemoDark` and `-LayerVoiceDemoDesign`
 /// work as for `-LayerVoiceDemo`.
 @MainActor
 enum PencilDemo {
@@ -155,7 +155,7 @@ enum PencilDemo {
         let defaults = UserDefaults.standard
         let freeze = defaults.string(forKey: "LayerVoiceDemoFreeze")
         // The setting the bubble reads, set either way so that an earlier run's doesn't linger.
-        defaults.set(defaults.bool(forKey: "LayerPencilDemoWords"), forKey: "pencilVoice.showsWords")
+        defaults.set(defaults.object(forKey: "LayerPencilDemoWords") as? Bool ?? true, forKey: "pencilVoice.showsWords")
         VoiceDemo.prepareCanvas(of: model)
 
         let lines = [squeeze.line]

@@ -36,7 +36,7 @@ struct PencilVoiceBubble: View {
     let topInset: CGFloat
 
     @Environment(AppModel.self) private var model
-    @AppStorage("pencilVoice.showsWords") private var showsWords = false
+    @AppStorage("pencilVoice.showsWords") private var showsWords = true
     /// Measured once laid out. Until then, about the size it opens at.
     @State private var size = CGSize(width: 190, height: 52)
     @State private var isMeasured = false
@@ -153,7 +153,7 @@ struct PencilVoiceBubble: View {
     /// problem's line, or the largest it has been measured).
     nonisolated static func plannedSizes(showsWords: Bool, largestMeasured: CGSize) -> [CGSize] {
         [CGSize(width: 80, height: 48), CGSize(width: 200, height: 52)]
-            + (showsWords ? [CGSize(width: 262, height: 64)] : [])
+            + (showsWords ? [CGSize(width: 64 + PencilVoiceWords.width, height: 64)] : [])
             + [CGSize(width: max(300, largestMeasured.width), height: max(52, largestMeasured.height))]
     }
 
@@ -275,17 +275,7 @@ struct PencilVoiceBubble: View {
                         // Dim until the microphone is on: words now would be lost.
                         .opacity(bubble.state == .gettingReady ? 0.4 : 1)
                     if let words = wordsShown {
-                        // One line, so that the bubble stays small: a second one spilled
-                        // out of the glass, since a bubble sized to fit has no width to
-                        // wrap in. The newest words are the ones worth seeing, whole.
-                        Text(Self.newestWords(of: words))
-                            .font(.subheadline)
-                            // Primary: secondary was too faint where the glass, tinted with
-                            // a dark canvas, lies over a white screen.
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .frame(maxWidth: 240, alignment: .leading)
+                        PencilVoiceWords(words: Self.newestWords(of: words))
                             .transition(.opacity)
                     }
                 }
@@ -315,21 +305,16 @@ struct PencilVoiceBubble: View {
         }
     }
 
-    /// About as many characters as fit the words' line.
-    nonisolated static let wordsLength = 32
+    /// How many of the newest words the line keeps. More than its width shows: the rest
+    /// are there to scroll in from, so the line slides rather than jumps.
+    nonisolated static let wordLimit = 8
 
-    /// The last whole words of `words` that fit `wordsLength`, after an ellipsis if any
-    /// were left out. A word longer than the line on its own is left for the line to cut.
+    /// The newest `wordLimit` words of `words`, between ellipses when earlier ones were
+    /// left out, as the person asked: "…words…".
     nonisolated static func newestWords(of words: String) -> String {
-        guard words.count > wordsLength else { return words }
-        var kept: [Substring] = []
-        var length = 1
-        for word in words.split(separator: " ").reversed() {
-            guard kept.isEmpty || length + word.count + 1 <= wordsLength else { break }
-            kept.insert(word, at: 0)
-            length += word.count + 1
-        }
-        return "…" + kept.joined(separator: " ")
+        let all = words.split(whereSeparator: \.isWhitespace)
+        guard all.count > wordLimit else { return all.joined(separator: " ") }
+        return "…" + all.suffix(wordLimit).joined(separator: " ") + "…"
     }
 
     /// The words heard for this listen, when Settings asks for them.
@@ -361,6 +346,39 @@ private struct PencilVoiceWaveform: View {
 
     var body: some View {
         CallWaveform(levels: pencil.levels)
+    }
+}
+
+/// The words heard, on one line of a fixed width, so the bubble keeps its size while they
+/// come in. Longer than the line, they scroll along it to the newest, fading out at the
+/// leading edge, instead of the bubble growing to fit them.
+struct PencilVoiceWords: View {
+    let words: String
+
+    static let width: CGFloat = 220
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Text(words)
+                .font(.subheadline)
+                // Primary: secondary was too faint where the glass, tinted with a dark
+                // canvas, lies over a white screen.
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .scrollIndicators(.hidden)
+        .scrollDisabled(true)
+        // Kept at the newest words as each one arrives, which slides the line along.
+        .defaultScrollAnchor(.trailing, for: .initialOffset)
+        .defaultScrollAnchor(.trailing, for: .sizeChanges)
+        .animation(.smooth(duration: 0.3), value: words)
+        .frame(width: Self.width, alignment: .leading)
+        // Faded only once earlier words have gone, which their ellipsis says.
+        .mask {
+            LinearGradient(stops: [.init(color: words.hasPrefix("…") ? .clear : .black, location: 0), .init(color: .black, location: 0.12)], startPoint: .leading, endPoint: .trailing)
+        }
+        .accessibilityLabel(words)
     }
 }
 
