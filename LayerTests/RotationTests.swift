@@ -973,6 +973,15 @@ struct RotationFieldTests {
         #expect([board.title, board.note].map(board.canvasRect) == before)
     }
 
+    @Test func theFieldShowsZeroTo359() {
+        #expect(Rotation.shown(359.6) == 0)
+        #expect(Rotation.shown(359.4) == 359)
+        #expect(Rotation.shown(0.4) == 0)
+        #expect(Rotation.shown(0.6) == 1)
+        // A scrub starting from what is shown starts from 0, not 360.
+        #expect(Scrubber.value(from: Rotation.shown(359.6), steps: -1, in: 0...360, wraps: true) == 359)
+    }
+
     @Test func anAngleThatIsNotANumberIsUpright() {
         #expect(Rotation.normalized(.nan) == 0)
         #expect(Rotation.normalized(.infinity) == 0)

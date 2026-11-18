@@ -13,6 +13,11 @@ enum Rotation {
         return kept >= 360 ? 0 : kept
     }
 
+    /// The angle as the Rotation field shows it: to the whole degree, from 0 to 359.
+    static func shown(_ degrees: Double) -> Double {
+        normalized(degrees.rounded())
+    }
+
     /// The angle as an element keeps it: from 0 up to 360, and nothing when upright.
     static func kept(_ degrees: Double) -> Double? {
         let kept = normalized(degrees)

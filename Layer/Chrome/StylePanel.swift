@@ -113,7 +113,7 @@ private struct ElementSettings: View {
                     ), range: 5...100)
                 }
                 NumberField("°", label: "Rotation",
-                            value: Binding(get: { CGFloat(element.resolvedRotation.rounded()) }, set: { degrees in change { $0.setRotation(Double(degrees)) } }),
+                            value: Binding(get: { CGFloat(Rotation.shown(element.resolvedRotation)) }, set: { degrees in change { $0.setRotation(Double(degrees)) } }),
                             range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
             }
             if case .screen = ref.host {
@@ -309,7 +309,7 @@ private struct SeveralSettings: View {
                     // pivot; a screen among them leaves nothing to turn.
                     if turnable, let first = elements.first {
                         NumberField("°", label: "Rotation", value: Binding(
-                            get: { CGFloat(first.resolvedRotation.rounded()) },
+                            get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
                             set: { degrees in change(where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
                         ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
                     }
