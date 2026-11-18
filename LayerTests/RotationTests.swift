@@ -123,19 +123,18 @@ struct TurnedThingsOnTheBoardTests {
 
     @Test func aLassoRoundATurnedShapePicksIt() throws {
         let board = TurnBoard()
-        board.turn(board.note, to: 45)
-        let shape = try #require(board.store.canvasShape(of: .element(board.note)))
-        #expect(board.store.things(enclosedBy: shape.corners) == [.element(board.note)])
+        board.turn(board.button, to: 45)
+        let shape = try #require(board.store.canvasShape(of: .element(board.button)))
+        // The turned corners go round all of it, though only a quarter of its upright frame.
+        #expect(board.store.things(enclosedBy: shape.corners) == [.element(board.button)])
     }
 
     @Test func aLassoRoundOnlyTheEmptyCornersDoesNot() throws {
         let board = TurnBoard()
-        board.turn(board.note, to: 45)
-        let box = board.canvasFrame(board.note)
-        let quarter = CGRect(x: box.minX - 5, y: box.minY - 5, width: box.width / 4 + 5, height: box.height / 4 + 5)
-        let corners = [CGPoint(x: quarter.minX, y: quarter.minY), CGPoint(x: quarter.maxX, y: quarter.minY),
-                       CGPoint(x: quarter.maxX, y: quarter.maxY), CGPoint(x: quarter.minX, y: quarter.maxY)]
-        #expect(board.store.things(enclosedBy: corners).isEmpty)
+        board.turn(board.button, to: 45)
+        // The upright frame's corners go round the button's empty corners and a quarter of it.
+        let frame = TurnedRect(rect: try #require(board.store.canvasShape(of: .element(board.button))).rect, degrees: 0)
+        #expect(board.store.things(enclosedBy: frame.corners).isEmpty)
     }
 
     @Test func aTurnedElementTakesUpTheBoxRoundItsShape() throws {
@@ -161,9 +160,13 @@ struct TurnedThingsOnTheBoardTests {
 
     @Test func aligningLinesUpTheTurnedShapesBoxes() throws {
         let board = TurnBoard()
-        board.turn(board.note, to: 90)
-        let second = board.store.addFloating(element(.stickyNote, 900, 300, 140, 130), scale: 1)
-        board.store.align(.several([.element(board.note), .element(second)]), .left)
-        #expect(abs(board.canvasFrame(board.note).minX - board.canvasFrame(second).minX) <= 1)
+        // A long thing stood on end: its box is far narrower than its frame, and it is
+        // not the leftmost, so it has to move.
+        let long = board.store.addFloating(element(.button, 500, 300, 200, 40), scale: 1)
+        board.turn(long, to: 90)
+        let second = board.store.addFloating(element(.stickyNote, 300, 100, 140, 130), scale: 1)
+        board.store.align(.several([.element(long), .element(second)]), .left)
+        #expect(abs(board.canvasFrame(long).minX - 300) <= 1)
+        #expect(abs(board.canvasFrame(second).minX - 300) <= 1)
     }
 }
