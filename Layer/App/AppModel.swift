@@ -1021,8 +1021,6 @@ final class AppModel {
     private(set) var snappedTurn: Double?
     /// The element being turned, and the angle it had when the turn began.
     @ObservationIgnored private var turnStart: (ref: DesignStore.ElementRef, degrees: Double)?
-    /// The number of the hold the turn opened, to close when it ends; nil when it opened none.
-    @ObservationIgnored private var turnHold: Int?
 
     /// The one element selected, unless it is locked: what a turn turns.
     private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
@@ -1036,17 +1034,10 @@ final class AppModel {
     @discardableResult
     func beginTurn() -> Bool {
         guard !isTurning, let turnable = turnableElement else { return false }
-        // A turn is an edit by hand, like a drag: a step a spoken command holds open is
-        // joined and left for the command to close, and a command that ends meanwhile
-        // leaves the turn's step open. A drag the turn cuts short would close the step it
-        // shares with the turn, so then the turn holds the step open itself.
-        if store.isEditing, !store.isHoldingEdit {
-            store.beginHeldEdit()
-            turnHold = store.holdNumber
-        } else {
-            turnHold = nil
-        }
-        store.beginEdit()
+        // The turn's own part of the step: a drag, a command or a screen being generated
+        // that is under way, or that begins or ends meanwhile, shares the step without
+        // closing it while the turn goes on, and the turn doesn't close theirs.
+        store.beginEdit(by: .turn)
         turnStart = (turnable.ref, turnable.element.resolvedRotation)
         isAdjusting = true
         isTurning = true
@@ -1061,28 +1052,21 @@ final class AppModel {
         guard let turnStart, selection == .element(turnStart.ref) else { return false }
         let turned = turnStart.degrees + degrees
         let (angle, isSnapped) = snaps ? Rotation.snapped(turned) : (Rotation.normalized(turned), false)
-        // Again with every move, as a slider does: a command's hold still sees the turn as
-        // an edit by hand after another edit inside it has ended.
-        store.beginEdit()
         store.update(turnStart.ref) { $0.setRotation(angle) }
         let snapped = isSnapped ? angle : nil
         if snappedTurn != snapped { snappedTurn = snapped }
         return isSnapped
     }
 
-    /// Ends the turn, and its step with it unless a spoken command is still holding the
-    /// step open. A hold the turn didn't open is left alone. Does nothing when no turn began.
+    /// Ends the turn, and its step with it unless something else still has the step open.
+    /// Does nothing when no turn began.
     func endTurn() {
         guard isTurning else { return }
         turnStart = nil
         isTurning = false
         isAdjusting = false
         snappedTurn = nil
-        store.endEdit()
-        if let turnHold, store.isHoldingEdit, store.holdNumber == turnHold {
-            store.endHeldEdit()
-        }
-        turnHold = nil
+        store.endEdit(by: .turn)
     }
 
     /// Turns what is selected `degrees` clockwise in one step, without snapping.
