@@ -31,7 +31,7 @@ final class Recorder: VoiceActing {
     private(set) var refusals = 0
     /// The canvas, changed as the app would change it, so that a command in a row sees
     /// what the one before it did.
-    private(set) var picture: CanvasPicture
+    var picture: CanvasPicture
     /// When the first and the last tool of the command under way ran.
     var firstToolAt: ContinuousClock.Instant?
     var lastToolAt: ContinuousClock.Instant?
@@ -132,11 +132,13 @@ final class Recorder: VoiceActing {
             refusals += 1
             return note("deleteElement", ["element": element, "named": named], saying: "There is no \(named) here. \(element) is the \(found.kind).")
         }
+        for screen in picture.screens.indices { picture.screens[screen].elements.removeAll { $0.handle == element } }
         return note("deleteElement", ["element": element, "named": named], saying: "Deleted \(element).")
     }
 
     func renameScreen(screen: String, name: String) -> String {
-        note("renameScreen", ["screen": screen, "name": name], saying: "Renamed \(screen) to “\(name)”.")
+        if let index = picture.screens.firstIndex(where: { $0.handle == screen }) { picture.screens[index].name = name }
+        return note("renameScreen", ["screen": screen, "name": name], saying: "Renamed \(screen) to “\(name)”.")
     }
 
     func deleteScreen(screen: String, named: String?) -> String {
@@ -144,6 +146,7 @@ final class Recorder: VoiceActing {
             refusals += 1
             return note("deleteScreen", ["screen": screen, "named": named], saying: "There is no \(named) here. \(screen) is “\(found.name)”.")
         }
+        picture.screens.removeAll { $0.handle == screen }
         return note("deleteScreen", ["screen": screen, "named": named], saying: "Deleted \(screen).")
     }
 
@@ -160,7 +163,11 @@ final class Recorder: VoiceActing {
     }
 
     func show(target: String) -> String {
-        note("show", ["target": target], saying: "Showing \(target).")
+        // Showing a screen puts it in view, which changes what the canvas says is in view.
+        if picture.screens.contains(where: { $0.handle == target }) {
+            for index in picture.screens.indices { picture.screens[index].visibleShare = picture.screens[index].handle == target ? 1 : 0 }
+        }
+        return note("show", ["target": target], saying: "Showing \(target).")
     }
 
     func zoom(to level: String) -> String {
@@ -346,25 +353,32 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
         /// The model's own sampling, which varies from run to run.
         case sampled
         /// Always the likeliest answer, so a run can be repeated, with the canvas in the
-        /// instructions, as the app had it until 2026-11-18.
+        /// instructions. As the app has it.
         case baseline
         /// The model must call a tool.
         case required
         /// Two worked examples added to the rules.
         case examples
-        /// The canvas at the head of the prompt instead of in the instructions, so that the
-        /// rules and the tools are the same from one command to the next. As the app has
-        /// it since 2026-11-18 ("Prompt order" in docs/benchmarks/voice-on-device.md).
+        /// The canvas at the head of the prompt, run straight into "The command: …".
+        /// The first try, 2026-11-18 (`PromptForm.plain`).
         case canvasfirst
-    }
+        /// The canvas for reference, then the person's words in quotes (`PromptForm.quoted`).
+        case quoted
+        /// The person's words in quotes, then the canvas (`PromptForm.commandfirst`).
+        case commandfirst
+        case quotedrule
+        case quotedonly
 
-    /// What the model is asked, with the canvas in front of the command where it goes there.
-    static func prompt(_ command: String, picture: CanvasPicture, canvasFirst: Bool) -> String {
-        canvasFirst ? canvasPrefix(picture) + command : command
-    }
-
-    static func canvasPrefix(_ picture: CanvasPicture) -> String {
-        "The canvas now:\n\(picture.text(.compact))\n\nThe command: "
+        var form: PromptForm {
+            switch self {
+            case .canvasfirst: .plain
+            case .quoted: .quoted
+            case .commandfirst: .commandfirst
+            case .quotedrule: .quotedrule
+            case .quotedonly: .quotedonly
+            default: .instructions
+            }
+        }
     }
 
     private static let examples = """
@@ -377,7 +391,7 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
             Instructions(VoiceRules.compact + (variant == .examples ? Self.examples : ""))
-            if variant != .canvasfirst {
+            if !variant.form.canvasInPrompt {
                 Instructions("The canvas now:\n\(picture.text(.compact))")
             }
             if picture.hasScreens {
@@ -418,7 +432,7 @@ func run(_ testCase: Case, variant: BenchProfile.Variant) async -> Outcome {
     var reply = ""
     var failure: String?
     do {
-        reply = try await session.respond(to: BenchProfile.prompt(testCase.command, picture: testCase.canvas.picture, canvasFirst: variant == .canvasfirst)).content
+        reply = try await session.respond(to: variant.form.prompt(testCase.command, picture: testCase.canvas.picture)).content
     } catch {
         failure = String(describing: error).prefix(160).description
     }
@@ -458,17 +472,96 @@ struct BenchBrief: DynamicInstructions {
     }
 }
 
-/// The app's on-device profile for a call, in one of two orders: the canvas between the
-/// rules and the tools, as `VoiceProfile` had it, or at the head of each command's prompt.
+/// The canvas in the prompt, as tried for the app on 2026-11-18 and not kept: the canvas
+/// marked as for reference, any notes of the app's own, then the person's words in
+/// quotes. See "Prompt order" in docs/benchmarks/voice-on-device.md.
+enum VoicePrompt {
+    static let canvasHeading = "The canvas now (for reference only):"
+    static let wordsLead = "The person said: "
+
+    static func make(_ words: String, notes: [String] = [], canvas: CanvasPicture) -> String {
+        ([canvasHeading + "\n" + canvas.text(.compact)] + notes + [wordsLead + "\"" + words + "\""]).joined(separator: "\n\n")
+    }
+
+    /// The person's words in such a prompt; the whole text where it isn't one.
+    static func words(in prompt: String) -> String {
+        guard let lead = prompt.range(of: wordsLead, options: .backwards) else { return prompt }
+        var words = prompt[lead.upperBound...]
+        if words.count >= 2, words.hasPrefix("\""), words.hasSuffix("\"") { words = words.dropFirst().dropLast() }
+        return String(words)
+    }
+
+    /// A prompt with its canvas taken out: the paragraph that opens "The canvas now".
+    static func withoutCanvas(_ prompt: String) -> String {
+        prompt.components(separatedBy: "\n\n").filter { !$0.hasPrefix("The canvas now") }.joined(separator: "\n\n")
+    }
+
+    /// The conversation with the canvas taken out of every prompt but the last. An older
+    /// canvas is no longer the canvas, and the model shouldn't read it as one.
+    static func withoutOldCanvases(_ entries: [Transcript.Entry]) -> [Transcript.Entry] {
+        guard let last = entries.lastIndex(where: { if case .prompt = $0 { true } else { false } }) else { return entries }
+        return entries.indices.map { index in
+            guard index != last, case .prompt(var prompt) = entries[index] else { return entries[index] }
+            prompt.segments = prompt.segments.map { segment in
+                guard case .text(var text) = segment else { return segment }
+                text.content = withoutCanvas(text.content)
+                return .text(text)
+            }
+            return .prompt(prompt)
+        }
+    }
+}
+
+/// How the canvas and the person's words are put to the on-device model.
+enum PromptForm: String, CaseIterable {
+    /// The canvas between the rules and the tools, as the app has it.
+    case instructions
+    /// "The canvas now:\n…\n\nThe command: …", the first try at the canvas in the prompt.
+    case plain
+    /// The canvas for reference, the app's notes, then the person's words in quotes, with
+    /// the canvas taken out of older prompts (`VoicePrompt`).
+    case quoted
+    /// As `quoted`, but older prompts keep their canvas.
+    case quotedkeep
+    /// The person's words in quotes, then the canvas; older prompts lose their canvas.
+    case commandfirst
+    /// As `quoted`, with a reminder before the person's words to act only on what is listed.
+    case quotedrule
+    /// As `quoted`, with the canvas headed as all there is.
+    case quotedonly
+
+    var canvasInPrompt: Bool { self != .instructions }
+    var stripsOldCanvases: Bool { self != .instructions && self != .plain && self != .quotedkeep }
+
+    func prompt(_ command: String, notes: [String] = [], picture: CanvasPicture) -> String {
+        switch self {
+        case .instructions:
+            return (notes + [command]).joined(separator: " ")
+        case .plain:
+            return "The canvas now:\n\(picture.text(.compact))\n\nThe command: " + (notes + [command]).joined(separator: " ")
+        case .quoted, .quotedkeep:
+            return VoicePrompt.make(command, notes: notes, canvas: picture)
+        case .quotedrule:
+            return VoicePrompt.make(command, notes: notes + ["(Act only on what the canvas lists. If they name something it doesn't list, call no tool and say it isn't there.)"], canvas: picture)
+        case .quotedonly:
+            return VoicePrompt.make(command, notes: notes, canvas: picture)
+                .replacingOccurrences(of: VoicePrompt.canvasHeading, with: "The canvas now. Only what is listed here exists:")
+        case .commandfirst:
+            return (notes + [VoicePrompt.wordsLead + "\"" + command + "\"", VoicePrompt.canvasHeading + "\n" + picture.text(.compact)]).joined(separator: "\n\n")
+        }
+    }
+}
+
+/// The app's on-device profile for a call, with the canvas told in one of the forms above.
 struct CallProfile: LanguageModelSession.DynamicProfile {
     @SessionProperty(\.benchCanvas) private var picture
     let actor: any VoiceActing
-    let canvasFirst: Bool
+    let form: PromptForm
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
             Instructions(VoiceRules.compact)
-            if !canvasFirst {
+            if !form.canvasInPrompt {
                 BenchBrief()
             }
             if picture.hasScreens {
@@ -477,7 +570,10 @@ struct CallProfile: LanguageModelSession.DynamicProfile {
                 VoiceTools.forEmptyCanvas(actor)
             }
         }
-        .historyTransform { Self.trimmed($0, keepingCommands: 2) }
+        .historyTransform { [form] in
+            let kept = Self.trimmed($0, keepingCommands: 2)
+            return form.stripsOldCanvases ? VoicePrompt.withoutOldCanvases(kept) : kept
+        }
         .maximumResponseTokens(200)
         .samplingMode(.greedy)
     }
@@ -492,23 +588,55 @@ struct CallProfile: LanguageModelSession.DynamicProfile {
     }
 }
 
-/// Where the canvas goes: in the instructions (as the app had it), at the head of the
-/// prompt with only the rules and tools read ahead, or at the head of the prompt with the
-/// starting canvas read ahead too.
-enum CallOrder: String, CaseIterable {
-    case instructions, prompt, promptwarm
+/// A call's commands in a row, graded as the single commands are. A correction is
+/// handled as the app handles it: the last change is undone first, and the model is told.
+struct Sequence {
+    var name: String
+    var canvas: Canvas
+    var steps: [Case]
+    /// The steps that open with "No, …" and so undo the step before them first.
+    var corrections: Set<Int> = []
 }
 
-/// A call's commands in a row on the one-screen canvas, each changing it.
-let callCommands = [
-    "Make the sign in button green",
-    "Make the title bold",
-    "Change the button text to Continue",
-    "Make the image half width",
-    "Make the title red",
-    "Align the image centrally",
-    "Duplicate the button",
-    "Change the title's text colour to blue",
+private func one(_ command: String, _ tools: [String], _ isRight: @escaping ([String: String]) -> Bool = { _ in true }) -> Case {
+    Case(canvas: .one, command: command, tools: tools, isRight: isRight)
+}
+
+let sequences: [Sequence] = [
+    // Edits on one screen, each changing the canvas.
+    Sequence(name: "edits", canvas: .one, steps: [
+        one("Make the sign in button green", ["styleElement"], both(has("element", "E2"), has("look", "green"))),
+        one("Make the title bold", ["styleElement"], both(has("element", "E1"), has("look", "bold"))),
+        one("Change the button text to Continue", ["setText"], both(has("element", "E2"), has("text", "continue"))),
+        one("Make the image half width", ["moveElement"], both(has("element", "E3"), has("width", "50"))),
+        one("Make the title red", ["styleElement"], both(has("element", "E1"), has("look", "red"))),
+        one("Align the image centrally", ["alignElement"], { $0["element"] == "E3" && ["centre", "center", "centrally", "middle"].contains(($0["alignment"] ?? "").lowercased()) }),
+        one("Duplicate the button", ["duplicateElement"], has("element", "E2")),
+        one("Change the title's text colour to blue", ["styleElement"], both(has("element", "E1"), has("look", "blue"))),
+    ]),
+    // Three screens, moving between them, with something that isn't there.
+    Sequence(name: "screens", canvas: .three, steps: [
+        one("Make the edit profile button red", ["styleElement"], both(has("element", "E6"), has("look", "red"))),
+        one("Show me the settings screen", ["show"], has("target", "S3")),
+        one("Turn the toggle off", ["styleElement"], both(has("element", "E7"), has("look", "off"))),
+        one("Delete the log out button", ["deleteElement"], has("element", "E8")),
+        one("Go to the login screen", ["show"], has("target", "S1")),
+        one("Make the sign in button green", ["styleElement"], both(has("element", "E2"), has("look", "green"))),
+        one("Make the slider wider", []),
+        one("Rename this screen to Sign In", ["renameScreen"], both(has("screen", "S1"), has("name", "sign in"))),
+    ]),
+    // Commands that leave the canvas as it is, a rename, a correction, and something
+    // that isn't there.
+    Sequence(name: "views", canvas: .one, steps: [
+        one("Zoom in", ["zoom"], has("level", "in")),
+        one("Make the title bold", ["styleElement"], both(has("element", "E1"), has("look", "bold"))),
+        one("Zoom out", ["zoom"], has("level", "out")),
+        one("Make the image bigger", ["moveElement", "styleElement"], { $0["element"] == "E3" }),
+        one("No, make the button bigger instead", ["moveElement", "styleElement"], { $0["element"] == "E2" }),
+        one("Rename this screen to Welcome", ["renameScreen"], both(has("screen", "S1"), has("name", "welcome"))),
+        one("Show me the whole canvas", ["show", "zoom"], { ($0["target"] ?? $0["level"] ?? "").lowercased().contains("all") || ($0["level"] ?? "").lowercased().contains("fit") }),
+        one("Make the checkbox blue", []),
+    ], corrections: [4]),
 ]
 
 private func seconds(_ duration: Duration) -> Double {
@@ -516,40 +644,84 @@ private func seconds(_ duration: Duration) -> Double {
 }
 
 /// One call: the session is made and warmed as the app does when a call starts, a pause
-/// stands in for the person speaking, and then the commands run one after another. For
-/// each, the time to the first tool, the time from the last tool to the model's last word
-/// (its "Done"), and the whole. Printed one line a command, for adding up elsewhere.
+/// stands in for the person speaking, and then a sequence's commands run one after
+/// another. For each, the time to the first tool, the time from the last tool to the
+/// model's last word (its "Done"), the whole, and whether it was right. Printed one line
+/// a command, for adding up elsewhere.
+/// Whether a build or test run is going on, which would slow the model and spoil the times.
+func isBuilding() -> Bool {
+    let pgrep = Process()
+    pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    pgrep.arguments = ["-x", "xcodebuild"]
+    pgrep.standardOutput = FileHandle.nullDevice
+    try? pgrep.run()
+    pgrep.waitUntilExit()
+    return pgrep.terminationStatus == 0
+}
+
+/// Runs a call when nothing is building, and again if a build started part way through.
+/// Only the clean call's lines are printed.
 @MainActor
-func call(_ order: CallOrder, run: Int) async {
-    let canvasFirst = order != .instructions
-    let recorder = Recorder(picture: Canvas.one.picture)
-    let session = LanguageModelSession(profile: CallProfile(actor: recorder, canvasFirst: canvasFirst))
+func cleanCall(_ sequence: Sequence, form: PromptForm, run: Int) async {
+    while true {
+        while isBuilding() { try? await Task.sleep(for: .seconds(10)) }
+        let lines = await call(sequence, form: form, run: run)
+        if let lines {
+            lines.forEach { print($0) }
+            return
+        }
+        print("# \(form.rawValue) run\(run) \(sequence.name): a build started part way, so the call is run again")
+    }
+}
+
+/// The call's lines, or nil where a build was going on at some point during it.
+@MainActor
+func call(_ sequence: Sequence, form: PromptForm, run: Int) async -> [String]? {
+    var lines: [String] = []
+    let recorder = Recorder(picture: sequence.canvas.picture)
+    let session = LanguageModelSession(profile: CallProfile(actor: recorder, form: form))
     session.properties.benchCanvas = recorder.picture
-    // `promptwarm` also reads ahead the canvas as the call starts, as the start of the
-    // first command's prompt.
-    session.prewarm(promptPrefix: order == .promptwarm ? Prompt(BenchProfile.canvasPrefix(recorder.picture)) : nil)
+    session.prewarm()
     try? await Task.sleep(for: .seconds(4))
-    for (index, command) in callCommands.enumerated() {
+    var before = recorder.picture
+    for (index, step) in sequence.steps.enumerated() {
+        var notes: [String] = []
+        if sequence.corrections.contains(index) {
+            recorder.picture = before
+            notes.append("(The last change has been undone.)")
+        }
+        before = recorder.picture
         // The app takes the canvas as it is before each command.
         session.properties.benchCanvas = recorder.picture
         recorder.firstToolAt = nil
         recorder.lastToolAt = nil
         let callsBefore = recorder.calls.count
+        let refusalsBefore = recorder.refusals
         let start = ContinuousClock.now
         var failure = ""
         do {
-            _ = try await session.respond(to: BenchProfile.prompt(command, picture: recorder.picture, canvasFirst: canvasFirst))
+            _ = try await session.respond(to: form.prompt(step.command, notes: notes, picture: recorder.picture))
         } catch {
             failure = " ERROR \(String(describing: error).prefix(100))"
         }
         let end = ContinuousClock.now
+        let calls = Array(recorder.calls[callsBefore...])
+        let refusals = recorder.refusals - refusalsBefore
+        let right: Bool
+        if step.tools.isEmpty {
+            right = calls.count == refusals
+        } else {
+            right = calls.count == 1 && step.tools.contains(calls[0].tool) && step.isRight(calls[0].arguments)
+        }
         let firstTool = recorder.firstToolAt.map { seconds($0 - start) } ?? -1
         let done = recorder.lastToolAt.map { seconds(end - $0) } ?? -1
-        let did = recorder.calls[callsBefore...].map(\.description).joined(separator: "; ")
-        print(String(format: "T %@ run%d cmd%d total %.3f first-tool %.3f done %.3f | %@ | %@%@", order.rawValue, run, index, seconds(end - start), firstTool, done, command, did, failure))
+        let did = calls.map(\.description).joined(separator: "; ") + (refusals > 0 ? " [\(refusals) turned down]" : "")
+        if isBuilding() { return nil }
+        lines.append(String(format: "T %@ run%d %@ cmd%d total %.3f first-tool %.3f done %.3f %@ | %@ | %@%@", form.rawValue, run, sequence.name, index, seconds(end - start), firstTool, done, right ? "RIGHT" : "WRONG", step.command, did, failure))
         // A short pause between commands, as there is in a call while the person speaks.
         try? await Task.sleep(for: .seconds(1.5))
     }
+    return lines
 }
 
 @main
@@ -583,10 +755,12 @@ struct Main {
             // Calls in each order, which goes first rotating from run to run, so that none
             // is favoured by the Mac warming or by a cache left by another.
             let runs = CommandLine.arguments.dropFirst(2).first.flatMap(Int.init) ?? 5
-            let orders = CommandLine.arguments.dropFirst(3).first.map { $0.split(separator: ",").compactMap { CallOrder(rawValue: String($0)) } } ?? CallOrder.allCases
+            let forms = CommandLine.arguments.dropFirst(3).first.map { $0.split(separator: ",").compactMap { PromptForm(rawValue: String($0)) } } ?? PromptForm.allCases
             for run in 1...runs {
-                for step in orders.indices {
-                    await call(orders[(step + run) % orders.count], run: run)
+                for sequence in sequences {
+                    for step in forms.indices {
+                        await cleanCall(sequence, form: forms[(step + run) % forms.count], run: run)
+                    }
                 }
             }
             return
