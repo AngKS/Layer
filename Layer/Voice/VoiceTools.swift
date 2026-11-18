@@ -17,6 +17,8 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
     @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String
+    /// `angle` is where to turn it to; `by` is how far to turn it from where it is. Both in degrees, clockwise.
+    @MainActor func rotateElement(element: String, angle: String?, by: String?) -> String
     @MainActor func alignElement(element: String, alignment: String) -> String
     @MainActor func duplicateElement(element: String) -> String
     /// `named` is the person's own word for what is to go. See `VoiceNaming`.
@@ -121,7 +123,7 @@ enum VoiceTools {
     static func all(_ actor: any VoiceActing, canEndCall: Bool = true) -> [any Tool] {
         let tools: [any Tool] = [
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
-            StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
+            StyleElementTool(actor: actor), MoveElementTool(actor: actor), RotateElementTool(actor: actor), AlignElementTool(actor: actor),
             StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor), TidyScreenTool(actor: actor), ChangeScreenDeviceTool(actor: actor),
             ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
@@ -147,6 +149,7 @@ enum VoiceTools {
         case "setText": "Rewording…"
         case "styleElement": "Restyling…"
         case "moveElement": "Resizing…"
+        case "rotateElement": "Turning…"
         case "alignElement": "Aligning…"
         case "stackElements": "Stacking…"
         case "placeElement": "Placing…"
@@ -283,6 +286,26 @@ struct MoveElementTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.moveElement(element: arguments.element, x: arguments.x, y: arguments.y, width: arguments.width, height: arguments.height)
+    }
+}
+
+struct RotateElementTool: Tool {
+    let actor: any VoiceActing
+    let name = "rotateElement"
+    let description = "Turns an element to an angle, or by an amount, in degrees clockwise. A negative amount turns it anticlockwise. “Straighten” is angle 0."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The element's handle, such as E2.")
+        var element: String
+        @Guide(description: "The angle to turn it to, such as 45. 0 is upright.")
+        var angle: String?
+        @Guide(description: "How far to turn it from where it is, such as 15 or -15.")
+        var by: String?
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.rotateElement(element: arguments.element, angle: arguments.angle, by: arguments.by)
     }
 }
 

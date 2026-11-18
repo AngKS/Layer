@@ -19,6 +19,8 @@ struct CanvasPicture: Sendable, Equatable {
         var text: String
         /// In the screen's own points; nil for a loose element, which has no screen.
         var frame: CGRect?
+        /// How far it is turned clockwise, in degrees; 0 when upright.
+        var rotation: Double = 0
         /// Look words that would give this look back, such as `colour blue` or `bold`.
         var look: [String] = []
         var isSelected = false
@@ -127,6 +129,7 @@ struct CanvasPicture: Sendable, Equatable {
         if let frame = element.frame {
             parts.append("x\(number(frame.minX)) y\(number(frame.minY)) w\(number(frame.width)) h\(number(frame.height))")
         }
+        if element.rotation != 0 { parts.append("turned \(number(CGFloat(Rotation.shown(element.rotation))))°") }
         parts += element.look
         if element.isSelected { parts.append("[selected]") }
         if element.isLocked { parts.append("[locked]") }
