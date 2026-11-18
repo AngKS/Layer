@@ -88,6 +88,32 @@ struct VoiceAgentTests {
         #expect(Set(told.tools).isSuperset(of: ["createScreen", "styleElement", "moveElement", "show", "undo", "endCall"]))
     }
 
+    /// The pencil's call stays up for the next squeeze: its model isn't handed the tool that
+    /// ends a call, which said "Hanging up." and hung nothing up.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func thePencilsModelCantEndTheCall() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let recorder = ScriptRecorder()
+        let agent = VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: [:], closing: "Done.", recorder: recorder), canEndCall: false)
+        _ = await agent.run("hello")
+        let told = try #require(recorder.requests.first)
+        #expect(told.tools.count == 17)
+        #expect(!told.tools.contains("endCall"))
+        #expect(told.tools.contains("undo"))
+        // The pencil's own agent is made that way.
+        #expect((PencilVoice.standardRunner(for: app) as? VoiceAgent)?.canEndCall == false)
+    }
+
+    @Test func noToolEndsThePencilsCallWhateverTheCanvas() {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let box = VoiceToolbox(model: app, handles: VoiceHandles())
+        #expect(!VoiceTools.all(box, canEndCall: false).contains { $0.name == "endCall" })
+        #expect(!VoiceTools.forEmptyCanvas(box, canEndCall: false).contains { $0.name == "endCall" })
+        // A phone call's model can still hang up.
+        #expect(VoiceTools.all(box).contains { $0.name == "endCall" })
+        #expect(VoiceTools.forEmptyCanvas(box).contains { $0.name == "endCall" })
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func thePictureIsFreshBetweenSteps() async throws {
         // The copy only exists, as E4, once the first step has run.

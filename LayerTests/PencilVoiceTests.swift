@@ -59,6 +59,8 @@ private final class Bench {
         // Other suites' calls run alongside: only this design's own call counts, unless a
         // test says otherwise.
         pencil.phoneCallIsUp = { false }
+        // Nor do other suites' designs count as other windows.
+        pencil.otherWindows = { [] }
         pencil.readiness = { readiness }
         pencil.silenceCheck = .milliseconds(5)
         app.pencilVoice = pencil
@@ -470,6 +472,8 @@ struct PencilVoiceTests {
 
     @Test func aPencilCallIsLetGoOf() async {
         let (app, _) = VoiceFixture.login()
+        // Out of Draw, where hovering warms nothing.
+        app.tool = .select
         var pencil: PencilVoice? = PencilVoice(model: app, makeRoute: { FakeRoute() }, makeRunner: { _ in FakeRunner() })
         pencil?.readiness = { .ready }
         pencil?.phoneCallIsUp = { false }
@@ -775,8 +779,9 @@ struct PencilVoiceTests {
         bench.end()
     }
 
-    /// A phone call in another window has the microphone: a squeeze here only retargets.
-    @Test func aSqueezeDuringAnotherWindowsCallOnlyRetargets() async {
+    /// A phone call in another window has the microphone, and its commands are about that
+    /// window's design: a squeeze here does nothing, and taps nothing (final fix 9).
+    @Test func aSqueezeDuringAnotherWindowsCallDoesNothing() async {
         let bench = Bench()
         let other = VoiceFixture.login().app
         await other.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
@@ -788,8 +793,8 @@ struct PencilVoiceTests {
         bench.pencil.squeezeEnded()
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.pencil.call == nil && bench.routes.isEmpty && bench.pencil.bubble == nil)
-        #expect(bench.app.selection == bench.button)
-        #expect(bench.pencil.retarget?.point == Bench.overButton)
+        #expect(bench.app.selection == nil)
+        #expect(bench.pencil.retarget == nil)
         other.endVoiceCall()
         bench.end()
     }
@@ -866,6 +871,145 @@ struct PencilVoiceTests {
         #expect(bench.state == .working)
         bench.routes[1].send(.command("make it red"))
         #expect(await eventually { bench.state == .done })
+        bench.end()
+    }
+    // MARK: Final fix wave
+
+    /// A squeeze over the last bubble, still showing, is a new squeeze: it opens a bubble
+    /// of its own in place of the old one (final fix 1).
+    @Test func aSqueezeOverTheLastBubbleStartsANewListen() async {
+        let bench = Bench()
+        #expect(await bench.hold())
+        bench.pencil.call?.captionTimes = (.seconds(60), .seconds(60))
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.state == .done })
+        // The bubble reports where it is, over the button.
+        bench.app.chromeFrames[PencilVoiceBubble.chromeName] = CGRect(x: 4000, y: 4200, width: 250, height: 120)
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.routes.count == 2 })
+        // Other chrome there still keeps a squeeze off.
+        bench.pencil.squeezeFailed()
+        bench.app.chromeFrames["format"] = CGRect(x: 4000, y: 4200, width: 250, height: 120)
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.routes.count == 2)
+        bench.end()
+    }
+
+    /// Talk in the room keeps a toggle's silence from coming, but it still stops after a
+    /// minute, as a hold does (final fix 2).
+    @Test func aToggleStopsAfterAMinuteThoughWordsKeepComing() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        for words in ["the radio", "is on", "in the kitchen"] {
+            bench.now += .seconds(15)
+            #expect(await bench.hear(words))
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        #expect(bench.state == .listening && !bench.routes[0].isStopped)
+        // Sixteen seconds since the last words: the toggle's silence hasn't run out, but
+        // the minute has.
+        bench.now += .seconds(16)
+        #expect(await eventually { bench.routes[0].isStopped && bench.state == .problem(PencilVoice.heldTooLong) })
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+    }
+
+    /// The first listen's words arrive only after the second was sent: its tick is still
+    /// its own, not the second bubble's (final fix 3, D-M3).
+    @Test func aCommandWhoseWordsArriveLateIsNotTheNextBubbles() async {
+        let bench = Bench()
+        #expect(await bench.hold())
+        // The first still settles as the second is squeezed and sent.
+        #expect(await bench.hold())
+        #expect(bench.routes.count == 2 && bench.state == .working)
+        bench.pencil.call?.captionTimes = (.seconds(60), .seconds(60))
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .done })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.state == .working)
+        bench.routes[1].send(.command("make it red"))
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] && bench.state == .done })
+        bench.end()
+    }
+
+    /// An earlier listen's failure, which came while it settled, isn't the next bubble's
+    /// problem (final fix 3).
+    @Test func anEarlierListensFailureIsNotTheNextBubbles() async {
+        let bench = Bench()
+        #expect(await bench.hold())
+        #expect(await bench.hold())
+        bench.pencil.call?.captionTimes = (.seconds(60), .seconds(60))
+        bench.routes[0].send(.failed("The microphone stopped. Squeeze to try again."))
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .problem })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.state == .working)
+        bench.routes[1].send(.command("make it red"))
+        #expect(await eventually { bench.state == .done })
+        bench.end()
+    }
+
+    /// A toggle sent with nothing said closes, even while another command runs: it used to
+    /// spin for as long as that one did (final fix 4).
+    @Test func aToggleWithNothingSaidClosesWhileAnotherCommandRuns() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(await bench.toggle())
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.pencil.squeezeEnded()
+        #expect(bench.state == .working)
+        bench.routes[1].send(.nothingHeard)
+        #expect(await eventually { bench.pencil.bubble == nil && bench.routes[1].isStopped })
+        #expect(bench.pencil.call?.phase == .working)
+        bench.runner.holds = false
+        bench.end()
+    }
+
+    /// One microphone at a time across windows: a squeeze here stops a pencil listening in
+    /// another, which sends nothing (final fix 8).
+    @Test func aSqueezeStopsAPencilListeningInAnotherWindow() async {
+        let bench = Bench()
+        let other = Bench()
+        bench.pencil.otherWindows = { [other.app] }
+        #expect(await other.toggle())
+        #expect(await other.hear("make it"))
+        #expect(await bench.toggle())
+        #expect(other.routes[0].isStopped && other.pencil.bubble == nil)
+        #expect(other.runner.commands.isEmpty && !other.pencil.ownsSqueeze)
+        other.end()
+        bench.end()
+    }
+
+    /// The pen hovering in Draw isn't on its way to a squeeze, which is PencilKit's there:
+    /// no pencil call is made ready (final fix 10).
+    @Test func hoveringInDrawMakesNoPencilCall() async {
+        let bench = Bench()
+        bench.app.tool = .draw
+        bench.pencil.hovered()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call == nil && bench.runner.warmUps == 0)
+        bench.app.tool = .select
+        bench.pencil.hovered()
+        #expect(await eventually { bench.runner.warmUps == 1 })
+        bench.end()
+    }
+
+    /// A drawing that is part of the selection is part of it like anything else: a squeeze
+    /// on it is about the whole selection, not what lies beneath it (final fix 13).
+    @Test func aSqueezeOnADrawingInTheSelectionKeepsTheWholeSelection() async {
+        let bench = Bench()
+        var ink = DesignStore.newElement(.drawing)
+        ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
+        ink.isLocked = true
+        let drawing = bench.app.store.addFloating(ink, scale: 1)
+        let both = CanvasSelection([.element(drawing), bench.title])
+        bench.app.selection = both
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(bench.app.selection == both)
         bench.end()
     }
 }

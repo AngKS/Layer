@@ -44,11 +44,14 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
     private let hooks: VoiceHooks
     /// A stand-in for the design's model, for tests and the simulator.
     private let testModel: (any LanguageModel)?
+    /// Whether the model is handed the tool that ends the call: not for the pencil's.
+    private let canEndCall: Bool
 
-    init(actor: any VoiceActing, hooks: VoiceHooks, testModel: (any LanguageModel)? = nil) {
+    init(actor: any VoiceActing, hooks: VoiceHooks, testModel: (any LanguageModel)? = nil, canEndCall: Bool = true) {
         self.actor = actor
         self.hooks = hooks
         self.testModel = testModel
+        self.canEndCall = canEndCall
     }
 
     var body: some LanguageModelSession.DynamicProfile {
@@ -56,7 +59,7 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             Profile {
                 Instructions(VoiceRules.full)
                 CanvasBrief(detail: .full)
-                VoiceTools.all(actor)
+                VoiceTools.all(actor, canEndCall: canEndCall)
             }
             .model(testModel)
             .historyTransform { Self.trimmed($0, keepingCommands: 6) }
@@ -66,7 +69,7 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             Profile {
                 Instructions(VoiceRules.full)
                 CanvasBrief(detail: .full)
-                VoiceTools.all(actor)
+                VoiceTools.all(actor, canEndCall: canEndCall)
             }
             .model(HostedLanguageModel(provider: provider, model: model))
             .historyTransform { Self.trimmed($0, keepingCommands: 6) }
@@ -78,9 +81,9 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
                 Instructions(VoiceRules.compact)
                 CanvasBrief(detail: .compact)
                 if picture.hasScreens {
-                    VoiceTools.all(actor)
+                    VoiceTools.all(actor, canEndCall: canEndCall)
                 } else {
-                    VoiceTools.forEmptyCanvas(actor)
+                    VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall)
                 }
             }
             .historyTransform { Self.trimmed($0, keepingCommands: 2) }

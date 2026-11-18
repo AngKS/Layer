@@ -563,6 +563,16 @@ struct DictationRouteTests {
         #expect(seen.last == .failed("The microphone stopped. Start voice mode again."))
     }
 
+    /// The pencil has no voice mode to start again: its words say to squeeze.
+    @Test func aMicrophoneThatGoesAwayDuringASqueezeSaysToSqueezeAgain() async throws {
+        let audio = FakeAudioSource()
+        let route = DictationRoute(endsOnPause: false, serving: .pencil, source: audio, recogniser: FakeRecogniser())
+        let stream = try await route.start(vocabulary: [])
+        audio.cutOut()
+        let seen = await events(from: stream) { $0.contains { if case .failed = $0 { true } else { false } } }
+        #expect(seen.last == .failed("The microphone stopped. Squeeze to try again."))
+    }
+
     @Test func stoppingLetsGoOfEverything() async throws {
         let bench = bench()
         let stream = try await bench.route.start(vocabulary: [])

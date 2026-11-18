@@ -79,11 +79,16 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Called with what the command under way is doing now, such as "Restyling…".
     var onStep: ((String) -> Void)?
 
+    /// Whether the model may end the call. The pencil's call has no voice mode to end, so
+    /// it isn't handed the tool: given it, a model said "Hanging up." and nothing hung up.
+    let canEndCall: Bool
+
     /// `testModel` stands in for the design's own model, for tests and the simulator.
-    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil) {
+    init(model: AppModel, testModel: (any LanguageModel)? = nil, looksAgainBetweenSteps: Bool? = nil, canEndCall: Bool = true) {
         self.model = model
         self.testModel = testModel
         self.looksAgain = looksAgainBetweenSteps
+        self.canEndCall = canEndCall
         toolbox = VoiceToolbox(model: model, handles: handles)
     }
 
@@ -186,7 +191,7 @@ final class VoiceAgent: VoiceCommandRunner {
             // Nothing more is done to a design once it has closed.
             mayRun: { @MainActor [weak model] in !Task.isCancelled && model?.isClosed == false }
         )
-        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel))
+        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel, canEndCall: canEndCall))
     }
 
     private func stepStarted(with tool: String) {

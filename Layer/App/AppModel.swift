@@ -640,7 +640,8 @@ final class AppModel {
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
         voice?.end()
-        // Listening stops, but a pencil command already running is left to finish.
+        // Listening stops. A pencil command already running isn't cancelled, but it ends at
+        // its next tool call, since nothing more is done to a closed design.
         pencilVoiceIfMade?.designClosed()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()

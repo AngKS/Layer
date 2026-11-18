@@ -107,23 +107,27 @@ enum VoiceNaming {
 /// The tools a model is handed during a call. There are few of them, each with a few flat
 /// arguments, because the smallest model that has to use them is the on-device one.
 enum VoiceTools {
-    static func all(_ actor: any VoiceActing) -> [any Tool] {
-        [
+    /// `canEndCall` is false for the pencil's call, which has no voice mode to end: it
+    /// stays up for the next squeeze, and a model handed the tool still said it hung up.
+    static func all(_ actor: any VoiceActing, canEndCall: Bool = true) -> [any Tool] {
+        let tools: [any Tool] = [
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), AlignElementTool(actor: actor),
             StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor),
             ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
-            UndoTool(actor: actor), RedoTool(actor: actor), EndCallTool(actor: actor),
+            UndoTool(actor: actor), RedoTool(actor: actor),
         ]
+        return canEndCall ? tools + [EndCallTool(actor: actor)] : tools
     }
 
     /// With no screens there is nothing to edit, so a model is spared the tools that edit.
-    static func forEmptyCanvas(_ actor: any VoiceActing) -> [any Tool] {
-        [
+    static func forEmptyCanvas(_ actor: any VoiceActing, canEndCall: Bool = true) -> [any Tool] {
+        let tools: [any Tool] = [
             CreateScreenTool(actor: actor), ShowTool(actor: actor), ZoomTool(actor: actor),
-            UndoTool(actor: actor), RedoTool(actor: actor), EndCallTool(actor: actor),
+            UndoTool(actor: actor), RedoTool(actor: actor),
         ]
+        return canEndCall ? tools + [EndCallTool(actor: actor)] : tools
     }
 
     /// What the pill says while a tool runs.

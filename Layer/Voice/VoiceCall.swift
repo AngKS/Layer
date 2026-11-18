@@ -88,8 +88,12 @@ final class VoiceCall {
     private(set) var levels: [Float] = []
     /// Commands spoken and not yet started.
     private(set) var queuedCount = 0
-    /// How many commands the call has taken, which is the number of the last one.
+    /// How many commands the call has numbered, which is the number of the last one. A
+    /// listen is numbered when it is sent, so that its outcome is told from one sent
+    /// before it whose words arrive later; a phone call's command when it is taken.
     @ObservationIgnored private(set) var commandsTaken = 0
+    /// The numbers of listens sent whose routes are still settling what they heard.
+    private(set) var settling: Set<Int> = []
     /// Why the call ended, when it wasn't hung up.
     private(set) var endReason: String?
     /// Whether a route asked for is open, from its starting until it stops. Only a call
@@ -213,6 +217,7 @@ final class VoiceCall {
         open = nil
         spare = nil
         finishing.removeAll()
+        settling = []
         isHearing = false
         isListeningAsAsked = false
         hasOpenListen = false
@@ -239,6 +244,8 @@ final class VoiceCall {
         var hasStarted = false
         /// Whether its route has reported any words.
         var heardWords = false
+        /// The number its command has, given when it was sent: what a pencil bubble follows.
+        var number: Int?
         var events: Task<Void, Never>?
         var deadline: Task<Void, Never>?
 
@@ -304,20 +311,28 @@ final class VoiceCall {
 
     /// The command is over: the route settles what it heard and sends it, and is stopped
     /// once it has, or after `finishWait` if nothing comes.
-    func send() {
-        guard let ear = open else { return }
+    ///
+    /// Returns the number the command will have, which every line about it carries, or nil
+    /// when nothing was listening.
+    @discardableResult
+    func send() -> Int? {
+        guard let ear = open else { return nil }
+        commandsTaken += 1
+        let number = commandsTaken
+        ear.number = number
         guard ear.hasStarted else {
             // Let go of before the microphone came on, so nothing was heard. Said, rather
             // than dropped in silence, or the person waits for a command that never comes.
             VoiceLog.log.info("call: sent before the route could hear")
             close(ear)
-            show(.problem, Self.tooSoon)
-            return
+            show(.problem, Self.tooSoon, about: number)
+            return number
         }
         open = nil
         isListeningAsAsked = false
         hasOpenListen = false
         finishing.append(ear)
+        settling.insert(number)
         ear.route.finish()
         let wait = finishWait
         // The route ends every finish within its patience (one and a half seconds as it
@@ -328,8 +343,16 @@ final class VoiceCall {
             VoiceLog.log.error("call: a sent route didn't finish in time")
             self.close(ear)
             // Words were heard and are now lost. Said, so that nobody waits on them.
-            if ear.heardWords { self.show(.problem, Self.missedTheEnd) }
+            if ear.heardWords { self.show(.problem, Self.missedTheEnd, about: number) }
         }
+        return number
+    }
+
+    /// Whether the command numbered `number` is still to come or under way: its route
+    /// settling, or the command waiting its turn or being carried out. Once it isn't, all
+    /// there is to show of it is its caption.
+    func isUnderWay(_ number: Int) -> Bool {
+        settling.contains(number) || working == number || queue.contains { $0.number == number }
     }
 
     /// Stops listening without acting on anything heard.
@@ -355,6 +378,7 @@ final class VoiceCall {
             hasOpenListen = false
         }
         finishing.removeAll { $0 === ear }
+        if let number = ear.number { settling.remove(number) }
         isHearing = open != nil || !finishing.isEmpty
     }
 
@@ -376,20 +400,24 @@ final class VoiceCall {
             close(ear)
             if open == nil, caption?.kind == .hearing { caption = nil }
         } else if case .failed(let reason) = event {
-            // As when it can't start: this listen is over, and the call stays up.
+            // As when it can't start: this listen is over, and the call stays up. A sent
+            // listen's problem is about its command, and only that command's bubble shows it.
             close(ear)
-            show(.problem, reason)
+            show(.problem, reason, about: ear.number)
         } else if case .command = event, finishing.contains(where: { $0 === ear }) {
-            handle(event, target: ear.target)
+            // Taken before the ear is closed, so the command is never neither settling
+            // nor queued.
+            handle(event, target: ear.target, number: ear.number)
             close(ear)
         } else {
-            handle(event, target: ear.target)
+            handle(event, target: ear.target, number: ear.number)
         }
     }
 
     // MARK: Hearing
 
-    private func handle(_ event: VoiceRouteEvent, target: VoiceTarget? = nil) {
+    /// `number` is the command's, when its listen was numbered as it was sent.
+    private func handle(_ event: VoiceRouteEvent, target: VoiceTarget? = nil, number: Int? = nil) {
         guard phase != .ended else { return }
         switch event {
         case .level(let level):
@@ -401,7 +429,7 @@ final class VoiceCall {
         case .hearing(let words):
             if !words.isEmpty { show(.hearing, words) }
         case .command(let command):
-            received(command, target: target)
+            received(command, target: target, number: number)
         case .nothingHeard:
             break
         case .failed(let reason):
@@ -409,7 +437,7 @@ final class VoiceCall {
         }
     }
 
-    private func received(_ command: String, target: VoiceTarget?) {
+    private func received(_ command: String, target: VoiceTarget?, number: Int? = nil) {
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
         var action = Self.localAction(for: command)
@@ -428,7 +456,7 @@ final class VoiceCall {
             end()
         case nil where listensOnRequest:
             // The person said they were done, so there is no rest of the sentence to wait for.
-            take(command, target: target)
+            take(command, target: target, number: number)
         case nil:
             var command = command
             // The rest of a sentence that stopped mid-way.
@@ -445,15 +473,16 @@ final class VoiceCall {
         }
     }
 
-    private func take(_ command: String, target: VoiceTarget?) {
+    private func take(_ command: String, target: VoiceTarget?, number: Int? = nil) {
         guard Self.isWorthAsking(command) else {
             VoiceLog.log.info("call: let go, it is no command")
             // The words were shown as they were heard, and aren't to be acted on.
             if caption?.kind == .hearing { caption = nil }
             return
         }
-        commandsTaken += 1
-        queue.append((command, target, commandsTaken))
+        // A sent listen's command has its number already; any other is numbered now.
+        if number == nil { commandsTaken += 1 }
+        queue.append((command, target, number ?? commandsTaken))
         queuedCount = queue.count
         startWorker()
     }
@@ -591,8 +620,9 @@ final class VoiceCall {
     /// Said while a command waits for another call's to finish.
     static let waitingItsTurn = "Waiting for the last command…"
 
-    /// The number of the command being carried out, for its captions.
-    @ObservationIgnored private var working: Int?
+    /// The number of the command being carried out, for its captions. Observed, so that a
+    /// bubble following a command hears when it is over.
+    private(set) var working: Int?
 
     /// What the command under way is doing right now, such as "Restyling…".
     func showStep(_ text: String) {

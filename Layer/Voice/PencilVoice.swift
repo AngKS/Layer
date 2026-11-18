@@ -35,10 +35,12 @@ final class PencilVoice {
     static let holdThreshold: Duration = .milliseconds(350)
     /// How long a toggle left listening waits for words before it gives up, sending nothing.
     static let silenceTimeout: Duration = .seconds(20)
-    /// The longest a held squeeze listens. Its end can go astray (the canvas torn down,
-    /// the gesture's end never delivered), and the microphone isn't left on for good.
+    /// The longest a squeeze listens, held or toggled. A held squeeze's end can go astray
+    /// (the canvas torn down, the gesture's end never delivered), and talk in the room
+    /// keeps a toggle's silence from ever coming: either way, the microphone isn't left on
+    /// for good.
     static let maximumHold: Duration = .seconds(60)
-    /// Said when a held squeeze listened for as long as one can.
+    /// Said when a squeeze listened for as long as one can.
     static let heldTooLong = "Stopped listening after a minute. Nothing was sent."
 
     /// How long a hover waits before asking again whether an unavailable model can be
@@ -85,6 +87,9 @@ final class PencilVoice {
     /// Whether a phone call is up in any window. Only one thing hears at a time, so the
     /// pencil doesn't listen then. A test says.
     @ObservationIgnored var phoneCallIsUp: @MainActor () -> Bool = { VoiceCall.current != nil }
+    /// The other windows' designs, whose pencils stop listening when this one starts: only
+    /// one thing hears at a time. A test says.
+    @ObservationIgnored var otherWindows: @MainActor () -> [AppModel]
     /// Whether the design's model can be asked. A test says.
     @ObservationIgnored var readiness: @MainActor () -> ProviderReadiness
     /// How often a toggle left listening checks whether it has waited long enough.
@@ -96,10 +101,11 @@ final class PencilVoice {
         /// Listening, held or toggled. `stale` is the call's caption when it began, which
         /// says nothing about this listen.
         case listening(began: ContinuousClock.Instant, toggled: Bool, stale: UUID?)
-        /// Sent: the bubble follows the call's caption until it clears. `after` is how many
-        /// commands the call had taken when this was sent: how an earlier command's
-        /// outcome is told from this one's.
-        case sent(stale: UUID?, after: Int)
+        /// Sent: the bubble follows the command numbered `command`, its captions and
+        /// nobody else's, until it is over and its caption has cleared.
+        case sent(command: Int)
+        /// This listen failed: the bubble shows the call's caption saying why, until it clears.
+        case failed(caption: UUID)
         /// Showing a line of its own, which closes after `problemTime`.
         case saying
     }
@@ -117,8 +123,6 @@ final class PencilVoice {
     /// Whether the call has been asked for this listen. From then on, the call's own
     /// `hasOpenListen` says whether it is still going.
     @ObservationIgnored private var askedToListen = false
-    /// Whether any words have been heard since this listen began.
-    @ObservationIgnored private var heardWords = false
     /// Set once the design has closed: the call ends as soon as it has nothing to finish.
     @ObservationIgnored private var designHasClosed = false
     /// Set when a squeeze sent a toggle: letting go of that squeeze does nothing more.
@@ -135,8 +139,8 @@ final class PencilVoice {
 
     init(
         model: AppModel,
-        makeRoute: @escaping @MainActor () -> any VoiceRoute = { DictationRoute(endsOnPause: false) },
-        makeRunner: @escaping @MainActor (AppModel) -> any VoiceCommandRunner = { VoiceAgent(model: $0) },
+        makeRoute: @escaping @MainActor () -> any VoiceRoute = PencilVoice.standardRoute,
+        makeRunner: @escaping @MainActor (AppModel) -> any VoiceCommandRunner = PencilVoice.standardRunner(for:),
         clock: @escaping () -> ContinuousClock.Instant = { .now }
     ) {
         self.model = model
@@ -144,10 +148,23 @@ final class PencilVoice {
         self.makeRunner = makeRunner
         self.clock = clock
         readiness = { [weak model] in model?.modelChoice.sketchProvider.readiness() ?? .ready }
+        otherWindows = { [weak model] in OpenDesigns.shared.all.filter { $0 !== model } }
         // A key added or a model chosen in Settings may have made the model usable.
         preferencesObserver = NotificationCenter.default.addObserver(forName: ModelPreferences.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.lastReadinessCheck = nil }
         }
+    }
+
+    /// A listen's route: a command ends when the squeeze says so, not at a pause, and a
+    /// problem is put in the pencil's words.
+    static func standardRoute() -> any VoiceRoute {
+        DictationRoute(endsOnPause: false, serving: .pencil)
+    }
+
+    /// What carries the pencil's commands out: the design's agent, without the tool that
+    /// ends a call, since the pencil's stays up for the next squeeze.
+    static func standardRunner(for model: AppModel) -> any VoiceCommandRunner {
+        VoiceAgent(model: model, canEndCall: false)
     }
 
     #if DEBUG
@@ -169,8 +186,9 @@ final class PencilVoice {
     /// first squeeze doesn't wait on it. Nothing listens.
     func hovered() {
         // A phone call hears everything while it is up, in this window or another: the
-        // pencil's own isn't needed.
-        guard call == nil, model?.voice == nil, !phoneCallIsUp() else { return }
+        // pencil's own isn't needed. In Draw the squeeze is PencilKit's, so the pen hovering
+        // there isn't on its way to one.
+        guard call == nil, let model, model.tool != .draw, model.voice == nil, !phoneCallIsUp() else { return }
         if let lastReadinessCheck, clock() - lastReadinessCheck < Self.readinessRetry { return }
         guard case .ready = readiness() else {
             lastReadinessCheck = clock()
@@ -191,12 +209,14 @@ final class PencilVoice {
         // One squeeze already listening: a second start of it isn't a new one.
         if case .listening(_, toggled: false, _) = mode { return }
         guard let model, let viewPoint, !squeezeIsOff(), model.tool != .draw, !isOverChrome(viewPoint, in: model) else { return }
+        // A phone call in another window has the microphone, and its commands are about that
+        // window's design: a squeeze here has nothing to say to it, so it does nothing.
+        if model.voice == nil, phoneCallIsUp() { return }
         endIsIgnored = false
         let target = target(at: viewPoint, in: model)
         select(target, in: model)
-        // The phone call hears the command: the squeeze only said what it is about. One in
-        // another window has the microphone too, so this one's isn't asked for.
-        guard model.voice == nil, !phoneCallIsUp() else {
+        // This window's phone call hears the command: the squeeze only said what it is about.
+        guard model.voice == nil else {
             retarget = Retarget(point: viewPoint)
             return
         }
@@ -205,6 +225,8 @@ final class PencilVoice {
             say()
             return
         }
+        // One microphone at a time: a pencil listening in another window lets go, unsent.
+        for other in otherWindows() { other.stopPencilListening() }
         guard let call = startCall() else { return }
         open(at: viewPoint, azimuth: azimuth, .gettingReady)
         mode = .listening(began: clock(), toggled: false, stale: call.caption?.id)
@@ -263,7 +285,8 @@ final class PencilVoice {
     }
 
     /// The design closed: listening stops, and the call ends once whatever it is running
-    /// has finished.
+    /// has stopped. A running command isn't cancelled here, but it ends at its next tool
+    /// call, since nothing more is done to a closed design (see `VoiceAgent.makeSession`).
     func designClosed() {
         designHasClosed = true
         stopListening()
@@ -308,7 +331,6 @@ final class PencilVoice {
     private func listen(for target: VoiceTarget, on call: VoiceCall) {
         pendingListen?.cancel()
         askedToListen = false
-        heardWords = false
         let starting = starting
         pendingListen = Task { [weak self] in
             await starting?.value
@@ -340,9 +362,12 @@ final class PencilVoice {
         // Whether anything was said is the route's to say once it is told to finish: words
         // spoken just before the squeeze may not have been shown yet. With nothing, it says
         // so at once and the bubble closes.
-        mode = .sent(stale: call.caption?.id, after: call.commandsTaken)
+        guard let number = call.send() else {
+            close()
+            return
+        }
+        mode = .sent(command: number)
         bubble?.state = .working
-        call.send()
         refresh()
     }
 
@@ -358,9 +383,10 @@ final class PencilVoice {
         holdTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
-                guard let self, !Task.isCancelled, case .listening(let began, toggled: false, _) = self.mode else { return }
+                // A toggle too: words in the room keep its silence timer from running out.
+                guard let self, !Task.isCancelled, case .listening(let began, _, _) = self.mode else { return }
                 if self.clock() - began >= Self.maximumHold {
-                    VoiceLog.log.info("pencil: a hold went on too long, so it stops")
+                    VoiceLog.log.info("pencil: a listen went on too long, so it stops")
                     self.stopHearing()
                     self.bubble?.state = .problem(Self.heldTooLong)
                     self.say()
@@ -390,23 +416,35 @@ final class PencilVoice {
 
     // MARK: Targets
 
+    /// The bubble still on screen from the last squeeze isn't counted: a squeeze over it is
+    /// a new one, which replaces it. A Pencil tap on it is still a tap on chrome.
     private func isOverChrome(_ viewPoint: CGPoint, in model: AppModel) -> Bool {
-        viewPoint.y < model.topBarBottom || model.chromeFrames.values.contains { $0.contains(viewPoint) }
+        viewPoint.y < model.topBarBottom
+            || model.chromeFrames.contains { $0.key != PencilVoiceBubble.chromeName && $0.value.contains(viewPoint) }
     }
 
     /// What the pen is over. Drawings are looked through, since voice can't change one.
-    /// Part of what is selected means all of it.
+    /// Part of what is selected means all of it, a drawing in it included: the drawing is
+    /// looked at before it is looked through.
     private func target(at viewPoint: CGPoint, in model: AppModel) -> VoiceTarget {
+        if let selection = model.selection, selection.isSeveral,
+           let top = model.hoverTarget(at: viewPoint), Self.isPart(top, of: selection) {
+            return .thing(selection)
+        }
         guard let hit = model.hoverTarget(at: viewPoint, skippingDrawings: true) else {
             return .canvas(model.viewport.canvasPoint(for: viewPoint))
         }
-        if let selection = model.selection, selection.isSeveral {
-            var isPart = selection.contains(hit)
-            // An element on a screen that is selected is part of it too.
-            if case .element(let ref) = hit, case .screen(let id) = ref.host, selection.contains(.screen(id)) { isPart = true }
-            if isPart { return .thing(selection) }
+        if let selection = model.selection, selection.isSeveral, Self.isPart(hit, of: selection) {
+            return .thing(selection)
         }
         return .thing(hit)
+    }
+
+    private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection) -> Bool {
+        if selection.contains(hit) { return true }
+        // An element on a screen that is selected is part of it too.
+        if case .element(let ref) = hit, case .screen(let id) = ref.host, selection.contains(.screen(id)) { return true }
+        return false
     }
 
     private func select(_ target: VoiceTarget, in model: AppModel) {
@@ -467,6 +505,8 @@ final class PencilVoice {
             _ = call.hasOpenListen
             _ = call.queuedCount
             _ = call.phase
+            _ = call.settling
+            _ = call.working
         } onChange: { [weak self, weak call] in
             // Held weakly: the call keeps this closure, and mustn't keep itself through it.
             Task { @MainActor [weak self, weak call] in
@@ -483,17 +523,18 @@ final class PencilVoice {
         switch mode {
         case .listening(_, let toggled, let stale):
             let caption = call.caption?.id == stale ? nil : call.caption
-            if let caption, caption.kind == .hearing {
-                heardWords = true
-                if toggled, caption.id != lastHeard?.caption { lastHeard = (clock(), caption.id) }
+            if let caption, caption.kind == .hearing, toggled, caption.id != lastHeard?.caption {
+                lastHeard = (clock(), caption.id)
             }
             // Whether this listen failed is the call's to say. A problem shown while it is
-            // still starting is some earlier command's.
+            // still starting is some earlier command's, and so is one about a command: a
+            // listen not yet sent has no number.
             if askedToListen, !call.hasOpenListen {
                 silenceTimer?.cancel()
-                if let caption, caption.kind == .problem {
+                holdTimer?.cancel()
+                if let caption, caption.kind == .problem, caption.command == nil {
                     // The microphone or speech couldn't start, or stopped: why, until the line clears.
-                    self.mode = .sent(stale: nil, after: call.commandsTaken)
+                    self.mode = .failed(caption: caption.id)
                     bubble?.state = .problem(caption.text)
                 } else {
                     close()
@@ -501,21 +542,25 @@ final class PencilVoice {
                 return
             }
             bubble?.state = call.isListeningAsAsked ? .listening : .gettingReady
-        case .sent(let stale, let after):
-            // An earlier command's working, outcome or problem isn't this one's.
-            if let caption = call.caption, caption.id != stale, (caption.command ?? .max) > after {
+        case .sent(let number):
+            // Another command's working, outcome or problem isn't this one's.
+            if let caption = call.caption, caption.command == number {
                 switch caption.kind {
                 case .hearing, .working: bubble?.state = .working
                 case .done: bubble?.state = .done
                 // What the model said when it did nothing is never shown as done.
                 case .said, .problem: bubble?.state = .problem(caption.text)
                 }
-            } else if call.isHearing || call.queuedCount > 0 || call.phase == .working {
+            } else if call.isUnderWay(number) {
+                // Still settling, waiting its turn, or running: whatever else the call is doing.
                 bubble?.state = .working
             } else {
-                // Nothing came of it, or what came of it has been shown long enough.
+                // Nothing came of it (nothing was heard, or it was no command), or what came
+                // of it has been shown long enough.
                 close()
             }
+        case .failed(let id):
+            if call.caption?.id != id { close() }
         case .saying:
             break
         }

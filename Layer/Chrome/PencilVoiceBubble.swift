@@ -27,6 +27,9 @@ struct PencilVoiceLayer: View {
 /// and the sound it hears, on the side away from the hand. The words heard show under the
 /// sound if Settings asks for them; a problem always shows, so that a failure is never silent.
 struct PencilVoiceBubble: View {
+    /// The name the bubble's frame is reported under, among the canvas's chrome.
+    static let chromeName = "pencil bubble"
+
     let pencil: PencilVoice
     let bubble: PencilVoice.Bubble
     let bounds: CGRect
@@ -182,7 +185,7 @@ struct PencilVoiceBubble: View {
     var body: some View {
         let canvas = model.store.canvas
         // The other chrome on the canvas, such as the actions over what the squeeze selected.
-        let chrome = model.chromeFrames.filter { $0.key != "pencil bubble" }.map(\.value)
+        let chrome = model.chromeFrames.filter { $0.key != Self.chromeName }.map(\.value)
         let subject = model.selectionViewRect
         // The side is the one chosen when it opened here, for every size it takes, so that
         // it doesn't swap sides from state to state. Only something in the way chooses again.
@@ -244,7 +247,7 @@ struct PencilVoiceBubble: View {
         .accessibilityValue(accessibilityValue)
         .accessibilityHint("Stops listening")
         .accessibilityIdentifier("pencil bubble")
-        .reportsChromeFrame("pencil bubble", to: model)
+        .reportsChromeFrame(Self.chromeName, to: model)
         .offset(x: origin.x, y: origin.y)
         // Laid out across the whole canvas, so that the tip is a point of it to swivel round.
         // Only the bubble itself takes touches.

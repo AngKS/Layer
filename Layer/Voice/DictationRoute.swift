@@ -49,9 +49,11 @@ final class DictationRoute: VoiceRoute {
     /// one handed in.
     init(
         endsOnPause: Bool = true,
+        serving: Serving = .phoneCall,
         source: any VoiceAudioSource = MicrophoneTap(), recogniser: any PhraseRecogniser = AppleSpeechRecogniser(),
         assembler: UtteranceAssembler? = nil
     ) {
+        self.serving = serving
         self.source = source
         self.recogniser = recogniser
         self.assembler = assembler ?? UtteranceAssembler(endsOnPause: endsOnPause)
@@ -244,10 +246,27 @@ final class DictationRoute: VoiceRoute {
         return Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     }
 
+    /// Which call a route hears for, which decides how it says what went wrong: what to do
+    /// next isn't the same for a phone call and a squeeze.
+    enum Serving {
+        case phoneCall
+        case pencil
+
+        /// Said when the sound stops under the route.
+        var soundStopped: String {
+            switch self {
+            case .phoneCall: "The microphone stopped. Start voice mode again."
+            case .pencil: "The microphone stopped. Squeeze to try again."
+            }
+        }
+    }
+
+    private let serving: Serving
+
     /// The sound stopped without the route being stopped: an interruption, or the
     /// microphone changing under it.
     private func soundEnded() {
-        fail(saying: "The microphone stopped. Start voice mode again.")
+        fail(saying: serving.soundStopped)
     }
 
     private func fail(saying reason: String) {
