@@ -91,7 +91,7 @@ struct ModelSettingsView: View {
     @State private var defaultChoice = ModelPreferences.defaultChoice
     /// Whether the pencil's bubble shows the words it hears, under the sound of them.
     /// Off, it is the model's icon and the waveform alone.
-    @AppStorage("pencilVoice.showsWords") private var showsWords = false
+    @AppStorage("pencilVoice.showsWords") private var showsWords = true
 
     var body: some View {
         NavigationStack {
