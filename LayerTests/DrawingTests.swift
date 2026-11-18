@@ -393,16 +393,36 @@ struct TurnedDrawingTests {
     }
 
     @Test func erasingPartOfATurnedDrawingLeavesTheRestWhereItWas() throws {
-        var (content, drawing) = try turnedCross(by: 30)
+        // An L with a third stroke down its right side: what is left once that is
+        // erased sits off the middle of the frame, and at 20 degrees one turn can't be
+        // mistaken for two.
+        var content = DesignContent()
+        var drawing = try #require(DesignElement.drawing([
+            stroke(from: CGPoint(x: 400, y: 300), to: CGPoint(x: 460, y: 300)),
+            stroke(from: CGPoint(x: 400, y: 300), to: CGPoint(x: 400, y: 360)),
+            stroke(from: CGPoint(x: 460, y: 300), to: CGPoint(x: 460, y: 420)),
+        ]))
+        drawing.setRotation(20)
+        content.add(drawing, to: nil, scale: 1)
         var sync = DrawingSync()
         let first = sync.strokes(showing: content, on: [])
         let shown = try #require(first)
-        sync.changes(for: Array(shown.dropFirst()), in: content).apply(to: &content)
+        let kept = Array(shown.dropLast())
+
+        sync.changes(for: kept, in: content).apply(to: &content)
 
         let after = try #require(content.element(drawing.id))
-        #expect(after.resolvedRotation == 30)
-        let bounds = try #require(InkGeometry.bounds(of: after.canvasStrokes))
-        #expect(close(bounds, shown[1].renderBounds))
+        #expect(after.resolvedRotation == 20)
+        #expect(after.strokeCount == 2)
+        func ends(_ stroke: PKStroke) -> [CGPoint] {
+            [stroke.path.first!, stroke.path.last!].map { $0.location.applying(stroke.transform) }
+        }
+        for before in kept {
+            let now = try #require(after.canvasStrokes.first { $0.key == before.key })
+            for (a, b) in zip(ends(before), ends(now)) {
+                #expect(abs(a.x - b.x) <= 0.5 && abs(a.y - b.y) <= 0.5)
+            }
+        }
     }
 
     @Test func aStrokeThatJoinsATurnedDrawingStaysWhereItWasDrawn() throws {
