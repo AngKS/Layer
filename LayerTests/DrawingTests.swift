@@ -491,5 +491,42 @@ struct InkFollowedAtTheEndTests {
         #expect(model.store.floating.first?.element.strokeCount == 2)
         coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
     }
+
+    /// Undo mid-use opens a fresh edit with no step in the history yet. Ink drawn after it
+    /// and not yet followed can't join a step as redo begins: registered then, it would be
+    /// taken for redo's own. It is dropped, and redo puts back what undo took (final fix 14).
+    @Test func inkAfterAnUndoMidUseIsNotTakenForRedosStep() {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.documentCanvas.documentUndoManager = undo
+        coordinator.watchHistory(undo)
+        defer { coordinator.stopWatchingHistory() }
+
+        coordinator.canvasViewDidBeginUsingTool(coordinator.documentCanvas)
+        let strokes = cross(at: CGPoint(x: 100, y: 100))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: [strokes[0]])
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: strokes)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+        #expect(model.store.isEditing && !model.store.editIsInHistory)
+
+        // Still in use: more ink, waiting to be followed, and then redo.
+        let later = cross(at: CGPoint(x: 600, y: 600))
+        coordinator.documentCanvas.drawing = PKDrawing(strokes: later)
+        coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
+        undo.redo()
+        #expect(model.store.floating.count == 1)
+        #expect(model.store.floating.first?.element.strokeCount == 2)
+        coordinator.canvasViewDidEndUsingTool(coordinator.documentCanvas)
+        // Undo once more takes back the use, and nothing else is left in the history.
+        undo.undo()
+        #expect(model.store.floating.isEmpty)
+    }
 }
 

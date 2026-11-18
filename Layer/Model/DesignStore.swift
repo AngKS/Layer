@@ -44,7 +44,10 @@ final class DesignStore {
     /// Whether the gradual edit in progress has put its step in the history yet. It does
     /// at its first change, not at its end, so that undo and redo pressed while it is still
     /// open act on it like any other step: see `change(_:)`.
-    @ObservationIgnored private var editIsInHistory = false
+    @ObservationIgnored private(set) var editIsInHistory = false
+    /// The step the gradual edit in progress put in the history, so that it can be taken
+    /// out again if the edit ends where it began.
+    @ObservationIgnored private var editStep: HistoryStep?
     /// Moves on whenever the history does: a step made, undone or redone. A spoken
     /// correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
@@ -482,10 +485,29 @@ final class DesignStore {
         }
         guard let start = editStart else { return }
         editStart = nil
+        defer {
+            editIsInHistory = false
+            editStep = nil
+        }
         // A change that isn't undoable on its own, such as a suggested name, still joins
         // the step of an edit it was made in.
-        if !editIsInHistory, start != content { registerUndo(restoring: start) }
-        editIsInHistory = false
+        guard editIsInHistory else {
+            if start != content { registerUndo(restoring: start) }
+            return
+        }
+        if start == content, let editStep {
+            // The edit put its step in at its first change and ended where it began: a
+            // generation that wrote nothing and took its screen away, or words typed and
+            // deleted. Its step would undo nothing, so it is taken out again rather than
+            // light up Undo for a press that does nothing. Nothing has been registered since
+            // (an undo or redo in the meantime opens a fresh edit), so it is the top step.
+            withdraw(editStep)
+            return
+        }
+        // The step went in at the first change, which is when the system was told there
+        // was something to save. An autosave since then saved only part of the edit, and
+        // nothing else would tell it about the rest.
+        markNeedsSaving()
     }
 
     /// Whether a gradual edit is under way.
@@ -512,6 +534,7 @@ final class DesignStore {
     private func openEdit() {
         editStart = content
         editIsInHistory = false
+        editStep = nil
     }
 
     /// Whether an edit is being held open: see `beginHeldEdit()`.
@@ -606,15 +629,57 @@ final class DesignStore {
         body(&content)
         if !editIsInHistory, content != start {
             editIsInHistory = true
-            registerUndo(restoring: start)
+            editStep = registerUndo(restoring: start)
         }
     }
 
-    private func registerUndo(restoring previous: DesignContent) {
+    /// What each step in the history is registered with, rather than the store itself, so
+    /// that one step can be taken out without the rest.
+    private final class HistoryStep: Sendable {}
+
+    /// Steps to take out of the history once the group they are in has closed.
+    @ObservationIgnored private var stepsToWithdraw: [HistoryStep] = []
+    @ObservationIgnored nonisolated(unsafe) private var groupCloseObserver: (any NSObjectProtocol)?
+
+    /// Takes a step that undoes nothing out of the history. The document's history groups
+    /// by event: taken out while the event's group is still open, the step leaves that group
+    /// empty, and an empty group still lights Undo. So it is taken out as the group closes,
+    /// and an empty group closed then goes with it. Undo pressed before then closes the
+    /// group first, so the step is gone by the time Undo looks.
+    private func withdraw(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
+        guard undoManager.groupingLevel > 0 else {
+            undoManager.removeAllActions(withTarget: step)
+            return
+        }
+        stepsToWithdraw.append(step)
+        guard groupCloseObserver == nil else { return }
+        groupCloseObserver = NotificationCenter.default.addObserver(forName: .NSUndoManagerDidCloseUndoGroup, object: undoManager, queue: nil) { [weak self, weak undoManager] _ in
+            MainActor.assumeIsolated {
+                guard let self, let undoManager, undoManager.groupingLevel == 0 else { return }
+                for step in self.stepsToWithdraw { undoManager.removeAllActions(withTarget: step) }
+                self.stepsToWithdraw = []
+                if let observer = self.groupCloseObserver { NotificationCenter.default.removeObserver(observer) }
+                self.groupCloseObserver = nil
+            }
+        }
+    }
+
+    deinit {
+        if let groupCloseObserver { NotificationCenter.default.removeObserver(groupCloseObserver) }
+    }
+
+    @discardableResult
+    private func registerUndo(restoring previous: DesignContent) -> HistoryStep? {
+        guard let undoManager else { return nil }
+        historyMark += 1
+        let step = HistoryStep()
         undoManager.beginUndoGrouping()
-        undoManager.registerUndo(withTarget: self) { store in
+        // The history holds its target weakly: the step is kept alive by its own action.
+        undoManager.registerUndo(withTarget: step) { [weak self, step] _ in
+            withExtendedLifetime(step) {}
+            guard let store = self else { return }
             let current = store.content
             store.content = previous
             // Registering while undoing makes this the redo step, and the reverse.
@@ -623,5 +688,6 @@ final class DesignStore {
             if store.editStart != nil { store.openEdit() }
         }
         undoManager.endUndoGrouping()
+        return step
     }
 }

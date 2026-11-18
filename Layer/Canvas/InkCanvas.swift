@@ -631,7 +631,7 @@ struct InkCanvas: UIViewRepresentable {
         private func followBeforeHistoryMoves() {
             guard hasInkToFollow else { return }
             hasInkToFollow = false
-            guard hasFollowedThisUse, model.store.isEditing else { return }
+            guard hasFollowedThisUse, model.store.editIsInHistory else { return }
             followInk(evenWhileTheHistoryMoves: true)
         }
 

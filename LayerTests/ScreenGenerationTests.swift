@@ -277,6 +277,26 @@ struct ScreenGenerationLifecycleTests {
         await app.waitForGeneration()
     }
 
+    /// A generation that fails, or writes nothing, takes its screen away and leaves no undo
+    /// step: Undo used to light up after it and do nothing.
+    @Test func aGenerationThatWritesNothingLeavesNoUndoStep() async throws {
+        let (app, undo, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        #expect(app.store.screens.count == 1)
+        feed.finish(throwing: URLError(.notConnectedToInternet))
+        await app.waitForGeneration()
+        #expect(app.store.screens.isEmpty)
+        #expect(!undo.canUndo)
+
+        let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        app.screenStream = { _, _, _ in stream }
+        app.generateScreen(from: "a profile screen")
+        empty.finish()
+        await app.waitForGeneration()
+        #expect(app.store.screens.isEmpty)
+        #expect(!undo.canUndo)
+    }
+
     /// Deleting the screen by hand while it is written: the same.
     @Test func aGenerationWhoseScreenIsDeletedStillFinishes() async throws {
         let (app, _, feed) = bench()
