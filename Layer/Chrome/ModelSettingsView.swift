@@ -89,6 +89,9 @@ struct ModelSettingsView: View {
 
     @State private var providers = HostedProvider.allCases.map { ProviderSettings($0) }
     @State private var defaultChoice = ModelPreferences.defaultChoice
+    /// Whether the pencil's bubble shows the words it hears, under the sound of them.
+    /// Off, it is the model's icon and the waveform alone.
+    @AppStorage("pencilVoice.showsWords") private var showsWords = false
 
     var body: some View {
         NavigationStack {
@@ -99,6 +102,14 @@ struct ModelSettingsView: View {
                     Text("Model for New Designs")
                 } footer: {
                     Text(defaultFooter)
+                }
+
+                Section {
+                    Toggle("Show Words in the Pencil Bubble", isOn: $showsWords)
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("Squeeze Apple Pencil Pro over the canvas to speak a command. The bubble at the tip shows the model listening; turn this on to see the words it hears too.")
                 }
 
                 if HostedLanguageModel.isSupported {

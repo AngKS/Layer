@@ -6,6 +6,9 @@ import Foundation
 /// passing it between threads safe.
 struct AudioChunk: @unchecked Sendable {
     let buffer: AVAudioPCMBuffer
+    /// When the sound was handed over by the microphone. Chunks can wait in a queue
+    /// before they are listened to, and a pause is measured from when it was spoken.
+    var time: ContinuousClock.Instant = .now
 }
 
 /// Where a call's sound comes from: the microphone, or a recording standing in for it.
@@ -38,8 +41,9 @@ protocol PhraseRecogniser: Sendable {
     /// when the recogniser stops, and throws if it can't go on.
     func start(sound: AsyncStream<AudioChunk>, format: AVAudioFormat, vocabulary: [String]) async throws -> AsyncThrowingStream<HeardPhrase, any Error>
     /// Settles what has been heard so far, without waiting for the recogniser to decide
-    /// for itself that the phrase is over.
-    func settle() async
+    /// for itself that the phrase is over. Says whether it did: a recogniser that hasn't
+    /// started listening yet has settled nothing, however quickly it returns.
+    func settle() async -> Bool
     func stop() async
 }
 

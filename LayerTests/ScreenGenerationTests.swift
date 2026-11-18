@@ -96,12 +96,17 @@ struct ScreenPromptTests {
         #expect(compact.count < 4_000, "\(compact.count) characters")
     }
 
-    @Test func theBoardIsSentWithTheDescriptionWhenThereIsOne() {
+    @Test func theBoardIsSentToAHostedModelWhenThereIsOne() {
         #expect(ScreenPrompt.request("a profile", board: nil, room: .full) == "a profile")
-        let board = String(repeating: "a title saying “Hi”, ", count: 100)
-        let compact = ScreenPrompt.request("a profile", board: board, room: .compact)
-        #expect(compact.hasPrefix("a profile\n\n") && compact.hasSuffix("…"))
-        #expect(compact.count < 520)
+        let board = String(repeating: "a title saying “Hi”, ", count: 200)
+        let full = ScreenPrompt.request("a profile", board: board, room: .full)
+        #expect(full.hasPrefix("a profile\n\n") && full.hasSuffix("…"))
+        #expect(full.count < 2_120)
+    }
+
+    /// Given the board, the on-device model copied it out in place of the screen asked for.
+    @Test func theOnDeviceModelIsToldOnlyTheDescription() {
+        #expect(ScreenPrompt.request("a calligraphy webpage", board: "S1 \"Trip planner\": title \"Plan your trip\"", room: .compact) == "a calligraphy webpage")
     }
 }
 
@@ -226,5 +231,104 @@ struct LMStudioLiveTests {
         #expect(screen.elements.count >= 3)
         #expect(screen.elements.contains { $0.kind == .button })
         #expect(counts.filter { $0 > 0 }.count >= 2, "elements should appear while the model is still writing: \(counts)")
+    }
+}
+
+/// A screen being written, as its design changes and closes around it (Wave 2).
+@Suite("A generation's life", .serialized)
+@MainActor
+struct ScreenGenerationLifecycleTests {
+    /// A design whose generations are written by the test, a line at a time.
+    private func bench() -> (app: AppModel, undo: UndoManager, feed: AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
+        let app = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        app.store.undoManager = undo
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        app.screenStream = { _, _, _ in stream }
+        return (app, undo, feed)
+    }
+
+    private static func written(_ text: String) -> ScreenGenerator.Update {
+        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+    }
+
+    /// Undo pressed while a screen is written takes it away. The generation still
+    /// finishes: it used to stay "writing" for good, with every later one refused and its
+    /// own undo step never closed (B-I1).
+    @Test func aGenerationWhoseScreenIsTakenAwayStillFinishes() async throws {
+        let (app, undo, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
+        undo.undo()
+        #expect(app.store.screen(screen) == nil)
+        feed.yield(Self.written("title: Settings\nbutton: Save\n"))
+        #expect(await eventually { !app.isGenerating })
+        #expect(app.generation == nil)
+        #expect(app.store.screen(screen) == nil)
+        // Its edit is closed: a change now is a step of its own.
+        let mark = app.store.historyMark
+        app.store.setTitle("Next")
+        #expect(app.store.historyMark != mark)
+        // And the next generation goes.
+        let (stream, next) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        app.screenStream = { _, _, _ in stream }
+        app.generateScreen(from: "a profile screen")
+        #expect(app.isGenerating)
+        next.finish()
+        feed.finish()
+        await app.waitForGeneration()
+    }
+
+    /// A generation that fails, or writes nothing, takes its screen away and leaves no undo
+    /// step: Undo used to light up after it and do nothing.
+    @Test func aGenerationThatWritesNothingLeavesNoUndoStep() async throws {
+        let (app, undo, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        #expect(app.store.screens.count == 1)
+        feed.finish(throwing: URLError(.notConnectedToInternet))
+        await app.waitForGeneration()
+        #expect(app.store.screens.isEmpty)
+        #expect(!undo.canUndo)
+
+        let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        app.screenStream = { _, _, _ in stream }
+        app.generateScreen(from: "a profile screen")
+        empty.finish()
+        await app.waitForGeneration()
+        #expect(app.store.screens.isEmpty)
+        #expect(!undo.canUndo)
+    }
+
+    /// Deleting the screen by hand while it is written: the same.
+    @Test func aGenerationWhoseScreenIsDeletedStillFinishes() async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
+        app.store.deleteScreen(screen)
+        feed.yield(Self.written("title: Settings\nbutton: Save\n"))
+        #expect(await eventually { !app.isGenerating })
+        feed.finish()
+    }
+
+    /// Nothing is written to a design once it has closed, and nothing new is started (B-I4).
+    @Test func aClosedDesignIsNotWrittenTo() async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { app.store.screens.first?.elements.count == 1 })
+        let saved = app.document.current.content
+        app.close()
+        await app.waitForGeneration()
+        #expect(app.generation == nil && !app.isGenerating)
+        // Nothing more is written to the closed file.
+        #expect(app.document.current.content == saved)
+        app.generateScreen(from: "a profile screen")
+        #expect(app.generation == nil)
+        feed.finish()
     }
 }

@@ -1,51 +1,5 @@
 import SwiftUI
 
-/// Describe a screen and have the design's model write it. The panel closes as soon as
-/// generating starts, so the screen can be watched filling in; `GenerationStatus` on the
-/// canvas shows how far it has got.
-struct GenerateScreenPanel: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var description = ""
-    @FocusState private var isFocused: Bool
-
-    private var canGenerate: Bool {
-        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isGenerating
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Generate Screen")
-                .font(.headline)
-            TextField("Describe a screen, such as a sign-in screen with email and password", text: $description, axis: .vertical)
-                .lineLimit(3...6)
-                .textFieldStyle(.roundedBorder)
-                .focused($isFocused)
-                .accessibilityLabel("Screen description")
-            Label(model.modelChoice.displayName, systemImage: model.modelChoice.symbol)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            if model.isGenerating {
-                Text("A screen is being written. Stop it, or wait for it to finish, to start another.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Button {
-                model.generateScreen(from: description)
-                dismiss()
-            } label: {
-                Label("Generate", systemImage: "wand.and.sparkles")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!canGenerate)
-        }
-        .padding(16)
-        .frame(width: 340)
-        .onAppear { isFocused = true }
-    }
-}
-
 /// How the screen being generated is getting on, floating at the bottom of the canvas:
 /// thinking, writing (with how many elements so far), then done or what went wrong.
 struct GenerationStatus: View {

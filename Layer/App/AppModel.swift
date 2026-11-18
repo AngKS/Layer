@@ -98,14 +98,19 @@ final class AppModel {
     /// tell the person once.
     var keptVersionsNotice: String?
 
+    /// The canvas's drags, so that one left live by a cancel nobody heard can be ended.
+    @ObservationIgnored weak var drags: CanvasDrags?
+
     var tool: Tool = .draw {
         didSet {
             guard tool != oldValue else { return }
             // Drawing chosen in a narrow window is kept, whatever the width does next.
             if tool == .draw { drawingWaitsForAWiderWindow = false }
+            drags?.endAny(model: self)
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
+                pencilVoiceIfMade?.drawTurnedOn()
             } else {
                 settle?.cancel()
             }
@@ -239,7 +244,7 @@ final class AppModel {
     @ObservationIgnored private var settle: Task<Void, Never>?
     /// Sketches being read, so that a design that closes can stop them.
     @ObservationIgnored private var conversions: [Task<Void, Never>] = []
-    @ObservationIgnored private var isPenDown = false
+    @ObservationIgnored private(set) var isPenDown = false
     @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
 
@@ -258,14 +263,15 @@ final class AppModel {
     }
 
     /// Apple Pencil touched the canvas. The first time, a finger stops drawing, unless
-    /// that has been set by hand.
-    func pencilTouched(at viewPoint: CGPoint) {
+    /// that has been set by hand. `elsewhere` is a touch in a presentation of its own over
+    /// the canvas: a panel's sheet, a popover or an alert.
+    func pencilTouched(at viewPoint: CGPoint, elsewhere: Bool = false) {
         if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
             fingerDraws = false
         }
-        // On a panel, the popover or the bars, the Pencil is pressing a control, scrubbing a
+        // On a panel, a popover or the bars, the Pencil is pressing a control, scrubbing a
         // field for instance, not landing on the canvas.
-        if chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
+        if elsewhere || chromeFrames.values.contains(where: { $0.contains(viewPoint) }) { return }
         // With the palette up, the Pencil is for drawing: landing on what a finger
         // selected lets go of it, rather than dragging it about. Not with the lasso in
         // hand, though: what the lasso has picked, the Pencil can drag.
@@ -302,11 +308,22 @@ final class AppModel {
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
+        appliedModel = .some(file.content.canvas.model)
         store.onChange = { [weak self, document] content in
+            // A command or generation still unwinding after the design closed doesn't
+            // write to a document the browser has already let go of.
+            guard self?.isClosed != true else { return }
             document.update { $0.content = content }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
-            self?.applyModelChoice()
+            // After this change is done with: ending a drag ends the edit it is part of.
+            if self?.drags?.isDragging == true {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    drags?.endIfDraggedIsGone(model: self)
+                }
+            }
+            self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.matchNameAndFile()
             self?.schedulePreview()
@@ -328,7 +345,19 @@ final class AppModel {
     /// Points the sketch engine at this design's model. Cheap when nothing changed, so it
     /// runs on every change to the design and whenever the app's model settings change.
     func applyModelChoice() {
+        appliedModel = .some(store.canvas.model)
         engine.use(modelChoice.sketchProvider)
+    }
+
+    /// The design's own choice of model as it was last applied. Every change to the design,
+    /// each frame of a drag among them, used to apply the choice again, which reads the
+    /// app's default and its lists of models from the user's defaults and decodes them.
+    @ObservationIgnored private var appliedModel: ModelChoice??
+
+    /// Applies the model choice if the design's own has changed. A change to the app's
+    /// default applies it through `applyModelChoice()`, on `ModelPreferences.changed`.
+    private func followModelChoice() {
+        if appliedModel != .some(store.canvas.model) { applyModelChoice() }
     }
 
     // MARK: Generating screens
@@ -365,33 +394,41 @@ final class AppModel {
     /// `name` is what to call the screen; without one it is named from the description.
     /// `device` is what it is a screen of; without one, the canvas's own device.
     ///
+    /// `anchor` is a canvas point to put the screen at, where the pencil pointed for a
+    /// spoken command; without one it goes where new screens always go.
+    ///
     /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
     /// is already being held open and the screen is part of it, so it opens none of its
     /// own. That is also how an edit by hand made in the meantime is told from it: see
     /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, named name: String? = nil, device chosen: DeviceFrame? = nil, partOfHeldEdit: Bool = false) {
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, partOfHeldEdit: Bool = false, device: DeviceFrame? = nil) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isGenerating else { return }
+        guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
         generationTask?.cancel()
         generationDismissal?.cancel()
 
-        let device = chosen ?? store.canvas.sketchDevice
+        let device = device ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
         generationOwnsEdit = !partOfHeldEdit
         if generationOwnsEdit { store.beginEdit() }
-        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self))
+        // A command the pencil pointed at empty canvas for puts the screen where it pointed.
+        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
         store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
         // Shown, not selected: a new screen comes in without selection handles round it.
         DesignActions.reveal(.screen(screen.id), in: self, selecting: false)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
 
         let choice = modelChoice
+        let stream = screenStream(prompt, board, choice)
         generationTask = Task { [weak self] in
             do {
-                for try await update in ScreenGenerator.stream(prompt, board: board, using: choice) {
-                    guard let self, let current = store.screen(screen.id) else { return }
+                for try await update in stream {
+                    guard let self else { return }
+                    // The screen was taken away, by undo or by hand: there is nothing left to
+                    // write on, but the generation still finishes, or it is stuck writing.
+                    guard let current = store.screen(screen.id) else { break }
                     switch update {
                     case .startedWriting:
                         generation?.isThinking = false
@@ -420,9 +457,26 @@ final class AppModel {
         await generationTask?.value
     }
 
+    /// Where a generated screen's updates come from. A test puts its own in.
+    @ObservationIgnored var screenStream: (String, String?, ModelChoice) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
+        ScreenGenerator.stream($0, board: $1, using: $2)
+    }
+
     private func finishGeneration(error: (any Error)?) {
         generationTask = nil
         guard var finished = generation else { return }
+        // Nothing is written to a design that has closed, and nothing is left to show.
+        guard !isClosed else {
+            generation = nil
+            return
+        }
+        // A screen taken away while it was written has nothing to show either. Its edit,
+        // if it opened one, is still closed.
+        guard store.screen(finished.screenID) != nil else {
+            if generationOwnsEdit { store.endEdit() }
+            generation = nil
+            return
+        }
         if let error {
             finished.phase = .failed(error.localizedDescription)
         } else {
@@ -486,13 +540,29 @@ final class AppModel {
         Task { await startVoiceCall(route: DictationRoute(), runner: VoiceAgent(model: self)) }
     }
 
+    /// Lets one spoken command at a time act on the design, whichever call it came from.
+    let voiceCommands = VoiceCommandGate()
+
+    /// Said when a command reaches a design that has closed.
+    static let closedProblem = "The design has closed."
+
+    /// Stops the pencil listening, if it is: another call is taking the microphone.
+    func stopPencilListening() {
+        pencilVoiceIfMade?.stopListening()
+    }
+
     /// Starts a call that hears through `route` and acts through `runner`. Returns once
     /// the call is listening, or has ended because it couldn't.
     func startVoiceCall(route: any VoiceRoute, runner: any VoiceCommandRunner) async {
         guard voice == nil else { return }
         // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
         tool = .select
+        // One microphone at a time, in every window: the phone call hears from now on. A
+        // pencil command already sent still runs, in its turn.
+        for design in OpenDesigns.shared.all where design !== self { design.stopPencilListening() }
+        stopPencilListening()
         let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        call.gate = voiceCommands
         // What the agent is doing, tool by tool, is what the pill says while it works.
         (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }
         call.onEnd = { [weak self, weak call] in
@@ -514,11 +584,25 @@ final class AppModel {
     /// stays that way, though the window never left.
     func windowLeftTheScreen() {
         endVoiceCall()
+        pencilVoiceIfMade?.stopListening()
     }
+
+    /// Apple Pencil Pro's push-to-talk, made when first asked for. A test puts its own in.
+    var pencilVoice: PencilVoice {
+        get {
+            if let pencilVoiceIfMade { return pencilVoiceIfMade }
+            let made = PencilVoice(model: self)
+            pencilVoiceIfMade = made
+            return made
+        }
+        set { pencilVoiceIfMade = newValue }
+    }
+
+    @ObservationIgnored private var pencilVoiceIfMade: PencilVoice?
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
     /// the names of the screens and what their elements say.
-    private var voiceVocabulary: [String] {
+    var voiceVocabulary: [String] {
         var seen: Set<String> = []
         let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
         return words
@@ -539,11 +623,16 @@ final class AppModel {
     /// Set once the design has closed. Whatever was still under way then, a name being
     /// thought up or a picture due, is dropped rather than done to a file the document
     /// browser has already listed.
-    @ObservationIgnored private var isClosed = false
+    @ObservationIgnored private(set) var isClosed = false
 
     /// Gets a design ready to go back to the document browser: its picture as the board
-    /// was left, its name decided, and its file given that name.
-    func prepareToClose() async {
+    /// was left, its name decided, and its file given that name. False when the design is
+    /// already on its way out, so that a second tap of the back button doesn't dismiss it
+    /// again, or early, while the first still waits for the file's name.
+    @discardableResult
+    func prepareToClose() async -> Bool {
+        guard !isClosing, !isClosed else { return false }
+        isClosing = true
         refreshPreview()
         // A name still being thought up is settled now, from the design's own words.
         if titleSuggestion != nil, store.title == nil {
@@ -551,11 +640,31 @@ final class AppModel {
         }
         await settleFileName()
         close()
+        return true
     }
 
+    @ObservationIgnored private var isClosing = false
+
     func close() {
+        // Closed by the back button, then again as the canvas goes from the screen.
+        guard !isClosed else { return }
+        // Ink a pen or the eraser has changed and that is waiting for the tool to be put
+        // down goes into the design now, while it can still be saved.
+        ink?.flushPendingInk()
+        drags?.endAny(model: self)
+        // A change made in the format panel moments ago is still an edit waiting for the
+        // panel's pause to end it: it ends now, while the design can still be saved.
+        adjustmentEnd?.cancel()
+        adjustmentEnd = nil
+        store.endEdit()
+        // What was written without an undo step, or after the last save within an edit,
+        // reaches the disk only if the system is told there is something to save.
+        if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
         voice?.end()
+        // Listening stops. A pencil command already running isn't cancelled, but it ends at
+        // its next tool call, since nothing more is done to a closed design.
+        pencilVoiceIfMade?.designClosed()
         OpenDesigns.shared.closed(self)
         titleSuggestion?.cancel()
         previewRefresh?.cancel()
@@ -563,7 +672,6 @@ final class AppModel {
         generationTask?.cancel()
         generationDismissal?.cancel()
         settle?.cancel()
-        adjustmentEnd?.cancel()
         suggestionExpiry?.cancel()
         for conversion in conversions { conversion.cancel() }
         conversions.removeAll()
@@ -619,6 +727,8 @@ final class AppModel {
     }
 
     @ObservationIgnored private var fileCheck: Task<Void, Never>?
+    /// Keeps aside the versions of the file other devices saved at the same time.
+    @ObservationIgnored var keepConflictingVersions: @Sendable (URL) async -> [String] = { await CloudFile.keepConflictingVersions(of: $0) }
 
     /// Looks at where the design's file stands with iCloud, and settles any versions of
     /// it that other devices saved at the same time. Done when the design opens, when
@@ -640,15 +750,19 @@ final class AppModel {
         guard let url = fileURL, !isClosed else { return }
         fileCheck?.cancel()
         fileCheck = Task { [weak self] in
-            let copies = await CloudFile.keepConflictingVersions(of: url)
-            let state = await Task.detached { CloudFile.syncState(of: url) }.value
-            guard let self, !Task.isCancelled, fileURL == url else { return }
-            if !copies.isEmpty {
+            guard let keep = self?.keepConflictingVersions else { return }
+            let copies = await keep(url)
+            // Said even by a check the next one cut short: settling can't be stopped part
+            // way, and the next check finds the versions settled and has nothing to say.
+            if !copies.isEmpty, let self, !isClosed, fileURL == url {
                 let names = copies.map { "“\($0)”" }.formatted(.list(type: .and))
                 keptVersionsNotice = copies.count == 1
                     ? "This design was changed on another device at the same time. That version is kept as \(names), beside this one."
                     : "This design was changed on other devices at the same time. Those versions are kept as \(names), beside this one."
             }
+            guard !Task.isCancelled else { return }
+            let state = await Task.detached { CloudFile.syncState(of: url) }.value
+            guard let self, !Task.isCancelled, fileURL == url else { return }
             if syncState != state { syncState = state }
             // While something has still to go up, keep looking, less often each time, and
             // not at all while the app is away: coming back checks again.
@@ -720,6 +834,16 @@ final class AppModel {
         previewedBoard = board
         let picture = BoardSnapshot.thumbnail(of: self)
         document.update { $0.preview = picture }
+    }
+
+    /// The app has gone to the background, and the system saves the design as it goes.
+    /// The board's picture is drawn for it, and, written without an undo step, has to be
+    /// announced to be saved. (Only drawn, not announced, when the app is merely inactive:
+    /// Control Center or an alert over it.)
+    func leavingTheScreen() {
+        ink?.flushPendingInk()
+        refreshPreview()
+        if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
 
     /// Redraws the board's picture while the board is left alone. Only its views are drawn
@@ -895,11 +1019,15 @@ final class AppModel {
     var isHoveringList = false
 
     /// The topmost element or screen at a point in the view, for hover.
-    func hoverTarget(at viewPoint: CGPoint) -> CanvasSelection? {
+    ///
+    /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
+    /// change a drawing.
+    func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
-        if let drawing = drawing(at: point) { return .element(drawing) }
+        if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
         for floating in store.floating.reversed() where floating.canvasFrame.contains(point) && floating.element.isPickedByItsFrame {
+            if skippingDrawings, floating.element.kind == .drawing { continue }
             return .element(.init(host: .canvas, element: floating.id))
         }
         for screen in store.screens.reversed() {
@@ -1077,17 +1205,47 @@ final class AppModel {
         store.endEdit()
     }
 
+    /// How long the format panel waits after its last change before ending its step.
+    @ObservationIgnored var adjustmentPause: Duration = .milliseconds(600)
+
+    /// While the format panel's edit is its own, how many edits the store had seen begun
+    /// when the panel last joined it. Anything else beginning an edit since, a drag, a
+    /// stroke or a scrub, makes the edit theirs to end: ended by the panel's pause, a drag
+    /// begun just after a colour was tapped lost its step halfway, and each later move was
+    /// a step of its own.
+    @ObservationIgnored private var adjustmentOwnsEditAt: Int?
+    /// How many edits the store had seen begun at the panel's last change: while it is the
+    /// same, nothing else has begun one since.
+    @ObservationIgnored private var adjustmentLastBegin: Int?
+    /// Whether the panel's change was made inside a spoken command's hold. Its pause may
+    /// come after the command has ended, which leaves the step open for the panel to end.
+    @ObservationIgnored private var adjustmentBeganInHold = false
+
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
+        // The panel's own edit if it opens one, or goes on with one it opened that nothing
+        // else has joined. Inside another's edit, the change joins that one.
+        let ownsEdit = !store.isEditing || adjustmentOwnsEditAt == store.editBegins
         store.beginEdit()
+        adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
+        adjustmentLastBegin = store.editBegins
+        if store.isHoldingEdit { adjustmentBeganInHold = true }
         body()
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
         adjustmentEnd?.cancel()
         adjustmentEnd = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.store.endEdit()
+            try? await Task.sleep(for: self?.adjustmentPause ?? .zero)
+            guard !Task.isCancelled, let self else { return }
+            // Its own edit, or, inside a spoken command's hold, its own part of it: there
+            // an end only says the panel's edit by hand is over, and the command then
+            // closes its step. Left, the hold would wait for an end that never comes.
+            if adjustmentLastBegin == store.editBegins, adjustmentOwnsEditAt != nil || adjustmentBeganInHold || store.isHoldingEdit {
+                store.endEdit()
+            }
+            adjustmentOwnsEditAt = nil
+            adjustmentLastBegin = nil
+            adjustmentBeganInHold = false
         }
     }
 
@@ -1425,8 +1583,13 @@ final class AppModel {
     private func reject(_ keys: Set<Double>) {
         rejected.insert(keys)
         Task { [weak self] in
-            // Long enough to add the strokes that would complete a half-drawn shape.
-            repeat { try? await Task.sleep(for: .seconds(4)) } while self?.isPenDown == true
+            // Long enough to add the strokes that would complete a half-drawn shape. Not for
+            // ever, though, should the pen's end never be heard.
+            var waited = 0
+            repeat {
+                try? await Task.sleep(for: .seconds(4))
+                waited += 4
+            } while self?.isPenDown == true && waited < 30
             self?.dissolve(keys)
         }
     }

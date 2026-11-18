@@ -115,6 +115,107 @@ struct FlatStoreTests {
     }
 }
 
+/// Counts notices, which are posted on the thread that changes the history: here, the main one.
+private final class Tally: @unchecked Sendable {
+    var count = 0
+}
+
+/// A gradual edit's step and the saving it asks for (final fix wave, items 11 and 12).
+@Suite("A gradual edit's step")
+@MainActor
+struct GradualEditStepTests {
+    /// Typed and deleted again, or a screen written and taken away: the edit ends where it
+    /// began, and leaves no step that undoes nothing. The step before is still on top.
+    @Test func anEditThatEndsWhereItBeganLeavesNoStep() throws {
+        let (store, undo) = makeStore()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        store.beginEdit()
+        store.updateScreen(screen.id) { $0.name = "Settings" }
+        store.updateScreen(screen.id) { $0.name = "Screen 1" }
+        store.endEdit()
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(store.screens.isEmpty, "undo takes back the screen added before the edit")
+        #expect(!undo.canUndo)
+    }
+
+    @Test func anEditThatEndsWhereItBeganOnAnEmptyHistoryLeavesUndoOff() {
+        let (store, undo) = makeStore()
+        store.beginEdit()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        store.deleteScreen(screen.id)
+        store.endEdit()
+        #expect(!undo.canUndo && !undo.canRedo)
+        // The next change is a step as ever, and undoes.
+        store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        undo.undo()
+        #expect(store.screens.isEmpty)
+    }
+
+    /// The app's history groups by event, as a document's does: the step taken out leaves
+    /// no empty group behind for Undo to light up for.
+    @Test func anEditThatEndsWhereItBeganLeavesNoEmptyGroupWhenGroupedByEvent() async {
+        let undo = UndoManager()
+        let store = DesignStore(content: DesignContent())
+        store.undoManager = undo
+        store.beginEdit()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        store.deleteScreen(screen.id)
+        store.endEdit()
+        // The event's group closes when the run loop turns.
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!undo.canUndo)
+    }
+
+    /// The same when the edit ends in a later event than its first change, as a failed
+    /// generation's does.
+    @Test func anEditEndedInALaterEventWhereItBeganLeavesNoStepWhenGroupedByEvent() async {
+        let undo = UndoManager()
+        let store = DesignStore(content: DesignContent())
+        store.undoManager = undo
+        store.beginEdit()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(undo.canUndo)
+        store.deleteScreen(screen.id)
+        store.endEdit()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!undo.canUndo)
+    }
+
+    /// An edit that changed something still undoes as one step.
+    @Test func anEditThatChangedSomethingKeepsItsStep() {
+        let (store, undo) = makeStore()
+        store.beginEdit()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        store.updateScreen(screen.id) { $0.name = "Settings" }
+        store.endEdit()
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(store.screens.isEmpty && !undo.canUndo)
+    }
+
+    /// An edit's step goes in at its first change, which is when the system hears there is
+    /// something to save. When the edit ends it is told again, so that the rest of a long
+    /// edit isn't lost to an autosave made part way through it.
+    @Test func theEndOfAnEditInTheHistoryAsksForASave() {
+        let (store, undo) = makeStore()
+        let asked = Tally()
+        let observer = NotificationCenter.default.addObserver(forName: .NSUndoManagerWillCloseUndoGroup, object: undo, queue: nil) { _ in
+            asked.count += 1
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        store.beginEdit()
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let afterFirstChange = asked.count
+        #expect(afterFirstChange >= 1)
+        store.updateScreen(screen.id) { $0.name = "Settings" }
+        #expect(asked.count == afterFirstChange, "later changes join the step without a word")
+        store.endEdit()
+        #expect(asked.count > afterFirstChange)
+    }
+}
+
 /// A design as it was saved before elements were one list: each screen held its own
 /// elements, and those on the open canvas were a list of their own.
 private struct EarlierDesign: Encodable {

@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+import UIKit
+import Observation
+import os
 import PencilKit
 import Testing
 @testable import Layer
@@ -587,4 +590,188 @@ struct SeveralThingsOnTheCanvasTests {
         board.model.sweepEnded()
         #expect(board.model.selection == .element(board.note))
     }
+}
+
+/// Drags on the canvas, as `SelectionLayer`'s gestures drive them. SwiftUI doesn't call
+/// `onEnded` for a drag it cancels, so a drag has to end without it.
+@Suite("Dragging on the canvas")
+@MainActor
+struct CanvasDragTests {
+    private func move(_ board: Board, _ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
+        let (element, placement) = board.store.resolve(ref)!
+        drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: board.model) {
+            drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        }
+    }
+
+    /// The Pencil landing on what a finger drags takes the selection, and the drag's view
+    /// with it. The drag ends there, as one step, and the guides and spacing go.
+    @Test func aDragWhoseViewGoesEndsThere() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let owner = CanvasDrags.Owner()
+        let before = board.store.content
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: owner)
+        move(board, drags, board.note, by: 40, from: CGPoint(x: 1, y: 1), owner: owner)
+        #expect(board.model.isAdjusting)
+        #expect(board.store.isEditing)
+
+        drags.cancel(owner, model: board.model)
+        #expect(!board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+        #expect(!drags.isDragging)
+        #expect(drags.elementOrigin == nil)
+
+        board.undo.undo()
+        #expect(board.store.content == before)
+    }
+
+    /// Cancelled without a word, a drag used to leave its origin behind, and the next drag,
+    /// of anything, began from the first element's frame.
+    @Test func theDragAfterOneThatWasCancelledMovesFromItsOwnPlace() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let titleBefore = board.canvasFrame(board.title)
+        let first = CanvasDrags.Owner()
+        move(board, drags, board.title, by: 20, from: CGPoint(x: 1, y: 1), owner: first)
+        // SwiftUI cancels it: its gesture state resets without `onEnded`.
+        drags.cancel(first, model: board.model)
+
+        let noteBefore = board.canvasFrame(board.note)
+        let other = CanvasDrags.Owner()
+        move(board, drags, board.note, by: 10, from: CGPoint(x: 500, y: 500), owner: other)
+        #expect(board.canvasFrame(board.note) == noteBefore.offsetBy(dx: 10, dy: 0))
+        drags.dropElement(board.note, findsNewHome: true, owner: other, model: board.model)
+        #expect(!board.store.isEditing)
+
+        // Two steps: the drag that was cut short, and this one.
+        board.undo.undo()
+        #expect(board.canvasFrame(board.note) == noteBefore)
+        #expect(board.canvasFrame(board.title) != titleBefore)
+        board.undo.undo()
+        #expect(board.canvasFrame(board.title) == titleBefore)
+    }
+
+    /// Two fingers on two elements at once: each frame of either used to end the other's
+    /// drag, and every frame was a step of its own. The second is left alone instead.
+    @Test func aSecondFingerDoesNotTakeOverADragUnderWay() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let (first, second) = (CanvasDrags.Owner(), CanvasDrags.Owner())
+        let noteBefore = board.canvasFrame(board.note)
+        let titleBefore = board.canvasFrame(board.title)
+        let mark = board.store.historyMark
+        for step in 1...5 {
+            move(board, drags, board.note, by: CGFloat(step) * 4, from: CGPoint(x: 1, y: 1), owner: first)
+            move(board, drags, board.title, by: CGFloat(step) * 4, from: CGPoint(x: 600, y: 600), owner: second)
+        }
+        drags.dropElement(board.title, findsNewHome: true, owner: second, model: board.model)
+        #expect(board.store.isEditing)
+        drags.dropElement(board.note, findsNewHome: true, owner: first, model: board.model)
+
+        #expect(board.canvasFrame(board.note) == noteBefore.offsetBy(dx: 20, dy: 0))
+        #expect(board.canvasFrame(board.title) == titleBefore)
+        #expect(board.store.historyMark == mark + 1)
+    }
+
+    /// A drag whose cancel was never heard is ended when what it moves is locked or taken
+    /// away, when the tool changes, and when the design closes: left live, it would stop
+    /// every other drag.
+    @Test(arguments: ["lock", "delete", "tool", "close"])
+    func aDragLeftLiveIsEnded(by event: String) async throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: CanvasDrags.Owner())
+        #expect(drags.isDragging)
+
+        switch event {
+        case "lock": board.store.update(board.note) { $0.isLocked = true }
+        case "delete": board.store.delete(board.note)
+        case "tool": board.model.tool = .draw
+        default: board.model.close()
+        }
+        for _ in 0..<5 { await Task.yield() }
+
+        #expect(!drags.isDragging)
+        #expect(!board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+    }
+
+    @Test func aNewTouchOnTheSameViewIsANewDrag() throws {
+        let board = Board()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        let owner = CanvasDrags.Owner()
+        let start = board.canvasFrame(board.note)
+        move(board, drags, board.note, by: 20, from: CGPoint(x: 1, y: 1), owner: owner)
+        // The first touch was cancelled; the second begins where the note now is.
+        move(board, drags, board.note, by: 5, from: CGPoint(x: 9, y: 9), owner: owner)
+        #expect(board.canvasFrame(board.note) == start.offsetBy(dx: 25, dy: 0))
+    }
+
+    /// The targets are drawn with the rule a drag will use. Read while they are drawn, the
+    /// viewport made them depend on where the canvas had scrolled, and every frame of a pan
+    /// drew them all again.
+    @Test func aDragsRuleDoesNotDependOnWhereTheCanvasHasScrolled() throws {
+        let board = Board()
+        let drags = CanvasDrags()
+        let (element, placement) = try #require(board.store.resolve(board.note))
+        let redrawn = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        } onChange: {
+            redrawn.withLock { $0 = true }
+        }
+        board.model.scrollOffset = CGPoint(x: 300, y: 120)
+        #expect(!redrawn.withLock { $0 })
+    }
+}
+
+/// The Pencil on a control over the canvas is on the control, not on the element under it:
+/// with Draw on, landing on what a finger selected lets go of it, and the format sheet over
+/// it closed under the Pencil (C-I6).
+@Suite("The Pencil on controls over the canvas")
+@MainActor
+struct PencilOnChromeTests {
+    @Test func aTouchInASheetOrPopoverIsNotOnTheCanvas() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let canvasRoot = UIView(frame: window.bounds)
+        let container = UIView(frame: canvasRoot.bounds)
+        let overlay = UIView(frame: CGRect(x: 10, y: 10, width: 50, height: 50))
+        canvasRoot.addSubview(container)
+        canvasRoot.addSubview(overlay)
+        window.addSubview(canvasRoot)
+        let sheetRoot = UIView(frame: CGRect(x: 0, y: 400, width: 1000, height: 400))
+        let field = UIView(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+        sheetRoot.addSubview(field)
+        window.addSubview(sheetRoot)
+
+        #expect(InkCanvas.Coordinator.isInAnotherPresentation(field, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(overlay, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(container, than: container))
+        #expect(!InkCanvas.Coordinator.isInAnotherPresentation(nil, than: container))
+    }
+
+    @Test func thePencilInASheetOverTheSelectionKeepsIt() throws {
+        let board = Board()
+        board.model.tool = .draw
+        board.model.selection = .element(board.note)
+        let point = try #require(board.model.selectionViewRect).center
+
+        board.model.pencilTouched(at: point, elsewhere: true)
+        #expect(board.model.selection == .element(board.note))
+
+        board.model.pencilTouched(at: point)
+        #expect(board.model.selection == nil)
+    }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }
