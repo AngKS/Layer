@@ -1,6 +1,6 @@
 # Groups, layer order, the Layers panel, and tap-to-add selection: design
 
-Date: 2026-11-18. Status: awaiting approval. Branch: `feature/groups` (worktree
+Date: 2026-11-18. Status: approved by the user on 2026-11-18. Branch: `feature/groups` (worktree
 `.claude/worktrees/groups`), started from `feature/rotation` and rebased onto it once rotation
 is finished, because a group turns the way several things do.
 
