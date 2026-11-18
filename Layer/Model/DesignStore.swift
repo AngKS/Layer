@@ -462,8 +462,14 @@ final class DesignStore {
         if start != content { registerUndo(restoring: start) }
     }
 
+    /// Whether a change made in many small steps is under way: see `beginEdit()`.
+    var isEditing: Bool { editStart != nil }
+
     /// Whether an edit is being held open: see `beginHeldEdit()`.
     @ObservationIgnored private(set) var isHoldingEdit = false
+    /// How many holds have been opened, which tells one hold from the next: whoever opened
+    /// one can close it without closing another opened since.
+    @ObservationIgnored private(set) var holdNumber = 0
     /// Whether an edit by hand is under way inside the hold: a drag begun while a spoken
     /// command runs, or one already begun when the command started. Not a count: like
     /// `beginEdit()` itself, which a slider calls with every move and ends once.
@@ -479,6 +485,7 @@ final class DesignStore {
         isEditingByHandInHold = editStart != nil
         if editStart == nil { editStart = content }
         isHoldingEdit = true
+        holdNumber += 1
     }
 
     /// Ends the hold. If an edit by hand is still under way inside it (a finger still

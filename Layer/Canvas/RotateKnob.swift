@@ -24,6 +24,9 @@ struct RotateKnob: View {
         /// How far the finger has gone round since the drag began. Each move adds the short
         /// way round from the last, so it can pass a half turn and go on.
         var total: Double
+        /// Whether this drag began the model's turn. One already under way, such as two
+        /// fingers twisting, isn't the knob's to change or end.
+        var isOwn: Bool
     }
 
     private static let space = "RotateKnob"
@@ -75,10 +78,10 @@ struct RotateKnob: View {
                 if turn == nil {
                     guard let canvas = model.selectionShape else { return }
                     let pivot = model.viewport.viewShape(for: canvas).centre
-                    turn = Turn(pivot: pivot, angle: Self.direction(of: value.startLocation, from: pivot), total: 0)
-                    model.beginTurn()
+                    let angle = Self.direction(of: value.startLocation, from: pivot)
+                    turn = Turn(pivot: pivot, angle: angle, total: 0, isOwn: model.beginTurn())
                 }
-                guard var current = turn else { return }
+                guard var current = turn, current.isOwn else { return }
                 let angle = Self.direction(of: value.location, from: current.pivot)
                 current.total += Rotation.shortestTurn(from: current.angle, to: angle)
                 current.angle = angle
@@ -89,9 +92,9 @@ struct RotateKnob: View {
     }
 
     private func finish() {
-        guard turn != nil else { return }
+        guard let finished = turn else { return }
         turn = nil
-        model.endTurn()
+        if finished.isOwn { model.endTurn() }
     }
 
     /// The way from `pivot` to `point`, in degrees clockwise from pointing right.

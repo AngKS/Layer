@@ -206,8 +206,10 @@ struct TurningOneElementTests {
     @Test func aTurnIsOneUndoStep() {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
-        board.model.beginTurn()
+        #expect(board.model.beginTurn())
         #expect(board.model.isTurning && board.model.isAdjusting)
+        // A second turn doesn't begin while one is under way.
+        #expect(!board.model.beginTurn())
         board.model.turnSelection(by: 10, snaps: false)
         board.model.turnSelection(by: 20, snaps: false)
         board.model.turnSelection(by: 35, snaps: false)
@@ -257,6 +259,8 @@ struct TurningOneElementTests {
         board.model.rotateSelection(by: 15)
         #expect(board.rotation(of: board.note) == nil)
 
+        // With an element that could turn on its own, the screen alone is what stops it.
+        board.store.update(board.note) { $0.isLocked = false }
         let before = board.store.content
         board.model.selection = .screen(board.screen)
         #expect(!board.model.canTurnSelection)
@@ -264,9 +268,141 @@ struct TurningOneElementTests {
         #expect(!board.model.canTurnSelection)
         board.model.beginTurn()
         board.model.turnSelection(by: 30, snaps: false)
+        #expect(!board.model.isTurning && !board.store.isHoldingEdit)
         board.model.endTurn()
         #expect(!board.store.isHoldingEdit)
         #expect(board.store.content == before)
+    }
+
+    @Test func aTurnDuringASpokenCommandJoinsItsStep() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        // A spoken command holds its step open while it works.
+        board.store.beginHeldEdit()
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        // Ending a turn that never began leaves the command's step alone.
+        board.model.endTurn()
+        #expect(board.store.isHoldingEdit)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.endTurn()
+        #expect(board.store.isHoldingEdit, "the turn must leave the command's step open")
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.endHeldEdit()
+        #expect(board.rotation(of: board.note) == 20)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+    }
+
+    @Test func aSpokenCommandEndingMidTurnLeavesTheTurnOneStep() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        // A command starts and finishes while the knob is still being turned.
+        board.store.beginHeldEdit()
+        board.model.turnSelection(by: 10, snaps: false)
+        board.store.endHeldEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.turnSelection(by: 30, snaps: false)
+        board.model.endTurn()
+        #expect(!board.store.isHoldingEdit)
+        #expect(board.rotation(of: board.note) == 30)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+    }
+
+    @Test func aSpokenCommandStartedMidTurnKeepsItsStepAfterTheTurn() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        // A command starts while the knob is being turned, and is still working when it is let go.
+        board.store.beginHeldEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.endTurn()
+        #expect(board.store.isHoldingEdit, "the command's step must still be open")
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.endHeldEdit()
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+    }
+
+    @Test func aTurnThatCutsADragShortIsOneStepWithIt() throws {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        let frame = try #require(board.store.resolve(board.note)).element.frame
+        // A finger has begun moving the note when the turn begins, and the drag is then ended.
+        board.store.beginEdit()
+        board.store.update(board.note) { $0.frame.origin.x += 3 }
+        board.model.beginTurn()
+        board.store.endEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.endTurn()
+        #expect(!board.store.isHoldingEdit)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.note)?.element.frame == frame)
+    }
+
+    @Test func aTurnNeverClosesAHoldItDidNotOpen() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        // One command comes and goes mid-turn, and another starts before the turn ends.
+        board.store.beginHeldEdit()
+        board.store.endHeldEdit()
+        board.store.beginHeldEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.endTurn()
+        #expect(board.store.isHoldingEdit, "the second command's step must still be open")
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.endHeldEdit()
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+    }
+
+    @Test func aTurnStaysOneStepWhenAnotherEditEndsInsideIt() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        // A command is working; the turn joins its step.
+        board.store.beginHeldEdit()
+        board.model.beginTurn()
+        // Another finger moves the title and lets go while the knob is still held.
+        board.store.beginEdit()
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.endEdit()
+        board.model.turnSelection(by: 10, snaps: false)
+        // The command finishes before the knob is let go.
+        board.store.endHeldEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.turnSelection(by: 30, snaps: false)
+        board.model.endTurn()
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+    }
+
+    @Test func aTurnClosesOnlyTheHoldItOpened() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        // A finger is already moving the note, so the turn holds its step open itself.
+        board.store.beginEdit()
+        board.model.beginTurn()
+        board.store.endEdit()
+        // A command closes that hold and opens one of its own, as an undo it is asked for does.
+        board.store.endHeldEdit()
+        board.store.beginHeldEdit()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.endTurn()
+        #expect(board.store.isHoldingEdit, "the command's own hold must still be open")
+        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.endHeldEdit()
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
     }
 
     @Test func resettingTheTurnStandsItUpright() {
