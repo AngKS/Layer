@@ -96,12 +96,17 @@ struct ScreenPromptTests {
         #expect(compact.count < 4_000, "\(compact.count) characters")
     }
 
-    @Test func theBoardIsSentWithTheDescriptionWhenThereIsOne() {
+    @Test func theBoardIsSentToAHostedModelWhenThereIsOne() {
         #expect(ScreenPrompt.request("a profile", board: nil, room: .full) == "a profile")
-        let board = String(repeating: "a title saying “Hi”, ", count: 100)
-        let compact = ScreenPrompt.request("a profile", board: board, room: .compact)
-        #expect(compact.hasPrefix("a profile\n\n") && compact.hasSuffix("…"))
-        #expect(compact.count < 520)
+        let board = String(repeating: "a title saying “Hi”, ", count: 200)
+        let full = ScreenPrompt.request("a profile", board: board, room: .full)
+        #expect(full.hasPrefix("a profile\n\n") && full.hasSuffix("…"))
+        #expect(full.count < 2_120)
+    }
+
+    /// Given the board, the on-device model copied it out in place of the screen asked for.
+    @Test func theOnDeviceModelIsToldOnlyTheDescription() {
+        #expect(ScreenPrompt.request("a calligraphy webpage", board: "S1 \"Trip planner\": title \"Plan your trip\"", room: .compact) == "a calligraphy webpage")
     }
 }
 

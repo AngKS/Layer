@@ -109,11 +109,13 @@ enum ScreenPrompt {
 
     // MARK: The request
 
-    /// The message sent for a screen: its description and, when the board has other
-    /// screens, what they say.
+    /// The message sent for a screen: its description and, for a hosted model when the
+    /// board has other screens, what they say. The on-device model isn't told the board:
+    /// given it, it wrote the other screens out again in place of the one asked for (a
+    /// calligraphy webpage came back as the board's trip planner, natively and on the iPad).
     static func request(_ description: String, board: String?, room: Room) -> String {
-        guard let board = board?.trimmingCharacters(in: .whitespacesAndNewlines), !board.isEmpty else { return description }
-        let limit = room == .compact ? 400 : 2000
+        guard room == .full, let board = board?.trimmingCharacters(in: .whitespacesAndNewlines), !board.isEmpty else { return description }
+        let limit = 2000
         let context = board.count > limit ? String(board.prefix(limit)) + "…" : board
         return """
             \(description)
