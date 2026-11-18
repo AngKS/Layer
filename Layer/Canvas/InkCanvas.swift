@@ -23,6 +23,7 @@ final class InkUndoManager: UndoManager {
 
     private static let changes: [Notification.Name] = [
         .NSUndoManagerDidCloseUndoGroup, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+        DesignStore.historyDidChange,
     ]
 
     override init() {

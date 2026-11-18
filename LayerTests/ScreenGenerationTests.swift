@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 @_weakLinked import FoundationModels
 import Testing
@@ -300,6 +301,30 @@ struct ScreenGenerationLifecycleTests {
         await app.waitForGeneration()
         #expect(app.store.screens.isEmpty)
         #expect(!undo.canUndo)
+    }
+
+    /// Undo and Redo look again whenever the history says it changed. Taking the empty step
+    /// out said nothing, so after a failed generation Undo stayed lit and did nothing.
+    @Test func undoGoesOutAfterAGenerationThatWritesNothing() async throws {
+        let (app, undo, feed) = bench()
+        var shown: [Bool] = []
+        let listening = UndoControl.changes(of: undo).sink { _ in shown.append(undo.canUndo) }
+        defer { listening.cancel() }
+
+        app.generateScreen(from: "a settings screen")
+        #expect(shown.last == true, "the screen being written is a step")
+        feed.finish(throwing: URLError(.notConnectedToInternet))
+        await app.waitForGeneration()
+        #expect(!undo.canUndo)
+        #expect(shown.last == false, "the controls were told the step went")
+
+        let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        app.screenStream = { _, _, _ in stream }
+        app.generateScreen(from: "a profile screen")
+        #expect(shown.last == true)
+        empty.finish()
+        await app.waitForGeneration()
+        #expect(shown.last == false)
     }
 
     /// Deleting the screen by hand while it is written: the same.
