@@ -361,3 +361,82 @@ struct DrawingFileTests {
         #expect(file.drawing.strokes.count == 4)
     }
 }
+
+@Suite("Turned drawings")
+struct TurnedDrawingTests {
+    private func turnedCross(by degrees: Double) throws -> (DesignContent, DesignElement) {
+        var content = DesignContent()
+        var drawing = try #require(DesignElement.drawing(cross(at: CGPoint(x: 400, y: 300))))
+        drawing.setRotation(degrees)
+        content.add(drawing, to: nil, scale: 1)
+        return (content, drawing)
+    }
+
+    @Test func aTurnedDrawingsInkIsTurnedAboutItsMiddle() throws {
+        var drawing = try #require(DesignElement.drawing([stroke(from: CGPoint(x: 100, y: 100), to: CGPoint(x: 200, y: 100))]))
+        drawing.setRotation(90)
+        let bounds = try #require(InkGeometry.bounds(of: drawing.canvasStrokes))
+        #expect(abs(bounds.midX - 150) <= 1)
+        #expect(abs(bounds.midY - 100) <= 1)
+        #expect(bounds.height >= 99)
+        #expect(bounds.width <= 6)
+    }
+
+    @Test func stretchingATurnedDrawingNeverShearsIt() throws {
+        var drawing = try #require(DesignElement.drawing(cross(at: CGPoint(x: 400, y: 300))))
+        drawing.setRotation(30)
+        drawing.frame.size.width *= 2
+        for stroke in drawing.canvasStrokes {
+            let t = stroke.transform
+            #expect(abs(t.a * t.c + t.b * t.d) < 1e-6)
+        }
+    }
+
+    @Test func erasingPartOfATurnedDrawingLeavesTheRestWhereItWas() throws {
+        var (content, drawing) = try turnedCross(by: 30)
+        var sync = DrawingSync()
+        let first = sync.strokes(showing: content, on: [])
+        let shown = try #require(first)
+        sync.changes(for: Array(shown.dropFirst()), in: content).apply(to: &content)
+
+        let after = try #require(content.element(drawing.id))
+        #expect(after.resolvedRotation == 30)
+        let bounds = try #require(InkGeometry.bounds(of: after.canvasStrokes))
+        #expect(close(bounds, shown[1].renderBounds))
+    }
+
+    @Test func aStrokeThatJoinsATurnedDrawingStaysWhereItWasDrawn() throws {
+        var (content, drawing) = try turnedCross(by: 30)
+        var sync = DrawingSync()
+        let first = sync.strokes(showing: content, on: [])
+        let shown = try #require(first)
+        let area = try #require(InkGeometry.bounds(of: shown))
+        let added = stroke(from: CGPoint(x: area.midX, y: area.midY), to: CGPoint(x: area.maxX + 40, y: area.midY))
+        let all = shown + [added]
+        sync.changes(for: all, in: content).apply(to: &content)
+
+        let after = try #require(content.element(drawing.id))
+        #expect(content.elements.count == 1)
+        #expect(after.strokeCount == 3)
+        #expect(after.resolvedRotation == 30)
+        let bounds = try #require(InkGeometry.bounds(of: after.canvasStrokes))
+        let expected = try #require(InkGeometry.bounds(of: all))
+        #expect(close(bounds, expected))
+    }
+
+    @Test func turningADrawingRedrawsItsInkTurned() throws {
+        var (content, drawing) = try turnedCross(by: 0)
+        var sync = DrawingSync()
+        let first = sync.strokes(showing: content, on: [])
+        let shown = try #require(first)
+        content.update(drawing.id) { $0.setRotation(45) }
+        drawing = try #require(content.element(drawing.id))
+
+        let next = sync.strokes(showing: content, on: shown)
+        let redrawn = try #require(next)
+        let bounds = try #require(InkGeometry.bounds(of: redrawn))
+        let expected = try #require(InkGeometry.bounds(of: drawing.canvasStrokes))
+        #expect(close(bounds, expected))
+        #expect(redrawn.count == 2)
+    }
+}

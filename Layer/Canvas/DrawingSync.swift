@@ -38,6 +38,7 @@ struct DrawingSync {
     private struct Shown: Equatable {
         var frame: CGRect
         var ink: Data?
+        var rotation: Double
     }
 
     /// A stroke as it was when its drawing's ink was last written out.
@@ -73,7 +74,7 @@ struct DrawingSync {
     /// place and are handed back as they are, so that PencilKit still knows them.
     mutating func strokes(showing content: DesignContent, on current: [PKStroke]) -> [PKStroke]? {
         let drawings = Self.onCanvas(content)
-        let wanted = Dictionary(uniqueKeysWithValues: drawings.map { ($0.id, Shown(frame: $0.frame, ink: $0.ink)) })
+        let wanted = Dictionary(uniqueKeysWithValues: drawings.map { ($0.id, Shown(frame: $0.frame, ink: $0.ink, rotation: $0.resolvedRotation)) })
         guard wanted != shown else { return nil }
 
         let held = Dictionary(current.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
@@ -137,12 +138,20 @@ struct DrawingSync {
             let strokeMarks = strokes.map(Self.mark)
             nowMarks[id] = strokeMarks
             // Untouched since its ink was last written out: nothing to work out again.
-            if let known = existing[id], marks[id] == strokeMarks, shown[id] == Shown(frame: known.frame, ink: known.ink) {
+            if let known = existing[id], marks[id] == strokeMarks, shown[id] == Shown(frame: known.frame, ink: known.ink, rotation: known.resolvedRotation) {
                 nowShown[id] = shown[id]
                 continue
             }
-            guard let drawn = DesignElement.drawing(strokes, id: id) else { continue }
-            nowShown[id] = Shown(frame: drawn.frame, ink: drawn.ink)
+            // A turned drawing's strokes lie turned on the canvas: they go back in upright,
+            // and it keeps its angle.
+            let drawn: DesignElement?
+            if let known = existing[id], known.resolvedRotation != 0 {
+                drawn = DesignElement.drawing(strokes, id: id, keepingTurn: known.resolvedRotation, about: CGPoint(x: known.frame.midX, y: known.frame.midY))
+            } else {
+                drawn = DesignElement.drawing(strokes, id: id)
+            }
+            guard let drawn else { continue }
+            nowShown[id] = Shown(frame: drawn.frame, ink: drawn.ink, rotation: drawn.resolvedRotation)
             if let known = existing[id], known.frame == drawn.frame, known.ink == drawn.ink { continue }
             changes.drawings.append(drawn)
         }

@@ -23,8 +23,9 @@ extension DesignElement {
         return element
     }
 
-    /// A drawing's strokes where they now lie on the canvas: at its frame, and stretched
-    /// to it if the frame has been resized since they were drawn.
+    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched
+    /// to it if the frame has been resized since they were drawn, and then turned about
+    /// the frame's middle by the drawing's angle.
     var canvasStrokes: [PKStroke] {
         guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink), !drawing.strokes.isEmpty else { return [] }
         let natural = drawing.bounds
@@ -35,11 +36,36 @@ extension DesignElement {
         let place = CGAffineTransform(translationX: -natural.minX, y: -natural.minY)
             .concatenating(CGAffineTransform(scaleX: stretch(frame.width, natural.width), y: stretch(frame.height, natural.height)))
             .concatenating(CGAffineTransform(translationX: frame.minX, y: frame.minY))
+            .concatenating(turn(resolvedRotation, about: CGPoint(x: frame.midX, y: frame.midY)))
         return drawing.strokes.map { stroke in
             var placed = stroke
             placed.transform = stroke.transform.concatenating(place)
             return placed
         }
+    }
+
+    /// Strokes as they lie on the canvas, already turned by `degrees` about `centre`, made
+    /// into a drawing that keeps that angle and looks exactly the same. The ink is
+    /// kept upright, and the frame is moved so that turning about its own middle puts
+    /// the strokes where they are. Nil when there are no strokes.
+    static func drawing(_ strokes: [PKStroke], id: UUID, keepingTurn degrees: Double, about centre: CGPoint) -> DesignElement? {
+        let back = turn(-degrees, about: centre)
+        let unturned = strokes.map { stroke -> PKStroke in
+            var upright = stroke
+            upright.transform = stroke.transform.concatenating(back)
+            return upright
+        }
+        guard let area = InkGeometry.bounds(of: unturned) else { return nil }
+        let middle = CGPoint(x: area.midX, y: area.midY)
+        let turned = Rotation.rotate(middle, about: centre, by: degrees)
+        // Turning about the new frame's middle must equal turning about the old one.
+        let shift = CGPoint(x: turned.x - middle.x, y: turned.y - middle.y)
+        var element = DesignStore.newElement(.drawing)
+        element.id = id
+        element.frame = area.offsetBy(dx: shift.x, dy: shift.y)
+        element.ink = InkGeometry.data(for: unturned, measuredFrom: area.origin)
+        element.setRotation(degrees)
+        return element
     }
 
     /// How many strokes a drawing is made of.
@@ -81,6 +107,14 @@ extension DesignElement {
     var isPickedByItsFrame: Bool {
         kind != .drawing || isLocked
     }
+}
+
+/// A turn clockwise on screen by `degrees` about a point, as a transform.
+private func turn(_ degrees: Double, about centre: CGPoint) -> CGAffineTransform {
+    let radians = degrees * .pi / 180
+    return CGAffineTransform(translationX: -centre.x, y: -centre.y)
+        .concatenating(CGAffineTransform(rotationAngle: radians))
+        .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
 }
 
 enum InkGeometry {
