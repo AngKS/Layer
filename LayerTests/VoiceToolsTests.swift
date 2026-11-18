@@ -123,6 +123,32 @@ struct CanvasPictureTests {
         #expect(picture.text(.full).contains("Edit profile"))
     }
 
+    /// The pencil points at an element on a screen that isn't the one mostly in view: that
+    /// screen is the one told in full, or the model can't see what it was pointed at.
+    @Test func theCompactPictureShowsThePointedAtScreenInFull() throws {
+        var picture = CanvasPicture()
+        picture.screens = [
+            .init(handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), visibleShare: 0.9, elements: [
+                .init(handle: "E1", kind: "title", text: "Welcome back"),
+            ]),
+            .init(handle: "S2", name: "Trip", size: CGSize(width: 393, height: 852), visibleShare: 0.1, elements: [
+                .init(handle: "E2", kind: "button", text: "Save itinerary", isSelected: true),
+            ]),
+        ]
+        let compact = picture.text(.compact)
+        #expect(compact.contains(#"E2 button "Save itinerary""#))
+        #expect(!compact.contains("Welcome back"))
+        #expect(picture.selectionInWords == #"E2, the button "Save itinerary" on S2"#)
+    }
+
+    @Test func aSelectedScreenIsToldByName() {
+        var picture = CanvasPicture()
+        picture.screens = [.init(handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), isSelected: true)]
+        #expect(picture.selectionInWords == #"S1, the screen "Login""#)
+        picture.screens[0].isSelected = false
+        #expect(picture.selectionInWords == nil)
+    }
+
     @Test func anEmptyCanvasSaysSo() {
         let picture = CanvasPicture.capture(from: AppModel(document: LayerDocument()), handles: VoiceHandles())
         #expect(!picture.hasScreens)

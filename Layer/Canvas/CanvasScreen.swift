@@ -82,7 +82,8 @@ struct CanvasScreen: View {
         // behind the canvas: that way it can be left out in Draw, where the squeeze must stay
         // PencilKit's, without the canvas itself being made anew each time Draw turns on.
         .background {
-            Color.clear.modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.tool != .draw))
+            // Not `Color.clear`, which SwiftUI may count as nothing there to squeeze.
+            Color.black.opacity(0.001).modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.tool != .draw))
         }
         // Things dragged out of the library land where they are dropped: on a screen when
         // dropped over one, on the open canvas otherwise.
@@ -346,6 +347,7 @@ private struct SqueezeToSpeak: ViewModifier {
 
     func body(content: Content) -> some View {
         Group {
+            let _ = VoiceLog.log.info("pencil: squeeze to speak \(isOn ? "on" : "off", privacy: .public)")
             if isOn {
                 squeezable(content)
             } else {
@@ -366,6 +368,7 @@ private struct SqueezeToSpeak: ViewModifier {
             switch phase {
             case .active(let value):
                 guard !isSqueezing else { return }
+                VoiceLog.log.info("pencil: squeeze began at \(String(describing: value.hoverPose?.location), privacy: .public)")
                 isSqueezing = true
                 pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
             case .ended:

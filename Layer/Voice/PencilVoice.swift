@@ -208,7 +208,10 @@ final class PencilVoice {
         }
         // One squeeze already listening: a second start of it isn't a new one.
         if case .listening(_, toggled: false, _) = mode { return }
-        guard let model, let viewPoint, !squeezeIsOff(), model.tool != .draw, !isOverChrome(viewPoint, in: model) else { return }
+        guard let model, let viewPoint, !squeezeIsOff(), model.tool != .draw, !isOverChrome(viewPoint, in: model) else {
+            VoiceLog.log.info("pencil: squeeze ignored (in range \(viewPoint != nil, privacy: .public), squeeze off \(self.squeezeIsOff(), privacy: .public), draw \(self.model?.tool == .draw, privacy: .public), over chrome \(viewPoint.flatMap { p in self.model.map { self.isOverChrome(p, in: $0) } } ?? false, privacy: .public))")
+            return
+        }
         // A phone call in another window has the microphone, and its commands are about that
         // window's design: a squeeze here has nothing to say to it, so it does nothing.
         if model.voice == nil, phoneCallIsUp() { return }

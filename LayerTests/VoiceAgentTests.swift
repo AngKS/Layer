@@ -63,6 +63,19 @@ struct VoiceAgentTests {
         #expect(bench.recorder.requests.last?.prompts.last == "zoom out")
     }
 
+    /// Pointed at a thing, the model is told which in so many words, not left to find it.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aThingPointedAtIsNamedWithItsCommand() async throws {
+        let bench = bench([:])
+        let button = try #require(bench.button)
+        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), element: button.id))
+        bench.app.selection = selection
+        _ = await bench.agent.run("remove this", about: .thing(selection))
+        let prompt = try #require(bench.recorder.requests.last?.prompts.last)
+        #expect(prompt.hasPrefix(#"(The person is pointing at E2, the button "#))
+        #expect(prompt.hasSuffix(" remove this"))
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aCommandIsOneUndoStep() async throws {
         let bench = bench(["make the button blue and say ahoy": Self.blueAndAhoy])

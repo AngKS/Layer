@@ -99,6 +99,11 @@ final class VoiceAgent: VoiceCommandRunner {
     /// What the model is told with a command the pencil pointed at empty canvas for.
     static let canvasHint = "(The person pointed at empty canvas: a description of a screen means a new screen there.)"
 
+    /// What the model is told with a command the pencil pointed at a thing for.
+    static func thingHint(_ pointed: String) -> String {
+        "(The person is pointing at \(pointed). \"This\", \"it\", \"that\" and a change that names nothing mean what is pointed at, and nothing else.)"
+    }
+
     func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
         guard let model, !model.isClosed else { return VoiceOutcome(problem: AppModel.closedProblem) }
         toolbox.reset()
@@ -115,6 +120,11 @@ final class VoiceAgent: VoiceCommandRunner {
         self.session = session
         session.properties.voiceModel = model.modelChoice
         lookAtTheCanvas()
+        // Pointed at a thing: said outright, as a model left to find "[selected]" in the
+        // canvas restyled the avatar for "the phone" and deleted what "it" was before (iPad).
+        if case .thing = target, let pointed = session.properties.canvasPicture.selectionInWords {
+            hint = Self.thingHint(pointed)
+        }
 
         // Everything the command changes is one step to undo, whatever becomes of it.
         model.store.beginHeldEdit()
@@ -154,7 +164,10 @@ final class VoiceAgent: VoiceCommandRunner {
             prompt = "(The last change has been undone.) " + command
             lookAtTheCanvas()
         }
-        if let hint { prompt = hint + " " + prompt }
+        if let hint {
+            prompt = hint + " " + prompt
+            VoiceLog.log.info("agent: told \(hint, privacy: .public)")
+        }
         VoiceLog.log.info("agent: asking \(String(describing: model.modelChoice), privacy: .public)")
         let began = ContinuousClock.now
         do {
