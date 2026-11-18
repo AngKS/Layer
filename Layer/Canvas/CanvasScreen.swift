@@ -178,6 +178,42 @@ struct CanvasScreen: View {
             PencilVoiceLayer()
                 .ignoresSafeArea()
         }
+        // In a modifier of its own: one chain this long is more than a Release build can
+        // type-check in reasonable time.
+        .modifier(CanvasEvents(model: model, undoManager: undoManager))
+    }
+
+    /// How tall a panel beside the canvas can be: from under the bar down to just short
+    /// of the controls along the bottom.
+    private var panelRoom: CGFloat {
+        max(model.canvasSize.height - model.topBarBottom - 12 - 96, 180)
+    }
+
+    /// Whether a panel is showing as a sheet, which it only does in a compact window.
+    private func sheet(_ isOpen: ReferenceWritableKeyPath<AppModel, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { model.isCompactSizeClass && model[keyPath: isOpen] },
+            set: { model[keyPath: isOpen] = $0 }
+        )
+    }
+
+    /// The screens that hold elements being dragged, one or several of them.
+    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
+        guard model.isAdjusting, let selection = model.selection else { return [] }
+        return Set(selection.things.compactMap { thing in
+            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
+        })
+    }
+}
+
+/// What the canvas listens for and tells the system: leaving the screen, its notices,
+/// the undo manager, and what Siri can see.
+private struct CanvasEvents: ViewModifier {
+    let model: AppModel
+    let undoManager: UndoManager?
+
+    func body(content: Content) -> some View {
+        content
         // Layer only listens while it is in front.
         .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { note in
             if let scene = note.object as? UIScene, scene === model.ink?.windowScene { model.windowLeftTheScreen() }
@@ -216,28 +252,6 @@ struct CanvasScreen: View {
             await VoiceDemo.runIfRequested(on: model)
             #endif
         }
-    }
-
-    /// How tall a panel beside the canvas can be: from under the bar down to just short
-    /// of the controls along the bottom.
-    private var panelRoom: CGFloat {
-        max(model.canvasSize.height - model.topBarBottom - 12 - 96, 180)
-    }
-
-    /// Whether a panel is showing as a sheet, which it only does in a compact window.
-    private func sheet(_ isOpen: ReferenceWritableKeyPath<AppModel, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { model.isCompactSizeClass && model[keyPath: isOpen] },
-            set: { model[keyPath: isOpen] = $0 }
-        )
-    }
-
-    /// The screens that hold elements being dragged, one or several of them.
-    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
-        guard model.isAdjusting, let selection = model.selection else { return [] }
-        return Set(selection.things.compactMap { thing in
-            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
-        })
     }
 }
 
