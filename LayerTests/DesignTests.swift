@@ -1366,6 +1366,56 @@ struct TurnedCodeTests {
         #expect(open < turn && turn < close)
     }
 
+    /// A bordered, shadowed button inset from a full-width title, which sets the margin.
+    private func styledButton(turnedBy degrees: Double?) -> DesignScreen {
+        var button = turned(.button, 60, 300, 200, 50, by: degrees)
+        button.borderWidth = 2
+        button.hasShadow = true
+        return screen([element(.title, 20, 100, 353, 40), button])
+    }
+
+    @Test func aStacksBorderAndShadowTurnWithTheElement() throws {
+        let lines = lines(of: styledButton(turnedBy: 15))
+        let border = try #require(lines.firstIndex(of: ".overlay {"))
+        let shadow = try #require(lines.firstIndex { $0.hasPrefix(".shadow(") })
+        let turn = try #require(lines.firstIndex(of: ".rotationEffect(.degrees(15))"))
+        let placement = try #require(lines.firstIndex { $0.hasPrefix(".padding(.leading,") })
+        #expect(border < turn && shadow < turn && turn < placement)
+    }
+
+    @Test func aTurnedCentredTitleIsTurnedBeforeItIsStretched() throws {
+        var title = element(.title, 82.5, 112, 228, 40)
+        title.rotation = 20
+        let lines = lines(of: screen([title, element(.body, 48, 300, 297, 44)]), settings: CodeSettings(includesPreview: false))
+        let turn = try #require(lines.firstIndex(of: ".rotationEffect(.degrees(20))"))
+        let stretch = try #require(lines.firstIndex(of: ".frame(maxWidth: .infinity)"))
+        #expect(turn < stretch)
+    }
+
+    @Test func anUprightStyledButtonIsWrittenAsBefore() throws {
+        // Recorded from the generator before elements could turn: placed, then finished.
+        let lines = lines(of: styledButton(turnedBy: nil))
+        let start = try #require(lines.firstIndex(of: "Button {"))
+        #expect(Array(lines[start...].prefix(16)) == [
+            "Button {",
+            "} label: {",
+            "Text(\"Continue\")",
+            ".font(.headline)",
+            ".foregroundStyle(.white)",
+            ".frame(width: 200, height: 50)",
+            ".background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)",
+            "}",
+            ".padding(.leading, 40)",
+            ".overlay {",
+            "Capsule()",
+            ".strokeBorder(Color(red: 0.17, green: 0.16, blue: 0.15), lineWidth: 2)",
+            "}",
+            ".shadow(color: .black.opacity(0.18), radius: 10, y: 5)",
+            ".padding(.top, 144)",
+            "}",
+        ])
+    }
+
     @Test func aHalfDegreeIsWrittenAsItIs() {
         let lines = lines(of: screen([turned(.button, 40, 300, 200, 50, by: 22.5)]), settings: CodeSettings(layout: .absolute, includesPreview: false))
         #expect(lines.contains(".rotationEffect(.degrees(22.5))"))
