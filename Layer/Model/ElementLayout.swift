@@ -5,6 +5,16 @@ import CoreGraphics
 enum ElementLayout {
     enum Corner: CaseIterable, Sendable {
         case topLeft, topRight, bottomLeft, bottomRight
+
+        /// The corner diagonally across.
+        var opposite: Corner {
+            switch self {
+            case .topLeft: .bottomRight
+            case .topRight: .bottomLeft
+            case .bottomLeft: .topRight
+            case .bottomRight: .topLeft
+            }
+        }
     }
 
     /// The size an element starts at, on the standard phone.
@@ -179,6 +189,24 @@ enum ElementLayout {
         if corner == .topLeft || corner == .topRight { result.origin.y = result.maxY - side }
         result.size = CGSize(width: side, height: side)
         return result
+    }
+
+    /// Resizing a turned element, in its own axes. `translation` is the drag as it went
+    /// across the glass, in the frame's points; turned back by the element's angle, it
+    /// resizes the upright frame as `resizedKeepingShape` does. The frame then moves so
+    /// that the corner opposite the one dragged stays where it was on the canvas. Upright,
+    /// it is `resizedKeepingShape` exactly, whole points and all.
+    static func resizedTurned(_ frame: CGRect, degrees: Double, from corner: Corner, by translation: CGSize, kind: ElementKind) -> CGRect {
+        guard Rotation.normalized(degrees) != 0 else {
+            return resizedKeepingShape(frame, from: corner, by: translation, kind: kind)
+        }
+        let along = Rotation.rotate(CGPoint(x: translation.width, y: translation.height), about: .zero, by: -degrees)
+        let sized = resizedKeepingShape(frame, from: corner, by: CGSize(width: along.x, height: along.y), kind: kind)
+        let fixed = TurnedRect(rect: frame, degrees: degrees).corner(corner.opposite)
+        let resized = TurnedRect(rect: sized, degrees: degrees)
+        let reach = resized.corner(corner.opposite)
+        let centre = CGPoint(x: fixed.x - (reach.x - resized.centre.x), y: fixed.y - (reach.y - resized.centre.y))
+        return CGRect(x: centre.x - sized.width / 2, y: centre.y - sized.height / 2, width: sized.width, height: sized.height)
     }
 
     // MARK: Snapping

@@ -6,7 +6,9 @@ import SwiftUI
 /// what a finger has selected takes touches here. A selected screen or
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
 /// A drawing is an element, moved and resized like the rest: its ink goes with its frame.
-/// When several things are selected, each is outlined and dragging any one moves them all.
+/// A selected element is outlined and handled on its turned box, and turned by its knob
+/// (`RotateKnob`). When several things are selected, each is outlined and dragging any one
+/// moves them all.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
 /// size at any zoom. Screens and drawings that aren't selected have no handle of their
@@ -44,7 +46,7 @@ struct SelectionLayer: View {
             // selected drawing at any time: it has no target of its own among the elements'.
             if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
-                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)))
+                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
                     .gesture(
                         drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model,
                                      apply: drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)),
@@ -80,31 +82,38 @@ struct SelectionLayer: View {
             if let screen = model.selectedScreen {
                 outline(viewport.viewRect(for: screen.canvasFrame), radius: screen.device.cornerRadius * screen.scale * viewport.scale)
             }
+            // Below the corner handles, which win where a small element's handles and knob meet.
+            RotateKnob()
             if let selected = model.selectedElement {
-                let rect = viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
-                if model.isAdjusting, store.canvas.showsMeasurements, case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
+                // The element's turned box: its outline, handles and badge go round with it.
+                let shape = viewport.viewShape(for: TurnedRect(rect: selected.placement.canvasRect(for: selected.element.frame), degrees: selected.element.resolvedRotation))
+                // Not while it turns: the gaps jitter as it goes round, and their labels would
+                // cover the angle beside the knob.
+                if model.isAdjusting, !model.isTurning, store.canvas.showsMeasurements, case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
                     SpacingOverlay(guides: .measure(selected.element, in: screen), screen: screen, viewport: viewport)
                 }
                 if model.isAdjusting {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
-                outline(rect, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
+                outline(shape.rect, degrees: shape.degrees, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
                 if selected.element.isLocked {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 22, height: 22)
                         .background(Theme.accent.color, in: .circle)
-                        .position(x: rect.maxX + 4, y: rect.minY - 4)
+                        .position(TurnedRect(rect: shape.rect.insetBy(dx: -4, dy: -4), degrees: shape.degrees).corner(.topRight))
                         .accessibilityLabel("Locked")
                 } else {
                     ForEach(ElementLayout.Corner.allCases, id: \.self) { corner in
-                        handle(corner, at: rect, for: selected.element, ref: selected.ref, placement: selected.placement)
+                        handle(corner, on: shape, for: selected.element, ref: selected.ref, placement: selected.placement)
                     }
                 }
             }
 
         }
+        // A tick as a turn snaps to the 45s; none as it leaves.
+        .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
     }
 
     /// How round a selected thing's corners are, in canvas points.
@@ -148,28 +157,26 @@ struct SelectionLayer: View {
 
     // MARK: Pieces
 
-    /// An invisible area that takes touches, at least big enough for a finger.
-    private func dragArea(_ rect: CGRect) -> some View {
+    /// An invisible area that takes touches, at least big enough for a finger, turned
+    /// `degrees` about its centre so that a turned element's empty corners don't take them.
+    private func dragArea(_ rect: CGRect, degrees: Double = 0) -> some View {
         Color.clear
             .contentShape(Rectangle())
             .frame(width: max(rect.width, 30), height: max(rect.height, 30))
+            .rotationEffect(.degrees(degrees))
             .position(x: rect.midX, y: rect.midY)
     }
 
+    /// A corner handle just outside the element's turned box, in the view. Dragged, the
+    /// element is resized in its own axes, and the corner across from it stays put.
     private func handle(
         _ corner: ElementLayout.Corner,
-        at rect: CGRect,
+        on shape: TurnedRect,
         for element: DesignElement,
         ref: DesignStore.ElementRef,
         placement: Placement
     ) -> some View {
-        let outer = rect.insetBy(dx: -6, dy: -6)
-        let point = switch corner {
-        case .topLeft: CGPoint(x: outer.minX, y: outer.minY)
-        case .topRight: CGPoint(x: outer.maxX, y: outer.minY)
-        case .bottomLeft: CGPoint(x: outer.minX, y: outer.maxY)
-        case .bottomRight: CGPoint(x: outer.maxX, y: outer.maxY)
-        }
+        let point = TurnedRect(rect: shape.rect.insetBy(dx: -6, dy: -6), degrees: shape.degrees).corner(corner)
         return Circle()
             .fill(Theme.chrome)
             .overlay { Circle().strokeBorder(Theme.accent.color, lineWidth: 1.5) }
@@ -178,15 +185,17 @@ struct SelectionLayer: View {
             .contentShape(Rectangle())
             .position(point)
             .gesture(drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model) { origin, translation in
-                (ElementLayout.resizedKeepingShape(origin, from: corner, by: translation, kind: element.kind), [])
+                (ElementLayout.resizedTurned(origin, degrees: element.resolvedRotation, from: corner, by: translation, kind: element.kind), [])
             })
     }
 
-    private func outline(_ rect: CGRect, radius: CGFloat) -> some View {
+    /// The selection's outline round a box, turned `degrees` about its centre.
+    private func outline(_ rect: CGRect, degrees: Double = 0, radius: CGFloat) -> some View {
         let outer = rect.insetBy(dx: -3, dy: -3)
         return RoundedRectangle(cornerRadius: radius + 3, style: .continuous)
             .strokeBorder(Theme.accent.color, lineWidth: 1.5)
             .frame(width: outer.width, height: outer.height)
+            .rotationEffect(.degrees(degrees))
             .position(x: outer.midX, y: outer.midY)
             .allowsHitTesting(false)
     }

@@ -913,17 +913,10 @@ final class AppModel {
         return nil
     }
 
-    /// Where something is, in the view's own points.
+    /// Where something is, in the view's own points: for a turned element, the box round
+    /// its turned shape.
     func viewRect(of target: CanvasSelection) -> CGRect? {
-        switch target {
-        case .element(let ref):
-            guard let found = store.resolve(ref) else { return nil }
-            return viewport.viewRect(for: found.placement.canvasRect(for: found.element.frame))
-        case .screen(let id):
-            return store.screen(id).map { viewport.viewRect(for: $0.canvasFrame) }
-        case .several:
-            return store.canvasFrame(of: target).map(viewport.viewRect(for:))
-        }
+        store.canvasFrame(of: target).map(viewport.viewRect(for:))
     }
 
     /// Whether what is selected is locked in place: all of it, when it is several things.
@@ -986,21 +979,123 @@ final class AppModel {
         store.update(ref) { $0.isLocked.toggle() }
     }
 
-    /// Where what is selected is, in the view's own points: for several things, the area
-    /// they cover together.
+    /// Where what is selected is, in the view's own points: for a turned element, the box
+    /// round its turned shape; for several things, the area they cover together. When it
+    /// can turn, the knob's touch target is included, so that the popover, which places
+    /// itself against this, never covers the knob.
     var selectionViewRect: CGRect? {
+        let area: CGRect?
         switch selection {
         case .element:
-            guard let selected = selectedElement else { return nil }
-            return viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
+            area = selectionShape.map { viewport.viewShape(for: $0).bounds }
         case .screen:
-            guard let screen = selectedScreen else { return nil }
-            return viewport.viewRect(for: screen.canvasFrame.union(screen.labelFrame))
+            area = selectedScreen.map { viewport.viewRect(for: $0.canvasFrame.union($0.labelFrame)) }
         case .several(let things):
-            return store.canvasFrame(of: .several(things)).map(viewport.viewRect(for:))
+            area = store.canvasFrame(of: .several(things)).map(viewport.viewRect(for:))
         case nil:
             return nil
         }
+        guard let area, let knob = knobViewPoint else { return area }
+        let reach = Self.knobTarget / 2
+        return area.union(CGRect(x: knob.x - reach, y: knob.y - reach, width: Self.knobTarget, height: Self.knobTarget))
+    }
+
+    // MARK: Turning
+
+    /// Whether what is selected can be turned: something is, no screen is among it, and
+    /// at least one element of it isn't locked.
+    var canTurnSelection: Bool {
+        var hasUnlocked = false
+        for thing in selectedThings {
+            // Screens never turn.
+            guard case .element(let ref) = thing else { return false }
+            if store.resolve(ref)?.element.isLocked == false { hasUnlocked = true }
+        }
+        return hasUnlocked
+    }
+
+    /// True from `beginTurn()` to `endTurn()`, while the knob or two fingers turn the selection.
+    private(set) var isTurning = false
+    /// The angle a turn has snapped to, while it is held there; nil between the 45s. A
+    /// tick plays as it snaps.
+    private(set) var snappedTurn: Double?
+    /// The element being turned, and the angle it had when the turn began.
+    @ObservationIgnored private var turnStart: (ref: DesignStore.ElementRef, degrees: Double)?
+
+    /// The one element selected, unless it is locked: what a turn turns.
+    private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
+        guard let selected = selectedElement, !selected.element.isLocked else { return nil }
+        return (selected.ref, selected.element)
+    }
+
+    /// Starts turning what is selected. Everything until `endTurn()` undoes as one step.
+    func beginTurn() {
+        guard !isTurning, let turnable = turnableElement else { return }
+        store.beginHeldEdit()
+        turnStart = (turnable.ref, turnable.element.resolvedRotation)
+        isAdjusting = true
+        isTurning = true
+    }
+
+    /// Turns what is selected `degrees` clockwise from the angle it had when the turn
+    /// began: the whole turn so far, not the latest step of it. With `snaps`, an angle
+    /// close to a multiple of 45° goes to it. Returns whether it did.
+    @discardableResult
+    func turnSelection(by degrees: Double, snaps: Bool) -> Bool {
+        guard let turnStart, selection == .element(turnStart.ref) else { return false }
+        let turned = turnStart.degrees + degrees
+        let (angle, isSnapped) = snaps ? Rotation.snapped(turned) : (Rotation.normalized(turned), false)
+        store.update(turnStart.ref) { $0.setRotation(angle) }
+        let snapped = isSnapped ? angle : nil
+        if snappedTurn != snapped { snappedTurn = snapped }
+        return isSnapped
+    }
+
+    func endTurn() {
+        guard isTurning else { return }
+        turnStart = nil
+        isTurning = false
+        isAdjusting = false
+        snappedTurn = nil
+        store.endHeldEdit()
+    }
+
+    /// Turns what is selected `degrees` clockwise in one step, without snapping.
+    func rotateSelection(by degrees: Double) {
+        guard let turnable = turnableElement else { return }
+        store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+    }
+
+    /// Stands what is selected upright again, in one step.
+    func resetSelectionTurn() {
+        guard let turnable = turnableElement else { return }
+        store.update(turnable.ref) { $0.setRotation(0) }
+    }
+
+    /// How far what is selected is turned, for the readout beside the knob.
+    var selectionTurn: Double? {
+        selectedElement?.element.resolvedRotation
+    }
+
+    /// The shape of what is selected, in canvas points, turned as it is. Nil for several things.
+    var selectionShape: TurnedRect? {
+        selection.flatMap(store.canvasShape(of:))
+    }
+
+    /// How far the knob hangs below the selection's bottom edge, to its centre, in the
+    /// view's points: the same reach at any zoom.
+    static let knobStem: CGFloat = 28
+    /// The size of the knob's touch target, in the view's points.
+    static let knobTarget: CGFloat = 44
+
+    /// Where the knob is in the view: below the middle of the selection's bottom edge, in
+    /// its own axes, so that it goes round as the selection turns. Nil when what is
+    /// selected can't turn.
+    var knobViewPoint: CGPoint? {
+        guard canTurnSelection, let canvas = selectionShape else { return nil }
+        let shape = viewport.viewShape(for: canvas)
+        let reach = shape.rect.height / 2 + Self.knobStem
+        return CGPoint(x: shape.centre.x + shape.down.dx * reach, y: shape.centre.y + shape.down.dy * reach)
     }
 
     /// Deletes what is selected. Of several things, those that are locked are left.

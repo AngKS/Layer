@@ -26,6 +26,7 @@
 		1513DD1E51F249D8D73DD482 /* VoiceRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F2BF93CE41926C0591EE8B7 /* VoiceRoute.swift */; };
 		170DAB099B7ED51F3B0D8A8D /* FlatStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21564DCF25E04B456CC7C6E5 /* FlatStoreTests.swift */; };
 		17ECB60AEE5827A50390D330 /* DictationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0836F6346DA257E439EE7077 /* DictationRouteTests.swift */; };
+		1A2F317AC2C7E0B3AFAC0A5D /* RotateKnob.swift in Sources */ = {isa = PBXBuildFile; fileRef = C736DC09434CE2FAF882E1AD /* RotateKnob.swift */; };
 		1A3466BCEA26046ED3D76D6E /* InkPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F26D6207862EDB065EB4F9 /* InkPicture.swift */; };
 		1A998CE1AFD9DCF074D7731E /* body_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 1E382C29EBB644B30B58C797 /* body_jittered_2b.json */; };
 		1BCF3008D24010E14BB2644E /* radio_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 3C96FF4F8B75BBE1903DB02D /* radio_jittered_2b.json */; };
@@ -568,6 +569,7 @@
 		C6185A374D6A12454DD66923 /* button_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_1a.json; sourceTree = "<group>"; };
 		C7251FAEF5B5DCCDEA0C4642 /* HostedProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedProvider.swift; sourceTree = "<group>"; };
 		C729E511A28042897902A214 /* divider_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_1b.json; sourceTree = "<group>"; };
+		C736DC09434CE2FAF882E1AD /* RotateKnob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotateKnob.swift; sourceTree = "<group>"; };
 		C95AF62786EE1A26726943AD /* divider_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_2a.json; sourceTree = "<group>"; };
 		C965BB35D27442237C7828A8 /* stickyNote_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_1a.json; sourceTree = "<group>"; };
 		C9CBBF0FBECCD252AE3E5B57 /* radio_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_jittered_2a.json; sourceTree = "<group>"; };
@@ -1070,6 +1072,7 @@
 				03F26D6207862EDB065EB4F9 /* InkPicture.swift */,
 				36AF626C495519A17886AA99 /* MagicPen.swift */,
 				9D91D32C8960E072A4A7C5AA /* PhoneScreenView.swift */,
+				C736DC09434CE2FAF882E1AD /* RotateKnob.swift */,
 				6B54C441B9B6BAC1F17E8276 /* SelectionLayer.swift */,
 				6AD900EFB3352CA687E60F15 /* ShapeElementView.swift */,
 			);
@@ -1514,6 +1517,7 @@
 				EB2BD5345F2BE29AC7B7AC46 /* OpenDesigns.swift in Sources */,
 				E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */,
 				470B186DA4E978F8D2114110 /* PromptOverrides.swift in Sources */,
+				1A2F317AC2C7E0B3AFAC0A5D /* RotateKnob.swift in Sources */,
 				CDEBAB3349C20B804B8285EB /* Rotation.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
 				3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */,

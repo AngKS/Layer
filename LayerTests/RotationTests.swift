@@ -73,7 +73,8 @@ private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: C
 }
 
 /// A board with a screen at (100, 50), drawn at half size, that holds a title, some body
-/// text and a button, and a sticky note on the open canvas beside it.
+/// text and a button, and a sticky note on the open canvas beside it. Changes made after
+/// it is set up can be undone.
 @MainActor
 private struct TurnBoard {
     let model: AppModel
@@ -82,6 +83,7 @@ private struct TurnBoard {
     let body: DesignStore.ElementRef
     let button: DesignStore.ElementRef
     let note: DesignStore.ElementRef
+    let undo = UndoManager()
 
     var store: DesignStore { model.store }
 
@@ -96,6 +98,8 @@ private struct TurnBoard {
         ], on: screen, replacing: true)
         (title, body, button) = (placed[0], placed[1], placed[2])
         note = model.store.addFloating(element(.stickyNote, 500, 100, 140, 130), scale: 1)
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
     }
 
     func canvasFrame(_ ref: DesignStore.ElementRef) -> CGRect {
@@ -104,6 +108,10 @@ private struct TurnBoard {
 
     func turn(_ ref: DesignStore.ElementRef, to degrees: Double) {
         store.update(ref) { $0.setRotation(degrees) }
+    }
+
+    func rotation(of ref: DesignStore.ElementRef) -> Double? {
+        store.resolve(ref)?.element.rotation
     }
 }
 
@@ -168,5 +176,149 @@ struct TurnedThingsOnTheBoardTests {
         board.store.align(.several([.element(long), .element(second)]), .left)
         #expect(abs(board.canvasFrame(long).minX - 300) <= 1)
         #expect(abs(board.canvasFrame(second).minX - 300) <= 1)
+    }
+}
+
+@MainActor
+@Suite("Turning one element")
+struct TurningOneElementTests {
+    @Test func resizingATurnedBoxKeepsTheOppositeCornerInPlace() {
+        let frame = CGRect(x: 100, y: 100, width: 200, height: 50)
+        let resized = ElementLayout.resizedTurned(frame, degrees: 30, from: .bottomRight, by: CGSize(width: 40, height: 30), kind: .stickyNote)
+        let before = TurnedRect(rect: frame, degrees: 30).corner(.topLeft)
+        let after = TurnedRect(rect: resized, degrees: 30).corner(.topLeft)
+        #expect(abs(after.x - before.x) <= 0.01 && abs(after.y - before.y) <= 0.01)
+        // The drag goes along the box's own axes: (40, 30) turned back by 30° is about
+        // (49.6, 6.0), where taken as it was on the glass it would be 40 and 30.
+        #expect(resized.size == CGSize(width: 250, height: 56))
+    }
+
+    @Test func resizingAnUprightBoxIsAsBefore() {
+        // Off whole points, which resizing an upright box rounds and keeping a corner exactly wouldn't.
+        let frame = CGRect(x: 100.4, y: 80.3, width: 200, height: 50)
+        let drag = CGSize(width: 13.6, height: -7.2)
+        for corner in ElementLayout.Corner.allCases {
+            #expect(ElementLayout.resizedTurned(frame, degrees: 0, from: corner, by: drag, kind: .stickyNote)
+                == ElementLayout.resizedKeepingShape(frame, from: corner, by: drag, kind: .stickyNote))
+        }
+    }
+
+    @Test func aTurnIsOneUndoStep() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        #expect(board.model.isTurning && board.model.isAdjusting)
+        board.model.turnSelection(by: 10, snaps: false)
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.turnSelection(by: 35, snaps: false)
+        board.model.endTurn()
+        #expect(!board.model.isTurning && !board.model.isAdjusting)
+        #expect(board.rotation(of: board.note) == 35)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+    }
+
+    @Test func aTurnSnapsToThe45sWhenClose() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        #expect(board.model.turnSelection(by: 43, snaps: true))
+        #expect(board.rotation(of: board.note) == 45)
+        #expect(board.model.snappedTurn == 45)
+        #expect(!board.model.turnSelection(by: 30, snaps: true))
+        #expect(board.rotation(of: board.note) == 30)
+        #expect(board.model.snappedTurn == nil)
+        board.model.endTurn()
+    }
+
+    @Test func aTurnCarriesOnFromTheAngleItHad() {
+        let board = TurnBoard()
+        board.turn(board.note, to: 100)
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 25, snaps: false)
+        #expect(board.rotation(of: board.note) == 125)
+        board.model.turnSelection(by: 300, snaps: false)
+        #expect(board.rotation(of: board.note) == 40)
+        board.model.endTurn()
+        #expect(board.model.selectionTurn == 40)
+    }
+
+    @Test func aLockedElementOrAScreenCannotBeTurned() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.canTurnSelection)
+        board.store.update(board.note) { $0.isLocked = true }
+        #expect(!board.model.canTurnSelection)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 30, snaps: false)
+        #expect(!board.model.isTurning && !board.model.isAdjusting && !board.store.isHoldingEdit)
+        board.model.endTurn()
+        board.model.rotateSelection(by: 15)
+        #expect(board.rotation(of: board.note) == nil)
+
+        let before = board.store.content
+        board.model.selection = .screen(board.screen)
+        #expect(!board.model.canTurnSelection)
+        board.model.selection = .several([.screen(board.screen), .element(board.note)])
+        #expect(!board.model.canTurnSelection)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 30, snaps: false)
+        board.model.endTurn()
+        #expect(!board.store.isHoldingEdit)
+        #expect(board.store.content == before)
+    }
+
+    @Test func resettingTheTurnStandsItUpright() {
+        let board = TurnBoard()
+        board.turn(board.note, to: 70)
+        board.model.selection = .element(board.note)
+        board.model.resetSelectionTurn()
+        #expect(board.rotation(of: board.note) == nil)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == 70)
+    }
+
+    @Test func rotatingBySteps() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.rotateSelection(by: -15)
+        #expect(board.rotation(of: board.note) == 345)
+        board.model.rotateSelection(by: 30)
+        #expect(board.rotation(of: board.note) == 15)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == 345)
+    }
+
+    @Test func theKnobHangsBelowTheElementInItsOwnAxes() throws {
+        let board = TurnBoard()
+        board.model.viewport = Viewport(offset: CGPoint(x: 40, y: 20), scale: 2)
+        // The button is 168.5 by 30 on the canvas: stood on end, its own bottom faces left.
+        board.turn(board.button, to: 90)
+        board.model.selection = .element(board.button)
+        let shape = board.model.viewport.viewShape(for: try #require(board.model.selectionShape))
+        let knob = try #require(board.model.knobViewPoint)
+        #expect(abs(knob.x - (shape.centre.x - 30 - AppModel.knobStem)) < 0.01)
+        #expect(abs(knob.y - shape.centre.y) < 0.01)
+    }
+
+    @Test func thePopoverKeepsClearOfTheKnob() throws {
+        let board = TurnBoard()
+        // Turned a little, the note's knob hangs below the box round its shape.
+        board.turn(board.note, to: 10)
+        board.model.selection = .element(board.note)
+        let knob = try #require(board.model.knobViewPoint)
+        let area = try #require(board.model.selectionViewRect)
+        #expect(area.contains(knob))
+        let shape = board.model.viewport.viewShape(for: try #require(board.model.selectionShape))
+        #expect(area.contains(shape.bounds))
+    }
+
+    @Test func aTurnedElementIsWhereItsShapeIs() throws {
+        let board = TurnBoard()
+        board.turn(board.button, to: 90)
+        let rect = try #require(board.model.viewRect(of: .element(board.button)))
+        // Stood on end, the 168.5 by 30 button takes up a box 30 wide and 168.5 tall.
+        #expect(abs(rect.width - 30) < 0.01 && abs(rect.height - 168.5) < 0.01)
     }
 }
