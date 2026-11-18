@@ -137,6 +137,96 @@ struct ScreenTidyTests {
         expectNoOverlaps(tidied)
     }
 
+    private func iPad() throws -> DeviceFrame {
+        try #require(DeviceFrame.all.first { $0.id == "ipad" })
+    }
+
+    /// A phone's 353 × 200 image kept its height on an iPad and became a flat strip.
+    @Test func anImageKeepsItsShapeOnANewDevice() throws {
+        let iPad = try iPad()
+        let image = element(.image, CGRect(x: 20, y: 120, width: 353, height: 200))
+        let elements = [element(.title, CGRect(x: 20, y: 70, width: 353, height: 40)), image]
+        let frame = try #require(ScreenTidy.frames(for: elements, on: iPad, from: .iPhone)[image.id])
+        #expect(frame.width == ScreenTidy.column(on: iPad).width)
+        #expect(abs(frame.height - (200 * frame.width / 353).rounded()) <= 1)
+        // Tidied where it is, a narrow image widened to the column grows with it too.
+        let narrow = element(.image, CGRect(x: 30, y: 120, width: 300, height: 150))
+        let tidied = try #require(ScreenTidy.frames(for: [narrow], on: .iPhone)[narrow.id])
+        #expect(tidied.size == CGSize(width: 353, height: 177))
+    }
+
+    /// A tall picture grows no taller than half the screen, and the rest still fits.
+    @Test func aTallImageIsHeldToHalfTheScreen() throws {
+        let iPad = try iPad()
+        let image = element(.image, CGRect(x: 20, y: 120, width: 353, height: 400))
+        let elements = [
+            element(.title, CGRect(x: 20, y: 70, width: 353, height: 40)),
+            image,
+            element(.textField, CGRect(x: 20, y: 540, width: 353, height: 48)),
+            element(.textField, CGRect(x: 20, y: 600, width: 353, height: 48)),
+            element(.button, CGRect(x: 20, y: 770, width: 353, height: 50)),
+        ]
+        let frames = ScreenTidy.frames(for: elements, on: iPad, from: .iPhone)
+        #expect(frames[image.id]?.height == iPad.size.height / 2)
+        let tidied = elements.map { frames[$0.id]! }
+        let bounds = CGRect(origin: .zero, size: iPad.size)
+        for frame in tidied { #expect(bounds.contains(frame)) }
+        expectNoOverlaps(tidied)
+    }
+
+    /// A caption laid on a photo on purpose stays on it, in the same place, on this device
+    /// and on another; the photo and its caption are one block in the layout.
+    @Test func aCaptionOnAnImageRidesWithIt() throws {
+        let image = element(.image, CGRect(x: 20, y: 140, width: 353, height: 200))
+        let caption = element(.text, CGRect(x: 36, y: 290, width: 200, height: 34), text: "Summer sale")
+        let button = element(.button, CGRect(x: 140, y: 180, width: 100, height: 40), text: "Shop")
+        let others = [
+            element(.title, CGRect(x: 30, y: 80, width: 300, height: 40), text: "Shop"),
+            element(.body, CGRect(x: 25, y: 370, width: 330, height: 44)),
+        ]
+        let elements = [others[0], image, caption, button, others[1]]
+        for (device, previous) in [(DeviceFrame.iPhone, DeviceFrame.iPhone), (try iPad(), .iPhone)] {
+            let frames = ScreenTidy.frames(for: elements, on: device, from: previous)
+            let photo = try #require(frames[image.id])
+            for rider in [caption, button] {
+                let frame = try #require(frames[rider.id])
+                #expect(photo.contains(frame), "\(rider.text) stays on the photo")
+                // In the same place on it.
+                let before = ((rider.frame.midX - image.frame.minX) / image.frame.width, (rider.frame.midY - image.frame.minY) / image.frame.height)
+                let after = ((frame.midX - photo.minX) / photo.width, (frame.midY - photo.minY) / photo.height)
+                #expect(abs(before.0 - after.0) < 0.02 && abs(before.1 - after.1) < 0.02)
+                #expect(frame.height == rider.frame.height, "text keeps its height")
+            }
+            // The rest go round the block, in order.
+            let laid = [others[0], image, others[1]].map { frames[$0.id]! }
+            expectNoOverlaps(laid)
+            #expect(laid[0].maxY <= laid[1].minY && laid[1].maxY <= laid[2].minY)
+        }
+    }
+
+    /// Text that only strays over the edge of a picture overlaps it by accident, and is
+    /// moved off it.
+    @Test func anAccidentalOverlapIsStillSeparated() throws {
+        let image = element(.image, CGRect(x: 20, y: 140, width: 353, height: 200))
+        // Half of it over the photo's bottom edge.
+        let text = element(.text, CGRect(x: 40, y: 320, width: 250, height: 40), text: "Caption")
+        let frames = ScreenTidy.frames(for: [image, text], on: .iPhone)
+        let photo = try #require(frames[image.id])
+        let moved = try #require(frames[text.id])
+        #expect(!photo.intersects(moved))
+        #expect(moved.minY > photo.maxY)
+    }
+
+    /// Text on a shape stays with the shape, which is the person's own and stays put.
+    @Test func whatRidesOnAShapeStaysWithIt() throws {
+        let card = element(.shape, CGRect(x: 20, y: 500, width: 353, height: 120))
+        let label = element(.text, CGRect(x: 40, y: 540, width: 200, height: 30), text: "Card")
+        let title = element(.title, CGRect(x: 40, y: 90, width: 228, height: 40))
+        let frames = ScreenTidy.frames(for: [card, label, title], on: .iPhone)
+        #expect(frames[card.id] == nil && frames[label.id] == nil)
+        #expect(frames[title.id] != nil)
+    }
+
     @Test func aMacKeepsAReadableColumn() throws {
         guard let mac = DeviceFrame.all.first(where: { $0.id == "imac" }) else { throw CancellationError() }
         let column = ScreenTidy.column(on: mac)
