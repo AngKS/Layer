@@ -18,13 +18,15 @@ private final class TwoElements {
 /// every update, to what is selected then, reading the value it had at that update.
 private struct TypingIntoTheSelection: View {
     let elements: TwoElements
+    /// As the Rotation field does: from 0 to 360, past one end round to the other.
+    var wraps = false
 
     var body: some View {
         let (first, second) = (elements.first, elements.second)
         let value = elements.isSecondSelected
             ? Binding(get: { second }, set: { elements.second = $0; elements.setOnSecond.append($0) })
             : Binding(get: { first }, set: { elements.first = $0; elements.setOnFirst.append($0) })
-        TypedNumber(label: "X", value: value, range: -99_999...99_999, wraps: false) {}
+        TypedNumber(label: "X", value: value, range: wraps ? 0...360 : -99_999...99_999, wraps: wraps) {}
             .frame(width: 200, height: 40)
     }
 }
@@ -137,6 +139,23 @@ struct TypingIntoTheFormatPanelTests {
         #expect(elements.first == 250)
         #expect(elements.second == 20)
         #expect(elements.setOnSecond.isEmpty)
+    }
+
+    /// Not a number, or an endless one, isn't set: a frame that isn't finite can't be saved,
+    /// and scrubbing it traps (audit M18).
+    @Test(arguments: ["nan", "NaN", "inf", "-inf", "1e999"], [false, true])
+    func aNumberThatIsntFiniteIsntSet(_ typed: String, wraps: Bool) async throws {
+        let elements = TwoElements()
+        let (window, view) = try await host(TypingIntoTheSelection(elements: elements, wraps: wraps))
+        defer { window.isHidden = true }
+        let field = try await focusedField(in: view)
+        type(typed, into: field)
+        try await settle(view)
+        field.resignFirstResponder()
+        try await settle(view)
+        let notFinite = elements.setOnFirst.filter { !$0.isFinite }
+        #expect(notFinite.isEmpty, "set: \(elements.setOnFirst)")
+        #expect(elements.first.isFinite)
     }
 
     /// Return ends typing as well, and sets the number on the same element.

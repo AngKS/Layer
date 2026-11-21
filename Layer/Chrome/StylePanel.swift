@@ -852,6 +852,9 @@ struct TypedNumber: View {
         TextField(
             label,
             value: Binding(get: { typed }, set: { number in
+                // "NaN", or a number too big to hold, isn't one: a frame that isn't finite
+                // can't be saved, and scrubbing it traps.
+                guard number.isFinite else { return }
                 let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
                 typed = Double(value)
                 target.wrappedValue = value
