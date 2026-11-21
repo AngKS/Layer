@@ -394,6 +394,37 @@ final class DesignStore {
         return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
     }
 
+    /// Writes a screen being generated as its latest version says, over what was written
+    /// from the last (`written`, by place in the version). Each element written before
+    /// stays the same element and takes its new form, unless it has been changed or taken
+    /// away since: it is then the person's, left as they left it and written no more
+    /// (nil). Elements new to this version are added, and ones it no longer has go.
+    /// Whatever else is on the screen, put there by hand meanwhile, is left alone: each
+    /// line used to replace everything on the screen (G5, M1). Returns what is now written.
+    func writeGenerated(_ elements: [DesignElement], on screenID: DesignScreen.ID, over written: [DesignElement?]) -> [DesignElement?] {
+        guard screen(screenID) != nil else { return written }
+        var now: [DesignElement?] = []
+        change { content in
+            for (index, var element) in elements.enumerated() {
+                guard index < written.count else {
+                    now.append(content.add(element, to: screenID))
+                    continue
+                }
+                guard let last = written[index], content.element(last.id) == last else {
+                    now.append(nil)
+                    continue
+                }
+                element.id = last.id
+                content.update(last.id) { $0 = element }
+                now.append(content.element(last.id))
+            }
+            for case let last? in written.dropFirst(elements.count) where content.element(last.id) == last {
+                content.remove([last.id])
+            }
+        }
+        return now
+    }
+
     /// Gives an element to whatever it now lies on: the screen under its centre, or the
     /// open canvas when there is none. It keeps its size in points and its position on
     /// the canvas. Returns where the element now lives.

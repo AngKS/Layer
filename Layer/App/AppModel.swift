@@ -333,6 +333,7 @@ final class AppModel {
             }
             self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
+            self?.stopGeneratingForAScreenThatIsGone()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
@@ -429,7 +430,10 @@ final class AppModel {
 
         let choice = modelChoice
         let stream = screenStream(prompt, board, choice)
+        generationWasStopped = false
         generationTask = Task { [weak self] in
+            // What the generation has written, by place in its latest version.
+            var written: [DesignElement?] = []
             do {
                 for try await update in stream {
                     guard let self else { return }
@@ -441,8 +445,8 @@ final class AppModel {
                         generation?.isThinking = false
                     case .screen(let blueprint):
                         withAnimation(.snappy(duration: 0.25)) {
-                            store.act(for: edit) {
-                                _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                            written = store.act(for: edit) {
+                                store.writeGenerated(blueprint.layout(on: current.device), on: screen.id, over: written)
                             }
                         }
                         generation?.isThinking = false
@@ -458,6 +462,18 @@ final class AppModel {
 
     /// Stops the model; what it has written so far stays.
     func stopGenerating() {
+        generationWasStopped = isGenerating
+        generationTask?.cancel()
+    }
+
+    /// Whether the generation under way was stopped, rather than finished or failed.
+    @ObservationIgnored private var generationWasStopped = false
+
+    /// A screen taken away while it is being written, by undo or by hand, stops the model:
+    /// a reasoning model can think for tens of seconds, a paid request, before it writes
+    /// the line that would find the screen gone (G11).
+    private func stopGeneratingForAScreenThatIsGone() {
+        guard isGenerating, let generation, store.screen(generation.screenID) == nil else { return }
         generationTask?.cancel()
     }
 
@@ -475,6 +491,8 @@ final class AppModel {
     /// that and nothing else, so a drag still under way goes on as its own step (G4).
     private func finishGeneration(error: (any Error)?, edit: DesignStore.Edit, ownsEdit: Bool) {
         generationTask = nil
+        let wasStopped = generationWasStopped
+        generationWasStopped = false
         defer { if ownsEdit { store.endEdit(edit) } }
         guard var finished = generation else { return }
         // Nothing is written to a design that has closed, and nothing is left to show.
@@ -483,7 +501,17 @@ final class AppModel {
             return
         }
         // A screen taken away while it was written has nothing to show either.
-        guard store.screen(finished.screenID) != nil else {
+        guard let screen = store.screen(finished.screenID) else {
+            generation = nil
+            return
+        }
+        // A screen nothing was written on isn't left behind, unless something was put on it
+        // by hand meanwhile: it stays, with that on it (M1).
+        if finished.elementCount == 0, screen.elements.isEmpty {
+            store.act(for: edit) { store.deleteScreen(finished.screenID) }
+        }
+        // Stopped before it wrote anything: there is nothing to say (G10).
+        if wasStopped, finished.elementCount == 0 {
             generation = nil
             return
         }
@@ -492,8 +520,6 @@ final class AppModel {
         } else {
             finished.phase = finished.elementCount > 0 ? .finished : .failed(ScreenGenerator.GenerationError.nothingWritten.localizedDescription)
         }
-        // A screen nothing was written on isn't left behind.
-        if finished.elementCount == 0 { store.act(for: edit) { store.deleteScreen(finished.screenID) } }
         finished.isThinking = false
         generation = finished
         // Success says so briefly; a failure stays until it is dismissed.
