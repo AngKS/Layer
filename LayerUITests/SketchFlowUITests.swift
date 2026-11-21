@@ -466,6 +466,37 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should be gone")
     }
 
+    /// Ink is drawn over the elements under it, so where it crosses one a finger in Select
+    /// picks and moves the drawing, as the Pencil's hover outlines it (audit C3).
+    func testInkOverAnElementIsWhatATapPicksAndADragMoves() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        // A stroke across the left half of the button, drawn with nothing selected: a finger
+        // on a selected element in Draw moves it.
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        control("Draw").tap()
+        choosePaletteTool("Pen")
+        let left = CGPoint(x: button.centre.x - 90, y: button.centre.y)
+        stroke(left, CGPoint(x: button.centre.x + 10, y: button.centre.y))
+        control("Draw").tap()
+
+        // On the ink, a tap picks the drawing; on the button clear of it, the button.
+        point(CGPoint(x: button.centre.x - 40, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on ink over the button should pick the drawing")
+        point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button away from the ink should pick the button")
+
+        // With the button selected, a drag that starts on the ink moves the drawing, not it.
+        let moved = CGVector(dx: 0, dy: 160)
+        stroke(CGPoint(x: button.centre.x - 40, y: button.centre.y), CGPoint(x: button.centre.x - 40 + moved.dx, y: button.centre.y + moved.dy))
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "the drag should have picked up the drawing")
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(showsInk(near: CGPoint(x: left.x + 50 + moved.dx, y: left.y + moved.dy)), "the ink should be drawn where it was dragged")
+        point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the button should have stayed where it was")
+        attach("ink-over-a-button")
+    }
+
     func testADrawingIsALayerThatCanBeHiddenLockedAndCopied() {
         openNewDesign()
 
