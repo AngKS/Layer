@@ -925,6 +925,19 @@ final class AppModel {
         }
     }
 
+    /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
+    /// is drawn over every element and screen, so where a drawing's ink lies over the target
+    /// the tap picks the drawing, as hover and a tap with the palette up do.
+    func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
+        pick(inkTarget(at: viewPoint).map { .element($0) } ?? thing)
+    }
+
+    /// The drawing whose ink is at a point in the view. It lies over everything else and
+    /// takes a touch there, even where an element's target is under it.
+    func inkTarget(at viewPoint: CGPoint) -> DesignStore.ElementRef? {
+        drawing(at: viewport.canvasPoint(for: viewPoint))
+    }
+
     // MARK: Selecting several things
 
     /// Where fingers are resting on the canvas, in the view's points, not counting one

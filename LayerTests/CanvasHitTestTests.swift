@@ -102,3 +102,88 @@ struct HiddenHitTestTests {
         #expect(board.model.hoverTarget(at: point) == nil)
     }
 }
+
+/// Ink is drawn over every element, and hover and a tap with the palette up already pick the
+/// drawing where its ink crosses an element. A finger in Select, which lands on the element's
+/// own target first, does the same: what it picks or moves is what is drawn on top (audit C3).
+@MainActor
+@Suite("Ink over an element")
+struct InkOverAnElementTests {
+    /// A line of ink drawn with a pen straight across the board's button, through its middle.
+    private func inkAcrossTheButton(on board: HitBoard) throws -> (coordinator: InkCanvas.Coordinator, drawing: DesignStore.ElementRef) {
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        board.model.ink = coordinator
+        let middle = board.middle(of: .element(board.button))
+        coordinator.appendInk([[CGPoint(x: middle.x - 120, y: middle.y), CGPoint(x: middle.x + 120, y: middle.y)]], ink: PKInk(.pen, color: .black), width: 4)
+        let drawing = try #require(board.store.floating.first { $0.element.kind == .drawing })
+        return (coordinator, .init(host: .canvas, element: drawing.id))
+    }
+
+    @Test func aTapOnInkOverAnElementPicksTheDrawing() throws {
+        let board = HitBoard()
+        let (coordinator, drawing) = try inkAcrossTheButton(on: board)
+        board.model.tool = .select
+        let middle = board.middle(of: .element(board.button))
+        // Hover already finds the drawing there.
+        #expect(board.model.hoverTarget(at: middle) == .element(drawing))
+
+        board.model.targetTapped(.element(board.button), at: middle)
+        #expect(board.model.selection == .element(drawing))
+        // Off the ink, the button's own target picks the button.
+        board.model.targetTapped(.element(board.button), at: CGPoint(x: middle.x, y: middle.y + 22))
+        #expect(board.model.selection == .element(board.button))
+        _ = coordinator
+    }
+
+    @Test func aDragFromInkOverAnElementMovesTheDrawing() throws {
+        let board = HitBoard()
+        let (coordinator, drawing) = try inkAcrossTheButton(on: board)
+        board.model.tool = .select
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let found = try #require(board.store.resolve(board.button))
+        let screen = board.store.screen(board.screen)
+        let buttonBefore = board.store.canvasFrame(of: .element(board.button))
+        let inkBefore = try #require(board.store.canvasFrame(of: .element(drawing)))
+        let start = board.middle(of: .element(board.button))
+
+        for step in 1...4 {
+            drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 10 * step, height: 0), startingAt: start, owner: owner, model: board.model)
+        }
+        drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
+
+        #expect(board.store.canvasFrame(of: .element(board.button)) == buttonBefore)
+        let inkAfter = try #require(board.store.canvasFrame(of: .element(drawing)))
+        #expect(abs(inkAfter.minX - (inkBefore.minX + 40)) < 0.5)
+        #expect(board.model.selection == .element(drawing))
+        _ = coordinator
+    }
+
+    /// Off the ink, a drag on the element's target moves the element, as before.
+    @Test func aDragOffTheInkMovesTheElement() throws {
+        let board = HitBoard()
+        let (coordinator, drawing) = try inkAcrossTheButton(on: board)
+        board.model.tool = .select
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let found = try #require(board.store.resolve(board.button))
+        let screen = board.store.screen(board.screen)
+        let buttonBefore = try #require(board.store.canvasFrame(of: .element(board.button)))
+        let inkBefore = board.store.canvasFrame(of: .element(drawing))
+        let middle = board.middle(of: .element(board.button))
+        let start = CGPoint(x: middle.x, y: middle.y + 22)
+
+        drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
+        drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
+
+        #expect(board.store.canvasFrame(of: .element(drawing)) == inkBefore)
+        let buttonAfter = try #require(board.store.canvasFrame(of: .element(board.button)))
+        #expect(abs(buttonAfter.minX - (buttonBefore.minX + 30)) < 0.5)
+        #expect(board.model.selection == .element(board.button))
+        _ = coordinator
+    }
+}
