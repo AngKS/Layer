@@ -116,6 +116,12 @@ final class Recorder: VoiceActing {
         return note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height], saying: "Resized \(element).")
     }
 
+    func rotateElement(element: String, angle: String?, by: String?) -> String {
+        // As the app does: the angle wins when both are given; both are clockwise degrees.
+        change(element) { $0.rotation = Rotation.normalized(angle.flatMap(Double.init) ?? $0.rotation + (by.flatMap(Double.init) ?? 0)) }
+        return note("rotateElement", ["element": element, "angle": angle, "by": by], saying: "Turned \(element).")
+    }
+
     func alignElement(element: String, alignment: String) -> String {
         change(element) { $0.frame?.origin.x = 96 }
         return note("alignElement", ["element": element, "alignment": alignment], saying: "Aligned \(element) to the \(alignment).")

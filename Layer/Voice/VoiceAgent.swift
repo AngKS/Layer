@@ -27,7 +27,9 @@ final class VoiceAgent: VoiceCommandRunner {
     /// under one where the canvas was the same. A step that makes something still hands
     /// back its handle, which is what a further step needs.
     static func looksAgainBetweenSteps(with choice: ModelChoice) -> Bool {
-        choice.hostedProvider != nil
+        // Hosted only where the profile runs a hosted model: one is named, and this system
+        // can run it. Otherwise the on-device model carries the command out.
+        choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported
     }
 
     /// Gets the model ready to be asked: the conversation is made, told the rules, the
@@ -41,11 +43,30 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Whether a command says the last one was wrong: "No, …", "Not the …", "That's
     /// wrong". `undoOnly` when it says nothing more; `undoThenAsk` when it goes on to say
     /// what was meant.
+    ///
+    /// "No" and "not" also begin commands of their own: "No border on the button", "Not
+    /// bold". Taken for corrections, those undid the command before. So "no" corrects
+    /// with a pause after it ("No, the title", "No."), or when the word after it couldn't
+    /// follow the "no" of a look ("no make it red", "no the other one"): the fallback
+    /// recogniser writes no commas, so "No, make it red" can arrive without one. A full
+    /// stop may be a recogniser splitting "No border" into sentences, so after one the
+    /// next word decides. "Not" corrects with a pause after it, when it points at what was
+    /// done ("Not the check marks", "not that one"), or when it goes on after a comma or a
+    /// dash to say what was meant ("not red, blue"). "No thanks" turns something down.
     static func correction(in command: String) -> Correction? {
-        let words = command.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let said = command.lowercased()
+        let words = said.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
         guard let first = words.first else { return nil }
-        let opens = ["no", "nope", "nah", "not", "wrong", "oops"].contains(first)
-            || (words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong")
+        let rest = Array(words.dropFirst())
+        if ["no", "nope", "nah"].contains(first), rest == ["thanks"] || rest == ["thank", "you"] { return nil }
+        let next = rest.first
+        let pause = pause(afterFirstWordOf: said)
+        let opens = switch first {
+        case "nope", "nah", "wrong", "oops": true
+        case "no": pause == .clause || next.map(correctsAfterNo.contains) ?? true
+        case "not": pause == .clause || next.map(correctsAfterNot.contains) ?? true || goesOnToSayInstead(said)
+        default: words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong"
+        }
         guard opens else { return nil }
         let saysNoMore: Set<String> = [
             "no", "nope", "nah", "not", "wrong", "oops", "undo", "revert", "that", "s", "is", "was", "it", "one", "go", "back",
@@ -53,6 +74,43 @@ final class VoiceAgent: VoiceCommandRunner {
         ]
         return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
     }
+
+    /// What comes between the first word and the next.
+    private enum Pause {
+        case none
+        /// A comma, a dash or an ellipsis.
+        case clause
+        /// A full stop, or "!" or "?".
+        case sentence
+    }
+
+    private static func pause(afterFirstWordOf said: String) -> Pause {
+        let isInWord: (Character) -> Bool = { $0.isLetter || $0.isNumber }
+        guard let start = said.firstIndex(where: isInWord), let end = said[start...].firstIndex(where: { !isInWord($0) }) else { return .none }
+        let between = String(said[end...].prefix(while: { !isInWord($0) }).filter { !$0.isWhitespace })
+        if between.isEmpty { return .none }
+        return between.contains(where: { ",;:-—–…".contains($0) }) || between.contains("..") ? .clause : .sentence
+    }
+
+    /// Whether what was said goes on after a comma or a dash: "not red, blue".
+    private static func goesOnToSayInstead(_ said: String) -> Bool {
+        let marked = said.replacingOccurrences(of: " - ", with: ",").replacingOccurrences(of: "...", with: ",")
+        return marked.components(separatedBy: CharacterSet(charactersIn: ",;—–…")).dropFirst().contains { $0.contains(where: \.isLetter) }
+    }
+
+    /// Words that, after "no" with no pause, make it a correction: none of them can follow
+    /// the "no" of "no border".
+    private static let correctsAfterNo: Set<String> = [
+        "no", "not", "nope", "i", "you", "the", "a", "an", "that", "this", "it", "other", "wrong", "undo", "revert", "sorry",
+        "wait", "oops", "go", "make", "change", "put", "move", "use", "set", "turn", "try", "do", "keep", "leave", "just",
+        "only", "actually", "instead", "rather", "bigger", "smaller", "larger", "wider", "narrower", "taller", "shorter",
+        "darker", "lighter", "higher", "lower",
+    ]
+
+    /// Words that, after "not", point at what was done rather than say a look.
+    private static let correctsAfterNot: Set<String> = [
+        "the", "that", "this", "it", "one", "those", "these", "there", "here", "what", "like",
+    ]
 
     /// The history mark the last command left, when its step was the last in the history:
     /// it stays on top for as long as the mark hasn't moved, and only then does a
@@ -219,7 +277,10 @@ final class VoiceAgent: VoiceCommandRunner {
             // Nothing more is done to a design once it has closed.
             mayRun: { @MainActor [weak model] in !Task.isCancelled && model?.isClosed == false }
         )
-        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel, canEndCall: canEndCall))
+        let turns = VoiceToolTurns()
+        let session = LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, turns: turns, testModel: testModel, canEndCall: canEndCall))
+        turns.session = session
+        return session
     }
 
     private func stepStarted(with tool: String) {
