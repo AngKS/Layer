@@ -62,14 +62,30 @@ final class OpenDesigns {
     var all: [AppModel] { models.compactMap(\.model) }
 
     /// The identifier a design is known by now, following its renames from `id`. A design
-    /// open under `id` itself is the one it means.
+    /// open under `id` itself, or any file now at its path, is the one it means: a rename
+    /// is followed only while nothing is where the design was, and forgotten once something
+    /// is, as when another device syncs a new "Untitled" into the folder.
     func currentID(for id: String) -> String {
         var id = id
         var seen: Set<String> = [id]
-        while !models.contains(where: { $0.model?.designID == id }), let next = renamed[id], seen.insert(next).inserted {
+        while !models.contains(where: { $0.model?.designID == id }), let next = renamed[id] {
+            if Self.somethingIsAt(id) {
+                renamed[id] = nil
+                break
+            }
+            guard seen.insert(next).inserted else { break }
             id = next
         }
         return id
+    }
+
+    /// Whether a file is at a design identifier's path, downloaded or not: iCloud may keep
+    /// one that isn't as a hidden placeholder, `.Name.layer.icloud`. Only looked at for an
+    /// identifier a design was renamed away from.
+    private static func somethingIsAt(_ id: String) -> Bool {
+        guard let url = DesignLibrary.url(for: id) else { return false }
+        let placeholder = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
+        return FileManager.default.fileExists(atPath: url.path) || FileManager.default.fileExists(atPath: placeholder.path)
     }
 
     // MARK: Opening and making designs

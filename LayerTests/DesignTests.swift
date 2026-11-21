@@ -1080,8 +1080,12 @@ struct DesignFileNameTests {
         #expect(snapshot?.screens.map(\.id) == [screen.id])
         #expect(try await DesignActions.screen(screen).model === model)
 
-        // A design made later under the old name is that design, not the renamed one.
+        // A design made later under the old name is that design, not the renamed one: as
+        // soon as its file is there, as when another device syncs it, before it is opened.
         try DesignFile().wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        #expect(OpenDesigns.shared.model(forDesign: before) == nil)
+        #expect(OpenDesigns.shared.currentID(for: before) == before)
+        #expect(await DesignActions.snapshot(design: before)?.screens.isEmpty == true)
         let newer = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
         newer.fileURL = url
         #expect(OpenDesigns.shared.model(forDesign: before) === newer)
