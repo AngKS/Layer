@@ -286,7 +286,7 @@ struct InkCanvas: UIViewRepresentable {
             // Not while unit tests run inside the app: a test that picked up the eraser or
             // the lasso changed the pen the app opened with afterwards. Left unset, the palette
             // saves under a name of PencilKit's own, so it is told to save nothing.
-            palette.stateAutosaveName = ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil ? "app.layer.palette" : nil
+            palette.stateAutosaveName = AppSettings.isRunningUnitTests ? nil : "app.layer.palette"
             palette.colorUserInterfaceStyle = .light
             // Every design opens with the Magic Pen in hand, whatever was used last.
             palette.selectedToolItemIdentifier = MagicPen.identifier
