@@ -208,26 +208,37 @@ struct VoiceAgentTests {
         }
     }
 
-    /// "Undo that and make it blue" in one answer undoes the last command, not the blue (V2).
+    /// "Undo that and make it blue" in one answer undoes the last command, not the blue
+    /// (V2). The undo is slow to start, so that left to the session the blue would always
+    /// go first, and its undo would take back the blue instead.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func anUndoAskedForWithAChangeUndoesTheCommandBefore() async throws {
-        for _ in 1...10 {
-            let bench = bench([
-                "make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)],
-                "undo that and make it blue": Step.together([
-                    Step(tool: "undo", arguments: "{}"),
-                    Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
-                ]),
-            ])
-            _ = await bench.agent.run("make the button say ahoy")
+        let (app, screen) = VoiceFixture.undoableLogin()
+        let handles = VoiceHandles()
+        let turns = VoiceToolTurns()
+        let hooks = VoiceHooks(
+            willRun: { tool in if tool == "undo" { try? await Task.sleep(for: .milliseconds(200)) } },
+            didRun: {}, mayRun: { true }
+        )
+        let model = ScriptedLanguageModel(script: ["undo that and make it blue": Step.together([
+            Step(tool: "undo", arguments: "{}"),
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+        ])])
+        let session = LanguageModelSession(profile: VoiceProfile(actor: VoiceToolbox(model: app, handles: handles), hooks: hooks, turns: turns, testModel: model))
+        turns.session = session
+        // The command before: the button says Ahoy, a step of its own.
+        let button = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screen(screen)?.elements[1].id))
+        app.store.update(button) { $0.text = "Ahoy" }
+        session.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
 
-            let outcome = await bench.agent.run("undo that and make it blue")
+        // Held as one step, as `VoiceAgent.run` holds a command.
+        app.store.beginHeldEdit()
+        _ = try await session.respond(to: "undo that and make it blue")
+        app.store.endHeldEdit()
 
-            #expect(outcome.problem == nil)
-            let button = try #require(bench.button)
-            #expect(button.text == "Sign in")
-            #expect(button.tint == ColourWords.parse("blue"))
-        }
+        let after = try #require(app.store.resolve(button)?.element)
+        #expect(after.text == "Sign in")
+        #expect(after.tint == ColourWords.parse("blue"))
     }
 
     /// Where the pencil pointed is told with the command it was pointed for, and only that one.
