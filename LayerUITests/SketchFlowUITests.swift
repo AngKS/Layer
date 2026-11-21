@@ -785,6 +785,97 @@ final class SketchFlowUITests: XCTestCase {
 
     /// Launches into the document browser and creates a design, ending on its canvas with
     /// the Magic Pen in hand.
+    // MARK: Rotation
+
+    func testTheRotationFieldTurnsTheSelection() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        setRotation(to: "90")
+
+        // Turned a quarter, the button stands on its end: where its right end was is now the
+        // screen's own, and the centre is still the button's.
+        point(CGPoint(x: button.centre.x + 100, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "where the button's end was (100 points out from its centre) should now select its screen")
+        point(button.centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the centre should still select the button")
+        attach("rotation-turned-button")
+    }
+
+    func testTheKnobTurnsAndADoubleTapStandsItUpright() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        let knob = control("Rotate")
+        XCTAssertTrue(knob.waitForExistence(timeout: 5), "a selected element should offer its knob")
+
+        knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: point(CGPoint(x: button.centre.x - 160, y: button.centre.y)))
+        XCTAssertTrue(wait(for: control("Rotation"), toHave: "value == '90'", timeout: 5), "the knob, taken level out to the left, should read 90")
+
+        XCTAssertTrue(control("Rotate").waitForExistence(timeout: 5))
+        control("Rotate").doubleTap()
+        XCTAssertTrue(wait(for: control("Rotation"), toHave: "value == '0'", timeout: 5), "a double tap on the knob should stand it upright")
+    }
+
+    func testATurnedDrawingIsDrawnWhereItIs() {
+        openNewDesign()
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 300, y: 420), CGPoint(x: 560, y: 420))
+        control("Draw").tap()
+        point(CGPoint(x: 430, y: 420)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Drawing'", timeout: 5), "tapping the stroke should select the drawing")
+        XCTAssertTrue(showsInk(near: CGPoint(x: 540, y: 420)), "the stroke should be drawn where it was drawn")
+
+        control("Format").tap()
+        setRotation(to: "90")
+        XCTAssertTrue(showsInk(near: CGPoint(x: 430, y: 310)), "turned a quarter, the stroke should rise above its centre")
+        XCTAssertFalse(showsInk(near: CGPoint(x: 540, y: 420)), "and no longer reach its old end")
+        attach("rotation-turned-drawing")
+    }
+
+    /// Adds a button from the library, which lands selected in the middle of the screen, and
+    /// opens the format panel. Gives where the button is and what the canvas says of it.
+    private func addAButtonAndOpenTheFormatPanel() -> (centre: CGPoint, size: CGSize, value: String) {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "the library should open")
+        search.tap()
+        search.typeText("button")
+        let component = app.buttons["Button"].firstMatch
+        XCTAssertTrue(component.waitForExistence(timeout: 5))
+        component.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "the new button should be selected")
+        let size = selectionSize
+        let value = selectionElement.value as? String ?? ""
+        if !control("Rotation").exists { control("Format").tap() }
+        XCTAssertTrue(control("Rotation").waitForExistence(timeout: 5), "the format panel should have a Rotation field")
+        let window = app.windows.firstMatch.frame
+        return (CGPoint(x: window.midX, y: window.midY), size, value)
+    }
+
+    private func setRotation(to degrees: String) {
+        // A key can be dropped when the simulator is busy, so a wrong number is typed again.
+        for _ in 0..<3 {
+            let field = control("Rotation")
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            let typing = app.textFields["Rotation"]
+            XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the Rotation field should let it be typed in")
+            typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + degrees + "\n")
+            if wait(for: control("Rotation"), toHave: "value == '\(degrees)'", timeout: 4) { return }
+        }
+        XCTFail("the field should read \(degrees), not \(String(describing: control("Rotation").value))")
+    }
+
+    private func attach(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    // MARK: Opening
+
     private func openNewDesign() {
         app.launch()
         XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 45), "the document browser should appear at launch")
