@@ -262,7 +262,8 @@ extension HostedWindowSuites {
             coordinator.clearSketch()
             #expect(field.isFirstResponder)
 
-            // Picking a tool is the person going back to the canvas: it takes first responder again.
+            // Typing over, picking a tool takes first responder again.
+            field.resignFirstResponder()
             coordinator.apply(.select)
             #expect(coordinator.documentCanvas.isFirstResponder)
         }
@@ -317,6 +318,44 @@ extension HostedWindowSuites {
 
             // The keyboard is put away: the canvas, and its palette, are back.
             note.resignFirstResponder()
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(coordinator.documentCanvas.isFirstResponder, "the palette should be back once typing ends in Draw")
+        }
+
+        /// A tool picked, or a panel's sheet coming and going, while a field has the keyboard
+        /// leaves it there: adding from the library puts Draw away, and so do a call starting
+        /// and the window changing width (review m1). The palette comes back as typing ends.
+        @Test func aToolChangeWhileTypingLeavesTheKeyboard() async throws {
+            let model = AppModel(document: LayerDocument())
+            let coordinator = InkCanvas.Coordinator(model: model)
+            model.ink = coordinator
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            let container = UIView(frame: window.bounds)
+            let search = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            window.addSubview(container)
+            window.addSubview(search)
+            window.makeKeyAndVisible()
+            defer {
+                search.resignFirstResponder()
+                coordinator.hidePalette()
+                window.isHidden = true
+            }
+            for canvas in coordinator.canvases {
+                canvas.frame = container.bounds
+                container.addSubview(canvas)
+            }
+            coordinator.apply(.draw)
+            #expect(search.becomeFirstResponder())
+
+            coordinator.apply(.select)
+            #expect(search.isFirstResponder)
+            coordinator.apply(.draw)
+            #expect(search.isFirstResponder)
+            coordinator.setHidesPalette(true)
+            coordinator.setHidesPalette(false)
+            #expect(search.isFirstResponder)
+
+            search.resignFirstResponder()
             try await Task.sleep(for: .milliseconds(50))
             #expect(coordinator.documentCanvas.isFirstResponder, "the palette should be back once typing ends in Draw")
         }

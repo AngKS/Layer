@@ -309,7 +309,8 @@ struct InkCanvas: UIViewRepresentable {
             guard hidesPalette != hides else { return }
             hidesPalette = hides
             refresh()
-            // A panel's sheet has gone from the palette's place: the palette comes back.
+            // A panel's sheet came or went in the palette's place: as it goes, the palette
+            // comes back.
             takeFirstResponder()
         }
 
@@ -421,6 +422,11 @@ struct InkCanvas: UIViewRepresentable {
             }
         }
 
+        /// Whether a field in the canvas's window has the keyboard.
+        private var isTyping: Bool {
+            typing.contains { $0.responder?.isFirstResponder == true }
+        }
+
         private func stopWatchingTyping() {
             for observer in typingObservers { NotificationCenter.default.removeObserver(observer) }
             typingObservers = []
@@ -430,9 +436,14 @@ struct InkCanvas: UIViewRepresentable {
         /// Makes the canvas first responder if neither canvas is: the palette shows only for
         /// it, and outside draw mode the system's undo and redo gestures reach the document's
         /// undo history through it. Only as the tool, the palette or the window changes, and
-        /// as typing ends in Draw. A sketch converted, dissolving or cleared in the background
-        /// also refreshes the canvases, and took the keyboard from a field being typed in.
+        /// as typing ends in Draw, and never while a field has the keyboard. A sketch
+        /// converted, dissolving or cleared in the background also refreshes the canvases, and
+        /// took the keyboard from a field being typed in.
         private func takeFirstResponder() {
+            // Never from a field still being typed in: a tool changed by adding from the
+            // library, a call starting or the window changing width took the keyboard mid-word.
+            // In Draw the palette comes back as typing ends.
+            guard !isTyping else { return }
             if documentCanvas.window != nil, !canvases.contains(where: \.isFirstResponder) {
                 documentCanvas.becomeFirstResponder()
             }
