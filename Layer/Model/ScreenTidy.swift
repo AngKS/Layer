@@ -34,8 +34,8 @@ import CoreGraphics
 ///   under its photo. Something that only overlaps a little is still separated. What rides
 ///   on something that stays put (a shape, or anything locked) stays put with it, and
 ///   the layout goes round that whole block, so nothing is set down on a card or its label.
-///   Only a block can carry things: a picture or a shape that covers more than half the
-///   screen (`backdropShare`) is a backdrop, not a host, and is left where it is, so that
+///   Only a block can carry things: a picture or a shape that covers nearly all of the
+///   screen (`backdropShare`, 90% of its area) is a backdrop, not a host, and is left where it is, so that
 ///   a background doesn't make the whole screen ride on it and go untidied.
 /// - **Rows share the column.** Small things keep their width and the rest share what is
 ///   left in proportion to their widths, 12 points apart (`ElementLayout.gutter`); a row
@@ -67,9 +67,11 @@ enum ScreenTidy {
     /// on it. Most of it, so that a caption set on a photo stays there while a label that
     /// merely strays over one's edge is moved off it.
     static let ridesOn: CGFloat = 0.8
-    /// The share of the screen's area above which a picture or a shape is a backdrop: it
-    /// carries nothing and isn't laid out, but stays as it is under the rest.
-    static let backdropShare: CGFloat = 0.5
+    /// The share of the screen's area from which a picture or a shape is a backdrop: it
+    /// carries nothing and isn't laid out, and no locked one is an obstacle. Unlocked, it is
+    /// scaled with its screen on a device change, shapes too, though they otherwise stay put.
+    /// A big hero picture below it is an ordinary picture.
+    static let backdropShare: CGFloat = 0.9
 
     /// The side margin on a device.
     static func margin(on device: DeviceFrame) -> CGFloat {
@@ -124,10 +126,6 @@ enum ScreenTidy {
         return rounded(carry(hosts, with: laid, in: elements))
     }
 
-    /// The share of the screen's area at which a locked element is a background, not an
-    /// obstacle: a locked hero picture is in the layout's way, a locked wallpaper isn't.
-    static let wallpaperShare: CGFloat = 0.9
-
     /// Whether an element covers at least `share` of `device`'s screen.
     private static func covers(_ element: DesignElement, _ share: CGFloat, on device: DeviceFrame) -> Bool {
         element.frame.width * element.frame.height >= device.size.width * device.size.height * share
@@ -136,7 +134,7 @@ enum ScreenTidy {
     /// Whether an element is a backdrop on `device`: see `backdropShare`.
     static func isBackdrop(_ element: DesignElement, on device: DeviceFrame) -> Bool {
         carries.contains(element.kind)
-            && element.frame.width * element.frame.height > device.size.width * device.size.height * backdropShare
+            && covers(element, backdropShare, on: device)
     }
 
     /// The layout of everything that is laid out: all that moves except what rides on another.
@@ -146,9 +144,9 @@ enum ScreenTidy {
         let rows = rows(of: moving)
         guard !rows.isEmpty else { return [:] }
         // Locked things are in the way, and so are shapes with something laid on them.
-        // Hidden ones, locked wallpaper (see `wallpaperShare`), drawings and other shapes
+        // Hidden ones, a locked backdrop, drawings and other shapes
         // aren't: they are under or over the layout, not part of it.
-        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !covers($0, wallpaperShare, on: old) }.map(\.frame) + blocks
+        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !covers($0, backdropShare, on: old) }.map(\.frame) + blocks
 
         // Each row laid out across the column, from a top of 0.
         let tallest = device.size.height / 2

@@ -321,6 +321,22 @@ struct ScreenTidyTests {
         #expect(ScreenTidy.frames(for: [locked, title], on: iPad, from: .iPhone)[locked.id] == nil)
     }
 
+    /// A big picture that doesn't cover the screen is laid out like any other, and the rest
+    /// of the screen doesn't flow over it.
+    @Test func anUnlockedHeroPictureIsLaidOutAndKeptClear() throws {
+        let hero = element(.image, CGRect(x: 0, y: 100, width: 393, height: 500))
+        let others = [
+            element(.title, CGRect(x: 20, y: 60, width: 300, height: 30), text: "Title"),
+            element(.textField, CGRect(x: 20, y: 620, width: 353, height: 48), text: "A"),
+            element(.textField, CGRect(x: 20, y: 690, width: 353, height: 48), text: "B"),
+            element(.button, CGRect(x: 20, y: 760, width: 353, height: 50), text: "Go"),
+        ]
+        let frames = ScreenTidy.frames(for: [hero] + others, on: .iPhone)
+        let laid = [hero] + others
+        let tidied = try laid.map { try #require(frames[$0.id]) }
+        expectNoOverlaps(tidied)
+    }
+
     @Test func aMacKeepsAReadableColumn() throws {
         guard let mac = DeviceFrame.all.first(where: { $0.id == "imac" }) else { throw CancellationError() }
         let column = ScreenTidy.column(on: mac)
