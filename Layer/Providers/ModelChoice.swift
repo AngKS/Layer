@@ -46,9 +46,9 @@ enum ModelPreferences {
 
     /// What a new design uses. Apple Intelligence until something else is chosen.
     static var defaultChoice: ModelChoice {
-        get { defaultChoice(in: .standard) }
+        get { defaultChoice(in: AppSettings.defaults) }
         set {
-            setDefaultChoice(newValue, in: .standard)
+            setDefaultChoice(newValue, in: AppSettings.defaults)
             NotificationCenter.default.post(name: changed, object: nil)
         }
     }
@@ -71,12 +71,12 @@ enum ModelPreferences {
 
     /// The server address set for a self-hosted provider, or its usual one.
     static func server(for provider: HostedProvider) -> String {
-        UserDefaults.standard.string(forKey: serverKey(provider)) ?? provider.defaultServer ?? ""
+        AppSettings.defaults.string(forKey: serverKey(provider)) ?? provider.defaultServer ?? ""
     }
 
     static func setServer(_ address: String, for provider: HostedProvider) {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(trimmed.isEmpty ? nil : trimmed, forKey: serverKey(provider))
+        AppSettings.defaults.set(trimmed.isEmpty ? nil : trimmed, forKey: serverKey(provider))
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
@@ -96,12 +96,12 @@ enum ModelPreferences {
 
     /// The models last fetched for a provider, so pickers can show them without asking again.
     static func knownModels(for provider: HostedProvider) -> [HostedModelInfo] {
-        guard let data = UserDefaults.standard.data(forKey: modelsKey(provider)) else { return [] }
+        guard let data = AppSettings.defaults.data(forKey: modelsKey(provider)) else { return [] }
         return (try? JSONDecoder().decode([HostedModelInfo].self, from: data)) ?? []
     }
 
     static func remember(_ models: [HostedModelInfo], for provider: HostedProvider) {
-        UserDefaults.standard.set(try? JSONEncoder().encode(models), forKey: modelsKey(provider))
+        AppSettings.defaults.set(try? JSONEncoder().encode(models), forKey: modelsKey(provider))
     }
 }
 

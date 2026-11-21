@@ -14,11 +14,14 @@ enum DesignIndexer {
     private static var dueAt: [String: ContinuousClock.Instant] = [:]
     private static let log = Logger(subsystem: "kahshin.Layer", category: "spotlight")
 
-    /// The index designs and screens go in: Spotlight's own, or a test's.
-    static var spotlight: any SpotlightIndex = SystemSpotlight()
+    /// The index designs and screens go in: Spotlight's own, or a test's. None while the
+    /// unit tests run, which run inside the app: the designs they make in temporary
+    /// folders went into the app's index, and with the record kept apart from the app's
+    /// (see `AppSettings`) the app could no longer take them out.
+    static var spotlight: any SpotlightIndex = AppSettings.isRunningUnitTests ? NoSpotlight() : SystemSpotlight()
     /// Where the record of what is in the index is kept across launches: the app's
-    /// defaults, or a test's own.
-    static var recordDefaults = UserDefaults.standard {
+    /// settings, or a test's own.
+    static var recordDefaults = AppSettings.defaults {
         didSet { record = nil }
     }
     private static let recordKey = "spotlightIndexedScreens"
@@ -152,6 +155,15 @@ protocol SpotlightIndex: Sendable {
     func delete(designs: [String]) async throws
     func delete(screens: [String]) async throws
     func deleteAll() async throws
+}
+
+/// No index at all: what the unit tests index by default.
+struct NoSpotlight: SpotlightIndex {
+    func index(designs: [DesignEntity]) async throws {}
+    func index(screens: [ScreenEntity]) async throws {}
+    func delete(designs: [String]) async throws {}
+    func delete(screens: [String]) async throws {}
+    func deleteAll() async throws {}
 }
 
 /// Spotlight's own index, called off the main actor.

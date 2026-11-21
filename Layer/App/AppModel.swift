@@ -203,9 +203,9 @@ final class AppModel {
     var imagePlaygroundRequest: ImagePlaygroundRequest?
     /// Whether sketches convert on their own once the pen has rested for a moment.
     /// Remembered between launches.
-    var convertsAutomatically = AppModel.savedConvertsAutomatically {
+    var convertsAutomatically: Bool {
         didSet {
-            UserDefaults.standard.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
+            settings.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
             scheduleConversion()
         }
     }
@@ -285,21 +285,25 @@ final class AppModel {
     /// it doesn't: the Pencil draws, and a finger selects, moves, pans and taps buttons.
     /// Until then a finger draws, so that Layer works without a Pencil. Either way it can
     /// be set in the format panel, after which it is left as set. Remembered between launches.
-    var fingerDraws = UserDefaults.standard.object(forKey: AppModel.fingerDrawsKey) == nil ? true : UserDefaults.standard.bool(forKey: AppModel.fingerDrawsKey) {
-        didSet { UserDefaults.standard.set(fingerDraws, forKey: AppModel.fingerDrawsKey) }
+    var fingerDraws: Bool {
+        didSet { settings.set(fingerDraws, forKey: AppModel.fingerDrawsKey) }
     }
+
+    /// Where the app's own settings are kept: see `AppSettings`. A test can give a design
+    /// settings of its own.
+    @ObservationIgnored let settings: UserDefaults
 
     /// Set by hand in the format panel.
     func setFingerDraws(_ draws: Bool) {
         fingerDraws = draws
-        UserDefaults.standard.set(true, forKey: AppModel.fingerDrawsChosenKey)
+        settings.set(true, forKey: AppModel.fingerDrawsChosenKey)
     }
 
     /// Apple Pencil touched the canvas. The first time, a finger stops drawing, unless
     /// that has been set by hand. `elsewhere` is a touch in a presentation of its own over
     /// the canvas: a panel's sheet, a popover or an alert.
     func pencilTouched(at viewPoint: CGPoint, elsewhere: Bool = false) {
-        if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
+        if fingerDraws, !settings.bool(forKey: AppModel.fingerDrawsChosenKey) {
             fingerDraws = false
         }
         // On a panel, a popover or the bars, the Pencil is pressing a control, scrubbing a
@@ -324,19 +328,19 @@ final class AppModel {
     /// Whether the Pencil detector has anything to do: notice a first Pencil, or let go of
     /// what a finger selected when the Pencil lands on it.
     var needsPencilDetector: Bool {
-        (fingerDraws && !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey)) || (tool == .draw && selection != nil)
+        (fingerDraws && !settings.bool(forKey: AppModel.fingerDrawsChosenKey)) || (tool == .draw && selection != nil)
     }
 
     private static let fingerDrawsKey = "fingerDraws"
     private static let fingerDrawsChosenKey = "fingerDrawsChosen"
     private static let convertsAutomaticallyKey = "convertsAutomatically"
-    private static var savedConvertsAutomatically: Bool {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: convertsAutomaticallyKey) == nil || defaults.bool(forKey: convertsAutomaticallyKey)
-    }
 
-    init(document: LayerDocument) {
+    init(document: LayerDocument, settings: UserDefaults = AppSettings.defaults) {
         self.document = document
+        self.settings = settings
+        // Both on until set otherwise.
+        fingerDraws = settings.object(forKey: AppModel.fingerDrawsKey) == nil || settings.bool(forKey: AppModel.fingerDrawsKey)
+        convertsAutomatically = settings.object(forKey: AppModel.convertsAutomaticallyKey) == nil || settings.bool(forKey: AppModel.convertsAutomaticallyKey)
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
@@ -1695,7 +1699,7 @@ final class AppModel {
     /// it was dropped, `viewPoint` being in the canvas view's own points.
     func addAsset(_ asset: Asset, at viewPoint: CGPoint? = nil) {
         let point = viewPoint.map { viewport.canvasPoint(for: $0) }
-        AssetLibrary.noteUsed(asset)
+        AssetLibrary.noteUsed(asset, in: settings)
         switch asset.content {
         case .symbol(let name):
             add(DesignStore.newElement(.symbol, symbol: name), at: point)

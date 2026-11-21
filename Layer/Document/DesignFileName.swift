@@ -17,8 +17,8 @@ enum DesignFileName {
     /// The name the system gives new designs, "Untitled" in English. It is in the
     /// language of the iPad, so it is learned from the first new design rather than assumed.
     static var untitled: String {
-        get { UserDefaults.standard.string(forKey: "untitledFileName") ?? "Untitled" }
-        set { UserDefaults.standard.set(newValue, forKey: "untitledFileName") }
+        get { AppSettings.defaults.string(forKey: "untitledFileName") ?? "Untitled" }
+        set { AppSettings.defaults.set(newValue, forKey: "untitledFileName") }
     }
 
     /// A name without the number the system adds to tell files apart: "Untitled 3" is "Untitled".
