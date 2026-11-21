@@ -180,7 +180,7 @@ struct CreateScreenTool: Tool {
         var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
-        @Guide(description: "Only if the person names one: iPhone, iPad, Mac or webpage.")
+        @Guide(description: "Only if the person names one: iPhone, iPad, Mac, or webpage for a web page or website.")
         var device: String?
     }
 
@@ -438,7 +438,7 @@ struct DeleteScreenTool: Tool {
 struct TidyScreenTool: Tool {
     let actor: any VoiceActing
     let name = "tidyScreen"
-    let description = "Tidies a whole screen's layout: consistent margins, spacing and alignment, keeping the order. Use for “align everything”, “tidy up”, “make it look nice”, “clean up the layout”."
+    let description = "Tidies a whole screen's layout: consistent margins, spacing and alignment, keeping the order. Use for “align everything”, “tidy up”, “space things out”, “make it look nice” and “clean up the layout”, even with one element pointed at."
 
     @Generable
     struct Arguments {
