@@ -290,4 +290,50 @@ struct CanvasDragLandingTests {
         #expect(board.store.resolve(board.button) != nil, "still A's")
         #expect(!board.store.isEditing)
     }
+
+    /// Several things landed by a drag cut short keep their stacking: they used to land in
+    /// the order a dictionary gave them, and each landed on top of the one before (review I1).
+    @Test func severalThingsLandedByADragCutShortKeepTheirStacking() throws {
+        let board = TwoScreens()
+        // Six labels overlapping on A, each over the one before it.
+        let labels = board.store.setElements((0..<6).map { index in
+            element(.body, 60 + CGFloat(index) * 4, 500 + CGFloat(index) * 4, 120, 40)
+        }, on: board.a, replacing: false)
+        let ids = labels.map(\.element)
+        let order = { (screen: DesignScreen.ID) in board.store.content.elements.filter { $0.parent == screen && ids.contains($0.id) }.map(\.id) }
+        #expect(order(board.a) == ids)
+        board.model.selection = CanvasSelection(labels.map { .element($0) })
+        let owner = CanvasDrags.Owner()
+        for dx in [CGFloat(150), 300] {
+            board.drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 100, y: 300), owner: owner, model: board.model)
+        }
+
+        board.drags.cancel(owner, model: board.model)
+        #expect(order(board.b) == ids, "on B as they were stacked on A")
+    }
+
+    /// A drag ended by its view's gesture being cancelled is over: what SwiftUI still reports
+    /// of that touch neither starts it again nor moves anything.
+    @Test func aCancelledDragIsntStartedAgainByWhatSwiftUIStillReports() {
+        let board = TwoScreens()
+        let touch = dragOntoB(board)
+        board.drags.cancel(touch.owner, model: board.model)
+        let landed = board.store.resolve(board.buttonOnB)?.element.frame
+        touch.move(board, by: 360)
+        #expect(!board.drags.isDragging)
+        #expect(board.store.resolve(board.buttonOnB)?.element.frame == landed)
+    }
+
+    /// The same for a drag ended because what it moves was locked meanwhile: a later frame
+    /// used to start a drag of the locked element and move it.
+    @Test func aDragEndedByALockIsntStartedAgainByItsLaterFrames() async {
+        let board = TwoScreens()
+        let touch = dragOntoB(board)
+        board.store.asOwnStep { board.store.update(board.button) { $0.isLocked = true } }
+        for _ in 0..<5 { await Task.yield() }
+        let landed = board.store.resolve(board.buttonOnB)?.element.frame
+        touch.move(board, by: 360)
+        #expect(!board.drags.isDragging)
+        #expect(board.store.resolve(board.buttonOnB)?.element.frame == landed, "the locked button stays where it landed")
+    }
 }

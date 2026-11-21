@@ -1229,8 +1229,11 @@ final class AppModel {
         isRehosting = true
         defer { isRehosting = false }
         var renamed: [CanvasSelection: CanvasSelection] = [:]
+        // In the design's order, back to front: each lands on top of its new host's things, so
+        // landed in any other order they would be stacked differently there (review I1).
+        let inOrder = CanvasSelection(things).map { store.things(in: $0) } ?? []
         store.asOneStep {
-            for case .element(let ref) in things {
+            for case .element(let ref) in inOrder {
                 let now = store.rehost(ref)
                 if now != ref { renamed[.element(ref)] = .element(now) }
             }
