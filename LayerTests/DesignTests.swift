@@ -794,6 +794,37 @@ struct DesignFileTests {
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)
     }
 
+    @Test func keysEarlierVersionsDroppedAreNotKeptFromAnOlderFile() throws {
+        let screen = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+        let element = """
+            {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
+             "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34},"legacyFont":"Avenir"}
+            """
+        let content = """
+            {"accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
+             "canvas":{"oldSetting":true},
+             "screens":[{"id":"\(screen)","name":"Screen 1","origin":[400,100],"scale":0.75,"oldFrame":1,"elements":[\(element)]}]}
+            """
+        // Version 1: one file. Version 2: a package, with a key at the top of its design file.
+        let single = FileWrapper(regularFileWithContents: Data("""
+            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":\(content)}
+            """.utf8))
+        let package = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: Data("{\"version\":2,\"legacy\":true,\"content\":\(content)}".utf8)),
+        ])
+        for older in [single, package] {
+            let saved = try manifest(of: DesignFile(wrapper: older).wrapper())
+            #expect(saved["legacy"] == nil)
+            let written = try #require(saved["content"] as? [String: Any])
+            for key in ["accent", "branchName", "comments"] { #expect(written[key] == nil, "\(key)") }
+            #expect((written["canvas"] as? [String: Any])?["oldSetting"] == nil)
+            #expect((written["screens"] as? [[String: Any]])?.first?["oldFrame"] == nil)
+            let elements = try #require(written["elements"] as? [[String: Any]])
+            #expect(elements.count == 1)
+            #expect(elements.first?["legacyFont"] == nil)
+        }
+    }
+
     @Test func theSharedDesignFileHasTheLatestEdit() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

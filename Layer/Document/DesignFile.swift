@@ -50,6 +50,16 @@ struct DesignContent: Equatable, Sendable {
         return names
     }
 
+    /// Forgets the keys read but not understood on the design, its canvas, screens and
+    /// elements. In a design saved before version 3 they are keys earlier versions of Layer
+    /// stopped using, not ones a newer Layer added, and aren't to be written back.
+    mutating func forgetUnknownKeys() {
+        unknownKeys = UnknownKeys()
+        canvas.unknownKeys = UnknownKeys()
+        for index in frames.indices { frames[index].unknownKeys = UnknownKeys() }
+        for index in elements.indices { elements[index].unknownKeys = UnknownKeys() }
+    }
+
     // MARK: Views of the list
 
     /// Each screen with what is on it.
@@ -387,6 +397,12 @@ struct DesignFile: Sendable {
         content = manifest.content
         fileName = manifest.fileName
         unknownKeys = manifest.unknownKeys
+        // What a design from before version 3 has that this version doesn't know, earlier
+        // versions put there.
+        if manifest.version < 3 {
+            content.forgetUnknownKeys()
+            unknownKeys = UnknownKeys()
+        }
         // Each drawing's ink is beside the design, under the drawing's identifier.
         let ink = parts[DesignPackage.ink]?.fileWrappers ?? [:]
         for drawing in content.elements where drawing.kind == .drawing {
@@ -417,6 +433,7 @@ struct DesignFile: Sendable {
         guard old.version <= Self.currentVersion else { throw ReadError.newerVersion(old.version) }
         self.init()
         content = old.content
+        content.forgetUnknownKeys()
         content.adopt(old.drawing)
         images = old.images ?? [:]
     }
