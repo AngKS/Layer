@@ -1,17 +1,22 @@
 import PencilKit
 import UIKit
 
-/// Tells two fingers that turn from two that pinch or spread, from where they were when
-/// both were down and where they are now. They must turn about 8° before the distance
-/// between them changes by about 8% for the selection to turn; otherwise the canvas zooms.
+/// Tells two fingers that turn from two that pinch or spread, or that move together, from
+/// where they were when both were down and where they are now. They must turn about 8°
+/// before the distance between them changes by about 8%, and before the point between them
+/// moves about 12 points, for the selection to turn; otherwise the canvas zooms or scrolls.
 enum TwistClassifier {
-    enum Decision { case undecided, twist, pinch }
+    enum Decision { case undecided, twist, pinch, pan }
 
     /// How far, in degrees, the line between the fingers turns before it is a twist.
     static let turnThreshold = 8.0
     /// How much the distance between the fingers changes, as a share of what it was, before
     /// it is a pinch.
     static let spreadThreshold = 0.08
+    /// How far, in points, the point halfway between the fingers moves before it is a pan.
+    /// One finger still and the other going round it moves that point about 7 points by 8°
+    /// at 100 points apart, which stays a twist.
+    static let panThreshold = 12.0
 
     /// How far the line from the first finger to the second has turned, in degrees clockwise
     /// on the screen, the short way round: from -180 to 180.
@@ -19,19 +24,18 @@ enum TwistClassifier {
         Rotation.shortestTurn(from: direction(start), to: direction(now))
     }
 
-    /// A twist once the fingers have turned past their mark while their distance is still
-    /// within its own, and a pinch the other way round. When both pass in one move, the one
-    /// further past its mark, as a share of it, decides; a tie is a pinch, as it was before
-    /// there was a twist.
+    /// Each measure as a share of its mark: the turn, the change of distance, and how far
+    /// the point between the fingers has moved. Undecided until one is past its mark; then
+    /// the one furthest past it decides. A tie goes to the canvas, as it did before there was
+    /// a twist: a pinch over a twist, a pan over a twist, and a pinch over a pan.
     static func decide(from start: (CGPoint, CGPoint), to now: (CGPoint, CGPoint)) -> Decision {
         let turned = abs(turn(from: start, to: now)) / turnThreshold
         let spread = abs(distance(now) / max(distance(start), 1) - 1) / spreadThreshold
-        switch (turned >= 1, spread >= 1) {
-        case (false, false): return .undecided
-        case (true, false): return .twist
-        case (false, true): return .pinch
-        case (true, true): return turned > spread ? .twist : .pinch
-        }
+        let (was, mid) = (middle(start), middle(now))
+        let travelled = hypot(mid.x - was.x, mid.y - was.y) / panThreshold
+        guard max(turned, spread, travelled) >= 1 else { return .undecided }
+        if turned > spread, turned > travelled { return .twist }
+        return spread >= travelled ? .pinch : .pan
     }
 
     private static func direction(_ fingers: (CGPoint, CGPoint)) -> Double {
@@ -40,6 +44,10 @@ enum TwistClassifier {
 
     private static func distance(_ fingers: (CGPoint, CGPoint)) -> Double {
         hypot(fingers.1.x - fingers.0.x, fingers.1.y - fingers.0.y)
+    }
+
+    private static func middle(_ fingers: (CGPoint, CGPoint)) -> CGPoint {
+        CGPoint(x: (fingers.0.x + fingers.1.x) / 2, y: (fingers.0.y + fingers.1.y) / 2)
     }
 }
 
@@ -110,15 +118,16 @@ struct TwistTracker {
         guard verdict == .undecided else { return }
         switch TwistClassifier.decide(from: start, to: now) {
         case .twist: verdict = .twist
-        case .pinch: verdict = .notATwist
+        case .pinch, .pan: verdict = .notATwist
         case .undecided: break
         }
     }
 }
 
-/// Two fingers that land on the selection and turn before they pinch or spread: the
-/// selection turns with them (`AppModel.beginTwist()`). Anything else, it fails as soon as
-/// it can tell, so that the canvases' pan and pinch, which wait for it, go on as before.
+/// Two fingers that land on the selection and turn before they pinch, spread or move
+/// together: the selection turns with them (`AppModel.beginTwist()`). Anything else, it
+/// fails as soon as it can tell, so that the canvases' pan and pinch, which wait for it, go
+/// on as before.
 ///
 /// It is on the window, as `RestingFingerDetector` is, to see fingers on the selection's
 /// own targets, which are drawn above the canvas. Only fingers: Apple Pencil and the pointer

@@ -1054,6 +1054,29 @@ struct TwistTests {
         #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), finger(at: 10, 116))) == .pinch)
     }
 
+    @Test func twoFingersThatMoveTogetherFirstAreAPan() {
+        let start = (CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0))
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 15, y: 0), CGPoint(x: 115, y: 0))) == .pan)
+        // Drifting 6° as they go, 20 points.
+        let drifted = finger(at: 6, 100)
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 20, y: 0), CGPoint(x: 20 + drifted.x, y: drifted.y))) == .pan)
+        // One still and the other going round it 10°: the point between them moves about 9.
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), finger(at: 10, 100))) == .twist)
+    }
+
+    @Test func aMoveAndATurnTogetherGoToTheOneFurtherPastItsMark() {
+        /// Two fingers 100 points apart about `centre`, their line `degrees` from level.
+        func fingers(about centre: CGPoint, at degrees: Double) -> (CGPoint, CGPoint) {
+            let half = finger(at: degrees, 50)
+            return (CGPoint(x: centre.x - half.x, y: centre.y - half.y), CGPoint(x: centre.x + half.x, y: centre.y + half.y))
+        }
+        let start = fingers(about: CGPoint(x: 50, y: 0), at: 0)
+        // Turned 10° about the point between them (1.25 of the mark) while it moved 18 (1.5).
+        #expect(TwistClassifier.decide(from: start, to: fingers(about: CGPoint(x: 68, y: 0), at: 10)) == .pan)
+        // The same turn while it moved 13 (1.08).
+        #expect(TwistClassifier.decide(from: start, to: fingers(about: CGPoint(x: 63, y: 0), at: 10)) == .twist)
+    }
+
     // MARK: Where the fingers land
 
     @Test func aFingerIsOnTheSelectionWithinEightPointsOfItsTurnedShape() {
@@ -1398,6 +1421,44 @@ struct TwistTests {
         // Spread apart once it twists, it goes on twisting.
         tracker.moved(first: .zero, second: finger(at: 210, 150), time: 0.4)
         #expect(tracker.verdict == .twist)
+    }
+
+    // MARK: Two fingers that move together
+
+    /// Two fingers on the selection, 100 points apart, the second landing 0.1 s after the first.
+    private func trackerWithTwoFingersDown() -> TwistTracker {
+        var tracker = TwistTracker()
+        tracker.landed(at: .zero, time: 0, first: .zero, isOnSelection: true, canTurn: true)
+        tracker.landed(at: CGPoint(x: 100, y: 0), time: 0.1, first: .zero, isOnSelection: true, canTurn: true)
+        return tracker
+    }
+
+    /// Moved together 15 points, without turning, they are scrolling the canvas: the twist
+    /// fails, and the canvas's pan, which waits for it, takes over.
+    @Test func twoFingersThatMoveTogetherArentATwist() {
+        var tracker = trackerWithTwoFingersDown()
+        tracker.moved(first: CGPoint(x: 15, y: 0), second: CGPoint(x: 115, y: 0), time: 0.2)
+        #expect(tracker.verdict == .notATwist)
+    }
+
+    /// One finger still and the other going round it 10° moves the point between them about
+    /// 9 points: less past the pan's mark than the turn is past its own, so it twists.
+    @Test func aTwistAboutOneFingerIsStillATwist() {
+        var tracker = trackerWithTwoFingersDown()
+        tracker.moved(first: .zero, second: finger(at: 10, 100), time: 0.2)
+        #expect(tracker.verdict == .twist)
+    }
+
+    /// Moved together 20 points while drifting 6°, they are scrolling; and drifting on past
+    /// 8° as they go doesn't make them a twist after all.
+    @Test func fingersThatMoveTogetherAndDriftArentATwist() {
+        var tracker = trackerWithTwoFingersDown()
+        let drifted = finger(at: 6, 100)
+        tracker.moved(first: CGPoint(x: 20, y: 0), second: CGPoint(x: 20 + drifted.x, y: drifted.y), time: 0.2)
+        #expect(tracker.verdict == .notATwist)
+        let further = finger(at: 10, 100)
+        tracker.moved(first: CGPoint(x: 25, y: 0), second: CGPoint(x: 25 + further.x, y: further.y), time: 0.25)
+        #expect(tracker.verdict == .notATwist)
     }
 }
 
