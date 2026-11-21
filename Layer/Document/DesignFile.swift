@@ -206,7 +206,8 @@ struct DesignContent: Equatable, Sendable {
                 guard left != element, let here = elements.firstIndex(where: { $0.id == element.id }), elements[here] == left else { continue }
                 if left.parent == element.parent {
                     elements[here] = element
-                } else {
+                } else if element.parent.map(screenIDs.contains) ?? true {
+                    // Moved to another screen: back where it was, if that is still there.
                     elements.remove(at: here)
                     elements.insert(element, at: min(index, elements.count))
                 }

@@ -352,6 +352,29 @@ struct DesignActionTests {
         #expect(model.store.screen(third.id) != nil)
     }
 
+    @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
+        let model = model()
+        let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
+        let button = DesignStore.newElement(.button)
+        model.store.setElements([button], on: first.id, replacing: false)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Move Button") {
+            model.store.apply { $0.move(button.id, to: second.id, frame: button.frame) }
+        }
+        // The screen it came from is deleted by hand.
+        model.store.deleteScreen(first.id)
+        let now = model.store.content
+        #expect(!(model.takenActions.first?.canTakeBack(from: now) ?? true), "there is nowhere to put it back")
+
+        siri.undo()
+        #expect(model.store.content == now)
+        let screens = Set(model.store.screens.map(\.id))
+        #expect(model.store.content.elements.allSatisfy { $0.parent.map(screens.contains) ?? true }, "nothing is left on a screen that has gone")
+        #expect(model.store.screen(second.id)?.elements.map(\.id) == [button.id])
+    }
+
     @Test func siriIsNotOfferedAnUndoOnceTheDesignHasClosed() throws {
         let model = model()
         let siri = UndoManager()
