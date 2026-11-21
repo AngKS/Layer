@@ -1248,6 +1248,31 @@ struct DesignFileNameTests {
         model.close()
     }
 
+    /// The name shown for a board without one of its own is its file's, as Files and Siri
+    /// show it, unless the file still has the name new designs get. A name undone or
+    /// cleared showed "Untitled" in the top bar, while the file kept the name (review m2).
+    @Test func aBoardWithoutANameIsShownByItsFilesName() async throws {
+        let url = try savedDesign(named: "Untitled 3")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        #expect(model.boardName == "Untitled")
+        #expect(model.chosenName == nil)
+
+        model.store.setTitle("Login")
+        #expect(model.boardName == "Login")
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        undo.undo()
+        #expect(model.store.title == nil)
+        #expect(model.boardName == "Login")
+        #expect(model.chosenName == "Login")
+        #expect(DesignActions.snapshot(of: model)?.name == "Login")
+        model.close()
+    }
+
     @Test func undoingANameThatNeededANumberTakesTheNumberWithIt() async throws {
         let url = try savedDesign(named: "Untitled")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

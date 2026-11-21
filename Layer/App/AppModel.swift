@@ -271,6 +271,18 @@ final class AppModel {
     @ObservationIgnored private(set) var isPenDown = false
     /// The name being thought up for the board, while it is: a test can wait for it.
     @ObservationIgnored private(set) var titleSuggestion: Task<Void, Never>?
+    /// The board's name as it is shown: its own, or else its file's, unless the file still
+    /// has the name new designs get. A name undone or cleared showed "Untitled" in the top
+    /// bar, while the file, Files and Siri kept the name (review m2).
+    var boardName: String { chosenName ?? String(localized: "Untitled") }
+
+    /// The board's own name, or else its file's, if somebody chose that.
+    var chosenName: String? {
+        if let title = store.title { return title }
+        guard let file = fileURL?.deletingPathExtension().lastPathComponent, !DesignFileName.isUntitled(file) else { return nil }
+        return file
+    }
+
     /// Whether the board is given a name of the app's once it has something on it. A test
     /// about something else turns it off, so that no name lands in the middle of it.
     @ObservationIgnored var suggestsTitle = true

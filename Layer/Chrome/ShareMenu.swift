@@ -262,7 +262,7 @@ enum BoardSnapshot {
     /// written off the main thread too.
     static func file(of model: AppModel) async -> URL? {
         guard let data = await png(of: model) else { return nil }
-        let name = (model.store.title ?? "Board").replacingOccurrences(of: "/", with: "-")
+        let name = (model.chosenName ?? "Board").replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name).appendingPathExtension("png")
         return await Task.detached(priority: .userInitiated) { () -> URL? in
             do {

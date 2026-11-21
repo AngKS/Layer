@@ -121,7 +121,7 @@ private struct TitleBar: View {
                 model.openBoardMenu()
             } label: {
                 HStack(spacing: 6) {
-                    Text(model.store.title ?? "Untitled")
+                    Text(model.boardName)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -139,7 +139,7 @@ private struct TitleBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Board title")
-            .accessibilityValue(model.store.title ?? "Untitled")
+            .accessibilityValue(model.boardName)
             .accessibilityHint("Rename the board and change the canvas settings")
             .popover(isPresented: $model.isBoardMenuOpen, arrowEdge: .top) {
                 BoardMenu(isSheet: model.isCompactSizeClass)
