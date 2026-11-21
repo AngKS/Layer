@@ -136,6 +136,8 @@ final class AppModel {
         didSet {
             if selection != oldValue {
                 isEditingText = false
+                // The format panel's changes so far are a step, apart from the next selection's.
+                endAdjustmentNow()
                 // Several things turn about a pivot fixed as they are selected, and forgotten
                 // when the selection changes: selected again, they form a new one.
                 turnSession = nil
@@ -1677,7 +1679,7 @@ final class AppModel {
     func beginScrubbing() {
         adjustmentEnd?.cancel()
         isScrubbing = true
-        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
+        if adjustment?.isOpen != true { adjustment = store.beginEdit(takingOnlyItsOwn: true) }
     }
 
     func endScrubbing() {
@@ -1696,8 +1698,10 @@ final class AppModel {
     @ObservationIgnored private var adjustment: DesignStore.Edit?
 
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
+    /// Only the panel's own: what else is done meanwhile, a delete or a lock, is a step of its
+    /// own, and so is a change made once the selection has changed (M14).
     func adjusting(_ body: () -> Void) {
-        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
+        if adjustment?.isOpen != true { adjustment = store.beginEdit(takingOnlyItsOwn: true) }
         store.act(for: adjustment, body)
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
@@ -1708,6 +1712,16 @@ final class AppModel {
             if let adjustment { store.endEdit(adjustment) }
             adjustment = nil
         }
+    }
+
+    /// Ends the panel's run of changes now rather than at its pause: the panel is for another
+    /// selection. A scrub under way ends its own as it ends.
+    private func endAdjustmentNow() {
+        guard !isScrubbing, let adjustment else { return }
+        adjustmentEnd?.cancel()
+        adjustmentEnd = nil
+        store.endEdit(adjustment)
+        self.adjustment = nil
     }
 
     // MARK: Adding things

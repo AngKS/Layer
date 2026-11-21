@@ -519,6 +519,9 @@ final class DesignStore {
         /// Edits begun and ended inside its own work, which are part of it.
         fileprivate var nested = 0
         fileprivate(set) var isOpen = true
+        /// Whether only the changes made for it are its own: one that says nothing of whose it
+        /// is never joins it. See `beginEdit(by:takingOnlyItsOwn:)`.
+        fileprivate var takesOnlyItsOwn = false
 
         fileprivate init(editor: Editor) {
             self.editor = editor
@@ -551,6 +554,15 @@ final class DesignStore {
         }
         let edit = Edit(editor: editor)
         edits.append(edit)
+        return edit
+    }
+
+    /// Starts an edit by hand that takes only the changes made for it (`act(for:)`): the
+    /// format panel's run of quick changes, which waits for a pause to end. A delete, a lock
+    /// or a duplicate made in that pause joined it, so one Undo took back both (audit M14).
+    func beginEdit(by editor: Editor = .hand, takingOnlyItsOwn: Bool) -> Edit {
+        let edit = beginEdit(by: editor)
+        if edit !== acting { edit.takesOnlyItsOwn = takingOnlyItsOwn }
         return edit
     }
 
@@ -784,7 +796,7 @@ final class DesignStore {
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
-        let owner = acting ?? edits.last { $0.editor == .hand } ?? edits.last { $0.editor == .turn }
+        let owner = acting ?? edits.last { $0.editor == .hand && !$0.takesOnlyItsOwn } ?? edits.last { $0.editor == .turn }
         let step: HistoryStep
         if let existing = owner?.step {
             step = existing
