@@ -1508,24 +1508,37 @@ struct ResourceTests {
     }
 
     /// The board's views are drawn on the main thread; its ink, the picture and the PNG
-    /// aren't, and the main thread is free meanwhile. Asked where that work is made, and
-    /// whether the main thread can take a turn while it is, rather than counted how many
-    /// turns it had: other tests' work on the main thread, all running at once, took those
-    /// turns now and then, and the count fell short.
+    /// aren't, and the main thread is free meanwhile.
+    ///
+    /// Asked where that work is made, and how long the call held the main thread before
+    /// handing it over, against the whole: the main thread is held from the call until the
+    /// work starts elsewhere, in one go that nothing else on it can lengthen. Counting the
+    /// main thread's turns instead failed now and then, as other tests' work on it, all
+    /// running at once, took those turns.
     @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
         let model = bigBoard()
-        let seen = OSAllocatedUnfairLock(initialState: (offTheMainThread: false, mainThreadTookATurn: false))
+        let seen = OSAllocatedUnfairLock(initialState: (offTheMainThread: false, mainThreadTookATurn: false, handedOver: ContinuousClock.Instant?.none))
+        let start = ContinuousClock.now
         let data = await BoardSnapshot.png(of: model) {
             let isMain = Self.isMainThread()
-            seen.withLock { $0.offTheMainThread = !isMain }
+            let now = ContinuousClock.now
+            seen.withLock {
+                $0.offTheMainThread = !isMain
+                $0.handedOver = now
+            }
             // Held on the main thread, this turn would only come once the picture was made.
             await MainActor.run { seen.withLock { $0.mainThreadTookATurn = true } }
         }
+        let total = ContinuousClock.now - start
         let png = try #require(data)
         let picture = try #require(UIImage(data: png))
         #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
         #expect(seen.withLock { $0.offTheMainThread }, "the ink, the picture and the PNG are made on another thread")
         #expect(seen.withLock { $0.mainThreadTookATurn }, "the main thread is free while they are")
+        // Heavy work moved back before the hand-over, onto the main thread, makes the
+        // hold most of the whole.
+        let held = try #require(seen.withLock { $0.handedOver }) - start
+        #expect(held < total * 0.5, "the main thread was held for \(held) of \(total)")
 
         // The file to share is the same picture.
         let shared = try #require(await BoardSnapshot.file(of: model))
