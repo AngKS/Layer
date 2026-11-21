@@ -108,8 +108,8 @@ private struct TurnBoard {
 
     var store: DesignStore { model.store }
 
-    init() {
-        model = AppModel(document: LayerDocument())
+    init(settings: UserDefaults = AppSettings.defaults) {
+        model = AppModel(document: LayerDocument(), settings: settings)
         model.canvasSize = CGSize(width: 1210, height: 834)
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
         let placed = model.store.setElements([
@@ -661,26 +661,29 @@ struct TurningOneElementTests {
     /// end. Left open, it kept the popover away, refused every other turn, and made each
     /// later change part of its step.
     @Test func aTurnEndsWhenWhatItTurnsIsLetGo() throws {
-        let board = TurnBoard()
-        board.model.selection = .element(board.note)
-        #expect(board.model.beginTurn())
-        board.model.turnSelection(by: 20, snaps: false)
-        let note = try #require(board.model.selectionViewRect)
-        board.model.pencilTouched(at: CGPoint(x: note.midX, y: note.midY))
-        #expect(board.model.selection == nil)
-        #expect(!board.model.isTurning && !board.model.isAdjusting)
-        #expect(!board.store.isEditing)
-        // The next change is a step of its own.
-        board.turn(board.title, to: 10)
-        board.undo.undo()
-        #expect(board.rotation(of: board.title) == nil)
-        #expect(board.rotation(of: board.note) == 20)
-        // And two fingers, or the knob, can turn what is selected next.
-        board.model.selection = .element(board.title)
-        #expect(board.model.beginTwist())
-        board.model.endTwist()
-        #expect(board.model.beginTurn())
-        board.model.endTurn()
+        // The Pencil's first touch turns Finger Draws off: in settings of the test's own.
+        try withOwnSettings { settings in
+            let board = TurnBoard(settings: settings)
+            board.model.selection = .element(board.note)
+            #expect(board.model.beginTurn())
+            board.model.turnSelection(by: 20, snaps: false)
+            let note = try #require(board.model.selectionViewRect)
+            board.model.pencilTouched(at: CGPoint(x: note.midX, y: note.midY))
+            #expect(board.model.selection == nil)
+            #expect(!board.model.isTurning && !board.model.isAdjusting)
+            #expect(!board.store.isEditing)
+            // The next change is a step of its own.
+            board.turn(board.title, to: 10)
+            board.undo.undo()
+            #expect(board.rotation(of: board.title) == nil)
+            #expect(board.rotation(of: board.note) == 20)
+            // And two fingers, or the knob, can turn what is selected next.
+            board.model.selection = .element(board.title)
+            #expect(board.model.beginTwist())
+            board.model.endTwist()
+            #expect(board.model.beginTurn())
+            board.model.endTurn()
+        }
     }
 
     /// Something else selected mid-turn, by a finger tapping it say, the turn ends too: what

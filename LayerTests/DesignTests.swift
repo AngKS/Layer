@@ -402,6 +402,41 @@ struct DesignStoreTests {
         #expect(!undo.canUndo)
     }
 
+    /// A name the app gives the board has no step, so no undo takes it away: not one of a
+    /// step made before it, nor of a step under way as it came (M4).
+    @Test func undoLeavesANameTheAppGaveTheBoard() {
+        let (store, undo) = makeStore()
+        store.addScreen(from: leftScreenSketch)
+        store.setTitle("Suggested", undoable: false)
+        undo.undo()
+        #expect(store.screens.isEmpty)
+        #expect(store.title == "Suggested")
+        undo.redo()
+        #expect(store.title == "Suggested")
+
+        let screen = store.screens[0]
+        store.beginEdit()
+        store.updateScreen(screen.id) { $0.name = "Home" }
+        store.setTitle("Login", undoable: false)
+        store.updateScreen(screen.id) { $0.name = "Start" }
+        store.endEdit()
+        undo.undo()
+        #expect(store.screen(screen.id)?.name == "Screen 1")
+        #expect(store.title == "Login")
+    }
+
+    /// A name given since by something that isn't a step, the file renamed in Files for
+    /// instance, is the board's name now: undoing the naming it replaced leaves it (M4).
+    @Test func undoingANamingLeavesANameGivenSinceWithoutAStep() {
+        let (store, undo) = makeStore()
+        store.setTitle("Login")
+        store.setTitle("Client pitch", undoable: false)
+        undo.undo()
+        #expect(store.title == "Client pitch")
+        undo.redo()
+        #expect(store.title == "Client pitch")
+    }
+
     @Test func theContentBoundsCoverEverythingInTheDesign() throws {
         let (store, _) = makeStore()
         #expect(store.contentBounds == nil)
@@ -1121,6 +1156,144 @@ struct DesignFileNameTests {
         #expect(!exists("Onboarding 3.layer", beside: url))
     }
 
+    /// A design open in Layer, its board named twice: first by the app, then by hand.
+    private func renamedTwice() async throws -> (model: AppModel, undo: UndoManager, url: URL) {
+        let url = try savedDesign(named: "Untitled")
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        model.store.setTitle("Login", undoable: false)
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        model.store.setTitle("Checkout")
+        await wait { model.fileURL?.lastPathComponent == "Checkout.layer" }
+        #expect(model.fileURL?.lastPathComponent == "Checkout.layer")
+        return (model, undo, url)
+    }
+
+    /// Renamed in Files while it is open, the design takes the name. Undoing the naming
+    /// by hand before it put the old name back, and the file was renamed back to it (M4).
+    @Test func aFileRenamedInFilesIsNotRenamedBackByUndo() async throws {
+        let (model, undo, url) = try await renamedTwice()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let pitch = url.deletingLastPathComponent().appendingPathComponent("Client pitch.layer")
+        try FileManager.default.moveItem(at: try #require(model.fileURL), to: pitch)
+        model.fileURL = pitch
+        #expect(model.store.title == "Client pitch")
+
+        undo.undo()
+        await model.settleFileName()
+        #expect(model.store.title == "Client pitch")
+        #expect(model.fileURL?.lastPathComponent == "Client pitch.layer")
+        #expect(exists("Client pitch.layer", beside: url))
+        model.close()
+    }
+
+    /// Once a board has had a name, given by hand or by the app, none is suggested for it
+    /// again: not after the name is cleared, nor after it is undone. A suggestion then
+    /// renamed the file a second time (M4).
+    @Test func aBoardThatHasHadANameIsNotGivenASuggestionAgain() async throws {
+        let (model, _, url) = try await renamedTwice()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        model.store.setTitle(nil)
+        model.addFrame(.iPhone)
+        #expect(model.titleSuggestion == nil)
+        #expect(model.store.title == nil)
+        model.close()
+
+        // Opened again with its board's name undone, and only its file's name to go on.
+        var file = DesignFile()
+        file.fileName = "Login"
+        let login = url.deletingLastPathComponent().appendingPathComponent("Login.layer")
+        try file.wrapper().write(to: login, options: .atomic, originalContentsURL: nil)
+        let reopened = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: login))))
+        reopened.fileURL = login
+        #expect(reopened.store.title == nil)
+        reopened.addText()
+        #expect(reopened.titleSuggestion == nil)
+        reopened.close()
+    }
+
+    /// A name given by hand that another design has takes a number, and that is part of
+    /// the naming: undoing it takes the number away too, and redoing puts it back.
+    /// Undo puts back a name another design has taken meanwhile, so it gets a number. The
+    /// number is part of what undo put back: redo still brings back the name given after
+    /// it, and undo the number with the name (review m1).
+    @Test func redoBringsBackANameAfterUndoPutBackOneThatNeededANumber() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        model.store.setTitle("Onboarding")
+        await wait { model.fileURL?.lastPathComponent == "Onboarding.layer" }
+        model.store.setTitle("Home")
+        await wait { model.fileURL?.lastPathComponent == "Home.layer" }
+        // Another design takes the first name.
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+
+        undo.undo()
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.store.title == "Onboarding 2")
+        undo.redo()
+        #expect(model.store.title == "Home")
+        await wait { model.fileURL?.lastPathComponent == "Home.layer" }
+        undo.undo()
+        #expect(model.store.title == "Onboarding 2")
+        undo.undo()
+        #expect(model.store.title == nil)
+        model.close()
+    }
+
+    /// The name shown for a board without one of its own is its file's, as Files and Siri
+    /// show it, unless the file still has the name new designs get. A name undone or
+    /// cleared showed "Untitled" in the top bar, while the file kept the name (review m2).
+    @Test func aBoardWithoutANameIsShownByItsFilesName() async throws {
+        let url = try savedDesign(named: "Untitled 3")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        #expect(model.boardName == "Untitled")
+        #expect(model.chosenName == nil)
+
+        model.store.setTitle("Login")
+        #expect(model.boardName == "Login")
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        undo.undo()
+        #expect(model.store.title == nil)
+        #expect(model.boardName == "Login")
+        #expect(model.chosenName == "Login")
+        #expect(DesignActions.snapshot(of: model)?.name == "Login")
+        model.close()
+    }
+
+    @Test func undoingANameThatNeededANumberTakesTheNumberWithIt() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+
+        model.store.setTitle("Onboarding")
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.store.title == "Onboarding 2")
+        undo.undo()
+        #expect(model.store.title == nil)
+        #expect(!undo.canUndo)
+        undo.redo()
+        #expect(model.store.title == "Onboarding 2")
+        model.close()
+    }
+
     @Test func aDesignStillAnswersToItsIdentifierAfterItsFileIsRenamed() async throws {
         let url = try savedDesign(named: "Untitled")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -1334,46 +1507,46 @@ struct ResourceTests {
         return AppModel(document: document)
     }
 
-    /// How many turns the main thread had while `work` ran, the longest it went without one,
-    /// and how long `work` took. Turns are counted, rather than the longest stall judged,
-    /// because other tests' work on the main thread can stall it too while all run at once.
-    private func turnsOnTheMainThread(during work: () async -> Void) async -> (turns: Int, stall: Duration, total: Duration) {
-        var last = ContinuousClock.now
-        var longest = Duration.zero
-        var turns = 0
-        var isWorking = false
-        let beat = Task { @MainActor in
-            while !Task.isCancelled {
-                let now = ContinuousClock.now
-                longest = max(longest, now - last)
-                last = now
-                if isWorking { turns += 1 }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-        }
-        await Task.yield()
-        let start = ContinuousClock.now
-        last = start
-        isWorking = true
-        await work()
-        isWorking = false
-        let total = ContinuousClock.now - start
-        beat.cancel()
-        return (turns, max(longest, ContinuousClock.now - last), total)
-    }
-
+    /// The board's views are drawn on the main thread; its ink, the picture and the PNG
+    /// aren't, and the main thread is free meanwhile.
+    ///
+    /// Asked where that work is made, and how long the call held the main thread before
+    /// handing it over, against the whole: the main thread is held from the call until the
+    /// work starts elsewhere, in one go that nothing else on it can lengthen. Counting the
+    /// main thread's turns instead failed now and then, as other tests' work on it, all
+    /// running at once, took those turns.
     @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
         let model = bigBoard()
-        var url: URL?
-        let (turns, stall, total) = await turnsOnTheMainThread { url = await BoardSnapshot.file(of: model) }
-        let shared = try #require(url)
-        defer { try? FileManager.default.removeItem(at: shared) }
-        let picture = try #require(UIImage(contentsOfFile: shared.path))
+        let seen = OSAllocatedUnfairLock(initialState: (offTheMainThread: false, mainThreadTookATurn: false, handedOver: ContinuousClock.Instant?.none))
+        let start = ContinuousClock.now
+        let data = await BoardSnapshot.png(of: model) {
+            let isMain = Self.isMainThread()
+            let now = ContinuousClock.now
+            seen.withLock {
+                $0.offTheMainThread = !isMain
+                $0.handedOver = now
+            }
+            // Held on the main thread, this turn would only come once the picture was made.
+            await MainActor.run { seen.withLock { $0.mainThreadTookATurn = true } }
+        }
+        let total = ContinuousClock.now - start
+        let png = try #require(data)
+        let picture = try #require(UIImage(data: png))
         #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
-        // The board's views are drawn on the main thread; its ink, the picture and the file
-        // aren't, so the main thread has turns meanwhile. Done on it, it had none.
-        #expect(turns >= 3, "the main thread had \(turns) turns in \(total), the longest wait \(stall)")
+        #expect(seen.withLock { $0.offTheMainThread }, "the ink, the picture and the PNG are made on another thread")
+        #expect(seen.withLock { $0.mainThreadTookATurn }, "the main thread is free while they are")
+        // Heavy work moved back before the hand-over, onto the main thread, makes the
+        // hold most of the whole.
+        let held = try #require(seen.withLock { $0.handedOver }) - start
+        #expect(held < total * 0.5, "the main thread was held for \(held) of \(total)")
+
+        // The file to share is the same picture.
+        let shared = try #require(await BoardSnapshot.file(of: model))
+        defer { try? FileManager.default.removeItem(at: shared) }
+        #expect(UIImage(contentsOfFile: shared.path)?.size == picture.size)
     }
+
+    private nonisolated static func isMainThread() -> Bool { Thread.isMainThread }
 
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
         let store = DesignStore(content: DesignContent())

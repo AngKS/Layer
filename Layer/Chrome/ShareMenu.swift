@@ -216,10 +216,14 @@ enum BoardSnapshot {
 
     /// The board as a PNG, no more than 4096 pixels along its longer side. Only its views
     /// are drawn on the main thread: at that size its ink, the picture and the PNG take
-    /// long enough to hold the app up, so they are made on another.
-    static func png(of model: AppModel) async -> Data? {
+    /// long enough to hold the app up, so they are made on another. `offTheMainThread` is
+    /// called there first: a test looks at where that is.
+    static func png(of model: AppModel, offTheMainThread: @escaping @Sendable () async -> Void = {}) async -> Data? {
         guard let parts = parts(of: model, longestSide: 4096, aspect: nil) else { return nil }
-        return await Task.detached(priority: .userInitiated) { parts.png() }.value
+        return await Task.detached(priority: .userInitiated) {
+            await offTheMainThread()
+            return parts.png()
+        }.value
     }
 
     private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
@@ -258,7 +262,7 @@ enum BoardSnapshot {
     /// written off the main thread too.
     static func file(of model: AppModel) async -> URL? {
         guard let data = await png(of: model) else { return nil }
-        let name = (model.store.title ?? "Board").replacingOccurrences(of: "/", with: "-")
+        let name = (model.chosenName ?? "Board").replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name).appendingPathExtension("png")
         return await Task.detached(priority: .userInitiated) { () -> URL? in
             do {

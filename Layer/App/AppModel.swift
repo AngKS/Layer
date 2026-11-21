@@ -205,9 +205,9 @@ final class AppModel {
     var imagePlaygroundRequest: ImagePlaygroundRequest?
     /// Whether sketches convert on their own once the pen has rested for a moment.
     /// Remembered between launches.
-    var convertsAutomatically = AppModel.savedConvertsAutomatically {
+    var convertsAutomatically: Bool {
         didSet {
-            UserDefaults.standard.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
+            settings.set(convertsAutomatically, forKey: AppModel.convertsAutomaticallyKey)
             scheduleConversion()
         }
     }
@@ -271,28 +271,56 @@ final class AppModel {
     /// Sketches being read, so that a design that closes can stop them.
     @ObservationIgnored private var conversions: [Task<Void, Never>] = []
     @ObservationIgnored private(set) var isPenDown = false
-    @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
+    /// The name being thought up for the board, while it is: a test can wait for it.
+    @ObservationIgnored private(set) var titleSuggestion: Task<Void, Never>?
+    /// The board's name as it is shown: its own, or else its file's, unless the file still
+    /// has the name new designs get. A name undone or cleared showed "Untitled" in the top
+    /// bar, while the file, Files and Siri kept the name (review m2).
+    var boardName: String { chosenName ?? String(localized: "Untitled") }
+
+    /// The board's own name, or else its file's, if somebody chose that.
+    var chosenName: String? {
+        if let title = store.title { return title }
+        guard let file = fileURL?.deletingPathExtension().lastPathComponent, !DesignFileName.isUntitled(file) else { return nil }
+        return file
+    }
+
+    /// Whether the board is given a name of the app's once it has something on it. A test
+    /// about something else turns it off, so that no name lands in the middle of it.
+    @ObservationIgnored var suggestsTitle = true
+    /// Whether the board has had a name here, given by hand or by the app.
+    @ObservationIgnored private var hasHadName = false
+    /// Whether the board has been named: it has had a name here, or its file has one
+    /// somebody chose. A name is suggested only for a board that hasn't, so one cleared or
+    /// undone stays so, rather than a suggestion renaming the file again (M4).
+    private var hasBeenNamed: Bool {
+        hasHadName || store.title != nil || document.current.fileName.map { !DesignFileName.isUntitled($0) } == true
+    }
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
 
     /// Whether a finger draws while the palette is up. Once Apple Pencil has been seen,
     /// it doesn't: the Pencil draws, and a finger selects, moves, pans and taps buttons.
     /// Until then a finger draws, so that Layer works without a Pencil. Either way it can
     /// be set in the format panel, after which it is left as set. Remembered between launches.
-    var fingerDraws = UserDefaults.standard.object(forKey: AppModel.fingerDrawsKey) == nil ? true : UserDefaults.standard.bool(forKey: AppModel.fingerDrawsKey) {
-        didSet { UserDefaults.standard.set(fingerDraws, forKey: AppModel.fingerDrawsKey) }
+    var fingerDraws: Bool {
+        didSet { settings.set(fingerDraws, forKey: AppModel.fingerDrawsKey) }
     }
+
+    /// Where the app's own settings are kept: see `AppSettings`. A test can give a design
+    /// settings of its own.
+    @ObservationIgnored let settings: UserDefaults
 
     /// Set by hand in the format panel.
     func setFingerDraws(_ draws: Bool) {
         fingerDraws = draws
-        UserDefaults.standard.set(true, forKey: AppModel.fingerDrawsChosenKey)
+        settings.set(true, forKey: AppModel.fingerDrawsChosenKey)
     }
 
     /// Apple Pencil touched the canvas. The first time, a finger stops drawing, unless
     /// that has been set by hand. `elsewhere` is a touch in a presentation of its own over
     /// the canvas: a panel's sheet, a popover or an alert.
     func pencilTouched(at viewPoint: CGPoint, elsewhere: Bool = false) {
-        if fingerDraws, !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey) {
+        if fingerDraws, !settings.bool(forKey: AppModel.fingerDrawsChosenKey) {
             fingerDraws = false
         }
         // On a panel, a popover or the bars, the Pencil is pressing a control, scrubbing a
@@ -317,29 +345,31 @@ final class AppModel {
     /// Whether the Pencil detector has anything to do: notice a first Pencil, or let go of
     /// what a finger selected when the Pencil lands on it.
     var needsPencilDetector: Bool {
-        (fingerDraws && !UserDefaults.standard.bool(forKey: AppModel.fingerDrawsChosenKey)) || (tool == .draw && selection != nil)
+        (fingerDraws && !settings.bool(forKey: AppModel.fingerDrawsChosenKey)) || (tool == .draw && selection != nil)
     }
 
     private static let fingerDrawsKey = "fingerDraws"
     private static let fingerDrawsChosenKey = "fingerDrawsChosen"
     private static let convertsAutomaticallyKey = "convertsAutomatically"
-    private static var savedConvertsAutomatically: Bool {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: convertsAutomaticallyKey) == nil || defaults.bool(forKey: convertsAutomaticallyKey)
-    }
 
-    init(document: LayerDocument) {
+    init(document: LayerDocument, settings: UserDefaults = AppSettings.defaults) {
         self.document = document
+        self.settings = settings
+        // Both on until set otherwise.
+        fingerDraws = settings.object(forKey: AppModel.fingerDrawsKey) == nil || settings.bool(forKey: AppModel.fingerDrawsKey)
+        convertsAutomatically = settings.object(forKey: AppModel.convertsAutomaticallyKey) == nil || settings.bool(forKey: AppModel.convertsAutomaticallyKey)
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         appliedModel = .some(file.content.canvas.model)
+        hasHadName = file.content.title != nil
         store.onChange = { [weak self, document] content in
             // A command or generation still unwinding after the design closed doesn't
             // write to a document the browser has already let go of.
             guard self?.isClosed != true else { return }
             document.update { $0.content = content }
+            if content.title != nil { self?.hasHadName = true }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
             // Something else may have locked or taken away what a finger is dragging.
@@ -615,6 +645,10 @@ final class AppModel {
     /// Lets one spoken command at a time act on the design, whichever call it came from.
     let voiceCommands = VoiceCommandGate()
 
+    /// The line the design's phone calls are made on: the app's, so that one started in
+    /// any window ends one up in another. A test gives its design a line of its own.
+    @ObservationIgnored var phoneLine = PhoneLine.shared
+
     /// Said when a command reaches a design that has closed.
     static let closedProblem = "The design has closed."
 
@@ -633,7 +667,7 @@ final class AppModel {
         // pencil command already sent still runs, in its turn.
         for design in OpenDesigns.shared.all where design !== self { design.stopPencilListening() }
         stopPencilListening()
-        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] }, line: phoneLine)
         call.gate = voiceCommands
         // What the agent is doing, tool by tool, is what the pill says while it works.
         (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }
@@ -717,7 +751,7 @@ final class AppModel {
         let getting = Task {
             refreshPreview()
             // A name still being thought up is settled now, from the design's own words.
-            if titleSuggestion != nil, store.title == nil {
+            if titleSuggestion != nil, store.title == nil, !hasBeenNamed {
                 store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
             }
             await settleFileName()
@@ -832,7 +866,7 @@ final class AppModel {
             let name = moved.deletingPathExtension().lastPathComponent
             document.update { $0.fileName = name }
             // The name was taken, so the file has a number on the end: the board takes it too.
-            if name != wanted, store.title == title { store.setTitle(name, undoable: false) }
+            if name != wanted { store.numberTitle(name, for: title) }
             fileURL = moved
             matchNameAndFile()
         }
@@ -1777,7 +1811,7 @@ final class AppModel {
     /// it was dropped, `viewPoint` being in the canvas view's own points.
     func addAsset(_ asset: Asset, at viewPoint: CGPoint? = nil) {
         let point = viewPoint.map { viewport.canvasPoint(for: $0) }
-        AssetLibrary.noteUsed(asset)
+        AssetLibrary.noteUsed(asset, in: settings)
         switch asset.content {
         case .symbol(let name):
             add(DesignStore.newElement(.symbol, symbol: name), at: point)
@@ -1858,11 +1892,11 @@ final class AppModel {
 
     /// Names the board once, the first time it has something on it worth naming.
     private func suggestTitleIfNeeded() {
-        guard store.title == nil, titleSuggestion == nil else { return }
+        guard suggestsTitle, store.title == nil, !hasBeenNamed, titleSuggestion == nil else { return }
         titleSuggestion = Task { [weak self] in
             guard let self else { return }
             let title = await engine.suggestTitle(for: store.content)
-            if store.title == nil, !isClosed { store.setTitle(title, undoable: false) }
+            if store.title == nil, !hasBeenNamed, !isClosed { store.setTitle(title, undoable: false) }
             titleSuggestion = nil
         }
     }

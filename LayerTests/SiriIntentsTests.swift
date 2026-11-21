@@ -263,7 +263,10 @@ private final class CountingDefaults: UserDefaults {
 @MainActor
 struct DesignIndexTests {
     /// Runs `body` with the indexer writing to `index` and keeping its record in `record`.
+    /// `suite` is named after the test, so each test has one set of defaults, emptied as it
+    /// starts and when it is done: one named afresh each time left a file behind every run.
     private func using(_ index: FakeSpotlight, record: UserDefaults, suite: String, _ body: () async throws -> Void) async rethrows {
+        record.removePersistentDomain(forName: suite)
         let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
         DesignIndexer.spotlight = index
         DesignIndexer.recordDefaults = record
@@ -276,7 +279,7 @@ struct DesignIndexTests {
     }
 
     @Test func aLaunchPassReadsAndWritesItsRecordOnce() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(CountingDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -293,7 +296,7 @@ struct DesignIndexTests {
     }
 
     @Test func withoutARecordToReadTheIndexIsBuiltAgain() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -311,7 +314,7 @@ struct DesignIndexTests {
     }
 
     @Test func aDesignRenamedAfterItClosedIsIndexedUnderItsNewIdentifier() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -332,7 +335,7 @@ struct DesignIndexTests {
     }
 
     @Test func designsInAFolderThatCouldNotBeLookedThroughAreKept() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -362,8 +365,9 @@ struct DesignIndexTests {
 
     @Test func aLaunchPassKeepsWhatItCouldNotReadAndTakesOutWhatHasGone() async throws {
         let index = FakeSpotlight()
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
+        record.removePersistentDomain(forName: suite)
         let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
         DesignIndexer.spotlight = index
         DesignIndexer.recordDefaults = record
@@ -510,7 +514,9 @@ struct OpeningDesignTests {
 
         var steps: [String] = []
         let url = URL(fileURLWithPath: "/designs/B.layer")
-        try await DocumentBrowser.pick(url, in: browser) { presented in
+        // A real dismiss, on a main thread every suite running alongside shares: the app's
+        // 2 s for it ran out now and then. The limit isn't what this test is about.
+        try await DocumentBrowser.pick(url, in: browser, limit: .seconds(8)) { presented in
             steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
         } picking: { picked in
             steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
@@ -579,7 +585,9 @@ struct OpeningDesignTests {
         #expect(design.isBeingPresented)
         let url = URL(fileURLWithPath: "/designs/B.layer")
         let picking = Task {
-            try await DocumentBrowser.pick(url, in: browser) { _ in } picking: { _ in }
+            // Within the ten seconds waited for below: the app's 2 s for a real
+            // presentation and dismiss, on a shared main thread, isn't what this is about.
+            try await DocumentBrowser.pick(url, in: browser, limit: .seconds(4)) { _ in } picking: { _ in }
         }
         guard case .success? = await outcome(of: picking, within: .seconds(10)) else {
             Issue.record("a dismiss tried while the design was still coming up was never finished")

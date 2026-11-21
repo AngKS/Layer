@@ -338,7 +338,7 @@ enum AssetLibrary {
     static let recentsLimit = 12
 
     /// Notes that an asset was used, so it leads its tab next time.
-    static func noteUsed(_ asset: Asset, in defaults: UserDefaults = .standard) {
+    static func noteUsed(_ asset: Asset, in defaults: UserDefaults = AppSettings.defaults) {
         var ids = recentIDs(from: defaults.string(forKey: recentsKey) ?? "")
         ids.removeAll { $0 == asset.id }
         ids.insert(asset.id, at: 0)

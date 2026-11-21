@@ -223,10 +223,14 @@ struct DesignContent: Equatable, Sendable {
     /// An undo step is taken back this way, so that a step made while something else was
     /// changing the design too (a screen being written, a spoken command, a drag) takes
     /// back its own changes and leaves the others'.
+    ///
+    /// The board's name goes back only if it is still the one the change gave it. A name
+    /// given since without a step, the file renamed in Files for instance, is the board's
+    /// name now: put back, the file was renamed back to match (M4).
     func reverting(_ after: DesignContent, to before: DesignContent) -> DesignContent {
         if self == after { return before }
         var result = self
-        if after.title != before.title { result.title = before.title }
+        if after.title != before.title, title == after.title { result.title = before.title }
         if after.canvas != before.canvas { result.canvas = before.canvas }
         if after.unread != before.unread { result.unread = before.unread }
         result.frames = Self.reverting(frames, after: after.frames, before: before.frames, id: \.id, fields: DesignScreen.reverting)

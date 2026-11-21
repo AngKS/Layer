@@ -32,6 +32,9 @@ struct ConcurrentEditTests {
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .seconds(60)
+        // A name the app suggests has no step, so undo leaves it: landing at a moment of
+        // its own choosing, it made "everything undone is the start" fail now and then.
+        model.suggestsTitle = false
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let refs = model.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
@@ -393,6 +396,9 @@ struct ConcurrentEditsGroupedByEventTests {
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .seconds(60)
+        // A name the app suggests has no step, so undo leaves it: landing at a moment of
+        // its own choosing, it made "everything undone is the start" fail now and then.
+        model.suggestsTitle = false
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let refs = model.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),

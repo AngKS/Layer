@@ -40,8 +40,8 @@ private struct Board {
 
     var store: DesignStore { model.store }
 
-    init() {
-        model = AppModel(document: LayerDocument())
+    init(settings: UserDefaults = AppSettings.defaults) {
+        model = AppModel(document: LayerDocument(), settings: settings)
         model.canvasSize = CGSize(width: 1210, height: 834)
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
         let placed = model.store.setElements([
@@ -762,17 +762,21 @@ struct PencilOnChromeTests {
         #expect(!InkCanvas.Coordinator.isInAnotherPresentation(nil, than: container))
     }
 
+    /// The first touch of the Pencil turns Finger Draws off, so the board has settings of
+    /// its own.
     @Test func thePencilInASheetOverTheSelectionKeepsIt() throws {
-        let board = Board()
-        board.model.tool = .draw
-        board.model.selection = .element(board.note)
-        let point = try #require(board.model.selectionViewRect).center
+        try withOwnSettings { settings in
+            let board = Board(settings: settings)
+            board.model.tool = .draw
+            board.model.selection = .element(board.note)
+            let point = try #require(board.model.selectionViewRect).center
 
-        board.model.pencilTouched(at: point, elsewhere: true)
-        #expect(board.model.selection == .element(board.note))
+            board.model.pencilTouched(at: point, elsewhere: true)
+            #expect(board.model.selection == .element(board.note))
 
-        board.model.pencilTouched(at: point)
-        #expect(board.model.selection == nil)
+            board.model.pencilTouched(at: point)
+            #expect(board.model.selection == nil)
+        }
     }
 }
 

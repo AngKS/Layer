@@ -374,6 +374,25 @@ final class DesignStore {
         }
     }
 
+    /// Names the board `numbered`: `title` with the number its file needed, another design
+    /// having that name. The number is part of the naming, so it goes in the step that
+    /// named the board `title`, when a step did: undoing that takes the number away too,
+    /// as the name can't go back while it isn't the one the step gave (M4). So does the
+    /// step redo would take, when undo put the name back: redoing it brings back the name
+    /// given after (review m1). A name with no step, one the app suggested, is numbered
+    /// without one.
+    func numberTitle(_ numbered: String, for title: String) {
+        guard content.title == title, numbered != title else { return }
+        let before = content
+        isChanging = true
+        content.title = numbered
+        isChanging = false
+        for steps in [undoable, redoable] {
+            steps.last { $0.step?.lastNamed == title }?.step?.record(from: before, to: content, change: changeCount)
+        }
+        onChange?(content)
+    }
+
     func updateCanvas(_ body: (inout CanvasSettings) -> Void) {
         change { body(&$0.canvas) }
     }
@@ -872,6 +891,11 @@ final class DesignStore {
         /// The design with the step's changes taken back.
         func undone(from content: DesignContent) -> DesignContent {
             runs.reversed().reduce(content) { $0.reverting($1.after, to: $1.before) }
+        }
+
+        /// The name it last gave the board, when it named the board.
+        var lastNamed: String? {
+            runs.last { $0.before.title != $0.after.title }?.after.title
         }
 
         /// Whether its changes undo themselves, so that taking it back would change nothing.

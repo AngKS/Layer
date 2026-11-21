@@ -425,7 +425,10 @@ struct BoardMenu: View {
         VStack(alignment: .leading, spacing: 0) {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                TextField("Untitled", text: $draft)
+                // The name the top bar shows, as the field's placeholder: a board without one
+                // of its own shows its file's (review m2). Typing names the board; nothing
+                // typed renames nothing.
+                TextField(model.boardName, text: $draft)
                     .font(.system(size: 17, weight: .semibold))
                     .submitLabel(.done)
                     .onSubmit {
