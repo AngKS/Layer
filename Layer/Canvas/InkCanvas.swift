@@ -782,7 +782,15 @@ struct InkCanvas: UIViewRepresentable {
             // The design changed while a tool is in use (a spoken command, say): what the tool
             // has done so far is followed first, not drawn over.
             followInkNotYetFollowed()
-            guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
+            // The canvas's strokes are read only if a drawing has changed: see `DrawingSync`.
+            let canvas = documentCanvas
+            guard let strokes = drawings.strokes(showing: model.store.content, reading: {
+                let current = canvas.drawing.strokes
+                #if DEBUG
+                CanvasWork.strokesRead += current.count
+                #endif
+                return current
+            }) else { return }
             isShowingDrawings = true
             defer { isShowingDrawings = false }
             documentCanvas.drawing = PKDrawing(strokes: strokes)

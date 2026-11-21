@@ -46,6 +46,7 @@
 		236E977F0866D38822C63A37 /* AssetLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 256854F5FF9A4150D645BB42 /* AssetLibrary.swift */; };
 		241EEF700A965CE22C52D81A /* OnscreenContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C2F1B0E9354D93D9B272F96 /* OnscreenContext.swift */; };
 		2536037BDFE2544B060813AF /* image_textField_image_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 174E6CBAA6637D272B1095BD /* image_textField_image_1.json */; };
+		257248133E2329DD0AEB9B21 /* CanvasDragWorkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212F7CCE94FC2C4A4065FCDA /* CanvasDragWorkTests.swift */; };
 		2B00E81F69D26F110A11E197 /* FreeformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 477F1E99CE379C9A7BA707E3 /* FreeformTests.swift */; };
 		2B737C1728743984C36AADE4 /* ShareMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF431B52852C4E5B18BAF1B7 /* ShareMenu.swift */; };
 		2C5602DB846AC7061B6AAA6B /* ScreenPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450E3AF29ABC2CF8B0EB9654 /* ScreenPrompt.swift */; };
@@ -382,6 +383,7 @@
 		1F3F65930923986507700DF7 /* unknown_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_jittered_1a.json; sourceTree = "<group>"; };
 		1FBBF5A3BCE7E5D6FDC651B7 /* CanvasBenchmarkUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBenchmarkUITests.swift; sourceTree = "<group>"; };
 		212D1539287FCE5A1C9D6F0C /* textField_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_jittered_2a.json; sourceTree = "<group>"; };
+		212F7CCE94FC2C4A4065FCDA /* CanvasDragWorkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDragWorkTests.swift; sourceTree = "<group>"; };
 		21367BB9CEF150145DCDC8DF /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		21564DCF25E04B456CC7C6E5 /* FlatStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatStoreTests.swift; sourceTree = "<group>"; };
 		21E425BB63DD6A2017EA6A99 /* ElementLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLayout.swift; sourceTree = "<group>"; };
@@ -832,6 +834,7 @@
 			children = (
 				75038A2AE7C9F3344E801F1B /* AssetLibraryTests.swift */,
 				A1550A22E1500191461C4B68 /* CanvasDragLandingTests.swift */,
+				212F7CCE94FC2C4A4065FCDA /* CanvasDragWorkTests.swift */,
 				DBC34B46661E4E975767AA7C /* CanvasHitTestTests.swift */,
 				80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */,
 				7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */,
@@ -1469,6 +1472,7 @@
 			files = (
 				0456A2D9BE73FB50F88700C3 /* AssetLibraryTests.swift in Sources */,
 				F376F8FE5D328F8D44244A6B /* CanvasDragLandingTests.swift in Sources */,
+				257248133E2329DD0AEB9B21 /* CanvasDragWorkTests.swift in Sources */,
 				AF4C99B81F7284071AF36346 /* CanvasHitTestTests.swift in Sources */,
 				AE217498FB6664260CE3D179 /* ComponentCatalogueTests.swift in Sources */,
 				5312CD8E17306FB20F9B4388 /* ConcurrentEditTests.swift in Sources */,

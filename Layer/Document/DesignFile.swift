@@ -122,10 +122,15 @@ struct DesignContent: Equatable, Sendable {
     mutating func update(_ id: DesignElement.ID, _ body: (inout DesignElement) -> Void) {
         guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
         let before = elements[index]
-        body(&elements[index])
-        elements[index].id = before.id
-        elements[index].parent = before.parent
-        elements[index].scale = before.scale
+        var element = before
+        body(&element)
+        element.id = before.id
+        element.parent = before.parent
+        element.scale = before.scale
+        // Left as it was, as a drag's frame held on a snap is, the list isn't written to:
+        // written, it is copied, only for the whole design to be compared and found the same.
+        guard element != before else { return }
+        elements[index] = element
     }
 
     mutating func remove(_ ids: Set<DesignElement.ID>) {

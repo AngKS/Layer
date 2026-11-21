@@ -255,7 +255,13 @@ final class CanvasDrags {
     typealias Rule = (_ origin: CGRect, _ translation: CGSize) -> (CGRect, [SnapGuide])
 
     /// Stands for one view that carries a drag.
-    final class Owner {
+    @MainActor final class Owner {
+        init() {
+            #if DEBUG
+            CanvasWork.ownersMade += 1
+            #endif
+        }
+
         /// For an element's target: where its drag began, and the drawing whose ink was
         /// there, which the drag moves instead (see `moveOnTarget`). Kept for the whole drag,
         /// since the ink moves away from where the drag began.
@@ -278,6 +284,13 @@ final class CanvasDrags {
     @ObservationIgnored private var rule: Rule?
 
     var isDragging: Bool { session != nil }
+
+    /// Whether the change being made now is the drag's own: a frame of it, or its landing.
+    /// That neither locks nor takes away what it moves.
+    func isMakingChange(in store: DesignStore) -> Bool {
+        guard let acting = store.actingEdit else { return false }
+        return acting === edit || acting === handedOver
+    }
 
     /// The drag under way's own step: see `DesignStore.Edit`.
     @ObservationIgnored private var edit: DesignStore.Edit?
@@ -500,7 +513,8 @@ final class CanvasDrags {
         let translation = CGSize(width: glassTranslation.width / scale, height: glassTranslation.height / scale)
         let (frame, snappedTo) = rule(elementOrigin, translation)
         if guides != snappedTo { guides = snappedTo }
-        guidePlacement = placement
+        // Set only when it differs: each setting tells whatever draws the guides to draw again.
+        if guidePlacement != placement { guidePlacement = placement }
         model.store.act(for: edit) { model.store.update(ref) { $0.frame = frame } }
     }
 
@@ -516,13 +530,14 @@ final class CanvasDrags {
 
     /// The drag on an element's own target, in the selection layer's points. Ink is drawn
     /// over every element, so a drag that starts on a drawing's ink moves the drawing, as a
-    /// tap there picks it.
-    func adjustOnTarget(
-        _ ref: DesignStore.ElementRef, element: DesignElement, placement: Placement, on screen: DesignScreen?,
-        model: AppModel, owner: Owner
-    ) -> some Gesture {
+    /// tap there picks it. The element, and the screen it is on, are looked up as the drag
+    /// goes, so that its target is built again only when where it lies changes, not with
+    /// every change to it or to its screen (audit C6).
+    func adjustOnTarget(_ ref: DesignStore.ElementRef, model: AppModel, owner: Owner) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .named(SelectionLayer.space))
             .onChanged { [self] value in
+                guard let (element, placement) = model.store.resolve(ref) else { return }
+                let screen: DesignScreen? = if case .screen(let id) = ref.host { model.store.screen(id) } else { nil }
                 moveOnTarget(ref, element: element, placement: placement, on: screen, by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
             }
             .onEnded { [self] value in
@@ -613,7 +628,8 @@ final class CanvasDrags {
         }
         if guides != snappedTo { guides = snappedTo }
         // The lines are in canvas points, as the things lined up are.
-        guidePlacement = Placement(origin: .zero, scale: 1)
+        let onCanvas = Placement(origin: .zero, scale: 1)
+        if guidePlacement != onCanvas { guidePlacement = onCanvas }
         model.store.act(for: edit) {
             model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
             model.selectionMoved(by: delta)
@@ -625,6 +641,19 @@ final class CanvasDrags {
         finish(model: model)
         model.store.act(for: edit) { model.rehostSelection() }
         endEdit(model: model)
+    }
+
+    /// A drag that moves a screen by its name, which looks the screen up as the drag goes:
+    /// the name's target isn't built again with every change to what is on the screen.
+    func moveScreen(_ id: DesignScreen.ID, model: AppModel, owner: Owner) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+            .onChanged { [self] value in
+                guard let screen = model.store.screen(id) else { return }
+                moveScreen(screen, by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
+            }
+            .onEnded { [self] _ in
+                dropScreen(owner: owner, model: model)
+            }
     }
 
     func moveScreen(_ screen: DesignScreen, model: AppModel, owner: Owner) -> some Gesture {
@@ -702,7 +731,10 @@ private struct CanvasDragModifier<G: Gesture>: ViewModifier {
 
 /// The tap and drag target of every visible element, and of every screen's name, laid
 /// out in canvas points. Its body depends on the design and the zoom, not on where the
-/// canvas has scrolled to, so panning doesn't rebuild it.
+/// canvas has scrolled to, so panning doesn't rebuild it. Each target is a view of its own,
+/// given where it lies and compared by that alone: a change to the design builds only the
+/// targets of what it moved, where every target, with its tap and its drag, was built again
+/// for every change, each frame of a drag among them (audit C6).
 private struct ElementTargets: View {
     @Environment(AppModel.self) private var model
     let drags: CanvasDrags
@@ -714,39 +746,88 @@ private struct ElementTargets: View {
         ZStack(alignment: .topLeading) {
             ForEach(store.screens) { screen in
                 if store.canvas.showsFrameNames {
-                    area(screen.labelFrame, minimum: minimum)
-                        .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { model.targetTapped(.screen(screen.id), at: $0) }
-                        .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
+                    ScreenNameTarget(id: screen.id, frame: screen.labelFrame, isLocked: screen.isLocked == true, minimum: minimum, model: model, drags: drags)
+                        .equatable()
                 }
                 ForEach(screen.elements.filter { !$0.isHidden }) { element in
-                    target(for: element, ref: .init(host: .screen(screen.id), element: element.id), placement: screen.placement, on: screen, minimum: minimum)
+                    ElementTarget(
+                        ref: .init(host: .screen(screen.id), element: element.id), frame: screen.placement.canvasRect(for: element.frame),
+                        degrees: element.resolvedRotation, isLocked: element.isLocked, minimum: minimum, model: model, drags: drags
+                    )
+                    .equatable()
                 }
             }
             // A drawing on the ink canvas has no target here: a tap on its ink picks it, and
             // a drag across it is free to pan the canvas.
             ForEach(store.floating.filter { !$0.element.isHidden && $0.element.isPickedByItsFrame }) { floating in
-                target(for: floating.element, ref: .init(host: .canvas, element: floating.id), placement: floating.placement, on: nil, minimum: minimum)
+                ElementTarget(
+                    ref: .init(host: .canvas, element: floating.id), frame: floating.placement.canvasRect(for: floating.element.frame),
+                    degrees: floating.element.resolvedRotation, isLocked: floating.element.isLocked, minimum: minimum, model: model, drags: drags
+                )
+                .equatable()
             }
         }
         .frame(width: Viewport.canvasSize.width, height: Viewport.canvasSize.height, alignment: .topLeading)
     }
+}
 
-    /// An invisible area in canvas points that takes touches.
-    private func area(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -> some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .frame(width: max(rect.width, minimum), height: max(rect.height, minimum))
-            .rotationEffect(.degrees(degrees))
-            .position(x: rect.midX, y: rect.midY)
+/// An invisible area in canvas points that takes touches.
+private func targetArea(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -> some View {
+    Color.clear
+        .contentShape(Rectangle())
+        .frame(width: max(rect.width, minimum), height: max(rect.height, minimum))
+        .rotationEffect(.degrees(degrees))
+        .position(x: rect.midX, y: rect.midY)
+}
+
+/// One element's target: where it lies on the canvas, in canvas points, and whether it can
+/// be dragged. It reads nothing from the model that would build it again otherwise: what
+/// a tap or a drag acts on is looked up as it happens.
+private struct ElementTarget: View, Equatable {
+    let ref: DesignStore.ElementRef
+    let frame: CGRect
+    let degrees: Double
+    let isLocked: Bool
+    let minimum: CGFloat
+    /// For what a tap and a drag do; not part of where the target lies.
+    let model: AppModel
+    let drags: CanvasDrags
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.ref == b.ref && a.frame == b.frame && a.degrees == b.degrees && a.isLocked == b.isLocked && a.minimum == b.minimum
     }
 
-    /// `screen` is the screen the element is on, or nil on the open canvas.
-    private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?, minimum: CGFloat) -> some View {
-        area(placement.canvasRect(for: element.frame), degrees: element.resolvedRotation, minimum: minimum)
+    var body: some View {
+        #if DEBUG
+        let _ = CanvasWork.targetsBuilt += 1
+        #endif
+        targetArea(frame, degrees: degrees, minimum: minimum)
             // Ink lies over the element: where it does, a tap or a drag is the drawing's.
-            .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { model.targetTapped(.element(ref), at: $0) }
-            .canvasDrag(drags, model: model, isEnabled: !element.isLocked) { owner in
-                drags.adjustOnTarget(ref, element: element, placement: placement, on: screen, model: model, owner: owner)
+            .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { [model, ref] in model.targetTapped(.element(ref), at: $0) }
+            .canvasDrag(drags, model: model, isEnabled: !isLocked) { [drags, model, ref] owner in
+                drags.adjustOnTarget(ref, model: model, owner: owner)
+            }
+    }
+}
+
+/// A screen's name, which picks the screen and drags it.
+private struct ScreenNameTarget: View, Equatable {
+    let id: DesignScreen.ID
+    let frame: CGRect
+    let isLocked: Bool
+    let minimum: CGFloat
+    let model: AppModel
+    let drags: CanvasDrags
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.id == b.id && a.frame == b.frame && a.isLocked == b.isLocked && a.minimum == b.minimum
+    }
+
+    var body: some View {
+        targetArea(frame, minimum: minimum)
+            .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { [model, id] in model.targetTapped(.screen(id), at: $0) }
+            .canvasDrag(drags, model: model, isEnabled: !isLocked) { [drags, model, id] owner in
+                drags.moveScreen(id, model: model, owner: owner)
             }
     }
 }
@@ -828,3 +909,26 @@ private struct SpacingOverlay: View {
         .allowsHitTesting(false)
     }
 }
+
+#if DEBUG
+/// How much of the board a change to the design during a drag works through: for the tests
+/// that hold a drag to doing only what its own frames need (audit C6).
+@MainActor
+enum CanvasWork {
+    /// Strokes read out of PencilKit to show the design's drawings.
+    static var strokesRead = 0
+    /// Checks put off until after a change, of whether what a drag moves is still there.
+    static var dragChecks = 0
+    /// Element targets built, each with its tap and drag.
+    static var targetsBuilt = 0
+    /// Drag owners made: one each time a view carrying a drag is made.
+    static var ownersMade = 0
+
+    static func reset() {
+        strokesRead = 0
+        dragChecks = 0
+        targetsBuilt = 0
+        ownersMade = 0
+    }
+}
+#endif

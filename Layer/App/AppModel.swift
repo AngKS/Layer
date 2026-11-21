@@ -340,19 +340,34 @@ final class AppModel {
             document.update { $0.content = content }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
-            // After this change is done with: ending a drag ends the edit it is part of.
-            if self?.drags?.isDragging == true {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    drags?.endIfDraggedIsGone(model: self)
-                }
-            }
+            // Something else may have locked or taken away what a finger is dragging.
+            self?.checkDragAfterChange()
             self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.stopGeneratingForAScreenThatIsGone()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
+        }
+    }
+
+    /// The check put off until after a change, of whether what a drag moves is still there.
+    @ObservationIgnored private var dragCheck: Task<Void, Never>?
+
+    /// Sees, once the change being told of is done with, whether a drag under way still has
+    /// what it moves: ending the drag ends the edit the change may be part of. Not for the
+    /// drag's own frames, which neither lock nor take away what it moves, and once for all
+    /// the changes made before it runs. A task was made for every change, each frame of a
+    /// drag among them (audit C6).
+    private func checkDragAfterChange() {
+        guard dragCheck == nil, let drags, drags.isDragging, !drags.isMakingChange(in: store) else { return }
+        #if DEBUG
+        CanvasWork.dragChecks += 1
+        #endif
+        dragCheck = Task { @MainActor [weak self] in
+            guard let self else { return }
+            dragCheck = nil
+            drags.endIfDraggedIsGone(model: self)
         }
     }
 

@@ -1,0 +1,189 @@
+import CoreGraphics
+import PencilKit
+import SwiftUI
+import Testing
+import UIKit
+@testable import Layer
+
+private func stroke(from start: CGPoint, length: CGFloat) -> PKStroke {
+    let points: [PKStrokePoint] = (0..<12).map { (index: Int) -> PKStrokePoint in
+        let x: CGFloat = start.x + length * CGFloat(index) / 11
+        let y: CGFloat = start.y + CGFloat(index % 3)
+        return PKStrokePoint(location: CGPoint(x: x, y: y), timeOffset: Double(index) * 0.01, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+    }
+    return PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: InkGeometry.newStrokeDate()))
+}
+
+/// A busy board: a phone screen with 40 lines of text, drawn at half size at (100, 50), and
+/// 20 drawings of 10 strokes each on the open canvas beside it, 200 strokes in all.
+@MainActor
+private struct BusyBoard {
+    let model = AppModel(document: LayerDocument())
+    let screen: DesignScreen.ID
+    let lines: [DesignStore.ElementRef]
+    static let strokes = 200
+
+    var store: DesignStore { model.store }
+
+    init() {
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
+        lines = model.store.setElements((0..<40).map { index in
+            DesignElement(kind: .text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
+        }, on: screen, replacing: true)
+        for index in 0..<20 {
+            let corner = CGPoint(x: 700 + CGFloat(index % 4) * 120, y: 80 + CGFloat(index / 4) * 140)
+            let strokes = (0..<10).map { line in stroke(from: CGPoint(x: corner.x, y: corner.y + CGFloat(line) * 9), length: 80) }
+            model.store.addFloating(DesignElement.drawing(strokes)!, scale: 1)
+        }
+        model.store.updateCanvas { $0.snapsToGuides = false }
+        model.tool = .select
+    }
+
+    /// One frame of a finger dragging `ref` `dx` across the glass since it landed.
+    func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
+        guard let (element, placement) = store.resolve(ref) else { return }
+        drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model) {
+            drags.moveRule(for: element, placement: placement, on: store.screen(screen), model: model)
+        }
+    }
+}
+
+/// A design change made during a drag does what that change needs, not whole-board work on
+/// every frame (audit C6): the ink isn't read out of PencilKit unless a drawing changed, and
+/// no task is put off for every frame to see whether what is dragged is still there.
+@MainActor
+@Suite("What a drag's frames cost")
+struct CanvasDragWorkTests {
+    @Test func aDragOfAnElementReadsNoInkAndPutsOffNoTaskPerFrame() throws {
+        let board = BusyBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        board.model.ink = coordinator
+        #expect(coordinator.documentCanvas.drawing.strokes.count == BusyBoard.strokes)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+
+        CanvasWork.reset()
+        for frame in 1...60 { board.drag(drags, board.lines[5], by: CGFloat(frame), owner: owner) }
+        drags.dropElement(board.lines[5], findsNewHome: true, owner: owner, model: board.model)
+        let read = CanvasWork.strokesRead, checks = CanvasWork.dragChecks
+
+        // 60 × 200 then (12,000): the whole canvas's strokes on every frame. And a task for
+        // every frame (60).
+        #expect(read == 0, "strokes read out of PencilKit during a 60-frame drag: \(read)")
+        #expect(checks == 0, "checks put off during a 60-frame drag: \(checks)")
+        #expect(coordinator.documentCanvas.drawing.strokes.count == BusyBoard.strokes, "the ink is still all there")
+        #expect(!board.store.isEditing)
+    }
+
+    /// A drawing dragged is shown where it goes on every frame, as before.
+    @Test func aDragOfADrawingStillMovesItsInk() throws {
+        let board = BusyBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        board.model.ink = coordinator
+        let drawing = try #require(board.store.floating.first { $0.element.kind == .drawing })
+        let ref = DesignStore.ElementRef(host: .canvas, element: drawing.id)
+        let area = drawing.canvasFrame
+        /// Its strokes, wherever they are now: those in its row that start past `x`.
+        func strokes(startingPast x: CGFloat) -> Int {
+            coordinator.documentCanvas.drawing.strokes.filter { stroke in
+                let bounds = stroke.renderBounds
+                return bounds.midY > area.minY && bounds.midY < area.maxY && bounds.minX > x && bounds.minX < area.minX + 40
+            }.count
+        }
+        #expect(strokes(startingPast: area.minX + 20) == 0)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        for frame in 1...10 {
+            board.drag(drags, ref, by: CGFloat(frame) * 3, owner: owner)
+            #expect(strokes(startingPast: area.minX + CGFloat(frame) * 3 - 6) == 10, "frame \(frame): its ink is where it has been dragged to")
+        }
+        drags.dropElement(ref, findsNewHome: true, owner: owner, model: board.model)
+    }
+
+    /// Changes made by something else while a drag is under way, a spoken command say, are
+    /// checked once after they are made, however many there were.
+    @Test func changesMadeBesideADragAreCheckedOnceAfterThem() async throws {
+        let board = BusyBoard()
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        board.drag(drags, board.lines[5], by: 10, owner: owner)
+        CanvasWork.reset()
+        for index in 20..<23 {
+            board.store.asOwnStep { board.store.update(board.lines[index]) { $0.text = "Changed" } }
+        }
+        #expect(CanvasWork.dragChecks == 1)
+        for _ in 0..<5 { await Task.yield() }
+        #expect(drags.isDragging, "what it drags is still there")
+        board.store.asOwnStep { board.store.update(board.lines[5]) { $0.isLocked = true } }
+        for _ in 0..<5 { await Task.yield() }
+        #expect(!drags.isDragging, "locked meanwhile, it is let go of")
+    }
+}
+
+extension HostedWindowSuites {
+    /// The canvas's element targets, each with its tap and drag, while an element is dragged.
+    @MainActor
+    @Suite("The canvas's targets during a drag", .serialized)
+    struct CanvasTargetsWorkTests {
+        /// Lets SwiftUI catch up with what has changed.
+        private func settle(_ view: UIView, for duration: Duration = .milliseconds(100)) async throws {
+            try await Task.sleep(for: duration)
+            view.layoutIfNeeded()
+        }
+
+        /// Nudges a line, now and then, until a change to the design builds at most its own
+        /// target. For a while after a window first shows, SwiftUI builds every view on every
+        /// update whatever it is given (see `LayersPanelWorkTests`).
+        private func waitForTargetsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
+            for step in 0..<40 {
+                let before = CanvasWork.targetsBuilt
+                model.store.update(ref) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
+                try await Task.sleep(for: .milliseconds(50))
+                if CanvasWork.targetsBuilt - before <= 1 { return }
+            }
+        }
+
+        private func show(_ board: BusyBoard) async throws -> (UIWindow, UIView) {
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
+            let host = UIHostingController(rootView: SelectionLayer().environment(board.model))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            for _ in 0..<20 where CanvasWork.targetsBuilt == 0 || board.model.drags == nil { try await settle(host.view) }
+            return (window, host.view)
+        }
+
+        @Test func aDragBuildsOnlyTheTargetOfWhatItMoves() async throws {
+            let board = BusyBoard()
+            CanvasWork.reset()
+            let (window, view) = try await show(board)
+            defer { window.isHidden = true }
+            #expect(CanvasWork.targetsBuilt >= 40, "a target for each line (a drawing has none: its ink is picked)")
+            let drags = try #require(board.model.drags)
+
+            // Measured again, up to three times, while something outside has SwiftUI building
+            // every view whatever it is given. The targets as they were were all built on every
+            // frame each time, so they can't pass by a retry.
+            var built = Int.max
+            for _ in 0..<3 where built > 70 {
+                try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
+                CanvasWork.reset()
+                let owner = CanvasDrags.Owner()
+                for frame in 1...60 {
+                    board.drag(drags, board.lines[5], by: CGFloat(frame), owner: owner)
+                    view.layoutIfNeeded()
+                    try await Task.sleep(for: .milliseconds(4))
+                }
+                drags.dropElement(board.lines[5], findsNewHome: true, owner: owner, model: board.model)
+                try await settle(view)
+                built = CanvasWork.targetsBuilt
+            }
+            // Every target on every frame then: 40 lines, 60 times (2,441 measured); now only the
+            // line dragged, once a frame (60).
+            #expect(built <= 70, "targets built during a 60-frame drag: \(built)")
+        }
+    }
+}
