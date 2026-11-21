@@ -309,12 +309,27 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     func canvasRect(for local: CGRect) -> CGRect { placement.canvasRect(for: local) }
     func localRect(for canvas: CGRect) -> CGRect { placement.localRect(for: canvas) }
 
-    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file.
+    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name
+    /// that is one of the types the view's own code uses, or a Swift keyword, has "Screen"
+    /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
     var typeName: String {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }
-        return cleaned
+        return Self.reservedTypeNames.contains(cleaned) ? cleaned + "Screen" : cleaned
     }
+
+    /// The types generated code uses, and the keywords a name of letters alone can be.
+    private static let reservedTypeNames: Set<String> = [
+        "View", "Text", "Image", "Button", "Color", "Toggle", "Divider", "Path", "Spacer", "TextField", "ProgressView",
+        "VStack", "HStack", "ZStack", "NavigationStack", "Rectangle", "RoundedRectangle", "Circle", "Capsule", "Ellipse",
+        "StrokeStyle", "CGPoint", "CGSize", "CGFloat", "String", "Int", "Double", "Bool", "Optional", "SwiftUI",
+        "Any", "Self", "Type", "Protocol", "Never",
+        "as", "associatedtype", "break", "case", "catch", "class", "continue", "default", "defer", "deinit", "do",
+        "else", "enum", "extension", "fallthrough", "false", "fileprivate", "for", "func", "guard", "if", "import",
+        "in", "init", "inout", "internal", "is", "let", "nil", "open", "operator", "private", "protocol", "public",
+        "repeat", "rethrows", "return", "self", "some", "static", "struct", "subscript", "super", "switch", "throw",
+        "throws", "true", "try", "typealias", "var", "where", "while",
+    ]
 }
 
 extension DesignScreen {
