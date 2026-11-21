@@ -291,27 +291,31 @@ private struct SeveralSettings: View {
         }
         .disabled(isLocked)
 
-        let rounded = elements.first(where: \.hasCornerRadius)
+        // Corners, opacity and angle are for what isn't locked, as they are for one element:
+        // the value shown is an unlocked element's, and only unlocked ones change.
+        let unlocked = elements.filter { !$0.isLocked }
+        let rounded = unlocked.first(where: \.hasCornerRadius)
+        let faded = unlocked.first { $0.kind.spec.hasEffects }
         let effects = elements.first { $0.kind.spec.hasEffects }
         let turnable = model.canTurnSelection
-        if rounded != nil || effects != nil || turnable {
+        if rounded != nil || faded != nil || turnable {
             PanelSection {
                 HStack(spacing: 8) {
                     if let rounded {
                         NumberField("R", label: "Corner radius", value: Binding(
                             get: { rounded.resolvedCornerRadius },
-                            set: { radius in change(refs, where: \.hasCornerRadius) { $0.cornerRadius = radius } }
+                            set: { radius in change(refs, where: { $0.hasCornerRadius && !$0.isLocked }) { $0.cornerRadius = radius } }
                         ), range: 0...999)
                     }
-                    if let effects {
+                    if let faded {
                         NumberField("%", label: "Opacity", value: Binding(
-                            get: { (effects.resolvedOpacity * 100).rounded() },
-                            set: { percent in change(refs, where: \.kind.spec.hasEffects) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                            get: { (faded.resolvedOpacity * 100).rounded() },
+                            set: { percent in change(refs, where: { $0.kind.spec.hasEffects && !$0.isLocked }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
                     }
-                    // Each element is turned to the angle shown (the first one's), on its own
-                    // pivot; a screen among them leaves nothing to turn.
-                    if turnable, let first = elements.first {
+                    // Each element is turned to the angle shown (the first unlocked one's), on
+                    // its own pivot; a screen among them leaves nothing to turn.
+                    if turnable, let first = unlocked.first {
                         NumberField("°", label: "Rotation", value: Binding(
                             get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
                             set: { degrees in change(refs, where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
