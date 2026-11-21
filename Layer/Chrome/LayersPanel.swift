@@ -16,8 +16,8 @@ struct LayersPanel: View {
             tabs
                 .padding(12)
             switch model.panelTab {
-            case .layers: layers
-            case .code: code
+            case .layers: LayersList()
+            case .code: CodePane(screenID: $codeScreenID)
             }
         }
         if isSheet {
@@ -60,26 +60,42 @@ struct LayersPanel: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
+}
 
-    // MARK: Layers
+// MARK: Layers
 
-    private var layers: some View {
+/// The design's layers, topmost first under each screen, then those on the open canvas. Only
+/// this reads the design, the selection and the hover, which change on every frame of a drag
+/// and every move of the pencil: each row is given what it shows, and is built again only
+/// when that changes.
+private struct LayersList: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
         let store = model.store
-        return ScrollView {
+        let selection = model.selection
+        let hovered = model.hovered
+        ScrollView {
+            // Not lazy: a lazy stack built every row in view again on every change to the
+            // design, whether or not what the row shows had changed.
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(store.screens) { screen in
-                    group(screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", isSelected: model.selection?.contains(.screen(screen.id)) == true, target: .screen(screen.id)) {
-                        select(.screen(screen.id))
-                    }
+                    let target = CanvasSelection.screen(screen.id)
+                    LayerGroupRow(
+                        model: model, name: screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", target: target,
+                        isSelected: selection?.contains(target) == true, isHovered: hovered == target
+                    )
+                    .equatable()
                     // Topmost layer first, as layer lists usually read.
                     ForEach(screen.elements.reversed()) { element in
-                        layerRow(element, ref: .init(host: .screen(screen.id), element: element.id))
+                        row(element, ref: .init(host: .screen(screen.id), element: element.id), selection: selection, hovered: hovered)
                     }
                 }
                 if !store.floating.isEmpty {
-                    group("Canvas", symbol: "square.dashed", isSelected: false, target: nil, action: nil)
+                    LayerGroupRow(model: model, name: "Canvas", symbol: "square.dashed", target: nil, isSelected: false, isHovered: false)
+                        .equatable()
                     ForEach(store.floating.reversed()) { floating in
-                        layerRow(floating.element, ref: .init(host: .canvas, element: floating.id))
+                        row(floating.element, ref: .init(host: .canvas, element: floating.id), selection: selection, hovered: hovered)
                     }
                 }
             }
@@ -88,15 +104,67 @@ struct LayersPanel: View {
         }
     }
 
-    private func select(_ selection: CanvasSelection) {
-        model.tool = .select
-        model.selection = selection
+    private func row(_ element: DesignElement, ref: DesignStore.ElementRef, selection: CanvasSelection?, hovered: CanvasSelection?) -> some View {
+        let target = CanvasSelection.element(ref)
+        return LayerRow(
+            model: model, ref: ref, symbol: element.symbol ?? element.kind.symbol, name: element.displayName,
+            isLocked: element.isLocked, isHidden: element.isHidden,
+            isSelected: selection?.contains(target) == true, isHovered: hovered == target
+        )
+        .equatable()
+    }
+}
+
+/// What picking a layer in the list does: selects it, with the palette put away.
+@MainActor
+private func pickLayer(_ selection: CanvasSelection, in model: AppModel) {
+    model.tool = .select
+    model.selection = selection
+}
+
+/// Hovering over a row outlines its layer on the canvas.
+@MainActor
+private func hoverLayer(_ target: CanvasSelection?, _ isInside: Bool, in model: AppModel) {
+    guard let target else { return }
+    if isInside {
+        model.isHoveringList = true
+        model.hovered = target
+    } else if model.hovered == target {
+        model.isHoveringList = false
+        model.hovered = nil
+    }
+}
+
+/// A row is filled when its layer is selected, and tinted while it is hovered over, here
+/// or on the canvas.
+private func rowFill(isSelected: Bool, isHovered: Bool) -> Color {
+    if isSelected { return Color(uiColor: .secondarySystemFill) }
+    if isHovered { return Color.accentColor.opacity(0.10) }
+    return .clear
+}
+
+/// The heading for a screen's layers, which selects the screen, or for the layers on the
+/// open canvas. Like a layer's row, it is built from what it shows alone (see `LayerRow`).
+private struct LayerGroupRow: View, Equatable {
+    /// For what a tap and hover do; not part of what the heading shows.
+    let model: AppModel
+    let name: String
+    let symbol: String
+    /// What the heading picks: its screen, or nothing for the open canvas.
+    let target: CanvasSelection?
+    let isSelected: Bool
+    let isHovered: Bool
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.name == b.name && a.symbol == b.symbol && a.target == b.target && a.isSelected == b.isSelected && a.isHovered == b.isHovered
     }
 
-    /// The heading for a screen's layers, or for the layers on the open canvas.
-    private func group(_ name: String, symbol: String, isSelected: Bool, target: CanvasSelection?, action: (() -> Void)?) -> some View {
+    var body: some View {
+        #if DEBUG
+        let _ = LayersPanelWork.rowBuilt()
+        #endif
         Button {
-            action?()
+            if let target { pickLayer(target, in: model) }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
@@ -109,28 +177,51 @@ struct LayersPanel: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(rowFill(isSelected: isSelected, target: target), in: .rect(cornerRadius: 10))
+            .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .onHover { hover(target, $0) }
-        .disabled(action == nil)
+        .onHover { hoverLayer(target, $0, in: model) }
+        .disabled(target == nil)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+}
 
-    private func layerRow(_ element: DesignElement, ref: DesignStore.ElementRef) -> some View {
-        let isSelected = model.selection?.contains(.element(ref)) == true
-        return HStack(spacing: 0) {
+/// One layer's row, with its lock and eye. It is given what it shows, and compared by that
+/// alone, so that it is built again only when that changes: not for a change elsewhere in the
+/// design, such as each frame of a drag, nor for the hover moving between other rows. It
+/// reads nothing from the model or the environment that would build it again otherwise.
+private struct LayerRow: View, Equatable {
+    /// For what a tap, the lock, the eye and hover do; not part of what the row shows.
+    let model: AppModel
+    let ref: DesignStore.ElementRef
+    let symbol: String
+    let name: String
+    let isLocked: Bool
+    let isHidden: Bool
+    let isSelected: Bool
+    let isHovered: Bool
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.ref == b.ref && a.symbol == b.symbol && a.name == b.name && a.isLocked == b.isLocked
+            && a.isHidden == b.isHidden && a.isSelected == b.isSelected && a.isHovered == b.isHovered
+    }
+
+    var body: some View {
+        #if DEBUG
+        let _ = LayersPanelWork.rowBuilt()
+        #endif
+        HStack(spacing: 0) {
             Button {
                 // A hidden layer can still be picked here, its outline showing where it is.
-                select(.element(ref))
+                pickLayer(.element(ref), in: model)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: element.symbol ?? element.kind.symbol)
+                    Image(systemName: symbol)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
-                    Text(element.displayName)
+                    Text(name)
                         .font(.system(size: 14))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -141,29 +232,29 @@ struct LayersPanel: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(element.displayName)
+            .accessibilityLabel(name)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
             // A layer's lock and eye show when they are on, or when it is selected.
-            if isSelected || element.isLocked {
+            if isSelected || isLocked {
                 rowToggle(
-                    element.isLocked ? "Unlock \(element.displayName)" : "Lock \(element.displayName)",
-                    symbol: element.isLocked ? "lock.fill" : "lock.open",
-                    isOn: element.isLocked
+                    isLocked ? "Unlock \(name)" : "Lock \(name)",
+                    symbol: isLocked ? "lock.fill" : "lock.open",
+                    isOn: isLocked
                 ) { model.toggleLock(ref) }
             }
-            if isSelected || element.isHidden {
+            if isSelected || isHidden {
                 rowToggle(
-                    element.isHidden ? "Show \(element.displayName)" : "Hide \(element.displayName)",
-                    symbol: element.isHidden ? "eye.slash" : "eye",
-                    isOn: element.isHidden
+                    isHidden ? "Show \(name)" : "Hide \(name)",
+                    symbol: isHidden ? "eye.slash" : "eye",
+                    isOn: isHidden
                 ) { model.toggleHidden(ref) }
             }
             Spacer().frame(width: 4)
         }
-        .opacity(element.isHidden ? 0.5 : 1)
-        .background(rowFill(isSelected: isSelected, target: .element(ref)), in: .rect(cornerRadius: 10))
-        .onHover { hover(.element(ref), $0) }
+        .opacity(isHidden ? 0.5 : 1)
+        .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
+        .onHover { hoverLayer(.element(ref), $0, in: model) }
     }
 
     /// A lock or eye on a layer's row.
@@ -178,38 +269,26 @@ struct LayersPanel: View {
         .buttonStyle(.plain)
         .accessibilityLabel(label)
     }
+}
 
-    /// A row is filled when its layer is selected, and tinted while it is hovered over,
-    /// here or on the canvas.
-    private func rowFill(isSelected: Bool, target: CanvasSelection?) -> Color {
-        if isSelected { return Color(uiColor: .secondarySystemFill) }
-        if let target, model.hovered == target { return Color.accentColor.opacity(0.10) }
-        return .clear
-    }
+// MARK: Code
 
-    /// Hovering over a row outlines its layer on the canvas.
-    private func hover(_ target: CanvasSelection?, _ isInside: Bool) {
-        guard let target else { return }
-        if isInside {
-            model.isHoveringList = true
-            model.hovered = target
-        } else if model.hovered == target {
-            model.isHoveringList = false
-            model.hovered = nil
-        }
-    }
+/// The Code tab: a screen's SwiftUI, made once the screen has stopped changing rather than on
+/// every frame of a drag, and coloured once for each time it is made.
+private struct CodePane: View {
+    @Environment(AppModel.self) private var model
+    /// The screen whose code is shown; the first screen until another is picked.
+    @Binding var screenID: DesignScreen.ID?
+    @State private var preview = CodePreview()
 
-    // MARK: Code
-
-    @ViewBuilder
-    private var code: some View {
+    var body: some View {
         let screens = model.store.screens
-        if let screen = screens.first(where: { $0.id == codeScreenID }) ?? screens.first {
-            let source = SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code)
+        if let screen = screens.first(where: { $0.id == screenID }) ?? screens.first {
+            let shown = CodePreview.Shown(screen: screen, settings: model.store.canvas.code)
             HStack {
                 Menu {
                     ForEach(screens) { other in
-                        Button(SwiftUICodeGenerator.fileName(for: other)) { codeScreenID = other.id }
+                        Button(SwiftUICodeGenerator.fileName(for: other)) { screenID = other.id }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -226,13 +305,48 @@ struct LayersPanel: View {
                 .buttonStyle(.plain)
                 Spacer()
                 CodeOptionsMenu()
-                CopyButton(text: source)
+                CopyButton(text: preview.source)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
 
-            CodeView(source: source)
+            CodeView(lines: preview.lines)
+                // Each change to the screen starts this again, which cancels the wait before.
+                .task(id: shown) { await preview.show(shown) }
         }
+    }
+}
+
+/// A screen's code as the Code tab shows it, and its lines coloured.
+@MainActor @Observable
+private final class CodePreview {
+    /// What the code is made from.
+    struct Shown: Equatable {
+        var screen: DesignScreen
+        var settings: CodeSettings
+    }
+
+    /// How long a screen has to stay as it is before its code is made again.
+    static let settle: Duration = .milliseconds(300)
+
+    private(set) var source = ""
+    private(set) var lines: [AttributedString] = []
+    @ObservationIgnored private var shown: Shown?
+
+    /// Makes the code for a screen. A new screen's shows at once; a change to the one shown,
+    /// once it has stayed as it is for `settle`. Called again meanwhile, the wait is cancelled.
+    func show(_ wanted: Shown) async {
+        guard wanted != shown else { return }
+        if shown?.screen.id == wanted.screen.id {
+            try? await Task.sleep(for: Self.settle)
+            guard !Task.isCancelled else { return }
+        }
+        shown = wanted
+        source = SwiftUICodeGenerator.code(for: wanted.screen, settings: wanted.settings)
+        lines = source.components(separatedBy: "\n").map(SwiftHighlighter.attributed)
+        #if DEBUG
+        LayersPanelWork.codeMade()
+        #endif
     }
 }
 
@@ -287,13 +401,12 @@ private struct CopyButton: View {
     }
 }
 
-/// Source code with line numbers and syntax colours. Long lines run off the edge and
-/// can be scrolled to.
+/// Source code with line numbers and syntax colours, a line at a time. Long lines run off
+/// the edge and can be scrolled to.
 private struct CodeView: View {
-    let source: String
+    let lines: [AttributedString]
 
     var body: some View {
-        let lines = source.components(separatedBy: "\n")
         ScrollView([.vertical, .horizontal]) {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
@@ -301,7 +414,7 @@ private struct CodeView: View {
                         Text("\(index + 1)")
                             .foregroundStyle(Theme.codeLineNumber)
                             .frame(width: 22, alignment: .trailing)
-                        Text(SwiftHighlighter.attributed(line))
+                        Text(line)
                     }
                     .lineLimit(1)
                 }
@@ -313,3 +426,21 @@ private struct CodeView: View {
         }
     }
 }
+
+#if DEBUG
+/// How often the panel builds a layer's row and generates a screen's code: for the tests
+/// that hold it to doing so only when what it shows has changed.
+@MainActor
+enum LayersPanelWork {
+    static var rows = 0
+    static var codes = 0
+
+    static func rowBuilt() { rows += 1 }
+    static func codeMade() { codes += 1 }
+
+    static func reset() {
+        rows = 0
+        codes = 0
+    }
+}
+#endif

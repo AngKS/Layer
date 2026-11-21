@@ -141,6 +141,7 @@
 		6CFC41C9DECBF999C184E829 /* ComponentSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19861EA94680E1443F344D14 /* ComponentSpec.swift */; };
 		6E368FE8E9296205E8B61A20 /* title_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 89BCFA94096E01D308318FA2 /* title_clean_1.json */; };
 		6ED0E39F303E24431DB8B072 /* body_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 83EACE39A1933E73EDE22325 /* body_jittered_1b.json */; };
+		6EEDB23E93684CC1B26AB427 /* LayersPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */; };
 		6FF5BD54A0848654E83B48BF /* scratchOut_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 6DCD29CBE5A03B6E15F90FD1 /* scratchOut_jittered_2b.json */; };
 		7090D84D41F2EB5963685A6B /* image_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = B1D2FF7572BE3BC72C090667 /* image_noisy_2.json */; };
 		718BBD36F1EB666DC10C683C /* HandwritingRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B6243D62E7152C04A2D74D /* HandwritingRecognizer.swift */; };
@@ -563,6 +564,7 @@
 		B913F32A038AC223100E64C4 /* avatar_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_2b.json; sourceTree = "<group>"; };
 		B99EA13F6706F71173016180 /* VoiceModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeUITests.swift; sourceTree = "<group>"; };
 		B9E6D9AAF13ACD16D213B2AC /* ScreenBlueprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBlueprint.swift; sourceTree = "<group>"; };
+		BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayersPanelTests.swift; sourceTree = "<group>"; };
 		BAA734A20F2453F4B1D3EB37 /* image_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_clean_1.json; sourceTree = "<group>"; };
 		BACC3382A545FA5EAB6241B7 /* Layer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Layer.entitlements; sourceTree = "<group>"; };
 		BBDCEE64E8D29C165584DF67 /* image_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_clean_2.json; sourceTree = "<group>"; };
@@ -836,6 +838,7 @@
 				477F1E99CE379C9A7BA707E3 /* FreeformTests.swift */,
 				C0E9CF91BDC7654B1CAA911E /* HostedModelTests.swift */,
 				FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */,
+				BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
 				C94018B0CE474C089DF26FFB /* PencilVoiceTests.swift */,
@@ -1470,6 +1473,7 @@
 				2B00E81F69D26F110A11E197 /* FreeformTests.swift in Sources */,
 				98E5D0F3B4AB52DA3528CA7F /* HostedModelTests.swift in Sources */,
 				B40438032782589250C74E31 /* HostedToolCallingTests.swift in Sources */,
+				6EEDB23E93684CC1B26AB427 /* LayersPanelTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
 				5366C1AC84EBB37F5F78B29B /* PencilVoiceTests.swift in Sources */,
