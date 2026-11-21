@@ -79,6 +79,9 @@ extension HostedWindowSuites {
             window.rootViewController = host
             window.makeKeyAndVisible()
             host.view.layoutIfNeeded()
+            // Before the field takes the keyboard: the on-screen keyboard coming up held the
+            // main thread, and the suites alongside, for half a second at a time.
+            for field in Self.textFields(in: host.view) { quiet(field) }
             return (window, host.view)
         }
 

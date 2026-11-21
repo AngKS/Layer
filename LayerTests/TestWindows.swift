@@ -39,10 +39,16 @@ private struct NoScene: Error {}
 @MainActor
 func quietTextField(frame: CGRect) -> UITextField {
     let field = UITextField(frame: frame)
+    quiet(field)
+    return field
+}
+
+/// Keeps the on-screen keyboard down for a field already made, such as SwiftUI's.
+@MainActor
+func quiet(_ field: UITextField) {
     field.inputView = UIView()
     field.inputAssistantItem.leadingBarButtonGroups = []
     field.inputAssistantItem.trailingBarButtonGroups = []
-    return field
 }
 
 /// The same for a text view.
