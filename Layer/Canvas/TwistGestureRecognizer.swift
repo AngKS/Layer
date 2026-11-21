@@ -193,7 +193,11 @@ final class TwistGestureRecognizer: UIGestureRecognizer {
         guard let first else { return }
         tracker.moved(first: first.location(in: view), second: second?.location(in: view), time: event.timestamp)
         switch tracker.verdict {
-        case .twist: state = state == .possible ? .began : .changed
+        case .twist where state == .possible:
+            // What is selected may have changed since the fingers landed. Begun with nothing
+            // to turn, the twist would hold off the canvas's pan and pinch for nothing.
+            if canTurn() { state = .began } else { fail() }
+        case .twist: state = .changed
         case .notATwist: fail()
         case .undecided: break
         }

@@ -1506,6 +1506,23 @@ struct TwistTests {
         withExtendedLifetime((view, first)) {}
     }
 
+    /// What is selected may change between the fingers landing and turning (a screen
+    /// selected by a drag in its margin, say). The twist then fails rather than begin: begun
+    /// with nothing to turn, it held off the canvas's pan and pinch, and the fingers did nothing.
+    /// (Failed outside a real event, as here, UIKit reports it as possible again at once.)
+    @Test func aTwistThatCanNoLongerTurnFailsRatherThanBegins() {
+        let (twist, view, first, second) = twoFingersDown()
+        twist.canTurn = { false }
+        second.point = finger(at: 12, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.2))
+        #expect(twist.state == .failed || twist.state == .possible)
+        // It never begins, however far they turn on.
+        second.point = finger(at: 30, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.3))
+        #expect(twist.state == .failed || twist.state == .possible)
+        withExtendedLifetime((view, first)) {}
+    }
+
     /// A third finger ends the twist: whatever the fingers are doing now, it isn't this one.
     /// (Called outside a real event, as here, UIKit reports the cancel of a twist whose
     /// beginning it never delivered as a failure; either way it is over.)
