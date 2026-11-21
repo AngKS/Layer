@@ -834,9 +834,10 @@ struct DesignFileTests {
         let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
         model.fileURL = url
 
-        // Changed since the system last saved it.
+        // Changed since the system last saved it, then shared as the share menu shares it.
         model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let shared = try await model.fileToShare()
+        #expect(ShareItem.offered(for: model) == [.picture, .designFile])
+        let shared = try #require(try await ShareItem.designFile.file(for: model))
         defer { try? FileManager.default.removeItem(at: shared.deletingLastPathComponent()) }
 
         #expect(shared.lastPathComponent == "Untitled 4.layer")
@@ -845,7 +846,37 @@ struct DesignFileTests {
         #expect(copy.preview != nil, "with a picture of the board as it is")
         // The design's own file is left to the system to save.
         #expect(try DesignFile.content(at: url).screens.isEmpty)
+
+        // Once the share sheet closes, the copy goes.
+        ShareItem.designFile.cleanUp(shared)
+        #expect(!FileManager.default.fileExists(atPath: shared.deletingLastPathComponent().path))
         model.close()
+    }
+
+    @Test func copiesToShareLeaveNoFoldersBehind() async throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        // One copy from a share sheet whose closing went unheard an hour ago, and one that
+        // another window may be sharing now.
+        let old = temporary.appendingPathComponent("Design-old"), recent = temporary.appendingPathComponent("Design-recent")
+        for folder in [old, recent] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-3600)], ofItemAtPath: old.path)
+
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        model.fileURL = temporary.appendingPathComponent("Shop.layer")
+        let shared = try await model.fileToShare(in: temporary)
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: recent.path))
+
+        // A copy that can't be written leaves nothing behind: its name is too long here.
+        let unwritable = AppModel(document: LayerDocument(file: DesignFile()))
+        unwritable.fileURL = temporary.appendingPathComponent(String(repeating: "a", count: 300) + ".layer")
+        await #expect(throws: (any Error).self) { try await unwritable.fileToShare(in: temporary) }
+        let left = try FileManager.default.contentsOfDirectory(atPath: temporary.path).filter { $0.hasPrefix("Design-") }
+        #expect(Set(left) == ["Design-recent", shared.deletingLastPathComponent().lastPathComponent])
+        model.close()
+        unwritable.close()
     }
 
     @Test func openingADesignShowsItsContent() throws {

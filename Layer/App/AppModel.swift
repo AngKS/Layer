@@ -870,19 +870,28 @@ final class AppModel {
     /// A copy of the design as it is now, to share. The file on disk can be some seconds
     /// behind, since the system saves a while after each change. The ink still waiting
     /// for the pen to be put down is taken in and the board's picture drawn first; the
-    /// copy is written to a folder of its own on another thread, under the file's name.
-    func fileToShare() async throws -> URL {
+    /// copy is written on another thread, under the file's name, in a folder of its own in
+    /// `temporary`, which the share menu takes away when its sheet closes (see `ShareItem`).
+    /// Old copies whose sheet closed unheard are cleared first, and a copy that can't be
+    /// written leaves nothing behind.
+    func fileToShare(in temporary: URL = FileManager.default.temporaryDirectory) async throws -> URL {
         ink?.flushPendingInk()
         refreshPreview()
         let file = document.current
         let name = [fileURL?.deletingPathExtension().lastPathComponent, store.title.map(DesignFileName.fileName(for:))]
             .compactMap(\.self).first { !$0.isEmpty } ?? DesignFileName.untitled
         return try await Task.detached(priority: .userInitiated) {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Design-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(name).appendingPathExtension("layer")
-            try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
-            return url
+            ShareItem.clearOldCopies(in: temporary)
+            let folder = temporary.appendingPathComponent(ShareItem.copyPrefix + UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent(name).appendingPathExtension("layer")
+                try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+                return url
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                throw error
+            }
         }.value
     }
 

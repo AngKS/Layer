@@ -29,30 +29,8 @@ struct ShareMenu: View {
                     }
                 }
             }
-            Button("Image of Board", systemImage: "photo") {
-                Task {
-                    isPreparing = true
-                    defer { isPreparing = false }
-                    if let url = await BoardSnapshot.file(of: model) {
-                        picture = SharedPicture(urls: [url])
-                    } else {
-                        problem = "There is nothing on the board to make a picture of yet."
-                    }
-                }
-            }
-            if model.fileURL != nil {
-                // A copy of the design as it is, rather than the file as last saved.
-                Button("Design File", systemImage: "doc") {
-                    Task {
-                        isPreparing = true
-                        defer { isPreparing = false }
-                        do {
-                            picture = SharedPicture(urls: [try await model.fileToShare()])
-                        } catch {
-                            problem = "Layer couldn't make a copy of the design to share."
-                        }
-                    }
-                }
+            ForEach(ShareItem.offered(for: model), id: \.self) { item in
+                Button(item.title, systemImage: item.symbol) { share(item) }
             }
         } label: {
             // A big board takes a moment: the button spins meanwhile, in its own place.
@@ -63,10 +41,92 @@ struct ShareMenu: View {
         .disabled(isPreparing)
         .accessibilityLabel("Share")
         .popover(item: $picture) { picture in
-            ActivityView(items: picture.urls)
+            ActivityView(items: picture.urls, whenClosed: picture.whenClosed)
         }
         .alert(problem ?? "", isPresented: Binding { problem != nil } set: { if !$0 { problem = nil } }) {
             Button("OK", role: .cancel) {}
+        }
+    }
+
+    /// Makes what `item` shares from the design as it is now, and hands it to the share sheet.
+    private func share(_ item: ShareItem) {
+        Task {
+            isPreparing = true
+            defer { isPreparing = false }
+            do {
+                guard let url = try await item.file(for: model) else {
+                    problem = item.problem
+                    return
+                }
+                picture = SharedPicture(urls: [url]) { item.cleanUp(url) }
+            } catch {
+                problem = item.problem
+            }
+        }
+    }
+}
+
+/// What the share menu makes when one of its items is picked, from the design as it is
+/// then: a picture of the board, or a copy of the design.
+enum ShareItem: Hashable {
+    case picture, designFile
+
+    var title: String {
+        switch self {
+        case .picture: "Image of Board"
+        case .designFile: "Design File"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .picture: "photo"
+        case .designFile: "doc"
+        }
+    }
+
+    /// Said when nothing could be made to share.
+    var problem: String {
+        switch self {
+        case .picture: "There is nothing on the board to make a picture of yet."
+        case .designFile: "Layer couldn't make a copy of the design to share."
+        }
+    }
+
+    /// What the menu offers for a design: its file only once it has been saved somewhere.
+    @MainActor static func offered(for model: AppModel) -> [ShareItem] {
+        model.fileURL == nil ? [.picture] : [.picture, .designFile]
+    }
+
+    /// Makes the file to share: for the design, a copy of it as it is rather than the file
+    /// as last saved. Nil when there is nothing to make a picture of.
+    @MainActor func file(for model: AppModel) async throws -> URL? {
+        switch self {
+        case .picture: await BoardSnapshot.file(of: model)
+        case .designFile: try await model.fileToShare()
+        }
+    }
+
+    /// Takes away what was made, once the share sheet has closed: a copy of a design can be
+    /// large. A picture stays in the system's temporary folder, under the board's name.
+    func cleanUp(_ url: URL) {
+        let folder = url.deletingLastPathComponent()
+        guard self == .designFile, folder.lastPathComponent.hasPrefix(Self.copyPrefix) else { return }
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// The start of the name of each folder a copy of a design is made in.
+    static let copyPrefix = "Design-"
+
+    /// Clears the copies made more than ten minutes ago in `temporary`, whose share sheet
+    /// closed without saying so. Newer ones are left: another window may be sharing one.
+    static func clearOldCopies(in temporary: URL) {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+        let folders = (try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: Array(keys))) ?? []
+        let cutoff = Date.now.addingTimeInterval(-600)
+        for folder in folders where folder.lastPathComponent.hasPrefix(copyPrefix) {
+            guard let made = try? folder.resourceValues(forKeys: keys).contentModificationDate, made < cutoff else { continue }
+            try? FileManager.default.removeItem(at: folder)
         }
     }
 }
@@ -75,6 +135,8 @@ struct ShareMenu: View {
 private struct SharedPicture: Identifiable {
     let urls: [URL]
     let id = UUID()
+    /// Done once the share sheet has closed.
+    var whenClosed: (@Sendable () -> Void)?
 }
 
 /// The generated SwiftUI for every screen, written out as files to share.
@@ -97,9 +159,13 @@ enum CodeFiles {
 /// The system share sheet.
 private struct ActivityView: UIViewControllerRepresentable {
     let items: [Any]
+    var whenClosed: (@Sendable () -> Void)?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        // Told when the sheet closes, whether something was shared or not.
+        controller.completionWithItemsHandler = { [whenClosed] _, _, _, _ in whenClosed?() }
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
