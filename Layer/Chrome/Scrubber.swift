@@ -81,6 +81,20 @@ final class Scrubber {
         onEnd()
     }
 
+    /// A finger holds a field to scrub it. A ruler the pencil left up on another field is put
+    /// away first: the finger's steps are this field's, not the one the pencil was scrubbing.
+    func hold(_ field: Target) {
+        if let target, target.label != field.label || target.frame != field.frame { end() }
+        begin(field)
+    }
+
+    /// A finger holding a field has dragged this far sideways since it was held: the field
+    /// is scrubbed a step for every `pointsPerStep`.
+    func fingerDragged(_ field: Target, by width: CGFloat) {
+        hold(field)
+        scrub(to: Self.steps(forDrag: width, pointsPerStep: field.pointsPerStep))
+    }
+
     // MARK: Apple Pencil
 
     /// A squeeze over a field brings up its ruler, and the pencil need not stay squeezed:
@@ -100,6 +114,23 @@ final class Scrubber {
             }
         case .ended, .failed:
             isSqueezing = false
+        }
+    }
+
+    /// The pencil hovering anywhere in the window: coming into range, moving, or leaving it.
+    /// Only a roll made while it stays in range turns the value. The barrel turned in the
+    /// hand while the pencil was away, or touching the screen, isn't counted: it made the
+    /// value jump as the pencil came back.
+    func hover(_ state: UIGestureRecognizer.State, roll: Angle) {
+        switch state {
+        case .began:
+            // Turning counts from where the barrel is as the pencil comes back.
+            lastRoll = nil
+            rolled(to: roll)
+        case .changed:
+            rolled(to: roll)
+        default:
+            lastRoll = nil
         }
     }
 
@@ -245,9 +276,9 @@ struct PencilBridge: UIViewRepresentable {
             hover = recognizer
         }
 
-        @objc private func hovered(_ recognizer: UIHoverGestureRecognizer) {
+        @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {
             guard let scrubber, scrubber.target != nil else { return }
-            scrubber.rolled(to: .radians(recognizer.rollAngle))
+            scrubber.hover(recognizer.state, roll: .radians(recognizer.rollAngle))
         }
     }
 }

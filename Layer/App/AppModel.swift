@@ -1033,6 +1033,19 @@ final class AppModel {
         }
     }
 
+    /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
+    /// is drawn over every element and screen, so where a drawing's ink lies over the target
+    /// the tap picks the drawing, as hover and a tap with the palette up do.
+    func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
+        pick(inkTarget(at: viewPoint).map { .element($0) } ?? thing)
+    }
+
+    /// The drawing whose ink is at a point in the view. It lies over everything else and
+    /// takes a touch there, even where an element's target is under it.
+    func inkTarget(at viewPoint: CGPoint) -> DesignStore.ElementRef? {
+        drawing(at: viewport.canvasPoint(for: viewPoint))
+    }
+
     // MARK: Selecting several things
 
     /// Where fingers are resting on the canvas, in the view's points, not counting one
@@ -1153,23 +1166,27 @@ final class AppModel {
     /// True while the hover comes from the layers list rather than the canvas.
     var isHoveringList = false
 
-    /// The topmost element or screen at a point in the view, for hover.
+    /// The topmost element or screen at a point in the view, for hover, and for a tap or a
+    /// resting finger that reaches the model. Only what is drawn there: a hidden element is
+    /// looked through, as is a screen's name strip while names aren't shown.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
     /// change a drawing.
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
+        // A hidden drawing's ink isn't on the canvas.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        for floating in store.floating.reversed() where floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
+        for floating in store.floating.reversed() where !floating.element.isHidden && floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
             if skippingDrawings, floating.element.kind == .drawing { continue }
             return .element(.init(host: .canvas, element: floating.id))
         }
+        let showsNames = store.canvas.showsFrameNames
         for screen in store.screens.reversed() {
-            for element in screen.elements.reversed() where TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
+            for element in screen.elements.reversed() where !element.isHidden && TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
                 return .element(.init(host: .screen(screen.id), element: element.id))
             }
-            if screen.canvasFrame.contains(point) || screen.labelFrame.contains(point) {
+            if screen.canvasFrame.contains(point) || (showsNames && screen.labelFrame.contains(point)) {
                 return .screen(screen.id)
             }
         }

@@ -187,9 +187,21 @@ enum ScreenTidy {
         let bottom = device.size.height - bottomInset(on: device)
         var best: [DesignElement.ID: CGRect] = [:]
         for pinning in [pinnedFrom, rows.count] where pinning <= rows.count {
-            let pinned = Array(laidOut[pinning...])
-            let pinnedHeight = pinned.map(\.height).reduce(0, +) + normal * CGFloat(max(pinned.count - 1, 0))
-            let limit = pinned.isEmpty ? bottom : bottom - pinnedHeight - group
+            // Pinned rows stack up from the bottom, 12 apart, each above any obstacle it would
+            // lie on, a locked picture or a card. One that was below an obstacle stays below
+            // it, as a row that flows does; if it can't, the rows aren't pinned.
+            var pinnedFrames: [DesignElement.ID: CGRect] = [:]
+            var pinnedTop = bottom
+            var pinnedClear = true
+            for index in (pinning..<rows.count).reversed() {
+                let row = laidOut[index]
+                let y = clear(of: obstacles, bottom: index == rows.count - 1 ? bottom : pinnedTop - normal, row: row)
+                let was = rows[index].map { box(of: $0).minY }.min() ?? 0
+                if obstacles.contains(where: { $0.midY < was && y < $0.maxY + normal }) { pinnedClear = false }
+                for (id, frame) in row.frames { pinnedFrames[id] = frame.offsetBy(dx: 0, dy: y) }
+                pinnedTop = y
+            }
+            let limit = pinning == rows.count ? bottom : pinnedTop - group
             for scheme in schemes {
                 var frames: [DesignElement.ID: CGRect] = [:]
                 var y = top(on: device)
@@ -205,15 +217,9 @@ enum ScreenTidy {
                     for (id, frame) in row.frames { frames[id] = frame.offsetBy(dx: 0, dy: y) }
                     y += row.height
                 }
-                // Pinned rows stack up from the bottom, 12 apart.
-                var pinnedY = bottom
-                for row in pinned.reversed() {
-                    pinnedY -= row.height
-                    for (id, frame) in row.frames { frames[id] = frame.offsetBy(dx: 0, dy: pinnedY) }
-                    pinnedY -= normal
-                }
+                frames.merge(pinnedFrames) { _, pinned in pinned }
                 best = frames
-                if y <= limit { return best }
+                if pinnedClear, y <= limit { return best }
             }
         }
         return best
@@ -473,6 +479,26 @@ enum ScreenTidy {
                 let band = CGRect(x: across.minX, y: y, width: across.width, height: row.height)
                 if band.insetBy(dx: 0, dy: -0.5).intersects(obstacle), obstacle.minX < band.maxX, band.minX < obstacle.maxX {
                     y = obstacle.maxY + normal
+                    moved = true
+                }
+            }
+        }
+        return y
+    }
+
+    /// The top of a row pinned to the bottom so that it clears every obstacle in its way: its
+    /// bottom at `bottom`, or moved up above an obstacle it would lie on.
+    private static func clear(of obstacles: [CGRect], bottom: CGFloat, row: LaidRow) -> CGFloat {
+        var y = bottom - row.height
+        guard !row.frames.isEmpty else { return y }
+        let across = row.frames.dropFirst().reduce(row.frames[0].1) { $0.union($1.1) }
+        var moved = true
+        while moved {
+            moved = false
+            for obstacle in obstacles {
+                let band = CGRect(x: across.minX, y: y, width: across.width, height: row.height)
+                if band.insetBy(dx: 0, dy: -0.5).intersects(obstacle), obstacle.minX < band.maxX, band.minX < obstacle.maxX {
+                    y = obstacle.minY - normal - row.height
                     moved = true
                 }
             }

@@ -1,0 +1,450 @@
+import SwiftUI
+import Testing
+import UIKit
+@testable import Layer
+
+extension Tag {
+    /// A test of how the system behaves, which the app relies on, rather than of the app.
+    @Tag static var describesSwiftUI: Self
+}
+
+/// Two elements' X, as the Format panel shows one of them: the field is bound to whichever
+/// is selected now, and every value set on each is noted.
+@MainActor @Observable
+private final class TwoElements {
+    var isSecondSelected = false
+    var first: CGFloat = 10
+    var second: CGFloat = 20
+    var setOnFirst: [CGFloat] = []
+    var setOnSecond: [CGFloat] = []
+}
+
+/// A number field being typed into, bound as the Format panel binds its fields: afresh on
+/// every update, to what is selected then, reading the value it had at that update.
+private struct TypingIntoTheSelection: View {
+    let elements: TwoElements
+    /// As the Rotation field does: from 0 to 360, past one end round to the other.
+    var wraps = false
+
+    var body: some View {
+        let (first, second) = (elements.first, elements.second)
+        let value = elements.isSecondSelected
+            ? Binding(get: { second }, set: { elements.second = $0; elements.setOnSecond.append($0) })
+            : Binding(get: { first }, set: { elements.first = $0; elements.setOnFirst.append($0) })
+        TypedNumber(label: "X", value: value, range: wraps ? 0...360 : -99_999...99_999, wraps: wraps) {}
+            .frame(width: 200, height: 40)
+    }
+}
+
+/// The X field of a real element, bound as the Format panel binds it: reading the frame the
+/// element had at the last update, and setting it as one adjustment, which undoes as a step.
+private struct TypingIntoAnElement: View {
+    let model: AppModel
+    let ref: DesignStore.ElementRef
+
+    var body: some View {
+        let x = model.store.resolve(ref)?.element.frame.origin.x ?? 0
+        TypedNumber(label: "X", value: Binding(get: { x }, set: { value in
+            model.adjusting { model.store.update(ref) { $0.frame.origin.x = value } }
+        }), range: -99_999...99_999, wraps: false) {}
+            .frame(width: 200, height: 40)
+    }
+}
+
+/// SwiftUI's own formatted text field, bound the same way.
+private struct PlainFieldOnTheSelection: View {
+    let elements: TwoElements
+
+    var body: some View {
+        let (first, second) = (elements.first, elements.second)
+        let value = elements.isSecondSelected
+            ? Binding(get: { Double(second) }, set: { elements.second = CGFloat($0); elements.setOnSecond.append(CGFloat($0)) })
+            : Binding(get: { Double(first) }, set: { elements.first = CGFloat($0); elements.setOnFirst.append(CGFloat($0)) })
+        TextField("X", value: value, format: TypedNumber.format)
+            .frame(width: 200, height: 40)
+    }
+}
+
+extension HostedWindowSuites {
+    /// A number typed into the Format panel goes to the element that was selected as typing
+    /// began, even when another is tapped on the canvas before typing ends: tapping the canvas
+    /// doesn't end typing, and the panel's fields are bound to whatever is selected (audit M5).
+    /// Hosted in a window, so that SwiftUI's own text field decides when what is typed is set.
+    @MainActor
+    @Suite("Typing into the Format panel")
+    struct TypingIntoTheFormatPanelTests {
+        private func host<Content: View>(_ content: Content) async throws -> (window: UIWindow, view: UIView) {
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+            let host = UIHostingController(rootView: content)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.layoutIfNeeded()
+            // Before the field takes the keyboard: the on-screen keyboard coming up held the
+            // main thread, and the suites alongside, for half a second at a time.
+            for field in Self.textFields(in: host.view) { quiet(field) }
+            return (window, host.view)
+        }
+
+        /// Lets SwiftUI catch up: its tasks, focus and updates.
+        private func settle(_ view: UIView) async throws {
+            for _ in 0..<5 {
+                try await Task.sleep(for: .milliseconds(30))
+                view.layoutIfNeeded()
+            }
+        }
+
+        /// The text field the number is typed into, once it has taken the keyboard.
+        private func focusedField(in view: UIView) async throws -> UITextField {
+            for _ in 0..<40 {
+                if let field = Self.textFields(in: view).first(where: \.isFirstResponder) { return field }
+                try await Task.sleep(for: .milliseconds(25))
+                view.layoutIfNeeded()
+            }
+            throw FieldNotFocused()
+        }
+
+        private struct FieldNotFocused: Error {}
+
+        private static func textFields(in view: UIView) -> [UITextField] {
+            (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(textFields(in:))
+        }
+
+        /// Types over what the field shows.
+        private func type(_ text: String, into field: UITextField) {
+            field.selectedTextRange = field.textRange(from: field.beginningOfDocument, to: field.endOfDocument)
+            field.insertText(text)
+        }
+
+        /// What the fix has to deal with, as SwiftUI does it: a formatted field sets its value as
+        /// the text changes, not only as typing ends. Bound to another value mid-typing, it shows
+        /// that value in place of what was typed, and what is typed next goes to the new value.
+        /// This describes SwiftUI, not the app (iOS 27): a later iOS may fail it while the app is
+        /// fine, and then the tests after it say whether the app still is.
+        @Test(.tags(.describesSwiftUI))
+        func swiftUIsFormattedFieldSetsAsItIsTypedAndFollowsANewBinding() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(PlainFieldOnTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try #require(Self.textFields(in: view).first)
+            #expect(field.becomeFirstResponder())
+            type("100", into: field)
+            try await settle(view)
+            #expect(field.isFirstResponder)
+            #expect(elements.first == 100)
+
+            elements.isSecondSelected = true
+            try await settle(view)
+            #expect(field.text == "20")
+            type("250", into: field)
+            #expect(elements.setOnSecond.contains(250))
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 100)
+        }
+
+        @Test func aNumberTypedIsSetOnWhatWasSelectedWhenTypingBegan() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            #expect(field.text == "10")
+            type("100", into: field)
+            try await settle(view)
+            #expect(elements.first == 100)
+
+            // The second element is tapped on the canvas: the panel now shows it, and binds the
+            // field being typed in to it. What is being typed stays, and is still the first's.
+            elements.isSecondSelected = true
+            try await settle(view)
+            #expect(field.isFirstResponder)
+            #expect(field.text == "100")
+            type("250", into: field)
+
+            // The keyboard is put away, which ends typing.
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 250)
+            #expect(elements.second == 20)
+            #expect(elements.setOnSecond.isEmpty)
+        }
+
+        /// Not a number, or an endless one, isn't set: a frame that isn't finite can't be saved,
+        /// and scrubbing it traps (audit M18).
+        @Test(arguments: ["nan", "NaN", "inf", "-inf", "1e999"], [false, true])
+        func aNumberThatIsntFiniteIsntSet(_ typed: String, wraps: Bool) async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements, wraps: wraps))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type(typed, into: field)
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            let notFinite = elements.setOnFirst.filter { !$0.isFinite }
+            #expect(notFinite.isEmpty, "set: \(elements.setOnFirst)")
+            #expect(elements.first.isFinite)
+        }
+
+        /// The element changed another way while its field has the keyboard (an Align in the
+        /// panel, a drag, the knob, voice): as typing ends, the number typed earlier isn't set
+        /// again over that change. SwiftUI sets the field's value once more as typing ends, and
+        /// the field, which keeps what was typed, put it back (review I1).
+        @Test func aChangeMadeWhileTheFieldIsFocusedStandsAsTypingEnds() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            try await settle(view)
+            #expect(elements.first == 100)
+
+            elements.first = 0
+            elements.setOnFirst = []
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 0)
+            #expect(!elements.setOnFirst.contains(100), "set again as typing ended: \(elements.setOnFirst)")
+        }
+
+        /// Undo pressed while the field has the keyboard takes back the typed number, and stays
+        /// taken back as typing ends, with redo still there to put it back (review I1).
+        @Test func undoWhileTheFieldIsFocusedStandsAndKeepsItsRedo() async throws {
+            let model = AppModel(document: LayerDocument())
+            let undo = UndoManager()
+            undo.groupsByEvent = false
+            model.store.undoManager = undo
+            model.adjustmentPause = .milliseconds(10)
+            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+            var button = DesignStore.newElement(.button)
+            button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
+            let ref = model.store.setElements([button], on: screen, replacing: true)[0]
+            func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
+
+            let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            try await settle(view)
+            #expect(x() == 100)
+            #expect(!model.store.isEditing, "the panel's pause should have ended its edit")
+
+            undo.undo()
+            #expect(x() == 20)
+            #expect(undo.canRedo)
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(x() == 20, "typing ending set the typed number again over the undo")
+            #expect(undo.canRedo, "and threw away the redo")
+            undo.redo()
+            #expect(x() == 100)
+        }
+
+        /// Return ends typing as well, and sets the number on the same element.
+        @Test func returnSetsItOnWhatWasSelectedWhenTypingBegan() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            elements.isSecondSelected = true
+            try await settle(view)
+
+            _ = field.delegate?.textFieldShouldReturn?(field)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 100)
+            #expect(elements.second == 20)
+            #expect(elements.setOnSecond.isEmpty)
+        }
+    }
+}
+
+/// A field's value, and every value set on it.
+@MainActor
+private final class ScrubbedField {
+    var value: CGFloat
+    var sets: [CGFloat] = []
+    init(_ value: CGFloat) { self.value = value }
+
+    func target(_ label: String, at frame: CGRect, range: ClosedRange<CGFloat> = 0...360, degreesPerStep: Double = 1) -> Scrubber.Target {
+        Scrubber.Target(
+            label: label, unit: "", frame: frame, range: range,
+            get: { self.value }, set: { self.value = $0; self.sets.append($0) },
+            degreesPerStep: degreesPerStep, wraps: range == 0...360
+        )
+    }
+}
+
+/// The pencil hovering, as the window's hover recogniser tells the panel's bridge: in a
+/// state, at a roll of the barrel.
+private final class PencilHovering: UIHoverGestureRecognizer {
+    var now: UIGestureRecognizer.State = .possible
+    var roll: CGFloat = 0
+    override var state: UIGestureRecognizer.State {
+        get { now }
+        set { now = newValue }
+    }
+    override var rollAngle: CGFloat { roll }
+
+    func moved(_ state: UIGestureRecognizer.State, toDegrees degrees: Double) {
+        now = state
+        roll = degrees * .pi / 180
+    }
+}
+
+/// The ruler that scrubs a field: rolled by the pencil's barrel after a squeeze, or dragged
+/// by a finger holding the field (audit M8).
+@MainActor
+@Suite("Scrubbing a field")
+struct ScrubbingAFieldTests {
+    /// Only a roll made while the pencil stays in hover range turns the value. Turned in the
+    /// hand while out of range, or while touching the canvas, it jumped by as much.
+    @Test func rollWhileThePencilIsAwayIsntCounted() {
+        let scrubber = Scrubber()
+        let rotation = ScrubbedField(0)
+        // Squeezed over the Rotation field, one degree a step: its ruler is up.
+        scrubber.begin(rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
+        scrubber.hover(.began, roll: .degrees(0))
+        scrubber.hover(.changed, roll: .degrees(5))
+        #expect(rotation.value == 5)
+
+        // Out of range, turned in the hand, and back.
+        scrubber.hover(.ended, roll: .degrees(5))
+        scrubber.hover(.began, roll: .degrees(60))
+        #expect(rotation.value == 5)
+        scrubber.hover(.changed, roll: .degrees(62))
+        #expect(rotation.value == 7)
+        // Cancelled, as when the pencil touches down, the same.
+        scrubber.hover(.cancelled, roll: .degrees(62))
+        scrubber.hover(.began, roll: .degrees(140))
+        scrubber.hover(.changed, roll: .degrees(141))
+        #expect(rotation.value == 8)
+    }
+
+    /// The same, through the bridge that follows the pencil's hover in the window: what the
+    /// recogniser says reaches the scrubber with its state (review m9 b).
+    @Test func theBridgePassesTheHoversStateOn() {
+        let scrubber = Scrubber()
+        let bridge = PencilBridge.BridgeView()
+        bridge.scrubber = scrubber
+        let hover = PencilHovering()
+        let rotation = ScrubbedField(0)
+        scrubber.begin(rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
+        for (state, degrees) in [(UIGestureRecognizer.State.began, 0.0), (.changed, 5), (.ended, 5), (.began, 60), (.changed, 62)] {
+            hover.moved(state, toDegrees: degrees)
+            bridge.hovered(hover)
+        }
+        #expect(rotation.value == 7)
+    }
+
+    /// While the pencil's ruler is up on one field, a finger holding another scrubs that one:
+    /// the pencil's is put away first.
+    @Test func aFingerHoldingAnotherFieldScrubsThatOne() {
+        let scrubber = Scrubber()
+        var begins = 0
+        var ends = 0
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+        let rotation = ScrubbedField(0)
+        let opacity = ScrubbedField(50)
+        let rotationTarget = rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32))
+        let opacityTarget = opacity.target("Opacity", at: CGRect(x: 90, y: 0, width: 80, height: 32), range: 5...100)
+        scrubber.begin(rotationTarget)
+
+        // Three steps' worth of finger, as the field's hold gesture reports it.
+        scrubber.fingerDragged(opacityTarget, by: 3 * Scrubber.pointsPerStep)
+        #expect(rotation.sets.isEmpty)
+        #expect(opacity.value == 53)
+        #expect(scrubber.target?.label == "Opacity")
+        #expect(begins == 2 && ends == 1, "the pencil's scrub ended, and the finger's began")
+
+        // The finger goes on holding: it is the same scrub.
+        scrubber.fingerDragged(opacityTarget, by: 5 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 55)
+        #expect(begins == 2)
+    }
+}
+
+/// The Format panel's own changes beside a drag, under the store's edits that each have an
+/// identity of their own: a number typed (as `TypedNumber` sets it, through the panel's
+/// `adjusting`), the pencil's scrub of one field and a finger's of another (M8's hold) are
+/// each a step of their own, and none ends the drag, which stays one step (merge with
+/// main's concurrent edits).
+@MainActor
+@Suite("The panel's changes beside a drag")
+struct PanelChangesBesideADragTests {
+    @Test func typingAndEachScrubAreStepsOfTheirOwnAndTheDragGoesOn() async throws {
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        let model = AppModel(document: LayerDocument())
+        model.store.undoManager = undo
+        model.adjustmentPause = .milliseconds(10)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let refs = model.store.setElements([
+            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent),
+            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], on: screen, replacing: false)
+        let (title, button) = (refs[0], refs[1])
+        undo.removeAllActions()
+        func frame(_ ref: DesignStore.ElementRef) -> CGRect? { model.store.resolve(ref)?.element.frame }
+        let titleBefore = try #require(frame(title))
+        let buttonBefore = try #require(frame(button))
+
+        // A finger drags the button.
+        let drags = CanvasDrags()
+        model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let found = try #require(model.store.resolve(button))
+        func drag(by dx: CGFloat) {
+            drags.moveElement(button, from: found.element.frame, placement: found.placement, by: CGSize(width: dx, height: 0), startingAt: .zero, owner: owner, model: model) {
+                { origin, translation in (origin.offsetBy(dx: translation.width, dy: translation.height), []) }
+            }
+        }
+        drag(by: 10)
+
+        // Meanwhile the pencil scrubs the title's width; then a finger holds its Y and scrubs
+        // that, which puts the pencil's ruler away.
+        let scrubber = Scrubber()
+        scrubber.onBegin = { model.beginScrubbing() }
+        scrubber.onEnd = { model.endScrubbing() }
+        func field(_ label: String, _ keyPath: WritableKeyPath<CGRect, CGFloat>, at y: CGFloat) -> Scrubber.Target {
+            Scrubber.Target(
+                label: label, unit: label, frame: CGRect(x: 0, y: y, width: 80, height: 32), range: 0...4000,
+                get: { model.store.resolve(title)?.element.frame[keyPath: keyPath] ?? 0 },
+                set: { value in model.adjusting { model.store.update(title) { $0.frame[keyPath: keyPath] = value } } }
+            )
+        }
+        scrubber.begin(field("W", \.size.width, at: 0))
+        scrubber.scrub(to: 5)
+        scrubber.fingerDragged(field("Y", \.origin.y, at: 40), by: 3 * Scrubber.pointsPerStep)
+        scrubber.end()
+        drag(by: 20)
+
+        // Then the title's X is typed, as TypedNumber sets it.
+        model.adjusting { model.store.update(title) { $0.frame.origin.x = 100 } }
+
+        // The drag goes on, and drops; the panel's pause then ends its own step.
+        drag(by: 30)
+        drags.dropElement(button, findsNewHome: false, owner: owner, model: model)
+        for _ in 0..<100 where model.store.isEditing { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!model.store.isEditing)
+        let moved = try #require(frame(button))
+        #expect(moved.minX == buttonBefore.minX + 30)
+
+        // Undo takes each back on its own, the last first: the typed number, the finger's
+        // scrub, the pencil's, then the whole drag, frames before and after them alike.
+        undo.undo()
+        #expect(frame(title)?.minX == titleBefore.minX)
+        #expect(frame(title)?.minY == titleBefore.minY + 3)
+        undo.undo()
+        #expect(frame(title)?.minY == titleBefore.minY)
+        #expect(frame(title)?.width == titleBefore.width + 5)
+        undo.undo()
+        #expect(frame(title) == titleBefore)
+        #expect(frame(button) == moved)
+        undo.undo()
+        #expect(frame(button) == buttonBefore)
+    }
+}

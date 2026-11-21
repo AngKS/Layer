@@ -256,7 +256,11 @@ private struct SeveralSettings: View {
 
     var body: some View {
         let things = model.selectedThings
-        let elements = model.selectedElements.map(\.element)
+        let selected = model.selectedElements
+        let elements = selected.map(\.element)
+        // What the settings change: these elements, even if a field typed in sets its value
+        // after the selection has moved on.
+        let refs = selected.map(\.ref)
         let isLocked = model.isSelectionLocked
 
         PanelHeader(symbol: "square.on.square.dashed", title: "\(things.count) Items") {
@@ -287,30 +291,34 @@ private struct SeveralSettings: View {
         }
         .disabled(isLocked)
 
-        let rounded = elements.first(where: \.hasCornerRadius)
+        // Corners, opacity and angle are for what isn't locked, as they are for one element:
+        // the value shown is an unlocked element's, and only unlocked ones change.
+        let unlocked = elements.filter { !$0.isLocked }
+        let rounded = unlocked.first(where: \.hasCornerRadius)
+        let faded = unlocked.first { $0.kind.spec.hasEffects }
         let effects = elements.first { $0.kind.spec.hasEffects }
         let turnable = model.canTurnSelection
-        if rounded != nil || effects != nil || turnable {
+        if rounded != nil || faded != nil || turnable {
             PanelSection {
                 HStack(spacing: 8) {
                     if let rounded {
                         NumberField("R", label: "Corner radius", value: Binding(
                             get: { rounded.resolvedCornerRadius },
-                            set: { radius in change(where: \.hasCornerRadius) { $0.cornerRadius = radius } }
+                            set: { radius in change(refs, where: { $0.hasCornerRadius && !$0.isLocked }) { $0.cornerRadius = radius } }
                         ), range: 0...999)
                     }
-                    if let effects {
+                    if let faded {
                         NumberField("%", label: "Opacity", value: Binding(
-                            get: { (effects.resolvedOpacity * 100).rounded() },
-                            set: { percent in change(where: \.kind.spec.hasEffects) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                            get: { (faded.resolvedOpacity * 100).rounded() },
+                            set: { percent in change(refs, where: { $0.kind.spec.hasEffects && !$0.isLocked }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
                     }
-                    // Each element is turned to the angle shown (the first one's), on its own
-                    // pivot; a screen among them leaves nothing to turn.
-                    if turnable, let first = elements.first {
+                    // Each element is turned to the angle shown (the first unlocked one's), on
+                    // its own pivot; a screen among them leaves nothing to turn.
+                    if turnable, let first = unlocked.first {
                         NumberField("°", label: "Rotation", value: Binding(
                             get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
-                            set: { degrees in change(where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
+                            set: { degrees in change(refs, where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
                         ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
                     }
                 }
@@ -323,24 +331,24 @@ private struct SeveralSettings: View {
             PanelSection {
                 if let filled {
                     PanelRow("Fill") {
-                        ColorField(label: "Fill colour", color: Binding(get: { filled.tint }, set: { colour in change(where: \.hasFill) { $0.tint = colour } }))
+                        ColorField(label: "Fill colour", color: Binding(get: { filled.tint }, set: { colour in change(refs, where: \.hasFill) { $0.tint = colour } }))
                     }
                 }
                 if let bordered {
                     PanelRow("Border") {
                         NumberField("W", label: "Border width", value: Binding(
                             get: { bordered.resolvedBorderWidth },
-                            set: { width in change(where: \.hasBorder) { $0.borderWidth = width > 0 ? width : nil } }
+                            set: { width in change(refs, where: \.hasBorder) { $0.borderWidth = width > 0 ? width : nil } }
                         ), range: 0...40)
                             .frame(width: 84)
                         ColorField(label: "Border colour", color: Binding(
                             get: { bordered.resolvedBorderColor },
-                            set: { colour in change(where: \.hasBorder) { $0.borderColor = colour } }
+                            set: { colour in change(refs, where: \.hasBorder) { $0.borderColor = colour } }
                         ))
                     }
                 }
                 if let effects {
-                    Toggle("Shadow", isOn: Binding(get: { effects.hasShadow }, set: { shadow in change(where: \.kind.spec.hasEffects) { $0.hasShadow = shadow } }))
+                    Toggle("Shadow", isOn: Binding(get: { effects.hasShadow }, set: { shadow in change(refs, where: \.kind.spec.hasEffects) { $0.hasShadow = shadow } }))
                 }
             }
         }
@@ -350,11 +358,11 @@ private struct SeveralSettings: View {
                 HStack(spacing: 8) {
                     NumberField("pt", label: "Font size", value: Binding(
                         get: { worded.resolvedFontSize.rounded() },
-                        set: { size in change(where: \.kind.hasText) { $0.fontSize = size } }
+                        set: { size in change(refs, where: \.kind.hasText) { $0.fontSize = size } }
                     ), range: 6...400)
                         .frame(width: 84)
                     Spacer(minLength: 0)
-                    Picker("Weight", selection: Binding(get: { worded.resolvedFontWeight }, set: { weight in change(where: \.kind.hasText) { $0.fontWeight = weight } })) {
+                    Picker("Weight", selection: Binding(get: { worded.resolvedFontWeight }, set: { weight in change(refs, where: \.kind.hasText) { $0.fontWeight = weight } })) {
                         ForEach(FontWeightChoice.allCases, id: \.self) { weight in
                             Text(weight.name).tag(weight)
                         }
@@ -363,14 +371,14 @@ private struct SeveralSettings: View {
                     .fixedSize()
                     ColorPicker("Text colour", selection: Binding(
                         get: { worded.resolvedTextColor.color },
-                        set: { colour in change(where: \.kind.hasText) { $0.textColor = RGBColor(UIColor(colour)) } }
+                        set: { colour in change(refs, where: \.kind.hasText) { $0.textColor = RGBColor(UIColor(colour)) } }
                     ), supportsOpacity: false)
                         .labelsHidden()
                 }
                 if let aligned = elements.first(where: \.hasTextAlignment) {
                     Picker("Text alignment", selection: Binding(
                         get: { aligned.resolvedTextAlignment },
-                        set: { alignment in change(where: \.hasTextAlignment) { $0.textAlignment = alignment } }
+                        set: { alignment in change(refs, where: \.hasTextAlignment) { $0.textAlignment = alignment } }
                     )) {
                         ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
                             Image(systemName: alignment.symbol)
@@ -384,10 +392,11 @@ private struct SeveralSettings: View {
         }
     }
 
-    /// Makes a change to every selected element a setting applies to. A run of quick
-    /// changes, a colour being dragged for instance, undoes as one step.
-    private func change(where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        model.adjusting { model.changeSelectedElements(where: applies, body) }
+    /// Makes a change to each of the elements the settings are for that a setting applies to.
+    /// A run of quick changes, a colour being dragged for instance, undoes as one step.
+    private func change(_ refs: [DesignStore.ElementRef], where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        let store = model.store
+        model.adjusting { store.update(refs.filter { store.resolve($0).map { applies($0.element) } ?? false }, body) }
     }
 }
 
@@ -721,7 +730,6 @@ private struct NumberField: View {
     /// Whether the number is being typed. Until it is tapped, it is shown as text, which
     /// leaves holding it free to scrub.
     @State private var isTyping = false
-    @FocusState private var isEditing: Bool
 
     init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, range: ClosedRange<CGFloat> = -99_999...99_999,
          pointsPerStep: CGFloat = Scrubber.pointsPerStep, degreesPerStep: Double = Scrubber.degreesPerStep,
@@ -744,20 +752,7 @@ private struct NumberField: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             if isTyping {
-                TextField(
-                    label,
-                    value: Binding(get: { Double(value) }, set: { value = Scrubber.typed(CGFloat($0), in: range, wraps: wraps) }),
-                    format: Self.format
-                )
-                .keyboardType(.numbersAndPunctuation)
-                .focused($isEditing)
-                // Focus taken as the field appears is dropped; a moment later it holds.
-                .task {
-                    try? await Task.sleep(for: .milliseconds(50))
-                    isEditing = true
-                }
-                .onChange(of: isEditing) { _, focused in if !focused { isTyping = false } }
-                .accessibilityLabel(label)
+                TypedNumber(label: label, value: $value, range: range, wraps: wraps) { isTyping = false }
             } else {
                 Text(Double(value), format: Self.format)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -799,8 +794,7 @@ private struct NumberField: View {
                 }
                 .onChanged { value in
                     guard case .second(true, let drag) = value else { return }
-                    if scrubber.target == nil { scrubber.begin(target) }
-                    scrubber.scrub(to: Scrubber.steps(forDrag: drag?.translation.width ?? 0, pointsPerStep: pointsPerStep))
+                    scrubber.fingerDragged(target, by: drag?.translation.width ?? 0)
                 },
             isEnabled: !isTyping
         )
@@ -808,7 +802,7 @@ private struct NumberField: View {
         .onChange(of: isHeld) { _, held in if !held { scrubber.end() } }
     }
 
-    private static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+    private static let format = TypedNumber.format
 
     private var target: Scrubber.Target {
         Scrubber.Target(
@@ -816,6 +810,69 @@ private struct NumberField: View {
             get: { value }, set: { value = $0 },
             pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery
         )
+    }
+}
+
+/// A number field being typed into, which appears as typing begins. SwiftUI sets what is
+/// typed as the text changes, and once more as typing ends, on Return or as the field loses
+/// focus, which ends typing.
+///
+/// It all goes to the value the field was bound to as typing began. The panel binds its
+/// fields to whatever is selected, and tapping another element on the canvas doesn't end
+/// typing: rebound, the field showed the other element's value in place of what was typed,
+/// and what was typed next was set on that element.
+struct TypedNumber: View {
+    let label: String
+    let range: ClosedRange<CGFloat>
+    let wraps: Bool
+    /// Typing has ended.
+    let onEnd: () -> Void
+    /// The value typed into: the binding as typing began, kept for as long as it goes on.
+    @State private var target: Binding<CGFloat>
+    /// The number as typed, which the field shows. The binding kept may read the value it
+    /// had as typing began, as the panel's do.
+    @State private var typed: Double
+    @FocusState private var isEditing: Bool
+
+    static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+
+    init(label: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, wraps: Bool, onEnd: @escaping () -> Void) {
+        self.label = label
+        self.range = range
+        self.wraps = wraps
+        self.onEnd = onEnd
+        // Only as the field appears: later bindings, made for whatever is selected then, are
+        // passed in but not taken.
+        _target = State(initialValue: value)
+        _typed = State(initialValue: Double(value.wrappedValue))
+    }
+
+    var body: some View {
+        TextField(
+            label,
+            value: Binding(get: { typed }, set: { number in
+                // "NaN", or a number too big to hold, isn't one: a frame that isn't finite
+                // can't be saved, and scrubbing it traps.
+                guard number.isFinite else { return }
+                let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
+                // Only a number newly typed. SwiftUI sets each change twice, and once more as
+                // typing ends; set again then, the number typed earlier undid whatever changed
+                // the element meanwhile: an Align, Undo, a drag, the knob, voice.
+                guard Double(value) != typed else { return }
+                typed = Double(value)
+                target.wrappedValue = value
+            }),
+            format: Self.format
+        )
+        .keyboardType(.numbersAndPunctuation)
+        .focused($isEditing)
+        // Focus taken as the field appears is dropped; a moment later it holds.
+        .task {
+            try? await Task.sleep(for: .milliseconds(50))
+            isEditing = true
+        }
+        .onChange(of: isEditing) { _, focused in if !focused { onEnd() } }
+        .accessibilityLabel(label)
     }
 }
 

@@ -14,6 +14,8 @@ import SwiftUI
 /// size at any zoom. Screens and drawings that aren't selected have no handle of their
 /// own, which leaves a drag across them free to pan the canvas.
 struct SelectionLayer: View {
+    /// The layer's coordinate space: the view's own points, as the viewport has them.
+    static let space = "SelectionLayer"
     @Environment(AppModel.self) private var model
     /// Shared with the element targets, which draw in canvas points in a view of their own.
     @State private var drags = CanvasDrags()
@@ -105,6 +107,9 @@ struct SelectionLayer: View {
             }
 
         }
+        // The view's own points, which the element targets, drawn in canvas points, are
+        // touched in: what lies under a touch is found in them.
+        .coordinateSpace(.named(Self.space))
         // A tick as a turn snaps to the 45s; none as it leaves.
         .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
         // The model ends a drag left live: see `CanvasDrags.endAny`.
@@ -248,7 +253,12 @@ final class CanvasDrags {
     typealias Rule = (_ origin: CGRect, _ translation: CGSize) -> (CGRect, [SnapGuide])
 
     /// Stands for one view that carries a drag.
-    final class Owner {}
+    final class Owner {
+        /// For an element's target: where its drag began, and the drawing whose ink was
+        /// there, which the drag moves instead (see `moveOnTarget`). Kept for the whole drag,
+        /// since the ink moves away from where the drag began.
+        fileprivate var ink: (start: CGPoint, drawing: DesignStore.ElementRef?)?
+    }
 
     /// The lines the dragged element has snapped to, and the placement of their points.
     var guides: [SnapGuide] = []
@@ -479,6 +489,56 @@ final class CanvasDrags {
         endEdit(model: model)
     }
 
+    /// The drag on an element's own target, in the selection layer's points. Ink is drawn
+    /// over every element, so a drag that starts on a drawing's ink moves the drawing, as a
+    /// tap there picks it.
+    func adjustOnTarget(
+        _ ref: DesignStore.ElementRef, element: DesignElement, placement: Placement, on screen: DesignScreen?,
+        model: AppModel, owner: Owner
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(SelectionLayer.space))
+            .onChanged { [self] value in
+                moveOnTarget(ref, element: element, placement: placement, on: screen, by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
+            }
+            .onEnded { [self] value in
+                dropOnTarget(ref, startingAt: value.startLocation, owner: owner, model: model)
+            }
+    }
+
+    /// Moves what a drag on an element's target moves: the element, or the drawing whose ink
+    /// lay over it where the drag began. `start` is in the view's points.
+    func moveOnTarget(
+        _ ref: DesignStore.ElementRef, element: DesignElement, placement: Placement, on screen: DesignScreen?,
+        by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel
+    ) {
+        guard let drawing = ink(under: start, for: owner, model: model) else {
+            moveElement(ref, from: element.frame, placement: placement, by: translation, startingAt: start, owner: owner, model: model) {
+                self.moveRule(for: element, placement: placement, on: screen, model: model)
+            }
+            return
+        }
+        guard let found = model.store.resolve(drawing) else { return }
+        moveElement(drawing, from: found.element.frame, placement: found.placement, by: translation, startingAt: start, owner: owner, model: model) {
+            self.moveRule(for: found.element, placement: found.placement, on: nil, model: model)
+        }
+    }
+
+    func dropOnTarget(_ ref: DesignStore.ElementRef, startingAt start: CGPoint, owner: Owner, model: AppModel) {
+        let drawing = owner.ink.flatMap { $0.start == start ? $0.drawing : nil }
+        owner.ink = nil
+        dropElement(drawing ?? ref, findsNewHome: true, owner: owner, model: model)
+    }
+
+    /// The drawing with ink where a drag on a target began, looked up once for each drag: as
+    /// it begins, and kept while it is this owner's drag under way. A drag ended any other
+    /// way, and then begun again from the same point, looks again.
+    private func ink(under start: CGPoint, for owner: Owner, model: AppModel) -> DesignStore.ElementRef? {
+        if let ink = owner.ink, ink.start == start, session?.owner === owner { return ink.drawing }
+        let drawing = model.inkTarget(at: start)
+        owner.ink = (start, drawing)
+        return drawing
+    }
+
     /// A drag that moves everything selected, each thing by the same distance across the
     /// canvas. Together they go to the grid's marks, or line up with what is around them,
     /// as one element does; and dropped, each element belongs to whatever it then lies on.
@@ -629,7 +689,7 @@ private struct ElementTargets: View {
             ForEach(store.screens) { screen in
                 if store.canvas.showsFrameNames {
                     area(screen.labelFrame, minimum: minimum)
-                        .onTapGesture { model.pick(.screen(screen.id)) }
+                        .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { model.targetTapped(.screen(screen.id), at: $0) }
                         .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
                 }
                 ForEach(screen.elements.filter { !$0.isHidden }) { element in
@@ -657,11 +717,10 @@ private struct ElementTargets: View {
     /// `screen` is the screen the element is on, or nil on the open canvas.
     private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?, minimum: CGFloat) -> some View {
         area(placement.canvasRect(for: element.frame), degrees: element.resolvedRotation, minimum: minimum)
-            .onTapGesture { model.pick(.element(ref)) }
+            // Ink lies over the element: where it does, a tap or a drag is the drawing's.
+            .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { model.targetTapped(.element(ref), at: $0) }
             .canvasDrag(drags, model: model, isEnabled: !element.isLocked) { owner in
-                drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: true, model: model, owner: owner) {
-                    drags.moveRule(for: element, placement: placement, on: screen, model: model)
-                }
+                drags.adjustOnTarget(ref, element: element, placement: placement, on: screen, model: model, owner: owner)
             }
     }
 }
