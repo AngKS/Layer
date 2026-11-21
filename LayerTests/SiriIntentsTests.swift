@@ -282,25 +282,53 @@ struct DesignActionTests {
         #expect(model.store.screen(third.id) != nil)
     }
 
-    @Test func siriUndoReachesTheDesignOpenedAgain() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let url = folder.appendingPathComponent("Shop.layer")
+    @Test func siriIsNotOfferedAnUndoOnceTheDesignHasClosed() throws {
         let model = model()
-        model.fileURL = url
         let siri = UndoManager()
         siri.groupsByEvent = false
         DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
             model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         }
-        // The design is closed and opened again, as it was saved.
+        #expect(siri.canUndo)
         model.close()
+        // Nothing for Siri to undo, rather than an undo that does nothing and says it did.
+        #expect(!siri.canUndo)
         let reopened = AppModel(document: LayerDocument(file: model.document.current))
-        reopened.fileURL = url
+        if siri.canUndo { siri.undo() }
         #expect(reopened.store.screens.count == 1)
-
-        siri.undo()
-        #expect(reopened.store.screens.isEmpty)
         reopened.close()
+    }
+
+    @Test func anUndoWithNothingLeftToTakeBackChangesNothingAndSaysSo() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let button = DesignStore.newElement(.button)
+        model.store.setElements([button], on: screen.id, replacing: false)
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+
+        DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
+            model.store.update(ref) { $0.tint = RGBColor(hex: 0xFF0000) }
+        }
+        // The button is recoloured again by hand: what Siri changed is gone.
+        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
+        let now = model.store.content
+        siri.undo()
+        #expect(model.store.content == now)
+        #expect(model.undoNotice?.contains("Style Button") == true)
+
+        // Checked before Siri can be asked, as the app stops being active, such an undo
+        // is taken out of Siri's history instead.
+        model.undoNotice = nil
+        DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
+            model.store.update(ref) { $0.tint = RGBColor(hex: 0x0000FF) }
+        }
+        model.withdrawTakenActionsWithNothingLeft()
+        #expect(siri.canUndo, "the button is still as Siri left it")
+        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
+        model.withdrawTakenActionsWithNothingLeft()
+        #expect(!siri.canUndo)
     }
 
     @Test func newElementsGoBelowWhatIsThere() {

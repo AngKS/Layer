@@ -664,6 +664,24 @@ final class AppModel {
 
     @ObservationIgnored private var isClosing = false
 
+    /// Actions Siri and Shortcuts took on this design that their own undo can still take
+    /// back. Each is taken out of their history once it can't be: see `TakenAction`.
+    @ObservationIgnored var takenActions: [TakenAction] = []
+    /// Said when Siri's undo of an action found nothing left to take back.
+    var undoNotice: String?
+
+    /// Takes out of Siri's history the actions everything of which has been changed since,
+    /// so that Siri isn't left to undo one, do nothing, and say it did. Done as the app
+    /// stops being active, which is when Siri can next be asked.
+    func withdrawTakenActionsWithNothingLeft() {
+        let content = store.content
+        takenActions.removeAll { action in
+            guard !action.canTakeBack(from: content) else { return false }
+            action.withdraw()
+            return true
+        }
+    }
+
     func close() {
         // Closed by the back button, then again as the canvas goes from the screen.
         guard !isClosed else { return }
@@ -683,6 +701,9 @@ final class AppModel {
         // reaches the disk only if the system is told there is something to save.
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
+        // Siri's undo can't reach a closed design: it is given nothing to undo.
+        for action in takenActions { action.withdraw() }
+        takenActions.removeAll()
         voice?.end()
         // Listening stops. A pencil command already running isn't cancelled, but it ends at
         // its next tool call, since nothing more is done to a closed design.
@@ -884,6 +905,7 @@ final class AppModel {
     func leavingTheScreen() {
         ink?.flushPendingInk()
         refreshPreview()
+        withdrawTakenActionsWithNothingLeft()
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
 

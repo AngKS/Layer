@@ -131,10 +131,11 @@ enum DesignActions {
             model.store.endEdit()
             let after = model.store.content
             if before != after, let undoManager, undoManager !== model.store.undoManager {
-                let action = TakenAction(before: before, after: after, design: model.designID, model: model)
+                let action = TakenAction(name: actionName, before: before, after: after, model: model, undoManager: undoManager)
+                model.takenActions.append(action)
                 undoManager.beginUndoGrouping()
                 // The system's history holds its target weakly: the action is kept alive by
-                // its own handler, as the design's store may be gone by the time it is undone.
+                // its own handler.
                 undoManager.registerUndo(withTarget: action) { [action] _ in
                     MainActor.assumeIsolated { action.takeBack() }
                 }
@@ -143,37 +144,6 @@ enum DesignActions {
             }
         }
         return try body()
-    }
-
-    /// An action Siri or Shortcuts took on a design, as the system's undo takes it back.
-    @MainActor
-    private final class TakenAction {
-        let before: DesignContent
-        let after: DesignContent
-        /// The design it was taken on, found again by this when it is undone: it may have
-        /// been renamed, or closed and opened again, since.
-        let design: String?
-        weak var model: AppModel?
-
-        init(before: DesignContent, after: DesignContent, design: String?, model: AppModel) {
-            self.before = before
-            self.after = after
-            self.design = design
-            self.model = model
-        }
-
-        /// Puts back what the action changed, as one step in the design's own history.
-        /// Undone straight away, the design goes back as it was. Undone after more has
-        /// been done, only what the action changed and nothing has changed since goes back.
-        func takeBack() {
-            let open = design.flatMap { OpenDesigns.shared.model(forDesign: $0) } ?? model.flatMap { $0.isClosed ? nil : $0 }
-            guard let store = open?.store else { return }
-            if store.content == after {
-                store.restore(before)
-            } else {
-                store.apply { $0.takeBack(after, to: before) }
-            }
-        }
     }
 
     /// Selects something and glides the canvas to show it.
@@ -229,6 +199,61 @@ enum DesignActions {
             frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
         }
         return frame
+    }
+}
+
+/// An action Siri or Shortcuts took on a design, kept for the system's undo of it.
+///
+/// The system's undo can't be told that it failed: it calls the handler and says the action
+/// was undone. So an action that can no longer be taken back is taken out of the system's
+/// history instead, leaving Siri nothing to undo: when its design closes, and, checked as
+/// the app stops being active, once everything it changed has been changed since. See
+/// `AppModel.takenActions`.
+@MainActor
+final class TakenAction {
+    let name: String
+    private let before: DesignContent
+    private let after: DesignContent
+    private weak var model: AppModel?
+    private weak var undoManager: UndoManager?
+
+    init(name: String, before: DesignContent, after: DesignContent, model: AppModel, undoManager: UndoManager) {
+        self.name = name
+        self.before = before
+        self.after = after
+        self.model = model
+        self.undoManager = undoManager
+    }
+
+    /// Whether anything the action changed is still as the action left it in `content`.
+    func canTakeBack(from content: DesignContent) -> Bool {
+        if content == after { return true }
+        var taken = content
+        taken.takeBack(after, to: before)
+        return taken != content
+    }
+
+    /// Takes the action out of the system's history, so that nothing offers to undo it.
+    func withdraw() {
+        undoManager?.removeAllActions(withTarget: self)
+    }
+
+    /// Puts back what the action changed, as one step in the design's own history. Undone
+    /// straight away, the design goes back as it was. Undone after more has been done, only
+    /// what the action changed and nothing has changed since goes back. When nothing is
+    /// left to take back, nothing changes, and the design says so.
+    func takeBack() {
+        guard let model else { return }
+        model.takenActions.removeAll { $0 === self }
+        guard !model.isClosed else { return }
+        let store = model.store
+        if store.content == after {
+            store.restore(before)
+        } else if canTakeBack(from: store.content) {
+            store.apply { $0.takeBack(after, to: before) }
+        } else {
+            model.undoNotice = "Siri couldn't undo “\(name)”: everything it changed has been changed since. Use Undo in Layer to go back step by step."
+        }
     }
 }
 
