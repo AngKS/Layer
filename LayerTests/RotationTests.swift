@@ -1475,7 +1475,7 @@ struct TwistTests {
     /// 0.1 s after the first, 100 points to its right.
     private func twoFingersDown() -> (TwistGestureRecognizer, UIView, FakeTouch, FakeTouch) {
         let twist = TwistGestureRecognizer()
-        twist.isOnSelection = { _ in true }
+        twist.isOnSelection = { _, _ in true }
         twist.canTurn = { true }
         let view = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         view.addGestureRecognizer(twist)
@@ -1696,10 +1696,32 @@ struct TwistOnTheInkCanvasTests {
         board.model.selection = .element(board.note)
         #expect(coordinator.twist.canTurn())
         // The note is at (500, 100) to (640, 230) in the canvas view.
-        #expect(coordinator.twist.isOnSelection(CGPoint(x: 570, y: 265)))
-        #expect(!coordinator.twist.isOnSelection(CGPoint(x: 570, y: 165)), "that is 35 points above it")
+        #expect(coordinator.twist.isOnSelection(CGPoint(x: 570, y: 265), nil))
+        #expect(!coordinator.twist.isOnSelection(CGPoint(x: 570, y: 165), nil), "that is 35 points above it")
         board.model.beginTurn()
         #expect(!coordinator.twist.canTurn(), "not while the knob turns it")
         board.model.endTurn()
+    }
+
+    /// Fingers on a sheet or a popover lying over the selection are on that, not on the
+    /// selection: they don't turn what is hidden under it, as the Pencil there doesn't let
+    /// go of it. In a narrow window, the panels are sheets over the canvas.
+    @Test func fingersOnASheetOverTheSelectionArentOnIt() {
+        let board = TurnBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
+        let canvasRoot = UIView(frame: window.bounds)
+        let container = UIView(frame: canvasRoot.bounds)
+        canvasRoot.addSubview(container)
+        container.addSubview(coordinator.documentCanvas)
+        window.addSubview(canvasRoot)
+        let sheet = UIView(frame: window.bounds)
+        window.addSubview(sheet)
+        window.addGestureRecognizer(coordinator.twist)
+        board.model.selection = .element(board.note)
+        // The note is at (500, 100) to (640, 230) in the canvas view.
+        let onTheNote = CGPoint(x: 570, y: 165)
+        #expect(coordinator.twist.isOnSelection(onTheNote, container))
+        #expect(!coordinator.twist.isOnSelection(onTheNote, sheet))
     }
 }

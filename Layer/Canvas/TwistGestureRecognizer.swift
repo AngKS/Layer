@@ -142,8 +142,9 @@ struct TwistTracker {
 /// The resting-finger and Pencil detectors and the palette's flicks recognise alongside it,
 /// as they do alongside every gesture: their delegates say so.
 final class TwistGestureRecognizer: UIGestureRecognizer {
-    /// Whether a point in its view, the window, is on what is selected.
-    var isOnSelection: (CGPoint) -> Bool = { _ in false }
+    /// Whether a point in its view, the window, is on what is selected, for a finger on a
+    /// view: one in a sheet or a popover over the canvas isn't on it.
+    var isOnSelection: (CGPoint, UIView?) -> Bool = { _, _ in false }
     /// Whether what is selected can be turned now.
     var canTurn: () -> Bool = { false }
     /// How far the fingers have turned, in degrees clockwise, since both were down (see
@@ -182,7 +183,7 @@ final class TwistGestureRecognizer: UIGestureRecognizer {
             let point = touch.location(in: view)
             tracker.landed(
                 at: point, time: touch.timestamp, first: first?.location(in: view) ?? point,
-                isOnSelection: isOnSelection(point), canTurn: canTurn()
+                isOnSelection: isOnSelection(point, touch.view), canTurn: canTurn()
             )
             if tracker.verdict == .notATwist { return fail() }
         }
