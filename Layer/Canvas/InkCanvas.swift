@@ -289,6 +289,7 @@ struct InkCanvas: UIViewRepresentable {
             palette.selectedToolItemIdentifier = MagicPen.identifier
             palette.addObserver(documentCanvas)
             palette.addObserver(self)
+            watchTyping()
         }
 
         func apply(_ tool: AppModel.Tool) {
@@ -369,11 +370,68 @@ struct InkCanvas: UIViewRepresentable {
             watchForFlicks()
         }
 
+        // MARK: Typing
+
+        /// The fields and text views in the canvas's window that began to be typed in, and may
+        /// still have the keyboard.
+        private var typing: [WeakResponder] = []
+        private var typingObservers: [NSObjectProtocol] = []
+
+        private struct WeakResponder {
+            weak var responder: UIResponder?
+        }
+
+        /// Follows typing in the canvas's window, in a text field or a text view, from the
+        /// panels, the popovers or the board's menu. While anything has the keyboard the
+        /// palette is away, since it shows only for the canvas as first responder; when typing
+        /// ends, it comes back (see `typingEnded`).
+        private func watchTyping() {
+            let began: [Notification.Name] = [UITextField.textDidBeginEditingNotification, UITextView.textDidBeginEditingNotification]
+            let ended: [Notification.Name] = [UITextField.textDidEndEditingNotification, UITextView.textDidEndEditingNotification]
+            typingObservers = began.map { name in
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+                    // Posted by UIKit on the main thread, as the field takes the keyboard.
+                    let field = note.object as? UIView
+                    MainActor.assumeIsolated { self?.typingBegan(in: field) }
+                }
+            } + ended.map { name in
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.typingEnded() }
+                }
+            }
+        }
+
+        private func typingBegan(in field: UIView?) {
+            guard let field, field.window != nil, field.window === documentCanvas.window else { return }
+            typing.removeAll { $0.responder == nil || $0.responder === field }
+            typing.append(WeakResponder(responder: field))
+        }
+
+        /// Typing ended in a field. Once the keyboard has settled (focus moving to another
+        /// field ends typing in the first before it begins in the next), and if nothing in the
+        /// window is still typed in, the canvas takes first responder back in Draw, where the
+        /// palette is to show. A field still being typed in keeps the keyboard.
+        private func typingEnded() {
+            guard !typing.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                typing.removeAll { $0.responder?.isFirstResponder != true }
+                guard typing.isEmpty, tool == .draw, !hidesPalette else { return }
+                takeFirstResponder()
+            }
+        }
+
+        private func stopWatchingTyping() {
+            for observer in typingObservers { NotificationCenter.default.removeObserver(observer) }
+            typingObservers = []
+            typing = []
+        }
+
         /// Makes the canvas first responder if neither canvas is: the palette shows only for
         /// it, and outside draw mode the system's undo and redo gestures reach the document's
-        /// undo history through it. Only as the tool, the palette or the window changes. A
-        /// sketch converted, dissolving or cleared in the background also refreshes the
-        /// canvases, and took the keyboard from a field being typed in.
+        /// undo history through it. Only as the tool, the palette or the window changes, and
+        /// as typing ends in Draw. A sketch converted, dissolving or cleared in the background
+        /// also refreshes the canvases, and took the keyboard from a field being typed in.
         private func takeFirstResponder() {
             if documentCanvas.window != nil, !canvases.contains(where: \.isFirstResponder) {
                 documentCanvas.becomeFirstResponder()
@@ -427,6 +485,7 @@ struct InkCanvas: UIViewRepresentable {
             paletteFlicks = []
             restingFingers.view?.removeGestureRecognizer(restingFingers)
             twist.view?.removeGestureRecognizer(twist)
+            stopWatchingTyping()
             for canvas in canvases {
                 palette.setVisible(false, forFirstResponder: canvas)
             }

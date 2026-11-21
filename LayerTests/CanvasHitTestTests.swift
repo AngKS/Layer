@@ -229,6 +229,85 @@ struct CanvasFocusTests {
     }
 }
 
+/// In Draw the palette shows only while the canvas is first responder, so it goes while a
+/// field has the keyboard. When typing ends it comes back: the canvas takes first responder
+/// again, but never from a field still being typed in (audit C5, follow-up).
+@MainActor
+@Suite("The palette and typing")
+struct PaletteAndTypingTests {
+    @Test func thePaletteComesBackWhenTypingEndsInDraw() async throws {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let container = UIView(frame: window.bounds)
+        let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+        let note = UITextView(frame: CGRect(x: 20, y: 80, width: 200, height: 80))
+        window.addSubview(container)
+        window.addSubview(name)
+        window.addSubview(note)
+        window.makeKeyAndVisible()
+        defer {
+            name.resignFirstResponder()
+            note.resignFirstResponder()
+            coordinator.hidePalette()
+            window.isHidden = true
+        }
+        for canvas in coordinator.canvases {
+            canvas.frame = container.bounds
+            container.addSubview(canvas)
+        }
+        coordinator.apply(.draw)
+        #expect(coordinator.documentCanvas.isFirstResponder)
+
+        // While a name is typed the palette is away, and stays away whatever the canvas does.
+        #expect(name.becomeFirstResponder())
+        try await Task.sleep(for: .milliseconds(50))
+        coordinator.removeSketch([])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(name.isFirstResponder)
+        #expect(!coordinator.documentCanvas.isFirstResponder)
+
+        // Typing goes on in another field: still nothing for the canvas.
+        #expect(note.becomeFirstResponder())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(note.isFirstResponder)
+        #expect(!coordinator.documentCanvas.isFirstResponder)
+
+        // The keyboard is put away: the canvas, and its palette, are back.
+        note.resignFirstResponder()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(coordinator.documentCanvas.isFirstResponder, "the palette should be back once typing ends in Draw")
+    }
+
+    /// Out of Draw there is no palette to bring back, and the canvas is left as it is.
+    @Test func typingEndingOutOfDrawLeavesTheCanvasAlone() async throws {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let container = UIView(frame: window.bounds)
+        let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+        window.addSubview(container)
+        window.addSubview(name)
+        window.makeKeyAndVisible()
+        defer {
+            name.resignFirstResponder()
+            coordinator.hidePalette()
+            window.isHidden = true
+        }
+        for canvas in coordinator.canvases {
+            canvas.frame = container.bounds
+            container.addSubview(canvas)
+        }
+        coordinator.apply(.select)
+        #expect(name.becomeFirstResponder())
+        name.resignFirstResponder()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!coordinator.documentCanvas.isFirstResponder)
+    }
+}
+
 /// A glide of the viewport, zooming to fit or moved by voice, gives way to a finger that
 /// starts to pan meanwhile. It went on under the finger, and on its last frame jumped to
 /// where it had been going, throwing the pan away (audit C10).

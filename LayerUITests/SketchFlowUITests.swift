@@ -497,6 +497,40 @@ final class SketchFlowUITests: XCTestCase {
         attach("ink-over-a-button")
     }
 
+    /// In Draw the palette goes while text is typed, and comes back as the keyboard goes
+    /// (audit C5, follow-up).
+    func testThePaletteComesBackWhenTypingEndsInDraw() {
+        // With a pencil about, a finger taps to select while the palette is up.
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        // New text is selected and opened for typing, with the palette put away.
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "new text should be selected")
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        let palette = app.buttons["Magic Pen"].firstMatch
+        control("Draw").tap()
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "Draw should bring up the palette")
+        let window = app.windows.firstMatch.frame
+        point(CGPoint(x: window.midX, y: window.midY)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a finger tap in Draw should select the text")
+
+        // Typed into, the palette makes way for the keyboard.
+        control("Edit text").tap()
+        let popover = app.popovers.firstMatch
+        XCTAssertTrue(popover.waitForExistence(timeout: 5), "Edit text should open the text's popover")
+        let field = popover.textViews.firstMatch.exists ? popover.textViews.firstMatch : popover.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(" there")
+        XCTAssertTrue(waitForDisappearance(of: palette), "the palette should make way while text is typed")
+
+        // The popover is closed and the keyboard goes: the palette is back.
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(of: popover))
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "the palette should come back once typing ends in Draw")
+        attach("palette-after-typing")
+    }
+
     func testADrawingIsALayerThatCanBeHiddenLockedAndCopied() {
         openNewDesign()
 
