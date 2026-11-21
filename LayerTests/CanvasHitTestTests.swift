@@ -228,3 +228,35 @@ struct CanvasFocusTests {
         #expect(coordinator.documentCanvas.isFirstResponder)
     }
 }
+
+/// A glide of the viewport, zooming to fit or moved by voice, gives way to a finger that
+/// starts to pan meanwhile. It went on under the finger, and on its last frame jumped to
+/// where it had been going, throwing the pan away (audit C10).
+@MainActor
+@Suite("A glide and a finger")
+struct GlideAndFingerTests {
+    @Test func aPanStartedDuringAGlideStopsIt() async throws {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        #expect(model.zoomScale == 1)
+        coordinator.zoom(to: 2)
+        try await Task.sleep(for: .milliseconds(60))
+        coordinator.scrollViewWillBeginDragging(coordinator.documentCanvas)
+        let atTheTouch = model.zoomScale
+        // Longer than the glide's 0.3 s.
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(model.zoomScale == atTheTouch, "the glide went on under the finger")
+        #expect(model.zoomScale < 2)
+    }
+
+    /// Left alone, the glide arrives.
+    @Test func aGlideLeftAloneArrives() async throws {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        coordinator.zoom(to: 2)
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(model.zoomScale == 2)
+    }
+}
