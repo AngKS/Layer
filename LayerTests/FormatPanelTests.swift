@@ -363,3 +363,85 @@ struct ScrubbingAFieldTests {
         #expect(begins == 2)
     }
 }
+
+/// The Format panel's own changes beside a drag, under the store's edits that each have an
+/// identity of their own: a number typed (as `TypedNumber` sets it, through the panel's
+/// `adjusting`), the pencil's scrub of one field and a finger's of another (M8's hold) are
+/// each a step of their own, and none ends the drag, which stays one step (merge with
+/// main's concurrent edits).
+@MainActor
+@Suite("The panel's changes beside a drag")
+struct PanelChangesBesideADragTests {
+    @Test func typingAndEachScrubAreStepsOfTheirOwnAndTheDragGoesOn() async throws {
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        let model = AppModel(document: LayerDocument())
+        model.store.undoManager = undo
+        model.adjustmentPause = .milliseconds(10)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let refs = model.store.setElements([
+            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent),
+            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], on: screen, replacing: false)
+        let (title, button) = (refs[0], refs[1])
+        undo.removeAllActions()
+        func frame(_ ref: DesignStore.ElementRef) -> CGRect? { model.store.resolve(ref)?.element.frame }
+        let titleBefore = try #require(frame(title))
+        let buttonBefore = try #require(frame(button))
+
+        // A finger drags the button.
+        let drags = CanvasDrags()
+        model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let found = try #require(model.store.resolve(button))
+        func drag(by dx: CGFloat) {
+            drags.moveElement(button, from: found.element.frame, placement: found.placement, by: CGSize(width: dx, height: 0), startingAt: .zero, owner: owner, model: model) {
+                { origin, translation in (origin.offsetBy(dx: translation.width, dy: translation.height), []) }
+            }
+        }
+        drag(by: 10)
+
+        // Meanwhile the pencil scrubs the title's width; then a finger holds its Y and scrubs
+        // that, which puts the pencil's ruler away.
+        let scrubber = Scrubber()
+        scrubber.onBegin = { model.beginScrubbing() }
+        scrubber.onEnd = { model.endScrubbing() }
+        func field(_ label: String, _ keyPath: WritableKeyPath<CGRect, CGFloat>, at y: CGFloat) -> Scrubber.Target {
+            Scrubber.Target(
+                label: label, unit: label, frame: CGRect(x: 0, y: y, width: 80, height: 32), range: 0...4000,
+                get: { model.store.resolve(title)?.element.frame[keyPath: keyPath] ?? 0 },
+                set: { value in model.adjusting { model.store.update(title) { $0.frame[keyPath: keyPath] = value } } }
+            )
+        }
+        scrubber.begin(field("W", \.size.width, at: 0))
+        scrubber.scrub(to: 5)
+        scrubber.fingerDragged(field("Y", \.origin.y, at: 40), by: 3 * Scrubber.pointsPerStep)
+        scrubber.end()
+        drag(by: 20)
+
+        // Then the title's X is typed, as TypedNumber sets it.
+        model.adjusting { model.store.update(title) { $0.frame.origin.x = 100 } }
+
+        // The drag goes on, and drops; the panel's pause then ends its own step.
+        drag(by: 30)
+        drags.dropElement(button, findsNewHome: false, owner: owner, model: model)
+        for _ in 0..<100 where model.store.isEditing { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!model.store.isEditing)
+        let moved = try #require(frame(button))
+        #expect(moved.minX == buttonBefore.minX + 30)
+
+        // Undo takes each back on its own, the last first: the typed number, the finger's
+        // scrub, the pencil's, then the whole drag, frames before and after them alike.
+        undo.undo()
+        #expect(frame(title)?.minX == titleBefore.minX)
+        #expect(frame(title)?.minY == titleBefore.minY + 3)
+        undo.undo()
+        #expect(frame(title)?.minY == titleBefore.minY)
+        #expect(frame(title)?.width == titleBefore.width + 5)
+        undo.undo()
+        #expect(frame(title) == titleBefore)
+        #expect(frame(button) == moved)
+        undo.undo()
+        #expect(frame(button) == buttonBefore)
+    }
+}

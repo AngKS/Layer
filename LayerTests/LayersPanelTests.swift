@@ -101,5 +101,29 @@ extension HostedWindowSuites {
             #expect(codeInADrag == 0, "code generated during a 60-frame drag: \(codeInADrag)")
             #expect(codeAfterIt == 1, "code generated once the drag settled: \(codeAfterIt)")
         }
+
+        /// The code's view is named as the design's files name it, so a screen named like an
+        /// earlier one declares "Login2". Renaming the earlier one frees the name: the code
+        /// shown is made again for it, though the screen shown hasn't changed (merge with the
+        /// screens' unique view names, G2).
+        @Test func theCodeFollowsTheNameItsViewIsGivenAmongTheScreens() async throws {
+            let model = AppModel(document: LayerDocument())
+            let first = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+            let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 100), scale: 1)).id
+            model.store.updateScreen(first) { $0.name = "Login" }
+            model.store.updateScreen(second) { $0.name = "Login" }
+            LayersPanelWork.reset()
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))
+            let host = UIHostingController(rootView: CodePane(screenID: .constant(second)).environment(model))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            for _ in 0..<20 where LayersPanelWork.codes == 0 { try await settle(host.view) }
+            #expect(LayersPanelWork.lastCode.contains("struct Login2: View"))
+
+            model.store.updateScreen(first) { $0.name = "Home" }
+            for _ in 0..<20 where !LayersPanelWork.lastCode.contains("struct Login: View") { try await settle(host.view) }
+            #expect(LayersPanelWork.lastCode.contains("struct Login: View"), "the code still declares the name it had")
+        }
     }
 }

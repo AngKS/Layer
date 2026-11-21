@@ -275,7 +275,7 @@ private struct LayerRow: View, Equatable {
 
 /// The Code tab: a screen's SwiftUI, made once the screen has stopped changing rather than on
 /// every frame of a drag, and coloured once for each time it is made.
-private struct CodePane: View {
+struct CodePane: View {
     @Environment(AppModel.self) private var model
     /// The screen whose code is shown; the first screen until another is picked.
     @Binding var screenID: DesignScreen.ID?
@@ -349,7 +349,7 @@ private final class CodePreview {
         source = SwiftUICodeGenerator.code(for: wanted.screen, typeName: wanted.typeName, settings: wanted.settings)
         lines = source.components(separatedBy: "\n").map(SwiftHighlighter.attributed)
         #if DEBUG
-        LayersPanelWork.codeMade()
+        LayersPanelWork.codeMade(source)
         #endif
     }
 }
@@ -440,11 +440,18 @@ enum LayersPanelWork {
     static var codes = 0
 
     static func rowBuilt() { rows += 1 }
-    static func codeMade() { codes += 1 }
+    /// The code last made.
+    static var lastCode = ""
+
+    static func codeMade(_ code: String) {
+        codes += 1
+        lastCode = code
+    }
 
     static func reset() {
         rows = 0
         codes = 0
+        lastCode = ""
     }
 }
 #endif
