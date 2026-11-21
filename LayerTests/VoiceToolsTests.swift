@@ -1021,6 +1021,24 @@ struct VoiceToolsTests {
         #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
     }
 
+    /// A correction never redoes a change by hand either; "redo" said outright does.
+    @Test func redoForACorrectionNeverRedoesAChangeByHand() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let undo = try #require(store.undoManager)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.update(image) { $0.frame.origin.x = 40 }
+        undo.undo()
+        store.beginHeldEdit()
+        bench.box.spokenCommand = "No, that's wrong."
+        #expect(bench.box.redo() != "Redid the last change.")
+        #expect(try #require(bench.element("E3")).frame.origin.x == 20)
+        bench.box.spokenCommand = "Redo."
+        #expect(bench.box.redo() == "Redid the last change.")
+        store.endHeldEdit()
+        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
+    }
+
     /// "Undo" said outright is the Undo button: it takes back the last change, whoever
     /// made it, a move by hand included.
     @Test func undoSaidOutrightTakesBackTheLastChangeWhoeverMadeIt() throws {

@@ -907,9 +907,17 @@ final class DesignStore {
     /// The step on top of the history: the one undo would take back.
     private var lastStep: HistoryStep? { undoable.last { $0.step != nil }?.step }
 
+    /// The steps redo would put back, oldest first: added as undo registers them, taken off
+    /// as they are redone, and all gone once a new step is made.
+    @ObservationIgnored private var redoable: [Weak] = []
+
     private func forget(_ step: HistoryStep) {
         undoable.removeAll { $0.step == nil || $0.step === step }
+        redoable.removeAll { $0.step == nil || $0.step === step }
     }
+
+    /// Whether the step redo would put back now is a spoken command's.
+    var nextRedoIsCommand: Bool { redoable.last { $0.step != nil }?.step?.isCommand == true }
 
     /// Whether the step undo would take back now is a spoken command's.
     var lastStepIsCommand: Bool { lastStep?.isCommand == true }
@@ -963,8 +971,13 @@ final class DesignStore {
     private func register(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
-        // Registering while undoing makes the step the redo step.
-        if !undoManager.isUndoing { undoable.append(Weak(step: step)) }
+        // Registering while undoing makes the step the redo step; a new step clears redo.
+        if undoManager.isUndoing {
+            redoable.append(Weak(step: step))
+        } else {
+            undoable.append(Weak(step: step))
+            if !undoManager.isRedoing { redoable = [] }
+        }
         if !undoManager.isUndoing {
             for edit in edits where edit.step != nil && edit.step !== step { edit.later.append(Weak(step: step)) }
         }

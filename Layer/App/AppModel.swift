@@ -1818,10 +1818,12 @@ final class AppModel {
 
         withAnimation(.smooth(duration: 0.45)) {
             effects.removeAll { $0.id == effect.id }
-            // A drawing and what it becomes change places as one undo step of their own,
-            // which leaves a drag under way meanwhile its own (M3).
-            let conversion = isDrawing ? store.beginEdit(by: .app) : nil
-            defer { if let conversion { store.endEdit(conversion) } }
+            // What a sketch becomes, with the words written in it, is one undo step of its own,
+            // and a drawing changes places with it in that step: made in one turn of the run
+            // loop but not for an edit, they were two steps, and the first undo only put the
+            // placeholder back (review N-1). A drag under way meanwhile keeps its own (M3).
+            let conversion = store.beginEdit(by: .app)
+            defer { store.endEdit(conversion) }
             store.act(for: conversion) {
                 var converted = false
                 var added: DesignStore.ElementRef?

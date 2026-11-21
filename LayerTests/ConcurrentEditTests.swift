@@ -355,10 +355,10 @@ struct ConcurrentEditTests {
 }
 
 
-/// The same changes with the history the document really has: it groups what is registered
-/// in one turn of the run loop, which turns between one touch and the next. Steps taken out
-/// of the history then go only as their group closes, and a step put on top joins the
-/// group of the event that finished it.
+/// The same changes with the history the document really has, which groups what is
+/// registered in one turn of the run loop, and the run loop turning between one touch and
+/// the next. Each step is still a group of its own (`DesignStore.register`): two begun in
+/// one turn used to share the event's group, and one undo took back both.
 @Suite("Changes under way at once, grouped by event", .serialized)
 @MainActor
 struct ConcurrentEditsGroupedByEventTests {
@@ -473,6 +473,29 @@ struct ConcurrentEditsGroupedByEventTests {
         b.undo.undo()
         #expect(b.model.store.screen(generated) == nil)
         b.undo.undo()
+        b.undo.undo()
+        #expect(b.model.store.content == start)
+        #expect(!b.undo.canUndo)
+    }
+
+    /// A sketch the Magic Pen reads becomes an element and takes the words written in it in
+    /// the same turn of the run loop. Not made for an edit, the two changes were two steps,
+    /// and the first undo only put the placeholder back (review N-1).
+    @Test func aMagicPenConversionIsOneStep() async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        let start = b.model.store.content
+        b.model.engine.readHandwriting = { _ in "Sign in" }
+        let wave = StrokeScript.wave(CGRect(x: 150, y: 300, width: 96, height: 40), humps: 3)
+        b.model.sketchChanged([SketchStroke(key: 1, points: wave)])
+        b.model.convertNow()
+        #expect(await eventually(within: .seconds(10)) { b.model.store.screen(b.screen)?.elements.count == 3 })
+        // With no ink canvas here, the sketch is taken away by hand.
+        b.model.sketchChanged([])
+        let added = try #require(b.model.store.screen(b.screen)?.elements.last)
+        #expect(b.model.store.screen(b.screen)?.elements.count == 3)
+        #expect(added.text == "Sign in")
+        await nextEvent()
         b.undo.undo()
         #expect(b.model.store.content == start)
         #expect(!b.undo.canUndo)

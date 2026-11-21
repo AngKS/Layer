@@ -36,6 +36,10 @@ final class SketchEngine {
     @ObservationIgnored private static var lastAnswered: [String: ContinuousClock.Instant] = [:]
     @ObservationIgnored private let log = Logger(subsystem: "kahshin.Layer", category: "sketch")
 
+    /// Reads the handwritten words in a sketch's strokes: PencilKit's recognizer, or a
+    /// test's stand-in, as the simulator has no recognizer assets.
+    @ObservationIgnored var readHandwriting: @Sendable ([[CGPoint]]) async -> String? = { await HandwritingRecognizer.recognize($0) }
+
     init(provider: SketchProvider = .appleIntelligence) {
         self.provider = provider
         readiness = provider.readiness()
@@ -122,7 +126,7 @@ final class SketchEngine {
         if requested.isAsked { return SketchOutcome(reading: await readAsked(requested)) }
         var withText = requested
         if Self.mightBeHandwriting(requested.observation.form) {
-            withText.recognizedText = await HandwritingRecognizer.recognize(requested.strokes)
+            withText.recognizedText = await readHandwriting(requested.strokes)
         }
         let request = withText
         let fallback = rules.reading(for: request)

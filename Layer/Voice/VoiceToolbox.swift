@@ -796,14 +796,17 @@ final class VoiceToolbox: VoiceActing {
         // "Undo" said outright is the Undo button: the last change goes, whoever made it. A
         // correction ("No, …") is about the command, and takes back only a command's step:
         // a model asked to correct a command undid the person's own change instead (I-2).
+        // Nor does a correction redo a change made by hand.
         let isCorrection = spokenCommand.flatMap(VoiceAgent.correction(in:)) != nil
-        guard !isUndo || !isCorrection || model.store.lastStepIsCommand else { return failed(Self.changedByHand) }
+        guard !isCorrection || (isUndo ? model.store.lastStepIsCommand : model.store.nextRedoIsCommand) else {
+            return failed(Self.changedByHand)
+        }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
     }
 
-    /// Why undo by voice won't take back the last change.
-    static let changedByHand = "The last change was made by hand, not by voice, so I'll leave it. The Undo button takes it back."
+    /// Why a correction won't undo or redo the change at hand.
+    static let changedByHand = "That change was made by hand, not by voice, so a correction leaves it. The Undo and Redo buttons work on it."
 
     /// A correction with nothing of the last command's to undo: the command changed
     /// nothing, or something has been changed by hand since, which isn't undone in its place.
