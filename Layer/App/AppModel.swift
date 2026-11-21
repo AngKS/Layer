@@ -1340,6 +1340,18 @@ final class AppModel {
         }
     }
 
+    /// VoiceOver's "Reset rotation": the knob's double tap, except for several things not
+    /// turned together since they were selected, where that has nothing to put back. Each of
+    /// them is then stood upright about its own centre, in one step, as the Rotation field
+    /// set to 0 does: an action that did nothing would read as broken.
+    func resetSelectionRotation() {
+        if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
+            changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(0) }
+        } else {
+            resetSelectionTurn()
+        }
+    }
+
     /// Puts several things where their session turned `degrees` places them, as one change,
     /// and keeps the session.
     private func turn(_ session: inout TurnSession, to degrees: Double) {

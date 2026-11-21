@@ -926,6 +926,32 @@ struct TurningSeveralThingsTests {
         #expect(board.placed(things) == turned)
     }
 
+    /// VoiceOver's Reset rotation, on several things just selected, stands each upright about
+    /// its own centre in one step, as the Rotation field set to 0 does: the knob's double tap
+    /// has nothing to put back there, and an action that did nothing would read as broken.
+    /// Turned together since, it first puts them back where the selection formed, as the
+    /// double tap does.
+    @Test func voiceOversResetStandsEachUprightWhenNothingIsTurnedTogether() {
+        let board = TurnBoard()
+        board.turn(board.title, to: 30)
+        board.turn(board.note, to: 100)
+        let things = [board.title, board.note, board.button]
+        board.select(things)
+        let centres = things.map(board.centre(of:))
+        board.model.resetSelectionRotation()
+        #expect(things.allSatisfy { board.rotation(of: $0) == nil })
+        #expect(zip(things, centres).allSatisfy { isClose(board.centre(of: $0), $1) })
+        board.undo.undo()
+        #expect(things.map(board.rotation(of:)) == [30, 100, nil])
+
+        let before = board.placed(things)
+        board.knobTurn(20)
+        board.model.resetSelectionRotation()
+        #expect(board.placed(things) == before)
+        board.model.resetSelectionRotation()
+        #expect(things.allSatisfy { board.rotation(of: $0) == nil })
+    }
+
     @Test func aSelectionWithAScreenCannotTurn() throws {
         let board = TurnBoard()
         let selection = CanvasSelection.several([.screen(board.screen), .element(board.note)])
