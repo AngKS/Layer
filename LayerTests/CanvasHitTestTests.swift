@@ -239,7 +239,7 @@ extension HostedWindowSuites {
             model.ink = coordinator
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
             let container = UIView(frame: window.bounds)
-            let field = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            let field = quietTextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
             window.addSubview(container)
             window.addSubview(field)
             window.makeKeyAndVisible()
@@ -283,8 +283,8 @@ extension HostedWindowSuites {
             model.ink = coordinator
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
             let container = UIView(frame: window.bounds)
-            let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
-            let note = UITextView(frame: CGRect(x: 20, y: 80, width: 200, height: 80))
+            let name = quietTextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            let note = quietTextView(frame: CGRect(x: 20, y: 80, width: 200, height: 80))
             window.addSubview(container)
             window.addSubview(name)
             window.addSubview(note)
@@ -331,7 +331,7 @@ extension HostedWindowSuites {
             model.ink = coordinator
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
             let container = UIView(frame: window.bounds)
-            let search = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            let search = quietTextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
             window.addSubview(container)
             window.addSubview(search)
             window.makeKeyAndVisible()
@@ -367,7 +367,7 @@ extension HostedWindowSuites {
             model.ink = coordinator
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
             let container = UIView(frame: window.bounds)
-            let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            let name = quietTextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
             window.addSubview(container)
             window.addSubview(name)
             window.makeKeyAndVisible()
