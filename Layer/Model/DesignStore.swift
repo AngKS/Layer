@@ -969,6 +969,9 @@ final class DesignStore {
         if let groupCloseObserver { NotificationCenter.default.removeObserver(groupCloseObserver) }
     }
 
+    /// What Undo and Redo call a spoken command's step.
+    static let commandStepName = String(localized: "Voice Command")
+
     private func register(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
@@ -995,6 +998,10 @@ final class DesignStore {
             withExtendedLifetime(step) {}
             self?.takeBack(step)
         }
+        // A spoken command's step is named for the Edit menu and the undo HUD (V8). Named
+        // here, inside its own group: after the command, with the document's history
+        // grouping by event, no group is open and naming one throws.
+        if step.isCommand { undoManager.setActionName(Self.commandStepName) }
         undoManager.endUndoGrouping()
     }
 

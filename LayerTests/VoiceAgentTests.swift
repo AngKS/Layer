@@ -315,6 +315,22 @@ struct VoiceAgentTests {
         #expect(!undo.canUndo)
     }
 
+    /// The Edit menu, the shortcut list and the undo HUD name a spoken command's step,
+    /// rather than a bare "Undo" (V8).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandsUndoStepIsNamed() async throws {
+        // Both ways a history can group: the tests' own, and the document's, by event.
+        for groupsByEvent in [false, true] {
+            let bench = bench(["make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)]])
+            let undo = try #require(bench.undo)
+            undo.groupsByEvent = groupsByEvent
+            _ = await bench.agent.run("make the button blue")
+            #expect(undo.undoActionName == "Voice Command")
+            undo.undo()
+            #expect(undo.redoActionName == "Voice Command")
+        }
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func theModelIsToldTheRulesTheCanvasAndTheTools() async throws {
         let bench = bench([:])
