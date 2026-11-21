@@ -86,7 +86,7 @@ final class PencilVoice {
     @ObservationIgnored var squeezeIsOff: @MainActor () -> Bool = { UIPencilInteraction.preferredSqueezeAction == .ignore }
     /// Whether a phone call is up in any window. Only one thing hears at a time, so the
     /// pencil doesn't listen then. A test says.
-    @ObservationIgnored var phoneCallIsUp: @MainActor () -> Bool = { VoiceCall.current != nil }
+    @ObservationIgnored var phoneCallIsUp: @MainActor () -> Bool
     /// The other windows' designs, whose pencils stop listening when this one starts: only
     /// one thing hears at a time. A test says.
     @ObservationIgnored var otherWindows: @MainActor () -> [AppModel]
@@ -149,6 +149,7 @@ final class PencilVoice {
         self.clock = clock
         readiness = { [weak model] in model?.modelChoice.sketchProvider.readiness() ?? .ready }
         otherWindows = { [weak model] in OpenDesigns.shared.all.filter { $0 !== model } }
+        phoneCallIsUp = { [weak model] in (model?.phoneLine ?? .shared).call != nil }
         // A key added or a model chosen in Settings may have made the model usable.
         preferencesObserver = NotificationCenter.default.addObserver(forName: ModelPreferences.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.lastReadinessCheck = nil }

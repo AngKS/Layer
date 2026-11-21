@@ -27,7 +27,7 @@ final class Scrubber {
     }
 
     /// The coordinate space field frames and the ruler share: the panel's.
-    static let space = "scrubber"
+    nonisolated static let space = "scrubber"
     /// How far a finger slides for each step.
     nonisolated static let pointsPerStep: CGFloat = 8
     /// How far the pencil's barrel turns for each step.

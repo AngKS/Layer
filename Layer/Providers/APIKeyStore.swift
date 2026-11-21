@@ -6,7 +6,9 @@ import Security
 /// iCloud Keychain or included in backups, and it can be read once the device has been
 /// unlocked after starting up, so a sketch read in the background still works.
 enum APIKeyStore {
-    static let service = "kahshin.Layer.model-provider"
+    /// Where the keys are kept. The unit tests, which run inside the app, keep theirs apart:
+    /// they put keys in and take them out, and took out the ones saved in the app.
+    static let service = AppSettings.isRunningUnitTests ? "kahshin.Layer.model-provider.unit-tests" : "kahshin.Layer.model-provider"
 
     /// The saved key, or nil when there is none.
     static func key(for provider: HostedProvider) -> String? {

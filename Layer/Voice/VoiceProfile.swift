@@ -301,7 +301,14 @@ struct TakingTurns<Arguments: ConvertibleFromGeneratedContent, Output: PromptRep
         parameters = tool.parameters
         includesSchemaInInstructions = tool.includesSchemaInInstructions
         self.turns = turns
-        run = { try await tool.call(arguments: $0) }
+        run = Self.caller(of: tool)
+    }
+
+    /// What calls `tool`. Made here, where the only type it is made for is the tool's own:
+    /// made in `init`, the closure took in the type of what the tool returns, which isn't
+    /// known to be safe to send.
+    private static func caller<Inner: Tool>(of tool: Inner) -> @Sendable (Inner.Arguments) async throws -> Inner.Output {
+        { try await tool.call(arguments: $0) }
     }
 
     func call(arguments: Arguments) async throws -> Output {

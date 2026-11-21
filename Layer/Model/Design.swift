@@ -516,7 +516,10 @@ extension CanvasSettings {
     }
 
     /// The model this design uses: its own choice, or the app's default.
-    var resolvedModel: ModelChoice { model ?? ModelPreferences.defaultChoice }
+    var resolvedModel: ModelChoice { resolvedModel(defaultingTo: ModelPreferences.defaultChoice) }
+
+    /// The model this design uses: its own choice, or `default`.
+    func resolvedModel(defaultingTo default: ModelChoice) -> ModelChoice { model ?? `default` }
 }
 
 extension CanvasSettings: KeepsUnknownKeys {}

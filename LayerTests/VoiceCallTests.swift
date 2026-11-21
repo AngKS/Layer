@@ -10,6 +10,9 @@ enum VoiceFixture {
     /// button and an image, which a call knows as E1, E2 and E3 on S1.
     static func login() -> (app: AppModel, screen: DesignScreen.ID) {
         let app = AppModel(document: LayerDocument())
+        // A line of its own: on the app's, a call started by a test running alongside
+        // ended this design's.
+        app.phoneLine = PhoneLine()
         let screen = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4000, y: 4000), scale: 0.6))
         app.store.updateScreen(screen.id) { $0.name = "Login" }
         _ = app.store.setElements([
@@ -118,13 +121,39 @@ func eventually(within limit: Duration = .seconds(3), _ condition: @MainActor ()
     return true
 }
 
+/// Waits for `condition` without polling: it is looked at now, and again each time
+/// something observable it reads changes, so a state that lasts only a moment, a caption
+/// shown for 150 ms, isn't missed between looks. `limit` is only there so that a change
+/// that never comes fails the test rather than hanging it; nothing waits for it otherwise.
+@MainActor
+func until(within limit: Duration = .seconds(10), _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + limit
+    while true {
+        let (changes, change) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        if withObservationTracking(condition, onChange: { change.yield() }) { return true }
+        let timer = Task {
+            try? await Task.sleep(until: deadline)
+            change.finish()
+        }
+        var changed = false
+        for await _ in changes {
+            changed = true
+            break
+        }
+        timer.cancel()
+        guard changed else { return condition() }
+    }
+}
+
 @Suite("A voice call", .serialized)
 @MainActor
 struct VoiceCallTests {
-    private func makeCall(vocabulary: [String] = []) -> (VoiceCall, FakeRoute, FakeRunner) {
+    /// A call on a line of its own, unless it is given one: on the app's line, a call
+    /// started by a test running alongside ended it.
+    private func makeCall(vocabulary: [String] = [], line: PhoneLine = PhoneLine()) -> (VoiceCall, FakeRoute, FakeRunner) {
         let route = FakeRoute()
         let runner = FakeRunner()
-        return (VoiceCall(route: route, runner: runner, vocabulary: { vocabulary }), route, runner)
+        return (VoiceCall(route: route, runner: runner, vocabulary: { vocabulary }, line: line), route, runner)
     }
 
     @Test func aCallListensOnceItsRouteHasStarted() async {
@@ -212,7 +241,7 @@ struct VoiceCallTests {
         let (call, route, _) = makeCall()
         await call.start()
         route.send(.hearing("make the button"))
-        #expect(await eventually { call.caption == VoiceCall.Caption(kind: .hearing, text: "make the button") })
+        #expect(await until { call.caption == VoiceCall.Caption(kind: .hearing, text: "make the button") })
         call.end()
     }
 
@@ -222,8 +251,9 @@ struct VoiceCallTests {
         runner.outcomes = [VoiceOutcome(lines: ["Selected the button", "Made the button blue"])]
         await call.start()
         route.send(.command("make the button blue"))
-        #expect(await eventually { call.caption == VoiceCall.Caption(kind: .done, text: "Made the button blue") })
-        #expect(await eventually { call.caption == nil })
+        #expect(await until { call.caption == VoiceCall.Caption(kind: .done, text: "Made the button blue") })
+        #expect(await until { call.caption == nil })
+        #expect(call.phase == .listening)
         call.end()
     }
 
@@ -273,16 +303,25 @@ struct VoiceCallTests {
     }
 
     @Test func aSecondCallEndsTheFirst() async {
-        let (first, firstRoute, _) = makeCall()
-        let (second, _, _) = makeCall()
+        let line = PhoneLine()
+        let (first, firstRoute, _) = makeCall(line: line)
+        let (second, _, _) = makeCall(line: line)
         await first.start()
         await second.start()
         #expect(first.phase == .ended)
         #expect(firstRoute.isStopped)
         #expect(second.phase == .listening)
-        #expect(VoiceCall.current === second)
+        #expect(line.call === second)
         second.end()
-        #expect(VoiceCall.current == nil)
+        #expect(line.call == nil)
+    }
+
+    /// The app's designs share its line, so a call started in one window ends another's.
+    @Test func designsShareTheAppsLine() {
+        #expect(AppModel(document: LayerDocument()).phoneLine === PhoneLine.shared)
+        let (call, _, _) = makeCall()
+        #expect(call.line !== PhoneLine.shared)
+        #expect(VoiceCall(route: FakeRoute(), runner: FakeRunner()).line === PhoneLine.shared)
     }
 
     @Test func levelsKeepTheLatest() async {
@@ -573,18 +612,13 @@ struct VoiceCallTests {
         let (app, _, route) = await call(["make the button green": [.init(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#, delay: .milliseconds(200))]])
         var captions: [VoiceCall.Caption] = []
         let call = try #require(app.voice)
-        let watching = Task {
-            while true {
-                if let caption = call.caption, captions.last != caption { captions.append(caption) }
-                // One more look after being told to stop, so the last caption isn't missed.
-                if Task.isCancelled { break }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-        }
         route.send(.command("make the button green"))
-        #expect(await eventually { call.caption?.kind == .done })
-        watching.cancel()
-        await watching.value
+        // Each caption is taken as it is shown, rather than looked for every few
+        // milliseconds, which missed the first under load.
+        #expect(await until {
+            if let caption = call.caption, captions.last != caption { captions.append(caption) }
+            return call.caption?.kind == .done
+        })
         #expect(captions.first == VoiceCall.Caption(kind: .working, text: "Thinking…"))
         #expect(captions.last?.kind == .done)
         app.endVoiceCall()
@@ -883,12 +917,13 @@ struct VoiceCallTests {
     }
 
     @Test func aPencilCallAndAPhoneCallCoexist() async {
-        let (phone, phoneRoute, _) = makeCall()
-        let pencil = VoiceCall(listening: .onRequest { FakeRoute() }, runner: FakeRunner())
+        let line = PhoneLine()
+        let (phone, phoneRoute, _) = makeCall(line: line)
+        let pencil = VoiceCall(listening: .onRequest { FakeRoute() }, runner: FakeRunner(), line: line)
         await phone.start()
         await pencil.start()
         #expect(phone.phase == .listening && !phoneRoute.isStopped)
-        let (other, _, _) = makeCall()
+        let (other, _, _) = makeCall(line: line)
         await other.start()
         #expect(phone.phase == .ended && pencil.phase == .listening)
         other.end()
@@ -1376,6 +1411,7 @@ struct PencilBarFlickTests {
 
     @Test func thePhoneButtonIsOnlyInANarrowWindowWithNothingOverIt() async {
         let app = AppModel(document: LayerDocument())
+        app.phoneLine = PhoneLine()
         // A design opened in a narrow window starts with Draw off, so with the phone button.
         app.isCompactSizeClass = true
         #expect(app.offersVoiceMode)

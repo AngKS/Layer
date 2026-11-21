@@ -355,7 +355,7 @@ private struct PencilVoiceWaveform: View {
 struct PencilVoiceWords: View {
     let words: String
 
-    static let width: CGFloat = 220
+    nonisolated static let width: CGFloat = 220
 
     var body: some View {
         ScrollView(.horizontal) {

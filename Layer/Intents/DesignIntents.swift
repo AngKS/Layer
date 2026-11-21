@@ -176,7 +176,7 @@ struct ExportDesignImageIntent: AppIntent {
         guard let data = await BoardSnapshot.png(of: model) else {
             throw LayerIntentError.nothingToExport
         }
-        let name = DesignFileName.fileName(for: model.store.title ?? "Layer Design")
+        let name = DesignFileName.fileName(for: model.chosenName ?? "Layer Design")
         return .result(value: IntentFile(data: data, filename: "\(name).png", type: .png))
     }
 }
