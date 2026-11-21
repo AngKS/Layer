@@ -1217,6 +1217,37 @@ struct DesignFileNameTests {
 
     /// A name given by hand that another design has takes a number, and that is part of
     /// the naming: undoing it takes the number away too, and redoing puts it back.
+    /// Undo puts back a name another design has taken meanwhile, so it gets a number. The
+    /// number is part of what undo put back: redo still brings back the name given after
+    /// it, and undo the number with the name (review m1).
+    @Test func redoBringsBackANameAfterUndoPutBackOneThatNeededANumber() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        model.store.setTitle("Onboarding")
+        await wait { model.fileURL?.lastPathComponent == "Onboarding.layer" }
+        model.store.setTitle("Home")
+        await wait { model.fileURL?.lastPathComponent == "Home.layer" }
+        // Another design takes the first name.
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+
+        undo.undo()
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.store.title == "Onboarding 2")
+        undo.redo()
+        #expect(model.store.title == "Home")
+        await wait { model.fileURL?.lastPathComponent == "Home.layer" }
+        undo.undo()
+        #expect(model.store.title == "Onboarding 2")
+        undo.undo()
+        #expect(model.store.title == nil)
+        model.close()
+    }
+
     @Test func undoingANameThatNeededANumberTakesTheNumberWithIt() async throws {
         let url = try savedDesign(named: "Untitled")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

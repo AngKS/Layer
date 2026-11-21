@@ -377,15 +377,19 @@ final class DesignStore {
     /// Names the board `numbered`: `title` with the number its file needed, another design
     /// having that name. The number is part of the naming, so it goes in the step that
     /// named the board `title`, when a step did: undoing that takes the number away too,
-    /// as the name can't go back while it isn't the one the step gave (M4). A name with no
-    /// step, one the app suggested, is numbered without one.
+    /// as the name can't go back while it isn't the one the step gave (M4). So does the
+    /// step redo would take, when undo put the name back: redoing it brings back the name
+    /// given after (review m1). A name with no step, one the app suggested, is numbered
+    /// without one.
     func numberTitle(_ numbered: String, for title: String) {
         guard content.title == title, numbered != title else { return }
         let before = content
         isChanging = true
         content.title = numbered
         isChanging = false
-        undoable.last { $0.step?.lastNamed == title }?.step?.record(from: before, to: content, change: changeCount)
+        for steps in [undoable, redoable] {
+            steps.last { $0.step?.lastNamed == title }?.step?.record(from: before, to: content, change: changeCount)
+        }
         onChange?(content)
     }
 
