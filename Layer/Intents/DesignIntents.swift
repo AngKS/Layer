@@ -173,7 +173,7 @@ struct ExportDesignImageIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<IntentFile> {
         let model = try await DesignActions.model(for: design)
-        guard let image = BoardSnapshot.image(of: model), let data = image.pngData() else {
+        guard let data = await BoardSnapshot.png(of: model) else {
             throw LayerIntentError.nothingToExport
         }
         let name = DesignFileName.fileName(for: model.store.title ?? "Layer Design")

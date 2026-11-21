@@ -8,6 +8,8 @@ struct ShareMenu: View {
     @State private var picture: SharedPicture?
     /// What went wrong in making something to share, said in an alert.
     @State private var problem: String?
+    /// Whether a picture of the board or a copy of the design is being made to share.
+    @State private var isPreparing = false
 
     var body: some View {
         Menu {
@@ -28,16 +30,22 @@ struct ShareMenu: View {
                 }
             }
             Button("Image of Board", systemImage: "photo") {
-                if let url = BoardSnapshot.file(of: model) {
-                    picture = SharedPicture(urls: [url])
-                } else {
-                    problem = "There is nothing on the board to make a picture of yet."
+                Task {
+                    isPreparing = true
+                    defer { isPreparing = false }
+                    if let url = await BoardSnapshot.file(of: model) {
+                        picture = SharedPicture(urls: [url])
+                    } else {
+                        problem = "There is nothing on the board to make a picture of yet."
+                    }
                 }
             }
             if model.fileURL != nil {
                 // A copy of the design as it is, rather than the file as last saved.
                 Button("Design File", systemImage: "doc") {
                     Task {
+                        isPreparing = true
+                        defer { isPreparing = false }
                         do {
                             picture = SharedPicture(urls: [try await model.fileToShare()])
                         } catch {
@@ -47,8 +55,12 @@ struct ShareMenu: View {
                 }
             }
         } label: {
+            // A big board takes a moment: the button spins meanwhile, in its own place.
             ToolIcon(symbol: "square.and.arrow.up")
+                .opacity(isPreparing ? 0 : 1)
+                .overlay { if isPreparing { ProgressView() } }
         }
+        .disabled(isPreparing)
         .accessibilityLabel("Share")
         .popover(item: $picture) { picture in
             ActivityView(items: picture.urls)
@@ -130,12 +142,18 @@ enum BoardSnapshot {
         func thumbnail() -> Data? {
             image().jpegData(compressionQuality: 0.8)
         }
+
+        func png() -> Data? {
+            image().pngData()
+        }
     }
 
-    /// A picture no more than `longestSide` pixels along its longer side. `aspect` limits
-    /// its width over its height, by adding canvas around the board.
-    static func image(of model: AppModel, longestSide: CGFloat = 4096, aspect: ClosedRange<CGFloat>? = nil) -> UIImage? {
-        parts(of: model, longestSide: longestSide, aspect: aspect)?.image()
+    /// The board as a PNG, no more than 4096 pixels along its longer side. Only its views
+    /// are drawn on the main thread: at that size its ink, the picture and the PNG take
+    /// long enough to hold the app up, so they are made on another.
+    static func png(of model: AppModel) async -> Data? {
+        guard let parts = parts(of: model, longestSide: 4096, aspect: nil) else { return nil }
+        return await Task.detached(priority: .userInitiated) { parts.png() }.value
     }
 
     private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
@@ -170,16 +188,19 @@ enum BoardSnapshot {
         return Parts(design: design, drawing: ink == nil ? nil : drawing, area: area, scale: scale)
     }
 
-    /// Writes the snapshot as a PNG named after the board, for sharing.
-    static func file(of model: AppModel) -> URL? {
-        guard let data = image(of: model)?.pngData() else { return nil }
+    /// Writes the snapshot as a PNG named after the board, for sharing. The file is
+    /// written off the main thread too.
+    static func file(of model: AppModel) async -> URL? {
+        guard let data = await png(of: model) else { return nil }
         let name = (model.store.title ?? "Board").replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name).appendingPathExtension("png")
-        do {
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
+        return await Task.detached(priority: .userInitiated) { () -> URL? in
+            do {
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }.value
     }
 }

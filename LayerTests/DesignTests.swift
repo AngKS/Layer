@@ -1195,6 +1195,62 @@ struct CloudFileTests {
 @Suite("Keeping resources in check")
 @MainActor
 struct ResourceTests {
+    /// A board of three screens and 30 drawings of 40 strokes, some 2400 points across.
+    private func bigBoard() -> AppModel {
+        var content = DesignContent()
+        for index in 0..<3 {
+            content.addScreen(DesignScreen(name: "Screen \(index + 1)", origin: CGPoint(x: CGFloat(index) * 800, y: 0), scale: 1, elements: [element(.title, 40, 120, 300, 40)]))
+        }
+        for index in 0..<30 {
+            let origin = CGPoint(x: CGFloat(index % 6) * 400, y: 900 + CGFloat(index / 6) * 400)
+            let strokes = (0..<40).map { stroke in
+                let rect = CGRect(x: origin.x + CGFloat(stroke % 5) * 30, y: origin.y + CGFloat(stroke / 5) * 12, width: 160, height: 10)
+                let points = SketchSamples.wave(rect, humps: 4).enumerated().map { offset, point in
+                    PKStrokePoint(location: point, timeOffset: Double(offset) * 0.008, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+                }
+                return PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSinceReferenceDate: Double(index * 1000 + stroke))))
+            }
+            if let drawing = DesignElement.drawing(strokes) { content.add(drawing, to: nil, scale: 1) }
+        }
+        let board = content
+        let document = LayerDocument()
+        document.update { $0.content = board }
+        return AppModel(document: document)
+    }
+
+    /// The longest the main thread went without a turn while `work` ran, and how long `work` took.
+    private func longestStall(during work: () async -> Void) async -> (stall: Duration, total: Duration) {
+        var last = ContinuousClock.now
+        var longest = Duration.zero
+        let beat = Task { @MainActor in
+            while !Task.isCancelled {
+                let now = ContinuousClock.now
+                longest = max(longest, now - last)
+                last = now
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+        }
+        await Task.yield()
+        let start = ContinuousClock.now
+        last = start
+        await work()
+        let total = ContinuousClock.now - start
+        beat.cancel()
+        return (max(longest, ContinuousClock.now - last), total)
+    }
+
+    @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
+        let model = bigBoard()
+        var url: URL?
+        let (stall, total) = await longestStall { url = await BoardSnapshot.file(of: model) }
+        let shared = try #require(url)
+        defer { try? FileManager.default.removeItem(at: shared) }
+        let picture = try #require(UIImage(contentsOfFile: shared.path))
+        #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
+        // The board's views are drawn on the main thread; its ink, the picture and the file aren't.
+        #expect(stall < total * 0.5, "the main thread was held for \(stall) of \(total)")
+    }
+
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
         let store = DesignStore(content: DesignContent())
         let undo = UndoManager()
