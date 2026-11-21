@@ -226,123 +226,127 @@ struct InkOverAnElementTests {
     }
 }
 
-/// The canvas takes first responder, for the palette and the system's undo gestures, when the
-/// tool, the palette or the window changes. Work done in the background, a sketch converted or
-/// dissolving, mustn't take it from a field being typed in (audit C5).
-@MainActor
-@Suite("The canvas and the keyboard")
-struct CanvasFocusTests {
-    @Test func aSketchTakenAwayLeavesTheKeyboardWithTheFieldBeingTypedIn() async throws {
-        let model = AppModel(document: LayerDocument())
-        let coordinator = InkCanvas.Coordinator(model: model)
-        model.ink = coordinator
-        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
-        let container = UIView(frame: window.bounds)
-        let field = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
-        window.addSubview(container)
-        window.addSubview(field)
-        window.makeKeyAndVisible()
-        defer {
-            field.resignFirstResponder()
-            coordinator.hidePalette()
-            window.isHidden = true
-        }
-        for canvas in coordinator.canvases {
-            canvas.frame = container.bounds
-            container.addSubview(canvas)
-        }
-        // Coming to the window, the canvas takes first responder.
-        #expect(coordinator.documentCanvas.isFirstResponder)
+extension HostedWindowSuites {
+    /// The canvas takes first responder, for the palette and the system's undo gestures, when the
+    /// tool, the palette or the window changes. Work done in the background, a sketch converted or
+    /// dissolving, mustn't take it from a field being typed in (audit C5).
+    @MainActor
+    @Suite("The canvas and the keyboard")
+    struct CanvasFocusTests {
+        @Test func aSketchTakenAwayLeavesTheKeyboardWithTheFieldBeingTypedIn() async throws {
+            let model = AppModel(document: LayerDocument())
+            let coordinator = InkCanvas.Coordinator(model: model)
+            model.ink = coordinator
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            let container = UIView(frame: window.bounds)
+            let field = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            window.addSubview(container)
+            window.addSubview(field)
+            window.makeKeyAndVisible()
+            defer {
+                field.resignFirstResponder()
+                coordinator.hidePalette()
+                window.isHidden = true
+            }
+            for canvas in coordinator.canvases {
+                canvas.frame = container.bounds
+                container.addSubview(canvas)
+            }
+            // Coming to the window, the canvas takes first responder.
+            #expect(coordinator.documentCanvas.isFirstResponder)
 
-        // A name is being typed when a rejected sketch dissolves, and when a conversion lands.
-        #expect(field.becomeFirstResponder())
-        coordinator.removeSketch([])
-        #expect(field.isFirstResponder)
-        coordinator.clearSketch()
-        #expect(field.isFirstResponder)
+            // A name is being typed when a rejected sketch dissolves, and when a conversion lands.
+            #expect(field.becomeFirstResponder())
+            coordinator.removeSketch([])
+            #expect(field.isFirstResponder)
+            coordinator.clearSketch()
+            #expect(field.isFirstResponder)
 
-        // Picking a tool is the person going back to the canvas: it takes first responder again.
-        coordinator.apply(.select)
-        #expect(coordinator.documentCanvas.isFirstResponder)
+            // Picking a tool is the person going back to the canvas: it takes first responder again.
+            coordinator.apply(.select)
+            #expect(coordinator.documentCanvas.isFirstResponder)
+        }
     }
 }
 
-/// In Draw the palette shows only while the canvas is first responder, so it goes while a
-/// field has the keyboard. When typing ends it comes back: the canvas takes first responder
-/// again, but never from a field still being typed in (audit C5, follow-up).
-@MainActor
-@Suite("The palette and typing")
-struct PaletteAndTypingTests {
-    @Test func thePaletteComesBackWhenTypingEndsInDraw() async throws {
-        let model = AppModel(document: LayerDocument())
-        let coordinator = InkCanvas.Coordinator(model: model)
-        model.ink = coordinator
-        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
-        let container = UIView(frame: window.bounds)
-        let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
-        let note = UITextView(frame: CGRect(x: 20, y: 80, width: 200, height: 80))
-        window.addSubview(container)
-        window.addSubview(name)
-        window.addSubview(note)
-        window.makeKeyAndVisible()
-        defer {
-            name.resignFirstResponder()
+extension HostedWindowSuites {
+    /// In Draw the palette shows only while the canvas is first responder, so it goes while a
+    /// field has the keyboard. When typing ends it comes back: the canvas takes first responder
+    /// again, but never from a field still being typed in (audit C5, follow-up).
+    @MainActor
+    @Suite("The palette and typing")
+    struct PaletteAndTypingTests {
+        @Test func thePaletteComesBackWhenTypingEndsInDraw() async throws {
+            let model = AppModel(document: LayerDocument())
+            let coordinator = InkCanvas.Coordinator(model: model)
+            model.ink = coordinator
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            let container = UIView(frame: window.bounds)
+            let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            let note = UITextView(frame: CGRect(x: 20, y: 80, width: 200, height: 80))
+            window.addSubview(container)
+            window.addSubview(name)
+            window.addSubview(note)
+            window.makeKeyAndVisible()
+            defer {
+                name.resignFirstResponder()
+                note.resignFirstResponder()
+                coordinator.hidePalette()
+                window.isHidden = true
+            }
+            for canvas in coordinator.canvases {
+                canvas.frame = container.bounds
+                container.addSubview(canvas)
+            }
+            coordinator.apply(.draw)
+            #expect(coordinator.documentCanvas.isFirstResponder)
+
+            // While a name is typed the palette is away, and stays away whatever the canvas does.
+            #expect(name.becomeFirstResponder())
+            try await Task.sleep(for: .milliseconds(50))
+            coordinator.removeSketch([])
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(name.isFirstResponder)
+            #expect(!coordinator.documentCanvas.isFirstResponder)
+
+            // Typing goes on in another field: still nothing for the canvas.
+            #expect(note.becomeFirstResponder())
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(note.isFirstResponder)
+            #expect(!coordinator.documentCanvas.isFirstResponder)
+
+            // The keyboard is put away: the canvas, and its palette, are back.
             note.resignFirstResponder()
-            coordinator.hidePalette()
-            window.isHidden = true
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(coordinator.documentCanvas.isFirstResponder, "the palette should be back once typing ends in Draw")
         }
-        for canvas in coordinator.canvases {
-            canvas.frame = container.bounds
-            container.addSubview(canvas)
-        }
-        coordinator.apply(.draw)
-        #expect(coordinator.documentCanvas.isFirstResponder)
 
-        // While a name is typed the palette is away, and stays away whatever the canvas does.
-        #expect(name.becomeFirstResponder())
-        try await Task.sleep(for: .milliseconds(50))
-        coordinator.removeSketch([])
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(name.isFirstResponder)
-        #expect(!coordinator.documentCanvas.isFirstResponder)
-
-        // Typing goes on in another field: still nothing for the canvas.
-        #expect(note.becomeFirstResponder())
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(note.isFirstResponder)
-        #expect(!coordinator.documentCanvas.isFirstResponder)
-
-        // The keyboard is put away: the canvas, and its palette, are back.
-        note.resignFirstResponder()
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(coordinator.documentCanvas.isFirstResponder, "the palette should be back once typing ends in Draw")
-    }
-
-    /// Out of Draw there is no palette to bring back, and the canvas is left as it is.
-    @Test func typingEndingOutOfDrawLeavesTheCanvasAlone() async throws {
-        let model = AppModel(document: LayerDocument())
-        let coordinator = InkCanvas.Coordinator(model: model)
-        model.ink = coordinator
-        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
-        let container = UIView(frame: window.bounds)
-        let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
-        window.addSubview(container)
-        window.addSubview(name)
-        window.makeKeyAndVisible()
-        defer {
+        /// Out of Draw there is no palette to bring back, and the canvas is left as it is.
+        @Test func typingEndingOutOfDrawLeavesTheCanvasAlone() async throws {
+            let model = AppModel(document: LayerDocument())
+            let coordinator = InkCanvas.Coordinator(model: model)
+            model.ink = coordinator
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            let container = UIView(frame: window.bounds)
+            let name = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+            window.addSubview(container)
+            window.addSubview(name)
+            window.makeKeyAndVisible()
+            defer {
+                name.resignFirstResponder()
+                coordinator.hidePalette()
+                window.isHidden = true
+            }
+            for canvas in coordinator.canvases {
+                canvas.frame = container.bounds
+                container.addSubview(canvas)
+            }
+            coordinator.apply(.select)
+            #expect(name.becomeFirstResponder())
             name.resignFirstResponder()
-            coordinator.hidePalette()
-            window.isHidden = true
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(!coordinator.documentCanvas.isFirstResponder)
         }
-        for canvas in coordinator.canvases {
-            canvas.frame = container.bounds
-            container.addSubview(canvas)
-        }
-        coordinator.apply(.select)
-        #expect(name.becomeFirstResponder())
-        name.resignFirstResponder()
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(!coordinator.documentCanvas.isFirstResponder)
     }
 }
 

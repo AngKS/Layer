@@ -3,6 +3,11 @@ import Testing
 import UIKit
 @testable import Layer
 
+extension Tag {
+    /// A test of how the system behaves, which the app relies on, rather than of the app.
+    @Tag static var describesSwiftUI: Self
+}
+
 /// Two elements' X, as the Format panel shows one of them: the field is bound to whichever
 /// is selected now, and every value set on each is noted.
 @MainActor @Observable
@@ -60,191 +65,196 @@ private struct PlainFieldOnTheSelection: View {
     }
 }
 
-/// A number typed into the Format panel goes to the element that was selected as typing
-/// began, even when another is tapped on the canvas before typing ends: tapping the canvas
-/// doesn't end typing, and the panel's fields are bound to whatever is selected (audit M5).
-/// Hosted in a window, so that SwiftUI's own text field decides when what is typed is set.
-@MainActor
-@Suite("Typing into the Format panel")
-struct TypingIntoTheFormatPanelTests {
-    private func host<Content: View>(_ content: Content) async throws -> (window: UIWindow, view: UIView) {
-        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
-        let host = UIHostingController(rootView: content)
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        host.view.layoutIfNeeded()
-        return (window, host.view)
-    }
-
-    /// Lets SwiftUI catch up: its tasks, focus and updates.
-    private func settle(_ view: UIView) async throws {
-        for _ in 0..<5 {
-            try await Task.sleep(for: .milliseconds(30))
-            view.layoutIfNeeded()
+extension HostedWindowSuites {
+    /// A number typed into the Format panel goes to the element that was selected as typing
+    /// began, even when another is tapped on the canvas before typing ends: tapping the canvas
+    /// doesn't end typing, and the panel's fields are bound to whatever is selected (audit M5).
+    /// Hosted in a window, so that SwiftUI's own text field decides when what is typed is set.
+    @MainActor
+    @Suite("Typing into the Format panel")
+    struct TypingIntoTheFormatPanelTests {
+        private func host<Content: View>(_ content: Content) async throws -> (window: UIWindow, view: UIView) {
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+            let host = UIHostingController(rootView: content)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.layoutIfNeeded()
+            return (window, host.view)
         }
-    }
 
-    /// The text field the number is typed into, once it has taken the keyboard.
-    private func focusedField(in view: UIView) async throws -> UITextField {
-        for _ in 0..<40 {
-            if let field = Self.textFields(in: view).first(where: \.isFirstResponder) { return field }
-            try await Task.sleep(for: .milliseconds(25))
-            view.layoutIfNeeded()
+        /// Lets SwiftUI catch up: its tasks, focus and updates.
+        private func settle(_ view: UIView) async throws {
+            for _ in 0..<5 {
+                try await Task.sleep(for: .milliseconds(30))
+                view.layoutIfNeeded()
+            }
         }
-        throw FieldNotFocused()
-    }
 
-    private struct FieldNotFocused: Error {}
+        /// The text field the number is typed into, once it has taken the keyboard.
+        private func focusedField(in view: UIView) async throws -> UITextField {
+            for _ in 0..<40 {
+                if let field = Self.textFields(in: view).first(where: \.isFirstResponder) { return field }
+                try await Task.sleep(for: .milliseconds(25))
+                view.layoutIfNeeded()
+            }
+            throw FieldNotFocused()
+        }
 
-    private static func textFields(in view: UIView) -> [UITextField] {
-        (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(textFields(in:))
-    }
+        private struct FieldNotFocused: Error {}
 
-    /// Types over what the field shows.
-    private func type(_ text: String, into field: UITextField) {
-        field.selectedTextRange = field.textRange(from: field.beginningOfDocument, to: field.endOfDocument)
-        field.insertText(text)
-    }
+        private static func textFields(in view: UIView) -> [UITextField] {
+            (view as? UITextField).map { [$0] } ?? view.subviews.flatMap(textFields(in:))
+        }
 
-    /// What the fix has to deal with, as SwiftUI does it: a formatted field sets its value as
-    /// the text changes, not only as typing ends. Bound to another value mid-typing, it shows
-    /// that value in place of what was typed, and what is typed next goes to the new value.
-    @Test func swiftUIsFormattedFieldSetsAsItIsTypedAndFollowsANewBinding() async throws {
-        let elements = TwoElements()
-        let (window, view) = try await host(PlainFieldOnTheSelection(elements: elements))
-        defer { window.isHidden = true }
-        let field = try #require(Self.textFields(in: view).first)
-        #expect(field.becomeFirstResponder())
-        type("100", into: field)
-        try await settle(view)
-        #expect(field.isFirstResponder)
-        #expect(elements.first == 100)
+        /// Types over what the field shows.
+        private func type(_ text: String, into field: UITextField) {
+            field.selectedTextRange = field.textRange(from: field.beginningOfDocument, to: field.endOfDocument)
+            field.insertText(text)
+        }
 
-        elements.isSecondSelected = true
-        try await settle(view)
-        #expect(field.text == "20")
-        type("250", into: field)
-        #expect(elements.setOnSecond.contains(250))
-        field.resignFirstResponder()
-        try await settle(view)
-        #expect(elements.first == 100)
-    }
+        /// What the fix has to deal with, as SwiftUI does it: a formatted field sets its value as
+        /// the text changes, not only as typing ends. Bound to another value mid-typing, it shows
+        /// that value in place of what was typed, and what is typed next goes to the new value.
+        /// This describes SwiftUI, not the app (iOS 27): a later iOS may fail it while the app is
+        /// fine, and then the tests after it say whether the app still is.
+        @Test(.tags(.describesSwiftUI))
+        func swiftUIsFormattedFieldSetsAsItIsTypedAndFollowsANewBinding() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(PlainFieldOnTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try #require(Self.textFields(in: view).first)
+            #expect(field.becomeFirstResponder())
+            type("100", into: field)
+            try await settle(view)
+            #expect(field.isFirstResponder)
+            #expect(elements.first == 100)
 
-    @Test func aNumberTypedIsSetOnWhatWasSelectedWhenTypingBegan() async throws {
-        let elements = TwoElements()
-        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
-        defer { window.isHidden = true }
-        let field = try await focusedField(in: view)
-        #expect(field.text == "10")
-        type("100", into: field)
-        try await settle(view)
-        #expect(elements.first == 100)
+            elements.isSecondSelected = true
+            try await settle(view)
+            #expect(field.text == "20")
+            type("250", into: field)
+            #expect(elements.setOnSecond.contains(250))
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 100)
+        }
 
-        // The second element is tapped on the canvas: the panel now shows it, and binds the
-        // field being typed in to it. What is being typed stays, and is still the first's.
-        elements.isSecondSelected = true
-        try await settle(view)
-        #expect(field.isFirstResponder)
-        #expect(field.text == "100")
-        type("250", into: field)
+        @Test func aNumberTypedIsSetOnWhatWasSelectedWhenTypingBegan() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            #expect(field.text == "10")
+            type("100", into: field)
+            try await settle(view)
+            #expect(elements.first == 100)
 
-        // The keyboard is put away, which ends typing.
-        field.resignFirstResponder()
-        try await settle(view)
-        #expect(elements.first == 250)
-        #expect(elements.second == 20)
-        #expect(elements.setOnSecond.isEmpty)
-    }
+            // The second element is tapped on the canvas: the panel now shows it, and binds the
+            // field being typed in to it. What is being typed stays, and is still the first's.
+            elements.isSecondSelected = true
+            try await settle(view)
+            #expect(field.isFirstResponder)
+            #expect(field.text == "100")
+            type("250", into: field)
 
-    /// Not a number, or an endless one, isn't set: a frame that isn't finite can't be saved,
-    /// and scrubbing it traps (audit M18).
-    @Test(arguments: ["nan", "NaN", "inf", "-inf", "1e999"], [false, true])
-    func aNumberThatIsntFiniteIsntSet(_ typed: String, wraps: Bool) async throws {
-        let elements = TwoElements()
-        let (window, view) = try await host(TypingIntoTheSelection(elements: elements, wraps: wraps))
-        defer { window.isHidden = true }
-        let field = try await focusedField(in: view)
-        type(typed, into: field)
-        try await settle(view)
-        field.resignFirstResponder()
-        try await settle(view)
-        let notFinite = elements.setOnFirst.filter { !$0.isFinite }
-        #expect(notFinite.isEmpty, "set: \(elements.setOnFirst)")
-        #expect(elements.first.isFinite)
-    }
+            // The keyboard is put away, which ends typing.
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 250)
+            #expect(elements.second == 20)
+            #expect(elements.setOnSecond.isEmpty)
+        }
 
-    /// The element changed another way while its field has the keyboard (an Align in the
-    /// panel, a drag, the knob, voice): as typing ends, the number typed earlier isn't set
-    /// again over that change. SwiftUI sets the field's value once more as typing ends, and
-    /// the field, which keeps what was typed, put it back (review I1).
-    @Test func aChangeMadeWhileTheFieldIsFocusedStandsAsTypingEnds() async throws {
-        let elements = TwoElements()
-        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
-        defer { window.isHidden = true }
-        let field = try await focusedField(in: view)
-        type("100", into: field)
-        try await settle(view)
-        #expect(elements.first == 100)
+        /// Not a number, or an endless one, isn't set: a frame that isn't finite can't be saved,
+        /// and scrubbing it traps (audit M18).
+        @Test(arguments: ["nan", "NaN", "inf", "-inf", "1e999"], [false, true])
+        func aNumberThatIsntFiniteIsntSet(_ typed: String, wraps: Bool) async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements, wraps: wraps))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type(typed, into: field)
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            let notFinite = elements.setOnFirst.filter { !$0.isFinite }
+            #expect(notFinite.isEmpty, "set: \(elements.setOnFirst)")
+            #expect(elements.first.isFinite)
+        }
 
-        elements.first = 0
-        elements.setOnFirst = []
-        try await settle(view)
-        field.resignFirstResponder()
-        try await settle(view)
-        #expect(elements.first == 0)
-        #expect(!elements.setOnFirst.contains(100), "set again as typing ended: \(elements.setOnFirst)")
-    }
+        /// The element changed another way while its field has the keyboard (an Align in the
+        /// panel, a drag, the knob, voice): as typing ends, the number typed earlier isn't set
+        /// again over that change. SwiftUI sets the field's value once more as typing ends, and
+        /// the field, which keeps what was typed, put it back (review I1).
+        @Test func aChangeMadeWhileTheFieldIsFocusedStandsAsTypingEnds() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            try await settle(view)
+            #expect(elements.first == 100)
 
-    /// Undo pressed while the field has the keyboard takes back the typed number, and stays
-    /// taken back as typing ends, with redo still there to put it back (review I1).
-    @Test func undoWhileTheFieldIsFocusedStandsAndKeepsItsRedo() async throws {
-        let model = AppModel(document: LayerDocument())
-        let undo = UndoManager()
-        undo.groupsByEvent = false
-        model.store.undoManager = undo
-        model.adjustmentPause = .milliseconds(10)
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-        var button = DesignStore.newElement(.button)
-        button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
-        let ref = model.store.setElements([button], on: screen, replacing: true)[0]
-        func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
+            elements.first = 0
+            elements.setOnFirst = []
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 0)
+            #expect(!elements.setOnFirst.contains(100), "set again as typing ended: \(elements.setOnFirst)")
+        }
 
-        let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
-        defer { window.isHidden = true }
-        let field = try await focusedField(in: view)
-        type("100", into: field)
-        try await settle(view)
-        #expect(x() == 100)
-        #expect(!model.store.isEditing, "the panel's pause should have ended its edit")
+        /// Undo pressed while the field has the keyboard takes back the typed number, and stays
+        /// taken back as typing ends, with redo still there to put it back (review I1).
+        @Test func undoWhileTheFieldIsFocusedStandsAndKeepsItsRedo() async throws {
+            let model = AppModel(document: LayerDocument())
+            let undo = UndoManager()
+            undo.groupsByEvent = false
+            model.store.undoManager = undo
+            model.adjustmentPause = .milliseconds(10)
+            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+            var button = DesignStore.newElement(.button)
+            button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
+            let ref = model.store.setElements([button], on: screen, replacing: true)[0]
+            func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
 
-        undo.undo()
-        #expect(x() == 20)
-        #expect(undo.canRedo)
-        try await settle(view)
-        field.resignFirstResponder()
-        try await settle(view)
-        #expect(x() == 20, "typing ending set the typed number again over the undo")
-        #expect(undo.canRedo, "and threw away the redo")
-        undo.redo()
-        #expect(x() == 100)
-    }
+            let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            try await settle(view)
+            #expect(x() == 100)
+            #expect(!model.store.isEditing, "the panel's pause should have ended its edit")
 
-    /// Return ends typing as well, and sets the number on the same element.
-    @Test func returnSetsItOnWhatWasSelectedWhenTypingBegan() async throws {
-        let elements = TwoElements()
-        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
-        defer { window.isHidden = true }
-        let field = try await focusedField(in: view)
-        type("100", into: field)
-        elements.isSecondSelected = true
-        try await settle(view)
+            undo.undo()
+            #expect(x() == 20)
+            #expect(undo.canRedo)
+            try await settle(view)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(x() == 20, "typing ending set the typed number again over the undo")
+            #expect(undo.canRedo, "and threw away the redo")
+            undo.redo()
+            #expect(x() == 100)
+        }
 
-        _ = field.delegate?.textFieldShouldReturn?(field)
-        field.resignFirstResponder()
-        try await settle(view)
-        #expect(elements.first == 100)
-        #expect(elements.second == 20)
-        #expect(elements.setOnSecond.isEmpty)
+        /// Return ends typing as well, and sets the number on the same element.
+        @Test func returnSetsItOnWhatWasSelectedWhenTypingBegan() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("100", into: field)
+            elements.isSecondSelected = true
+            try await settle(view)
+
+            _ = field.delegate?.textFieldShouldReturn?(field)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.first == 100)
+            #expect(elements.second == 20)
+            #expect(elements.setOnSecond.isEmpty)
+        }
     }
 }
 
