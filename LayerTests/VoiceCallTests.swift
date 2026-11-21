@@ -1409,6 +1409,24 @@ struct PencilBarFlickTests {
         #expect(chosen.tool == .draw)
     }
 
+    /// Drawing waits for a wider window only until something else is chosen, and a call is
+    /// that: widening the window while one is up leaves Draw off, so the pencil bar doesn't
+    /// come over the pill, and hanging up in the narrow window brings the phone button back.
+    @Test func wideningTheWindowDuringACallLeavesDrawOff() async {
+        let app = AppModel(document: LayerDocument())
+        app.phoneLine = PhoneLine()
+        app.isCompactSizeClass = true
+        #expect(app.tool == .select)
+        await app.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        #expect(app.isInVoiceCall)
+        app.isCompactSizeClass = false
+        #expect(app.tool == .select)
+        app.isCompactSizeClass = true
+        app.endVoiceCall()
+        #expect(app.tool == .select)
+        #expect(app.offersVoiceMode)
+    }
+
     @Test func thePhoneButtonIsOnlyInANarrowWindowWithNothingOverIt() async {
         let app = AppModel(document: LayerDocument())
         app.phoneLine = PhoneLine()
