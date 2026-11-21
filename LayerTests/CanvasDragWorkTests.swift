@@ -151,7 +151,9 @@ extension HostedWindowSuites {
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
             let host = UIHostingController(rootView: SelectionLayer().environment(board.model))
             window.rootViewController = host
-            window.makeKeyAndVisible()
+            // Shown without being made key: taking the key window from another hosted suite's
+            // has SwiftUI building every view in that one, and in this, on its next updates.
+            window.isHidden = false
             for _ in 0..<20 where CanvasWork.targetsBuilt == 0 || board.model.drags == nil { try await settle(host.view) }
             return (window, host.view)
         }
