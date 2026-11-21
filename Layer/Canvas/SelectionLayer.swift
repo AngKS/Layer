@@ -242,6 +242,8 @@ private struct SelectionSummary: View {
 /// selection or the tool), or a system gesture takes the touch. Each view with a drag
 /// therefore has an `Owner`, and the drag under way is ended when its owner's gesture
 /// state resets or the view goes (see `canvasDrag`), or when a drag starts that isn't it.
+/// However a drag ends, what it moved lands as a drop would land it: on whatever it lies
+/// over, in the drag's own step (audit C4).
 ///
 /// Two fingers that twist the selection end the drag the first of them had begun, and
 /// SwiftUI may go on reporting it, or a drag either of them begins meanwhile, until they
@@ -281,11 +283,16 @@ final class CanvasDrags {
     @ObservationIgnored private var edit: DesignStore.Edit?
 
     /// Gives the drag under way's step to a turn that cuts it short, so that the move so far
-    /// and the turn are one step. The drag then ends without ending it.
+    /// and the turn are one step. The drag then ends without ending it, and what it moved
+    /// lands in that step.
     func handOverEdit() -> DesignStore.Edit? {
         defer { edit = nil }
+        handedOver = edit
         return edit
     }
+
+    /// The drag's step, given to the turn that cut it short, until the drag has ended.
+    @ObservationIgnored private var handedOver: DesignStore.Edit?
 
     /// Opens the drag's step as it begins.
     private func beginEdit(model: AppModel) {
@@ -302,6 +309,9 @@ final class CanvasDrags {
 
     /// What the drag under way moves.
     @ObservationIgnored private var dragged: [CanvasSelection] = []
+    /// Whether what the drag under way moves belongs to whatever it lies on as it ends: an
+    /// element moved, or several things. Not an element resized by a handle, nor a screen.
+    @ObservationIgnored private var findsNewHome = false
 
     /// Ends the drag under way, whoever's it is. A backstop for a cancel SwiftUI didn't
     /// report: while a drag is live every other is ignored, so one left live would stop all
@@ -328,10 +338,12 @@ final class CanvasDrags {
 
     /// Ends the drag under way if what it moves has been locked or taken away, by a spoken
     /// command for instance: its gesture is disabled or its view gone, which may not be heard.
+    /// Whatever SwiftUI still reports of it is left alone.
     func endIfDraggedIsGone(model: AppModel) {
-        guard session != nil else { return }
+        guard let session else { return }
         let store = model.store
         if dragged.contains(where: { store.canvasFrame(of: $0) == nil || store.isLocked($0) }) {
+            leaveAlone(session.owner, startingAt: session.start)
             endAbandoned(model: model)
         }
     }
@@ -342,9 +354,11 @@ final class CanvasDrags {
     /// is a second finger, and the new one is left alone: taking over, the two made every
     /// frame a step. A drag SwiftUI cancelled has already been ended by its owner's gesture
     /// state resetting, or its view going (see `canvasDrag`). A new touch on the same view
-    /// means the one before was cancelled: it is ended first, leaving nothing behind.
+    /// means the one before was cancelled: it is ended first, leaving nothing behind. What
+    /// it moved lands then, apart from what the new touch moves (`moving`), which the view
+    /// has as it lay, on its old host: that lands as the new touch ends.
     /// While two fingers twist the selection, a drag that begins is one of theirs.
-    private func begins(_ owner: Owner, at start: CGPoint, model: AppModel) -> Turn {
+    private func begins(_ owner: Owner, at start: CGPoint, moving: @autoclosure () -> Set<CanvasSelection>, model: AppModel) -> Turn {
         if let index = leftAlone.firstIndex(where: { $0.owner === owner }) {
             if leftAlone[index].start == start { return .ignored }
             // That touch ended without a word: this is a new one.
@@ -357,40 +371,48 @@ final class CanvasDrags {
         if let session {
             guard session.owner === owner else { return .ignored }
             if session.start == start { return .continuing }
-            endAbandoned(model: model)
+            endAbandoned(model: model, keeping: moving())
         }
         session = (owner, start)
         return .new
     }
 
-    /// Ends the drag under way where it is, if it is this owner's: SwiftUI cancelled it.
+    /// Ends the drag under way where it is, if it is this owner's: SwiftUI cancelled it. Its
+    /// `onEnded`, if it comes after all, is left alone: it has landed already.
     func cancel(_ owner: Owner, model: AppModel) {
-        guard session?.owner === owner else { return }
+        guard let session, session.owner === owner else { return }
+        leaveAlone(owner, startingAt: session.start)
         endAbandoned(model: model)
     }
 
-    private func endAbandoned(model: AppModel) {
+    /// Ends the drag under way without its drop. What it moved lands all the same, as the
+    /// drop would land it: on whatever it now lies over, in the drag's step, or the turn's
+    /// that cut it short. Left where it was, an element dragged from one screen onto another
+    /// stayed the first one's, and was drawn under the second (audit C4). `keeping` is what
+    /// a new touch on the same view goes on to move.
+    private func endAbandoned(model: AppModel, keeping: Set<CanvasSelection> = []) {
+        let landing = findsNewHome ? dragged.filter { !keeping.contains($0) } : []
+        let step = edit ?? handedOver
         finish(model: model)
+        if !landing.isEmpty { model.store.act(for: step) { model.rehost(landing) } }
         endEdit(model: model)
     }
 
-    /// Whether `onEnded` belongs to the drag under way, or to the one just ended. That of a
-    /// drag left alone doesn't: its finger has lifted, and that is all.
+    /// Whether `onEnded` belongs to the drag under way. That of a drag left alone doesn't:
+    /// its finger has lifted, and that is all. Nor does one that comes after its drag was
+    /// ended some other way, which left it alone, having landed what it moved.
     private func ends(_ owner: Owner) -> Bool {
         if let index = leftAlone.firstIndex(where: { $0.owner === owner }) {
             leftAlone.remove(at: index)
             return false
         }
-        return session?.owner === owner || (session == nil && lastOwner === owner)
+        return session?.owner === owner
     }
 
-    /// Whose the last drag was, after it ended: its `onEnded` may come after it was already
-    /// ended as cancelled. A second finger's drag, left alone, never was a drag here.
-    @ObservationIgnored private weak var lastOwner: Owner?
-
     private func finish(model: AppModel) {
-        if let session { lastOwner = session.owner }
         session = nil
+        handedOver = nil
+        findsNewHome = false
         dragged = []
         elementOrigin = nil
         screenOrigin = nil
@@ -449,22 +471,25 @@ final class CanvasDrags {
     ) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
-                moveElement(ref, from: frame, placement: placement, by: value.translation, startingAt: value.startLocation, owner: owner, model: model, rule: rule)
+                moveElement(ref, from: frame, placement: placement, by: value.translation, startingAt: value.startLocation, findsNewHome: findsNewHome, owner: owner, model: model, rule: rule)
             }
             .onEnded { [self] _ in
                 dropElement(ref, findsNewHome: findsNewHome, owner: owner, model: model)
             }
     }
 
+    /// `findsNewHome`: whether the element belongs to whatever it lies on as the drag ends,
+    /// as it does when it is moved, though not when a handle resizes it.
     func moveElement(
         _ ref: DesignStore.ElementRef, from frame: CGRect, placement: Placement, by glassTranslation: CGSize,
-        startingAt start: CGPoint, owner: Owner, model: AppModel, rule makeRule: () -> Rule
+        startingAt start: CGPoint, findsNewHome: Bool = true, owner: Owner, model: AppModel, rule makeRule: () -> Rule
     ) {
-        let turn = begins(owner, at: start, model: model)
+        let turn = begins(owner, at: start, moving: [.element(ref)], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
             beginEdit(model: model)
             dragged = [.element(ref)]
+            self.findsNewHome = findsNewHome
             model.selection = .element(ref)
             elementOrigin = frame
             rule = makeRule()
@@ -554,7 +579,7 @@ final class CanvasDrags {
     }
 
     func moveGroup(by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
-        let turn = begins(owner, at: start, model: model)
+        let turn = begins(owner, at: start, moving: model.selection?.things ?? [], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
             beginEdit(model: model)
@@ -565,6 +590,7 @@ final class CanvasDrags {
             }
             groupOrigins = origins
             dragged = Array(origins.keys)
+            findsNewHome = true
             model.isAdjusting = true
         }
         guard let origins = groupOrigins,
@@ -612,7 +638,7 @@ final class CanvasDrags {
     }
 
     func moveScreen(_ screen: DesignScreen, by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
-        let turn = begins(owner, at: start, model: model)
+        let turn = begins(owner, at: start, moving: [.screen(screen.id)], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
             beginEdit(model: model)

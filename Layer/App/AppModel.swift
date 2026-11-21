@@ -1152,7 +1152,34 @@ final class AppModel {
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
 
-    /// True while `rehostSelection()` names what is selected afresh.
+    /// Gives things a drag moved to whatever they now lie on, as the drag ends some way other
+    /// than its finger lifting: SwiftUI cancelled it, the tool changed, a twist cut it short
+    /// (see `CanvasDrags`). The selection goes on naming those of them it named, wherever they
+    /// now are, and a turn of them under way goes on: they are still the same things.
+    func rehost(_ things: [CanvasSelection]) {
+        let selected = selection
+        let session = turnSession.flatMap { $0.selection == selected && $0.matches(store) ? $0 : nil }
+        // Moved to its new host, an element drops out of the selection until it is named again.
+        isRehosting = true
+        defer { isRehosting = false }
+        var renamed: [CanvasSelection: CanvasSelection] = [:]
+        store.asOneStep {
+            for case .element(let ref) in things {
+                let now = store.rehost(ref)
+                if now != ref { renamed[.element(ref)] = .element(now) }
+            }
+        }
+        guard let selected, selected.things.contains(where: { renamed[$0] != nil }) else { return }
+        let rehosted = CanvasSelection(selected.things.map { renamed[$0] ?? $0 })
+        selection = rehosted
+        // The new selection let go of the session as it was set; it is the same one.
+        if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
+        if case .element(let ref, let degrees)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
+            turnStart = .element(now, degrees: degrees)
+        }
+    }
+
+    /// True while `rehostSelection()` or `rehost(_:)` names what is selected afresh.
     @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
