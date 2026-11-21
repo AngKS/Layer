@@ -352,6 +352,43 @@ struct VoiceAgentTests {
         #expect(bench.button?.text == "Sign in")
     }
 
+    /// The corrections above with the history the document really has, which groups by
+    /// event: the agent's work turns the run loop between its steps.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func correctionsWorkWithAHistoryGroupedByEvent() async throws {
+        let bench = bench([
+            "make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#, delay: .milliseconds(100))],
+            "make the button blue and say ahoy": [
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(200)),
+            ],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let undo = try #require(bench.undo)
+        undo.groupsByEvent = true
+        try await Task.sleep(for: .milliseconds(5))
+        undo.removeAllActions()
+        // Ink drawn before the command changed anything: the correction takes back the command.
+        async let first = bench.agent.run("make the button blue")
+        try await Task.sleep(for: .milliseconds(20))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }
+        _ = await first
+        try await Task.sleep(for: .milliseconds(5))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+        // A move by hand of what the command changed: neither it nor the command is undone.
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        async let second = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await second
+        try await Task.sleep(for: .milliseconds(5))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+    }
+
     /// Ink drawn while the model was still thinking, before the command changed anything:
     /// the correction takes back the command, and only the command.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))

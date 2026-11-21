@@ -968,6 +968,13 @@ final class DesignStore {
         if !undoManager.isUndoing {
             for edit in edits where edit.step != nil && edit.step !== step { edit.later.append(Weak(step: step)) }
         }
+        // Each step is a group of its own, even in the document's history, which groups what
+        // is registered in one turn of the run loop: steps begun in the same turn, a drag's
+        // first frame and a turn's, or a command's change and a stroke, shared a group, and
+        // one undo, or a spoken correction, took back both.
+        let groupsByEvent = undoManager.groupsByEvent
+        if groupsByEvent, undoManager.groupingLevel == 0 { undoManager.groupsByEvent = false }
+        defer { undoManager.groupsByEvent = groupsByEvent }
         undoManager.beginUndoGrouping()
         // The history holds its target weakly: the step is kept alive by its own action.
         undoManager.registerUndo(withTarget: step) { [weak self, step] _ in

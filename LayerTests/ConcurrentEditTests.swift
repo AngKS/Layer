@@ -26,9 +26,9 @@ struct ConcurrentEditTests {
 
     /// A screen with a title and a button, and an empty history. Generations are written
     /// by the test, a line at a time.
-    private func board() -> (Board, AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
+    private func board(groupsByEvent: Bool = false) -> (Board, AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
         let undo = UndoManager()
-        undo.groupsByEvent = false
+        undo.groupsByEvent = groupsByEvent
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .seconds(60)
@@ -351,5 +351,188 @@ struct ConcurrentEditTests {
         board.undo.undo()
         #expect(board.store.title == nil)
         #expect(!board.undo.canUndo)
+    }
+}
+
+
+/// The same changes with the history the document really has: it groups what is registered
+/// in one turn of the run loop, which turns between one touch and the next. Steps taken out
+/// of the history then go only as their group closes, and a step put on top joins the
+/// group of the event that finished it.
+@Suite("Changes under way at once, grouped by event", .serialized)
+@MainActor
+struct ConcurrentEditsGroupedByEventTests {
+    private func board() -> (model: AppModel, undo: UndoManager, screen: DesignScreen.ID, title: DesignStore.ElementRef, button: DesignStore.ElementRef, feed: AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
+        let undo = UndoManager()
+        undo.groupsByEvent = true
+        let model = AppModel(document: LayerDocument())
+        model.store.undoManager = undo
+        model.adjustmentPause = .seconds(60)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let refs = model.store.setElements([
+            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
+            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], on: screen.id, replacing: false)
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        model.screenStream = { _, _, _ in stream }
+        return (model, undo, screen.id, refs[0], refs[1], feed)
+    }
+
+    /// The run loop turns, as between two touches, and the event's group closes.
+    private func nextEvent() async {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+
+    /// Starts from an empty history, once the setting up's group has closed.
+    private func clearHistory(_ undo: UndoManager) async {
+        await nextEvent()
+        undo.removeAllActions()
+    }
+
+    private static func written(_ text: String) -> ScreenGenerator.Update {
+        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+    }
+
+    @Test func aDragIsOneStep() async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        let start = b.model.store.content
+        let drag = b.model.store.beginEdit()
+        for frame in 1...20 {
+            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            await nextEvent()
+        }
+        b.model.store.endEdit(drag)
+        let end = b.model.store.content
+        await nextEvent()
+        b.undo.undo()
+        #expect(b.model.store.content == start)
+        #expect(!b.undo.canUndo)
+        b.undo.redo()
+        #expect(b.model.store.content == end)
+    }
+
+    @Test(arguments: [true, false])
+    func aDragAndATurnAtOnceAreAStepEach(dragEndsFirst: Bool) async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        let start = b.model.store.content
+        b.model.selection = .element(b.title)
+        let drag = b.model.store.beginEdit()
+        #expect(b.model.beginTurn())
+        for frame in 1...20 {
+            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.y = 700 - CGFloat(frame) } }
+            b.model.turnSelection(by: Double(frame), snaps: false)
+            await nextEvent()
+        }
+        if dragEndsFirst { b.model.store.endEdit(drag) } else { b.model.endTurn() }
+        await nextEvent()
+        for frame in 21...40 {
+            if dragEndsFirst {
+                b.model.turnSelection(by: Double(frame), snaps: false)
+            } else {
+                b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.y = 700 - CGFloat(frame) } }
+            }
+            await nextEvent()
+        }
+        if dragEndsFirst { b.model.endTurn() } else { b.model.store.endEdit(drag) }
+        await nextEvent()
+        b.undo.undo()
+        let turned = b.model.store.resolve(b.title)?.element.rotation != nil
+        let moved = b.model.store.resolve(b.button)?.element.frame.minY != 700
+        #expect(turned != moved)
+        b.undo.undo()
+        #expect(b.model.store.content == start)
+        #expect(!b.undo.canUndo)
+    }
+
+    /// A drag during a generation, still going when it finishes, and a template dropped in
+    /// the middle of it: a step each, nothing more.
+    @Test func aDragDuringAGenerationAndATemplateAreAStepEach() async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        let start = b.model.store.content
+        b.model.generateScreen(from: "a settings screen")
+        let generated = try #require(b.model.generation?.screenID)
+        await nextEvent()
+        b.feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { b.model.store.screen(generated)?.elements.count == 1 })
+        let drag = b.model.store.beginEdit()
+        for frame in 0..<200 {
+            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            if frame == 50 { b.feed.yield(Self.written("title: Settings\nbutton: Save\n")) }
+            if frame == 100 { b.model.addTemplate("Sign In") }
+            if frame == 150 { b.feed.finish() }
+            await nextEvent()
+        }
+        await b.model.waitForGeneration()
+        b.model.store.endEdit(drag)
+        await nextEvent()
+        #expect(b.model.store.screens.count == 3)
+        // The generation finished last and touched nothing else: it goes first.
+        b.undo.undo()
+        #expect(b.model.store.screen(generated) == nil)
+        b.undo.undo()
+        b.undo.undo()
+        #expect(b.model.store.content == start)
+        #expect(!b.undo.canUndo)
+    }
+
+    /// A generation that writes nothing leaves no step, though its step is taken out in
+    /// the group it went into, and a step by hand made meanwhile stays the only one.
+    @Test func aGenerationThatWritesNothingLeavesOnlyTheHandsStep() async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        b.model.generateScreen(from: "a settings screen")
+        await nextEvent()
+        b.model.store.update(b.title) { $0.text = "Mine" }
+        await nextEvent()
+        b.feed.finish(throwing: URLError(.notConnectedToInternet))
+        await b.model.waitForGeneration()
+        await nextEvent()
+        #expect(b.model.store.screens.count == 1)
+        b.undo.undo()
+        #expect(b.model.store.resolve(b.title)?.element.text == "Welcome")
+        #expect(!b.undo.canUndo)
+    }
+
+    /// Undo of a finished screen leaves nothing on no screen (review C-1), and the redo of
+    /// a step undone while it was written survives its end (review I-3).
+    @Test func undoAndRedoAroundAGenerationKeepTheDesignWhole() async throws {
+        let b = board()
+        await clearHistory(b.undo)
+        b.model.generateScreen(from: "a settings screen")
+        let generated = try #require(b.model.generation?.screenID)
+        b.feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { b.model.store.screen(generated)?.elements.count == 1 })
+        let drag = b.model.store.beginEdit()
+        b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x += 5 } }
+        await nextEvent()
+        b.model.store.update(b.title) { $0.text = "Mine" }
+        await nextEvent()
+        b.undo.undo()
+        #expect(b.undo.canRedo)
+        b.feed.finish()
+        await b.model.waitForGeneration()
+        #expect(b.undo.canRedo)
+        b.undo.redo()
+        #expect(b.model.store.resolve(b.title)?.element.text == "Mine")
+        let dropped = try #require(b.model.store.act(for: drag) {
+            b.model.store.move(b.button, toScreen: generated, origin: CGPoint(x: 20, y: 400))
+        })
+        b.model.store.endEdit(drag)
+        await nextEvent()
+        while b.undo.canUndo {
+            b.undo.undo()
+            #expect(b.model.store.content.elementsOnMissingScreens.isEmpty)
+            await nextEvent()
+        }
+        #expect(b.model.store.resolve(b.button)?.element.frame.minX == 20)
+        while b.undo.canRedo {
+            b.undo.redo()
+            #expect(b.model.store.content.elementsOnMissingScreens.isEmpty)
+            await nextEvent()
+        }
+        #expect(b.model.store.resolve(dropped) != nil)
     }
 }
