@@ -1168,6 +1168,33 @@ struct DesignFileNameTests {
         #expect(OpenDesigns.shared.currentID(for: old) == model.designID)
     }
 
+    @Test func askingToCloseWhileClosingWaitsForTheCloseToFinish() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        // Something else holds the file for a moment, as iCloud can, so the rename the
+        // board's new name starts takes a while.
+        await withCheckedContinuation { (holding: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: [], error: nil) { _ in
+                    holding.resume()
+                    Thread.sleep(forTimeInterval: 0.6)
+                }
+            }
+        }
+        model.store.setTitle("Login")
+
+        // The back button's close waits for the rename; an action asks to close meanwhile.
+        let first = Task { await model.prepareToClose() }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!model.isClosed)
+        let second = await model.prepareToClose()
+        #expect(!second, "only the first close dismisses the design")
+        #expect(model.isClosed, "the second waited for the first to finish")
+        #expect(await first.value)
+    }
+
     @Test func aDesignPutAwayToOpenAnotherIsReadiedAsTheBackButtonReadiesIt() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         // One design shown in the window's controller, another in a window of its own.

@@ -400,6 +400,52 @@ struct DesignIndexTests {
     }
 }
 
+@Suite("Opening designs")
+@MainActor
+struct OpeningDesignTests {
+    /// What happened, in order.
+    private final class Steps {
+        var all: [String] = []
+    }
+
+    @Test func oneOpeningWaitsForTheOneBefore() async {
+        let turns = OneAtATime()
+        let steps = Steps()
+        let opens = ["A", "B"].map { name in
+            Task {
+                await turns.run {
+                    steps.all.append("start \(name)")
+                    try? await Task.sleep(for: .milliseconds(50))
+                    steps.all.append("end \(name)")
+                }
+            }
+        }
+        for open in opens { await open.value }
+        #expect(steps.all == ["start A", "end A", "start B", "end B"], "\(steps.all)")
+    }
+
+    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let browser = UIViewController(), design = UIViewController()
+        window.rootViewController = browser
+        window.isHidden = false
+        defer { window.isHidden = true }
+        browser.present(design, animated: false)
+        #expect(browser.presentedViewController === design)
+
+        var steps: [String] = []
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        await DocumentBrowser.pick(url, in: browser) { presented in
+            steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
+        } picking: { picked in
+            steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
+        }
+        #expect(steps == ["readied while shown", "picked B.layer"])
+        #expect(browser.presentedViewController == nil)
+    }
+}
+
 @Suite("Actions on an open design")
 @MainActor
 struct DesignActionTests {

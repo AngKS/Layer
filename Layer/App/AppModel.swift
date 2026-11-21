@@ -651,24 +651,33 @@ final class AppModel {
     }
 
     /// Gets a design ready to go back to the document browser: its picture as the board
-    /// was left, its name decided, and its file given that name. False when the design is
-    /// already on its way out, so that a second tap of the back button doesn't dismiss it
-    /// again, or early, while the first still waits for the file's name.
+    /// was left, its name decided, and its file given that name. Asked again while it is
+    /// getting ready, by a second tap of the back button or by an action opening another
+    /// design, it waits for that to finish rather than going on early, and says false, so
+    /// that only the first asker dismisses the design.
     @discardableResult
     func prepareToClose() async -> Bool {
-        guard !isClosing, !isClosed else { return false }
-        isClosing = true
-        refreshPreview()
-        // A name still being thought up is settled now, from the design's own words.
-        if titleSuggestion != nil, store.title == nil {
-            store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+        if let closing {
+            await closing.value
+            return false
         }
-        await settleFileName()
-        close()
+        guard !isClosed else { return false }
+        let getting = Task {
+            refreshPreview()
+            // A name still being thought up is settled now, from the design's own words.
+            if titleSuggestion != nil, store.title == nil {
+                store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+            }
+            await settleFileName()
+            close()
+        }
+        closing = getting
+        await getting.value
         return true
     }
 
-    @ObservationIgnored private var isClosing = false
+    /// The design getting ready to close, once something has asked it to.
+    @ObservationIgnored private var closing: Task<Void, Never>?
 
     /// Actions Siri and Shortcuts took on this design that their own undo can still take
     /// back. Each is taken out of their history once it can't be: see `TakenAction`.

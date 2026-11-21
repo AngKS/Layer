@@ -103,23 +103,32 @@ final class OpenDesigns {
         }
     }
 
-    /// Opens a design, if it isn't open already, and waits for its window.
+    /// One action opens a design at a time: two at once would each put away the design
+    /// the other was opening and pick their own over it.
+    @ObservationIgnored private let opening = OneAtATime()
+
+    /// Opens a design, if it isn't open already, and waits for its window. An action that
+    /// asks while another is opening a design waits its turn.
     func open(design id: String) async throws -> AppModel {
         if let model = model(forDesign: id) { return model }
-        guard let url = DesignLibrary.url(for: currentID(for: id)) else { throw LayerIntentError.designNotFound }
-        guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
-        // A design still closing can keep the browser from taking the request, so it is
-        // asked again if the design hasn't opened after a few seconds.
-        for _ in 0..<3 {
-            try await DocumentBrowser.open(url) { presented in
-                await self.prepareToPutAway(presented, keeping: id)
+        return try await opening.run {
+            // Opened while this waited its turn.
+            if let model = model(forDesign: id) { return model }
+            guard let url = DesignLibrary.url(for: currentID(for: id)) else { throw LayerIntentError.designNotFound }
+            guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
+            // A design still closing can keep the browser from taking the request, so it is
+            // asked again if the design hasn't opened after a few seconds.
+            for _ in 0..<3 {
+                try await DocumentBrowser.open(url) { presented in
+                    await self.prepareToPutAway(presented, keeping: id)
+                }
+                for _ in 0..<30 {
+                    if let model = model(forDesign: id) { return model }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
             }
-            for _ in 0..<30 {
-                if let model = model(forDesign: id) { return model }
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            throw LayerIntentError.couldNotOpen
         }
-        throw LayerIntentError.couldNotOpen
     }
 
     /// Makes a new, empty design in Layer's folder, opens it, and waits for its window.
@@ -151,6 +160,30 @@ final class OpenDesigns {
     }
 }
 
+/// Runs one piece of work at a time, in the order asked: each waits for the one before
+/// it to finish.
+@MainActor
+final class OneAtATime {
+    private var isRunning = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func run<T>(_ work: () async throws -> T) async rethrows -> T {
+        if isRunning {
+            await withCheckedContinuation { waiting.append($0) }
+        }
+        isRunning = true
+        // The next in line is let go as this one finishes, the turn passing straight to it.
+        defer {
+            if waiting.isEmpty {
+                isRunning = false
+            } else {
+                waiting.removeFirst().resume()
+            }
+        }
+        return try await work()
+    }
+}
+
 /// Opens a design the way picking it in Layer's document browser does. SwiftUI's own
 /// `openDocument` action isn't available on iPadOS, so this asks the browser that
 /// `DocumentGroup` puts in each window, through its delegate, which is how the browser
@@ -164,22 +197,29 @@ enum DocumentBrowser {
         for _ in 0..<30 {
             if let browser = find(), let delegate = browser.delegate,
                delegate.responds(to: #selector(UIDocumentBrowserViewControllerDelegate.documentBrowser(_:didPickDocumentsAt:))) {
-                // A design open over the browser is put away first, as tapping Back would:
-                // made ready to close, then dismissed, unless it went meanwhile.
-                if let presented = browser.presentedViewController {
-                    await prepare(presented)
-                    if browser.presentedViewController === presented {
-                        await withCheckedContinuation { continuation in
-                            presented.dismiss(animated: false) { continuation.resume() }
-                        }
-                    }
+                await pick(url, in: browser, preparing: prepare) { url in
+                    delegate.documentBrowser?(browser, didPickDocumentsAt: [url])
                 }
-                delegate.documentBrowser?(browser, didPickDocumentsAt: [url])
                 return
             }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw LayerIntentError.couldNotOpen
+    }
+
+    /// Picks `url` in a browser, with `picking`, as the browser itself does. A design open
+    /// over the browser is put away first, as tapping Back would: given to `prepare` while
+    /// it is still shown, then dismissed, unless it went or began to go meanwhile.
+    static func pick(_ url: URL, in browser: UIViewController, preparing prepare: (UIViewController) async -> Void, picking: (URL) -> Void) async {
+        if let presented = browser.presentedViewController {
+            await prepare(presented)
+            if browser.presentedViewController === presented, !presented.isBeingDismissed {
+                await withCheckedContinuation { continuation in
+                    presented.dismiss(animated: false) { continuation.resume() }
+                }
+            }
+        }
+        picking(url)
     }
 
     /// The document browser in every window.
