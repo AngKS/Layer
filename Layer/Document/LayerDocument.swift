@@ -22,11 +22,11 @@ final class LayerDocument: ReferenceFileDocument {
     /// the name the system gave it.
     let isNew: Bool
 
-    /// A new, empty design.
-    init() {
+    /// A new, empty design, made with `model`: the app's default model unless said.
+    init(model: ModelChoice = ModelPreferences.defaultChoice) {
         // A new design starts with the app's default model, and keeps it from then on.
         var new = DesignFile()
-        new.content.canvas.model = ModelPreferences.defaultChoice
+        new.content.canvas.model = model
         state = OSAllocatedUnfairLock(initialState: State(file: new))
         isNew = true
     }

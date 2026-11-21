@@ -372,15 +372,23 @@ struct ModelChoiceTests {
         #expect(reopened.content.canvas.resolvedModel.hostedProvider == .anthropic)
     }
 
+    /// The default is the app's, so it is never changed here, even for a moment: other
+    /// tests running alongside read it.
     @Test func aDesignSavedBeforeThereWasAChoiceUsesTheDefault() throws {
-        let previous = ModelPreferences.defaultChoice
-        defer { ModelPreferences.defaultChoice = previous }
-        ModelPreferences.defaultChoice = .hosted(.openAI, model: "gpt-test")
-
         let old = #"{"screens":[],"floating":[],"canvas":{"showsGrid":true}}"#
         let content = try JSONDecoder().decode(DesignContent.self, from: Data(old.utf8))
         #expect(content.canvas.model == nil)
-        #expect(content.canvas.resolvedModel == .hosted(.openAI, model: "gpt-test"))
+        #expect(content.canvas.resolvedModel(defaultingTo: .hosted(.openAI, model: "gpt-test")) == .hosted(.openAI, model: "gpt-test"))
+        #expect(content.canvas.resolvedModel == ModelPreferences.defaultChoice)
+    }
+
+    @Test func theDefaultIsKeptInTheSettings() throws {
+        let suite = "ModelChoiceTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(ModelPreferences.defaultChoice(in: defaults) == .appleIntelligence)
+        ModelPreferences.setDefaultChoice(.hosted(.openAI, model: "gpt-test"), in: defaults)
+        #expect(ModelPreferences.defaultChoice(in: defaults) == .hosted(.openAI, model: "gpt-test"))
     }
 
     @Test func aChoiceFromANewerLayerStillOpens() throws {
@@ -390,10 +398,8 @@ struct ModelChoiceTests {
     }
 
     @Test func aNewDesignStartsWithTheDefaultModel() {
-        let previous = ModelPreferences.defaultChoice
-        defer { ModelPreferences.defaultChoice = previous }
-        ModelPreferences.defaultChoice = .hosted(.anthropic, model: "claude-new")
-        #expect(LayerDocument().current.content.canvas.model == .hosted(.anthropic, model: "claude-new"))
+        #expect(LayerDocument(model: .hosted(.anthropic, model: "claude-new")).current.content.canvas.model == .hosted(.anthropic, model: "claude-new"))
+        #expect(LayerDocument().current.content.canvas.model == ModelPreferences.defaultChoice)
     }
 
     @Test func aHostedChoiceRunsItsModelWhereItCan() {

@@ -46,16 +46,25 @@ enum ModelPreferences {
 
     /// What a new design uses. Apple Intelligence until something else is chosen.
     static var defaultChoice: ModelChoice {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: defaultChoiceKey),
-                  let choice = try? JSONDecoder().decode(ModelChoice.self, from: data)
-            else { return .appleIntelligence }
-            return choice
-        }
+        get { defaultChoice(in: .standard) }
         set {
-            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: defaultChoiceKey)
+            setDefaultChoice(newValue, in: .standard)
             NotificationCenter.default.post(name: changed, object: nil)
         }
+    }
+
+    /// The choice new designs start with, as kept in `defaults`. A test reads and writes
+    /// defaults of its own: changing the app's, even for a moment, changed it for every
+    /// other test running alongside.
+    static func defaultChoice(in defaults: UserDefaults) -> ModelChoice {
+        guard let data = defaults.data(forKey: defaultChoiceKey),
+              let choice = try? JSONDecoder().decode(ModelChoice.self, from: data)
+        else { return .appleIntelligence }
+        return choice
+    }
+
+    static func setDefaultChoice(_ choice: ModelChoice, in defaults: UserDefaults) {
+        defaults.set(try? JSONEncoder().encode(choice), forKey: defaultChoiceKey)
     }
 
     private static func serverKey(_ provider: HostedProvider) -> String { "server.\(provider.rawValue)" }
