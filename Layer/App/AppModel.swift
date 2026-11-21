@@ -106,7 +106,10 @@ final class AppModel {
             guard tool != oldValue else { return }
             // Drawing chosen in a narrow window is kept, whatever the width does next.
             if tool == .draw { drawingWaitsForAWiderWindow = false }
+            // A drag or a turn whose end was never heard ends here: left live, a drag stops
+            // every other, and a turn keeps its part of the step open.
             drags?.endAny(model: self)
+            endTurn()
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
@@ -1246,9 +1249,52 @@ final class AppModel {
         guard isTurning else { return }
         turnStart = nil
         isTurning = false
+        isTwisting = false
         isAdjusting = false
         snappedTurn = nil
         store.endEdit(by: .turn)
+    }
+
+    // MARK: Twisting with two fingers
+
+    /// True from `beginTwist()` until its turn ends: two fingers are turning what is
+    /// selected. A drag either of them makes meanwhile is left alone (see `CanvasDrags`).
+    @ObservationIgnored private(set) var isTwisting = false
+
+    /// Two fingers on the selection have turned before they pinched: their turn begins. A
+    /// drag the first finger was already making is ended after the turn has begun, so that
+    /// its move so far is part of the turn's step, and the rest of it is left alone.
+    /// Returns whether the turn began: not while another, the knob's, is under way, nor
+    /// when what is selected can't turn.
+    @discardableResult
+    func beginTwist() -> Bool {
+        guard beginTurn() else { return false }
+        isTwisting = true
+        drags?.endAny(model: self)
+        return true
+    }
+
+    /// Turns what is selected as far as the two fingers have turned since they landed,
+    /// snapping to the 45s. Only a turn the twist began.
+    func twist(by degrees: Double) {
+        guard isTwisting else { return }
+        turnSelection(by: degrees, snaps: true)
+    }
+
+    /// A finger lifted, or the twist was cancelled: its turn ends. A turn the twist didn't
+    /// begin is left alone.
+    func endTwist() {
+        guard isTwisting else { return }
+        endTurn()
+    }
+
+    /// Whether a point in the view is on what is selected, for a finger that would twist
+    /// it: within 8 points of its turned shape, so that a finger landing just off its edge
+    /// counts, and not on a control floating over it.
+    func isOnSelection(_ viewPoint: CGPoint) -> Bool {
+        guard let canvas = selectionShape, !chromeFrames.values.contains(where: { $0.contains(viewPoint) }) else { return false }
+        let shape = viewport.viewShape(for: canvas)
+        return TurnedRect(rect: shape.rect.insetBy(dx: -8, dy: -8), degrees: shape.degrees).contains(viewPoint)
     }
 
     /// Turns what is selected `degrees` clockwise in one step, without snapping.

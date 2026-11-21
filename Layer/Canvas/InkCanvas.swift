@@ -159,6 +159,10 @@ struct InkCanvas: UIViewRepresentable {
         private var paletteFlicks: [PaletteFlick] = []
         /// Knows where fingers are resting, for tapping things while one is held.
         let restingFingers = RestingFingerDetector()
+        /// Two fingers on the selection that turn before they pinch turn it with them. The
+        /// resting-finger and Pencil detectors and the flicks go along with it, as they go
+        /// along with every gesture.
+        let twist = TwistGestureRecognizer()
         private var fingerDraws = true
         private let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
         private var tool: AppModel.Tool?
@@ -227,6 +231,11 @@ struct InkCanvas: UIViewRepresentable {
                     restingFingers.view?.removeGestureRecognizer(restingFingers)
                     documentCanvas.window?.addGestureRecognizer(restingFingers)
                 }
+                // And the twist, whose fingers land on the selection's own targets.
+                if twist.view !== documentCanvas.window {
+                    twist.view?.removeGestureRecognizer(twist)
+                    documentCanvas.window?.addGestureRecognizer(twist)
+                }
                 // The smallest window the bars and controls still fit in.
                 documentCanvas.window?.windowScene?.sizeRestrictions?.minimumSize = CGSize(width: 360, height: 480)
                 refresh()
@@ -253,6 +262,21 @@ struct InkCanvas: UIViewRepresentable {
                 return restingFingers.fingers(in: container)
             }
             restingFingers.onAllLifted = { [weak self] in self?.model.fingersLifted() }
+            twist.addTarget(self, action: #selector(twisted(_:)))
+            twist.canTurn = { [weak self] in
+                guard let model = self?.model else { return false }
+                return model.canTurnSelection && !model.isTurning
+            }
+            twist.isOnSelection = { [weak self] point in
+                guard let self, let container = documentCanvas.superview else { return false }
+                return model.isOnSelection(container.convert(point, from: twist.view))
+            }
+            // The canvases scroll and zoom only once it is plain that two fingers on the
+            // selection aren't turning it. The twist fails at once for fingers anywhere else.
+            for canvas in canvases {
+                canvas.panGestureRecognizer.require(toFail: twist)
+                canvas.pinchGestureRecognizer?.require(toFail: twist)
+            }
 
             palette.stateAutosaveName = "app.layer.palette"
             palette.colorUserInterfaceStyle = .light
@@ -388,6 +412,7 @@ struct InkCanvas: UIViewRepresentable {
             for flick in paletteFlicks { flick.view?.removeGestureRecognizer(flick) }
             paletteFlicks = []
             restingFingers.view?.removeGestureRecognizer(restingFingers)
+            twist.view?.removeGestureRecognizer(twist)
             for canvas in canvases {
                 palette.setVisible(false, forFirstResponder: canvas)
             }
@@ -703,6 +728,21 @@ struct InkCanvas: UIViewRepresentable {
         @objc func tapped(_ recognizer: UITapGestureRecognizer) {
             isAtOpeningViewport = false
             model.canvasTapped(at: recognizer.location(in: recognizer.view))
+        }
+
+        /// Two fingers on the selection turned before they pinched: it turns with them, from
+        /// the angle it had as they landed, until one lifts. With the canvas locked too, which
+        /// only stops it scrolling and zooming.
+        @objc func twisted(_ recognizer: TwistGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                model.beginTwist()
+                model.twist(by: recognizer.turn)
+            case .changed:
+                model.twist(by: recognizer.turn)
+            default:
+                model.endTwist()
+            }
         }
 
         // MARK: Drawing round things

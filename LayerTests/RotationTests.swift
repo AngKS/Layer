@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UIKit
 import Testing
 @testable import Layer
 
@@ -988,5 +989,470 @@ struct RotationFieldTests {
         #expect(Rotation.normalized(-.infinity) == 0)
         #expect(Rotation.kept(.nan) == nil)
         #expect(Rotation.normalized(-90) == 270)
+    }
+}
+
+/// A finger `length` points from the origin, `degrees` clockwise from pointing right.
+private func finger(at degrees: Double, _ length: Double) -> CGPoint {
+    let radians = degrees * .pi / 180
+    return CGPoint(x: length * cos(radians), y: length * sin(radians))
+}
+
+private extension TurnBoard {
+    /// A finger dragging an element by `dx` across the glass so far, from `start`, as
+    /// `SelectionLayer`'s drag reports it.
+    func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
+        guard let (element, placement) = store.resolve(ref) else { return }
+        drags.moveElement(ref, from: element.frame, placement: placement, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: model) {
+            drags.moveRule(for: element, placement: placement, on: nil, model: model)
+        }
+    }
+
+    func frame(of ref: DesignStore.ElementRef) -> CGRect? {
+        store.resolve(ref)?.element.frame
+    }
+}
+
+@MainActor
+@Suite("The two-finger twist")
+struct TwistTests {
+    // MARK: Turn or pinch
+
+    @Test func twoFingersThatTurnFirstAreATwist() {
+        let start = (CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0))
+        let now = (CGPoint(x: 0, y: 0), CGPoint(x: 98.48, y: 17.36))
+        #expect(TwistClassifier.decide(from: start, to: now) == .twist)
+        // Clockwise on the screen, where y points down.
+        #expect(abs(TwistClassifier.turn(from: start, to: now) - 10) <= 0.1)
+    }
+
+    @Test func twoFingersThatSpreadFirstAreAPinch() {
+        let start = (CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0))
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), CGPoint(x: 112, y: 0))) == .pinch)
+        // Closing in is a pinch too.
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), CGPoint(x: 88, y: 0))) == .pinch)
+    }
+
+    @Test func aLittleJitterIsUndecided() {
+        let start = (CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0))
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 1, y: 0), CGPoint(x: 101, y: 3))) == .undecided)
+    }
+
+    @Test func aTurnPastTheWrapIsMeasuredTheShortWay() {
+        // The line between the fingers goes from 175° round past 180° to -175°.
+        let start = (CGPoint(x: 0, y: 0), finger(at: 175, 100))
+        let now = (CGPoint(x: 0, y: 0), finger(at: -175, 100))
+        #expect(abs(abs(TwistClassifier.turn(from: start, to: now)) - 10) <= 0.1)
+        #expect(TwistClassifier.decide(from: start, to: now) == .twist)
+    }
+
+    @Test func whenBothCrossAtOnceTheOneFurtherPastItsMarkWins() {
+        let start = (CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0))
+        // Turned twice the mark, spread a quarter past it.
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), finger(at: 16, 110))) == .twist)
+        // Turned a quarter past the mark, spread twice it.
+        #expect(TwistClassifier.decide(from: start, to: (CGPoint(x: 0, y: 0), finger(at: 10, 116))) == .pinch)
+    }
+
+    // MARK: Where the fingers land
+
+    @Test func aFingerIsOnTheSelectionWithinEightPointsOfItsTurnedShape() {
+        let board = TurnBoard()
+        board.model.viewport = Viewport(offset: CGPoint(x: 40, y: 20), scale: 2)
+        let middle = CGPoint(x: 1100, y: 310)
+        #expect(!board.model.isOnSelection(middle), "nothing is selected")
+        board.model.selection = .element(board.note)
+        // The note, 140 by 130 at (500, 100) on the canvas, is 280 by 260 at (960, 180) in the view.
+        #expect(board.model.isOnSelection(middle))
+        #expect(board.model.isOnSelection(CGPoint(x: 953, y: 310)), "7 points left of it")
+        #expect(!board.model.isOnSelection(CGPoint(x: 950, y: 310)), "10 points left of it")
+        #expect(board.model.isOnSelection(CGPoint(x: 1100, y: 447)), "7 points below it")
+        #expect(!board.model.isOnSelection(CGPoint(x: 1100, y: 450)), "10 points below it")
+        // Turned, its upright box's corner is well off it, and its own corner reaches far
+        // above that box.
+        board.turn(board.note, to: 45)
+        #expect(!board.model.isOnSelection(CGPoint(x: 962, y: 182)))
+        #expect(board.model.isOnSelection(CGPoint(x: 1093, y: 128)))
+        #expect(board.model.isOnSelection(middle))
+        // A control floating over it is not on it.
+        board.model.chromeFrames["selection actions"] = CGRect(x: 1050, y: 280, width: 100, height: 60)
+        #expect(!board.model.isOnSelection(middle))
+    }
+
+    // MARK: The twist and the drag under the first finger
+
+    /// The first finger is already moving the button when the twist is told apart. The
+    /// turn begins first, so the move joins its step; then the drag ends. The second finger
+    /// turns about the first, which stays still, and lifts, ending the twist; the first then
+    /// moves on and lifts. SwiftUI still reports that drag, and its end, but neither moves
+    /// the button nor lets it join the screen it lies over.
+    @Test func aTwistAfterTheFingerBeganDraggingIsOneUndoStep() throws {
+        let board = TurnBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        // On the open canvas over the screen: dropped, it would join the screen.
+        let button = board.store.addFloating(element(.button, 130, 200, 120, 40), scale: 1)
+        board.undo.removeAllActions()
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        board.model.selection = .element(button)
+        let frame = try #require(board.frame(of: button))
+        let owner = CanvasDrags.Owner()
+        let finger = CGPoint(x: 300, y: 420)
+
+        board.drag(drags, button, by: 3, from: finger, owner: owner)
+        #expect(board.frame(of: button) == frame.offsetBy(dx: 3, dy: 0))
+        #expect(board.model.beginTwist())
+        #expect(!drags.isDragging)
+        #expect(board.store.isEditing(by: .turn) && !board.store.isEditing(by: .hand))
+        #expect(board.model.isAdjusting, "the twist is still adjusting the selection")
+
+        board.model.twist(by: 20)
+        board.model.endTwist()
+        board.drag(drags, button, by: 15, from: finger, owner: owner)
+        drags.dropElement(button, findsNewHome: true, owner: owner, model: board.model)
+        #expect(board.frame(of: button) == frame.offsetBy(dx: 3, dy: 0))
+        #expect(board.model.selection == .element(button), "it stays on the open canvas")
+        #expect(!drags.isDragging && !board.store.isEditing && !board.model.isTurning && !board.model.isAdjusting)
+        #expect(board.rotation(of: button) == 20)
+        board.undo.undo()
+        #expect(board.rotation(of: button) == nil)
+        #expect(board.frame(of: button) == frame)
+        #expect(!board.undo.canUndo, "the move and the turn were one step")
+    }
+
+    /// The finger that was dragging lands again, after the twist, whether SwiftUI cancelled
+    /// the drag the twist ended or went on reporting it until the finger lifted.
+    @Test(arguments: [true, false])
+    func theDragAfterATwistMoves(swiftUICancelled: Bool) throws {
+        let board = TurnBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        board.model.selection = .element(board.note)
+        let owner = CanvasDrags.Owner()
+        board.drag(drags, board.note, by: 4, from: CGPoint(x: 560, y: 160), owner: owner)
+        board.model.beginTwist()
+        // A quarter turn, which leaves the box round it on whole points: a drag moves that
+        // box, rounded, and the box round any other angle would come out a fraction off.
+        board.model.twist(by: 90)
+        if swiftUICancelled {
+            drags.cancel(owner, model: board.model)
+        } else {
+            board.drag(drags, board.note, by: 9, from: CGPoint(x: 560, y: 160), owner: owner)
+            drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        }
+        board.model.endTwist()
+        let frame = try #require(board.frame(of: board.note))
+
+        board.drag(drags, board.note, by: 10, from: CGPoint(x: 700, y: 300), owner: owner)
+        #expect(drags.isDragging)
+        #expect(board.frame(of: board.note) == frame.offsetBy(dx: 10, dy: 0))
+        drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        #expect(!drags.isDragging && !board.store.isEditing && !board.model.isAdjusting)
+        #expect(board.rotation(of: board.note) == 90)
+    }
+
+    /// The first finger hadn't moved far enough to be a drag when the twist began. When it
+    /// does, it is one of the twisting fingers: its drag is left alone until it lifts, even
+    /// once the other has lifted and ended the twist.
+    @Test func aDragTheTwistingFingersBeginIsLeftAloneUntilTheyLift() throws {
+        let board = TurnBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.undo.removeAllActions()
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        board.model.selection = .element(board.note)
+        let frame = try #require(board.frame(of: board.note))
+        let owner = CanvasDrags.Owner()
+        let finger = CGPoint(x: 560, y: 160)
+
+        #expect(board.model.beginTwist())
+        board.drag(drags, board.note, by: 6, from: finger, owner: owner)
+        #expect(!drags.isDragging)
+        // A quarter turn, which leaves the box round it on whole points (see above).
+        board.model.twist(by: 90)
+        board.model.endTwist()
+        board.drag(drags, board.note, by: 25, from: finger, owner: owner)
+        #expect(!drags.isDragging && !board.store.isEditing)
+        #expect(board.frame(of: board.note) == frame)
+        drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        #expect(!board.store.isEditing && !board.model.isAdjusting)
+
+        // Landed again, it drags.
+        board.drag(drags, board.note, by: 10, from: CGPoint(x: 700, y: 300), owner: owner)
+        #expect(board.frame(of: board.note) == frame.offsetBy(dx: 10, dy: 0))
+        drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        board.undo.undo()
+        #expect(board.frame(of: board.note) == frame)
+        #expect(board.rotation(of: board.note) == 90)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(!board.undo.canUndo)
+    }
+
+    /// The knob's turn under way is the knob's: two fingers neither turn it nor end it.
+    @Test func aTwistLeavesATurnItDidNotBeginAlone() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 10, snaps: false)
+        #expect(!board.model.beginTwist())
+        board.model.twist(by: 40)
+        #expect(board.rotation(of: board.note) == 10)
+        board.model.endTwist()
+        #expect(board.model.isTurning, "the knob's turn goes on")
+        board.model.endTurn()
+        #expect(!board.store.isEditing)
+    }
+
+    // MARK: Ending
+
+    /// A turn whose end was never heard is ended when the tool changes, as a drag is: left
+    /// live, its part of the step would stay open for good.
+    @Test func changingTheToolEndsATurnLeftLive() {
+        let board = TurnBoard()
+        board.model.tool = .select
+        board.undo.removeAllActions()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 20)
+        board.model.tool = .draw
+        #expect(!board.model.isTurning && !board.model.isTwisting && !board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+        #expect(board.rotation(of: board.note) == 20)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+    }
+
+    /// Undo while one element is being twisted takes back the twist so far; the fingers
+    /// turning on make a fresh step from the angle it had when the twist began. Nothing is
+    /// left open, and the next twist is a step of its own.
+    @Test func undoDuringATwistLeavesNothingOpen() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 20)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        board.model.twist(by: 30)
+        #expect(board.rotation(of: board.note) == 30)
+        board.model.endTwist()
+        #expect(!board.store.isEditing && !board.model.isTurning && !board.model.isAdjusting)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 15)
+        board.model.endTwist()
+        #expect(!board.store.isEditing)
+        #expect(board.rotation(of: board.note) == 15)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+    }
+
+    /// Undo while several things are being twisted puts them back, and the rest of that
+    /// twist leaves them there, as anything else that changes them mid-turn does. The next
+    /// twist turns them from where undo put them: it doesn't jump on from the undone turn.
+    @Test func undoDuringATwistOfSeveralThingsLeavesNoJump() {
+        let board = TurnBoard()
+        let things = [board.title, board.button, board.note]
+        board.select(things)
+        let before = board.placed(things)
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 20)
+        #expect(things.allSatisfy { board.rotation(of: $0) == 20 })
+        board.undo.undo()
+        #expect(board.placed(things) == before)
+        board.model.twist(by: 30)
+        #expect(board.placed(things) == before)
+        board.model.endTwist()
+        #expect(!board.store.isEditing && !board.model.isTurning && !board.model.isTwisting && !board.model.isAdjusting)
+
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 15)
+        board.model.endTwist()
+        #expect(!board.store.isEditing)
+        #expect(things.allSatisfy { board.rotation(of: $0) == 15 })
+        #expect(board.model.selectionTurn == 15)
+        board.undo.undo()
+        #expect(board.placed(things) == before)
+    }
+
+    // MARK: The recogniser
+
+    /// The recogniser on a view, with two fingers down on the selection: the second landed
+    /// 0.1 s after the first, 100 points to its right.
+    private func twoFingersDown() -> (TwistGestureRecognizer, UIView, FakeTouch, FakeTouch) {
+        let twist = TwistGestureRecognizer()
+        twist.isOnSelection = { _ in true }
+        twist.canTurn = { true }
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        view.addGestureRecognizer(twist)
+        let first = FakeTouch(at: CGPoint(x: 0, y: 0), time: 0)
+        let second = FakeTouch(at: CGPoint(x: 100, y: 0), time: 0.1)
+        twist.touchesBegan([first], with: FakeEvent(time: 0))
+        twist.touchesBegan([second], with: FakeEvent(time: 0.1))
+        return (twist, view, first, second)
+    }
+
+    /// The recogniser begins as its tracker finds a twist, already turned as far as the
+    /// fingers have since both landed; changes as they turn on; and ends as one lifts.
+    @Test func theRecogniserBeginsChangesAndEndsWithItsFingers() {
+        let (twist, view, first, second) = twoFingersDown()
+        second.point = finger(at: 5, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.15))
+        #expect(twist.state == .possible, "5° is not yet a twist")
+        second.point = finger(at: 10, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.2))
+        #expect(twist.state == .began)
+        #expect(abs(twist.turn - 10) < 0.01)
+        second.point = finger(at: 30, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.3))
+        #expect(twist.state == .changed)
+        #expect(abs(twist.turn - 30) < 0.01)
+        twist.touchesEnded([second], with: FakeEvent(time: 0.4))
+        #expect(twist.state == .ended)
+        withExtendedLifetime((view, first)) {}
+    }
+
+    /// A third finger ends the twist: whatever the fingers are doing now, it isn't this one.
+    /// (Called outside a real event, as here, UIKit reports the cancel of a twist whose
+    /// beginning it never delivered as a failure; either way it is over.)
+    @Test func aThirdFingerEndsATwist() {
+        let (twist, view, first, second) = twoFingersDown()
+        second.point = finger(at: 12, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.2))
+        #expect(twist.state == .began)
+        let third = FakeTouch(at: CGPoint(x: 50, y: 50), time: 0.3)
+        twist.touchesBegan([third], with: FakeEvent(time: 0.3))
+        #expect(twist.state == .cancelled || twist.state == .failed)
+        withExtendedLifetime((view, first)) {}
+    }
+
+    // MARK: Telling a twist from the fingers
+
+    /// Two fingers on the selection that then turn 12° twist it, unless something about
+    /// them already said they aren't a twist: then the turn that follows changes nothing.
+    @Test(arguments: [
+        "none", "first off the selection", "nothing turnable", "second too late", "second off the selection",
+        "first drifted", "first alone too long", "pinched first", "third finger first",
+    ])
+    func theTrackerTwistsOnlyForTwoFingersThatTurnFirst(fault: String) {
+        var tracker = TwistTracker()
+        var first = fault == "first off the selection" ? CGPoint(x: 300, y: 300) : .zero
+        tracker.landed(at: first, time: 0, first: first, isOnSelection: fault != "first off the selection", canTurn: fault != "nothing turnable")
+        switch fault {
+        case "first drifted":
+            first = CGPoint(x: 9, y: 0)
+            tracker.moved(first: first, second: nil, time: 0.03)
+            #expect(tracker.verdict == .undecided, "9 points is still resting")
+            first = CGPoint(x: 11, y: 0)
+            tracker.moved(first: first, second: nil, time: 0.06)
+        case "first alone too long":
+            first = CGPoint(x: 1, y: 0)
+            tracker.moved(first: first, second: nil, time: 0.3)
+        default:
+            break
+        }
+        var second = CGPoint(x: 100, y: 0)
+        tracker.landed(
+            at: second, time: fault == "second too late" ? 0.3 : 0.1, first: first,
+            isOnSelection: fault != "second off the selection", canTurn: true
+        )
+        switch fault {
+        case "pinched first":
+            second = CGPoint(x: 112, y: 0)
+            tracker.moved(first: first, second: second, time: 0.2)
+        case "third finger first":
+            tracker.landed(at: CGPoint(x: 50, y: 50), time: 0.15, first: first, isOnSelection: true, canTurn: true)
+        default:
+            break
+        }
+        let verdictBeforeTheTurn = tracker.verdict
+        tracker.moved(first: first, second: finger(at: 12, 100), time: 0.35)
+        if fault == "none" {
+            #expect(verdictBeforeTheTurn == .undecided)
+            #expect(tracker.verdict == .twist)
+        } else {
+            #expect(verdictBeforeTheTurn == .notATwist)
+            #expect(tracker.verdict == .notATwist)
+        }
+    }
+
+    /// The fingers' turn is counted from where they were as the second landed, so that the
+    /// selection catches up with the 8° it took to tell; and it goes on past a half turn.
+    @Test func theTrackersTurnCatchesUpAndGoesOnPastAHalfTurn() {
+        var tracker = TwistTracker()
+        tracker.landed(at: .zero, time: 0, first: .zero, isOnSelection: true, canTurn: true)
+        tracker.landed(at: CGPoint(x: 100, y: 0), time: 0.1, first: .zero, isOnSelection: true, canTurn: true)
+        tracker.moved(first: .zero, second: finger(at: 5, 100), time: 0.15)
+        #expect(tracker.verdict == .undecided)
+        tracker.moved(first: .zero, second: finger(at: 10, 100), time: 0.2)
+        #expect(tracker.verdict == .twist)
+        #expect(abs(tracker.turn - 10) < 0.01)
+        for degrees in [60.0, 120, 170, 210] {
+            tracker.moved(first: .zero, second: finger(at: degrees, 100), time: 0.3)
+        }
+        #expect(tracker.verdict == .twist)
+        #expect(abs(tracker.turn - 210) < 0.01)
+        // Spread apart once it twists, it goes on twisting.
+        tracker.moved(first: .zero, second: finger(at: 210, 150), time: 0.4)
+        #expect(tracker.verdict == .twist)
+    }
+}
+
+/// A finger on the glass, where a test puts it.
+private final class FakeTouch: UITouch {
+    var point: CGPoint
+    private let time: TimeInterval
+
+    init(at point: CGPoint, time: TimeInterval) {
+        self.point = point
+        self.time = time
+        super.init()
+    }
+
+    override func location(in view: UIView?) -> CGPoint { point }
+    override var timestamp: TimeInterval { time }
+}
+
+private final class FakeEvent: UIEvent {
+    private let time: TimeInterval
+
+    init(time: TimeInterval) {
+        self.time = time
+        super.init()
+    }
+
+    override var timestamp: TimeInterval { time }
+}
+
+@MainActor
+@Suite("The twist on the ink canvas")
+struct TwistOnTheInkCanvasTests {
+    /// The twist asks the model, in the canvas view's own points, whether a finger is on the
+    /// selection and whether it can turn; and the canvases it holds off can zoom, so their
+    /// pinch was there to be held off.
+    @Test func theTwistAsksTheModelInTheCanvasViewsPoints() throws {
+        let board = TurnBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        // The canvas view sits 100 points down the window, below a bar. The twist is on the
+        // window, and tells points in it; a plain view stands in for the window here.
+        let window = UIView(frame: CGRect(x: 0, y: 0, width: 1210, height: 934))
+        let container = UIView(frame: CGRect(x: 0, y: 100, width: 1210, height: 834))
+        window.addSubview(container)
+        container.addSubview(coordinator.documentCanvas)
+        window.addGestureRecognizer(coordinator.twist)
+        #expect(coordinator.canvases.allSatisfy { $0.pinchGestureRecognizer != nil })
+
+        #expect(!coordinator.twist.canTurn())
+        board.model.selection = .element(board.note)
+        #expect(coordinator.twist.canTurn())
+        // The note is at (500, 100) to (640, 230) in the canvas view.
+        #expect(coordinator.twist.isOnSelection(CGPoint(x: 570, y: 265)))
+        #expect(!coordinator.twist.isOnSelection(CGPoint(x: 570, y: 165)), "that is 35 points above it")
+        board.model.beginTurn()
+        #expect(!coordinator.twist.canTurn(), "not while the knob turns it")
+        board.model.endTurn()
     }
 }
