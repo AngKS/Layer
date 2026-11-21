@@ -55,6 +55,10 @@ struct RotateKnob: View {
                     .position(knob)
                     .onTapGesture(count: 2) { model.resetSelectionTurn() }
                     .gesture(drag)
+                    // Gone mid-drag, with the selection let go of or locked, the knob may
+                    // never hear its drag end, as `isDragging` belongs to the view that
+                    // stays: the turn it began ends as it goes.
+                    .onDisappear { finish() }
 
                 if model.isTurning, let degrees = model.selectionTurn {
                     // Beside the knob, on the side away from the selection's middle, so that
@@ -68,6 +72,11 @@ struct RotateKnob: View {
         .coordinateSpace(.named(Self.space))
         .onChange(of: isDragging) { _, isDragging in
             if !isDragging { finish() }
+        }
+        // A turn ended meanwhile by something else, the selection changing for one, is no
+        // longer the knob's: the rest of the drag turns nothing, and its end ends nothing.
+        .onChange(of: model.isTurning) { _, isTurning in
+            if !isTurning { turn?.isOwn = false }
         }
     }
 

@@ -121,9 +121,10 @@ enum DesignActions {
     /// when the system offers one, in the action's undo manager too.
     static func edit<T>(_ model: AppModel, undoManager: UndoManager?, actionName: String, _ body: () throws -> T) rethrows -> T {
         let before = model.store.content
-        model.store.beginEdit()
+        // Its own step, even in the middle of a drag, which goes on as its own (M3).
+        let edit = model.store.beginEdit(by: .app)
         defer {
-            model.store.endEdit()
+            model.store.endEdit(edit)
             let after = model.store.content
             if before != after, let undoManager, undoManager !== model.store.undoManager {
                 undoManager.beginUndoGrouping()
@@ -134,7 +135,7 @@ enum DesignActions {
                 undoManager.endUndoGrouping()
             }
         }
-        return try body()
+        return try model.store.act(for: edit, body)
     }
 
     /// Selects something and glides the canvas to show it.

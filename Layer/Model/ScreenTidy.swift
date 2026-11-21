@@ -56,6 +56,11 @@ import CoreGraphics
 /// - **What isn't the layout's stays put.** Locked elements don't move and the rest go
 ///   round them, those that were below one staying below it. Hidden ones keep their place, and so do drawings and shapes, which
 ///   are the person's own marks.
+/// - **A turned element keeps its size and its angle.** It is laid out by the upright box
+///   round its turned shape (`box(of:)`), and never stretched or resized, as a small thing
+///   isn't: given the column's width, a button at 15° spilled over the rows round it, and one
+///   stood on end ran off the top of an iPad. Riding on something, it goes with it at its own
+///   size; a turned backdrop is carried to its place on a new device, not stretched to fill it.
 enum ScreenTidy {
     static let tight: CGFloat = 8
     static let normal: CGFloat = 12
@@ -99,6 +104,17 @@ enum ScreenTidy {
         max(device.safeBottom + 8, margin(on: device))
     }
 
+    /// Whether an element is turned: see `box(of:)`.
+    static func isTurned(_ element: DesignElement) -> Bool {
+        element.resolvedRotation != 0
+    }
+
+    /// The room an element takes up on its screen, which the tidy lays out: its frame, or for
+    /// one that is turned, the upright box round its turned shape.
+    static func box(of element: DesignElement) -> CGRect {
+        isTurned(element) ? element.shapeBounds : element.frame
+    }
+
     /// Whether the tidy moves an element at all.
     static func moves(_ element: DesignElement) -> Bool {
         !element.isLocked && !element.isHidden && element.kind != .drawing && element.kind != .shape && element.kind.belongsOnScreens
@@ -112,18 +128,27 @@ enum ScreenTidy {
         let hosts = hosts(in: elements, on: old)
         // A shape that carries something stays put, and the layout goes round it.
         let keptClear = Set(hosts.values.filter { !moves($0) }.map(\.id))
-        let blocks = elements.filter { keptClear.contains($0.id) }.map(\.frame)
+        let blocks = elements.filter { keptClear.contains($0.id) }.map(box(of:))
         let flowing = elements.filter { moves($0) && hosts[$0.id] == nil && !isBackdrop($0, on: old) }
         var laid = layout(flowing, among: elements, keeping: blocks, on: device, from: old)
+        // A turned element was laid out by its box: its frame goes where that went.
+        for element in flowing where isTurned(element) {
+            guard let placed = laid[element.id] else { continue }
+            let box = box(of: element)
+            laid[element.id] = element.frame.offsetBy(dx: placed.minX - box.minX, dy: placed.minY - box.minY)
+        }
         // An unlocked backdrop grows with its screen, and isn't laid out otherwise.
         if old.size != device.size, old.size.width > 0, old.size.height > 0 {
             let (sx, sy) = (device.size.width / old.size.width, device.size.height / old.size.height)
             for element in elements where !element.isLocked && !element.isHidden && isBackdrop(element, on: old) {
                 let f = element.frame
-                laid[element.id] = CGRect(x: f.minX * sx, y: f.minY * sy, width: f.width * sx, height: f.height * sy)
+                laid[element.id] = isTurned(element)
+                    // Turned, it keeps its size, and its middle goes to the same place on the screen.
+                    ? CGRect(x: f.midX * sx - f.width / 2, y: f.midY * sy - f.height / 2, width: f.width, height: f.height)
+                    : CGRect(x: f.minX * sx, y: f.minY * sy, width: f.width * sx, height: f.height * sy)
             }
         }
-        return rounded(carry(hosts, with: laid, in: elements))
+        return rounded(carry(hosts, with: laid, in: elements), in: elements)
     }
 
     /// Whether an element covers at least `share` of `device`'s screen.
@@ -146,7 +171,7 @@ enum ScreenTidy {
         // Locked things are in the way, and so are shapes with something laid on them.
         // Hidden ones, a locked backdrop, drawings and other shapes
         // aren't: they are under or over the layout, not part of it.
-        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !covers($0, backdropShare, on: old) }.map(\.frame) + blocks
+        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !covers($0, backdropShare, on: old) }.map(box(of:)) + blocks
 
         // Each row laid out across the column, from a top of 0.
         let tallest = device.size.height / 2
@@ -174,7 +199,7 @@ enum ScreenTidy {
                     }
                     let row = laidOut[index]
                     // A row that was below a locked element stays below it.
-                    let top = rows[index].map(\.frame.minY).min() ?? 0
+                    let top = rows[index].map { box(of: $0).minY }.min() ?? 0
                     for obstacle in obstacles where obstacle.midY < top { y = max(y, obstacle.maxY + normal) }
                     y = clear(of: obstacles, top: y, row: row)
                     for (id, frame) in row.frames { frames[id] = frame.offsetBy(dx: 0, dy: y) }
@@ -196,8 +221,8 @@ enum ScreenTidy {
 
     // MARK: Rows
 
-    /// A row laid out across the column: each member's frame from the row's top, and the
-    /// row's height.
+    /// A row laid out across the column: each member's frame from the row's top (for a
+    /// turned one, its box), and the row's height.
     struct LaidRow {
         var frames: [(DesignElement.ID, CGRect)]
         var height: CGFloat
@@ -205,7 +230,7 @@ enum ScreenTidy {
 
     /// The elements in reading order, in rows. Members of a row are in order from the left.
     static func rows(of elements: [DesignElement]) -> [[DesignElement]] {
-        let sorted = elements.sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
+        let sorted = elements.sorted { (box(of: $0).minY, box(of: $0).minX) < (box(of: $1).minY, box(of: $1).minX) }
         var rows: [[DesignElement]] = []
         for element in sorted {
             if var last = rows.last, joins(element, last) {
@@ -215,7 +240,7 @@ enum ScreenTidy {
                 rows.append([element])
             }
         }
-        return rows.map { $0.sorted { $0.frame.minX < $1.frame.minX } }
+        return rows.map { $0.sorted { box(of: $0).minX < box(of: $1).minX } }
     }
 
     /// Whether an element belongs in a row beside the ones there: it overlaps the row
@@ -223,12 +248,14 @@ enum ScreenTidy {
     /// by half the narrower. A divider is a row of its own.
     private static func joins(_ element: DesignElement, _ row: [DesignElement]) -> Bool {
         guard element.kind != .divider, !row.contains(where: { $0.kind == .divider }) else { return false }
-        let band = row.dropFirst().reduce(row[0].frame) { $0.union($1.frame) }
-        let shared = min(band.maxY, element.frame.maxY) - max(band.minY, element.frame.minY)
-        guard shared >= min(band.height, element.frame.height) / 2, shared > 0 else { return false }
+        let mine = box(of: element)
+        let band = row.dropFirst().reduce(box(of: row[0])) { $0.union(box(of: $1)) }
+        let shared = min(band.maxY, mine.maxY) - max(band.minY, mine.minY)
+        guard shared >= min(band.height, mine.height) / 2, shared > 0 else { return false }
         return row.allSatisfy { other in
-            let across = min(other.frame.maxX, element.frame.maxX) - max(other.frame.minX, element.frame.minX)
-            return across < min(other.frame.width, element.frame.width) / 2
+            let theirs = box(of: other)
+            let across = min(theirs.maxX, mine.maxX) - max(theirs.minX, mine.minX)
+            return across < min(theirs.width, mine.width) / 2
         }
     }
 
@@ -239,9 +266,16 @@ enum ScreenTidy {
     /// Kinds that something can be laid on: see `ridesOn`.
     static let carries: Set<ElementKind> = [.image, .shape]
 
+    /// Whether an element keeps its size in a row: a small thing, or anything turned.
+    private static func keepsSize(_ element: DesignElement) -> Bool {
+        small.contains(element.kind) || isTurned(element)
+    }
+
     /// The height an element has at a new width: its own, or for a picture the one that
-    /// keeps its proportions, no taller than `tallest` unless it was taller already.
+    /// keeps its proportions, no taller than `tallest` unless it was taller already. A
+    /// turned element isn't resized: it is as tall as its box.
     static func height(of element: DesignElement, at width: CGFloat, tallest: CGFloat) -> CGFloat {
+        guard !isTurned(element) else { return box(of: element).height }
         let frame = element.frame
         guard keepsShape.contains(element.kind), frame.width > 0, width != frame.width else { return frame.height }
         return min(frame.height * width / frame.width, max(tallest, frame.height))
@@ -251,7 +285,7 @@ enum ScreenTidy {
     /// in the column: the proportions are kept. Anything else keeps the width it is given.
     static func width(of element: DesignElement, at place: (x: CGFloat, width: CGFloat), height: CGFloat) -> (x: CGFloat, width: CGFloat) {
         let frame = element.frame
-        guard keepsShape.contains(element.kind), frame.width > 0, frame.height > 0 else { return place }
+        guard keepsShape.contains(element.kind), !isTurned(element), frame.width > 0, frame.height > 0 else { return place }
         let kept = height * frame.width / frame.height
         guard kept < place.width - 0.5 else { return place }
         return (place.x + (place.width - kept) / 2, kept)
@@ -276,14 +310,16 @@ enum ScreenTidy {
     private static func placed(_ row: [DesignElement], from old: (x: CGFloat, width: CGFloat), to new: (x: CGFloat, width: CGFloat)) -> [(x: CGFloat, width: CGFloat)] {
         if row.count == 1 {
             let element = row[0]
-            let share = element.frame.width / old.width
-            if spans.contains(element.kind) || (!small.contains(element.kind) && share > 0.5) {
+            let box = box(of: element)
+            let share = box.width / old.width
+            if !isTurned(element), spans.contains(element.kind) || (!small.contains(element.kind) && share > 0.5) {
                 return [(new.x, new.width)]
             }
-            // Kept to its size, or its share of the column, by the edge it was nearest.
-            let width = small.contains(element.kind) ? element.frame.width : min(new.width, (share * new.width).rounded())
-            let offset = element.frame.midX - (old.x + old.width / 2)
-            let x: CGFloat = if abs(offset) <= max(8, old.width * 0.08) {
+            // Kept to its size, or its share of the column, by the edge it was nearest. A
+            // turned element wider than the column is centred on it.
+            let width = keepsSize(element) ? box.width : min(new.width, (share * new.width).rounded())
+            let offset = box.midX - (old.x + old.width / 2)
+            let x: CGFloat = if abs(offset) <= max(8, old.width * 0.08) || (isTurned(element) && width > new.width) {
                 new.x + (new.width - width) / 2
             } else if offset > 0 {
                 new.x + new.width - width
@@ -294,8 +330,8 @@ enum ScreenTidy {
         }
 
         let gutter = ElementLayout.gutter
-        let stretchy = row.filter { !small.contains($0.kind) }
-        let fixedWidth = row.filter { small.contains($0.kind) }.map(\.frame.width).reduce(0, +)
+        let stretchy = row.filter { !keepsSize($0) }
+        let fixedWidth = row.filter(keepsSize).map { box(of: $0).width }.reduce(0, +)
         let room = new.width - gutter * CGFloat(row.count - 1) - fixedWidth
         if !stretchy.isEmpty, room >= 44 * CGFloat(stretchy.count) {
             // What is left is shared in proportion to the widths they have now.
@@ -303,7 +339,7 @@ enum ScreenTidy {
             var x = new.x
             var places: [(x: CGFloat, width: CGFloat)] = []
             for element in row {
-                let width = small.contains(element.kind) ? element.frame.width : room * element.frame.width / total
+                let width = keepsSize(element) ? box(of: element).width : room * element.frame.width / total
                 places.append((x, width))
                 x += width + gutter
             }
@@ -312,7 +348,7 @@ enum ScreenTidy {
         // Equal slots, each member centred in its own, as a generated row is.
         let slot = new.width / CGFloat(row.count)
         return row.enumerated().map { index, element in
-            let width = min(element.frame.width, slot - gutter)
+            let width = isTurned(element) ? box(of: element).width : min(element.frame.width, slot - gutter)
             return (new.x + CGFloat(index) * slot + (slot - width) / 2, width)
         }
     }
@@ -328,11 +364,12 @@ enum ScreenTidy {
         func area(_ rect: CGRect) -> CGFloat { rect.isNull ? 0 : rect.width * rect.height }
         var hosts: [DesignElement.ID: DesignElement] = [:]
         for element in elements where moves(element) {
-            let own = area(element.frame)
+            let mine = box(of: element)
+            let own = area(mine)
             guard own > 0 else { continue }
             let host = candidates
-                .filter { $0.id != element.id && area($0.frame) > own && area($0.frame.intersection(element.frame)) >= own * ridesOn }
-                .min { area($0.frame) < area($1.frame) }
+                .filter { $0.id != element.id && area(box(of: $0)) > own && area(box(of: $0).intersection(mine)) >= own * ridesOn }
+                .min { area(box(of: $0)) < area(box(of: $1)) }
             if let host { hosts[element.id] = host }
         }
         return hosts
@@ -352,8 +389,26 @@ enum ScreenTidy {
             let to = placed(byID[host.id] ?? host)
             let from = host.frame
             guard to != from, from.width > 0, from.height > 0 else { return element.frame }
-            let (sx, sy) = (to.width / from.width, to.height / from.height)
             let mine = element.frame
+            // A turned host isn't resized: what rides on it goes along as it is.
+            if isTurned(host) {
+                let frame = mine.offsetBy(dx: to.minX - from.minX, dy: to.minY - from.minY)
+                frames[element.id] = frame
+                return frame
+            }
+            let (sx, sy) = (to.width / from.width, to.height / from.height)
+            if isTurned(element) {
+                // Turned, it keeps its size: its middle goes to the same place on the host,
+                // and its box is kept on it.
+                let box = box(of: element)
+                let midX = to.minX + (mine.midX - from.minX) * sx
+                let midY = to.minY + (mine.midY - from.minY) * sy
+                let x = min(max(midX, to.minX + box.width / 2), max(to.maxX - box.width / 2, to.minX + box.width / 2))
+                let y = min(max(midY, to.minY + box.height / 2), max(to.maxY - box.height / 2, to.minY + box.height / 2))
+                let frame = CGRect(x: x - mine.width / 2, y: y - mine.height / 2, width: mine.width, height: mine.height)
+                frames[element.id] = frame
+                return frame
+            }
             let width = mine.width * sx
             let height = min(keepsShape.contains(element.kind) ? mine.height * sx : mine.height, to.height)
             let midX = to.minX + (mine.midX - from.minX) * sx
@@ -378,12 +433,12 @@ enum ScreenTidy {
     private static func firstPinned(_ rows: [[DesignElement]], on device: DeviceFrame) -> Int {
         let zone = device.size.height * 0.75
         var first = rows.count
-        while first > 1, rows.count - first < 3, rows[first - 1].allSatisfy({ $0.frame.minY >= zone }) {
+        while first > 1, rows.count - first < 3, rows[first - 1].allSatisfy({ box(of: $0).minY >= zone }) {
             first -= 1
         }
         guard first < rows.count else { return rows.count }
-        let above = rows[first - 1].map(\.frame.maxY).max() ?? 0
-        let below = rows[first].map(\.frame.minY).min() ?? 0
+        let above = rows[first - 1].map { box(of: $0).maxY }.max() ?? 0
+        let below = rows[first].map { box(of: $0).minY }.min() ?? 0
         return below - above >= group ? first : rows.count
     }
 
@@ -425,9 +480,14 @@ enum ScreenTidy {
         return y
     }
 
-    private static func rounded(_ frames: [DesignElement.ID: CGRect]) -> [DesignElement.ID: CGRect] {
-        frames.mapValues { frame in
-            CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: frame.width.rounded(), height: frame.height.rounded())
+    /// On whole points. A turned element keeps its size exactly: only where it is is rounded.
+    private static func rounded(_ frames: [DesignElement.ID: CGRect], in elements: [DesignElement]) -> [DesignElement.ID: CGRect] {
+        let turned = Set(elements.filter(isTurned).map(\.id))
+        var rounded = frames
+        for (id, frame) in frames {
+            let size = turned.contains(id) ? frame.size : CGSize(width: frame.width.rounded(), height: frame.height.rounded())
+            rounded[id] = CGRect(origin: CGPoint(x: frame.minX.rounded(), y: frame.minY.rounded()), size: size)
         }
+        return rounded
     }
 }

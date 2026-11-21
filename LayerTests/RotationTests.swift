@@ -67,6 +67,26 @@ struct RotationGeometryTests {
         #expect(!String(decoding: upright, as: UTF8.self).contains("\"rotation\""))
         #expect(try JSONDecoder().decode(DesignElement.self, from: upright).rotation == nil)
     }
+
+    /// An angle read from a file, written by hand or by a later Layer, is kept as one set
+    /// here is: from 0 up to 360, nothing when upright, and upright when it isn't a number.
+    @Test func anAngleReadFromAFileIsKeptAsAnyOther() throws {
+        var turned = element()
+        turned.setRotation(30)
+        let saved = String(decoding: try JSONEncoder().encode(turned), as: UTF8.self)
+        try #require(saved.contains("\"rotation\":30"))
+        func read(_ value: String) throws -> Double? {
+            let decoder = JSONDecoder()
+            decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+            let file = saved.replacingOccurrences(of: "\"rotation\":30", with: "\"rotation\":\(value)")
+            return try decoder.decode(DesignElement.self, from: Data(file.utf8)).rotation
+        }
+        #expect(try read("720") == nil)
+        #expect(try read("-30") == 330)
+        #expect(try read("390") == 30)
+        #expect(try read("\"nan\"") == nil)
+        #expect(try read("\"-inf\"") == nil)
+    }
 }
 
 private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> DesignElement {
@@ -153,6 +173,16 @@ struct TurnedThingsOnTheBoardTests {
         #expect(board.canvasFrame(board.note) == TurnedRect(rect: rect, degrees: 30).bounds)
     }
 
+    /// What the design covers, for its thumbnail, its share picture and zoom to fit, takes in
+    /// a turned note's corners where it lies at the board's edge.
+    @Test func whatTheDesignCoversTakesInATurnedShape() throws {
+        let board = TurnBoard()
+        board.turn(board.note, to: 45)
+        let shape = try #require(board.store.canvasShape(of: .element(board.note)))
+        let covered = try #require(board.store.contentBounds)
+        #expect(covered.contains(shape.bounds), "\(covered) crops the turned note's \(shape.bounds)")
+    }
+
     @Test func movingSeveralThingsMovesATurnedOneByItsBox() throws {
         let board = TurnBoard()
         board.turn(board.note, to: 30)
@@ -234,6 +264,39 @@ struct TurningOneElementTests {
         board.model.endTurn()
     }
 
+    /// Taken hold of on a mark (upright, say), the knob holds there for its first few degrees
+    /// without a tick: the tick is for snapping to a mark on the way, not for the angle it
+    /// started at. Back into that mark once it has left it, it ticks.
+    @Test func noTickForTheMarkATurnStartsOn() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        #expect(board.model.turnSelection(by: 2, snaps: true))
+        #expect(board.rotation(of: board.note) == nil, "it holds upright")
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: -3, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 20, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 2, snaps: true)
+        #expect(board.model.snappedTurn == 0)
+        board.model.endTurn()
+
+        // From 43°, near the 45 mark, and for several things at once.
+        board.turn(board.note, to: 43)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 3, snaps: true)
+        #expect(board.rotation(of: board.note) == 45 && board.model.snappedTurn == nil)
+        board.model.endTurn()
+        board.select([board.title, board.note])
+        board.model.beginTurn()
+        board.model.turnSelection(by: 1, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 44, snaps: true)
+        #expect(board.model.snappedTurn == 45)
+        board.model.endTurn()
+    }
+
     @Test func aTurnCarriesOnFromTheAngleItHad() {
         let board = TurnBoard()
         board.turn(board.note, to: 100)
@@ -275,12 +338,15 @@ struct TurningOneElementTests {
         #expect(board.store.content == before)
     }
 
-    @Test func aTurnDuringASpokenCommandJoinsItsStep() {
+    /// A turn made while a spoken command works is a step of its own, which neither ends
+    /// the command's nor joins it (C1, V1). The command, finished last and touching
+    /// nothing the turn did, is taken back first.
+    @Test func aTurnDuringASpokenCommandIsAStepOfItsOwn() {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         // A spoken command holds its step open while it works.
         board.store.beginHeldEdit()
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         // Ending a turn that never began leaves the command's step alone.
         board.model.endTurn()
         #expect(board.store.isHoldingEdit)
@@ -288,12 +354,15 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the turn must leave the command's step open")
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         #expect(board.rotation(of: board.note) == 20)
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        #expect(board.rotation(of: board.note) == 20)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(!board.undo.canUndo)
     }
 
     @Test func aSpokenCommandEndingMidTurnLeavesTheTurnOneStep() {
@@ -322,29 +391,39 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's step must still be open")
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        let mark = board.store.historyMark
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
+        #expect(board.store.historyMark == mark + 1, "the command's changes are one step")
+        board.undo.undo()
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        #expect(board.rotation(of: board.note) == 20)
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
-        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
     }
 
-    @Test func aTurnThatCutsADragShortIsOneStepWithIt() throws {
+    /// A turn begun while a finger drags the note, which then lets go: each is a step of its
+    /// own, and the drag's end doesn't end the turn. (A drag the twist itself cuts short is
+    /// one step with the twist: see `aTwistAfterTheFingerBeganDraggingIsOneUndoStep`.)
+    @Test func aTurnBegunDuringADragLeavesTheDragItsOwnStep() throws {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         let frame = try #require(board.store.resolve(board.note)).element.frame
-        // A finger has begun moving the note when the turn begins, and the drag is then ended.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.origin.x += 3 }
         board.model.beginTurn()
         board.store.endEdit()
+        #expect(board.model.isTurning && board.store.isEditing(by: .turn))
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
-        #expect(!board.store.isHoldingEdit)
+        #expect(!board.store.isEditing)
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.note)?.element.frame == frame.offsetBy(dx: 3, dy: 0))
+        board.undo.undo()
         #expect(board.store.resolve(board.note)?.element.frame == frame)
+        #expect(!board.undo.canUndo)
     }
 
     @Test func aTurnNeverClosesAHoldItDidNotOpen() {
@@ -358,17 +437,19 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the second command's step must still be open")
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
     }
 
+    /// A finger moves the title and lets go while the knob is held during a command: the
+    /// move, the turn and the command are a step each, and none ends another.
     @Test func aTurnStaysOneStepWhenAnotherEditEndsInsideIt() {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
-        // A command is working; the turn joins its step.
         board.store.beginHeldEdit()
         board.model.beginTurn()
         // Another finger moves the title and lets go while the knob is still held.
@@ -378,12 +459,17 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 10, snaps: false)
         // The command finishes before the knob is let go.
         board.store.endHeldEdit()
+        let mark = board.store.historyMark
         board.model.turnSelection(by: 20, snaps: false)
         board.model.turnSelection(by: 30, snaps: false)
+        #expect(board.store.historyMark == mark, "no frame of the turn is a step of its own")
         board.model.endTurn()
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 90)
+        board.undo.undo()
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        #expect(!board.undo.canUndo)
     }
 
     @Test func endingAHoldNoCommandOpenedLeavesTheTurnsStepOpen() {
@@ -399,82 +485,89 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's hold must still be open")
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
     }
 
-    @Test func aHandleDraggedAndLetGoDuringATurnIsOneStepWithIt() throws {
+    /// A second finger drags a corner handle and lets go while the knob is held: a step of
+    /// its own, which leaves the turn's open.
+    @Test func aHandleDraggedAndLetGoDuringATurnIsAStepOfItsOwn() throws {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         let frame = try #require(board.store.resolve(board.note)).element.frame
         board.model.beginTurn()
         board.model.turnSelection(by: 10, snaps: false)
-        // A second finger drags a corner handle and lets go while the knob is still held.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.size.width += 20 }
         board.store.endEdit()
+        #expect(board.model.isTurning && board.store.isEditing(by: .turn))
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.note)?.element.frame == frame)
+        #expect(board.rotation(of: board.note) == 20)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        #expect(!board.undo.canUndo)
     }
 
-    @Test func aDragGoingOnAfterTheKnobIsLetGoIsOneStepWithTheTurn() throws {
+    @Test func aDragGoingOnAfterTheKnobIsLetGoIsOneStepOfItsOwn() throws {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         let frame = try #require(board.store.resolve(board.note)).element.frame
         board.model.beginTurn()
         board.model.turnSelection(by: 10, snaps: false)
-        // The one step, in the history from the turn's first change.
-        let mark = board.store.historyMark
         // A second finger starts dragging a handle, and is still dragging when the knob is let go.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.size.width += 20 }
+        let mark = board.store.historyMark
         board.model.endTurn()
         board.store.update(board.note) { $0.frame.size.width += 20 }
         board.store.update(board.note) { $0.frame.size.width += 20 }
         #expect(board.store.historyMark == mark, "nothing is a step of its own while the finger is still down")
         board.store.endEdit()
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
         #expect(board.store.resolve(board.note)?.element.frame == frame)
+        #expect(board.rotation(of: board.note) == 10)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
     }
 
-    @Test func aTurnWhileAScreenIsGeneratedIsOneStepWithIt() {
+    /// A screen being written is a step of its own (`AppModel.generateScreen`): a turn
+    /// made meanwhile is another, and no line written after the turn is a step of its own.
+    @Test func aTurnWhileAScreenIsGeneratedIsAStepOfItsOwn() {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
-        // A screen being generated opens a step as it starts and closes it when it finishes
-        // (`AppModel.generateScreen`), with each streamed update made in between.
-        board.store.beginEdit()
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
-        // The one step, in the history from the edit's first change.
-        let mark = board.store.historyMark
+        let generation = board.store.beginEdit(by: .app)
+        board.store.act(for: generation) { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         board.model.beginTurn()
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
+        let mark = board.store.historyMark
+        board.store.act(for: generation) { board.store.update(board.title) { $0.frame.origin.x += 10 } }
+        board.store.act(for: generation) { board.store.update(board.title) { $0.frame.origin.x += 10 } }
         #expect(board.store.historyMark == mark, "nothing is a step of its own while the screen is still being written")
-        board.store.endEdit()
+        board.store.endEdit(generation)
+        // Finished last, and touching nothing the turn did, the screen's step is taken back first.
+        board.undo.undo()
+        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        #expect(board.rotation(of: board.note) == 20)
         board.undo.undo()
         #expect(board.rotation(of: board.note) == nil)
-        #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        #expect(!board.undo.canUndo)
     }
 
     @Test func aCommandStartedDuringATurnThatCutADragShortKeepsItsStep() throws {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         let frame = try #require(board.store.resolve(board.note)).element.frame
-        // As two fingers twisting begin: one finger was already moving the note, and that
-        // drag ends as the turn begins.
+        // One finger was already moving the note when the turn began, and that drag ends.
         board.store.beginEdit()
         board.store.update(board.note) { $0.frame.origin.x += 3 }
-        // The one step, in the history from the drag's first change.
-        let mark = board.store.historyMark
         board.model.beginTurn()
         board.store.endEdit()
         // A command starts during the turn, and is still working when the turn ends.
@@ -482,19 +575,23 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's step must still be open")
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
-        board.store.update(board.title) { $0.frame.origin.x += 10 }
-        #expect(board.store.historyMark == mark)
+        let mark = board.store.historyMark
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title) { $0.frame.origin.x += 10 } }
+        #expect(board.store.historyMark == mark + 1)
         board.store.endHeldEdit()
         board.undo.undo()
-        #expect(board.rotation(of: board.note) == nil)
-        #expect(board.store.resolve(board.note)?.element.frame == frame)
         #expect(board.store.resolve(board.title)?.element.frame.minX == 80)
+        board.undo.undo()
+        #expect(board.rotation(of: board.note) == nil)
+        board.undo.undo()
+        #expect(board.store.resolve(board.note)?.element.frame == frame)
+        #expect(!board.undo.canUndo)
     }
 
-    /// The format panel's pause ends its own part of the step, made just before a turn or
-    /// during it: the turn's end leaves a part by hand open, so a panel that took the turn
-    /// for another's edit by hand left the step open for good once the turn ended.
+    /// The format panel's pause ends its own step, made just before a turn or during it,
+    /// and the turn's end ends the turn's: a panel that took the turn for another's edit
+    /// by hand used to leave the step open for good once the turn ended.
     @Test(arguments: [true, false])
     func aPanelChangeAroundATurnLeavesNoEditOpen(panelFirst: Bool) async throws {
         let board = TurnBoard()
@@ -516,8 +613,15 @@ struct TurningOneElementTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(!board.store.isEditing)
+        // The panel's change and the turn are a step each, neither left open: one undo
+        // takes back one of them, whole, and leaves the other.
         board.undo.undo()
-        #expect(board.store.content == before, "the panel's change and the turn are one step")
+        let titleBack = board.store.resolve(board.title)?.element.frame.minX == 80
+        let turnBack = board.rotation(of: board.note) == nil
+        #expect(titleBack != turnBack)
+        board.undo.undo()
+        #expect(board.store.content == before)
+        #expect(!board.undo.canUndo)
     }
 
     /// A turn the knob left live as the design closes is ended with it, as a drag is.
@@ -530,6 +634,59 @@ struct TurningOneElementTests {
         #expect(!board.model.isTurning)
         #expect(!board.store.isEditing)
         #expect(board.model.document.current.content.element(board.note.element)?.rotation == 20)
+    }
+
+    /// What the knob was turning let go of mid-turn, by the Pencil landing on it with the
+    /// palette up for one, the turn ends with it: the knob goes, and may never hear its drag
+    /// end. Left open, it kept the popover away, refused every other turn, and made each
+    /// later change part of its step.
+    @Test func aTurnEndsWhenWhatItTurnsIsLetGo() throws {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 20, snaps: false)
+        let note = try #require(board.model.selectionViewRect)
+        board.model.pencilTouched(at: CGPoint(x: note.midX, y: note.midY))
+        #expect(board.model.selection == nil)
+        #expect(!board.model.isTurning && !board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+        // The next change is a step of its own.
+        board.turn(board.title, to: 10)
+        board.undo.undo()
+        #expect(board.rotation(of: board.title) == nil)
+        #expect(board.rotation(of: board.note) == 20)
+        // And two fingers, or the knob, can turn what is selected next.
+        board.model.selection = .element(board.title)
+        #expect(board.model.beginTwist())
+        board.model.endTwist()
+        #expect(board.model.beginTurn())
+        board.model.endTurn()
+    }
+
+    /// Something else selected mid-turn, by a finger tapping it say, the turn ends too: what
+    /// it was turning is no longer selected.
+    @Test func aTurnEndsWhenSomethingElseIsSelected() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.selection = .element(board.title)
+        #expect(!board.model.isTurning && !board.store.isEditing)
+        // What the knob's drag goes on to do turns nothing.
+        #expect(!board.model.turnSelection(by: 30, snaps: false))
+        #expect(board.rotation(of: board.title) == nil && board.rotation(of: board.note) == 20)
+    }
+
+    /// Two fingers end their own turn as they lift, wherever the selection has gone meanwhile:
+    /// the drags they make until then are left alone.
+    @Test func aTwistEndsItsTurnOnlyAsItsFingersLift() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTwist())
+        board.model.selection = nil
+        #expect(board.model.isTurning && board.model.isTwisting)
+        board.model.endTwist()
+        #expect(!board.model.isTurning && !board.store.isEditing)
     }
 
     @Test func resettingTheTurnStandsItUpright() {
@@ -810,6 +967,32 @@ struct TurningSeveralThingsTests {
         #expect(board.placed(things) == turned)
     }
 
+    /// VoiceOver's Reset rotation, on several things just selected, stands each upright about
+    /// its own centre in one step, as the Rotation field set to 0 does: the knob's double tap
+    /// has nothing to put back there, and an action that did nothing would read as broken.
+    /// Turned together since, it first puts them back where the selection formed, as the
+    /// double tap does.
+    @Test func voiceOversResetStandsEachUprightWhenNothingIsTurnedTogether() {
+        let board = TurnBoard()
+        board.turn(board.title, to: 30)
+        board.turn(board.note, to: 100)
+        let things = [board.title, board.note, board.button]
+        board.select(things)
+        let centres = things.map(board.centre(of:))
+        board.model.resetSelectionRotation()
+        #expect(things.allSatisfy { board.rotation(of: $0) == nil })
+        #expect(zip(things, centres).allSatisfy { isClose(board.centre(of: $0), $1) })
+        board.undo.undo()
+        #expect(things.map(board.rotation(of:)) == [30, 100, nil])
+
+        let before = board.placed(things)
+        board.knobTurn(20)
+        board.model.resetSelectionRotation()
+        #expect(board.placed(things) == before)
+        board.model.resetSelectionRotation()
+        #expect(things.allSatisfy { board.rotation(of: $0) == nil })
+    }
+
     @Test func aSelectionWithAScreenCannotTurn() throws {
         let board = TurnBoard()
         let selection = CanvasSelection.several([.screen(board.screen), .element(board.note)])
@@ -913,6 +1096,32 @@ struct TurningSeveralThingsTests {
             #expect(isClose(now.origin, CGPoint(x: was.minX + delta.width, y: was.minY + delta.height)) && now.size == was.size)
             #expect(board.rotation(of: ref) == nil)
         }
+    }
+
+    /// Several things dropped onto other hosts by a drag while they turn are still the same
+    /// things: though the selection now names them differently, the turn goes on.
+    @Test func aTurnGoesOnWhenADragGivesWhatItTurnsToAnotherHost() {
+        let board = TurnBoard()
+        let far = board.store.addFloating(element(.stickyNote, 1200, 600, 140, 130), scale: 1)
+        let things = [board.button, far]
+        board.select(things)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 90, snaps: false)
+        board.model.selectionWillMove()
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for ref in things {
+            let box = board.canvasFrame(ref)
+            origins[.element(ref)] = CGPoint(x: box.minX + 10, y: box.minY + 6)
+        }
+        board.store.position(origins)
+        board.model.selectionMoved(by: CGSize(width: 10, height: 6))
+        board.model.rehostSelection()
+        let button = DesignStore.ElementRef(host: .canvas, element: board.button.element)
+        #expect(board.model.selection == CanvasSelection([.element(button), .element(far)]))
+        #expect(board.model.isTurning)
+        board.model.turnSelection(by: 100, snaps: false)
+        #expect(board.rotation(of: button) == 100 && board.rotation(of: far) == 100)
+        board.model.endTurn()
     }
 }
 
@@ -1307,7 +1516,7 @@ struct TwistTests {
     /// 0.1 s after the first, 100 points to its right.
     private func twoFingersDown() -> (TwistGestureRecognizer, UIView, FakeTouch, FakeTouch) {
         let twist = TwistGestureRecognizer()
-        twist.isOnSelection = { _ in true }
+        twist.isOnSelection = { _, _ in true }
         twist.canTurn = { true }
         let view = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         view.addGestureRecognizer(twist)
@@ -1335,6 +1544,23 @@ struct TwistTests {
         #expect(abs(twist.turn - 30) < 0.01)
         twist.touchesEnded([second], with: FakeEvent(time: 0.4))
         #expect(twist.state == .ended)
+        withExtendedLifetime((view, first)) {}
+    }
+
+    /// What is selected may change between the fingers landing and turning (a screen
+    /// selected by a drag in its margin, say). The twist then fails rather than begin: begun
+    /// with nothing to turn, it held off the canvas's pan and pinch, and the fingers did nothing.
+    /// (Failed outside a real event, as here, UIKit reports it as possible again at once.)
+    @Test func aTwistThatCanNoLongerTurnFailsRatherThanBegins() {
+        let (twist, view, first, second) = twoFingersDown()
+        twist.canTurn = { false }
+        second.point = finger(at: 12, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.2))
+        #expect(twist.state == .failed || twist.state == .possible)
+        // It never begins, however far they turn on.
+        second.point = finger(at: 30, 100)
+        twist.touchesMoved([second], with: FakeEvent(time: 0.3))
+        #expect(twist.state == .failed || twist.state == .possible)
         withExtendedLifetime((view, first)) {}
     }
 
@@ -1528,10 +1754,32 @@ struct TwistOnTheInkCanvasTests {
         board.model.selection = .element(board.note)
         #expect(coordinator.twist.canTurn())
         // The note is at (500, 100) to (640, 230) in the canvas view.
-        #expect(coordinator.twist.isOnSelection(CGPoint(x: 570, y: 265)))
-        #expect(!coordinator.twist.isOnSelection(CGPoint(x: 570, y: 165)), "that is 35 points above it")
+        #expect(coordinator.twist.isOnSelection(CGPoint(x: 570, y: 265), nil))
+        #expect(!coordinator.twist.isOnSelection(CGPoint(x: 570, y: 165), nil), "that is 35 points above it")
         board.model.beginTurn()
         #expect(!coordinator.twist.canTurn(), "not while the knob turns it")
         board.model.endTurn()
+    }
+
+    /// Fingers on a sheet or a popover lying over the selection are on that, not on the
+    /// selection: they don't turn what is hidden under it, as the Pencil there doesn't let
+    /// go of it. In a narrow window, the panels are sheets over the canvas.
+    @Test func fingersOnASheetOverTheSelectionArentOnIt() {
+        let board = TurnBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
+        let canvasRoot = UIView(frame: window.bounds)
+        let container = UIView(frame: canvasRoot.bounds)
+        canvasRoot.addSubview(container)
+        container.addSubview(coordinator.documentCanvas)
+        window.addSubview(canvasRoot)
+        let sheet = UIView(frame: window.bounds)
+        window.addSubview(sheet)
+        window.addGestureRecognizer(coordinator.twist)
+        board.model.selection = .element(board.note)
+        // The note is at (500, 100) to (640, 230) in the canvas view.
+        let onTheNote = CGPoint(x: 570, y: 165)
+        #expect(coordinator.twist.isOnSelection(onTheNote, container))
+        #expect(!coordinator.twist.isOnSelection(onTheNote, sheet))
     }
 }

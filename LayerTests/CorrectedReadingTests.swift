@@ -107,6 +107,34 @@ struct KindSuggestionTests {
         model.store.delete(ref)
         #expect(model.suggestion == nil)
     }
+
+    /// Taking the suggestion lays the element out again from where it was sketched. Moved,
+    /// resized or turned since, or with its screen moved, taking it threw that away and
+    /// could put the element off its screen (G6). The offer goes once that happens.
+    @Test(arguments: ["moved", "resized", "turned", "screen moved"])
+    func aSuggestionGoesOnceItsElementOrScreenIsMoved(change: String) throws {
+        let (model, ref, suggestion) = try makeModel()
+        model.offer(suggestion)
+        guard case .screen(let screen) = ref.host else { return }
+        switch change {
+        case "moved": model.store.update(ref) { $0.frame.origin.y += 100 }
+        case "resized": model.store.update(ref) { $0.frame.size.width -= 40 }
+        case "turned": model.store.update(ref) { $0.rotation = 15 }
+        default: model.store.updateScreen(screen) { $0.origin.x += 200 }
+        }
+        let changed = try #require(model.store.resolve(ref)?.element)
+        #expect(model.suggestion == nil)
+        model.acceptSuggestion()
+        #expect(model.store.resolve(ref)?.element == changed)
+    }
+
+    /// Words put on it, as Magic Pen does just after offering, don't take the offer away.
+    @Test func aSuggestionStaysWhenOnlyItsWordsChange() throws {
+        let (model, ref, suggestion) = try makeModel()
+        model.offer(suggestion)
+        model.store.update(ref) { $0.text = "Email" }
+        #expect(model.suggestion == suggestion)
+    }
 }
 
 @Suite("Logging readings")
@@ -120,6 +148,35 @@ struct SketchReadingLogTests {
         let element = UUID()
         await log.link(element: element, toEntry: entry)
         return (log, element)
+    }
+
+    private func record(in log: SketchReadingLog, chosen: String) async -> UUID {
+        await log.record(
+            placementKind: "onScreen", existingKinds: [], existingFrames: [], screenSize: [393, 852], strokes: [],
+            candidates: [chosen], scores: [1], chosen: chosen, escalated: false, decidedBy: "rules"
+        )
+    }
+
+    /// The log on disk keeps every launch's readings, but a correction rewrote the file
+    /// from this launch's readings alone, and every earlier launch's were lost (G8).
+    @Test func aCorrectionKeepsEarlierLaunchesReadings() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("readings-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let earlier = SketchReadingLog(fileURL: file)
+        let first = await record(in: earlier, chosen: "title")
+
+        let now = SketchReadingLog(fileURL: file)
+        let second = await record(in: now, chosen: "button")
+        let element = UUID()
+        await now.link(element: element, toEntry: second)
+        await now.noteCorrected(element, to: "textField")
+
+        let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+        let read = try lines.map { try JSONDecoder().decode(SketchReadingLogEntry.self, from: Data($0.utf8)) }
+        #expect(read.map(\.id) == [first, second])
+        try #require(read.count == 2)
+        #expect(read[0].chosen == "title" && read[0].correctedAfter == nil)
+        #expect(read[1].correctedTo == "textField")
     }
 
     @Test func changingWhatAReadingBecameIsRecordedAsItsCorrection() async {

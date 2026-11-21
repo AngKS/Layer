@@ -204,7 +204,7 @@ private struct SelectionSummary: View {
                     if model.canTurnSelection {
                         Button("Rotate 15° clockwise") { model.rotateSelection(by: 15) }
                         Button("Rotate 15° counterclockwise") { model.rotateSelection(by: -15) }
-                        Button("Reset rotation") { model.resetSelectionTurn() }
+                        Button("Reset rotation") { model.resetSelectionRotation() }
                     }
                 }
         }
@@ -266,6 +266,29 @@ final class CanvasDrags {
     @ObservationIgnored private var rule: Rule?
 
     var isDragging: Bool { session != nil }
+
+    /// The drag under way's own step: see `DesignStore.Edit`.
+    @ObservationIgnored private var edit: DesignStore.Edit?
+
+    /// Gives the drag under way's step to a turn that cuts it short, so that the move so far
+    /// and the turn are one step. The drag then ends without ending it.
+    func handOverEdit() -> DesignStore.Edit? {
+        defer { edit = nil }
+        return edit
+    }
+
+    /// Opens the drag's step as it begins.
+    private func beginEdit(model: AppModel) {
+        if let edit { model.store.endEdit(edit) }
+        edit = model.store.beginEdit()
+    }
+
+    /// Closes the drag's step, and nothing else under way.
+    private func endEdit(model: AppModel) {
+        guard let edit else { return }
+        self.edit = nil
+        model.store.endEdit(edit)
+    }
 
     /// What the drag under way moves.
     @ObservationIgnored private var dragged: [CanvasSelection] = []
@@ -338,7 +361,7 @@ final class CanvasDrags {
 
     private func endAbandoned(model: AppModel) {
         finish(model: model)
-        model.store.endEdit()
+        endEdit(model: model)
     }
 
     /// Whether `onEnded` belongs to the drag under way, or to the one just ended. That of a
@@ -430,7 +453,7 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, model: model)
         guard turn != .ignored else { return }
         if turn == .new {
-            model.store.beginEdit()
+            beginEdit(model: model)
             dragged = [.element(ref)]
             model.selection = .element(ref)
             elementOrigin = frame
@@ -443,7 +466,7 @@ final class CanvasDrags {
         let (frame, snappedTo) = rule(elementOrigin, translation)
         if guides != snappedTo { guides = snappedTo }
         guidePlacement = placement
-        model.store.update(ref) { $0.frame = frame }
+        model.store.act(for: edit) { model.store.update(ref) { $0.frame = frame } }
     }
 
     func dropElement(_ ref: DesignStore.ElementRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
@@ -451,9 +474,9 @@ final class CanvasDrags {
         finish(model: model)
         if findsNewHome {
             // Dropped somewhere new, the element belongs to whatever it now lies on.
-            model.selection = .element(model.store.rehost(ref))
+            model.selection = .element(model.store.act(for: edit) { model.store.rehost(ref) })
         }
-        model.store.endEdit()
+        endEdit(model: model)
     }
 
     /// A drag that moves everything selected, each thing by the same distance across the
@@ -474,7 +497,7 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, model: model)
         guard turn != .ignored else { return }
         if turn == .new {
-            model.store.beginEdit()
+            beginEdit(model: model)
             model.selectionWillMove()
             var origins: [CanvasSelection: CGRect] = [:]
             for thing in model.selectedThings where !model.store.isLocked(thing) {
@@ -505,15 +528,17 @@ final class CanvasDrags {
         if guides != snappedTo { guides = snappedTo }
         // The lines are in canvas points, as the things lined up are.
         guidePlacement = Placement(origin: .zero, scale: 1)
-        model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
-        model.selectionMoved(by: delta)
+        model.store.act(for: edit) {
+            model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
+            model.selectionMoved(by: delta)
+        }
     }
 
     func dropGroup(owner: Owner, model: AppModel) {
         guard ends(owner) else { return }
         finish(model: model)
-        model.rehostSelection()
-        model.store.endEdit()
+        model.store.act(for: edit) { model.rehostSelection() }
+        endEdit(model: model)
     }
 
     func moveScreen(_ screen: DesignScreen, model: AppModel, owner: Owner) -> some Gesture {
@@ -530,7 +555,7 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, model: model)
         guard turn != .ignored else { return }
         if turn == .new {
-            model.store.beginEdit()
+            beginEdit(model: model)
             dragged = [.screen(screen.id)]
             model.selection = .screen(screen.id)
             screenOrigin = screen.origin
@@ -552,13 +577,13 @@ final class CanvasDrags {
             let frame = CGRect(origin: origin, size: screen.canvasFrame.size)
             origin = ElementLayout.snapped(frame, to: others, in: nil, threshold: 8 / scale).frame.origin
         }
-        model.store.updateScreen(screen.id) { $0.origin = origin }
+        model.store.act(for: edit) { model.store.updateScreen(screen.id) { $0.origin = origin } }
     }
 
     func dropScreen(owner: Owner, model: AppModel) {
         guard ends(owner) else { return }
         finish(model: model)
-        model.store.endEdit()
+        endEdit(model: model)
     }
 }
 
