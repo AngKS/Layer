@@ -184,6 +184,119 @@ struct ConcurrentEditTests {
         #expect(store.content == end)
     }
 
+    /// A finger picks something up while a screen is written and drops it on that screen
+    /// once it is finished. Undoing the screen, on top as the last thing finished, took the
+    /// screen away and left what was dropped on it on no screen: invisible, and saved so
+    /// (review C-1). It goes onto the open canvas where it was, and the drag's own undo
+    /// then puts it back where it came from.
+    @Test func undoingAGenerationLeavesNothingOnNoScreen() async throws {
+        let (board, feed) = board()
+        let start = board.store.content
+        board.model.generateScreen(from: "a settings screen")
+        let generated = try #require(board.model.generation?.screenID)
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { board.store.screen(generated)?.elements.count == 1 })
+        let drag = board.store.beginEdit()
+        board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x += 5 } }
+        feed.finish()
+        await board.model.waitForGeneration()
+        let dropped = try #require(board.store.act(for: drag) {
+            board.store.move(board.button, toScreen: generated, origin: CGPoint(x: 20, y: 400))
+        })
+        board.store.endEdit(drag)
+        let onScreen = try #require(board.store.resolve(dropped))
+
+        board.undo.undo()
+        #expect(board.store.screen(generated) == nil)
+        #expect(board.store.content.elementsOnMissingScreens.isEmpty)
+        let floating = try #require(board.store.floating.first { $0.id == dropped.element })
+        // Where it was on the canvas, at the screen's scale.
+        #expect(floating.canvasFrame == onScreen.placement.canvasRect(for: onScreen.element.frame))
+        board.undo.redo()
+        #expect(board.store.resolve(dropped) != nil)
+        board.undo.undo()
+        board.undo.undo()
+        #expect(board.store.content == start)
+        #expect(board.store.content.elementsOnMissingScreens.isEmpty)
+    }
+
+    /// Something else changes the design while a change is being made, as the ink canvas
+    /// follows an eraser inside the store's own notice of a change. That change was put in
+    /// both steps, so undoing a generation's line took back part of an erasure (review I-1).
+    @Test func aChangeMadeWhileAnotherIsReportedIsInItsOwnStepOnly() throws {
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        let store = DesignStore()
+        store.undoManager = undo
+        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let refs = store.setElements([
+            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
+            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], on: screen.id, replacing: false)
+        undo.removeAllActions()
+        let start = store.content
+        let erasing = store.beginEdit()
+        let writing = store.beginEdit(by: .app)
+        store.act(for: erasing) { store.update(refs[0]) { $0.text = "1" } }
+        var follows = true
+        store.onChange = { _ in
+            guard follows else { return }
+            follows = false
+            store.act(for: erasing) { store.update(refs[0]) { $0.text = "2" } }
+        }
+        store.act(for: writing) { store.update(refs[1]) { $0.frame.origin.y = 600 } }
+        store.onChange = nil
+        store.endEdit(writing)
+        store.endEdit(erasing)
+
+        // The line's step takes back the line, and leaves the erasure whole.
+        undo.undo()
+        #expect(store.resolve(refs[0])?.element.text == "2")
+        #expect(store.resolve(refs[1])?.element.frame.minY == 700)
+        undo.undo()
+        #expect(store.content == start)
+    }
+
+    /// A screen finishing used to move its step to the top of the history, and registering
+    /// a step clears Redo: what the person had just undone could no longer be redone
+    /// (review I-3).
+    @Test func aGenerationFinishingKeepsRedo() async throws {
+        let (board, feed) = board()
+        board.model.generateScreen(from: "a settings screen")
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { board.model.generation?.elementCount == 1 })
+        board.store.update(board.title) { $0.text = "Hello" }
+        board.store.update(board.button) { $0.text = "Next" }
+        board.undo.undo()
+        #expect(board.undo.canRedo)
+        feed.finish()
+        await board.model.waitForGeneration()
+        #expect(board.undo.canRedo)
+        board.undo.redo()
+        #expect(board.store.resolve(board.button)?.element.text == "Next")
+    }
+
+    /// A drag and a turn whose frames take turns: each step used to start a new run, two
+    /// whole designs kept, at every frame of the other (review M-1). A run goes on over
+    /// what the other changed meanwhile when that touched nothing of the run's.
+    @Test func editsTakingTurnsFrameByFrameKeepFewRuns() throws {
+        let (board, _) = board()
+        let start = board.store.content
+        board.model.selection = .element(board.title)
+        let drag = board.store.beginEdit()
+        #expect(board.model.beginTurn())
+        for frame in 1...200 {
+            board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            board.model.turnSelection(by: Double(frame) / 10, snaps: false)
+        }
+        #expect(board.store.recordedRuns(of: drag) <= 2)
+        board.store.endEdit(drag)
+        board.model.endTurn()
+        board.undo.undo()
+        board.undo.undo()
+        #expect(board.store.content == start)
+    }
+
     /// A change by hand ended between two lines of a generation used to close the screen's
     /// step: every later line was then a step of its own, and one undo took back only the
     /// last (G4). The screen is one step, taken back by one undo, and the hand's change,

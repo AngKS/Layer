@@ -151,6 +151,35 @@ struct DesignContent: Equatable, Sendable {
     /// The screens themselves, without what is on them.
     var screenFrames: [DesignScreen] { frames }
 
+    /// Elements that say they are on a screen the design doesn't have. They are drawn
+    /// nowhere, can't be touched and are left out of the code, so a design should never
+    /// have any: tests check it after every undo and redo.
+    var elementsOnMissingScreens: [DesignElement.ID] {
+        let screens = Set(frames.map(\.id))
+        return elements.filter { $0.parent.map { !screens.contains($0) } ?? false }.map(\.id)
+    }
+
+    /// Puts every element left on a screen the design no longer has onto the open canvas,
+    /// where it was on that screen in `previous`, at the screen's scale, and takes the scale
+    /// off anything on a screen, which has none of its own. Undo uses it: a step that took a
+    /// screen away may leave there something another edit put on it meanwhile.
+    mutating func rehostElementsOnMissingScreens(from previous: DesignContent) {
+        let screens = Set(frames.map(\.id))
+        for element in elements {
+            guard let parent = element.parent, !screens.contains(parent) else { continue }
+            guard let gone = previous.frames.first(where: { $0.id == parent }), gone.scale > 0 else {
+                move(element.id, to: nil, scale: 1, frame: element.frame)
+                continue
+            }
+            let onCanvas = gone.placement.canvasRect(for: element.frame)
+            let origin = CGPoint(x: onCanvas.minX / gone.scale, y: onCanvas.minY / gone.scale)
+            move(element.id, to: nil, scale: gone.scale, frame: CGRect(origin: origin, size: element.frame.size))
+        }
+        for index in elements.indices where elements[index].parent != nil && elements[index].scale != nil {
+            elements[index].scale = nil
+        }
+    }
+
     /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
     func boardDiffers(from other: DesignContent) -> Bool {
         title != other.title || canvas != other.canvas || unread != other.unread

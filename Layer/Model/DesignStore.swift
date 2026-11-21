@@ -27,9 +27,13 @@ final class DesignStore {
             guard content != oldValue else { return }
             views = nil
             changeCount += 1
-            onChange?(content)
+            // A change made through `change(_:)` is told once it has been recorded: see there.
+            if !isChanging { onChange?(content) }
         }
     }
+
+    /// True while `change(_:)` makes a change, before it is recorded.
+    @ObservationIgnored private var isChanging = false
 
     /// Counts the changes made to the content, by anyone, so that a step can tell whether
     /// the change before its own was its own too.
@@ -629,7 +633,8 @@ final class DesignStore {
     /// only when none of them touched what it did: taken back first then, it would take
     /// away a screen with something added to it by hand, which would be left on nothing.
     private func putOnTop(_ edit: Edit) {
-        guard let step = edit.step, let undoManager, !undoManager.isUndoing, !undoManager.isRedoing else { return }
+        // Not while something can be redone: registering a step clears Redo (review I-3).
+        guard let step = edit.step, let undoManager, !undoManager.isUndoing, !undoManager.isRedoing, !undoManager.canRedo else { return }
         let above = edit.later.compactMap(\.step)
         guard !above.isEmpty, !above.contains(where: { $0.touched.meets(step.touched) }) else { return }
         let moved = HistoryStep(runs: step.runs)
@@ -637,6 +642,9 @@ final class DesignStore {
         register(moved)
         edit.step = moved
     }
+
+    /// How many runs `edit`'s step holds: the design is kept twice for each. For tests.
+    func recordedRuns(of edit: Edit) -> Int { edit.step?.runs.count ?? 0 }
 
     /// Whether `edit`'s step is the one undo would take back now.
     func isLastStep(_ edit: Edit) -> Bool {
@@ -756,8 +764,12 @@ final class DesignStore {
     /// was itself undone when the edit closed.
     private func change(_ body: (inout DesignContent) -> Void) {
         let before = content
+        let count = changeCount
+        isChanging = true
         body(&content)
-        guard content != before else { return }
+        isChanging = false
+        // Whether it changed anything, as the content's own comparison found.
+        guard changeCount != count else { return }
         let owner = acting ?? edits.last { $0.editor == .hand } ?? edits.last { $0.editor == .turn }
         let step: HistoryStep
         if let existing = owner?.step {
@@ -768,6 +780,10 @@ final class DesignStore {
             register(step)
         }
         step.record(from: before, to: content, change: changeCount)
+        // Told only now that it is recorded. Whatever the notice sets off, such as the ink
+        // canvas following an eraser, is a change of its own, recorded in its own step: told
+        // before, it went into this step as well (review I-1).
+        onChange?(content)
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
@@ -790,14 +806,23 @@ final class DesignStore {
 
         /// Adds a change of the step's own. One that follows straight on from its last
         /// extends that run: an edit nothing else interrupts is one run, from its start to
-        /// where it is now, as a snapshot would be.
+        /// where it is now, as a snapshot would be. So does one after changes by others that
+        /// touched nothing the run did, which the run then takes in at both ends: two edits
+        /// taking turns frame by frame, a drag and a turn, kept two designs for each frame
+        /// (review M-1).
         func record(from before: DesignContent, to after: DesignContent, change: Int) {
-            if lastChange == change - 1, !runs.isEmpty {
+            defer { lastChange = change }
+            guard let last = runs.last else {
+                runs.append(Run(before: before, after: after))
+                return
+            }
+            if lastChange == change - 1 {
                 runs[runs.count - 1].after = after
+            } else if !Touched(from: last.after, to: before).meets(Touched(from: last.before, to: last.after)) {
+                runs[runs.count - 1] = Run(before: last.before.reverting(last.after, to: before), after: after)
             } else {
                 runs.append(Run(before: before, after: after))
             }
-            lastChange = change
         }
 
         /// The design with the step's changes taken back.
@@ -928,7 +953,11 @@ final class DesignStore {
     /// reverse.
     private func takeBack(_ step: HistoryStep) {
         let current = content
-        let result = step.undone(from: current)
+        var result = step.undone(from: current)
+        // A screen the step took away may have had something put on it by another edit
+        // since: it goes onto the open canvas where it was, rather than on no screen, drawn
+        // nowhere and saved so (review C-1).
+        result.rehostElementsOnMissingScreens(from: current)
         content = result
         register(HistoryStep(runs: [.init(before: current, after: result)]))
         // An edit still open whose step this was goes on from here, as a step of its own.
