@@ -1102,6 +1102,29 @@ struct DesignFileNameTests {
         #expect(OpenDesigns.shared.currentID(for: old) == model.designID)
     }
 
+    @Test func aDesignPutAwayToOpenAnotherIsReadiedAsTheBackButtonReadiesIt() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // One design shown in the window's controller, another in a window of its own.
+        let shown = AppModel(document: LayerDocument()), elsewhere = AppModel(document: LayerDocument())
+        shown.fileURL = folder.appendingPathComponent("A.layer")
+        elsewhere.fileURL = folder.appendingPathComponent("B.layer")
+        let controller = UIViewController(), otherWindow = UIView()
+        let canvas = InkCanvas.Coordinator(model: shown), otherCanvas = InkCanvas.Coordinator(model: elsewhere)
+        shown.ink = canvas
+        elsewhere.ink = otherCanvas
+        controller.view.addSubview(canvas.documentCanvas)
+        otherWindow.addSubview(otherCanvas.documentCanvas)
+        // Edited moments ago: its picture for the document browser isn't drawn yet.
+        shown.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        #expect(shown.document.current.preview == nil)
+
+        await OpenDesigns.shared.prepareToPutAway(controller, keeping: nil)
+        #expect(shown.isClosed)
+        #expect(shown.document.current.preview != nil, "its picture shows the board as it was left")
+        #expect(!elsewhere.isClosed)
+        elsewhere.close()
+    }
+
     @Test func aFileRenamedElsewhereNamesTheBoard() {
         let document = LayerDocument()
         document.update {

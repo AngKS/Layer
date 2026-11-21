@@ -639,6 +639,11 @@ final class AppModel {
     /// browser has already listed.
     @ObservationIgnored private(set) var isClosed = false
 
+    /// Whether the design's canvas is inside `view`: the view of the controller that shows it.
+    func isShown(in view: UIView) -> Bool {
+        ink?.canvases.contains { $0.isDescendant(of: view) } == true
+    }
+
     /// Gets a design ready to go back to the document browser: its picture as the board
     /// was left, its name decided, and its file given that name. False when the design is
     /// already on its way out, so that a second tap of the back button doesn't dismiss it

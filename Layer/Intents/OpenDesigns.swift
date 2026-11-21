@@ -74,6 +74,19 @@ final class OpenDesigns {
 
     // MARK: Opening and making designs
 
+    /// Gets the designs shown in `controller` ready to go, as the back button does, before
+    /// an action puts it away to open another: their pictures drawn as they were left,
+    /// their names settled and their files named after them. Put away without this, a
+    /// design kept the picture of the board from before its last edits, and a name still
+    /// being thought up was dropped. The design with identifier `keeping`, the one being
+    /// opened, is left alone.
+    func prepareToPutAway(_ controller: UIViewController, keeping id: String?) async {
+        let target = id.map(currentID(for:))
+        for model in all where model.designID != target && model.isShown(in: controller.view) {
+            await model.prepareToClose()
+        }
+    }
+
     /// Opens a design, if it isn't open already, and waits for its window.
     func open(design id: String) async throws -> AppModel {
         if let model = model(forDesign: id) { return model }
@@ -82,7 +95,9 @@ final class OpenDesigns {
         // A design still closing can keep the browser from taking the request, so it is
         // asked again if the design hasn't opened after a few seconds.
         for _ in 0..<3 {
-            try await DocumentBrowser.open(url)
+            try await DocumentBrowser.open(url) { presented in
+                await self.prepareToPutAway(presented, keeping: id)
+            }
             for _ in 0..<30 {
                 if let model = model(forDesign: id) { return model }
                 try await Task.sleep(for: .milliseconds(100))
@@ -126,15 +141,21 @@ final class OpenDesigns {
 /// itself opens what is picked.
 @MainActor
 enum DocumentBrowser {
-    static func open(_ url: URL) async throws {
+    /// `prepare` is given the controller of a design open over the browser, before it is
+    /// put away.
+    static func open(_ url: URL, preparing prepare: (UIViewController) async -> Void = { _ in }) async throws {
         // An app Siri has just launched may not have its window up yet.
         for _ in 0..<30 {
             if let browser = find(), let delegate = browser.delegate,
                delegate.responds(to: #selector(UIDocumentBrowserViewControllerDelegate.documentBrowser(_:didPickDocumentsAt:))) {
-                // A design open over the browser is put away first, as tapping Back would.
+                // A design open over the browser is put away first, as tapping Back would:
+                // made ready to close, then dismissed, unless it went meanwhile.
                 if let presented = browser.presentedViewController {
-                    await withCheckedContinuation { continuation in
-                        presented.dismiss(animated: false) { continuation.resume() }
+                    await prepare(presented)
+                    if browser.presentedViewController === presented {
+                        await withCheckedContinuation { continuation in
+                            presented.dismiss(animated: false) { continuation.resume() }
+                        }
                     }
                 }
                 delegate.documentBrowser?(browser, didPickDocumentsAt: [url])
