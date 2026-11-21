@@ -363,6 +363,30 @@ struct VoiceAgentTests {
         #expect(VoiceAgent.correction(in: "Oops") == .undoOnly)
     }
 
+    /// The fallback recogniser writes no commas, and phrases are joined with a space, so
+    /// "No, make it red" can arrive as "No make it red". Words that can't follow the "no"
+    /// of a look still make it a correction, and "not X, Y" says what was meant instead.
+    /// A pause that ends a sentence, as in "No. Border.", is one only when what follows is
+    /// one; "no thanks" turns something down and undoes nothing (review of V3).
+    @Test func correctionsWithoutACommaAndLooksWithNo() {
+        let expected: [(String, VoiceAgent.Correction?)] = [
+            ("no, make it red", .undoThenAsk), ("No make it red", .undoThenAsk), ("no I meant the title", .undoThenAsk),
+            ("not that one, the button", .undoThenAsk), ("no — bigger", .undoThenAsk), ("no - bigger", .undoThenAsk),
+            ("no—bigger", .undoThenAsk), ("No bigger", .undoThenAsk), ("No it should be blue", .undoThenAsk),
+            ("no it's the title", .undoThenAsk), ("no change it to blue", .undoThenAsk), ("no put it at the top", .undoThenAsk),
+            ("no just the title", .undoThenAsk), ("no actually the title", .undoThenAsk), ("not red, blue", .undoThenAsk),
+            ("not bigger, smaller", .undoThenAsk), ("Not bold, italic", .undoThenAsk), ("no, no border", .undoThenAsk),
+            ("no the button", .undoThenAsk), ("no I said blue", .undoThenAsk), ("No... the title", .undoThenAsk),
+            ("no move it down", .undoThenAsk), ("no use the other one", .undoThenAsk), ("no instead make it green", .undoThenAsk),
+            ("not it", .undoOnly),
+            ("No border", nil), ("not bold", nil), ("no shadow on it", nil), ("nothing on the left", nil), ("No. Border.", nil),
+            ("Not so big", nil), ("No, thanks", nil), ("no thanks", nil), ("not italic", nil), ("no more shadow on the card", nil),
+        ]
+        for (said, correction) in expected {
+            #expect(VoiceAgent.correction(in: said) == correction, "\(said)")
+        }
+    }
+
     /// "No border on the button" after "make the title blue" is put to the model as it was
     /// said, and leaves the blue title alone (V3).
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))

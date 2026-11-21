@@ -46,25 +46,25 @@ final class VoiceAgent: VoiceCommandRunner {
     ///
     /// "No" and "not" also begin commands of their own: "No border on the button", "Not
     /// bold". Taken for corrections, those undid the command before. So "no" corrects
-    /// only with a pause after it ("No, the title", "No.") or words after it that correct
-    /// ("no I meant…", "no the other one"), and "not" only with a pause or when it points
-    /// at what was done ("Not the check marks", "not that one").
+    /// with a pause after it ("No, the title", "No."), or when the word after it couldn't
+    /// follow the "no" of a look ("no make it red", "no the other one"): the fallback
+    /// recogniser writes no commas, so "No, make it red" can arrive without one. A full
+    /// stop may be a recogniser splitting "No border" into sentences, so after one the
+    /// next word decides. "Not" corrects with a pause after it, when it points at what was
+    /// done ("Not the check marks", "not that one"), or when it goes on after a comma or a
+    /// dash to say what was meant ("not red, blue"). "No thanks" turns something down.
     static func correction(in command: String) -> Correction? {
         let said = command.lowercased()
         let words = said.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
         guard let first = words.first else { return nil }
-        let next = words.dropFirst().first
-        // A comma, a full stop or a dash between the first word and the next, or nothing after it.
-        let isInWord: (Character) -> Bool = { $0.isLetter || $0.isNumber }
-        var pauses = true
-        if let start = said.firstIndex(where: isInWord), let end = said[start...].firstIndex(where: { !isInWord($0) }),
-           let following = said[end...].first(where: { !$0.isWhitespace }) {
-            pauses = !isInWord(following)
-        }
+        let rest = Array(words.dropFirst())
+        if ["no", "nope", "nah"].contains(first), rest == ["thanks"] || rest == ["thank", "you"] { return nil }
+        let next = rest.first
+        let pause = pause(afterFirstWordOf: said)
         let opens = switch first {
         case "nope", "nah", "wrong", "oops": true
-        case "no": pauses || next.map(correctsAfterNo.contains) == true
-        case "not": pauses || next.map(correctsAfterNot.contains) == true
+        case "no": pause == .clause || next.map(correctsAfterNo.contains) ?? true
+        case "not": pause == .clause || next.map(correctsAfterNot.contains) ?? true || goesOnToSayInstead(said)
         default: words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong"
         }
         guard opens else { return nil }
@@ -75,10 +75,36 @@ final class VoiceAgent: VoiceCommandRunner {
         return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
     }
 
+    /// What comes between the first word and the next.
+    private enum Pause {
+        case none
+        /// A comma, a dash or an ellipsis.
+        case clause
+        /// A full stop, or "!" or "?".
+        case sentence
+    }
+
+    private static func pause(afterFirstWordOf said: String) -> Pause {
+        let isInWord: (Character) -> Bool = { $0.isLetter || $0.isNumber }
+        guard let start = said.firstIndex(where: isInWord), let end = said[start...].firstIndex(where: { !isInWord($0) }) else { return .none }
+        let between = String(said[end...].prefix(while: { !isInWord($0) }).filter { !$0.isWhitespace })
+        if between.isEmpty { return .none }
+        return between.contains(where: { ",;:-—–…".contains($0) }) || between.contains("..") ? .clause : .sentence
+    }
+
+    /// Whether what was said goes on after a comma or a dash: "not red, blue".
+    private static func goesOnToSayInstead(_ said: String) -> Bool {
+        let marked = said.replacingOccurrences(of: " - ", with: ",").replacingOccurrences(of: "...", with: ",")
+        return marked.components(separatedBy: CharacterSet(charactersIn: ",;—–…")).dropFirst().contains { $0.contains(where: \.isLetter) }
+    }
+
     /// Words that, after "no" with no pause, make it a correction: none of them can follow
     /// the "no" of "no border".
     private static let correctsAfterNo: Set<String> = [
-        "no", "not", "i", "the", "that", "this", "wrong", "undo", "revert", "sorry", "wait", "go", "oops",
+        "no", "not", "nope", "i", "you", "the", "a", "an", "that", "this", "it", "other", "wrong", "undo", "revert", "sorry",
+        "wait", "oops", "go", "make", "change", "put", "move", "use", "set", "turn", "try", "do", "keep", "leave", "just",
+        "only", "actually", "instead", "rather", "bigger", "smaller", "larger", "wider", "narrower", "taller", "shorter",
+        "darker", "lighter", "higher", "lower",
     ]
 
     /// Words that, after "not", point at what was done rather than say a look.
