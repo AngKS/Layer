@@ -371,6 +371,28 @@ struct MoreCodeTests {
         #expect(structName(in: SwiftUICodeGenerator.code(for: screens[1], among: screens)) == "SignIn2")
     }
 
+    /// A carriage return or other control character in an element's words, pasted from
+    /// Windows or set by a Siri intent, broke the string literal it was written into, and
+    /// in a layer's name ended the comment, leaving the rest as code (G16).
+    @Test func controlCharactersAreEscapedInStringsAndDroppedFromComments() {
+        var body = element(.body, 48, 580, 297, 44)
+        body.text = "a\r\nb\tc\u{7}d"
+        body.name = "Hero\r\nText"
+        let code = SwiftUICodeGenerator.code(for: screenWith([body]))
+        #expect(!code.contains("\r") && !code.contains("\t") && !code.contains("\u{7}"))
+        #expect(code.contains(#"Text("a\r\nb\tc\u{07}d")"#))
+        #expect(code.contains("// Hero  Text"))
+    }
+
+    /// A size past Int's range trapped writing it out, and the code panel works its code
+    /// out as it draws (G18).
+    @Test func aHugeNumberIsWrittenRatherThanATrap() {
+        var wide = element(.button, 20, 744, 353, 50)
+        wide.frame.size.width = 1e19
+        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        #expect(code.contains("Button"))
+    }
+
     /// A screen named after a type its own code uses ("Image", "Text") shadowed it, and
     /// one named for a keyword wasn't a type name at all (G17).
     @Test func aScreenNamedAfterATypeItsCodeUsesGetsAnotherName() {

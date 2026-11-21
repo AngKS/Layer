@@ -116,7 +116,7 @@ enum SwiftUICodeGenerator {
                 }
             }
             if row.count == 1, let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                lines.insert("// \(name.replacingOccurrences(of: "\n", with: " "))", at: 0)
+                lines.insert("// \(commentText(name))", at: 0)
             }
             body += lines
             previousBottom = bounds.maxY
@@ -165,7 +165,7 @@ enum SwiftUICodeGenerator {
         var body: [String] = []
         for (element, next) in zip(row, row.dropFirst().map { Optional($0) } + [nil]) {
             if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+                body.append("// \(commentText(name))")
             }
             // Each element at its own width, flush with the one before it.
             body += view(for: element, margin: element.frame.minX, contentWidth: .infinity, screenWidth: .infinity)
@@ -295,7 +295,7 @@ enum SwiftUICodeGenerator {
         var body = ["Color.clear"]
         for element in elements {
             if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+                body.append("// \(commentText(name))")
             }
             body += positioned(element)
         }
@@ -534,16 +534,36 @@ enum SwiftUICodeGenerator {
 
     // MARK: Literals
 
+    /// Text as a Swift string literal. A carriage return or another control character,
+    /// pasted from Windows or set by a Siri intent, is escaped too: left in, it ended the
+    /// literal, and the file didn't compile.
     private static func literal(_ text: String) -> String {
-        let escaped = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        var escaped = ""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\\": escaped += "\\\\"
+            case "\"": escaped += "\\\""
+            case "\n": escaped += "\\n"
+            case "\r": escaped += "\\r"
+            case "\t": escaped += "\\t"
+            case _ where scalar.value < 0x20 || scalar.value == 0x7F: escaped += String(format: "\\u{%02X}", scalar.value)
+            default: escaped.unicodeScalars.append(scalar)
+            }
+        }
         return "\"\(escaped)\""
+    }
+
+    /// A layer's name for a comment line: a line break or control character in it would
+    /// end the comment and leave the rest of the name as code.
+    private static func commentText(_ name: String) -> String {
+        String(String.UnicodeScalarView(name.unicodeScalars.map { CharacterSet.newlines.contains($0) || CharacterSet.controlCharacters.contains($0) ? " " : $0 }))
     }
 
     private static func number(_ value: CGFloat) -> String {
         let rounded = (value * 10).rounded() / 10
+        // Past what an Int holds it is written as it is: a size like that is a mistake,
+        // but writing it out mustn't stop the app.
+        guard rounded.magnitude < 1e15 else { return String(Double(rounded)) }
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(Double(rounded))
     }
 
