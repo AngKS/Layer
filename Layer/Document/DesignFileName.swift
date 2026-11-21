@@ -48,7 +48,7 @@ enum DesignFileName {
     /// Renames a design's file where it is, giving it a number if the name is taken.
     /// Anything that has the file open, the document itself included, is told that it
     /// moved, so nothing is lost by renaming a design that is being edited. Returns
-    /// where the file is now.
+    /// where the file is now, which is where it was when it already has the name.
     static func rename(_ url: URL, to name: String) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             // File coordination waits on whoever else has the file, so not on the main thread.
@@ -57,8 +57,15 @@ enum DesignFileName {
                 defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
 
                 let folder = url.deletingLastPathComponent()
+                // The file doesn't stand in its own way: a board named after its own numbered
+                // file, "Onboarding" over "Onboarding 2" beside another "Onboarding", keeps it.
+                let source = url.standardizedFileURL.path
                 let destination = unused(name, extension: url.pathExtension, in: folder) {
-                    FileManager.default.fileExists(atPath: $0.path)
+                    $0.standardizedFileURL.path != source && FileManager.default.fileExists(atPath: $0.path)
+                }
+                guard destination.standardizedFileURL.path != source else {
+                    continuation.resume(returning: url)
+                    return
                 }
                 let coordinator = NSFileCoordinator(filePresenter: nil)
                 var coordinationError: NSError?

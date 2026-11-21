@@ -82,7 +82,19 @@ final class AppModel {
             guard fileURL != oldValue else { return }
             let previousID = designID
             designID = fileURL.map(DesignLibrary.id(for:))
-            if let previousID, previousID != designID { DesignIndexer.forget(design: previousID) }
+            if let previousID, previousID != designID {
+                DesignIndexer.forget(design: previousID)
+                // What Siri and Shortcuts hold from before the move still finds the design.
+                if let designID { OpenDesigns.shared.designMoved(from: previousID, to: designID) }
+            }
+            // A rename that finishes after the design closed doesn't list it again, but the
+            // design is indexed under its new identifier now: nothing here will change it again.
+            guard !isClosed else {
+                if previousID != designID, let snapshot = DesignActions.snapshot(of: self) {
+                    Task { await DesignIndexer.index(snapshot) }
+                }
+                return
+            }
             OpenDesigns.shared.opened(self)
             DesignIndexer.designChanged(self)
             matchNameAndFile()
@@ -667,25 +679,57 @@ final class AppModel {
     /// browser has already listed.
     @ObservationIgnored private(set) var isClosed = false
 
+    /// Whether the design's canvas is inside `view`: the view of the controller that shows it.
+    func isShown(in view: UIView) -> Bool {
+        ink?.canvases.contains { $0.isDescendant(of: view) } == true
+    }
+
     /// Gets a design ready to go back to the document browser: its picture as the board
-    /// was left, its name decided, and its file given that name. False when the design is
-    /// already on its way out, so that a second tap of the back button doesn't dismiss it
-    /// again, or early, while the first still waits for the file's name.
+    /// was left, its name decided, and its file given that name. Asked again while it is
+    /// getting ready, by a second tap of the back button or by an action opening another
+    /// design, it waits for that to finish rather than going on early, and says false, so
+    /// that only the first asker dismisses the design.
     @discardableResult
     func prepareToClose() async -> Bool {
-        guard !isClosing, !isClosed else { return false }
-        isClosing = true
-        refreshPreview()
-        // A name still being thought up is settled now, from the design's own words.
-        if titleSuggestion != nil, store.title == nil {
-            store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+        if let closing {
+            await closing.value
+            return false
         }
-        await settleFileName()
-        close()
+        guard !isClosed else { return false }
+        let getting = Task {
+            refreshPreview()
+            // A name still being thought up is settled now, from the design's own words.
+            if titleSuggestion != nil, store.title == nil {
+                store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+            }
+            await settleFileName()
+            close()
+        }
+        closing = getting
+        await getting.value
         return true
     }
 
-    @ObservationIgnored private var isClosing = false
+    /// The design getting ready to close, once something has asked it to.
+    @ObservationIgnored private var closing: Task<Void, Never>?
+
+    /// Actions Siri and Shortcuts took on this design that their own undo can still take
+    /// back. Each is taken out of their history once it can't be: see `TakenAction`.
+    @ObservationIgnored var takenActions: [TakenAction] = []
+    /// Said when Siri's undo of an action found nothing left to take back.
+    var undoNotice: String?
+
+    /// Takes out of Siri's history the actions everything of which has been changed since,
+    /// so that Siri isn't left to undo one, do nothing, and say it did. Done as the app
+    /// stops being active, which is when Siri can next be asked.
+    func withdrawTakenActionsWithNothingLeft() {
+        let content = store.content
+        takenActions.removeAll { action in
+            guard !action.canTakeBack(from: content) else { return false }
+            action.withdraw()
+            return true
+        }
+    }
 
     func close() {
         // Closed by the back button, then again as the canvas goes from the screen.
@@ -708,6 +752,9 @@ final class AppModel {
         // reaches the disk only if the system is told there is something to save.
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
+        // Siri's undo can't reach a closed design: it is given nothing to undo.
+        for action in takenActions { action.withdraw() }
+        takenActions.removeAll()
         voice?.end()
         // Listening stops. A pencil command already running isn't cancelled, but it ends at
         // its next tool call, since nothing more is done to a closed design.
@@ -871,6 +918,34 @@ final class AppModel {
         return previewedBoard != board
     }
 
+    /// A copy of the design as it is now, to share. The file on disk can be some seconds
+    /// behind, since the system saves a while after each change. The ink still waiting
+    /// for the pen to be put down is taken in and the board's picture drawn first; the
+    /// copy is written on another thread, under the file's name, in a folder of its own in
+    /// `temporary`, which the share menu takes away when its sheet closes (see `ShareItem`).
+    /// Old copies whose sheet closed unheard are cleared first, and a copy that can't be
+    /// written leaves nothing behind.
+    func fileToShare(in temporary: URL = FileManager.default.temporaryDirectory) async throws -> URL {
+        ink?.flushPendingInk()
+        refreshPreview()
+        let file = document.current
+        let name = [fileURL?.deletingPathExtension().lastPathComponent, store.title.map(DesignFileName.fileName(for:))]
+            .compactMap(\.self).first { !$0.isEmpty } ?? DesignFileName.untitled
+        return try await Task.detached(priority: .userInitiated) {
+            ShareItem.clearOldCopies(in: temporary)
+            let folder = temporary.appendingPathComponent(ShareItem.copyPrefix + UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent(name).appendingPathExtension("layer")
+                try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+                return url
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                throw error
+            }
+        }.value
+    }
+
     /// Redraws the board's picture now. Done before a design closes or the app leaves the
     /// screen, so that the picture saved is of the board as it was left.
     func refreshPreview() {
@@ -890,6 +965,7 @@ final class AppModel {
     func leavingTheScreen() {
         ink?.flushPendingInk()
         refreshPreview()
+        withdrawTakenActionsWithNothingLeft()
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
 

@@ -9,6 +9,9 @@ struct DesignSnapshot: Sendable {
     let name: String
     let content: DesignContent
     let modified: Date?
+    /// False for a design listed by its name alone, which iCloud hasn't downloaded: see
+    /// `DesignSummary.isRead`.
+    var isRead = true
 
     var entity: DesignEntity {
         DesignEntity(id: id, content: content, fallbackName: name, modified: modified)
@@ -38,20 +41,30 @@ enum DesignActions {
         return DesignSnapshot(id: id, name: name, content: model.store.content, modified: .now)
     }
 
+    /// A design by the identifier Siri or Shortcuts holds for it, which may be one it had
+    /// before its file was renamed. The snapshot keeps that identifier, so that the design
+    /// and its screens and elements answer to the identifiers they were asked for by.
     static func snapshot(design id: String) async -> DesignSnapshot? {
-        if let model = OpenDesigns.shared.model(forDesign: id) { return snapshot(of: model) }
-        guard let summary = await DesignLibrary.summary(for: id) else { return nil }
-        return DesignSnapshot(id: summary.id, name: summary.title, content: summary.content, modified: summary.modified)
+        if let model = OpenDesigns.shared.model(forDesign: id), let open = snapshot(of: model) {
+            return DesignSnapshot(id: id, name: open.name, content: open.content, modified: open.modified)
+        }
+        guard let summary = await DesignLibrary.summary(for: OpenDesigns.shared.currentID(for: id)) else { return nil }
+        return DesignSnapshot(id: id, name: summary.title, content: summary.content, modified: summary.modified)
     }
 
     /// Every design: the open ones as they are now, the rest as saved. Newest first.
     static func allSnapshots() async -> [DesignSnapshot] {
+        snapshots(with: await DesignLibrary.all())
+    }
+
+    /// Every design: the open ones as they are now, the rest as `saved` has them.
+    static func snapshots(with saved: [DesignSummary]) -> [DesignSnapshot] {
         let open = OpenDesigns.shared.all.compactMap(snapshot(of:))
         let openIDs = Set(open.map(\.id))
-        let saved = await DesignLibrary.all()
+        let rest = saved
             .filter { !openIDs.contains($0.id) }
-            .map { DesignSnapshot(id: $0.id, name: $0.title, content: $0.content, modified: $0.modified) }
-        return open.reversed() + saved
+            .map { DesignSnapshot(id: $0.id, name: $0.title, content: $0.content, modified: $0.modified, isRead: $0.isRead) }
+        return open.reversed() + rest
     }
 
     /// The design an action works on: the one named, opened if it isn't already, or else
@@ -127,9 +140,13 @@ enum DesignActions {
             model.store.endEdit(edit)
             let after = model.store.content
             if before != after, let undoManager, undoManager !== model.store.undoManager {
+                let action = TakenAction(name: actionName, before: before, after: after, model: model, undoManager: undoManager)
+                model.takenActions.append(action)
                 undoManager.beginUndoGrouping()
-                undoManager.registerUndo(withTarget: model.store) { store in
-                    MainActor.assumeIsolated { store.restore(before) }
+                // The system's history holds its target weakly: the action is kept alive by
+                // its own handler.
+                undoManager.registerUndo(withTarget: action) { [action] _ in
+                    MainActor.assumeIsolated { action.takeBack() }
                 }
                 undoManager.setActionName(actionName)
                 undoManager.endUndoGrouping()
@@ -191,6 +208,63 @@ enum DesignActions {
             frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
         }
         return frame
+    }
+}
+
+/// An action Siri or Shortcuts took on a design, kept for the system's undo of it.
+///
+/// The system's undo can't be told that it failed: it calls the handler and says the action
+/// was undone. So an action that can no longer be taken back is taken out of the system's
+/// history instead, leaving Siri nothing to undo: when its design closes, and, checked as
+/// the app stops being active, once everything it changed has been changed since. See
+/// `AppModel.takenActions`.
+@MainActor
+final class TakenAction {
+    let name: String
+    private let before: DesignContent
+    private let after: DesignContent
+    private weak var model: AppModel?
+    private weak var undoManager: UndoManager?
+
+    init(name: String, before: DesignContent, after: DesignContent, model: AppModel, undoManager: UndoManager) {
+        self.name = name
+        self.before = before
+        self.after = after
+        self.model = model
+        self.undoManager = undoManager
+    }
+
+    /// Whether anything the action changed is still as the action left it in `content`.
+    func canTakeBack(from content: DesignContent) -> Bool {
+        if content == after { return true }
+        var taken = content
+        taken.takeBack(after, to: before)
+        return taken != content
+    }
+
+    /// Takes the action out of the system's history, so that nothing offers to undo it.
+    func withdraw() {
+        undoManager?.removeAllActions(withTarget: self)
+    }
+
+    /// Puts back what the action changed, as one step in the design's own history. Undone
+    /// straight away, the design goes back as it was. Undone after more has been done, only
+    /// what the action changed and nothing has changed since goes back. When nothing is
+    /// left to take back, nothing changes, and the design says so.
+    func takeBack() {
+        guard let model else { return }
+        model.takenActions.removeAll { $0 === self }
+        guard !model.isClosed else { return }
+        let store = model.store
+        // A one-off step of its own, as the action was: a drag under way meanwhile stays
+        // one step of its own, rather than taking this in.
+        if store.content == after {
+            store.asOwnStep { store.restore(before) }
+        } else if canTakeBack(from: store.content) {
+            store.asOwnStep { store.apply { $0.takeBack(after, to: before) } }
+        } else {
+            model.undoNotice = "Siri couldn't undo “\(name)”: everything it changed has been changed since. Use Undo in Layer to go back step by step."
+        }
     }
 }
 
