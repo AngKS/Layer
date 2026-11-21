@@ -14,9 +14,9 @@ import PencilKit
 /// known word list — component names, `reading(namedIn:)`'s vocabulary — is a second pass
 /// over whatever text comes back, not something the recognizer does for you.
 enum HandwritingRecognizer {
-    /// One recognizer, reused across calls. `PKStrokeRecognizer` is an actor; a fresh
-    /// instance per call would mean reloading its model assets every time.
-    private static let recognizer = PKStrokeRecognizer()
+    /// One reader, reused across calls. A fresh `PKStrokeRecognizer` per call would mean
+    /// reloading its model assets every time.
+    private static let shared = Reader(recognizer: PKStrokeRecognizer())
 
     /// The handwritten word or phrase these strokes spell, trimmed, or nil when
     /// PencilKit's recognizer finds nothing legible — a decorative squiggle, a shape
@@ -24,12 +24,44 @@ enum HandwritingRecognizer {
     /// just a missing label: see `ComponentRule`'s use of this for the text/title/body
     /// decision.
     static func recognize(_ strokes: [[CGPoint]]) async -> String? {
+        await recognize(strokes, with: shared)
+    }
+
+    /// The same, read by `reader`. A test hands in a reader with a stand-in recognizer.
+    static func recognize(_ strokes: [[CGPoint]], with reader: Reader) async -> String? {
         guard !strokes.isEmpty else { return nil }
-        let drawing = makeDrawing(strokes)
-        await recognizer.updateDrawing(drawing)
-        guard let text = await recognizer.recognizedText(strokeIDs: nil) else { return nil }
+        guard let text = await reader.read(makeDrawing(strokes)) else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Reads drawings with one recognizer, one at a time.
+    ///
+    /// The recognizer is given a drawing in one call and asked what it says in another.
+    /// It is an actor, but nothing holds it between the two: sketches read together used
+    /// to hand over their drawings one after the other and then each be told the words in
+    /// the last one. An actor of our own doesn't hold it either, since it too lets the next
+    /// call in at every wait, so each read waits for the one before it to finish.
+    actor Reader {
+        private let recognizer: any StrokeTextRecognizing
+        /// The read that goes before the next one.
+        private var last: Task<String?, Never>?
+
+        init(recognizer: any StrokeTextRecognizing) {
+            self.recognizer = recognizer
+        }
+
+        /// The text in `drawing`.
+        func read(_ drawing: PKDrawing) async -> String? {
+            let previous = last
+            let read = Task { [recognizer] in
+                _ = await previous?.value
+                await recognizer.updateDrawing(drawing)
+                return await recognizer.recognizedText(strokeIDs: nil)
+            }
+            last = read
+            return await read.value
+        }
     }
 
     /// Builds a throwaway `PKDrawing` from plain points, the same construction
@@ -53,3 +85,12 @@ enum HandwritingRecognizer {
         return PKDrawing(strokes: pkStrokes)
     }
 }
+
+/// What reads words out of a drawing: PencilKit's recognizer, or a test's stand-in. It is
+/// given the drawing in one call and asked what it says in another.
+protocol StrokeTextRecognizing: Sendable {
+    func updateDrawing(_ drawing: PKDrawing) async
+    func recognizedText(strokeIDs: Set<UUID>?) async -> String?
+}
+
+extension PKStrokeRecognizer: StrokeTextRecognizing {}

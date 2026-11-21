@@ -1,5 +1,7 @@
 import CoreGraphics
 import Testing
+import Foundation
+import PencilKit
 @testable import Layer
 
 private func observe(_ paths: [[CGPoint]]) -> SketchObservation? {
@@ -456,5 +458,42 @@ struct AskedReadingTests {
         #expect(SketchPrompt.label(in: "a button saying Sign up") == "Sign up")
         #expect(SketchPrompt.label(in: "title “Welcome back”") == "Welcome back")
         #expect(SketchPrompt.label(in: "a big picture") == nil)
+    }
+}
+
+/// A stand-in for PencilKit's recognizer that reads a drawing as its number of strokes, and
+/// that, like any actor, lets another call in while it waits: a drawing handed over is
+/// taken in only after a pause.
+private actor CountingRecognizer: StrokeTextRecognizing {
+    private var drawing = PKDrawing()
+
+    func updateDrawing(_ drawing: PKDrawing) async {
+        try? await Task.sleep(for: .milliseconds(30))
+        self.drawing = drawing
+    }
+
+    func recognizedText(strokeIDs: Set<UUID>?) async -> String? {
+        "\(drawing.strokes.count) strokes"
+    }
+}
+
+@Suite("Reading handwriting")
+struct HandwritingRecognizerTests {
+    private func strokes(_ count: Int) -> [[CGPoint]] {
+        (0..<count).map { index in [CGPoint(x: 0, y: index * 20), CGPoint(x: 40, y: index * 20)] }
+    }
+
+    /// Two sketches read at once used to share the recognizer between taking in their
+    /// drawings and asking what they say, so one could be told the other's words (G1).
+    /// Each read is one turn of the recognizer now.
+    @Test func sketchesReadTogetherEachGetTheirOwnWords() async {
+        let reader = HandwritingRecognizer.Reader(recognizer: CountingRecognizer())
+        for _ in 0..<5 {
+            async let one = HandwritingRecognizer.recognize(strokes(1), with: reader)
+            async let two = HandwritingRecognizer.recognize(strokes(2), with: reader)
+            async let three = HandwritingRecognizer.recognize(strokes(3), with: reader)
+            let read = await [one, two, three]
+            #expect(read == ["1 strokes", "2 strokes", "3 strokes"])
+        }
     }
 }
