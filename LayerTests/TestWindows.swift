@@ -6,8 +6,9 @@ import UIKit
 ///
 /// Not serialized, though one could take the key window from another at a pause. Run one at
 /// a time they made the whole run 11-12 s rather than 8, and in each of four runs a voice
-/// call test failed: a call started by another suite ends the current one (`VoiceCall.start`
-/// ends `VoiceCall.current`), and the longer run gave that more chances. Run alongside each
+/// call test failed: a call started by another suite ended the current one (all were on the
+/// app's one `PhoneLine`; the voice tests' calls now have lines of their own), and the
+/// longer run gave that more chances. Run alongside each
 /// other they passed in every run, and the run did too. Their fields keep the on-screen
 /// keyboard down where they can (`quietTextField`).
 @MainActor

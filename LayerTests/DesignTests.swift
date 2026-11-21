@@ -1451,46 +1451,33 @@ struct ResourceTests {
         return AppModel(document: document)
     }
 
-    /// How many turns the main thread had while `work` ran, the longest it went without one,
-    /// and how long `work` took. Turns are counted, rather than the longest stall judged,
-    /// because other tests' work on the main thread can stall it too while all run at once.
-    private func turnsOnTheMainThread(during work: () async -> Void) async -> (turns: Int, stall: Duration, total: Duration) {
-        var last = ContinuousClock.now
-        var longest = Duration.zero
-        var turns = 0
-        var isWorking = false
-        let beat = Task { @MainActor in
-            while !Task.isCancelled {
-                let now = ContinuousClock.now
-                longest = max(longest, now - last)
-                last = now
-                if isWorking { turns += 1 }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-        }
-        await Task.yield()
-        let start = ContinuousClock.now
-        last = start
-        isWorking = true
-        await work()
-        isWorking = false
-        let total = ContinuousClock.now - start
-        beat.cancel()
-        return (turns, max(longest, ContinuousClock.now - last), total)
-    }
-
+    /// The board's views are drawn on the main thread; its ink, the picture and the PNG
+    /// aren't, and the main thread is free meanwhile. Asked where that work is made, and
+    /// whether the main thread can take a turn while it is, rather than counted how many
+    /// turns it had: other tests' work on the main thread, all running at once, took those
+    /// turns now and then, and the count fell short.
     @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
         let model = bigBoard()
-        var url: URL?
-        let (turns, stall, total) = await turnsOnTheMainThread { url = await BoardSnapshot.file(of: model) }
-        let shared = try #require(url)
-        defer { try? FileManager.default.removeItem(at: shared) }
-        let picture = try #require(UIImage(contentsOfFile: shared.path))
+        let seen = OSAllocatedUnfairLock(initialState: (offTheMainThread: false, mainThreadTookATurn: false))
+        let data = await BoardSnapshot.png(of: model) {
+            let isMain = Self.isMainThread()
+            seen.withLock { $0.offTheMainThread = !isMain }
+            // Held on the main thread, this turn would only come once the picture was made.
+            await MainActor.run { seen.withLock { $0.mainThreadTookATurn = true } }
+        }
+        let png = try #require(data)
+        let picture = try #require(UIImage(data: png))
         #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
-        // The board's views are drawn on the main thread; its ink, the picture and the file
-        // aren't, so the main thread has turns meanwhile. Done on it, it had none.
-        #expect(turns >= 3, "the main thread had \(turns) turns in \(total), the longest wait \(stall)")
+        #expect(seen.withLock { $0.offTheMainThread }, "the ink, the picture and the PNG are made on another thread")
+        #expect(seen.withLock { $0.mainThreadTookATurn }, "the main thread is free while they are")
+
+        // The file to share is the same picture.
+        let shared = try #require(await BoardSnapshot.file(of: model))
+        defer { try? FileManager.default.removeItem(at: shared) }
+        #expect(UIImage(contentsOfFile: shared.path)?.size == picture.size)
     }
+
+    private nonisolated static func isMainThread() -> Bool { Thread.isMainThread }
 
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
         let store = DesignStore(content: DesignContent())

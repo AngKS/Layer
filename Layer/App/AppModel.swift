@@ -269,8 +269,11 @@ final class AppModel {
     /// Sketches being read, so that a design that closes can stop them.
     @ObservationIgnored private var conversions: [Task<Void, Never>] = []
     @ObservationIgnored private(set) var isPenDown = false
-    /// The name being thought up for the board, while it is.
+    /// The name being thought up for the board, while it is: a test can wait for it.
     @ObservationIgnored private(set) var titleSuggestion: Task<Void, Never>?
+    /// Whether the board is given a name of the app's once it has something on it. A test
+    /// about something else turns it off, so that no name lands in the middle of it.
+    @ObservationIgnored var suggestsTitle = true
     /// Whether the board has had a name here, given by hand or by the app.
     @ObservationIgnored private var hasHadName = false
     /// Whether the board has been named: it has had a name here, or its file has one
@@ -1797,7 +1800,7 @@ final class AppModel {
 
     /// Names the board once, the first time it has something on it worth naming.
     private func suggestTitleIfNeeded() {
-        guard store.title == nil, !hasBeenNamed, titleSuggestion == nil else { return }
+        guard suggestsTitle, store.title == nil, !hasBeenNamed, titleSuggestion == nil else { return }
         titleSuggestion = Task { [weak self] in
             guard let self else { return }
             let title = await engine.suggestTitle(for: store.content)
