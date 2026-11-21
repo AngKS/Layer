@@ -675,6 +675,14 @@ final class DesignStore {
     /// Whether a gradual edit by hand, or a turn, is under way.
     var isEditing: Bool { edits.contains { $0.editor != .app } }
 
+    /// The edit a change joins when it says nothing of whose it is: the edit by hand begun
+    /// last that takes such changes, or failing one the turn. One rule for `change(_:)` and
+    /// `asOneStep(_:)`: they disagreed about the format panel's edit, which takes only its
+    /// own, so several changes made in its pause were a step each (review I2).
+    private var implicitOwner: Edit? {
+        edits.last { $0.editor == .hand && !$0.takesOnlyItsOwn } ?? edits.last { $0.editor == .turn }
+    }
+
     /// Whether `editor` has an edit under way.
     func isEditing(by editor: Editor) -> Bool { edits.contains { $0.editor == editor } }
 
@@ -779,9 +787,10 @@ final class DesignStore {
     }
 
     /// Makes several changes one undo step. Inside a gradual edit by hand that is already
-    /// under way, or as part of an edit's own work, they join that edit instead.
+    /// under way and takes changes that say nothing of whose they are (`implicitOwner`), or
+    /// as part of an edit's own work, they join that edit instead.
     func asOneStep(_ body: () -> Void) {
-        guard acting == nil, !isEditing else {
+        guard acting == nil, implicitOwner == nil else {
             body()
             return
         }
@@ -826,7 +835,7 @@ final class DesignStore {
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
-        let owner = acting ?? edits.last { $0.editor == .hand && !$0.takesOnlyItsOwn } ?? edits.last { $0.editor == .turn }
+        let owner = acting ?? implicitOwner
         let step: HistoryStep
         if let existing = owner?.step {
             step = existing

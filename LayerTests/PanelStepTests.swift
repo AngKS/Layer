@@ -59,6 +59,41 @@ struct PanelStepTests {
         #expect(board.tint(of: board.first) == RGBColor(hex: 0xFF0000), "the first change is a step of its own")
     }
 
+    /// An action on several things in the pause is one step of its own: it used to be one
+    /// step per thing, since it neither joined the panel's step nor made one of its own
+    /// (review I2).
+    @Test func duplicatingSeveralThingsRightAfterAColourChangeIsOneStep() {
+        let board = Board()
+        let things = CanvasSelection([.element(board.first), .element(board.second)])
+        board.model.selection = things
+        board.model.adjusting {
+            for ref in [board.first, board.second] { board.store.update(ref) { $0.tint = RGBColor(hex: 0xFF0000) } }
+        }
+        let count = board.store.content.elements.count
+        board.model.duplicateSelection()
+        #expect(board.store.content.elements.count == count + 2)
+
+        board.undo.undo()
+        #expect(board.store.content.elements.count == count, "one Undo takes back both copies")
+        #expect(board.tint(of: board.first) == RGBColor(hex: 0xFF0000), "and leaves the colour")
+        board.undo.undo()
+        #expect(board.tint(of: board.first) == RGBColor(hex: 0x000000))
+    }
+
+    @Test func deletingAScreenAndAnElementRightAfterAColourChangeIsOneStep() {
+        let board = Board()
+        let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5)).id
+        board.undo.removeAllActions()
+        board.model.selection = CanvasSelection([.element(board.second), .screen(other)])
+        board.model.adjusting { board.store.update(board.second) { $0.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.deleteSelection()
+        #expect(board.store.screen(other) == nil && board.store.resolve(board.second) == nil)
+
+        board.undo.undo()
+        #expect(board.store.screen(other) != nil && board.store.resolve(board.second) != nil, "one Undo brings both back")
+        #expect(board.tint(of: board.second) == RGBColor(hex: 0xFF0000), "with the colour")
+    }
+
     /// The panel's run of changes is still one step.
     @Test func aRunOfChangesInThePanelIsOneStep() {
         let board = Board()
