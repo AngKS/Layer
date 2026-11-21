@@ -112,6 +112,9 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     /// top-left corner, so that moving the frame moves the ink and resizing it stretches
     /// the ink. Kept beside the design in its file rather than inside it: see `DesignFile`.
     var ink: Data?
+    /// What a newer Layer saved with the element that this version doesn't know, to be
+    /// written back with it.
+    var unknownKeys = UnknownKeys()
 
     /// Everything about an element that is saved with the design. `ink` is saved apart.
     enum CodingKeys: String, CodingKey {
@@ -156,8 +159,11 @@ extension DesignElement {
         isOn = try container.decodeIfPresent(Bool.self, forKey: .isOn) ?? true
         value = try container.decodeIfPresent(Double.self, forKey: .value)
         buttonLook = try container.decodeIfPresent(ButtonLook.self, forKey: .buttonLook)
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
     }
 }
+
+extension DesignElement: KeepsUnknownKeys {}
 
 /// Where a group of elements sits on the canvas: where its own origin falls, and how
 /// large its points are drawn.
@@ -291,6 +297,9 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
     /// still be edited.
     var isLocked: Bool?
+    /// What a newer Layer saved with the screen that this version doesn't know, to be
+    /// written back with it.
+    var unknownKeys = UnknownKeys()
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }
@@ -332,10 +341,12 @@ extension DesignScreen {
         deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
         elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
     }
 
     /// A screen is saved without its elements, which are saved in the design's one list.
     func encode(to encoder: any Encoder) throws {
+        try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
@@ -401,6 +412,15 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     /// The model that reads this design's sketches and names it. Nil in designs saved
     /// before there was a choice, which use the app's default (`ModelPreferences`).
     var model: ModelChoice?
+    /// What a newer Layer saved with the settings that this version doesn't know, to be
+    /// written back with them.
+    var unknownKeys = UnknownKeys()
+
+    /// Everything about the settings that is saved with the design.
+    enum CodingKeys: String, CodingKey {
+        case showsGrid, gridStyle, gridSpacing, snapsToGuides, snapsToGrid, showsMeasurements, showsFrameNames
+        case background, sketchDeviceID, code, model
+    }
 
     static let paper = RGBColor(hex: 0xF4F3EC)
     /// Canvas colours offered as swatches beside the colour well.
@@ -429,13 +449,22 @@ extension CanvasSettings {
         background = try container.decodeIfPresent(RGBColor.self, forKey: .background)
         sketchDeviceID = try container.decodeIfPresent(String.self, forKey: .sketchDeviceID)
         code = try container.decodeIfPresent(CodeSettings.self, forKey: .code) ?? CodeSettings()
-        // A choice this version can't read, from a newer Layer, is treated as no choice.
-        model = try? container.decodeIfPresent(ModelChoice.self, forKey: .model)
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        // A choice this version can't read, from a newer Layer, is treated as no choice. It
+        // is kept as it was read and written back, unless a model is chosen here meanwhile.
+        do {
+            model = try container.decodeIfPresent(ModelChoice.self, forKey: .model)
+        } catch {
+            model = nil
+            unknownKeys[CodingKeys.model.stringValue] = try? container.decode(JSONValue.self, forKey: .model)
+        }
     }
 
     /// The model this design uses: its own choice, or the app's default.
     var resolvedModel: ModelChoice { model ?? ModelPreferences.defaultChoice }
 }
+
+extension CanvasSettings: KeepsUnknownKeys {}
 
 /// How screens are written out as SwiftUI.
 struct CodeSettings: Equatable, Codable, Sendable {

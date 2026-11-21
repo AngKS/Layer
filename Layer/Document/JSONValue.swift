@@ -50,3 +50,67 @@ enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 }
+
+/// The keys of a JSON object that this version of Layer doesn't know, with their values
+/// as they were read. A newer Layer may have added them: writing them back with the rest
+/// means that saving a design here doesn't take away what that version put in it.
+struct UnknownKeys: Equatable, Sendable {
+    var values: [String: JSONValue] = [:]
+
+    init() {}
+
+    /// Reads the keys of the object `decoder` is reading that `Known` doesn't list.
+    init<Known: CodingKey>(from decoder: any Decoder, besides _: Known.Type) throws {
+        let container = try decoder.container(keyedBy: AnyKey.self)
+        for key in container.allKeys where Known(stringValue: key.stringValue) == nil {
+            values[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+        }
+    }
+
+    subscript(key: String) -> JSONValue? {
+        get { values[key] }
+        set { values[key] = newValue }
+    }
+
+    /// Every string in them, however deeply held: what they may name of the design's files.
+    var strings: Set<String> {
+        values.values.reduce(into: []) { $0.formUnion($1.strings) }
+    }
+
+    /// Adds the keys to the object `encoder` is writing.
+    func encode(to encoder: any Encoder) throws {
+        guard !values.isEmpty else { return }
+        var container = encoder.container(keyedBy: AnyKey.self)
+        for (key, value) in values {
+            try container.encode(value, forKey: AnyKey(key))
+        }
+    }
+
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ stringValue: String) { self.stringValue = stringValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+}
+
+/// Something saved as a JSON object that keeps the keys it was read with but didn't know.
+protocol KeepsUnknownKeys: Encodable {
+    var unknownKeys: UnknownKeys { get }
+}
+
+/// A value as it is saved: the keys it was read with but didn't know, then its own. Its
+/// own come second, so that one it now has a value for replaces one it couldn't read.
+struct WithUnknownKeys<Value: KeepsUnknownKeys>: Encodable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        try value.unknownKeys.encode(to: encoder)
+        try value.encode(to: encoder)
+    }
+}

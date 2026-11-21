@@ -689,6 +689,73 @@ struct DesignFileTests {
         }
     }
 
+    /// The JSON object of a saved package's design.
+    private func manifest(of package: FileWrapper) throws -> [String: Any] {
+        let data = try #require(package.fileWrappers?["design.json"]?.regularFileContents)
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func keysThisVersionDoesNotKnowSurviveASave() throws {
+        var content = DesignContent()
+        let screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1)
+        content.addScreen(screen)
+        var button = DesignStore.newElement(.button)
+        button.rotation = 30
+        content.add(button, to: screen.id)
+        let mask = UUID()
+        var file = DesignFile(content: content)
+        file.images = [mask.uuidString: Data([1, 2, 3])]
+
+        // A newer Layer adds keys of its own at every level, one of them naming a picture,
+        // and saves the design's model in a shape this version can't read.
+        var root = try manifest(of: file.wrapper())
+        var saved = try #require(root["content"] as? [String: Any])
+        var elements = try #require(saved["elements"] as? [[String: Any]])
+        elements[0]["skew"] = 12
+        elements[0]["maskImageID"] = mask.uuidString
+        elements[0]["shadowStyle"] = ["blur": 8, "colour": "#000000"]
+        saved["elements"] = elements
+        var screens = try #require(saved["screens"] as? [[String: Any]])
+        screens[0]["background"] = "#FFFFFF"
+        saved["screens"] = screens
+        var canvas = try #require(saved["canvas"] as? [String: Any])
+        canvas["rulers"] = true
+        canvas["model"] = ["provider": ["name": "future"]]
+        saved["canvas"] = canvas
+        saved["groups"] = [["members": [button.id.uuidString]]]
+        root["content"] = saved
+        root["designID"] = "B7F0"
+        let newer = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: try JSONSerialization.data(withJSONObject: root)),
+            "images": FileWrapper(directoryWithFileWrappers: [mask.uuidString: FileWrapper(regularFileWithContents: Data([1, 2, 3]))]),
+        ])
+
+        var read = try DesignFile(wrapper: newer)
+        #expect(read.content.elements.first?.rotation == 30)
+        #expect(read.content.canvas.model == nil, "a model this version can't read is no choice here")
+
+        let written = try read.wrapper(replacing: newer)
+        let again = try manifest(of: written)
+        #expect(again["designID"] as? String == "B7F0")
+        let content2 = try #require(again["content"] as? [String: Any])
+        #expect((content2["groups"] as? [[String: Any]])?.first?["members"] as? [String] == [button.id.uuidString])
+        let element = try #require((content2["elements"] as? [[String: Any]])?.first)
+        #expect(element["rotation"] as? Double == 30)
+        #expect(element["skew"] as? Double == 12)
+        #expect((element["shadowStyle"] as? [String: Any])?["blur"] as? Double == 8)
+        #expect((content2["screens"] as? [[String: Any]])?.first?["background"] as? String == "#FFFFFF")
+        let canvas2 = try #require(content2["canvas"] as? [String: Any])
+        #expect(canvas2["rulers"] as? Bool == true)
+        #expect(((canvas2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
+        // The picture only the new key names is kept with it.
+        #expect(written.fileWrappers?["images"]?.fileWrappers?[mask.uuidString] != nil)
+
+        // A model chosen here is written in place of the one this version couldn't read.
+        read.content.canvas.model = .appleIntelligence
+        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["canvas"] as? [String: Any])
+        #expect((chosen["model"] as? [String: Any])?["provider"] as? String == ModelChoice.appleIntelligence.provider)
+    }
+
     @Test func aFileFromANewerVersionIsRefusedRatherThanHalfRead() throws {
         var file = sampleFile()
         file.version = DesignFile.currentVersion + 1

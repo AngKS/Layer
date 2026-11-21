@@ -27,6 +27,9 @@ struct DesignContent: Equatable, Sendable {
     /// The board's name. Nil until one has been suggested or typed.
     var title: String?
     var canvas = CanvasSettings()
+    /// What a newer Layer saved with the design that this version doesn't know, to be
+    /// written back with it.
+    private var unknownKeys = UnknownKeys()
 
     init() {}
 
@@ -35,11 +38,16 @@ struct DesignContent: Equatable, Sendable {
         Set(elements.compactMap(\.imageID))
     }
 
-    /// Every string in the elements this version couldn't read, their identifiers and
-    /// those of the pictures they show among them. The files they name are kept when the
-    /// design is saved, so that the newer Layer that wrote them still finds them.
+    /// Every string in what this version read but didn't understand: elements of kinds
+    /// it doesn't know, and keys it doesn't know on elements, screens, the canvas and the
+    /// design. Among them are the identifiers of drawings and pictures. The files they
+    /// name are kept when the design is saved, so that the newer Layer that wrote them
+    /// still finds them.
     var unreadNames: Set<String> {
-        unread.reduce(into: []) { $0.formUnion($1.json.strings) }
+        var names = unread.reduce(into: unknownKeys.strings.union(canvas.unknownKeys.strings)) { $0.formUnion($1.json.strings) }
+        for screen in frames where !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
+        for element in elements where !element.unknownKeys.values.isEmpty { names.formUnion(element.unknownKeys.strings) }
+        return names
     }
 
     // MARK: Views of the list
@@ -196,6 +204,7 @@ extension DesignContent: Codable {
         let screens = try container.decodeIfPresent([DesignScreen].self, forKey: .screens) ?? []
         title = try container.decodeIfPresent(String.self, forKey: .title)
         canvas = try container.decodeIfPresent(CanvasSettings.self, forKey: .canvas) ?? CanvasSettings()
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
         if container.contains(.elements) {
             frames = screens.map(\.withoutElements)
             (elements, unread) = try DesignElement.readList(in: container, forKey: .elements)
@@ -206,10 +215,11 @@ extension DesignContent: Codable {
     }
 
     func encode(to encoder: any Encoder) throws {
+        try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(frames, forKey: .screens)
         try container.encodeIfPresent(title, forKey: .title)
-        try container.encode(canvas, forKey: .canvas)
+        try container.encode(WithUnknownKeys(canvas), forKey: .canvas)
 
         // Elements this version couldn't read go back where they were among the others.
         var list = container.nestedUnkeyedContainer(forKey: .elements)
@@ -224,7 +234,7 @@ extension DesignContent: Codable {
         }
         for element in elements {
             try writeUnread()
-            try list.encode(element)
+            try list.encode(WithUnknownKeys(element))
             written += 1
         }
         try writeUnread(all: true)
@@ -281,6 +291,13 @@ struct DesignFile: Sendable {
     /// Parts of the package this version doesn't know, which a newer Layer may have added,
     /// as they were read. They are written back unchanged.
     var unknownParts: [String: PackagePart] = [:]
+    /// Keys at the top of the design's file that this version doesn't know, to be written back.
+    var unknownKeys = UnknownKeys()
+
+    /// The names of drawings and pictures that what this version couldn't read refers to.
+    private var unreadNames: Set<String> {
+        content.unreadNames.union(unknownKeys.strings)
+    }
 
     /// `drawing` is ink for the board as one PencilKit drawing, which is taken in as
     /// drawings: strokes that touch become one drawing each.
@@ -308,6 +325,7 @@ struct DesignFile: Sendable {
         self.init()
         content = manifest.content
         fileName = manifest.fileName
+        unknownKeys = manifest.unknownKeys
         // Each drawing's ink is beside the design, under the drawing's identifier.
         let ink = parts[DesignPackage.ink]?.fileWrappers ?? [:]
         for drawing in content.elements where drawing.kind == .drawing {
@@ -315,8 +333,8 @@ struct DesignFile: Sendable {
             content.update(drawing.id) { $0.ink = strokes }
         }
         // So is the ink of drawings this version can't read, which is kept for writing back.
-        let unreadNames = content.unreadNames
-        for (name, strokes) in ink where unreadNames.contains(name) {
+        let named = unreadNames
+        for (name, strokes) in ink where named.contains(name) {
             unreadInk[name] = strokes.regularFileContents
         }
         for (name, part) in parts where !Self.knownParts.contains(name) {
@@ -355,8 +373,8 @@ struct DesignFile: Sendable {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let manifest = Manifest(version: version, content: content, fileName: fileName)
-        parts[DesignPackage.design] = Self.file(try encoder.encode(manifest), named: DesignPackage.design, onDisk: old[DesignPackage.design])
+        let manifest = Manifest(version: version, content: content, fileName: fileName, unknownKeys: unknownKeys)
+        parts[DesignPackage.design] = Self.file(try encoder.encode(WithUnknownKeys(manifest)), named: DesignPackage.design, onDisk: old[DesignPackage.design])
 
         // A drawing whose ink is on disk unchanged keeps its file.
         let savedInk = old[DesignPackage.ink]?.fileWrappers ?? [:]
@@ -366,16 +384,16 @@ struct DesignFile: Sendable {
             let name = drawing.id.uuidString
             ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
         }
-        // Elements this version couldn't read keep the ink and pictures they name.
-        let unreadNames = content.unreadNames
-        for (name, strokes) in unreadInk where ink[name] == nil && unreadNames.contains(name) {
+        // What this version couldn't read keeps the ink and pictures it names.
+        let named = unreadNames
+        for (name, strokes) in unreadInk where ink[name] == nil && named.contains(name) {
             ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
         }
         if !ink.isEmpty {
             parts[DesignPackage.ink] = Self.folder(ink, named: DesignPackage.ink)
         }
 
-        let shown = Set(content.imageIDs.map(\.uuidString)).union(unreadNames)
+        let shown = Set(content.imageIDs.map(\.uuidString)).union(named)
         let savedPictures = old[DesignPackage.images]?.fileWrappers ?? [:]
         var pictures: [String: FileWrapper] = [:]
         for (name, data) in images where shown.contains(name) {
@@ -419,10 +437,30 @@ struct DesignFile: Sendable {
 
     // MARK: On disk
 
-    private struct Manifest: Codable {
+    private struct Manifest: Codable, KeepsUnknownKeys {
         var version: Int
         var content: DesignContent
         var fileName: String?
+        var unknownKeys = UnknownKeys()
+
+        enum CodingKeys: String, CodingKey {
+            case version, content, fileName
+        }
+
+        init(version: Int, content: DesignContent, fileName: String?, unknownKeys: UnknownKeys) {
+            self.version = version
+            self.content = content
+            self.fileName = fileName
+            self.unknownKeys = unknownKeys
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            version = try container.decode(Int.self, forKey: .version)
+            content = try container.decode(DesignContent.self, forKey: .content)
+            fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+            unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        }
     }
 
     private struct SingleFile: Decodable {
