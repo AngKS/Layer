@@ -40,9 +40,12 @@ struct SelectionLayer: View {
 
             // With the palette up, the selected element is moved by its own area. So is a
             // selected drawing at any time: it has no target of its own among the elements'.
+            // A tap in the area reaches what lies under it, as it would without the area: a
+            // drawing's box can hold other things (audit C12).
             if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
                 dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
+                    .onTapGesture(coordinateSpace: .named(Self.space)) { model.selectionAreaTapped(at: $0) }
                     .canvasDrag(drags, model: model, isEnabled: !selected.element.isLocked) { owner in
                         drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model, owner: owner) {
                             drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)

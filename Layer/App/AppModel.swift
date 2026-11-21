@@ -1051,6 +1051,20 @@ final class AppModel {
         }
     }
 
+    /// A tap in the area that drags the selected element, at a point in the view: a selected
+    /// drawing's box, or the selected element's with the palette up. It reaches what it would
+    /// have reached with no area there: in Draw the canvas, as a finger's tap does when a
+    /// finger doesn't draw; in Select whatever is drawn on top there, as the targets under
+    /// the area would pick it. The area used to take the tap and do nothing (audit C12).
+    func selectionAreaTapped(at viewPoint: CGPoint) {
+        if tool == .draw {
+            guard !fingerDraws else { return }
+            canvasTapped(at: viewPoint)
+        } else {
+            pick(hoverTarget(at: viewPoint))
+        }
+    }
+
     /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
     /// is drawn over every element and screen, so where a drawing's ink lies over the target
     /// the tap picks the drawing, as hover and a tap with the palette up do.
