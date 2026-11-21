@@ -148,6 +148,10 @@ struct InkOverAnElementTests {
         let buttonBefore = board.store.canvasFrame(of: .element(board.button))
         let inkBefore = try #require(board.store.canvasFrame(of: .element(drawing)))
         let start = board.middle(of: .element(board.button))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        board.store.undoManager = undo
+        let mark = board.store.historyMark
 
         for step in 1...4 {
             drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 10 * step, height: 0), startingAt: start, owner: owner, model: board.model)
@@ -158,6 +162,40 @@ struct InkOverAnElementTests {
         let inkAfter = try #require(board.store.canvasFrame(of: .element(drawing)))
         #expect(abs(inkAfter.minX - (inkBefore.minX + 40)) < 0.5)
         #expect(board.model.selection == .element(drawing))
+        // The whole drag is one step, which undo takes back.
+        #expect(board.store.historyMark == mark + 1)
+        undo.undo()
+        #expect(board.store.canvasFrame(of: .element(drawing)) == inkBefore)
+        _ = coordinator
+    }
+
+    /// The drawing found under a drag's start is kept for that drag alone. A later drag on the
+    /// same target from exactly the same point, where the ink no longer is, moves the
+    /// element: it moved the drawing it had found before (review m5).
+    @Test func aLaterDragFromTheSamePointLooksAgain() throws {
+        let board = HitBoard()
+        let (coordinator, drawing) = try inkAcrossTheButton(on: board)
+        board.model.tool = .select
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let found = try #require(board.store.resolve(board.button))
+        let screen = board.store.screen(board.screen)
+        let start = board.middle(of: .element(board.button))
+
+        // Drawing taken well away from the button.
+        drags.moveOnTarget(board.button, element: found.element, placement: found.placement, on: screen, by: CGSize(width: 0, height: 200), startingAt: start, owner: owner, model: board.model)
+        drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
+        let inkMoved = board.store.canvasFrame(of: .element(drawing))
+        let buttonBefore = try #require(board.store.canvasFrame(of: .element(board.button)))
+
+        let now = try #require(board.store.resolve(board.button))
+        drags.moveOnTarget(board.button, element: now.element, placement: now.placement, on: screen, by: CGSize(width: 30, height: 0), startingAt: start, owner: owner, model: board.model)
+        drags.dropOnTarget(board.button, startingAt: start, owner: owner, model: board.model)
+        #expect(board.store.canvasFrame(of: .element(drawing)) == inkMoved)
+        let buttonAfter = try #require(board.store.canvasFrame(of: .element(board.button)))
+        #expect(abs(buttonAfter.minX - (buttonBefore.minX + 30)) < 0.5)
         _ = coordinator
     }
 

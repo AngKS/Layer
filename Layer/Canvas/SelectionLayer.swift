@@ -502,12 +502,15 @@ final class CanvasDrags {
 
     func dropOnTarget(_ ref: DesignStore.ElementRef, startingAt start: CGPoint, owner: Owner, model: AppModel) {
         let drawing = owner.ink.flatMap { $0.start == start ? $0.drawing : nil }
+        owner.ink = nil
         dropElement(drawing ?? ref, findsNewHome: true, owner: owner, model: model)
     }
 
-    /// The drawing with ink where a drag on a target began, looked up once for each drag.
+    /// The drawing with ink where a drag on a target began, looked up once for each drag: as
+    /// it begins, and kept while it is this owner's drag under way. A drag ended any other
+    /// way, and then begun again from the same point, looks again.
     private func ink(under start: CGPoint, for owner: Owner, model: AppModel) -> DesignStore.ElementRef? {
-        if let ink = owner.ink, ink.start == start { return ink.drawing }
+        if let ink = owner.ink, ink.start == start, session?.owner === owner { return ink.drawing }
         let drawing = model.inkTarget(at: start)
         owner.ink = (start, drawing)
         return drawing
