@@ -83,6 +83,44 @@ struct VoiceAgentTests {
         #expect(outcome.lines.first?.contains("Profile") == true)
     }
 
+    /// A screen that takes longer to write than a call waits for its turn: the second
+    /// screen of the answer still waits for it, as the call ahead is running, not left
+    /// out. It ran early and was refused, "A screen is already being written" (review of V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCallWaitsAsLongAsTheCallAheadIsRunning() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let handles = VoiceHandles()
+        let toolbox = VoiceToolbox(model: app, handles: handles)
+        let turns = VoiceToolTurns()
+        turns.patience = .milliseconds(100)
+        let model = ScriptedLanguageModel(script: ["a profile and a settings screen": Step.together([
+            Step(tool: "createScreen", arguments: #"{"name":"Profile","description":"a profile screen"}"#),
+            Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#),
+        ])])
+        let session = LanguageModelSession(profile: VoiceProfile(
+            actor: toolbox, hooks: VoiceHooks(willRun: { _ in }, didRun: {}, mayRun: { true }), turns: turns, testModel: model
+        ))
+        turns.session = session
+        // Each screen takes four times as long to write as a call waits for its turn.
+        app.screenStream = { description, _, _ in
+            AsyncThrowingStream { feed in
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.finish()
+                }
+            }
+        }
+        session.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
+
+        app.store.beginHeldEdit()
+        _ = try await session.respond(to: "a profile and a settings screen")
+        app.store.endHeldEdit()
+
+        #expect(toolbox.failures.isEmpty)
+        #expect(app.store.screens.map(\.name) == ["Login", "Profile", "Settings"])
+    }
+
     // MARK: Taking turns
 
     /// A session whose transcript a test writes, and the turns taken against it.

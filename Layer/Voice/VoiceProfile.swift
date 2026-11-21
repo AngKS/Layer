@@ -151,8 +151,10 @@ private extension LanguageModelSession.DynamicProfile {
 final class VoiceToolTurns {
     /// The conversation whose answers are taken in turn.
     weak var session: LanguageModelSession?
-    /// How long a call waits for those ahead of it before it runs anyway. A session that
-    /// left out a call without cancelling the rest would otherwise hold the command for good.
+    /// How long a call waits for a call ahead of it to arrive before it runs anyway. A
+    /// session that left out a call without cancelling the rest would otherwise hold the
+    /// command for good. A call ahead that has arrived is waited for however long it runs:
+    /// a screen can take longer than this to write.
     var patience: Duration = .seconds(10)
 
     /// The transcript entry of the answer under way.
@@ -188,12 +190,7 @@ final class VoiceToolTurns {
                     turn.resume(returning: false)
                     return
                 }
-                let patience = patience
-                let timeout = Task { @MainActor [weak self] in
-                    guard (try? await Task.sleep(for: patience)) != nil else { return }
-                    self?.runAnyway(id)
-                }
-                waiting.append(Waiter(id: id, position: position, turn: turn, timeout: timeout))
+                waiting.append(Waiter(id: id, position: position, turn: turn, timeout: timeout(for: id)))
             }
         } onCancel: {
             Task { @MainActor in self.giveUp(id) }
@@ -249,9 +246,23 @@ final class VoiceToolTurns {
         return nil
     }
 
+    private func timeout(for id: UUID) -> Task<Void, Never> {
+        let patience = patience
+        return Task { @MainActor [weak self] in
+            guard (try? await Task.sleep(for: patience)) != nil else { return }
+            self?.runAnyway(id)
+        }
+    }
+
+    /// Runs a waiting call whose turn hasn't come because a call ahead of it never arrived.
+    /// While every call ahead has arrived, one of them is still running: it waits on.
     private func runAnyway(_ id: UUID) {
         guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
-        VoiceLog.log.error("turns: a tool waited \(self.patience, privacy: .public) for the one ahead of it, and runs anyway")
+        if (0..<waiting[index].position).allSatisfy(arrived.contains) {
+            waiting[index].timeout = timeout(for: id)
+            return
+        }
+        VoiceLog.log.error("turns: a tool waited \(self.patience, privacy: .public) for one ahead of it that never came, and runs anyway")
         resume(waiting.remove(at: index), goes: true)
     }
 
