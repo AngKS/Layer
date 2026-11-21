@@ -314,19 +314,25 @@ struct PaletteAndTypingTests {
 @MainActor
 @Suite("A glide and a finger")
 struct GlideAndFingerTests {
-    @Test func aPanStartedDuringAGlideStopsIt() async throws {
+    /// Driven by hand, a frame at a time, so that the display link can't finish the glide
+    /// first or fail to start it: the test fails without the fix, whatever the load.
+    @Test func aPanStartedDuringAGlideStopsItAndSettlesTheZoom() {
         let model = AppModel(document: LayerDocument())
         let coordinator = InkCanvas.Coordinator(model: model)
         model.ink = coordinator
-        #expect(model.zoomScale == 1)
         coordinator.zoom(to: 2)
-        try await Task.sleep(for: .milliseconds(60))
+        #expect(coordinator.isGliding)
+        // A frame of the glide, part of the way, as its display link sets it.
+        coordinator.documentCanvas.zoomScale = 1.4
+        coordinator.scrollViewDidZoom(coordinator.documentCanvas)
+        #expect(abs(model.zoomScale - 1.4) < 0.001)
+        #expect(model.settledScale == 1)
+
         coordinator.scrollViewWillBeginDragging(coordinator.documentCanvas)
-        let atTheTouch = model.zoomScale
-        // Longer than the glide's 0.3 s.
-        try await Task.sleep(for: .milliseconds(600))
-        #expect(model.zoomScale == atTheTouch, "the glide went on under the finger")
-        #expect(model.zoomScale < 2)
+        #expect(!coordinator.isGliding, "the glide went on under the finger")
+        // Where it stopped is where the canvas is drawn for: shadows and sharp text come back
+        // (review I2). Only the glide's last frame, or a pinch's end, settled it.
+        #expect(model.settledScale == model.zoomScale)
     }
 
     /// Left alone, the glide arrives.

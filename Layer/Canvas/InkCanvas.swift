@@ -603,14 +603,22 @@ struct InkCanvas: UIViewRepresentable {
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             isAtOpeningViewport = false
             // A finger takes the canvas from a glide under way, which would otherwise end by
-            // jumping to where it was going.
-            stopGliding()
+            // jumping to where it was going. The zoom it stopped at is settled, as the glide's
+            // last frame would have: screens get their shadows back and text is drawn sharp
+            // for it. A pinch settles it as the pinch ends.
+            if isGliding {
+                stopGliding()
+                model.settledScale = documentCanvas.zoomScale
+            }
         }
 
         func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
             if !isShowing { isAtOpeningViewport = false }
             if let pinch = scrollView.pinchGestureRecognizer, pinch.state == .began || pinch.state == .changed { stopGliding() }
         }
+
+        /// Whether a glide is under way.
+        var isGliding: Bool { zoomAnimation != nil }
 
         private func stopGliding() {
             zoomAnimation?.stop()
