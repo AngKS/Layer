@@ -13,8 +13,8 @@ struct ShareMenu: View {
             // The code of the selected screen, or of the first one.
             if let screen = model.selectedScreen ?? model.store.screens.first {
                 ShareLink(
-                    item: SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code),
-                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen))
+                    item: SwiftUICodeGenerator.code(for: screen, among: model.store.screens, settings: model.store.canvas.code),
+                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, among: model.store.screens))
                 ) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }

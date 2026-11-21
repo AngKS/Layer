@@ -351,6 +351,36 @@ struct StrokeScriptTests {
         #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("[[[0, 0]]]") }
     }
 
+    /// A number past Int's range used to trap working out how many points a line needs
+    /// (G9): a Siri or Shortcuts script could crash the app.
+    @Test func aNumberTooLargeToDrawIsRefusedNotATrap() {
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("line 0 0 99999999999999999999 0") }
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("[[[0, 0], [1e300, 0]]]") }
+    }
+
+    /// Strokes that would take hundreds of millions of points, or that many passes or
+    /// humps, were built anyway and the app was killed for memory (G9). They are refused
+    /// with a reason, and a stroke the size of a board still draws.
+    @Test func aStrokeTooLongToDrawIsRefused() throws {
+        for script in ["line 0 0 200000 0", "wave 0 0 100 40 1000", "scribble 0 0 10 10 1000", "box 0 0 30000 30000"] {
+            #expect(throws: StrokeScript.ParseError.self, "\(script)") { try StrokeScript.parse(script) }
+        }
+        #expect(try StrokeScript.parse("line 0 0 4000 3000").count == 1)
+        #expect(try StrokeScript.parse("wave 0 0 300 40 12").count == 1)
+    }
+
+    /// A line of many long segments was built, tens of millions of points, before it was
+    /// refused (review M-6). Its length is weighed first.
+    @Test func aStrokeTooLongIsRefusedBeforeItIsBuilt() {
+        let corners = (0..<1000).map { $0.isMultiple(of: 2) ? "0 0" : "100000 100000" }.joined(separator: " ")
+        let clock = ContinuousClock()
+        let took = clock.measure {
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("line " + corners) }
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse(corners.replacingOccurrences(of: " 100000", with: ",100000")) }
+        }
+        #expect(took < .milliseconds(200))
+    }
+
     @Test func aScriptedBoxIsReadLikeADrawnOne() throws {
         let observed = try #require(observation(try StrokeScript.parse("box 100 80 260 560 10")))
         guard case .enclosure = observed.form else {

@@ -205,17 +205,19 @@ struct LayersPanel: View {
     private var code: some View {
         let screens = model.store.screens
         if let screen = screens.first(where: { $0.id == codeScreenID }) ?? screens.first {
-            let source = SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code)
+            // Each view named as the shared files name it, so no two are the same.
+            let typeNames = SwiftUICodeGenerator.typeNames(for: screens)
+            let source = SwiftUICodeGenerator.code(for: screen, typeName: typeNames[screen.id], settings: model.store.canvas.code)
             HStack {
                 Menu {
                     ForEach(screens) { other in
-                        Button(SwiftUICodeGenerator.fileName(for: other)) { codeScreenID = other.id }
+                        Button((typeNames[other.id] ?? other.typeName) + ".swift") { codeScreenID = other.id }
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text")
                             .foregroundStyle(.secondary)
-                        Text(SwiftUICodeGenerator.fileName(for: screen))
+                        Text((typeNames[screen.id] ?? screen.typeName) + ".swift")
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
