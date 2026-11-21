@@ -427,3 +427,16 @@ struct GlideAndFingerTests {
         #expect(model.zoomScale == 2)
     }
 }
+
+/// The unit tests run inside the app. The palettes their canvases make don't save which pen
+/// is in hand: a test that picked up the eraser or the lasso changed the pen the app opened
+/// with afterwards.
+@MainActor
+@Suite("The palette in unit tests")
+struct PaletteStateInTestsTests {
+    @Test func aCanvasMadeInATestDoesntSaveItsPalettesState() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        #expect(coordinator.palette.stateAutosaveName == nil)
+    }
+}

@@ -165,7 +165,7 @@ struct InkCanvas: UIViewRepresentable {
         /// along with every gesture.
         let twist = TwistGestureRecognizer()
         private var fingerDraws = true
-        private let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
+        let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
         private var tool: AppModel.Tool?
         private var isFollowing = false
         /// The view size the viewport was last arranged for.
@@ -283,7 +283,10 @@ struct InkCanvas: UIViewRepresentable {
                 canvas.pinchGestureRecognizer?.require(toFail: twist)
             }
 
-            palette.stateAutosaveName = "app.layer.palette"
+            // Not while unit tests run inside the app: a test that picked up the eraser or
+            // the lasso changed the pen the app opened with afterwards. Left unset, the palette
+            // saves under a name of PencilKit's own, so it is told to save nothing.
+            palette.stateAutosaveName = ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil ? "app.layer.palette" : nil
             palette.colorUserInterfaceStyle = .light
             // Every design opens with the Magic Pen in hand, whatever was used last.
             palette.selectedToolItemIdentifier = MagicPen.identifier
