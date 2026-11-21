@@ -466,6 +466,71 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertFalse(readout.waitForExistence(timeout: 2), "the drawing should be gone")
     }
 
+    /// Ink is drawn over the elements under it, so where it crosses one a finger in Select
+    /// picks and moves the drawing, as the Pencil's hover outlines it (audit C3).
+    func testInkOverAnElementIsWhatATapPicksAndADragMoves() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        // A stroke across the left half of the button, drawn with nothing selected: a finger
+        // on a selected element in Draw moves it.
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        control("Draw").tap()
+        choosePaletteTool("Pen")
+        let left = CGPoint(x: button.centre.x - 90, y: button.centre.y)
+        stroke(left, CGPoint(x: button.centre.x + 10, y: button.centre.y))
+        control("Draw").tap()
+
+        // On the ink, a tap picks the drawing; on the button clear of it, the button.
+        point(CGPoint(x: button.centre.x - 40, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on ink over the button should pick the drawing")
+        point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button away from the ink should pick the button")
+
+        // With the button selected, a drag that starts on the ink moves the drawing, not it.
+        let moved = CGVector(dx: 0, dy: 160)
+        stroke(CGPoint(x: button.centre.x - 40, y: button.centre.y), CGPoint(x: button.centre.x - 40 + moved.dx, y: button.centre.y + moved.dy))
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "the drag should have picked up the drawing")
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(showsInk(near: CGPoint(x: left.x + 50 + moved.dx, y: left.y + moved.dy)), "the ink should be drawn where it was dragged")
+        point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the button should have stayed where it was")
+        attach("ink-over-a-button")
+    }
+
+    /// In Draw the palette goes while text is typed, and comes back as the keyboard goes
+    /// (audit C5, follow-up).
+    func testThePaletteComesBackWhenTypingEndsInDraw() {
+        // With a pencil about, a finger taps to select while the palette is up.
+        app.launchArguments += ["-fingerDraws", "NO"]
+        openNewDesign()
+        // New text is selected and opened for typing, with the palette put away.
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "new text should be selected")
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        let palette = app.buttons["Magic Pen"].firstMatch
+        control("Draw").tap()
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "Draw should bring up the palette")
+        let window = app.windows.firstMatch.frame
+        point(CGPoint(x: window.midX, y: window.midY)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a finger tap in Draw should select the text")
+
+        // Typed into, the palette makes way for the keyboard.
+        control("Edit text").tap()
+        let popover = app.popovers.firstMatch
+        XCTAssertTrue(popover.waitForExistence(timeout: 5), "Edit text should open the text's popover")
+        let field = popover.textViews.firstMatch.exists ? popover.textViews.firstMatch : popover.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(" there")
+        XCTAssertTrue(waitForDisappearance(of: palette), "the palette should make way while text is typed")
+
+        // The popover is closed and the keyboard goes: the palette is back.
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(of: popover))
+        XCTAssertTrue(palette.waitForExistence(timeout: 5), "the palette should come back once typing ends in Draw")
+        attach("palette-after-typing")
+    }
+
     func testADrawingIsALayerThatCanBeHiddenLockedAndCopied() {
         openNewDesign()
 

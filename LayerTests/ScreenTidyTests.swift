@@ -109,6 +109,44 @@ struct ScreenTidyTests {
         #expect(frames[button.id]!.maxY == DeviceFrame.iPhone.size.height - ScreenTidy.bottomInset(on: .iPhone))
     }
 
+    /// A row pinned to the bottom goes above a locked element there, rather than onto it
+    /// (audit M7): a primary button above a locked footer picture was set down on the picture.
+    @Test func aPinnedRowStaysClearOfALockedElementAtTheBottom() throws {
+        var footer = element(.image, CGRect(x: 20, y: 760, width: 353, height: 60))
+        footer.isLocked = true
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Welcome")
+        let button = element(.button, CGRect(x: 20, y: 700, width: 353, height: 50), text: "Continue")
+        let frames = ScreenTidy.frames(for: [footer, title, button], on: .iPhone)
+        let pinned = try #require(frames[button.id])
+        #expect(!pinned.intersects(footer.frame), "\(pinned) is on the locked picture")
+        #expect(pinned.maxY <= footer.frame.minY)
+        // Still at the bottom: just above the picture, not let go to follow the title.
+        #expect(pinned.maxY == footer.frame.minY - ScreenTidy.normal)
+    }
+
+    /// The same for a card with something on it, which the layout keeps clear.
+    @Test func aPinnedRowStaysClearOfACardAtTheBottom() throws {
+        let card = element(.shape, CGRect(x: 20, y: 740, width: 353, height: 80))
+        let label = element(.text, CGRect(x: 40, y: 760, width: 200, height: 30), text: "Card")
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Welcome")
+        let button = element(.button, CGRect(x: 20, y: 680, width: 353, height: 50), text: "Continue")
+        let frames = ScreenTidy.frames(for: [card, label, title, button], on: .iPhone)
+        let pinned = try #require(frames[button.id])
+        #expect(!pinned.intersects(card.frame), "\(pinned) is on the card")
+    }
+
+    /// Pinned rows pushed up past what flows above them aren't pinned: the rows flow instead.
+    @Test func pinnedRowsThatCantClearLetGo() throws {
+        var wall = element(.image, CGRect(x: 0, y: 200, width: 393, height: 600))
+        wall.isLocked = true
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Welcome")
+        let button = element(.button, CGRect(x: 20, y: 810, width: 353, height: 30), text: "Continue")
+        let frames = ScreenTidy.frames(for: [wall, title, button], on: .iPhone)
+        let tidied = [title, button].map { frames[$0.id]! }
+        for frame in tidied { #expect(!frame.intersects(wall.frame), "\(frame) is on the locked picture") }
+        expectNoOverlaps(tidied)
+    }
+
     @Test func aRowOfSmallThingsGetsEqualSlots() throws {
         let icons = (0..<4).map { element(.symbol, CGRect(x: 40 + CGFloat($0) * 60, y: 300, width: 44, height: 44)) }
         let frames = ScreenTidy.frames(for: icons, on: .iPhone)
