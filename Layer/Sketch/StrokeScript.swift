@@ -36,6 +36,15 @@ enum StrokeScript {
     /// The shape names, for describing the format.
     static let shapeNames = ["box", "pill", "circle", "oval", "line", "wave", "cross", "tick", "dot", "scribble"]
 
+    /// The largest number a script may use for a place or a size, in canvas points: far
+    /// past any board. Larger ones trapped working out a stroke's points.
+    static let largestNumber: CGFloat = 100_000
+    /// The most points one stroke may have once drawn, about 15,000 points long, and the
+    /// most humps or passes a shape may have. Past them a script built strokes of hundreds
+    /// of millions of points and the app was killed for the memory.
+    static let mostPointsPerStroke = 5_000
+    static let mostRepeats = 50
+
     static func parse(_ written: String) throws -> [[CGPoint]] {
         let trimmed = written.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[") || trimmed.hasPrefix("{") { return try parseJSON(trimmed) }
@@ -46,7 +55,7 @@ enum StrokeScript {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("//") { continue }
             do {
-                parsed += try strokes(fromLine: line)
+                parsed += try drawable(strokes(fromLine: line))
             } catch let reason as Reason {
                 throw ParseError(line: index + 1, text: line, reason: reason.text)
             }
@@ -60,8 +69,29 @@ enum StrokeScript {
         var text: String
     }
 
+    private static func checked(_ numbers: [CGFloat]) throws -> [CGFloat] {
+        guard numbers.allSatisfy({ $0.isFinite && abs($0) <= largestNumber }) else {
+            throw Reason(text: "Numbers go up to \(Int(largestNumber)) either way.")
+        }
+        return numbers
+    }
+
+    private static func drawable(_ strokes: [[CGPoint]]) throws -> [[CGPoint]] {
+        guard strokes.allSatisfy({ $0.count <= mostPointsPerStroke }) else {
+            throw Reason(text: "That stroke is too long to draw: keep each under about \(mostPointsPerStroke * 3) points long.")
+        }
+        return strokes
+    }
+
+    /// The number of humps or passes written at `index`, if one is, within the limit.
+    private static func repeats(_ numbers: [CGFloat], at index: Int, least: Int, otherwise usual: Int) throws -> Int {
+        guard numbers.count > index else { return usual }
+        guard numbers[index] <= CGFloat(mostRepeats) else { throw Reason(text: "Up to \(mostRepeats) humps or passes.") }
+        return max(least, Int(numbers[index].rounded()))
+    }
+
     private static func strokes(fromLine line: String) throws -> [[CGPoint]] {
-        let numbers = Self.numbers(in: line)
+        let numbers = try checked(Self.numbers(in: line))
         guard let first = line.first, first.isLetter else {
             guard numbers.count >= 4 else { throw Reason(text: "A freehand stroke needs at least two x,y points.") }
             guard numbers.count.isMultiple(of: 2) else { throw Reason(text: "Points come in x,y pairs, and one number is left over.") }
@@ -101,7 +131,7 @@ enum StrokeScript {
             return [wobbled(densified(points), by: 0.8)]
         case "wave", "zigzag", "squiggle":
             try need(4, "x y width height")
-            let humps = numbers.count > 4 ? max(1, Int(numbers[4].rounded())) : 3
+            let humps = try repeats(numbers, at: 4, least: 1, otherwise: 3)
             return [wave(rect(), humps: humps)]
         case "cross", "x":
             try need(4, "x y width height")
@@ -125,7 +155,7 @@ enum StrokeScript {
             return [box(CGRect(x: numbers[0] - radius, y: numbers[1] - radius, width: radius * 2, height: radius * 2), radius: radius, wobble: 0)]
         case "scribble", "scratch", "scratchout":
             try need(4, "x y width height")
-            let passes = numbers.count > 4 ? max(2, Int(numbers[4].rounded())) : 6
+            let passes = try repeats(numbers, at: 4, least: 2, otherwise: 6)
             return [scribble(rect(), passes: passes)]
         default:
             throw Reason(text: "“\(name)” isn't a shape. Use \(shapeNames.joined(separator: ", ")), or x,y points.")
@@ -180,7 +210,12 @@ enum StrokeScript {
                 throw fail("Each point is [x, y] or {\"x\": x, \"y\": y}.")
             }
             guard parsed.count >= 2 else { throw fail("Each stroke needs at least two points.") }
-            return densified(parsed)
+            do {
+                _ = try checked(parsed.flatMap { [$0.x, $0.y] })
+                return try drawable([densified(parsed)])[0]
+            } catch let reason as Reason {
+                throw fail(reason.text)
+            }
         }
     }
 
