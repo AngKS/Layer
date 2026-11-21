@@ -187,3 +187,46 @@ struct InkOverAnElementTests {
         _ = coordinator
     }
 }
+
+/// The canvas takes first responder, for the palette and the system's undo gestures, when the
+/// tool, the palette or the window changes. Work done in the background, a sketch converted or
+/// dissolving, mustn't take it from a field being typed in (audit C5).
+@MainActor
+@Suite("The canvas and the keyboard")
+struct CanvasFocusTests {
+    @Test func aSketchTakenAwayLeavesTheKeyboardWithTheFieldBeingTypedIn() throws {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        model.ink = coordinator
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let container = UIView(frame: window.bounds)
+        let field = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
+        window.addSubview(container)
+        window.addSubview(field)
+        window.makeKeyAndVisible()
+        defer {
+            field.resignFirstResponder()
+            coordinator.hidePalette()
+            window.isHidden = true
+        }
+        for canvas in coordinator.canvases {
+            canvas.frame = container.bounds
+            container.addSubview(canvas)
+        }
+        // Coming to the window, the canvas takes first responder.
+        #expect(coordinator.documentCanvas.isFirstResponder)
+
+        // A name is being typed when a rejected sketch dissolves, and when a conversion lands.
+        #expect(field.becomeFirstResponder())
+        coordinator.removeSketch([])
+        #expect(field.isFirstResponder)
+        coordinator.clearSketch()
+        #expect(field.isFirstResponder)
+
+        // Picking a tool is the person going back to the canvas: it takes first responder again.
+        coordinator.apply(.select)
+        #expect(coordinator.documentCanvas.isFirstResponder)
+    }
+}

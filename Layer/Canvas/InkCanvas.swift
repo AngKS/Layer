@@ -240,6 +240,7 @@ struct InkCanvas: UIViewRepresentable {
                 // The smallest window the bars and controls still fit in.
                 documentCanvas.window?.windowScene?.sizeRestrictions?.minimumSize = CGSize(width: 360, height: 480)
                 refresh()
+                takeFirstResponder()
             }
             documentCanvas.onLayout = { [weak self] in self?.arrangeViewportIfResized() }
 
@@ -294,6 +295,7 @@ struct InkCanvas: UIViewRepresentable {
             guard self.tool != tool else { return }
             self.tool = tool
             refresh()
+            takeFirstResponder()
         }
 
         func setFingerDraws(_ draws: Bool) {
@@ -306,6 +308,8 @@ struct InkCanvas: UIViewRepresentable {
             guard hidesPalette != hides else { return }
             hidesPalette = hides
             refresh()
+            // A panel's sheet has gone from the palette's place: the palette comes back.
+            takeFirstResponder()
         }
 
         /// Shows or hides the palette for the current tool, and sends touches to the canvas
@@ -363,8 +367,14 @@ struct InkCanvas: UIViewRepresentable {
                 palette.setVisible(showsPalette, forFirstResponder: canvas)
             }
             watchForFlicks()
-            // The canvas stays first responder outside draw mode too, so the system's
-            // undo and redo gestures keep reaching the document's undo history.
+        }
+
+        /// Makes the canvas first responder if neither canvas is: the palette shows only for
+        /// it, and outside draw mode the system's undo and redo gestures reach the document's
+        /// undo history through it. Only as the tool, the palette or the window changes. A
+        /// sketch converted, dissolving or cleared in the background also refreshes the
+        /// canvases, and took the keyboard from a field being typed in.
+        private func takeFirstResponder() {
             if documentCanvas.window != nil, !canvases.contains(where: \.isFirstResponder) {
                 documentCanvas.becomeFirstResponder()
             }
@@ -586,6 +596,7 @@ struct InkCanvas: UIViewRepresentable {
 
         func toolPickerSelectedToolItemDidChange(_ toolPicker: PKToolPicker) {
             refresh()
+            takeFirstResponder()
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
