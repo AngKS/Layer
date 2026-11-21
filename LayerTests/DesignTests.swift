@@ -1334,37 +1334,45 @@ struct ResourceTests {
         return AppModel(document: document)
     }
 
-    /// The longest the main thread went without a turn while `work` ran, and how long `work` took.
-    private func longestStall(during work: () async -> Void) async -> (stall: Duration, total: Duration) {
+    /// How many turns the main thread had while `work` ran, the longest it went without one,
+    /// and how long `work` took. Turns are counted, rather than the longest stall judged,
+    /// because other tests' work on the main thread can stall it too while all run at once.
+    private func turnsOnTheMainThread(during work: () async -> Void) async -> (turns: Int, stall: Duration, total: Duration) {
         var last = ContinuousClock.now
         var longest = Duration.zero
+        var turns = 0
+        var isWorking = false
         let beat = Task { @MainActor in
             while !Task.isCancelled {
                 let now = ContinuousClock.now
                 longest = max(longest, now - last)
                 last = now
+                if isWorking { turns += 1 }
                 try? await Task.sleep(for: .milliseconds(2))
             }
         }
         await Task.yield()
         let start = ContinuousClock.now
         last = start
+        isWorking = true
         await work()
+        isWorking = false
         let total = ContinuousClock.now - start
         beat.cancel()
-        return (max(longest, ContinuousClock.now - last), total)
+        return (turns, max(longest, ContinuousClock.now - last), total)
     }
 
     @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
         let model = bigBoard()
         var url: URL?
-        let (stall, total) = await longestStall { url = await BoardSnapshot.file(of: model) }
+        let (turns, stall, total) = await turnsOnTheMainThread { url = await BoardSnapshot.file(of: model) }
         let shared = try #require(url)
         defer { try? FileManager.default.removeItem(at: shared) }
         let picture = try #require(UIImage(contentsOfFile: shared.path))
         #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
-        // The board's views are drawn on the main thread; its ink, the picture and the file aren't.
-        #expect(stall < total * 0.5, "the main thread was held for \(stall) of \(total)")
+        // The board's views are drawn on the main thread; its ink, the picture and the file
+        // aren't, so the main thread has turns meanwhile. Done on it, it had none.
+        #expect(turns >= 3, "the main thread had \(turns) turns in \(total), the longest wait \(stall)")
     }
 
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
