@@ -644,7 +644,10 @@ final class AppModel {
     func startVoiceCall(route: any VoiceRoute, runner: any VoiceCommandRunner) async {
         guard voice == nil else { return }
         // The pencil bar goes, and a finger pans and selects, for as long as the call is up.
+        // That is a choice made: drawing put off by a narrow window no longer waits for a
+        // wider one, or widening the window mid-call would bring the bar over the pill.
         tool = .select
+        drawingWaitsForAWiderWindow = false
         // One microphone at a time, in every window: the phone call hears from now on. A
         // pencil command already sent still runs, in its turn.
         for design in OpenDesigns.shared.all where design !== self { design.stopPencilListening() }
