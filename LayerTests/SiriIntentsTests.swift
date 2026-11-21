@@ -139,6 +139,56 @@ struct DesignLibraryTests {
         #expect(summary.content.screens.map(\.name) == ["Login"])
         #expect(summary.content.screens[0].elements.count == 1)
     }
+
+    /// A folder with one design in it, named "Trip" on disk and "Travel" inside.
+    private func savedDesign() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var file = DesignFile()
+        file.content.title = "Travel"
+        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1)]
+        let url = folder.appendingPathComponent("Trip.layer")
+        try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        return url
+    }
+
+    @Test func aDesignICloudHasNotDownloadedIsListedByItsNameWithoutBeingRead() throws {
+        let url = try savedDesign()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        // Reading it would download it, and wait for that.
+        let listed = DesignLibrary.listed(url, isDownloaded: { _ in false })
+        #expect(listed.title == "Trip")
+        #expect(listed.content.screens.isEmpty)
+        #expect(listed.id == DesignLibrary.id(for: url))
+
+        let downloaded = DesignLibrary.listed(url, isDownloaded: { _ in true })
+        #expect(downloaded.title == "Travel")
+        #expect(downloaded.content.screens.map(\.name) == ["Login"])
+        // A design asked for by name is read whatever it takes.
+        #expect(DesignLibrary.read(url).title == "Travel")
+    }
+
+    @Test func aDesignUnchangedSinceItWasListedIsNotReadAgain() throws {
+        let url = try savedDesign()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+
+        // The design inside changes, but its dates are put back as they were.
+        let design = url.appendingPathComponent(DesignPackage.design)
+        let dates = try [url, design].map { try #require(try FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date) }
+        var renamed = try DesignFile(wrapper: FileWrapper(url: url))
+        renamed.content.title = "Holiday"
+        try renamed.wrapper().fileWrappers?[DesignPackage.design]?.regularFileContents?.write(to: design)
+        for (item, date) in zip([url, design], dates) {
+            try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: item.path)
+        }
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+
+        // Changed in the usual way, it is read again.
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(5)], ofItemAtPath: design.path)
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Holiday")
+    }
 }
 
 @Suite("Actions on an open design")

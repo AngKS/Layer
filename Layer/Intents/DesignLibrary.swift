@@ -7,7 +7,8 @@ struct DesignSummary: Sendable {
     let url: URL
     let title: String
     let modified: Date?
-    /// Empty when the file couldn't be read, as when iCloud hasn't downloaded it yet.
+    /// Empty when the file couldn't be read, or, in the list of every design, when iCloud
+    /// hasn't downloaded it to this iPad.
     let content: DesignContent
 }
 
@@ -84,7 +85,7 @@ enum DesignLibrary {
         var found: [URL] = []
         for folder in [roots.cloud, roots.local].compactMap(\.self) {
             guard let items = FileManager.default.enumerator(
-                at: folder, includingPropertiesForKeys: [.contentModificationDateKey],
+                at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey],
                 options: [.skipsPackageDescendants, .skipsHiddenFiles]
             ) else { continue }
             for case let url as URL in items where url.pathExtension == "layer" {
@@ -106,10 +107,57 @@ enum DesignLibrary {
         return DesignSummary(id: id(for: url), url: url, title: content.title ?? name, modified: modified, content: content)
     }
 
+    /// Whether a design can be read without downloading it: it isn't in iCloud, or this
+    /// iPad has its latest version. Reads the disk.
+    nonisolated static func isDownloaded(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]),
+              values.isUbiquitousItem == true
+        else { return true }
+        return values.ubiquitousItemDownloadingStatus == .current
+    }
+
+    /// One design as the list of every design has it. A design iCloud hasn't downloaded to
+    /// this iPad is listed by its file's name alone: a coordinated read would download it,
+    /// its pictures and ink included, and wait for that, and the list is made at every
+    /// launch and for many of Siri's questions. A design unchanged since it was last read
+    /// isn't read again. Reads the disk.
+    nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary {
+        guard isDownloaded(url) else {
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent())
+        }
+        let stamp = Stamp(of: url)
+        if let stamp, let kept = listedSummaries.withLock({ $0[url] }), kept.stamp == stamp { return kept.summary }
+        let summary = read(url)
+        if let stamp { listedSummaries.withLock { $0[url] = (stamp, summary) } }
+        return summary
+    }
+
+    /// When a design and, in a package, its design file were last changed: what says a
+    /// design read before is still as it was read.
+    private struct Stamp: Equatable, Sendable {
+        let package: Date
+        let design: Date?
+
+        nonisolated init?(of url: URL) {
+            let key: Set<URLResourceKey> = [.contentModificationDateKey]
+            guard let package = try? url.resourceValues(forKeys: key).contentModificationDate else { return nil }
+            self.package = package
+            design = try? url.appendingPathComponent(DesignPackage.design).resourceValues(forKeys: key).contentModificationDate
+        }
+    }
+
+    private static let listedSummaries = OSAllocatedUnfairLock<[URL: (stamp: Stamp, summary: DesignSummary)]>(initialState: [:])
+
     /// Every design, newest first, read off the main thread.
     static func all() async -> [DesignSummary] {
         await Task.detached(priority: .userInitiated) {
-            designURLs().map(read).sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+            let urls = designURLs()
+            let summaries = urls.map { listed($0) }
+            // Designs that have gone are forgotten.
+            let present = Set(urls)
+            listedSummaries.withLock { $0 = $0.filter { present.contains($0.key) } }
+            return summaries.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
         }.value
     }
 
