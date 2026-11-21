@@ -158,6 +158,17 @@ enum DesignLibrary {
         /// The folders that were looked through. A design in one that couldn't be, iCloud's
         /// when it can't be reached, may still be there.
         var folders: [URL]
+
+        /// Whether a design that isn't in `designs` is known to have gone: it would have
+        /// been in a folder that was looked through, or it is outside Layer's folders, as a
+        /// design opened from elsewhere is, which Siri couldn't open anyway. A design in a
+        /// folder that couldn't be found or looked through may still be there.
+        func hasGone(_ id: String) -> Bool {
+            if id.hasPrefix(DesignLibrary.filePrefix) { return true }
+            guard let url = DesignLibrary.url(for: id) else { return false }
+            let path = url.standardizedFileURL.path
+            return folders.contains { path.hasPrefix($0.standardizedFileURL.path + "/") }
+        }
     }
 
     /// Every design in `folders`, newest first, each as `listed` has it. A design iCloud
@@ -189,9 +200,14 @@ enum DesignLibrary {
                 }
             }
         }
-        // Designs that have gone are forgotten.
+        // Designs that have gone from the folders looked through are forgotten.
         let listedNow = present
-        listedSummaries.withLock { $0 = $0.filter { listedNow.contains($0.key) } }
+        let lookedIn = looked.map { $0.standardizedFileURL.path + "/" }
+        listedSummaries.withLock {
+            $0 = $0.filter { url, _ in
+                listedNow.contains(url) || !lookedIn.contains { url.standardizedFileURL.path.hasPrefix($0) }
+            }
+        }
         let designs = found.values.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
         return Listing(designs: designs, folders: looked)
     }

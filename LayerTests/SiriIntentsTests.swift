@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import Testing
 import UIKit
 @testable import Layer
@@ -197,6 +198,14 @@ struct DesignLibraryTests {
         #expect(undownloaded.designs.contains { $0.title == "Real" })
     }
 
+    @Test func aDesignMissingFromTheListHasGoneOnlyIfItsFolderWasLookedThrough() {
+        let listing = DesignLibrary.Listing(designs: [], folders: [DesignLibrary.roots.local])
+        #expect(listing.hasGone("local:Gone.layer"))
+        #expect(!listing.hasGone("icloud:There.layer"), "iCloud's folder wasn't looked through")
+        #expect(listing.hasGone("file:/elsewhere/Opened.layer"), "a design opened from outside Layer's folders")
+        #expect(!DesignLibrary.Listing(designs: [], folders: []).hasGone("local:Gone.layer"))
+    }
+
     @Test func aDesignUnchangedSinceItWasListedIsNotReadAgain() throws {
         let url = try savedDesign()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -234,9 +243,90 @@ private actor FakeSpotlight: SpotlightIndex {
     }
 }
 
-@Suite("Spotlight's index of designs")
+/// Defaults that count how often the indexer's record of what is in the index is read and written.
+private final class CountingDefaults: UserDefaults {
+    let counts = OSAllocatedUnfairLock(initialState: (reads: 0, writes: 0))
+
+    override func object(forKey defaultName: String) -> Any? {
+        if defaultName == "spotlightIndexedScreens" { counts.withLock { $0.reads += 1 } }
+        return super.object(forKey: defaultName)
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName == "spotlightIndexedScreens" { counts.withLock { $0.writes += 1 } }
+        super.set(value, forKey: defaultName)
+    }
+}
+
+/// One test at a time: each swaps the indexer's index and record for its own.
+@Suite("Spotlight's index of designs", .serialized)
 @MainActor
 struct DesignIndexTests {
+    /// Runs `body` with the indexer writing to `index` and keeping its record in `record`.
+    private func using(_ index: FakeSpotlight, record: UserDefaults, suite: String, _ body: () async throws -> Void) async rethrows {
+        let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
+        DesignIndexer.spotlight = index
+        DesignIndexer.recordDefaults = record
+        defer {
+            DesignIndexer.spotlight = systemIndex
+            DesignIndexer.recordDefaults = systemRecord
+            record.removePersistentDomain(forName: suite)
+        }
+        try await body()
+    }
+
+    @Test func aLaunchPassReadsAndWritesItsRecordOnce() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(CountingDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let designs = (0..<6).map { snapshot("local:Design \($0) \(tag).layer", screens: ["A", "B"]) }
+        await using(index, record: record, suite: suite) {
+            for _ in 0..<2 {
+                record.counts.withLock { $0 = (0, 0) }
+                await DesignIndexer.reindex(designs)
+                let counts = record.counts.withLock { $0 }
+                #expect(counts.reads <= 1, "read \(counts.reads) times")
+                #expect(counts.writes == 1, "written \(counts.writes) times")
+            }
+        }
+    }
+
+    @Test func withoutARecordToReadTheIndexIsBuiltAgain() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let kept = snapshot("local:Kept \(tag).layer", screens: ["Login"])
+        let stale = snapshot("local:Stale \(tag).layer", screens: ["Old"])
+        await using(index, record: record, suite: suite) {
+            await DesignIndexer.reindex([kept, stale])
+            // The record is lost, though a pass once completed: what is in the index isn't known.
+            record.removeObject(forKey: "spotlightIndexedScreens")
+            await DesignIndexer.reindex([kept])
+            #expect(!(await index.designs.contains(stale.id)))
+            #expect(!(await index.screens.contains(stale.screens[0].id)))
+            #expect(await index.designs.contains(kept.id))
+        }
+    }
+
+    @Test func designsInAFolderThatCouldNotBeLookedThroughAreKept() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let local = snapshot("local:Here \(tag).layer", screens: ["Login"])
+        let cloud = snapshot("icloud:There \(tag).layer", screens: ["Map"])
+        await using(index, record: record, suite: suite) {
+            await DesignIndexer.reindex([local, cloud])
+            // iCloud's folder can't be found this launch: its designs aren't listed, but
+            // they haven't gone.
+            await DesignIndexer.reindex([local]) { !$0.hasPrefix("icloud:") }
+            #expect(await index.designs.contains(cloud.id))
+            #expect(await index.screens.contains(cloud.screens[0].id))
+        }
+    }
+
     private func snapshot(_ id: String, screens names: [String]) -> DesignSnapshot {
         var content = DesignContent()
         for (index, name) in names.enumerated() {

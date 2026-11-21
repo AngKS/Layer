@@ -54,12 +54,17 @@ enum DesignActions {
 
     /// Every design: the open ones as they are now, the rest as saved. Newest first.
     static func allSnapshots() async -> [DesignSnapshot] {
+        snapshots(with: await DesignLibrary.all())
+    }
+
+    /// Every design: the open ones as they are now, the rest as `saved` has them.
+    static func snapshots(with saved: [DesignSummary]) -> [DesignSnapshot] {
         let open = OpenDesigns.shared.all.compactMap(snapshot(of:))
         let openIDs = Set(open.map(\.id))
-        let saved = await DesignLibrary.all()
+        let rest = saved
             .filter { !openIDs.contains($0.id) }
             .map { DesignSnapshot(id: $0.id, name: $0.title, content: $0.content, modified: $0.modified, isRead: $0.isRead) }
-        return open.reversed() + saved
+        return open.reversed() + rest
     }
 
     /// The design an action works on: the one named, opened if it isn't already, or else
