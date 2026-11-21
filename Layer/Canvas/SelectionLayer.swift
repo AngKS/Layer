@@ -919,7 +919,8 @@ private struct SpacingOverlay: View {
 
 #if DEBUG
 /// How much of the board a change to the design during a drag works through: for the tests
-/// that hold a drag to doing only what its own frames need (audit C6).
+/// that hold a drag to doing only what its own frames need (audit C6). The counts only grow:
+/// the suites that read them run side by side, so each measures the difference it makes.
 @MainActor
 enum CanvasWork {
     /// Strokes read out of PencilKit to show the design's drawings.
@@ -930,12 +931,5 @@ enum CanvasWork {
     static var targetsBuilt = 0
     /// Drag owners made: one each time a view carrying a drag is made.
     static var ownersMade = 0
-
-    static func reset() {
-        strokesRead = 0
-        dragChecks = 0
-        targetsBuilt = 0
-        ownersMade = 0
-    }
 }
 #endif
