@@ -607,6 +607,12 @@ final class DesignStore {
         edit.step = moved
     }
 
+    /// Whether `edit`'s step is the one undo would take back now.
+    func isLastStep(_ edit: Edit) -> Bool {
+        guard let step = edit.step else { return false }
+        return step === lastStep
+    }
+
     /// Tells the system the document has changes to save, without a step in the history.
     /// The system marks a document as changed when its undo manager is about to close a
     /// group, so a change made without an undo step (a name the app settles on, the file's

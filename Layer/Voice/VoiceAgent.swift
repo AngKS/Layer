@@ -54,8 +54,8 @@ final class VoiceAgent: VoiceCommandRunner {
         return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
     }
 
-    /// The history mark the last command left, when it changed the design: its step is on
-    /// top of the history for as long as the mark hasn't moved, and only then does a
+    /// The history mark the last command left, when its step was the last in the history:
+    /// it stays on top for as long as the mark hasn't moved, and only then does a
     /// correction undo it. A drag by hand since, or another call's command, moves it.
     private var lastCommandStep: Int?
 
@@ -127,13 +127,16 @@ final class VoiceAgent: VoiceCommandRunner {
         }
 
         // Everything the command changes is one step to undo, whatever becomes of it.
-        model.store.beginHeldEdit()
-        correctedTo = nil
-        let before = model.store.content
+        let edit = model.store.beginHeldEdit()
         let outcome = await carryOut(command, hint: hint, in: session, on: model)
         model.store.endHeldEdit()
-        // A correction's own undo isn't a change of the command's to correct again.
-        lastCommandStep = model.store.content != (correctedTo ?? before) ? model.store.historyMark : nil
+        // A correction may undo the command's step only while that is the last step. What
+        // was done by hand meanwhile is a step of its own; if one is the last, "No, …"
+        // would undo the person's work in the command's place (V1). That the design
+        // changed says nothing either: ink drawn while a command that changed nothing
+        // ran was undone as if it were the command's. A correction's own undo isn't a
+        // change of the command's to correct again: it is no step of the command's.
+        lastCommandStep = model.store.isLastStep(edit) ? model.store.historyMark : nil
         if commandsInSession >= commandsPerSession {
             // Made ready now, so that the next command doesn't wait on a cold session.
             VoiceLog.log.info("agent: a fresh session after \(self.commandsInSession) commands")
@@ -142,9 +145,6 @@ final class VoiceAgent: VoiceCommandRunner {
         }
         return outcome
     }
-
-    /// The design as a correction's undo left it, for the command under way.
-    private var correctedTo: DesignContent?
 
     private func carryOut(_ command: String, hint: String?, in session: LanguageModelSession, on model: AppModel) async -> VoiceOutcome {
         toolbox.spokenCommand = command
@@ -156,7 +156,6 @@ final class VoiceAgent: VoiceCommandRunner {
             VoiceLog.log.info("agent: a correction, so the last change is undone first")
             _ = toolbox.undo()
             lastCommandStep = nil
-            correctedTo = model.store.content
             if correction == .undoOnly {
                 outcome.lines = toolbox.lines
                 return outcome
