@@ -30,6 +30,13 @@ final class VoiceToolbox: VoiceActing {
     /// pencil pointed at empty canvas. Nil puts it where screens always go.
     var newScreenAnchor: CGPoint?
 
+    /// Makes what a tool changes the spoken command's under way: one step with the rest of
+    /// the command, and never one with what the person does meanwhile (V1).
+    private func forCommand<T>(_ body: () -> T) -> T {
+        guard let store = model?.store else { return body() }
+        return store.actingForCommand(body)
+    }
+
     /// Forgets the last command's results, ready for the next.
     func reset() {
         lines = []
@@ -72,49 +79,51 @@ final class VoiceToolbox: VoiceActing {
     /// Puts one element next to another, 12 points from it: below or above it with their
     /// left edges together, or beside it with their tops together.
     func placeElement(element: String, relation: String, target: String) -> String {
-        guard let model else { return gone }
-        guard let side = Self.side(named: relation) else {
-            return failed("I can put it above, below, left of or right of another, not “\(relation)”.")
-        }
-        // Next to the screen it is on is an edge of that screen: asked for "the image to
-        // the top", the on-device model names the screen here, or the element at the top.
-        // Unless one thing was said to go by another, an edge is what was meant.
-        let askedToPlace = spokenCommand.map(Self.asksToPlace) ?? true
-        if VoiceHandles.tidied(target)?.hasPrefix("S") == true || !askedToPlace {
-            let edge = switch side {
-            case .above: "top"
-            case .below: "bottom"
-            case .leftOf: "left"
-            case .rightOf: "right"
+        forCommand {
+            guard let model else { return gone }
+            guard let side = Self.side(named: relation) else {
+                return failed("I can put it above, below, left of or right of another, not “\(relation)”.")
             }
-            return alignElement(element: element, alignment: edge)
+            // Next to the screen it is on is an edge of that screen: asked for "the image to
+            // the top", the on-device model names the screen here, or the element at the top.
+            // Unless one thing was said to go by another, an edge is what was meant.
+            let askedToPlace = spokenCommand.map(Self.asksToPlace) ?? true
+            if VoiceHandles.tidied(target)?.hasPrefix("S") == true || !askedToPlace {
+                let edge = switch side {
+                case .above: "top"
+                case .below: "bottom"
+                case .leftOf: "left"
+                case .rightOf: "right"
+                }
+                return alignElement(element: element, alignment: edge)
+            }
+            let moving: FoundElement
+            let other: FoundElement
+            switch (find(element: element), find(element: target)) {
+            case (.failure(let refusal), _), (_, .failure(let refusal)): return failed(refusal.line)
+            case (.success(let one), .success(let two)): (moving, other) = (one, two)
+            }
+            guard moving.ref != other.ref else {
+                return failed("Name two different elements. To add a new one next to another, give addElement where it goes.")
+            }
+            guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
+            guard !moving.element.isLocked else { return failed("\(handles.handle(forElement: moving.element.id)) is locked.") }
+            let store = model.store
+            guard let frame = store.canvasFrame(of: .element(moving.ref)), let by = store.canvasFrame(of: .element(other.ref)) else {
+                return failed("That couldn't be placed.")
+            }
+            // In the points of the screen they are on.
+            let gap = 12 * (store.resolve(moving.ref)?.placement.scale ?? 1)
+            let origin = switch side {
+            case .below: CGPoint(x: by.minX, y: by.maxY + gap)
+            case .above: CGPoint(x: by.minX, y: by.minY - gap - frame.height)
+            case .leftOf: CGPoint(x: by.minX - gap - frame.width, y: by.minY)
+            case .rightOf: CGPoint(x: by.maxX + gap, y: by.minY)
+            }
+            DesignActions.reveal(.element(moving.ref), in: model)
+            store.position([.element(moving.ref): origin])
+            return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
         }
-        let moving: FoundElement
-        let other: FoundElement
-        switch (find(element: element), find(element: target)) {
-        case (.failure(let refusal), _), (_, .failure(let refusal)): return failed(refusal.line)
-        case (.success(let one), .success(let two)): (moving, other) = (one, two)
-        }
-        guard moving.ref != other.ref else {
-            return failed("Name two different elements. To add a new one next to another, give addElement where it goes.")
-        }
-        guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
-        guard !moving.element.isLocked else { return failed("\(handles.handle(forElement: moving.element.id)) is locked.") }
-        let store = model.store
-        guard let frame = store.canvasFrame(of: .element(moving.ref)), let by = store.canvasFrame(of: .element(other.ref)) else {
-            return failed("That couldn't be placed.")
-        }
-        // In the points of the screen they are on.
-        let gap = 12 * (store.resolve(moving.ref)?.placement.scale ?? 1)
-        let origin = switch side {
-        case .below: CGPoint(x: by.minX, y: by.maxY + gap)
-        case .above: CGPoint(x: by.minX, y: by.minY - gap - frame.height)
-        case .leftOf: CGPoint(x: by.minX - gap - frame.width, y: by.minY)
-        case .rightOf: CGPoint(x: by.maxX + gap, y: by.minY)
-        }
-        DesignActions.reveal(.element(moving.ref), in: model)
-        store.position([.element(moving.ref): origin])
-        return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
     }
 
     /// Whether what was said puts one thing by another: "below the title", "next to it".
@@ -154,53 +163,55 @@ final class VoiceToolbox: VoiceActing {
     }
 
     func stackElements(elements: String, direction: String) -> String {
-        guard let model else { return gone }
-        let isColumn: Bool
-        switch direction.lowercased().trimmingCharacters(in: .whitespaces) {
-        case "column", "vertical", "vertically", "down": isColumn = true
-        case "row", "horizontal", "horizontally", "across": isColumn = false
-        default: return failed("I can stack in a column or a row, not “\(direction)”.")
-        }
-        let named = Self.handleList(elements)
-        var found: [FoundElement] = []
-        for handle in named {
-            switch find(element: handle) {
-            case .failure(let refusal): return failed(refusal.line)
-            case .success(let one):
-                guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
-                if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
+        forCommand {
+            guard let model else { return gone }
+            let isColumn: Bool
+            switch direction.lowercased().trimmingCharacters(in: .whitespaces) {
+            case "column", "vertical", "vertically", "down": isColumn = true
+            case "row", "horizontal", "horizontally", "across": isColumn = false
+            default: return failed("I can stack in a column or a row, not “\(direction)”.")
             }
-        }
-        guard found.count > 1 else { return failed("Name two or more elements to stack.") }
-        guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
+            let named = Self.handleList(elements)
+            var found: [FoundElement] = []
+            for handle in named {
+                switch find(element: handle) {
+                case .failure(let refusal): return failed(refusal.line)
+                case .success(let one):
+                    guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
+                    if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
+                }
+            }
+            guard found.count > 1 else { return failed("Name two or more elements to stack.") }
+            guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
 
-        // Worked out on the canvas, where the store puts things, in the points of the
-        // screen they are on: a gap of 12 of those is less on a screen drawn small.
-        let store = model.store
-        let scale = store.resolve(found[0].ref)?.placement.scale ?? 1
-        let gap = 12 * scale
-        var placed: [(ref: DesignStore.ElementRef, frame: CGRect)] = found.compactMap { one in
-            store.canvasFrame(of: .element(one.ref)).map { (one.ref, $0) }
+            // Worked out on the canvas, where the store puts things, in the points of the
+            // screen they are on: a gap of 12 of those is less on a screen drawn small.
+            let store = model.store
+            let scale = store.resolve(found[0].ref)?.placement.scale ?? 1
+            let gap = 12 * scale
+            var placed: [(ref: DesignStore.ElementRef, frame: CGRect)] = found.compactMap { one in
+                store.canvasFrame(of: .element(one.ref)).map { (one.ref, $0) }
+            }
+            guard placed.count == found.count else { return failed("Those couldn't be stacked.") }
+            // A stable sort: things at the same place keep the order they were named in.
+            placed = placed.enumerated().sorted { a, b in
+                let (one, other) = isColumn ? (a.element.frame.minY, b.element.frame.minY) : (a.element.frame.minX, b.element.frame.minX)
+                return abs(one - other) > 0.5 ? one < other : a.offset < b.offset
+            }.map(\.element)
+            let left = placed.map(\.frame.minX).min() ?? 0
+            let top = placed.map(\.frame.minY).min() ?? 0
+            var next = isColumn ? top : left
+            var origins: [CanvasSelection: CGPoint] = [:]
+            for (ref, frame) in placed {
+                origins[.element(ref)] = isColumn ? CGPoint(x: left, y: next) : CGPoint(x: next, y: top)
+                next += (isColumn ? frame.height : frame.width) + gap
+            }
+            DesignActions.reveal(.element(placed[0].ref), in: model)
+            store.position(origins)
+            // All of them stay selected, so that "them" goes on meaning them.
+            model.selection = .several(Set(placed.map { .element($0.ref) }))
+            return done("Stacked \(placed.count) elements in a \(isColumn ? "column" : "row").")
         }
-        guard placed.count == found.count else { return failed("Those couldn't be stacked.") }
-        // A stable sort: things at the same place keep the order they were named in.
-        placed = placed.enumerated().sorted { a, b in
-            let (one, other) = isColumn ? (a.element.frame.minY, b.element.frame.minY) : (a.element.frame.minX, b.element.frame.minX)
-            return abs(one - other) > 0.5 ? one < other : a.offset < b.offset
-        }.map(\.element)
-        let left = placed.map(\.frame.minX).min() ?? 0
-        let top = placed.map(\.frame.minY).min() ?? 0
-        var next = isColumn ? top : left
-        var origins: [CanvasSelection: CGPoint] = [:]
-        for (ref, frame) in placed {
-            origins[.element(ref)] = isColumn ? CGPoint(x: left, y: next) : CGPoint(x: next, y: top)
-            next += (isColumn ? frame.height : frame.width) + gap
-        }
-        DesignActions.reveal(.element(placed[0].ref), in: model)
-        store.position(origins)
-        // All of them stay selected, so that "them" goes on meaning them.
-        model.selection = .several(Set(placed.map { .element($0.ref) }))
-        return done("Stacked \(placed.count) elements in a \(isColumn ? "column" : "row").")
     }
 
     /// The way to pan that some words ask for, and how far, as a share of what is in
@@ -286,7 +297,9 @@ final class VoiceToolbox: VoiceActing {
         // What the voice model asked for, so that a session log shows it beside the screen made.
         VoiceLog.log.info("tool: createScreen \"\(description, privacy: .public)\" on \((frame ?? usual).id, privacy: .public) (said \(device ?? "nothing", privacy: .public))")
         // Inside a command the screen is part of the command's own undo step.
-        model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, partOfHeldEdit: model.store.isHoldingEdit, device: frame)
+        model.store.actingForCommand {
+            model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, device: frame)
+        }
         guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
@@ -310,73 +323,81 @@ final class VoiceToolbox: VoiceActing {
     }
 
     func renameScreen(screen: String, name: String) -> String {
-        guard let model else { return gone }
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return failed("Say what to call it.") }
-        switch find(screen: screen) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            model.store.updateScreen(found.id) { $0.name = name }
-            DesignActions.reveal(.screen(found.id), in: model)
-            return done("Renamed \(handles.handle(forScreen: found.id)) to “\(name)”.")
+        forCommand {
+            guard let model else { return gone }
+            let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return failed("Say what to call it.") }
+            switch find(screen: screen) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                model.store.updateScreen(found.id) { $0.name = name }
+                DesignActions.reveal(.screen(found.id), in: model)
+                return done("Renamed \(handles.handle(forScreen: found.id)) to “\(name)”.")
+            }
         }
     }
 
     func deleteScreen(screen: String, named: String?) -> String {
-        guard let model else { return gone }
-        switch find(screen: screen) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            if let refusal = refusesToDelete() { return refusal }
-            let handle = handles.handle(forScreen: found.id)
-            // Only what the person named goes: see `VoiceNaming`. A handle given as the
-            // name is no name at all.
-            if let named, VoiceHandles.tidied(named) == nil, !VoiceNaming.fits(named, names: [], words: found.name) {
-                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That screen is “\(found.name)”.")
+        forCommand {
+            guard let model else { return gone }
+            switch find(screen: screen) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                if let refusal = refusesToDelete() { return refusal }
+                let handle = handles.handle(forScreen: found.id)
+                // Only what the person named goes: see `VoiceNaming`. A handle given as the
+                // name is no name at all.
+                if let named, VoiceHandles.tidied(named) == nil, !VoiceNaming.fits(named, names: [], words: found.name) {
+                    return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That screen is “\(found.name)”.")
+                }
+                guard found.isLocked != true else { return failed("\(handle) is locked.") }
+                model.store.deleteScreen(found.id)
+                return done("Deleted the screen “\(found.name)”.")
             }
-            guard found.isLocked != true else { return failed("\(handle) is locked.") }
-            model.store.deleteScreen(found.id)
-            return done("Deleted the screen “\(found.name)”.")
         }
     }
 
     /// Lays a whole screen out again with design sense: see `ScreenTidy`. One change, so
     /// one undo puts it back.
     func tidyScreen(screen: String?) -> String {
-        guard let model else { return gone }
-        switch screenMeant(screen, in: model) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            let frames = ScreenTidy.frames(for: found.elements, on: found.device)
-            let handle = handles.handle(forScreen: found.id)
-            guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
-            DesignActions.reveal(.screen(found.id), in: model)
-            model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
-            return done("Tidied the layout of \(handle).")
+        forCommand {
+            guard let model else { return gone }
+            switch screenMeant(screen, in: model) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                let frames = ScreenTidy.frames(for: found.elements, on: found.device)
+                let handle = handles.handle(forScreen: found.id)
+                guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+                DesignActions.reveal(.screen(found.id), in: model)
+                model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
+                return done("Tidied the layout of \(handle).")
+            }
         }
     }
 
     /// Makes a screen another device's and lays what is on it out again for that size,
     /// so that it looks made for it rather than a phone's layout in a tablet's corner.
     func changeScreenDevice(screen: String?, device: String) -> String {
-        guard let model else { return gone }
-        guard let frame = Self.device(named: device, preferring: model.store.canvas.sketchDevice) else {
-            return failed("I can make it an iPhone, iPad or Mac screen, not “\(device)”.")
-        }
-        switch screenMeant(screen, in: model) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            let handle = handles.handle(forScreen: found.id)
-            let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(Int(frame.size.width)) × \(Int(frame.size.height)))"
-            guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
-            let frames = ScreenTidy.frames(for: found.elements, on: frame, from: found.device)
-            model.store.updateScreen(found.id) { screen in
-                // An iPhone is kept as no device at all, as the Siri action keeps it.
-                screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
-                Self.apply(frames, to: &screen)
+        forCommand {
+            guard let model else { return gone }
+            guard let frame = Self.device(named: device, preferring: model.store.canvas.sketchDevice) else {
+                return failed("I can make it an iPhone, iPad or Mac screen, not “\(device)”.")
             }
-            DesignActions.reveal(.screen(found.id), in: model)
-            return done("Made \(handle) \(named).")
+            switch screenMeant(screen, in: model) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                let handle = handles.handle(forScreen: found.id)
+                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(Int(frame.size.width)) × \(Int(frame.size.height)))"
+                guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
+                let frames = ScreenTidy.frames(for: found.elements, on: frame, from: found.device)
+                model.store.updateScreen(found.id) { screen in
+                    // An iPhone is kept as no device at all, as the Siri action keeps it.
+                    screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
+                    Self.apply(frames, to: &screen)
+                }
+                DesignActions.reveal(.screen(found.id), in: model)
+                return done("Made \(handle) \(named).")
+            }
         }
     }
 
@@ -462,132 +483,142 @@ final class VoiceToolbox: VoiceActing {
     // MARK: Elements
 
     func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
-        guard let model else { return gone }
-        let host: DesignScreen
-        if let screen, !screen.trimmingCharacters(in: .whitespaces).isEmpty {
-            switch find(screen: screen) {
-            case .failure(let refusal): return failed(refusal.line)
-            case .success(let found): host = found
+        forCommand {
+            guard let model else { return gone }
+            let host: DesignScreen
+            if let screen, !screen.trimmingCharacters(in: .whitespaces).isEmpty {
+                switch find(screen: screen) {
+                case .failure(let refusal): return failed(refusal.line)
+                case .success(let found): host = found
+                }
+            } else if let current = currentScreen(in: model) {
+                host = current
+            } else {
+                return failed("There is no screen to add to yet.")
             }
-        } else if let current = currentScreen(in: model) {
-            host = current
-        } else {
-            return failed("There is no screen to add to yet.")
+            guard let kind = ScreenBlueprint.kind(named: kind), kind.belongsOnScreens else {
+                return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
+            }
+            let words = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var element = DesignStore.newElement(kind, symbol: kind == .symbol ? (words.isEmpty ? "star" : words) : nil)
+            if kind.hasText, !words.isEmpty { element.text = words }
+            if let look { Self.apply(look: look, to: &element) }
+            element.frame = DesignActions.frameForNewElement(element, on: host)
+            let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
+            DesignActions.reveal(.element(ref), in: model)
+            let handle = handles.handle(forElement: element.id)
+            let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
+            // "Add an image below the title": put by the other one as it is added.
+            if let relation, !relation.trimmingCharacters(in: .whitespaces).isEmpty,
+               let target, !target.trimmingCharacters(in: .whitespaces).isEmpty {
+                return added + " " + placeElement(element: handle, relation: relation, target: target)
+            }
+            return added
         }
-        guard let kind = ScreenBlueprint.kind(named: kind), kind.belongsOnScreens else {
-            return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
-        }
-        let words = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var element = DesignStore.newElement(kind, symbol: kind == .symbol ? (words.isEmpty ? "star" : words) : nil)
-        if kind.hasText, !words.isEmpty { element.text = words }
-        if let look { Self.apply(look: look, to: &element) }
-        element.frame = DesignActions.frameForNewElement(element, on: host)
-        let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
-        DesignActions.reveal(.element(ref), in: model)
-        let handle = handles.handle(forElement: element.id)
-        let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
-        // "Add an image below the title": put by the other one as it is added.
-        if let relation, !relation.trimmingCharacters(in: .whitespaces).isEmpty,
-           let target, !target.trimmingCharacters(in: .whitespaces).isEmpty {
-            return added + " " + placeElement(element: handle, relation: relation, target: target)
-        }
-        return added
     }
 
     func setText(element: String, text: String) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            // Asked for a text colour, a small model will hand the colour over as the
-            // words. A colour on its own, in lower case, is taken as the words' colour.
-            if let colour = Self.colourMeantAsWords(text) {
-                return styleElement(element: element, look: "text \(colour)")
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                // Asked for a text colour, a small model will hand the colour over as the
+                // words. A colour on its own, in lower case, is taken as the words' colour.
+                if let colour = Self.colourMeantAsWords(text) {
+                    return styleElement(element: element, look: "text \(colour)")
+                }
+                guard found.element.kind.hasText else {
+                    return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
+                }
+                DesignActions.reveal(.element(found.ref), in: model)
+                model.store.update(found.ref) { $0.text = text }
+                return done("Reworded the \(found.element.kind.layerName.lowercased()) to “\(text)”.")
             }
-            guard found.element.kind.hasText else {
-                return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
-            }
-            DesignActions.reveal(.element(found.ref), in: model)
-            model.store.update(found.ref) { $0.text = text }
-            return done("Reworded the \(found.element.kind.layerName.lowercased()) to “\(text)”.")
         }
     }
 
     func styleElement(element: String, look: String) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            var restyled = found.element
-            guard Self.apply(look: look, to: &restyled) else {
-                return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                var restyled = found.element
+                guard Self.apply(look: look, to: &restyled) else {
+                    return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
+                }
+                DesignActions.reveal(.element(found.ref), in: model)
+                model.store.update(found.ref) { $0 = restyled }
+                return done("Restyled \(Self.describe(found.element)).")
             }
-            DesignActions.reveal(.element(found.ref), in: model)
-            model.store.update(found.ref) { $0 = restyled }
-            return done("Restyled \(Self.describe(found.element)).")
         }
     }
 
     func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
-            let given = [x, y, width, height].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
-            guard given.contains(where: { $0 != nil }) else { return failed("Say where it should go or how big it should be.") }
-            // On a screen, shares are of the screen. A loose element has no screen to share.
-            let screenSize = found.screen?.size
-            // Loose elements are given in canvas points and kept in points of their own.
-            let scale: CGFloat = found.screen == nil ? (model.store.resolve(found.ref)?.placement.scale ?? 1) : 1
-            var values: [CGFloat?] = []
-            for (index, written) in given.enumerated() {
-                guard let written else {
-                    values.append(nil)
-                    continue
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
+                let given = [x, y, width, height].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
+                guard given.contains(where: { $0 != nil }) else { return failed("Say where it should go or how big it should be.") }
+                // On a screen, shares are of the screen. A loose element has no screen to share.
+                let screenSize = found.screen?.size
+                // Loose elements are given in canvas points and kept in points of their own.
+                let scale: CGFloat = found.screen == nil ? (model.store.resolve(found.ref)?.placement.scale ?? 1) : 1
+                var values: [CGFloat?] = []
+                for (index, written) in given.enumerated() {
+                    guard let written else {
+                        values.append(nil)
+                        continue
+                    }
+                    let extent = index.isMultiple(of: 2) ? screenSize?.width : screenSize?.height
+                    // Said plainly: told only that "50%" wasn't understood, a model tries
+                    // some other number of its own.
+                    if extent == nil, written.hasSuffix("%") {
+                        return failed("That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
+                    }
+                    guard let value = Self.length(written, of: extent), index < 2 || value >= 1 else {
+                        return failed("I didn't understand the size “\(written)”. Give points, such as 180, or a share of the screen, such as 50%.")
+                    }
+                    values.append(value / scale)
                 }
-                let extent = index.isMultiple(of: 2) ? screenSize?.width : screenSize?.height
-                // Said plainly: told only that "50%" wasn't understood, a model tries
-                // some other number of its own.
-                if extent == nil, written.hasSuffix("%") {
-                    return failed("That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
+                DesignActions.reveal(.element(found.ref), in: model)
+                model.store.update(found.ref) { element in
+                    if let x = values[0] { element.frame.origin.x = x }
+                    if let y = values[1] { element.frame.origin.y = y }
+                    if let width = values[2] { element.frame.size.width = width }
+                    if let height = values[3] { element.frame.size.height = height }
                 }
-                guard let value = Self.length(written, of: extent), index < 2 || value >= 1 else {
-                    return failed("I didn't understand the size “\(written)”. Give points, such as 180, or a share of the screen, such as 50%.")
-                }
-                values.append(value / scale)
+                let isResize = values[2] != nil || values[3] != nil
+                return done("\(isResize ? "Resized" : "Moved") \(Self.describe(found.element)).")
             }
-            DesignActions.reveal(.element(found.ref), in: model)
-            model.store.update(found.ref) { element in
-                if let x = values[0] { element.frame.origin.x = x }
-                if let y = values[1] { element.frame.origin.y = y }
-                if let width = values[2] { element.frame.size.width = width }
-                if let height = values[3] { element.frame.size.height = height }
-            }
-            let isResize = values[2] != nil || values[3] != nil
-            return done("\(isResize ? "Resized" : "Moved") \(Self.describe(found.element)).")
         }
     }
 
     func rotateElement(element: String, angle: String?, by: String?) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            let handle = handles.handle(forElement: found.element.id)
-            guard !found.element.isLocked else { return failed("\(handle) is locked.") }
-            let words = [angle, by].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
-            // The angle wins when both are given.
-            guard let written = words[0] ?? words[1] else {
-                return failed("Say an angle, such as 45, or how far to turn it, such as 15.")
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                let handle = handles.handle(forElement: found.element.id)
+                guard !found.element.isLocked else { return failed("\(handle) is locked.") }
+                let words = [angle, by].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
+                // The angle wins when both are given.
+                guard let written = words[0] ?? words[1] else {
+                    return failed("Say an angle, such as 45, or how far to turn it, such as 15.")
+                }
+                guard let degrees = Self.degrees(written) else {
+                    return failed("I didn't understand the angle “\(written)”.")
+                }
+                let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
+                DesignActions.reveal(.element(found.ref), in: model)
+                model.store.update(found.ref) { $0.setRotation(target) }
+                return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
             }
-            guard let degrees = Self.degrees(written) else {
-                return failed("I didn't understand the angle “\(written)”.")
-            }
-            let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
-            DesignActions.reveal(.element(found.ref), in: model)
-            model.store.update(found.ref) { $0.setRotation(target) }
-            return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
         }
     }
 
@@ -603,20 +634,22 @@ final class VoiceToolbox: VoiceActing {
     }
 
     func alignElement(element: String, alignment: String) -> String {
-        guard let model else { return gone }
-        let named = Self.handleList(element)
-        if named.count > 1 { return alignTogether(named, alignment: alignment) }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            guard let (edge, name) = Self.alignment(named: alignment) else {
-                return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
+        forCommand {
+            guard let model else { return gone }
+            let named = Self.handleList(element)
+            if named.count > 1 { return alignTogether(named, alignment: alignment) }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                guard let (edge, name) = Self.alignment(named: alignment) else {
+                    return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
+                }
+                guard found.screen != nil else { return failed("\(handles.handle(forElement: found.element.id)) isn't on a screen to line up with.") }
+                guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
+                DesignActions.reveal(.element(found.ref), in: model)
+                model.store.align(found.ref, edge)
+                return done("Aligned \(Self.describe(found.element)) to the \(name).")
             }
-            guard found.screen != nil else { return failed("\(handles.handle(forElement: found.element.id)) isn't on a screen to line up with.") }
-            guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
-            DesignActions.reveal(.element(found.ref), in: model)
-            model.store.align(found.ref, edge)
-            return done("Aligned \(Self.describe(found.element)) to the \(name).")
         }
     }
 
@@ -647,31 +680,35 @@ final class VoiceToolbox: VoiceActing {
     }
 
     func duplicateElement(element: String) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            guard let copy = model.store.duplicate(found.ref) else { return failed("That couldn't be duplicated.") }
-            DesignActions.reveal(.element(copy), in: model)
-            return done("Duplicated \(Self.describe(found.element)) as \(handles.handle(forElement: copy.element)).")
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                guard let copy = model.store.duplicate(found.ref) else { return failed("That couldn't be duplicated.") }
+                DesignActions.reveal(.element(copy), in: model)
+                return done("Duplicated \(Self.describe(found.element)) as \(handles.handle(forElement: copy.element)).")
+            }
         }
     }
 
     func deleteElement(element: String, named: String?) -> String {
-        guard let model else { return gone }
-        switch find(element: element) {
-        case .failure(let refusal): return failed(refusal.line)
-        case .success(let found):
-            if let refusal = refusesToDelete() { return refusal }
-            let handle = handles.handle(forElement: found.element.id)
-            // Only what the person named goes: see `VoiceNaming`. A handle given as the
-            // name is no name at all.
-            if let named, VoiceHandles.tidied(named) == nil, !Self.fits(named, found.element) {
-                return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That is \(Self.describe(found.element)).")
+        forCommand {
+            guard let model else { return gone }
+            switch find(element: element) {
+            case .failure(let refusal): return failed(refusal.line)
+            case .success(let found):
+                if let refusal = refusesToDelete() { return refusal }
+                let handle = handles.handle(forElement: found.element.id)
+                // Only what the person named goes: see `VoiceNaming`. A handle given as the
+                // name is no name at all.
+                if let named, VoiceHandles.tidied(named) == nil, !Self.fits(named, found.element) {
+                    return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That is \(Self.describe(found.element)).")
+                }
+                guard !found.element.isLocked else { return failed("\(handle) is locked.") }
+                model.store.delete(found.ref)
+                return done("Deleted \(Self.describe(found.element)).")
             }
-            guard !found.element.isLocked else { return failed("\(handle) is locked.") }
-            model.store.delete(found.ref)
-            return done("Deleted \(Self.describe(found.element)).")
         }
     }
 

@@ -200,11 +200,11 @@ struct DesignStoreTests {
         let before = store.content
 
         store.beginHeldEdit()
-        store.update(ref) { $0.text = "One" }
+        store.actingForCommand { store.update(ref) { $0.text = "One" } }
         undo.undo()
         // The command's change so far is what goes; the title added before it stays.
         #expect(store.content == before)
-        store.update(ref) { $0.text = "Two" }
+        store.actingForCommand { store.update(ref) { $0.text = "Two" } }
         store.endHeldEdit()
         #expect(store.resolve(ref)?.element.text == "Two")
 
@@ -224,7 +224,7 @@ struct DesignStoreTests {
         store.beginHeldEdit()
         undo.redo()
         #expect(store.content == withTitle)
-        store.updateScreen(screen.id) { $0.name = "Renamed" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Renamed" } }
         store.endHeldEdit()
         undo.undo()
         #expect(store.content == withTitle)
@@ -240,9 +240,9 @@ struct DesignStoreTests {
         store.setTitle("Quiet", undoable: false)
         #expect(store.historyMark == afterAdd)
         store.beginHeldEdit()
-        store.updateScreen(screen.id) { $0.name = "One" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "One" } }
         let inEdit = store.historyMark
-        store.updateScreen(screen.id) { $0.name = "Two" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Two" } }
         store.endHeldEdit()
         #expect(store.historyMark == inEdit, "a held edit is one step, however many changes")
         undo.undo()
@@ -1183,19 +1183,26 @@ struct FormatPanelEditTests {
     }
 
     /// A drag begun just after a colour was tapped: the pause used to end the drag's edit
-    /// halfway, and every later move of the drag was an undo step of its own.
+    /// halfway, and every later move of the drag was an undo step of its own. The pause
+    /// ends the panel's own step; the drag is one step of its own.
     @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
+        let x = screen.origin.x
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         model.store.beginEdit()
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        let mark = model.store.historyMark
         try await Task.sleep(for: .milliseconds(150))
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         #expect(model.store.isEditing)
+        #expect(model.store.historyMark == mark, "no move is a step of its own")
         model.store.endEdit()
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.origin.x == x)
+        #expect(model.store.screen(screen.id)?.name == "Checkout")
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1215,7 +1222,7 @@ struct FormatPanelEditTests {
             model.store.beginHeldEdit()
             panel()
         }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         try await Task.sleep(for: .milliseconds(150))
         model.store.endHeldEdit()
         #expect(try await pauseEnds(model))
@@ -1233,7 +1240,7 @@ struct FormatPanelEditTests {
         model.adjustmentPause = .milliseconds(200)
         model.store.beginHeldEdit()
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.store.endHeldEdit()
         #expect(model.store.isEditing, "the panel's edit goes on until its pause")
         #expect(try await pauseEnds(model))
@@ -1243,17 +1250,25 @@ struct FormatPanelEditTests {
         #expect(model.store.historyMark == mark + 1)
     }
 
+    /// A change in the panel during a drag is a step of its own, which the panel's pause
+    /// ends while the drag goes on in its own.
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
+        let x = screen.origin.x
         model.store.beginEdit()
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         try await Task.sleep(for: .milliseconds(150))
         #expect(model.store.isEditing)
+        let mark = model.store.historyMark
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        #expect(model.store.historyMark == mark, "the move after the pause is still the drag's")
         model.store.endEdit()
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.name == before.screens.first?.name)
+        #expect(model.store.screen(screen.id)?.origin.x == x + 20)
         undo.undo()
         #expect(model.store.content == before)
     }

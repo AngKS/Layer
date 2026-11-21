@@ -894,8 +894,10 @@ struct VoiceToolsTests {
         #expect(try #require(bench.app.store.undoManager).canUndo == false)
     }
 
-    /// A finger can be dragging something while a command runs. When the command ends
-    /// first the drag is still one step: it isn't left to make a step of every move.
+    /// A finger can be dragging something while a command runs. The drag is a step of its
+    /// own, which the command ending doesn't cut short: it isn't left to make a step of
+    /// every move. The command's is its own, and is taken back first, as it was the last
+    /// thing done and touched nothing the drag did (V1).
     @Test func aDragBegunDuringACommandIsOneStepWhenTheCommandEndsFirst() throws {
         let bench = bench()
         let store = bench.app.store
@@ -904,20 +906,24 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
-        let mark = store.historyMark
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
         store.endHeldEdit()
+        let mark = store.historyMark
         store.update(image) { $0.frame.origin.x = 60 }
         store.update(image) { $0.frame.origin.x = 80 }
         // No move is a step of its own while the finger is still down.
         #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
+        #expect(try #require(bench.element("E2")).tint == Theme.accent)
+        #expect(try #require(bench.element("E3")).frame.origin.x == 80)
+        undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
     }
 
+    /// A drag begun before a command and ended after it is one step, and the command its own.
     @Test func aDragBegunBeforeACommandAndEndedAfterItIsOneStep() throws {
         let bench = bench()
         let store = bench.app.store
@@ -926,20 +932,23 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
-        let mark = store.historyMark
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
+        let mark = store.historyMark
         store.update(image) { $0.frame.origin.x = 60 }
         #expect(store.historyMark == mark)
         store.endEdit()
+        undo.undo()
+        #expect(try #require(bench.element("E2")).tint == Theme.accent)
+        #expect(try #require(bench.element("E3")).frame.origin.x == 60)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
     }
 
-    /// A slider opens its edit with every move and closes it once, a moment after the
-    /// last. Moved and let go while a command runs, it leaves the step to the command.
+    /// A slider moved and let go while a command runs is a step of its own, and the
+    /// command's step is closed when the command ends: a change made next is a step of its own.
     @Test func aSliderMovedAndLetGoDuringACommandLeavesTheStepToTheCommand() throws {
         let bench = bench()
         let store = bench.app.store
@@ -947,25 +956,29 @@ struct VoiceToolsTests {
         let before = store.content
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
         store.beginHeldEdit()
+        let slider = store.beginEdit()
         for width in [180, 160, 140] {
-            store.beginEdit()
-            store.update(image) { $0.frame.size.width = CGFloat(width) }
+            store.act(for: slider) { store.update(image) { $0.frame.size.width = CGFloat(width) } }
         }
-        store.endEdit()
+        store.endEdit(slider)
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        // The step is closed: a change made next is a step of its own.
-        #expect(undo.canUndo)
+        #expect(!store.isEditing && !store.isHoldingEdit)
         store.update(image) { $0.frame.origin.y = 520 }
         undo.undo()
         #expect(try #require(bench.element("E3")).frame.origin.y == 500)
+        #expect(try #require(bench.element("E3")).frame.size.width == 140)
+        undo.undo()
+        #expect(try #require(bench.element("E2")).tint == Theme.accent)
         #expect(try #require(bench.element("E3")).frame.size.width == 140)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
     }
 
-    /// A drag that is over before the command is leaves the step to the command.
+    /// A drag that is over before the command is: a step of its own, and the command another.
+    /// The drag used to join the command's step, which a spoken correction then took back
+    /// with the command (V1).
     @Test func aDragThatEndsDuringACommandLeavesTheStepToTheCommand() throws {
         let bench = bench()
         let store = bench.app.store
@@ -975,11 +988,12 @@ struct VoiceToolsTests {
         store.beginHeldEdit()
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
-        let mark = store.historyMark
         store.endEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        #expect(store.historyMark == mark, "the drag and the command are the command's one step")
+        undo.undo()
+        #expect(try #require(bench.element("E2")).tint == Theme.accent)
+        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)

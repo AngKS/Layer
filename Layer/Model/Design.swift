@@ -127,6 +127,27 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
 }
 
 extension DesignElement {
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now. With a property ever missing from the
+    /// list below, the element as it was before, whole.
+    static func reverting(_ current: DesignElement, after: DesignElement, to before: DesignElement) -> DesignElement {
+        func reverted(_ current: DesignElement) -> DesignElement {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignElement, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.kind); back(\.parent); back(\.scale); back(\.frame); back(\.rotation); back(\.text)
+            back(\.tint); back(\.symbol); back(\.shape); back(\.imageID); back(\.fontSize); back(\.fontWeight)
+            back(\.textColor); back(\.cornerRadius); back(\.opacity); back(\.textAlignment); back(\.borderColor)
+            back(\.borderWidth); back(\.hasShadow); back(\.name); back(\.isLocked); back(\.isHidden); back(\.isOn)
+            back(\.value); back(\.buttonLook); back(\.ink)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
+    }
+}
+
+extension DesignElement {
     /// Reads every property that is present, so elements saved before one existed still open.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -294,6 +315,20 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }
+
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now; see `DesignElement.reverting`.
+    static func reverting(_ current: DesignScreen, after: DesignScreen, to before: DesignScreen) -> DesignScreen {
+        func reverted(_ current: DesignScreen) -> DesignScreen {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignScreen, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.name); back(\.origin); back(\.scale); back(\.deviceID); back(\.elements); back(\.isLocked)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
+    }
     var placement: Placement { Placement(origin: origin, scale: scale) }
 
     var canvasFrame: CGRect {

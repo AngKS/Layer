@@ -634,6 +634,8 @@ struct InkCanvas: UIViewRepresentable {
         /// use's step as an undo or redo begins: undo then takes back the whole use so far,
         /// and redo puts all of it back. Dropped instead, redo lost the rubbing out.
         private var watchedHistory: UndoManager?
+        /// The step of the tool's use under way: see `DesignStore.Edit`.
+        private var toolEdit: DesignStore.Edit?
         private var historyObservers: [NSObjectProtocol] = []
 
         func watchHistory(_ history: UndoManager?) {
@@ -657,7 +659,7 @@ struct InkCanvas: UIViewRepresentable {
         private func followBeforeHistoryMoves() {
             guard hasInkToFollow else { return }
             hasInkToFollow = false
-            guard hasFollowedThisUse, model.store.editIsInHistory else { return }
+            guard hasFollowedThisUse, toolEdit?.isInHistory == true else { return }
             followInk(evenWhileTheHistoryMoves: true)
         }
 
@@ -690,7 +692,9 @@ struct InkCanvas: UIViewRepresentable {
             // While the design is being put back by undo or redo it is the one to follow.
             if !evenWhileTheHistoryMoves, let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
-            model.inkChanged(drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach))
+            let changes = drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach)
+            // Part of the tool's use under way, if it is, and of nothing else under way.
+            model.store.act(for: toolEdit) { model.inkChanged(changes) }
             // PencilKit's own record of the change is not the one that is kept.
             documentCanvas.inkUndoManager.removeAllActions()
         }
@@ -705,7 +709,8 @@ struct InkCanvas: UIViewRepresentable {
                 // strokes on the way, as rubbing out does.
                 isUsingDocumentTool = true
                 hasFollowedThisUse = false
-                model.store.beginEdit()
+                if let toolEdit { model.store.endEdit(toolEdit) }
+                toolEdit = model.store.beginEdit()
             }
         }
 
@@ -716,7 +721,8 @@ struct InkCanvas: UIViewRepresentable {
             } else {
                 isUsingDocumentTool = false
                 followInkNotYetFollowed()
-                model.store.endEdit()
+                if let toolEdit { model.store.endEdit(toolEdit) }
+                toolEdit = nil
             }
         }
 
