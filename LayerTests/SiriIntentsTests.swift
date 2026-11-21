@@ -263,7 +263,10 @@ private final class CountingDefaults: UserDefaults {
 @MainActor
 struct DesignIndexTests {
     /// Runs `body` with the indexer writing to `index` and keeping its record in `record`.
+    /// `suite` is named after the test, so each test has one set of defaults, emptied as it
+    /// starts and when it is done: one named afresh each time left a file behind every run.
     private func using(_ index: FakeSpotlight, record: UserDefaults, suite: String, _ body: () async throws -> Void) async rethrows {
+        record.removePersistentDomain(forName: suite)
         let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
         DesignIndexer.spotlight = index
         DesignIndexer.recordDefaults = record
@@ -276,7 +279,7 @@ struct DesignIndexTests {
     }
 
     @Test func aLaunchPassReadsAndWritesItsRecordOnce() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(CountingDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -293,7 +296,7 @@ struct DesignIndexTests {
     }
 
     @Test func withoutARecordToReadTheIndexIsBuiltAgain() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -311,7 +314,7 @@ struct DesignIndexTests {
     }
 
     @Test func aDesignRenamedAfterItClosedIsIndexedUnderItsNewIdentifier() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -332,7 +335,7 @@ struct DesignIndexTests {
     }
 
     @Test func designsInAFolderThatCouldNotBeLookedThroughAreKept() async throws {
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
         let index = FakeSpotlight()
         let tag = UUID().uuidString
@@ -362,8 +365,9 @@ struct DesignIndexTests {
 
     @Test func aLaunchPassKeepsWhatItCouldNotReadAndTakesOutWhatHasGone() async throws {
         let index = FakeSpotlight()
-        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let suite = "DesignIndexTests-\(#function)"
         let record = try #require(UserDefaults(suiteName: suite))
+        record.removePersistentDomain(forName: suite)
         let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
         DesignIndexer.spotlight = index
         DesignIndexer.recordDefaults = record

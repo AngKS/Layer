@@ -32,6 +32,7 @@ struct AppSettingsTests {
         #expect(AppSettings.defaults !== UserDefaults.standard)
         #expect(AppModel(document: LayerDocument()).settings === AppSettings.defaults)
         #expect(!(DesignIndexer.spotlight is SystemSpotlight))
+        #expect(APIKeyStore.service != "kahshin.Layer.model-provider")
     }
 
     @Test func aDesignsSettingsAreKeptWhereItIsTold() throws {

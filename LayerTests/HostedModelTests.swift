@@ -121,7 +121,8 @@ final class HostedModelTests {
         try APIKeyStore.setKey("test-key-openai", for: .openAI)
     }
 
-    // The tests run inside the app, so their keys would otherwise stay in its Keychain.
+    // The tests run inside the app: their keys are kept apart from its own (see
+    // `APIKeyStore.service`), and taken out so as not to stay there either.
     deinit {
         try? APIKeyStore.removeKey(for: .anthropic)
         try? APIKeyStore.removeKey(for: .openAI)
@@ -358,6 +359,7 @@ extension HostedModelTests {
         #expect(!APIKeyStore.hasKey(for: provider))
         // Not kept anywhere else.
         #expect(UserDefaults.standard.dictionaryRepresentation().values.contains { ($0 as? String) == "second" } == false)
+        #expect(AppSettings.defaults.dictionaryRepresentation().values.contains { ($0 as? String) == "second" } == false)
     }
 }
 
@@ -383,8 +385,9 @@ struct ModelChoiceTests {
     }
 
     @Test func theDefaultIsKeptInTheSettings() throws {
-        let suite = "ModelChoiceTests-\(UUID().uuidString)"
+        let suite = "ModelChoiceTests-\(#function)"
         let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         #expect(ModelPreferences.defaultChoice(in: defaults) == .appleIntelligence)
         ModelPreferences.setDefaultChoice(.hosted(.openAI, model: "gpt-test"), in: defaults)

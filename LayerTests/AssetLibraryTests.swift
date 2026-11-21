@@ -116,7 +116,10 @@ struct AssetLibraryTests {
     }
 
     @Test func recentlyUsedThingsLeadAndArentRepeated() throws {
-        let defaults = try #require(UserDefaults(suiteName: "AssetLibraryTests-\(UUID().uuidString)"))
+        let suite = "AssetLibraryTests-\(#function)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
         let star = try #require(AssetLibrary.asset(id: "symbol:star"))
         let button = try #require(AssetLibrary.asset(id: "component:button"))
         AssetLibrary.noteUsed(star, in: defaults)
