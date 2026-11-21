@@ -595,6 +595,28 @@ final class DesignStore {
         edit.name = name
     }
 
+    /// Names `edit` again, and its step if it has one: a drag a twist takes over becomes a
+    /// move and a turn in one step (review m3). The history keeps the name a step was put in
+    /// with, and a group can only be named while it is open, so a step on top is put in again
+    /// under the new name, where it was. One below others keeps its old name until undone.
+    func rename(_ edit: Edit?, _ name: String) {
+        guard let edit, edit !== acting else { return }
+        edit.name = name
+        guard let step = edit.step, step.name != name else { return }
+        guard let undoManager, step === lastStep, !undoManager.isUndoing, !undoManager.isRedoing, !undoManager.canRedo else {
+            step.name = name
+            return
+        }
+        let renamed = step.renamed(name)
+        // The same step, where it was: the history hasn't moved, as far as anyone checking
+        // its mark (a spoken correction) is concerned.
+        let mark = historyMark
+        withdraw(step)
+        register(renamed)
+        historyMark = mark
+        edit.step = renamed
+    }
+
     /// Starts a turn that goes on from `edit`, a drag the turn cut short, so that the two
     /// are one step. Without an edit still under way, a turn of its own begins.
     func beginEdit(by editor: Editor, takingOver edit: Edit?) -> Edit {
@@ -895,6 +917,15 @@ final class DesignStore {
             } else {
                 runs.append(Run(before: before, after: after))
             }
+        }
+
+        /// The same step under another name.
+        func renamed(_ name: String) -> HistoryStep {
+            let copy = HistoryStep(runs: runs)
+            copy.isCommand = isCommand
+            copy.name = name
+            copy.lastChange = lastChange
+            return copy
         }
 
         /// The design with the step's changes taken back.

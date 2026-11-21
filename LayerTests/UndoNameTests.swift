@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PencilKit
 import Testing
 @testable import Layer
 
@@ -58,6 +59,32 @@ struct UndoNameTests {
         board.model.turnSelection(by: 30, snaps: false)
         board.model.endTurn()
         #expect(board.undo.undoActionName == "Rotate")
+    }
+
+    /// A drag that two fingers' twist takes over is one step with the turn, named for both
+    /// (review m3): it used to keep "Move", and "Undo Move" took back the turn too.
+    @Test(arguments: [false, true])
+    func aDragATwistTakesOverIsAMoveAndRotate(groupedByEvent: Bool) {
+        let board = Board()
+        board.undo.groupsByEvent = groupedByEvent
+        board.model.selection = .element(board.button)
+        let owner = CanvasDrags.Owner()
+        let (element, placement) = board.store.resolve(board.button)!
+        board.drags.moveElement(board.button, from: element.frame, placement: placement, by: CGSize(width: 10, height: 0), startingAt: .zero, owner: owner, model: board.model) {
+            board.drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        }
+        #expect(board.undo.undoActionName == "Move")
+        #expect(board.model.beginTwist())
+        board.model.twist(by: 30)
+        board.model.endTwist()
+        #expect(board.undo.undoActionName == "Move and Rotate")
+        board.undo.undo()
+        #expect(board.undo.redoActionName == "Move and Rotate")
+    }
+
+    @Test func aPensUseIsDrawingAndTheErasersIsErase() {
+        #expect(InkCanvas.Coordinator.stepName(for: PKInkingTool(.pen)) == "Drawing")
+        #expect(InkCanvas.Coordinator.stepName(for: PKEraserTool(.vector)) == "Erase")
     }
 
     @Test func theFormatPanelsChangesAreFormat() {

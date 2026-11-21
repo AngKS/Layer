@@ -1448,8 +1448,13 @@ final class AppModel {
         // The turn's own step: a drag, a command or a screen being generated that is under
         // way, or that begins or ends meanwhile, has its own, and neither ends the other.
         // A drag the turn cuts short goes on as the turn, one step with it.
-        turnEdit = store.beginEdit(by: .turn, takingOver: cuttingDragShort ? drags?.handOverEdit() : nil)
-        store.name(turnEdit, String(localized: "Rotate"))
+        let drag = cuttingDragShort ? drags?.handOverEdit() : nil
+        turnEdit = store.beginEdit(by: .turn, takingOver: drag)
+        if let drag, drag === turnEdit {
+            store.rename(turnEdit, String(localized: "Move and Rotate"))
+        } else {
+            store.name(turnEdit, String(localized: "Rotate"))
+        }
         isAdjusting = true
         isTurning = true
         return true

@@ -811,6 +811,11 @@ struct InkCanvas: UIViewRepresentable {
             documentCanvas.inkUndoManager.removeAllActions()
         }
 
+        /// What Undo calls a use of a tool on the document canvas.
+        static func stepName(for tool: any PKTool) -> String {
+            tool is PKEraserTool ? String(localized: "Erase") : String(localized: "Drawing")
+        }
+
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
             if canvasView === sketchCanvas {
@@ -823,7 +828,7 @@ struct InkCanvas: UIViewRepresentable {
                 hasFollowedThisUse = false
                 if let toolEdit { model.store.endEdit(toolEdit) }
                 toolEdit = model.store.beginEdit()
-                model.store.name(toolEdit, String(localized: "Drawing"))
+                model.store.name(toolEdit, Self.stepName(for: canvasView.tool))
             }
         }
 
