@@ -16,11 +16,30 @@ final class VoiceModeUITests: XCTestCase {
         app = XCUIApplication()
     }
 
+    /// Every test here narrows the window, and the system keeps a window's size from one
+    /// launch to the next, even across reinstalls. Left narrow, it would have every later
+    /// UI test open in a phone-sized window, where their controls are folded into menus.
+    /// So the window is put back as wide as the screen.
+    override func tearDown() async throws {
+        if app.state != .runningForeground {
+            // A fresh launch, without the call a test asked for.
+            app = XCUIApplication()
+            app.launchArguments = ["-convertsAutomatically", "NO"]
+            app.launch()
+            XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 20))
+            sleep(2)
+        }
+        resizeWindow(toWidth: screenWidth)
+        shoot("restored")
+        XCTAssertEqual(app.windows.firstMatch.frame.width, screenWidth, accuracy: 12, "the window should be left as wide as the screen")
+        app.terminate()
+    }
+
     func testThePhoneButtonStartsACallInANarrowWindow() {
         openNewDesign(arguments: ["-convertsAutomatically", "NO"])
         // The window comes back the size it was left. Full screen there is no phone
         // button: the corner belongs to the pencil palette.
-        resizeWindow(toWidth: XCUIApplication(bundleIdentifier: "com.apple.springboard").frame.width)
+        resizeWindow(toWidth: screenWidth)
         XCTAssertFalse(control("Start voice mode").exists, "the phone button is for the narrow window")
         shoot("full-idle")
 
@@ -218,6 +237,13 @@ final class VoiceModeUITests: XCTestCase {
             newDesign?.tap()
         }
         XCTAssertTrue(control("Board title").waitForExistence(timeout: 20), "creating a design should open its canvas")
+    }
+
+    /// How wide the screen is in landscape, where these tests run. The springboard's frame
+    /// is the screen upright whatever the orientation, so its width is the short side.
+    private var screenWidth: CGFloat {
+        let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+        return max(screen.width, screen.height)
     }
 
     /// Drags the window's corner grip until the window is about `target` points wide. The
