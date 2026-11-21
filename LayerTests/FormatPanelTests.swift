@@ -159,3 +159,77 @@ struct TypingIntoTheFormatPanelTests {
         #expect(elements.setOnSecond.isEmpty)
     }
 }
+
+/// A field's value, and every value set on it.
+@MainActor
+private final class ScrubbedField {
+    var value: CGFloat
+    var sets: [CGFloat] = []
+    init(_ value: CGFloat) { self.value = value }
+
+    func target(_ label: String, at frame: CGRect, range: ClosedRange<CGFloat> = 0...360, degreesPerStep: Double = 1) -> Scrubber.Target {
+        Scrubber.Target(
+            label: label, unit: "", frame: frame, range: range,
+            get: { self.value }, set: { self.value = $0; self.sets.append($0) },
+            degreesPerStep: degreesPerStep, wraps: range == 0...360
+        )
+    }
+}
+
+/// The ruler that scrubs a field: rolled by the pencil's barrel after a squeeze, or dragged
+/// by a finger holding the field (audit M8).
+@MainActor
+@Suite("Scrubbing a field")
+struct ScrubbingAFieldTests {
+    /// Only a roll made while the pencil stays in hover range turns the value. Turned in the
+    /// hand while out of range, or while touching the canvas, it jumped by as much.
+    @Test func rollWhileThePencilIsAwayIsntCounted() {
+        let scrubber = Scrubber()
+        let rotation = ScrubbedField(0)
+        // Squeezed over the Rotation field, one degree a step: its ruler is up.
+        scrubber.begin(rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
+        scrubber.hover(.began, roll: .degrees(0))
+        scrubber.hover(.changed, roll: .degrees(5))
+        #expect(rotation.value == 5)
+
+        // Out of range, turned in the hand, and back.
+        scrubber.hover(.ended, roll: .degrees(5))
+        scrubber.hover(.began, roll: .degrees(60))
+        #expect(rotation.value == 5)
+        scrubber.hover(.changed, roll: .degrees(62))
+        #expect(rotation.value == 7)
+        // Cancelled, as when the pencil touches down, the same.
+        scrubber.hover(.cancelled, roll: .degrees(62))
+        scrubber.hover(.began, roll: .degrees(140))
+        scrubber.hover(.changed, roll: .degrees(141))
+        #expect(rotation.value == 8)
+    }
+
+    /// While the pencil's ruler is up on one field, a finger holding another scrubs that one:
+    /// the pencil's is put away first.
+    @Test func aFingerHoldingAnotherFieldScrubsThatOne() {
+        let scrubber = Scrubber()
+        var begins = 0
+        var ends = 0
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+        let rotation = ScrubbedField(0)
+        let opacity = ScrubbedField(50)
+        let rotationTarget = rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32))
+        let opacityTarget = opacity.target("Opacity", at: CGRect(x: 90, y: 0, width: 80, height: 32), range: 5...100)
+        scrubber.begin(rotationTarget)
+
+        scrubber.hold(opacityTarget)
+        scrubber.scrub(to: 3)
+        #expect(rotation.sets.isEmpty)
+        #expect(opacity.value == 53)
+        #expect(scrubber.target?.label == "Opacity")
+        #expect(begins == 2 && ends == 1, "the pencil's scrub ended, and the finger's began")
+
+        // The finger goes on holding: it is the same scrub.
+        scrubber.hold(opacityTarget)
+        scrubber.scrub(to: 5)
+        #expect(opacity.value == 55)
+        #expect(begins == 2)
+    }
+}

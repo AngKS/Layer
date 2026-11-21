@@ -790,7 +790,7 @@ private struct NumberField: View {
                 }
                 .onChanged { value in
                     guard case .second(true, let drag) = value else { return }
-                    if scrubber.target == nil { scrubber.begin(target) }
+                    scrubber.hold(target)
                     scrubber.scrub(to: Scrubber.steps(forDrag: drag?.translation.width ?? 0, pointsPerStep: pointsPerStep))
                 },
             isEnabled: !isTyping
