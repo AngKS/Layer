@@ -522,6 +522,8 @@ final class DesignStore {
         /// Whether only the changes made for it are its own: one that says nothing of whose it
         /// is never joins it. See `beginEdit(by:takingOnlyItsOwn:)`.
         fileprivate var takesOnlyItsOwn = false
+        /// What Undo and Redo call its step: see `name(_:_:)`.
+        fileprivate var name: String?
 
         fileprivate init(editor: Editor) {
             self.editor = editor
@@ -564,6 +566,14 @@ final class DesignStore {
         let edit = beginEdit(by: editor)
         if edit !== acting { edit.takesOnlyItsOwn = takingOnlyItsOwn }
         return edit
+    }
+
+    /// Names what `edit` does, for the Edit menu, the keyboard's shortcuts and the undo HUD:
+    /// "Undo Move" rather than a plain "Undo" (C18, M22). Only before its step is made, and
+    /// not an edit whose work this is part of, which has its own name.
+    func name(_ edit: Edit?, _ name: String) {
+        guard let edit, edit.step == nil, edit !== acting else { return }
+        edit.name = name
     }
 
     /// Starts a turn that goes on from `edit`, a drag the turn cut short, so that the two
@@ -664,6 +674,7 @@ final class DesignStore {
         guard !above.isEmpty, !above.contains(where: { $0.touched.meets(step.touched) }) else { return }
         let moved = HistoryStep(runs: step.runs)
         moved.isCommand = step.isCommand
+        moved.name = step.name
         withdraw(step)
         register(moved)
         edit.step = moved
@@ -803,6 +814,7 @@ final class DesignStore {
         } else {
             step = HistoryStep()
             step.isCommand = owner != nil && owner === heldEdit
+            step.name = owner?.name
             owner?.step = step
             register(step)
         }
@@ -827,6 +839,8 @@ final class DesignStore {
         /// Whether it is what a spoken command did: the only kind of step the command's own
         /// undo tool takes back.
         var isCommand = false
+        /// What Undo and Redo call it, if it has a name.
+        var name: String?
         /// `changeCount` after the step's last change.
         private var lastChange = -1
 
@@ -1013,7 +1027,11 @@ final class DesignStore {
         // A spoken command's step is named for the Edit menu and the undo HUD (V8). Named
         // here, inside its own group: after the command, with the document's history
         // grouping by event, no group is open and naming one throws.
-        if step.isCommand { undoManager.setActionName(Self.commandStepName) }
+        if step.isCommand {
+            undoManager.setActionName(Self.commandStepName)
+        } else if let name = step.name {
+            undoManager.setActionName(name)
+        }
         undoManager.endUndoGrouping()
     }
 
@@ -1030,6 +1048,7 @@ final class DesignStore {
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand
+        reverse.name = step.name
         register(reverse)
         // An edit still open whose step this was goes on from here, as a step of its own.
         for edit in edits where edit.step === step { edit.step = nil }

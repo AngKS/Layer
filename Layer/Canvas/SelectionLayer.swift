@@ -309,10 +309,11 @@ final class CanvasDrags {
     /// The drag's step, given to the turn that cut it short, until the drag has ended.
     @ObservationIgnored private var handedOver: DesignStore.Edit?
 
-    /// Opens the drag's step as it begins.
-    private func beginEdit(model: AppModel) {
+    /// Opens the drag's step as it begins, named for what it does.
+    private func beginEdit(model: AppModel, named name: String = String(localized: "Move")) {
         if let edit { model.store.endEdit(edit) }
         edit = model.store.beginEdit()
+        model.store.name(edit, name)
     }
 
     /// Closes the drag's step, and nothing else under way.
@@ -502,7 +503,7 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, moving: [.element(ref)], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
-            beginEdit(model: model)
+            beginEdit(model: model, named: findsNewHome ? String(localized: "Move") : String(localized: "Resize"))
             dragged = [.element(ref)]
             self.findsNewHome = findsNewHome
             model.selection = .element(ref)

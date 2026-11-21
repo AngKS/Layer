@@ -454,6 +454,7 @@ final class AppModel {
         let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
         let ownsEdit = joined == nil
         let edit = joined ?? store.beginEditOfItsOwn(by: .app)
+        store.name(edit, String(localized: "Generate Screen"))
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
         let screen = store.act(for: edit) { () -> DesignScreen in
             let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
@@ -1397,6 +1398,7 @@ final class AppModel {
         // way, or that begins or ends meanwhile, has its own, and neither ends the other.
         // A drag the turn cuts short goes on as the turn, one step with it.
         turnEdit = store.beginEdit(by: .turn, takingOver: cuttingDragShort ? drags?.handOverEdit() : nil)
+        store.name(turnEdit, String(localized: "Rotate"))
         isAdjusting = true
         isTurning = true
         return true
@@ -1679,7 +1681,7 @@ final class AppModel {
     func beginScrubbing() {
         adjustmentEnd?.cancel()
         isScrubbing = true
-        if adjustment?.isOpen != true { adjustment = store.beginEdit(takingOnlyItsOwn: true) }
+        beginAdjustment()
     }
 
     func endScrubbing() {
@@ -1701,7 +1703,7 @@ final class AppModel {
     /// Only the panel's own: what else is done meanwhile, a delete or a lock, is a step of its
     /// own, and so is a change made once the selection has changed (M14).
     func adjusting(_ body: () -> Void) {
-        if adjustment?.isOpen != true { adjustment = store.beginEdit(takingOnlyItsOwn: true) }
+        beginAdjustment()
         store.act(for: adjustment, body)
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
@@ -1712,6 +1714,13 @@ final class AppModel {
             if let adjustment { store.endEdit(adjustment) }
             adjustment = nil
         }
+    }
+
+    /// Opens the panel's own edit, unless it is open already.
+    private func beginAdjustment() {
+        guard adjustment?.isOpen != true else { return }
+        adjustment = store.beginEdit(takingOnlyItsOwn: true)
+        store.name(adjustment, String(localized: "Format"))
     }
 
     /// Ends the panel's run of changes now rather than at its pause: the panel is for another

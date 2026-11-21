@@ -823,6 +823,7 @@ struct InkCanvas: UIViewRepresentable {
                 hasFollowedThisUse = false
                 if let toolEdit { model.store.endEdit(toolEdit) }
                 toolEdit = model.store.beginEdit()
+                model.store.name(toolEdit, String(localized: "Drawing"))
             }
         }
 
