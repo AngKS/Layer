@@ -26,9 +26,18 @@ final class DesignStore {
         didSet {
             guard content != oldValue else { return }
             views = nil
-            onChange?(content)
+            changeCount += 1
+            // A change made through `change(_:)` is told once it has been recorded: see there.
+            if !isChanging { onChange?(content) }
         }
     }
+
+    /// True while `change(_:)` makes a change, before it is recorded.
+    @ObservationIgnored private var isChanging = false
+
+    /// Counts the changes made to the content, by anyone, so that a step can tell whether
+    /// the change before its own was its own too.
+    @ObservationIgnored private var changeCount = 0
 
     /// The document's undo manager. Ink is in its history too, as changes to the design's
     /// drawings: PencilKit keeps none of its own here. Its history is capped, so a
@@ -39,17 +48,8 @@ final class DesignStore {
     static let undoLevels = 50
     /// Called with the new content after every change, including undo and redo.
     @ObservationIgnored var onChange: ((DesignContent) -> Void)?
-    /// The content as it was when the gradual edit in progress began.
-    @ObservationIgnored private var editStart: DesignContent?
-    /// Whether the gradual edit in progress has put its step in the history yet. It does
-    /// at its first change, not at its end, so that undo and redo pressed while it is still
-    /// open act on it like any other step: see `change(_:)`.
-    @ObservationIgnored private(set) var editIsInHistory = false
-    /// The step the gradual edit in progress put in the history, so that it can be taken
-    /// out again if the edit ends where it began.
-    @ObservationIgnored private var editStep: HistoryStep?
-    /// Moves on whenever the history does: a step made, undone or redone. A spoken
-    /// correction checks it to be sure the step on top is still its command's.
+    /// Moves on whenever the history does: a step made, undone, redone or taken out. A
+    /// spoken correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
 
     /// The views of the list, and where each element is in it, for the content as it is now.
@@ -399,6 +399,37 @@ final class DesignStore {
         return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
     }
 
+    /// Writes a screen being generated as its latest version says, over what was written
+    /// from the last (`written`, by place in the version). Each element written before
+    /// stays the same element and takes its new form, unless it has been changed or taken
+    /// away since: it is then the person's, left as they left it and written no more
+    /// (nil). Elements new to this version are added, and ones it no longer has go.
+    /// Whatever else is on the screen, put there by hand meanwhile, is left alone: each
+    /// line used to replace everything on the screen (G5, M1). Returns what is now written.
+    func writeGenerated(_ elements: [DesignElement], on screenID: DesignScreen.ID, over written: [DesignElement?]) -> [DesignElement?] {
+        guard screen(screenID) != nil else { return written }
+        var now: [DesignElement?] = []
+        change { content in
+            for (index, var element) in elements.enumerated() {
+                guard index < written.count else {
+                    now.append(content.add(element, to: screenID))
+                    continue
+                }
+                guard let last = written[index], content.element(last.id) == last else {
+                    now.append(nil)
+                    continue
+                }
+                element.id = last.id
+                content.update(last.id) { $0 = element }
+                now.append(content.element(last.id))
+            }
+            for case let last? in written.dropFirst(elements.count) where content.element(last.id) == last {
+                content.remove([last.id])
+            }
+        }
+        return now
+    }
+
     /// Gives an element to whatever it now lies on: the screen under its centre, or the
     /// open canvas when there is none. It keeps its size in points and its position on
     /// the canvas. Returns where the element now lives.
@@ -455,72 +486,185 @@ final class DesignStore {
 
     // MARK: Changes made gradually
 
-    /// Who has a change made in many small steps open. Each opens and closes its own part
-    /// of it; the change is one undo step from when the first opens it until the last
-    /// closes it, so that one ending while another goes on doesn't cut the other's short.
+    /// Who makes a change made gradually.
     enum Editor: Hashable, Sendable {
-        /// A drag, a slider, typing, or a screen being generated: `beginEdit()`. They
-        /// share one part, which may be opened again and again (a slider opens it with
-        /// every move) and is closed once.
+        /// A drag, a stroke, a scrub, typing, or a run of changes in the format panel.
         case hand
-        /// A spoken command: `beginHeldEdit()`.
-        case command
         /// The selection being turned, by its knob or two fingers.
         case turn
+        /// The app, working by itself over time or in several parts at once: a spoken
+        /// command, a screen being written, a Siri action, a template added. Only changes
+        /// made for it (`act(for:)`) are its own: one made by hand meanwhile never is.
+        case app
     }
 
-    /// Who has the change under way open; empty when none has. Its step began at `editStart`.
-    @ObservationIgnored private var editors: Set<Editor> = []
+    /// One change made gradually: a drag, a stroke, a turn, a scrub, a sitting of typing,
+    /// a run of changes in the format panel, a screen being written, a spoken command.
+    ///
+    /// Each is an undo step of its own, holding its own changes and nothing else. Several
+    /// can be under way at once, and one ending never ends another: they used to share one
+    /// edit, so a stroke ending during a generation closed the generation's step, and every
+    /// line written after it, or every frame of a drag after a conversion landed, was a
+    /// step of its own, which pushed the rest of the history out (C1). Undoing one leaves
+    /// what the others did meanwhile as it is.
+    @MainActor final class Edit {
+        /// Who is making it.
+        fileprivate(set) var editor: Editor
+        /// Its step, from its first change.
+        fileprivate var step: HistoryStep? {
+            didSet { later = [] }
+        }
+        /// Steps put in the history after its own while it was under way.
+        fileprivate var later: [Weak] = []
+        /// Edits begun and ended inside its own work, which are part of it.
+        fileprivate var nested = 0
+        fileprivate(set) var isOpen = true
 
-    /// Starts a change made in many small steps, such as a drag or typing. Everything
-    /// until `endEdit()` undoes as one step, together with whatever else is open meanwhile.
-    func beginEdit(by editor: Editor = .hand) {
-        // Only edits by hand are counted: they share one part, which any of them ends.
-        if editor == .hand { editBegins += 1 }
-        if editors.isEmpty { openEdit() }
-        editors.insert(editor)
+        fileprivate init(editor: Editor) {
+            self.editor = editor
+        }
+
+        /// Whether it has changed the design: its step is in the history.
+        var isInHistory: Bool { step != nil }
     }
 
-    /// Ends `editor`'s part of the change. Its step is closed once no one else's is open.
-    func endEdit(by editor: Editor = .hand) {
-        guard editors.remove(editor) != nil, editors.isEmpty, let start = editStart else { return }
-        editStart = nil
-        defer {
-            editIsInHistory = false
-            editStep = nil
+    fileprivate struct Weak {
+        weak var step: HistoryStep?
+    }
+
+    /// The edits under way, in the order they began.
+    @ObservationIgnored private var edits: [Edit] = []
+    /// The edit whose changes are being made, while one says so (`act(for:)`).
+    @ObservationIgnored private var acting: Edit?
+
+    /// Starts a change made in many small steps, such as a drag or typing. Everything made
+    /// for it (`act(for:)`) until `endEdit(_:)` undoes as one step. A change that says
+    /// nothing of whose it is joins the edit by hand begun last, or failing one the turn,
+    /// as a tap on a button in the middle of a drag does; it never joins the app's own.
+    ///
+    /// Begun inside an edit's own work, it is part of that edit.
+    @discardableResult
+    func beginEdit(by editor: Editor = .hand) -> Edit {
+        if let acting {
+            acting.nested += 1
+            return acting
         }
-        // A change that isn't undoable on its own, such as a suggested name, still joins
-        // the step of an edit it was made in.
-        guard editIsInHistory else {
-            if start != content { registerUndo(restoring: start) }
+        let edit = Edit(editor: editor)
+        edits.append(edit)
+        return edit
+    }
+
+    /// Starts a turn that goes on from `edit`, a drag the turn cut short, so that the two
+    /// are one step. Without an edit still under way, a turn of its own begins.
+    func beginEdit(by editor: Editor, takingOver edit: Edit?) -> Edit {
+        guard let edit, edit.isOpen, acting == nil else {
+            // Given up by the drag, it is this one's to end (review M-10).
+            if let edit, edit !== acting { endEdit(edit) }
+            return beginEdit(by: editor)
+        }
+        edit.editor = editor
+        return edit
+    }
+
+    /// Begins an edit of its own even inside another's work: for work that outlives what
+    /// started it, as a screen being written outlives a one-off step it was asked for in.
+    func beginEditOfItsOwn(by editor: Editor) -> Edit {
+        let edit = Edit(editor: editor)
+        edits.append(edit)
+        return edit
+    }
+
+    /// Ends `edit`. Its step is closed, and taken out again if it ended where it began.
+    /// Others under way go on.
+    func endEdit(_ edit: Edit) {
+        if edit.nested > 0 {
+            edit.nested -= 1
             return
         }
-        if start == content, let editStep {
-            // The edit put its step in at its first change and ended where it began: a
-            // generation that wrote nothing and took its screen away, or words typed and
-            // deleted. Its step would undo nothing, so it is taken out again rather than
-            // light up Undo for a press that does nothing. Nothing has been registered since
-            // (an undo or redo in the meantime opens a fresh edit), so it is the top step.
-            withdraw(editStep)
+        guard edit.isOpen else { return }
+        edit.isOpen = false
+        edits.removeAll { $0 === edit }
+        guard let step = edit.step else { return }
+        if step.changesNothing {
+            // Its changes undid themselves: a generation that wrote nothing and took its
+            // screen away, or words typed and deleted. Its step would undo nothing, so it
+            // is taken out again rather than light up Undo for a press that does nothing.
+            withdraw(step)
+            edit.step = nil
             return
         }
+        if edit.editor == .app { putOnTop(edit) }
         // The step went in at the first change, which is when the system was told there
         // was something to save. An autosave since then saved only part of the edit, and
         // nothing else would tell it about the rest.
         markNeedsSaving()
     }
 
-    /// Whether a gradual edit is under way, whoever has it open.
-    var isEditing: Bool { editStart != nil }
+    /// Ends the edit `editor` began last, for whoever holds no edit of its own.
+    func endEdit(by editor: Editor = .hand) {
+        if let acting, acting.nested > 0 {
+            acting.nested -= 1
+            return
+        }
+        guard let edit = edits.last(where: { $0.editor == editor }) else { return }
+        endEdit(edit)
+    }
 
-    /// Whether `editor` has its part of the change under way open.
-    func isEditing(by editor: Editor) -> Bool { editors.contains(editor) }
+    /// Ends every edit under way, as the design closes.
+    func endAllEdits() {
+        for edit in edits.reversed() {
+            edit.nested = 0
+            endEdit(edit)
+        }
+    }
 
-    /// Counts every edit by hand begun, so that whatever began one can tell whether anything
-    /// else has joined it since. Edits by hand don't nest: they share one part, and any end
-    /// by hand ends it. A spoken command's hold and a turn aren't counted: each has a part
-    /// of its own, which an end by hand leaves open.
-    @ObservationIgnored private(set) var editBegins = 0
+    /// Makes the changes `body` makes `edit`'s own, whatever else is under way. With no
+    /// edit, or one that has ended, they are made as if by hand.
+    func act<T>(for edit: Edit?, _ body: () throws -> T) rethrows -> T {
+        guard let edit, edit.isOpen else { return try body() }
+        let outer = acting
+        acting = edit
+        defer { acting = outer }
+        return try body()
+    }
+
+    /// The edit whose changes are being made now, while one says so (`act(for:)`).
+    var actingEdit: Edit? { acting }
+
+    /// Whether a gradual edit by hand, or a turn, is under way.
+    var isEditing: Bool { edits.contains { $0.editor != .app } }
+
+    /// Whether `editor` has an edit under way.
+    func isEditing(by editor: Editor) -> Bool { edits.contains { $0.editor == editor } }
+
+    /// Whether the edit by hand begun last has put its step in the history yet.
+    var editIsInHistory: Bool { edits.last { $0.editor != .app }?.step != nil }
+
+    /// Puts the step of the app's own work that has just finished, a screen written or a
+    /// spoken command, on top of the history, so that undo, or "No, …", takes it back first.
+    /// It went in at its first change, and steps by hand made since are above it. It moves
+    /// only when none of them touched what it did: taken back first then, it would take
+    /// away a screen with something added to it by hand, which would be left on nothing.
+    private func putOnTop(_ edit: Edit) {
+        // Not while something can be redone: registering a step clears Redo (review I-3).
+        guard let step = edit.step, let undoManager, !undoManager.isUndoing, !undoManager.isRedoing, !undoManager.canRedo else { return }
+        let above = edit.later.compactMap(\.step)
+        guard !above.isEmpty, !above.contains(where: { $0.touched.meets(step.touched) }) else { return }
+        let moved = HistoryStep(runs: step.runs)
+        moved.isCommand = step.isCommand
+        withdraw(step)
+        register(moved)
+        edit.step = moved
+    }
+
+    /// How many runs `edit`'s step holds: the design is kept twice for each. For tests.
+    func recordedRuns(of edit: Edit) -> Int { edit.step?.runs.count ?? 0 }
+
+    /// Whether `edit`'s step is the one undo would take back now.
+    func isLastStep(_ edit: Edit) -> Bool {
+        guard let step = edit.step else { return false }
+        return step === lastStep
+    }
 
     /// Tells the system the document has changes to save, without a step in the history.
     /// The system marks a document as changed when its undo manager is about to close a
@@ -536,29 +680,41 @@ final class DesignStore {
         NotificationCenter.default.post(name: .NSUndoManagerWillCloseUndoGroup, object: undoManager)
     }
 
-    private func openEdit() {
-        editStart = content
-        editIsInHistory = false
-        editStep = nil
-    }
+    /// The spoken command under way, whose changes are one step: see `beginHeldEdit()`.
+    @ObservationIgnored private(set) var heldEdit: Edit?
 
     /// Whether a spoken command is holding a step open: see `beginHeldEdit()`.
-    var isHoldingEdit: Bool { isEditing(by: .command) }
+    var isHoldingEdit: Bool { heldEdit != nil }
 
-    /// Starts an edit that stays open until `endHeldEdit()`, whatever begins and ends
-    /// inside it. A spoken command makes several changes; held, they undo as the one
-    /// step the command was. What the command itself does inside the hold doesn't call
-    /// `beginEdit()`: that is how an edit by hand is told from it. An edit already under
-    /// way goes on inside the hold.
-    func beginHeldEdit() {
-        beginEdit(by: .command)
+    /// Starts the step of a spoken command, which stays open until `endHeldEdit()`. What the
+    /// command does is made for it (`actingForCommand`) and undoes as the one step the
+    /// command was. A change by hand made meanwhile, ink drawn or a drag, is a step of its
+    /// own, which neither undoing the command nor a spoken correction of it takes back (V1).
+    @discardableResult
+    func beginHeldEdit() -> Edit {
+        if let heldEdit {
+            heldEdit.nested += 1
+            return heldEdit
+        }
+        let edit = beginEdit(by: .app)
+        heldEdit = edit
+        return edit
     }
 
-    /// Ends the hold. If an edit by hand is still under way inside it (a finger still
-    /// dragging when the command finishes), the step stays open for that edit to close:
-    /// closed here, every further move of the drag would be an undo step of its own.
+    /// Ends the spoken command's step. A drag or turn still under way goes on in its own.
     func endHeldEdit() {
-        endEdit(by: .command)
+        guard let heldEdit else { return }
+        if heldEdit.nested > 0 {
+            heldEdit.nested -= 1
+            return
+        }
+        self.heldEdit = nil
+        endEdit(heldEdit)
+    }
+
+    /// Makes the changes `body` makes the spoken command's under way, if there is one.
+    func actingForCommand<T>(_ body: () throws -> T) rethrows -> T {
+        try act(for: heldEdit, body)
     }
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {
@@ -580,16 +736,26 @@ final class DesignStore {
         change(body)
     }
 
-    /// Makes several changes one undo step. Inside a gradual edit that is already under
-    /// way they join that edit instead.
+    /// Makes several changes one undo step. Inside a gradual edit by hand that is already
+    /// under way, or as part of an edit's own work, they join that edit instead.
     func asOneStep(_ body: () -> Void) {
-        guard editStart == nil else {
+        guard acting == nil, !isEditing else {
             body()
             return
         }
-        beginEdit()
-        body()
-        endEdit()
+        asOwnStep(body)
+    }
+
+    /// Makes several changes one undo step of their own, even in the middle of a drag or a
+    /// stroke, which goes on as its own step: a template added, a drawing read on request,
+    /// a Siri action. They used to open and close the edit by hand that was shared, which
+    /// ended the drag's step under it (M3). As part of an edit's own work, they join it.
+    @discardableResult
+    func asOwnStep<T>(_ body: () throws -> T) rethrows -> T {
+        if acting != nil { return try body() }
+        let edit = beginEdit(by: .app)
+        defer { endEdit(edit) }
+        return try act(for: edit, body)
     }
 
     // MARK: Undo
@@ -602,32 +768,160 @@ final class DesignStore {
         return kept
     }
 
-    /// Applies a change. Inside `beginEdit()`…`endEdit()` it joins that edit's undo step;
-    /// on its own it is its own undo step.
+    /// Applies a change. Made for an edit (`act(for:)`), it joins that edit's step; one
+    /// that doesn't say whose it is joins the edit by hand begun last; on its own it is its
+    /// own undo step.
     ///
-    /// An edit's step goes in the history at its first change, and restores the content
-    /// as it was when the edit began. Undo takes the content as it is then, so the step
-    /// still undoes everything the edit went on to do. Put in at the end instead, an undo
-    /// pressed meanwhile (the toolbar's, while a spoken command or a generation holds its
-    /// step open) took back the step before, lost the edit's changes so far, and was
-    /// itself undone when the edit closed.
+    /// An edit's step goes in the history at its first change. Put in at the end instead,
+    /// an undo pressed meanwhile (the toolbar's, while a spoken command or a generation
+    /// holds its step open) took back the step before, lost the edit's changes so far, and
+    /// was itself undone when the edit closed.
     private func change(_ body: (inout DesignContent) -> Void) {
-        guard let start = editStart else {
-            let before = content
-            body(&content)
-            if before != content { registerUndo(restoring: before) }
-            return
-        }
+        let before = content
+        let count = changeCount
+        isChanging = true
         body(&content)
-        if !editIsInHistory, content != start {
-            editIsInHistory = true
-            editStep = registerUndo(restoring: start)
+        isChanging = false
+        // Whether it changed anything, as the content's own comparison found.
+        guard changeCount != count else { return }
+        let owner = acting ?? edits.last { $0.editor == .hand } ?? edits.last { $0.editor == .turn }
+        let step: HistoryStep
+        if let existing = owner?.step {
+            step = existing
+        } else {
+            step = HistoryStep()
+            step.isCommand = owner != nil && owner === heldEdit
+            owner?.step = step
+            register(step)
         }
+        step.record(from: before, to: content, change: changeCount)
+        // Told only now that it is recorded. Whatever the notice sets off, such as the ink
+        // canvas following an eraser, is a change of its own, recorded in its own step: told
+        // before, it went into this step as well (review I-1).
+        onChange?(content)
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
-    /// that one step can be taken out without the rest.
-    private final class HistoryStep: Sendable {}
+    /// that one step can be taken out without the rest. It holds the step's own changes, as
+    /// runs of the design before and after them: changes made between its runs by anyone
+    /// else aren't the step's, and undoing it leaves them as they are.
+    @MainActor fileprivate final class HistoryStep {
+        struct Run {
+            var before: DesignContent
+            var after: DesignContent
+        }
+
+        private(set) var runs: [Run] = []
+        /// Whether it is what a spoken command did: the only kind of step the command's own
+        /// undo tool takes back.
+        var isCommand = false
+        /// `changeCount` after the step's last change.
+        private var lastChange = -1
+
+        init(runs: [Run] = []) {
+            self.runs = runs
+        }
+
+        /// Adds a change of the step's own. One that follows straight on from its last
+        /// extends that run: an edit nothing else interrupts is one run, from its start to
+        /// where it is now, as a snapshot would be. So does one after changes by others that
+        /// touched nothing the run did, which the run then takes in at both ends: two edits
+        /// taking turns frame by frame, a drag and a turn, kept two designs for each frame
+        /// (review M-1).
+        func record(from before: DesignContent, to after: DesignContent, change: Int) {
+            defer { lastChange = change }
+            guard let last = runs.last else {
+                runs.append(Run(before: before, after: after))
+                return
+            }
+            if lastChange == change - 1 {
+                runs[runs.count - 1].after = after
+            } else if !Touched(from: last.after, to: before).meets(Touched(from: last.before, to: last.after)) {
+                runs[runs.count - 1] = Run(before: last.before.reverting(last.after, to: before), after: after)
+            } else {
+                runs.append(Run(before: before, after: after))
+            }
+        }
+
+        /// The design with the step's changes taken back.
+        func undone(from content: DesignContent) -> DesignContent {
+            runs.reversed().reduce(content) { $0.reverting($1.after, to: $1.before) }
+        }
+
+        /// Whether its changes undo themselves, so that taking it back would change nothing.
+        var changesNothing: Bool {
+            guard let last = runs.last?.after else { return true }
+            return undone(from: last) == last
+        }
+
+        /// What its changes touched.
+        var touched: Touched {
+            runs.reduce(into: Touched()) { $0.formUnion(Touched(from: $1.before, to: $1.after)) }
+        }
+    }
+
+    /// What a change touched: the elements it added, took away or altered, the screens it
+    /// added, took away or altered, and the screens it put an element on or took one off,
+    /// and whether it changed the board's name, its canvas, or what wasn't understood.
+    fileprivate struct Touched {
+        var elements: Set<DesignElement.ID> = []
+        var screens: Set<DesignScreen.ID> = []
+        var board = false
+
+        init() {}
+
+        init(from before: DesignContent, to after: DesignContent) {
+            board = before.boardDiffers(from: after)
+            let was = Dictionary(before.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let now = Dictionary(after.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for id in Set(was.keys).union(now.keys) where was[id] != now[id] {
+                elements.insert(id)
+                // Added, taken away or moved to another host: the host is touched too.
+                if was[id]?.parent != now[id]?.parent || was[id] == nil || now[id] == nil {
+                    if let parent = was[id]?.parent { screens.insert(parent) }
+                    if let parent = now[id]?.parent { screens.insert(parent) }
+                }
+            }
+            let screensBefore = Dictionary(before.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let screensAfter = Dictionary(after.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for id in Set(screensBefore.keys).union(screensAfter.keys) where screensBefore[id] != screensAfter[id] {
+                screens.insert(id)
+            }
+        }
+
+        mutating func formUnion(_ other: Touched) {
+            elements.formUnion(other.elements)
+            screens.formUnion(other.screens)
+            board = board || other.board
+        }
+
+        func meets(_ other: Touched) -> Bool {
+            (board && other.board) || !elements.isDisjoint(with: other.elements) || !screens.isDisjoint(with: other.screens)
+        }
+    }
+
+    /// The steps undo would take back, oldest first, as the history holds them: one is
+    /// added as it is registered, and taken off as it is undone or taken out. Those the
+    /// history lets go of, past its cap, go by themselves.
+    @ObservationIgnored private var undoable: [Weak] = []
+
+    /// The step on top of the history: the one undo would take back.
+    private var lastStep: HistoryStep? { undoable.last { $0.step != nil }?.step }
+
+    /// The steps redo would put back, oldest first: added as undo registers them, taken off
+    /// as they are redone, and all gone once a new step is made.
+    @ObservationIgnored private var redoable: [Weak] = []
+
+    private func forget(_ step: HistoryStep) {
+        undoable.removeAll { $0.step == nil || $0.step === step }
+        redoable.removeAll { $0.step == nil || $0.step === step }
+    }
+
+    /// Whether the step redo would put back now is a spoken command's.
+    var nextRedoIsCommand: Bool { redoable.last { $0.step != nil }?.step?.isCommand == true }
+
+    /// Whether the step undo would take back now is a spoken command's.
+    var lastStepIsCommand: Bool { lastStep?.isCommand == true }
 
     /// Steps to take out of the history once the group they are in has closed.
     @ObservationIgnored private var stepsToWithdraw: [HistoryStep] = []
@@ -641,6 +935,7 @@ final class DesignStore {
     private func withdraw(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
+        forget(step)
         guard undoManager.groupingLevel > 0 else {
             undoManager.removeAllActions(withTarget: step)
             Self.tellHistoryChanged(undoManager)
@@ -674,24 +969,57 @@ final class DesignStore {
         if let groupCloseObserver { NotificationCenter.default.removeObserver(groupCloseObserver) }
     }
 
-    @discardableResult
-    private func registerUndo(restoring previous: DesignContent) -> HistoryStep? {
-        guard let undoManager else { return nil }
+    /// What Undo and Redo call a spoken command's step.
+    static let commandStepName = String(localized: "Voice Command")
+
+    private func register(_ step: HistoryStep) {
+        guard let undoManager else { return }
         historyMark += 1
-        let step = HistoryStep()
+        // Registering while undoing makes the step the redo step; a new step clears redo.
+        if undoManager.isUndoing {
+            redoable.append(Weak(step: step))
+        } else {
+            undoable.append(Weak(step: step))
+            if !undoManager.isRedoing { redoable = [] }
+        }
+        if !undoManager.isUndoing {
+            for edit in edits where edit.step != nil && edit.step !== step { edit.later.append(Weak(step: step)) }
+        }
+        // Each step is a group of its own, even in the document's history, which groups what
+        // is registered in one turn of the run loop: steps begun in the same turn, a drag's
+        // first frame and a turn's, or a command's change and a stroke, shared a group, and
+        // one undo, or a spoken correction, took back both.
+        let groupsByEvent = undoManager.groupsByEvent
+        if groupsByEvent, undoManager.groupingLevel == 0 { undoManager.groupsByEvent = false }
+        defer { undoManager.groupsByEvent = groupsByEvent }
         undoManager.beginUndoGrouping()
         // The history holds its target weakly: the step is kept alive by its own action.
         undoManager.registerUndo(withTarget: step) { [weak self, step] _ in
             withExtendedLifetime(step) {}
-            guard let store = self else { return }
-            let current = store.content
-            store.content = previous
-            // Registering while undoing makes this the redo step, and the reverse.
-            store.registerUndo(restoring: current)
-            // An edit still open goes on from here, as a step of its own.
-            if store.editStart != nil { store.openEdit() }
+            self?.takeBack(step)
         }
+        // A spoken command's step is named for the Edit menu and the undo HUD (V8). Named
+        // here, inside its own group: after the command, with the document's history
+        // grouping by event, no group is open and naming one throws.
+        if step.isCommand { undoManager.setActionName(Self.commandStepName) }
         undoManager.endUndoGrouping()
-        return step
+    }
+
+    /// Undoes a step, or redoes one, by taking back its own changes, and registers the
+    /// reverse.
+    private func takeBack(_ step: HistoryStep) {
+        forget(step)
+        let current = content
+        var result = step.undone(from: current)
+        // A screen the step took away may have had something put on it by another edit
+        // since: it goes onto the open canvas where it was, rather than on no screen, drawn
+        // nowhere and saved so (review C-1).
+        result.rehostElementsOnMissingScreens(from: current)
+        content = result
+        let reverse = HistoryStep(runs: [.init(before: current, after: result)])
+        reverse.isCommand = step.isCommand
+        register(reverse)
+        // An edit still open whose step this was goes on from here, as a step of its own.
+        for edit in edits where edit.step === step { edit.step = nil }
     }
 }

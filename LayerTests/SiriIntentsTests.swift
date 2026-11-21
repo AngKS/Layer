@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import Testing
 import UIKit
 @testable import Layer
@@ -139,6 +140,453 @@ struct DesignLibraryTests {
         #expect(summary.content.screens.map(\.name) == ["Login"])
         #expect(summary.content.screens[0].elements.count == 1)
     }
+
+    /// A folder with one design in it, named "Trip" on disk and "Travel" inside.
+    private func savedDesign() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var file = DesignFile()
+        file.content.title = "Travel"
+        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1)]
+        let url = folder.appendingPathComponent("Trip.layer")
+        try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        return url
+    }
+
+    @Test func aDesignICloudHasNotDownloadedIsListedByItsNameWithoutBeingRead() throws {
+        let url = try savedDesign()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        // Reading it would download it, and wait for that.
+        let listed = DesignLibrary.listed(url, isDownloaded: { _ in false })
+        #expect(listed.title == "Trip")
+        #expect(listed.content.screens.isEmpty)
+        #expect(listed.id == DesignLibrary.id(for: url))
+
+        let downloaded = DesignLibrary.listed(url, isDownloaded: { _ in true })
+        #expect(downloaded.title == "Travel")
+        #expect(downloaded.content.screens.map(\.name) == ["Login"])
+        // A design asked for by name is read whatever it takes.
+        #expect(DesignLibrary.read(url).title == "Travel")
+    }
+
+    @Test func everyDesignIsListedWithThoseICloudHasNotDownloadedByTheirNamesAlone() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent(".Trash"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // A design, one iCloud keeps here only as its placeholder, one in a hidden folder,
+        // and something that isn't a design.
+        var file = DesignFile()
+        file.content.title = "Travel"
+        try file.wrapper().write(to: folder.appendingPathComponent("Real.layer"), options: .atomic, originalContentsURL: nil)
+        try Data().write(to: folder.appendingPathComponent(".Away.layer.icloud"))
+        try file.wrapper().write(to: folder.appendingPathComponent(".Trash/Old.layer"), options: .atomic, originalContentsURL: nil)
+        try Data("notes".utf8).write(to: folder.appendingPathComponent("notes.txt"))
+
+        let listing = DesignLibrary.list(in: [folder], isDownloaded: { _ in true })
+        #expect(Set(listing.designs.map(\.url.lastPathComponent)) == ["Real.layer", "Away.layer"])
+        #expect(listing.folders == [folder])
+        let away = try #require(listing.designs.first { $0.url.lastPathComponent == "Away.layer" })
+        #expect(!away.isRead)
+        #expect(away.title == "Away")
+        #expect(away.id == DesignLibrary.id(for: folder.appendingPathComponent("Away.layer")))
+        #expect(listing.designs.first { $0.url.lastPathComponent == "Real.layer" }?.title == "Travel")
+
+        // The list goes by what iCloud has downloaded, and reads nothing that it hasn't.
+        let undownloaded = DesignLibrary.list(in: [folder], isDownloaded: { _ in false })
+        #expect(undownloaded.designs.allSatisfy { !$0.isRead && $0.content.screens.isEmpty })
+        #expect(undownloaded.designs.contains { $0.title == "Real" })
+    }
+
+    @Test func aDesignMissingFromTheListHasGoneOnlyIfItsFolderWasLookedThrough() {
+        let listing = DesignLibrary.Listing(designs: [], folders: [DesignLibrary.roots.local])
+        #expect(listing.hasGone("local:Gone.layer"))
+        #expect(!listing.hasGone("icloud:There.layer"), "iCloud's folder wasn't looked through")
+        #expect(listing.hasGone("file:/elsewhere/Opened.layer"), "a design opened from outside Layer's folders")
+        #expect(!DesignLibrary.Listing(designs: [], folders: []).hasGone("local:Gone.layer"))
+    }
+
+    @Test func aDesignUnchangedSinceItWasListedIsNotReadAgain() throws {
+        let url = try savedDesign()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+
+        // The design inside changes, but its dates are put back as they were.
+        let design = url.appendingPathComponent(DesignPackage.design)
+        let dates = try [url, design].map { try #require(try FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date) }
+        var renamed = try DesignFile(wrapper: FileWrapper(url: url))
+        renamed.content.title = "Holiday"
+        try renamed.wrapper().fileWrappers?[DesignPackage.design]?.regularFileContents?.write(to: design)
+        for (item, date) in zip([url, design], dates) {
+            try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: item.path)
+        }
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+
+        // Changed in the usual way, it is read again.
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(5)], ofItemAtPath: design.path)
+        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Holiday")
+    }
+}
+
+/// A Spotlight index kept in memory, to see what the indexer leaves in it.
+private actor FakeSpotlight: SpotlightIndex {
+    private(set) var designs: Set<String> = []
+    private(set) var screens: Set<String> = []
+
+    func index(designs entities: [DesignEntity]) { designs.formUnion(entities.map(\.id)) }
+    func index(screens entities: [ScreenEntity]) { screens.formUnion(entities.map(\.id)) }
+    func delete(designs ids: [String]) { designs.subtract(ids) }
+    func delete(screens ids: [String]) { screens.subtract(ids) }
+    func deleteAll() {
+        designs = []
+        screens = []
+    }
+}
+
+/// Defaults that count how often the indexer's record of what is in the index is read and written.
+private final class CountingDefaults: UserDefaults {
+    let counts = OSAllocatedUnfairLock(initialState: (reads: 0, writes: 0))
+
+    override func object(forKey defaultName: String) -> Any? {
+        if defaultName == "spotlightIndexedScreens" { counts.withLock { $0.reads += 1 } }
+        return super.object(forKey: defaultName)
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName == "spotlightIndexedScreens" { counts.withLock { $0.writes += 1 } }
+        super.set(value, forKey: defaultName)
+    }
+}
+
+/// One test at a time: each swaps the indexer's index and record for its own.
+@Suite("Spotlight's index of designs", .serialized)
+@MainActor
+struct DesignIndexTests {
+    /// Runs `body` with the indexer writing to `index` and keeping its record in `record`.
+    private func using(_ index: FakeSpotlight, record: UserDefaults, suite: String, _ body: () async throws -> Void) async rethrows {
+        let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
+        DesignIndexer.spotlight = index
+        DesignIndexer.recordDefaults = record
+        defer {
+            DesignIndexer.spotlight = systemIndex
+            DesignIndexer.recordDefaults = systemRecord
+            record.removePersistentDomain(forName: suite)
+        }
+        try await body()
+    }
+
+    @Test func aLaunchPassReadsAndWritesItsRecordOnce() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(CountingDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let designs = (0..<6).map { snapshot("local:Design \($0) \(tag).layer", screens: ["A", "B"]) }
+        await using(index, record: record, suite: suite) {
+            for _ in 0..<2 {
+                record.counts.withLock { $0 = (0, 0) }
+                await DesignIndexer.reindex(designs)
+                let counts = record.counts.withLock { $0 }
+                #expect(counts.reads <= 1, "read \(counts.reads) times")
+                #expect(counts.writes == 1, "written \(counts.writes) times")
+            }
+        }
+    }
+
+    @Test func withoutARecordToReadTheIndexIsBuiltAgain() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let kept = snapshot("local:Kept \(tag).layer", screens: ["Login"])
+        let stale = snapshot("local:Stale \(tag).layer", screens: ["Old"])
+        await using(index, record: record, suite: suite) {
+            await DesignIndexer.reindex([kept, stale])
+            // The record is lost, though a pass once completed: what is in the index isn't known.
+            record.removeObject(forKey: "spotlightIndexedScreens")
+            await DesignIndexer.reindex([kept])
+            #expect(!(await index.designs.contains(stale.id)))
+            #expect(!(await index.screens.contains(stale.screens[0].id)))
+            #expect(await index.designs.contains(kept.id))
+        }
+    }
+
+    @Test func aDesignRenamedAfterItClosedIsIndexedUnderItsNewIdentifier() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try await using(index, record: record, suite: suite) {
+            let model = AppModel(document: LayerDocument(file: DesignFile()))
+            model.fileURL = folder.appendingPathComponent("Untitled.layer")
+            model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+            model.close()
+            // The rename the board's name started finishes now.
+            model.fileURL = folder.appendingPathComponent("Login.layer")
+            let renamed = try #require(model.designID)
+            for _ in 0..<40 where !(await index.designs.contains(renamed)) {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            #expect(await index.designs.contains(renamed))
+            #expect(await index.screens.count { $0.hasPrefix(renamed) } == 1)
+        }
+    }
+
+    @Test func designsInAFolderThatCouldNotBeLookedThroughAreKept() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let tag = UUID().uuidString
+        let local = snapshot("local:Here \(tag).layer", screens: ["Login"])
+        let cloud = snapshot("icloud:There \(tag).layer", screens: ["Map"])
+        await using(index, record: record, suite: suite) {
+            await DesignIndexer.reindex([local, cloud])
+            // iCloud's folder can't be found this launch: its designs aren't listed, but
+            // they haven't gone.
+            await DesignIndexer.reindex([local]) { !$0.hasPrefix("icloud:") }
+            #expect(await index.designs.contains(cloud.id))
+            #expect(await index.screens.contains(cloud.screens[0].id))
+        }
+    }
+
+    private func snapshot(_ id: String, screens names: [String]) -> DesignSnapshot {
+        var content = DesignContent()
+        for (index, name) in names.enumerated() {
+            content.addScreen(DesignScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1))
+        }
+        return DesignSnapshot(id: id, name: name(of: id), content: content, modified: nil)
+    }
+
+    private func name(of id: String) -> String {
+        String(id.split(separator: ":").last ?? "")
+    }
+
+    @Test func aLaunchPassKeepsWhatItCouldNotReadAndTakesOutWhatHasGone() async throws {
+        let index = FakeSpotlight()
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
+        DesignIndexer.spotlight = index
+        DesignIndexer.recordDefaults = record
+        defer {
+            DesignIndexer.spotlight = systemIndex
+            DesignIndexer.recordDefaults = systemRecord
+            record.removePersistentDomain(forName: suite)
+        }
+
+        let tag = UUID().uuidString
+        let kept = snapshot("local:Kept \(tag).layer", screens: ["Login", "Home"])
+        let away = snapshot("icloud:Away \(tag).layer", screens: ["Map", "Trips"])
+        let gone = snapshot("local:Gone \(tag).layer", screens: ["Old"])
+        // A launch that read all three.
+        await DesignIndexer.reindex([kept, away, gone])
+        #expect(await index.designs.isSuperset(of: [kept.id, away.id, gone.id]))
+
+        // The next: Kept has lost a screen, Away is in iCloud and not on this iPad, and
+        // Gone has been deleted.
+        var fewer = kept.content
+        fewer.removeScreen(kept.content.screens[1].id)
+        let keptNow = DesignSnapshot(id: kept.id, name: kept.name, content: fewer, modified: nil)
+        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: DesignContent(), modified: nil, isRead: false)
+        await DesignIndexer.reindex([keptNow, awayNow])
+
+        let designs = await index.designs, screens = await index.screens
+        #expect(designs.contains(kept.id))
+        #expect(designs.contains(away.id))
+        #expect(Set(away.screens.map(\.id)).isSubset(of: screens), "what couldn't be read stays as it was indexed")
+        #expect(screens.contains(keptNow.screens[0].id))
+        #expect(!screens.contains(kept.screens[1].id), "a screen that has gone is taken out")
+        #expect(!designs.contains(gone.id), "a design that has gone is taken out")
+        #expect(!screens.contains(gone.screens[0].id))
+    }
+}
+
+@Suite("Opening designs")
+@MainActor
+struct OpeningDesignTests {
+    /// What happened, in order.
+    private final class Steps {
+        var all: [String] = []
+    }
+
+    @Test func oneOpeningWaitsForTheOneBefore() async {
+        let turns = OneAtATime(limit: .seconds(2))
+        let steps = Steps()
+        let opens = ["A", "B"].map { name in
+            Task {
+                try await turns.run {
+                    steps.all.append("start \(name)")
+                    try? await Task.sleep(for: .milliseconds(50))
+                    steps.all.append("end \(name)")
+                }
+            }
+        }
+        for open in opens { _ = try? await open.value }
+        #expect(steps.all == ["start A", "end A", "start B", "end B"], "\(steps.all)")
+    }
+
+    /// A wait that may never end, let go when the test is done with it.
+    private final class Held {
+        var continuation: CheckedContinuation<Void, Never>?
+        func letGo() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    private func couldNotOpen(_ error: any Error) -> Bool {
+        if case .couldNotOpen? = error as? LayerIntentError { true } else { false }
+    }
+
+    /// What `task` came to, if it finished within `limit`. Nil if it is still waiting. The
+    /// limits the tests give are generous: with every suite running at once, the main
+    /// thread can be busy for seconds; what they check would otherwise never finish.
+    private final class Box<T> {
+        var outcome: Result<T, any Error>?
+    }
+
+    private func outcome<T>(of task: Task<T, any Error>, within limit: Duration) async -> Result<T, any Error>? {
+        let box = Box<T>()
+        Task { box.outcome = await task.result }
+        let deadline = ContinuousClock.now + limit
+        while box.outcome == nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return box.outcome
+    }
+
+    @Test func aTurnThatRunsOverGivesUpAndTheNextGoes() async throws {
+        let turns = OneAtATime(limit: .milliseconds(300))
+        let held = Held()
+        defer { held.letGo() }
+        let stuck = Task { try await turns.run { await withCheckedContinuation { held.continuation = $0 } } }
+        let next = Task { try await turns.run { "next" } }
+
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(10)) else {
+            Issue.record("the stuck turn should have given up")
+            return
+        }
+        #expect(couldNotOpen(error), "\(error)")
+        guard case .success(let value)? = await outcome(of: next, within: .seconds(10)) else {
+            Issue.record("the next turn should have gone")
+            return
+        }
+        #expect(value == "next")
+    }
+
+    @Test func aWaiterThatIsCancelledLeavesTheQueue() async throws {
+        let turns = OneAtATime(limit: .seconds(30))
+        let held = Held()
+        defer { held.letGo() }
+        let stuck = Task { try await turns.run { await withCheckedContinuation { held.continuation = $0 } } }
+        let waiter = Task { try await turns.run { "never" } }
+        for _ in 0..<50 where turns.queued == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(turns.queued == 1)
+
+        waiter.cancel()
+        guard case .failure(let error)? = await outcome(of: waiter, within: .seconds(10)) else {
+            Issue.record("a cancelled waiter should stop waiting")
+            return
+        }
+        #expect(error is CancellationError)
+        #expect(turns.queued == 0)
+        _ = stuck
+    }
+
+    /// A window with a stand-in browser and a design presented over it.
+    private func browserShowingADesign(animated: Bool) throws -> (window: UIWindow, browser: UIViewController, design: UIViewController) {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let browser = UIViewController(), design = UIViewController()
+        window.rootViewController = browser
+        window.isHidden = false
+        browser.present(design, animated: animated)
+        return (window, browser, design)
+    }
+
+    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: false)
+        defer { window.isHidden = true }
+        #expect(browser.presentedViewController === design)
+
+        var steps: [String] = []
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        try await DocumentBrowser.pick(url, in: browser) { presented in
+            steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
+        } picking: { picked in
+            steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
+        }
+        #expect(steps == ["readied while shown", "picked B.layer"])
+        #expect(browser.presentedViewController == nil)
+    }
+
+    @Test func aDismissThatNeverFinishesGivesUpAndTheNextOpenGoes() async throws {
+        let (window, browser, _) = try browserShowingADesign(animated: false)
+        defer { window.isHidden = true }
+        let turns = OneAtATime(limit: .seconds(5))
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let stuck = Task {
+            try await turns.run {
+                try await DocumentBrowser.pick(url, in: browser, limit: .milliseconds(300), dismissing: { _, _ in }) { _ in } picking: { _ in
+                    Issue.record("picked over a design that wasn't put away")
+                }
+            }
+        }
+        let next = Task { try await turns.run { "next" } }
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(10)) else {
+            Issue.record("an open whose dismiss never finishes should give up")
+            return
+        }
+        #expect(couldNotOpen(error), "\(error)")
+        guard case .success? = await outcome(of: next, within: .seconds(10)) else {
+            Issue.record("the next open should have gone")
+            return
+        }
+    }
+
+    @Test func anOpenThatTimedOutNeverPicksLate() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: false)
+        defer { window.isHidden = true }
+        for _ in 0..<100 where design.isBeingPresented { try await Task.sleep(for: .milliseconds(10)) }
+        // The turn runs out while the dismiss is still on its way; the dismiss then finishes.
+        let turns = OneAtATime(limit: .milliseconds(100))
+        let steps = Steps()
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let open = Task {
+            try await turns.run {
+                try await DocumentBrowser.pick(url, in: browser, dismissing: { _, done in
+                    steps.all.append("dismissing")
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        steps.all.append("dismissed")
+                        done()
+                    }
+                }) { _ in steps.all.append("prepared") } picking: { _ in
+                    steps.all.append("picked")
+                }
+            }
+        }
+        guard case .failure? = await outcome(of: open, within: .seconds(10)) else {
+            Issue.record("the open should have run out of time")
+            return
+        }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(steps.all == ["prepared", "dismissing", "dismissed"], "a design was picked after the open gave up: \(steps.all)")
+    }
+
+    @Test func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: true)
+        defer { window.isHidden = true }
+        #expect(design.isBeingPresented)
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let picking = Task {
+            try await DocumentBrowser.pick(url, in: browser) { _ in } picking: { _ in }
+        }
+        guard case .success? = await outcome(of: picking, within: .seconds(10)) else {
+            Issue.record("a dismiss tried while the design was still coming up was never finished")
+            return
+        }
+        #expect(browser.presentedViewController == nil)
+    }
 }
 
 @Suite("Actions on an open design")
@@ -182,6 +630,154 @@ struct DesignActionTests {
         #expect(siriUndo.canUndo)
         siriUndo.undo()
         #expect(model.store.content == before)
+    }
+
+    @Test func siriUndoTakesBackOnlyItsOwnAction() {
+        let model = model()
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Rename Design") { model.store.setTitle("A") }
+        // Then a screen is added by hand.
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        siri.undo()
+        #expect(model.store.title == nil)
+        #expect(model.store.screens.count == 1)
+        // Taking it back is a step of the design's own, which its Undo can take back in turn.
+        model.store.undoManager?.undo()
+        #expect(model.store.title == "A")
+        #expect(model.store.screens.count == 1)
+    }
+
+    @Test func siriUndoLeavesWhatWasChangedSinceAndBringsBackWhatItTookAway() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let other = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
+        let title = DesignStore.newElement(.title), button = DesignStore.newElement(.button), note = DesignStore.newElement(.body)
+        model.store.setElements([title, button, note], on: screen.id, replacing: false)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        let red = RGBColor(hex: 0xFF0000)
+
+        // One action recolours the title and the button, deletes the note, adds a symbol
+        // and moves the second screen.
+        DesignActions.edit(model, undoManager: siri, actionName: "Restyle") {
+            model.store.update(.init(host: .screen(screen.id), element: title.id)) { $0.tint = red }
+            model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.tint = red }
+            model.store.delete(.init(host: .screen(screen.id), element: note.id))
+            model.store.setElements([DesignStore.newElement(.symbol)], on: screen.id, replacing: false)
+            model.store.updateScreen(other.id) { $0.origin.x = 900 }
+        }
+        // By hand since: the button is given words of its own, and a screen is added.
+        model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.text = "Go" }
+        let third = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 1400, y: 0), scale: 1))
+
+        siri.undo()
+        let elements = try #require(model.store.screen(screen.id)?.elements)
+        #expect(elements.map(\.id) == [title.id, button.id, note.id], "the note is back where it was, the symbol gone")
+        #expect(elements[0].tint == title.tint, "the title is as it was")
+        #expect(elements[1].tint == red && elements[1].text == "Go", "the button, changed since, is left as it is")
+        #expect(model.store.screen(other.id)?.origin.x == 500)
+        #expect(model.store.screen(third.id) != nil)
+    }
+
+    @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
+        let model = model()
+        let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
+        let button = DesignStore.newElement(.button)
+        model.store.setElements([button], on: first.id, replacing: false)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Move Button") {
+            model.store.apply { $0.move(button.id, to: second.id, frame: button.frame) }
+        }
+        // The screen it came from is deleted by hand.
+        model.store.deleteScreen(first.id)
+        let now = model.store.content
+        #expect(!(model.takenActions.first?.canTakeBack(from: now) ?? true), "there is nowhere to put it back")
+
+        siri.undo()
+        #expect(model.store.content == now)
+        let screens = Set(model.store.screens.map(\.id))
+        #expect(model.store.content.elements.allSatisfy { $0.parent.map(screens.contains) ?? true }, "nothing is left on a screen that has gone")
+        #expect(model.store.screen(second.id)?.elements.map(\.id) == [button.id])
+    }
+
+    @Test func siriUndoDuringADragIsAStepOfItsOwnAndLeavesTheDragOne() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let button = DesignStore.newElement(.button)
+        model.store.setElements([button], on: screen.id, replacing: false)
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Rename Design") { model.store.setTitle("A") }
+
+        // Siri's undo comes while a drag is under way.
+        let drag = model.store.beginEdit(by: .hand)
+        model.store.update(ref) { $0.frame.origin.x += 10 }
+        siri.undo()
+        model.store.update(ref) { $0.frame.origin.x += 10 }
+        model.store.endEdit(drag)
+        #expect(model.store.title == nil)
+        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX + 20)
+
+        // Siri's undo is a step of its own, and the drag one step of its own.
+        model.store.undoManager?.undo()
+        #expect(model.store.title == "A")
+        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX + 20)
+        model.store.undoManager?.undo()
+        #expect(model.store.title == "A")
+        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX)
+    }
+
+    @Test func siriIsNotOfferedAnUndoOnceTheDesignHasClosed() throws {
+        let model = model()
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
+            model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        }
+        #expect(siri.canUndo)
+        model.close()
+        // Nothing for Siri to undo, rather than an undo that does nothing and says it did.
+        #expect(!siri.canUndo)
+        let reopened = AppModel(document: LayerDocument(file: model.document.current))
+        if siri.canUndo { siri.undo() }
+        #expect(reopened.store.screens.count == 1)
+        reopened.close()
+    }
+
+    @Test func anUndoWithNothingLeftToTakeBackChangesNothingAndSaysSo() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let button = DesignStore.newElement(.button)
+        model.store.setElements([button], on: screen.id, replacing: false)
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+
+        DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
+            model.store.update(ref) { $0.tint = RGBColor(hex: 0xFF0000) }
+        }
+        // The button is recoloured again by hand: what Siri changed is gone.
+        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
+        let now = model.store.content
+        siri.undo()
+        #expect(model.store.content == now)
+        #expect(model.undoNotice?.contains("Style Button") == true)
+
+        // Checked before Siri can be asked, as the app stops being active, such an undo
+        // is taken out of Siri's history instead.
+        model.undoNotice = nil
+        DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
+            model.store.update(ref) { $0.tint = RGBColor(hex: 0x0000FF) }
+        }
+        model.withdrawTakenActionsWithNothingLeft()
+        #expect(siri.canUndo, "the button is still as Siri left it")
+        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
+        model.withdrawTakenActionsWithNothingLeft()
+        #expect(!siri.canUndo)
     }
 
     @Test func newElementsGoBelowWhatIsThere() {
@@ -349,6 +945,36 @@ struct StrokeScriptTests {
         }
         #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("10,10 20") }
         #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("[[[0, 0]]]") }
+    }
+
+    /// A number past Int's range used to trap working out how many points a line needs
+    /// (G9): a Siri or Shortcuts script could crash the app.
+    @Test func aNumberTooLargeToDrawIsRefusedNotATrap() {
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("line 0 0 99999999999999999999 0") }
+        #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("[[[0, 0], [1e300, 0]]]") }
+    }
+
+    /// Strokes that would take hundreds of millions of points, or that many passes or
+    /// humps, were built anyway and the app was killed for memory (G9). They are refused
+    /// with a reason, and a stroke the size of a board still draws.
+    @Test func aStrokeTooLongToDrawIsRefused() throws {
+        for script in ["line 0 0 200000 0", "wave 0 0 100 40 1000", "scribble 0 0 10 10 1000", "box 0 0 30000 30000"] {
+            #expect(throws: StrokeScript.ParseError.self, "\(script)") { try StrokeScript.parse(script) }
+        }
+        #expect(try StrokeScript.parse("line 0 0 4000 3000").count == 1)
+        #expect(try StrokeScript.parse("wave 0 0 300 40 12").count == 1)
+    }
+
+    /// A line of many long segments was built, tens of millions of points, before it was
+    /// refused (review M-6). Its length is weighed first.
+    @Test func aStrokeTooLongIsRefusedBeforeItIsBuilt() {
+        let corners = (0..<1000).map { $0.isMultiple(of: 2) ? "0 0" : "100000 100000" }.joined(separator: " ")
+        let clock = ContinuousClock()
+        let took = clock.measure {
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("line " + corners) }
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse(corners.replacingOccurrences(of: " 100000", with: ",100000")) }
+        }
+        #expect(took < .milliseconds(200))
     }
 
     @Test func aScriptedBoxIsReadLikeADrawnOne() throws {

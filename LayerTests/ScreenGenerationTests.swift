@@ -340,6 +340,98 @@ struct ScreenGenerationLifecycleTests {
         feed.finish()
     }
 
+    /// Something put on the screen while it is written, and typed into, used to be wiped by
+    /// the next line, which replaced everything on the screen (G5, M1). Each line now
+    /// rewrites only what the generation wrote, keeping each element it wrote the same
+    /// element, so a selection of it stays.
+    @Test func whatIsPutOnTheScreenByHandSurvivesTheNextLine() async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        feed.yield(Self.written("title: Settings\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
+        let title = try #require(app.store.screen(screen)?.elements.first)
+        var note = DesignStore.newElement(.text)
+        note.frame.origin = CGPoint(x: 40, y: 600)
+        let added = app.store.setElements([note], on: screen, replacing: false)[0]
+        app.store.update(added) { $0.text = "typed" }
+        app.selection = .element(.init(host: .screen(screen), element: title.id))
+
+        feed.yield(Self.written("title: Settings\nbutton: Save\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 3 })
+        #expect(app.store.element(added.element)?.text == "typed")
+        #expect(app.store.element(title.id)?.kind == .title, "the title is the same element")
+        #expect(app.selection == .element(.init(host: .screen(screen), element: title.id)))
+        feed.finish()
+        await app.waitForGeneration()
+        #expect(app.store.element(added.element)?.text == "typed")
+    }
+
+    /// An element the generation wrote and the person then moved, retyped or deleted is
+    /// theirs: later lines leave it as they left it (G5).
+    @Test func aWrittenElementChangedByHandIsLeftAsItWasChanged() async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        feed.yield(Self.written("title: Settings\nbutton: Save\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 2 })
+        let written = try #require(app.store.screen(screen)?.elements)
+        let title = DesignStore.ElementRef(host: .screen(screen), element: written[0].id)
+        let button = DesignStore.ElementRef(host: .screen(screen), element: written[1].id)
+        app.store.update(title) { $0.text = "Mine"; $0.frame.origin.y += 40 }
+        app.store.delete(button)
+        let moved = try #require(app.store.element(title.element))
+
+        feed.yield(Self.written("title: Settings\nbutton: Save\ntext: Notifications\n"))
+        #expect(await eventually { app.store.screen(screen)?.elements.count == 2 })
+        #expect(app.store.element(title.element) == moved)
+        #expect(app.store.element(button.element) == nil, "a deleted element isn't brought back")
+        feed.finish()
+        await app.waitForGeneration()
+    }
+
+    /// A generation that writes nothing took its screen away with everything on it, so
+    /// what was put there by hand was lost with it (M1). A screen with something put on it
+    /// by hand stays, with that on it.
+    @Test(arguments: [true, false])
+    func aGenerationThatWritesNothingKeepsWhatWasPutOnItsScreen(fails: Bool) async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        feed.yield(.startedWriting)
+        #expect(await eventually { app.generation?.isThinking == false })
+        let added = app.store.setElements([DesignStore.newElement(.text)], on: screen, replacing: false)[0]
+        app.store.update(added) { $0.text = "typed" }
+        if fails { feed.finish(throwing: URLError(.notConnectedToInternet)) } else { feed.finish() }
+        await app.waitForGeneration()
+        #expect(app.store.screen(screen) != nil)
+        #expect(app.store.element(added.element)?.text == "typed")
+    }
+
+    /// Stop pressed before the first line: the screen goes, as there is nothing on it, and
+    /// that isn't reported as the model failing to describe anything (G10).
+    @Test func stoppingBeforeTheFirstLineIsNotAFailure() async throws {
+        let (app, _, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        let screen = try #require(app.generation?.screenID)
+        app.stopGenerating()
+        await app.waitForGeneration()
+        #expect(app.store.screen(screen) == nil)
+        #expect(app.generation == nil)
+        feed.finish()
+    }
+
+    /// The screen undone before the model has written a line: the model is stopped then,
+    /// not left thinking, and paid for, for a screen that is gone (G11).
+    @Test func aScreenTakenAwayBeforeItsFirstLineStopsTheModel() async throws {
+        let (app, undo, feed) = bench()
+        app.generateScreen(from: "a settings screen")
+        undo.undo()
+        #expect(await eventually { !app.isGenerating })
+        #expect(app.generation == nil)
+        feed.finish()
+    }
+
     /// Nothing is written to a design once it has closed, and nothing new is started (B-I4).
     @Test func aClosedDesignIsNotWrittenTo() async throws {
         let (app, _, feed) = bench()

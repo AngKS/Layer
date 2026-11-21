@@ -30,9 +30,15 @@ final class SketchEngine {
     @ObservationIgnored private var failuresInARow = 0
     @ObservationIgnored private var restingUntil: ContinuousClock.Instant?
     @ObservationIgnored private var check: Task<Void, Never>?
+    /// Which check `check` is, so that a check that ends lets go only of its own handle.
+    @ObservationIgnored private var checkNumber = 0
     /// When each provider last answered, so that it isn't asked to prove itself for every design opened.
     @ObservationIgnored private static var lastAnswered: [String: ContinuousClock.Instant] = [:]
     @ObservationIgnored private let log = Logger(subsystem: "kahshin.Layer", category: "sketch")
+
+    /// Reads the handwritten words in a sketch's strokes: PencilKit's recognizer, or a
+    /// test's stand-in, as the simulator has no recognizer assets.
+    @ObservationIgnored var readHandwriting: @Sendable ([[CGPoint]]) async -> String? = { await HandwritingRecognizer.recognize($0) }
 
     init(provider: SketchProvider = .appleIntelligence) {
         self.provider = provider
@@ -91,16 +97,22 @@ final class SketchEngine {
     private func checkThatProviderAnswers() {
         if let last = Self.lastAnswered[provider.id], ContinuousClock.now - last < .seconds(300) { return }
         guard check == nil, !isStillResting() else { return }
+        checkNumber += 1
+        let number = checkNumber
+        let checked = provider
         check = Task { [weak self] in
-            guard let self else { return }
-            let interpreter = provider.makeInterpreter(nil)
+            let interpreter = checked.makeInterpreter(nil)
             let board = "The board has one screen. Screen 1, an iPhone screen, has from top to bottom: a title saying “Welcome”."
             // No longer than a sketch would wait: until this is known, each sketch
             // and each board name waits out its own limit on a provider that hangs.
             let answer = try? await withTimeout(.seconds(6)) { try await interpreter.suggestTitle(for: board) }
-            if answer == nil { log.error("\(self.provider.id, privacy: .public) is available but did not answer its check") }
-            record(answered: answer != nil, restsAtOnce: true)
-            check = nil
+            guard let self else { return }
+            // Cancelled, as when the model is changed: neither an answer nor a failure, and
+            // the check under way now, if there is one, is another's.
+            if checkNumber == number { check = nil }
+            guard !Task.isCancelled else { return }
+            if answer == nil { log.error("\(checked.id, privacy: .public) is available but did not answer its check") }
+            record(answered: answer != nil, by: checked.id, restsAtOnce: true)
         }
     }
 
@@ -114,7 +126,7 @@ final class SketchEngine {
         if requested.isAsked { return SketchOutcome(reading: await readAsked(requested)) }
         var withText = requested
         if Self.mightBeHandwriting(requested.observation.form) {
-            withText.recognizedText = await HandwritingRecognizer.recognize(requested.strokes)
+            withText.recognizedText = await readHandwriting(requested.strokes)
         }
         let request = withText
         let fallback = rules.reading(for: request)
@@ -133,19 +145,20 @@ final class SketchEngine {
             return await settled(fallback, by: "rules")
         }
 
+        let asked = provider.id
         let interpreter = provider.makeInterpreter(nil)
         let started = ContinuousClock.now
         do {
             let decision = try await withTimeout(Self.readLimit) { try await interpreter.decide(request) }
             let elapsed = ContinuousClock.now - started
-            log.info("\(self.provider.id, privacy: .public) read \(SketchPrompt.name(for: decision.chosen), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
+            log.info("\(asked, privacy: .public) read \(SketchPrompt.name(for: decision.chosen), privacy: .public) in \(String(describing: elapsed), privacy: .public)")
             let isPossible = request.candidates.contains(decision.chosen)
-            record(answered: isPossible)
+            record(answered: isPossible, by: asked)
             guard isPossible else { return await settled(fallback, by: "rules") }
-            return await settled(decision.chosen, by: provider.id, runnerUp: decision.runnerUp)
+            return await settled(decision.chosen, by: asked, runnerUp: decision.runnerUp)
         } catch {
-            log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-            record(answered: false)
+            log.error("\(asked, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            record(answered: false, by: asked)
             return await settled(fallback, by: "rules")
         }
     }
@@ -219,15 +232,16 @@ final class SketchEngine {
         let fallback = options.contains(shaped) ? shaped : options.first ?? .unknown
         guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
 
+        let asked = provider.id
         let interpreter = provider.makeInterpreter(nil)
         do {
             let reading = try await withTimeout(Self.readLimit) { try await interpreter.read(request) }
             let isPossible = options.contains(reading)
-            record(answered: isPossible)
+            record(answered: isPossible, by: asked)
             return isPossible ? reading : fallback
         } catch {
-            log.error("\(self.provider.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-            record(answered: false)
+            log.error("\(asked, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            record(answered: false, by: asked)
             return fallback
         }
     }
@@ -242,13 +256,14 @@ final class SketchEngine {
     func suggestTitle(for content: DesignContent) async -> String {
         let fallback = rules.title(for: content)
         guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
+        let asked = provider.id
         let interpreter = provider.makeInterpreter(nil)
         let board = SketchPrompt.describe(board: content)
         guard let suggestion = try? await withTimeout(.seconds(5), { try await interpreter.suggestTitle(for: board) }) else {
-            record(answered: false)
+            record(answered: false, by: asked)
             return fallback
         }
-        record(answered: true)
+        record(answered: true, by: asked)
         // Models sometimes add quotation marks, a full stop or a second line.
         let line = suggestion.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let cleaned = line.trimmingCharacters(in: CharacterSet(charactersIn: " \"“”'.*#"))
@@ -273,7 +288,11 @@ final class SketchEngine {
 
     // MARK: How the provider is doing
 
-    private func record(answered: Bool, restsAtOnce: Bool = false) {
+    /// Records how `asked` did. An answer that comes back after the model was changed says
+    /// nothing about the model in use now, and one cut short by its caller (a design closed,
+    /// say) says nothing about any model: neither is recorded.
+    private func record(answered: Bool, by asked: String, restsAtOnce: Bool = false) {
+        guard asked == provider.id, !Task.isCancelled else { return }
         lastAttemptFailed = !answered
         if answered {
             failuresInARow = 0

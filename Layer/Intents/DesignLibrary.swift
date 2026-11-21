@@ -7,8 +7,12 @@ struct DesignSummary: Sendable {
     let url: URL
     let title: String
     let modified: Date?
-    /// Empty when the file couldn't be read, as when iCloud hasn't downloaded it yet.
+    /// Empty when the file couldn't be read, or, in the list of every design, when iCloud
+    /// hasn't downloaded it to this iPad.
     let content: DesignContent
+    /// False for a design listed by its name alone, which iCloud hasn't downloaded: its
+    /// content wasn't read, rather than empty.
+    var isRead = true
 }
 
 /// Finds Layer's designs on disk and reads them, for the system features that work with
@@ -78,22 +82,6 @@ enum DesignLibrary {
         return String(path.dropFirst(base.count))
     }
 
-    /// Every design in Layer's iCloud and On My iPad folders. Reads the disk.
-    nonisolated static func designURLs() -> [URL] {
-        let roots = roots
-        var found: [URL] = []
-        for folder in [roots.cloud, roots.local].compactMap(\.self) {
-            guard let items = FileManager.default.enumerator(
-                at: folder, includingPropertiesForKeys: [.contentModificationDateKey],
-                options: [.skipsPackageDescendants, .skipsHiddenFiles]
-            ) else { continue }
-            for case let url as URL in items where url.pathExtension == "layer" {
-                found.append(url)
-            }
-        }
-        return found
-    }
-
     /// Reads one design, coordinating with iCloud and any app writing it. Reads the disk.
     nonisolated static func read(_ url: URL) -> DesignSummary {
         let name = url.deletingPathExtension().lastPathComponent
@@ -106,10 +94,136 @@ enum DesignLibrary {
         return DesignSummary(id: id(for: url), url: url, title: content.title ?? name, modified: modified, content: content)
     }
 
-    /// Every design, newest first, read off the main thread.
+    /// Whether a design can be read without downloading it: it isn't in iCloud, or this
+    /// iPad has its latest version. Reads the disk.
+    nonisolated static func isDownloaded(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]),
+              values.isUbiquitousItem == true
+        else { return true }
+        return values.ubiquitousItemDownloadingStatus == .current
+    }
+
+    /// One design as the list of every design has it. A design iCloud hasn't downloaded to
+    /// this iPad is listed by its file's name alone: a coordinated read would download it,
+    /// its pictures and ink included, and wait for that, and the list is made at every
+    /// launch and for many of Siri's questions. A design unchanged since it was last read
+    /// isn't read again. Reads the disk.
+    nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary {
+        guard isDownloaded(url) else { return byName(url, modified: modified(of: url)) }
+        let stamp = Stamp(of: url)
+        if let stamp, let kept = listedSummaries.withLock({ $0[url] }), kept.stamp == stamp { return kept.summary }
+        let summary = read(url)
+        if let stamp { listedSummaries.withLock { $0[url] = (stamp, summary) } }
+        return summary
+    }
+
+    /// When a design and, in a package, its design file were last changed: what says a
+    /// design read before is still as it was read.
+    private struct Stamp: Equatable, Sendable {
+        let package: Date
+        let design: Date?
+
+        nonisolated init?(of url: URL) {
+            let key: Set<URLResourceKey> = [.contentModificationDateKey]
+            guard let package = try? url.resourceValues(forKeys: key).contentModificationDate else { return nil }
+            self.package = package
+            design = try? url.appendingPathComponent(DesignPackage.design).resourceValues(forKeys: key).contentModificationDate
+        }
+    }
+
+    private static let listedSummaries = OSAllocatedUnfairLock<[URL: (stamp: Stamp, summary: DesignSummary)]>(initialState: [:])
+
+    /// A design listed by its name alone, without reading it.
+    private nonisolated static func byName(_ url: URL, modified: Date?) -> DesignSummary {
+        DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent(), isRead: false)
+    }
+
+    private nonisolated static func modified(of url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    /// The design a hidden iCloud placeholder, `.Name.layer.icloud`, stands for: how iCloud
+    /// Drive has kept a file it hasn't downloaded, beside keeping it under its own name
+    /// with no contents. Nil for anything else.
+    private nonisolated static func design(heldBy placeholder: URL) -> URL? {
+        let name = placeholder.lastPathComponent
+        let suffix = ".layer.icloud"
+        guard name.hasPrefix("."), name.hasSuffix(suffix), name.count > suffix.count + 1 else { return nil }
+        return placeholder.deletingLastPathComponent().appendingPathComponent(String(name.dropFirst().dropLast(".icloud".count)))
+    }
+
+    /// Every design in some folders, and which of them could be looked through.
+    struct Listing: Sendable {
+        var designs: [DesignSummary]
+        /// The folders that were looked through. A design in one that couldn't be, iCloud's
+        /// when it can't be reached, may still be there.
+        var folders: [URL]
+
+        /// Whether a design that isn't in `designs` is known to have gone: it would have
+        /// been in a folder that was looked through, or it is outside Layer's folders, as a
+        /// design opened from elsewhere is, which Siri couldn't open anyway. A design in a
+        /// folder that couldn't be found or looked through may still be there.
+        func hasGone(_ id: String) -> Bool {
+            if id.hasPrefix(DesignLibrary.filePrefix) { return true }
+            guard let url = DesignLibrary.url(for: id) else { return false }
+            let path = url.standardizedFileURL.path
+            return folders.contains { path.hasPrefix($0.standardizedFileURL.path + "/") }
+        }
+    }
+
+    /// Every design in `folders`, newest first, each as `listed` has it. A design iCloud
+    /// keeps here only as a hidden placeholder is listed by its name, like one it keeps
+    /// under its own name with no contents. Hidden folders, iCloud's trash among them,
+    /// aren't looked in. Reads the disk.
+    nonisolated static func list(in folders: [URL], isDownloaded: (URL) -> Bool = isDownloaded) -> Listing {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
+        var looked: [URL] = []
+        var found: [String: DesignSummary] = [:]
+        var present: Set<URL> = []
+        for folder in folders {
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isFolder), isFolder.boolValue,
+                  let items = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants])
+            else { continue }
+            looked.append(folder)
+            for case let url as URL in items {
+                if !url.lastPathComponent.hasPrefix(".") {
+                    guard url.pathExtension == "layer" else { continue }
+                    found[url.standardizedFileURL.path] = listed(url, isDownloaded: isDownloaded)
+                    present.insert(url)
+                } else if let design = design(heldBy: url) {
+                    // The design itself wins over a placeholder for it, should both be there.
+                    let key = design.standardizedFileURL.path
+                    if found[key] == nil { found[key] = byName(design, modified: modified(of: url)) }
+                } else if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                    items.skipDescendants()
+                }
+            }
+        }
+        // Designs that have gone from the folders looked through are forgotten.
+        let listedNow = present
+        let lookedIn = looked.map { $0.standardizedFileURL.path + "/" }
+        listedSummaries.withLock {
+            $0 = $0.filter { url, _ in
+                listedNow.contains(url) || !lookedIn.contains { url.standardizedFileURL.path.hasPrefix($0) }
+            }
+        }
+        let designs = found.values.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+        return Listing(designs: designs, folders: looked)
+    }
+
+    /// Every design in Layer's iCloud and On My iPad folders, newest first, listed off the
+    /// main thread.
     static func all() async -> [DesignSummary] {
+        await everything().designs
+    }
+
+    /// Every design in Layer's folders, and which of the folders could be looked through,
+    /// listed off the main thread.
+    static func everything() async -> Listing {
         await Task.detached(priority: .userInitiated) {
-            designURLs().map(read).sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+            let roots = roots
+            return list(in: [roots.cloud, roots.local].compactMap(\.self))
         }.value
     }
 

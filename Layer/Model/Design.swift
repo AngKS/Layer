@@ -112,6 +112,9 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     /// top-left corner, so that moving the frame moves the ink and resizing it stretches
     /// the ink. Kept beside the design in its file rather than inside it: see `DesignFile`.
     var ink: Data?
+    /// What a newer Layer saved with the element that this version doesn't know, to be
+    /// written back with it.
+    var unknownKeys = UnknownKeys()
 
     /// Everything about an element that is saved with the design. `ink` is saved apart.
     enum CodingKeys: String, CodingKey {
@@ -123,6 +126,27 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var displayName: String {
         guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return kind.layerName }
         return name
+    }
+}
+
+extension DesignElement {
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now. With a property ever missing from the
+    /// list below, the element as it was before, whole.
+    static func reverting(_ current: DesignElement, after: DesignElement, to before: DesignElement) -> DesignElement {
+        func reverted(_ current: DesignElement) -> DesignElement {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignElement, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.kind); back(\.parent); back(\.scale); back(\.frame); back(\.rotation); back(\.text)
+            back(\.tint); back(\.symbol); back(\.shape); back(\.imageID); back(\.fontSize); back(\.fontWeight)
+            back(\.textColor); back(\.cornerRadius); back(\.opacity); back(\.textAlignment); back(\.borderColor)
+            back(\.borderWidth); back(\.hasShadow); back(\.name); back(\.isLocked); back(\.isHidden); back(\.isOn)
+            back(\.value); back(\.buttonLook); back(\.ink)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
     }
 }
 
@@ -157,8 +181,11 @@ extension DesignElement {
         isOn = try container.decodeIfPresent(Bool.self, forKey: .isOn) ?? true
         value = try container.decodeIfPresent(Double.self, forKey: .value)
         buttonLook = try container.decodeIfPresent(ButtonLook.self, forKey: .buttonLook)
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
     }
 }
+
+extension DesignElement: KeepsUnknownKeys {}
 
 /// Where a group of elements sits on the canvas: where its own origin falls, and how
 /// large its points are drawn.
@@ -292,9 +319,26 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
     /// still be edited.
     var isLocked: Bool?
+    /// What a newer Layer saved with the screen that this version doesn't know, to be
+    /// written back with it.
+    var unknownKeys = UnknownKeys()
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }
+
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now; see `DesignElement.reverting`.
+    static func reverting(_ current: DesignScreen, after: DesignScreen, to before: DesignScreen) -> DesignScreen {
+        func reverted(_ current: DesignScreen) -> DesignScreen {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignScreen, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.name); back(\.origin); back(\.scale); back(\.deviceID); back(\.elements); back(\.isLocked)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
+    }
     var placement: Placement { Placement(origin: origin, scale: scale) }
 
     var canvasFrame: CGRect {
@@ -310,12 +354,31 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     func canvasRect(for local: CGRect) -> CGRect { placement.canvasRect(for: local) }
     func localRect(for canvas: CGRect) -> CGRect { placement.localRect(for: canvas) }
 
-    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file.
+    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name
+    /// that is one of the types the view's own code uses, or a Swift keyword, has "Screen"
+    /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
     var typeName: String {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }
-        return cleaned
+        return Self.reservedTypeNames.contains(cleaned) ? cleaned + "Screen" : cleaned
     }
+
+    /// The types generated code uses, and the keywords a name of letters alone can be.
+    private static let reservedTypeNames: Set<String> = [
+        "View", "Text", "Image", "Button", "Color", "Toggle", "Divider", "Path", "Spacer", "TextField", "ProgressView",
+        "VStack", "HStack", "ZStack", "NavigationStack", "Rectangle", "RoundedRectangle", "Circle", "Capsule", "Ellipse",
+        "StrokeStyle", "CGPoint", "CGSize", "CGFloat", "String", "Int", "Double", "Bool", "Optional", "SwiftUI",
+        "Any", "Self", "Type", "Protocol", "Never",
+        // SwiftUI and Foundation types a screen is often named for, which a view of the
+        // name would hide throughout the target it is added to.
+        "Menu", "List", "Form", "Label", "Group", "Section", "Link", "Picker", "Slider", "Stepper", "Grid", "Table",
+        "Canvas", "Shape", "Font", "Gradient", "Animation", "Scene", "Window", "App", "Date", "Data", "URL", "Error",
+        "as", "associatedtype", "break", "case", "catch", "class", "continue", "default", "defer", "deinit", "do",
+        "else", "enum", "extension", "fallthrough", "false", "fileprivate", "for", "func", "guard", "if", "import",
+        "in", "init", "inout", "internal", "is", "let", "nil", "open", "operator", "private", "protocol", "public",
+        "repeat", "rethrows", "return", "self", "some", "static", "struct", "subscript", "super", "switch", "throw",
+        "throws", "true", "try", "typealias", "var", "where", "while",
+    ]
 }
 
 extension DesignScreen {
@@ -333,10 +396,12 @@ extension DesignScreen {
         deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
         elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
     }
 
     /// A screen is saved without its elements, which are saved in the design's one list.
     func encode(to encoder: any Encoder) throws {
+        try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
@@ -402,6 +467,15 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     /// The model that reads this design's sketches and names it. Nil in designs saved
     /// before there was a choice, which use the app's default (`ModelPreferences`).
     var model: ModelChoice?
+    /// What a newer Layer saved with the settings that this version doesn't know, to be
+    /// written back with them.
+    var unknownKeys = UnknownKeys()
+
+    /// Everything about the settings that is saved with the design.
+    enum CodingKeys: String, CodingKey {
+        case showsGrid, gridStyle, gridSpacing, snapsToGuides, snapsToGrid, showsMeasurements, showsFrameNames
+        case background, sketchDeviceID, code, model
+    }
 
     static let paper = RGBColor(hex: 0xF4F3EC)
     /// Canvas colours offered as swatches beside the colour well.
@@ -430,13 +504,22 @@ extension CanvasSettings {
         background = try container.decodeIfPresent(RGBColor.self, forKey: .background)
         sketchDeviceID = try container.decodeIfPresent(String.self, forKey: .sketchDeviceID)
         code = try container.decodeIfPresent(CodeSettings.self, forKey: .code) ?? CodeSettings()
-        // A choice this version can't read, from a newer Layer, is treated as no choice.
-        model = try? container.decodeIfPresent(ModelChoice.self, forKey: .model)
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        // A choice this version can't read, from a newer Layer, is treated as no choice. It
+        // is kept as it was read and written back, unless a model is chosen here meanwhile.
+        do {
+            model = try container.decodeIfPresent(ModelChoice.self, forKey: .model)
+        } catch {
+            model = nil
+            unknownKeys[CodingKeys.model.stringValue] = try? container.decode(JSONValue.self, forKey: .model)
+        }
     }
 
     /// The model this design uses: its own choice, or the app's default.
     var resolvedModel: ModelChoice { model ?? ModelPreferences.defaultChoice }
 }
+
+extension CanvasSettings: KeepsUnknownKeys {}
 
 /// How screens are written out as SwiftUI.
 struct CodeSettings: Equatable, Codable, Sendable {

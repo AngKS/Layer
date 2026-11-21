@@ -6,15 +6,18 @@ import UIKit
 struct ShareMenu: View {
     @Environment(AppModel.self) private var model
     @State private var picture: SharedPicture?
-    @State private var nothingToShare = false
+    /// What went wrong in making something to share, said in an alert.
+    @State private var problem: String?
+    /// Whether a picture of the board or a copy of the design is being made to share.
+    @State private var isPreparing = false
 
     var body: some View {
         Menu {
             // The code of the selected screen, or of the first one.
             if let screen = model.selectedScreen ?? model.store.screens.first {
                 ShareLink(
-                    item: SwiftUICodeGenerator.code(for: screen, settings: model.store.canvas.code),
-                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen))
+                    item: SwiftUICodeGenerator.code(for: screen, among: model.store.screens, settings: model.store.canvas.code),
+                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, among: model.store.screens))
                 ) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
@@ -26,27 +29,104 @@ struct ShareMenu: View {
                     }
                 }
             }
-            Button("Image of Board", systemImage: "photo") {
-                if let url = BoardSnapshot.file(of: model) {
-                    picture = SharedPicture(urls: [url])
-                } else {
-                    nothingToShare = true
-                }
-            }
-            if let url = model.fileURL {
-                ShareLink(item: url) {
-                    Label("Design File", systemImage: "doc")
-                }
+            ForEach(ShareItem.offered(for: model), id: \.self) { item in
+                Button(item.title, systemImage: item.symbol) { share(item) }
             }
         } label: {
+            // A big board takes a moment: the button spins meanwhile, in its own place.
             ToolIcon(symbol: "square.and.arrow.up")
+                .opacity(isPreparing ? 0 : 1)
+                .overlay { if isPreparing { ProgressView() } }
         }
+        .disabled(isPreparing)
         .accessibilityLabel("Share")
         .popover(item: $picture) { picture in
-            ActivityView(items: picture.urls)
+            ActivityView(items: picture.urls, whenClosed: picture.whenClosed)
         }
-        .alert("There is nothing on the board to make a picture of yet.", isPresented: $nothingToShare) {
+        .alert(problem ?? "", isPresented: Binding { problem != nil } set: { if !$0 { problem = nil } }) {
             Button("OK", role: .cancel) {}
+        }
+    }
+
+    /// Makes what `item` shares from the design as it is now, and hands it to the share sheet.
+    private func share(_ item: ShareItem) {
+        Task {
+            isPreparing = true
+            defer { isPreparing = false }
+            do {
+                guard let url = try await item.file(for: model) else {
+                    problem = item.problem
+                    return
+                }
+                picture = SharedPicture(urls: [url]) { item.cleanUp(url) }
+            } catch {
+                problem = item.problem
+            }
+        }
+    }
+}
+
+/// What the share menu makes when one of its items is picked, from the design as it is
+/// then: a picture of the board, or a copy of the design.
+enum ShareItem: Hashable {
+    case picture, designFile
+
+    var title: String {
+        switch self {
+        case .picture: "Image of Board"
+        case .designFile: "Design File"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .picture: "photo"
+        case .designFile: "doc"
+        }
+    }
+
+    /// Said when nothing could be made to share.
+    var problem: String {
+        switch self {
+        case .picture: "There is nothing on the board to make a picture of yet."
+        case .designFile: "Layer couldn't make a copy of the design to share."
+        }
+    }
+
+    /// What the menu offers for a design: its file only once it has been saved somewhere.
+    @MainActor static func offered(for model: AppModel) -> [ShareItem] {
+        model.fileURL == nil ? [.picture] : [.picture, .designFile]
+    }
+
+    /// Makes the file to share: for the design, a copy of it as it is rather than the file
+    /// as last saved. Nil when there is nothing to make a picture of.
+    @MainActor func file(for model: AppModel) async throws -> URL? {
+        switch self {
+        case .picture: await BoardSnapshot.file(of: model)
+        case .designFile: try await model.fileToShare()
+        }
+    }
+
+    /// Takes away what was made, once the share sheet has closed: a copy of a design can be
+    /// large. A picture stays in the system's temporary folder, under the board's name.
+    func cleanUp(_ url: URL) {
+        let folder = url.deletingLastPathComponent()
+        guard self == .designFile, folder.lastPathComponent.hasPrefix(Self.copyPrefix) else { return }
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// The start of the name of each folder a copy of a design is made in.
+    static let copyPrefix = "Design-"
+
+    /// Clears the copies made more than ten minutes ago in `temporary`, whose share sheet
+    /// closed without saying so. Newer ones are left: another window may be sharing one.
+    static func clearOldCopies(in temporary: URL) {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+        let folders = (try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: Array(keys))) ?? []
+        let cutoff = Date.now.addingTimeInterval(-600)
+        for folder in folders where folder.lastPathComponent.hasPrefix(copyPrefix) {
+            guard let made = try? folder.resourceValues(forKeys: keys).contentModificationDate, made < cutoff else { continue }
+            try? FileManager.default.removeItem(at: folder)
         }
     }
 }
@@ -55,6 +135,8 @@ struct ShareMenu: View {
 private struct SharedPicture: Identifiable {
     let urls: [URL]
     let id = UUID()
+    /// Done once the share sheet has closed.
+    var whenClosed: (@Sendable () -> Void)?
 }
 
 /// The generated SwiftUI for every screen, written out as files to share.
@@ -77,9 +159,13 @@ enum CodeFiles {
 /// The system share sheet.
 private struct ActivityView: UIViewControllerRepresentable {
     let items: [Any]
+    var whenClosed: (@Sendable () -> Void)?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        // Told when the sheet closes, whether something was shared or not.
+        controller.completionWithItemsHandler = { [whenClosed] _, _, _, _ in whenClosed?() }
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
@@ -122,12 +208,18 @@ enum BoardSnapshot {
         func thumbnail() -> Data? {
             image().jpegData(compressionQuality: 0.8)
         }
+
+        func png() -> Data? {
+            image().pngData()
+        }
     }
 
-    /// A picture no more than `longestSide` pixels along its longer side. `aspect` limits
-    /// its width over its height, by adding canvas around the board.
-    static func image(of model: AppModel, longestSide: CGFloat = 4096, aspect: ClosedRange<CGFloat>? = nil) -> UIImage? {
-        parts(of: model, longestSide: longestSide, aspect: aspect)?.image()
+    /// The board as a PNG, no more than 4096 pixels along its longer side. Only its views
+    /// are drawn on the main thread: at that size its ink, the picture and the PNG take
+    /// long enough to hold the app up, so they are made on another.
+    static func png(of model: AppModel) async -> Data? {
+        guard let parts = parts(of: model, longestSide: 4096, aspect: nil) else { return nil }
+        return await Task.detached(priority: .userInitiated) { parts.png() }.value
     }
 
     private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
@@ -162,16 +254,19 @@ enum BoardSnapshot {
         return Parts(design: design, drawing: ink == nil ? nil : drawing, area: area, scale: scale)
     }
 
-    /// Writes the snapshot as a PNG named after the board, for sharing.
-    static func file(of model: AppModel) -> URL? {
-        guard let data = image(of: model)?.pngData() else { return nil }
+    /// Writes the snapshot as a PNG named after the board, for sharing. The file is
+    /// written off the main thread too.
+    static func file(of model: AppModel) async -> URL? {
+        guard let data = await png(of: model) else { return nil }
         let name = (model.store.title ?? "Board").replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name).appendingPathExtension("png")
-        do {
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
+        return await Task.detached(priority: .userInitiated) { () -> URL? in
+            do {
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }.value
     }
 }

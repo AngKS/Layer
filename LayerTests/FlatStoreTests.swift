@@ -320,6 +320,18 @@ struct FlatFormatTests {
         #expect(written[1]["parent"] as? String == screen.id.uuidString)
     }
 
+    @Test func elementsThatShareAnIdentifierAreLeftInTheirOrderRatherThanTrapping() {
+        // Only a damaged file has two elements with one identifier; arranging them, or
+        // Siri's undo putting an order back, leaves them as they are.
+        let note = DesignStore.newElement(.stickyNote)
+        var content = DesignContent()
+        content.add(note, to: nil)
+        content.add(note, to: nil)
+        let before = content
+        content.reorder(nil, to: [note.id, note.id])
+        #expect(content == before)
+    }
+
     @Test func aPackageSavedByTheVersionBeforeOpens() throws {
         let earlier = EarlierDesign(
             screens: [.init(name: "Screen 1", origin: .zero, scale: 1, elements: [element(.title)])],

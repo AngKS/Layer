@@ -200,11 +200,11 @@ struct DesignStoreTests {
         let before = store.content
 
         store.beginHeldEdit()
-        store.update(ref) { $0.text = "One" }
+        store.actingForCommand { store.update(ref) { $0.text = "One" } }
         undo.undo()
         // The command's change so far is what goes; the title added before it stays.
         #expect(store.content == before)
-        store.update(ref) { $0.text = "Two" }
+        store.actingForCommand { store.update(ref) { $0.text = "Two" } }
         store.endHeldEdit()
         #expect(store.resolve(ref)?.element.text == "Two")
 
@@ -224,7 +224,7 @@ struct DesignStoreTests {
         store.beginHeldEdit()
         undo.redo()
         #expect(store.content == withTitle)
-        store.updateScreen(screen.id) { $0.name = "Renamed" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Renamed" } }
         store.endHeldEdit()
         undo.undo()
         #expect(store.content == withTitle)
@@ -240,9 +240,9 @@ struct DesignStoreTests {
         store.setTitle("Quiet", undoable: false)
         #expect(store.historyMark == afterAdd)
         store.beginHeldEdit()
-        store.updateScreen(screen.id) { $0.name = "One" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "One" } }
         let inEdit = store.historyMark
-        store.updateScreen(screen.id) { $0.name = "Two" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Two" } }
         store.endHeldEdit()
         #expect(store.historyMark == inEdit, "a held edit is one step, however many changes")
         undo.undo()
@@ -605,7 +605,9 @@ struct DesignFileTests {
         // Only the design changes: the ink and the picture on disk are handed back as they are.
         file.content.title = "Renamed"
         let second = try file.wrapper(replacing: first)
-        #expect(second.fileWrappers?["drawing.data"] === first.fileWrappers?["drawing.data"])
+        let drawing = try #require(file.content.elements.first { $0.kind == .drawing }).id.uuidString
+        let firstInk = try #require(first.fileWrappers?["ink"]?.fileWrappers?[drawing])
+        #expect(second.fileWrappers?["ink"]?.fileWrappers?[drawing] === firstInk)
         #expect(second.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] === first.fileWrappers?["images"]?.fileWrappers?[picture.uuidString])
         #expect(second.fileWrappers?["design.json"] !== first.fileWrappers?["design.json"])
         #expect(try DesignFile(wrapper: second).content.title == "Renamed")
@@ -636,6 +638,124 @@ struct DesignFileTests {
 
         let reopened = try DesignFile(wrapper: file.wrapper())
         #expect(reopened.images == [shown.uuidString: Data([1, 2, 3])])
+    }
+
+    /// A package as a newer Layer might save it: an image and a drawing this version can't
+    /// read (a text alignment it doesn't know), their picture and ink, a picture nothing
+    /// shows, and a folder of a kind it has never heard of.
+    private func packageFromANewerLayer() throws -> (package: FileWrapper, picture: UUID, drawing: UUID, orphan: UUID) {
+        let picture = UUID(), drawing = UUID(), orphan = UUID()
+        let tint = ["red": 0, "green": 0, "blue": 0]
+        let elements: [[String: Any]] = [
+            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "textAlignment": "justified",
+             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "text": "", "tint": tint],
+            ["id": drawing.uuidString, "kind": "drawing", "textAlignment": "justified",
+             "frame": [[0, 0], [10, 10]], "text": "", "tint": tint],
+        ]
+        let manifest = try JSONSerialization.data(withJSONObject: ["version": 3, "content": ["screens": [], "elements": elements]])
+        let package = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: manifest),
+            "images": FileWrapper(directoryWithFileWrappers: [
+                picture.uuidString: FileWrapper(regularFileWithContents: Data([1, 2, 3])),
+                orphan.uuidString: FileWrapper(regularFileWithContents: Data([4, 5, 6])),
+            ]),
+            "ink": FileWrapper(directoryWithFileWrappers: [drawing.uuidString: FileWrapper(regularFileWithContents: Data([5, 5, 5]))]),
+            "fonts": FileWrapper(directoryWithFileWrappers: ["Brand.otf": FileWrapper(regularFileWithContents: Data([7, 7]))]),
+        ])
+        return (package, picture, drawing, orphan)
+    }
+
+    @Test func savingKeepsThePictureAndInkOfElementsThisVersionCannotRead() throws {
+        let (package, picture, drawing, orphan) = try packageFromANewerLayer()
+        let file = try DesignFile(wrapper: package)
+        #expect(file.content.elements.isEmpty, "neither element can be read here")
+
+        // Saved over the file it came from, and written afresh, as a copy to share is.
+        for saved in [try file.wrapper(replacing: package), try file.wrapper()] {
+            #expect(saved.fileWrappers?["images"]?.fileWrappers?[picture.uuidString]?.regularFileContents == Data([1, 2, 3]))
+            #expect(saved.fileWrappers?["ink"]?.fileWrappers?[drawing.uuidString]?.regularFileContents == Data([5, 5, 5]))
+            #expect(saved.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"]?.regularFileContents == Data([7, 7]))
+            // A picture nothing shows, read or not, still goes.
+            #expect(saved.fileWrappers?["images"]?.fileWrappers?[orphan.uuidString] == nil)
+
+            // And again, from what was saved.
+            let again = try DesignFile(wrapper: saved).wrapper()
+            #expect(again.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] != nil)
+            #expect(again.fileWrappers?["ink"]?.fileWrappers?[drawing.uuidString] != nil)
+            #expect(again.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"] != nil)
+            let manifest = try #require(again.fileWrappers?["design.json"]?.regularFileContents)
+            let root = try #require(try JSONSerialization.jsonObject(with: manifest) as? [String: Any])
+            let written = try #require((root["content"] as? [String: Any])?["elements"] as? [[String: Any]])
+            #expect(written.first?["rotation"] as? Double == 30)
+            #expect(written.first?["blur"] as? Double == 4)
+        }
+    }
+
+    /// The JSON object of a saved package's design.
+    private func manifest(of package: FileWrapper) throws -> [String: Any] {
+        let data = try #require(package.fileWrappers?["design.json"]?.regularFileContents)
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func keysThisVersionDoesNotKnowSurviveASave() throws {
+        var content = DesignContent()
+        let screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1)
+        content.addScreen(screen)
+        var button = DesignStore.newElement(.button)
+        button.rotation = 30
+        content.add(button, to: screen.id)
+        let mask = UUID()
+        var file = DesignFile(content: content)
+        file.images = [mask.uuidString: Data([1, 2, 3])]
+
+        // A newer Layer adds keys of its own at every level, one of them naming a picture,
+        // and saves the design's model in a shape this version can't read.
+        var root = try manifest(of: file.wrapper())
+        var saved = try #require(root["content"] as? [String: Any])
+        var elements = try #require(saved["elements"] as? [[String: Any]])
+        elements[0]["skew"] = 12
+        elements[0]["maskImageID"] = mask.uuidString
+        elements[0]["shadowStyle"] = ["blur": 8, "colour": "#000000"]
+        saved["elements"] = elements
+        var screens = try #require(saved["screens"] as? [[String: Any]])
+        screens[0]["background"] = "#FFFFFF"
+        saved["screens"] = screens
+        var canvas = try #require(saved["canvas"] as? [String: Any])
+        canvas["rulers"] = true
+        canvas["model"] = ["provider": ["name": "future"]]
+        saved["canvas"] = canvas
+        saved["groups"] = [["members": [button.id.uuidString]]]
+        root["content"] = saved
+        root["designID"] = "B7F0"
+        let newer = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: try JSONSerialization.data(withJSONObject: root)),
+            "images": FileWrapper(directoryWithFileWrappers: [mask.uuidString: FileWrapper(regularFileWithContents: Data([1, 2, 3]))]),
+        ])
+
+        var read = try DesignFile(wrapper: newer)
+        #expect(read.content.elements.first?.rotation == 30)
+        #expect(read.content.canvas.model == nil, "a model this version can't read is no choice here")
+
+        let written = try read.wrapper(replacing: newer)
+        let again = try manifest(of: written)
+        #expect(again["designID"] as? String == "B7F0")
+        let content2 = try #require(again["content"] as? [String: Any])
+        #expect((content2["groups"] as? [[String: Any]])?.first?["members"] as? [String] == [button.id.uuidString])
+        let element = try #require((content2["elements"] as? [[String: Any]])?.first)
+        #expect(element["rotation"] as? Double == 30)
+        #expect(element["skew"] as? Double == 12)
+        #expect((element["shadowStyle"] as? [String: Any])?["blur"] as? Double == 8)
+        #expect((content2["screens"] as? [[String: Any]])?.first?["background"] as? String == "#FFFFFF")
+        let canvas2 = try #require(content2["canvas"] as? [String: Any])
+        #expect(canvas2["rulers"] as? Bool == true)
+        #expect(((canvas2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
+        // The picture only the new key names is kept with it.
+        #expect(written.fileWrappers?["images"]?.fileWrappers?[mask.uuidString] != nil)
+
+        // A model chosen here is written in place of the one this version couldn't read.
+        read.content.canvas.model = .appleIntelligence
+        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["canvas"] as? [String: Any])
+        #expect((chosen["model"] as? [String: Any])?["provider"] as? String == ModelChoice.appleIntelligence.provider)
     }
 
     @Test func aFileFromANewerVersionIsRefusedRatherThanHalfRead() throws {
@@ -674,6 +794,91 @@ struct DesignFileTests {
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)
     }
 
+    @Test func keysEarlierVersionsDroppedAreNotKeptFromAnOlderFile() throws {
+        let screen = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+        let element = """
+            {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
+             "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34},"legacyFont":"Avenir"}
+            """
+        let content = """
+            {"accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
+             "canvas":{"oldSetting":true},
+             "screens":[{"id":"\(screen)","name":"Screen 1","origin":[400,100],"scale":0.75,"oldFrame":1,"elements":[\(element)]}]}
+            """
+        // Version 1: one file. Version 2: a package, with a key at the top of its design file.
+        let single = FileWrapper(regularFileWithContents: Data("""
+            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":\(content)}
+            """.utf8))
+        let package = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: Data("{\"version\":2,\"legacy\":true,\"content\":\(content)}".utf8)),
+        ])
+        for older in [single, package] {
+            let saved = try manifest(of: DesignFile(wrapper: older).wrapper())
+            #expect(saved["legacy"] == nil)
+            let written = try #require(saved["content"] as? [String: Any])
+            for key in ["accent", "branchName", "comments"] { #expect(written[key] == nil, "\(key)") }
+            #expect((written["canvas"] as? [String: Any])?["oldSetting"] == nil)
+            #expect((written["screens"] as? [[String: Any]])?.first?["oldFrame"] == nil)
+            let elements = try #require(written["elements"] as? [[String: Any]])
+            #expect(elements.count == 1)
+            #expect(elements.first?["legacyFont"] == nil)
+        }
+    }
+
+    @Test func theSharedDesignFileHasTheLatestEdit() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("Untitled 4.layer")
+        try DesignFile().wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+
+        // Changed since the system last saved it, then shared as the share menu shares it.
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        #expect(ShareItem.offered(for: model) == [.picture, .designFile])
+        let shared = try #require(try await ShareItem.designFile.file(for: model))
+        defer { try? FileManager.default.removeItem(at: shared.deletingLastPathComponent()) }
+
+        #expect(shared.lastPathComponent == "Untitled 4.layer")
+        #expect(try DesignFile.content(at: shared).screens.count == 1)
+        let copy = try DesignFile(wrapper: FileWrapper(url: shared))
+        #expect(copy.preview != nil, "with a picture of the board as it is")
+        // The design's own file is left to the system to save.
+        #expect(try DesignFile.content(at: url).screens.isEmpty)
+
+        // Once the share sheet closes, the copy goes.
+        ShareItem.designFile.cleanUp(shared)
+        #expect(!FileManager.default.fileExists(atPath: shared.deletingLastPathComponent().path))
+        model.close()
+    }
+
+    @Test func copiesToShareLeaveNoFoldersBehind() async throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        // One copy from a share sheet whose closing went unheard an hour ago, and one that
+        // another window may be sharing now.
+        let old = temporary.appendingPathComponent("Design-old"), recent = temporary.appendingPathComponent("Design-recent")
+        for folder in [old, recent] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-3600)], ofItemAtPath: old.path)
+
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        model.fileURL = temporary.appendingPathComponent("Shop.layer")
+        let shared = try await model.fileToShare(in: temporary)
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: recent.path))
+
+        // A copy that can't be written leaves nothing behind: its name is too long here.
+        let unwritable = AppModel(document: LayerDocument(file: DesignFile()))
+        unwritable.fileURL = temporary.appendingPathComponent(String(repeating: "a", count: 300) + ".layer")
+        await #expect(throws: (any Error).self) { try await unwritable.fileToShare(in: temporary) }
+        let left = try FileManager.default.contentsOfDirectory(atPath: temporary.path).filter { $0.hasPrefix("Design-") }
+        #expect(Set(left) == ["Design-recent", shared.deletingLastPathComponent().lastPathComponent])
+        model.close()
+        unwritable.close()
+    }
+
     @Test func openingADesignShowsItsContent() throws {
         let file = sampleFile()
         let document = LayerDocument()
@@ -695,8 +900,8 @@ struct CodeGenerationTests {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Title")
                             .font(.title.bold())
-                            .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                         Image("photo")
                             .resizable()
                             .scaledToFill()
@@ -895,6 +1100,124 @@ struct DesignFileNameTests {
         #expect(model.store.title == "Onboarding 2")
     }
 
+    @Test func aBoardNamedAfterItsOwnNumberedFileKeepsThatFile() async throws {
+        let url = try savedDesign(named: "Onboarding 2")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+
+        let moved = try await DesignFileName.rename(url, to: "Onboarding")
+        #expect(moved.lastPathComponent == "Onboarding 2.layer")
+        #expect(exists("Onboarding 2.layer", beside: url))
+        #expect(!exists("Onboarding 3.layer", beside: url))
+
+        // The same through the board: named "Onboarding" over that file, it keeps the file
+        // and takes its number, as a name taken by another design does.
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        model.store.setTitle("Onboarding")
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.fileURL?.lastPathComponent == "Onboarding 2.layer")
+        #expect(model.store.title == "Onboarding 2")
+        #expect(!exists("Onboarding 3.layer", beside: url))
+    }
+
+    @Test func aDesignStillAnswersToItsIdentifierAfterItsFileIsRenamed() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let before = try #require(model.designID)
+        // What a Shortcut holds from its first step: the design, and a screen of it.
+        let screen = try #require(DesignActions.snapshot(of: model)?.screens.first)
+
+        model.store.setTitle("Login")
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        #expect(model.designID != before)
+
+        #expect(OpenDesigns.shared.model(forDesign: before) === model)
+        #expect(try await OpenDesigns.shared.open(design: before) === model)
+        let snapshot = await DesignActions.snapshot(design: before)
+        #expect(snapshot?.id == before, "the design answers to the identifier it was asked for")
+        #expect(snapshot?.screens.map(\.id) == [screen.id])
+        #expect(try await DesignActions.screen(screen).model === model)
+
+        // A design made later under the old name is that design, not the renamed one: as
+        // soon as its file is there, as when another device syncs it, before it is opened.
+        try DesignFile().wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        #expect(OpenDesigns.shared.model(forDesign: before) == nil)
+        #expect(OpenDesigns.shared.currentID(for: before) == before)
+        #expect(await DesignActions.snapshot(design: before)?.screens.isEmpty == true)
+        let newer = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        newer.fileURL = url
+        #expect(OpenDesigns.shared.model(forDesign: before) === newer)
+        newer.close()
+        model.close()
+    }
+
+    @Test func aClosedDesignIsNotListedAgainWhenItsFileMoves() throws {
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        model.fileURL = folder.appendingPathComponent("A.layer")
+        let old = try #require(model.designID)
+        model.close()
+        // A rename that finishes after the design closed.
+        model.fileURL = folder.appendingPathComponent("B.layer")
+        #expect(!OpenDesigns.shared.all.contains { $0 === model })
+        // The old identifier still leads to the file where it is now.
+        #expect(OpenDesigns.shared.currentID(for: old) == model.designID)
+    }
+
+    @Test func askingToCloseWhileClosingWaitsForTheCloseToFinish() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        // Something else holds the file for a moment, as iCloud can, so the rename the
+        // board's new name starts takes a while.
+        await withCheckedContinuation { (holding: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: [], error: nil) { _ in
+                    holding.resume()
+                    Thread.sleep(forTimeInterval: 0.6)
+                }
+            }
+        }
+        model.store.setTitle("Login")
+
+        // The back button's close waits for the rename; an action asks to close meanwhile.
+        let first = Task { await model.prepareToClose() }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!model.isClosed)
+        let second = await model.prepareToClose()
+        #expect(!second, "only the first close dismisses the design")
+        #expect(model.isClosed, "the second waited for the first to finish")
+        #expect(await first.value)
+    }
+
+    @Test func aDesignPutAwayToOpenAnotherIsReadiedAsTheBackButtonReadiesIt() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // One design shown in the window's controller, another in a window of its own.
+        let shown = AppModel(document: LayerDocument()), elsewhere = AppModel(document: LayerDocument())
+        shown.fileURL = folder.appendingPathComponent("A.layer")
+        elsewhere.fileURL = folder.appendingPathComponent("B.layer")
+        let controller = UIViewController(), otherWindow = UIView()
+        let canvas = InkCanvas.Coordinator(model: shown), otherCanvas = InkCanvas.Coordinator(model: elsewhere)
+        shown.ink = canvas
+        elsewhere.ink = otherCanvas
+        controller.view.addSubview(canvas.documentCanvas)
+        otherWindow.addSubview(otherCanvas.documentCanvas)
+        // Edited moments ago: its picture for the document browser isn't drawn yet.
+        shown.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        #expect(shown.document.current.preview == nil)
+
+        await OpenDesigns.shared.prepareToPutAway(controller, keeping: nil)
+        #expect(shown.isClosed)
+        #expect(shown.document.current.preview != nil, "its picture shows the board as it was left")
+        #expect(!elsewhere.isClosed)
+        elsewhere.close()
+    }
+
     @Test func aFileRenamedElsewhereNamesTheBoard() {
         let document = LayerDocument()
         document.update {
@@ -988,6 +1311,70 @@ struct CloudFileTests {
 @Suite("Keeping resources in check")
 @MainActor
 struct ResourceTests {
+    /// A board of three screens and 30 drawings of 40 strokes, some 2400 points across.
+    private func bigBoard() -> AppModel {
+        var content = DesignContent()
+        for index in 0..<3 {
+            content.addScreen(DesignScreen(name: "Screen \(index + 1)", origin: CGPoint(x: CGFloat(index) * 800, y: 0), scale: 1, elements: [element(.title, 40, 120, 300, 40)]))
+        }
+        for index in 0..<30 {
+            let origin = CGPoint(x: CGFloat(index % 6) * 400, y: 900 + CGFloat(index / 6) * 400)
+            let strokes = (0..<40).map { stroke in
+                let rect = CGRect(x: origin.x + CGFloat(stroke % 5) * 30, y: origin.y + CGFloat(stroke / 5) * 12, width: 160, height: 10)
+                let points = SketchSamples.wave(rect, humps: 4).enumerated().map { offset, point in
+                    PKStrokePoint(location: point, timeOffset: Double(offset) * 0.008, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+                }
+                return PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSinceReferenceDate: Double(index * 1000 + stroke))))
+            }
+            if let drawing = DesignElement.drawing(strokes) { content.add(drawing, to: nil, scale: 1) }
+        }
+        let board = content
+        let document = LayerDocument()
+        document.update { $0.content = board }
+        return AppModel(document: document)
+    }
+
+    /// How many turns the main thread had while `work` ran, the longest it went without one,
+    /// and how long `work` took. Turns are counted, rather than the longest stall judged,
+    /// because other tests' work on the main thread can stall it too while all run at once.
+    private func turnsOnTheMainThread(during work: () async -> Void) async -> (turns: Int, stall: Duration, total: Duration) {
+        var last = ContinuousClock.now
+        var longest = Duration.zero
+        var turns = 0
+        var isWorking = false
+        let beat = Task { @MainActor in
+            while !Task.isCancelled {
+                let now = ContinuousClock.now
+                longest = max(longest, now - last)
+                last = now
+                if isWorking { turns += 1 }
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+        }
+        await Task.yield()
+        let start = ContinuousClock.now
+        last = start
+        isWorking = true
+        await work()
+        isWorking = false
+        let total = ContinuousClock.now - start
+        beat.cancel()
+        return (turns, max(longest, ContinuousClock.now - last), total)
+    }
+
+    @Test func aPictureOfABigBoardToShareIsMadeWithoutHoldingUpTheApp() async throws {
+        let model = bigBoard()
+        var url: URL?
+        let (turns, stall, total) = await turnsOnTheMainThread { url = await BoardSnapshot.file(of: model) }
+        let shared = try #require(url)
+        defer { try? FileManager.default.removeItem(at: shared) }
+        let picture = try #require(UIImage(contentsOfFile: shared.path))
+        #expect(max(picture.size.width * picture.scale, picture.size.height * picture.scale) >= 4000)
+        // The board's views are drawn on the main thread; its ink, the picture and the file
+        // aren't, so the main thread has turns meanwhile. Done on it, it had none.
+        #expect(turns >= 3, "the main thread had \(turns) turns in \(total), the longest wait \(stall)")
+    }
+
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
         let store = DesignStore(content: DesignContent())
         let undo = UndoManager()
@@ -1183,19 +1570,26 @@ struct FormatPanelEditTests {
     }
 
     /// A drag begun just after a colour was tapped: the pause used to end the drag's edit
-    /// halfway, and every later move of the drag was an undo step of its own.
+    /// halfway, and every later move of the drag was an undo step of its own. The pause
+    /// ends the panel's own step; the drag is one step of its own.
     @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
+        let x = screen.origin.x
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         model.store.beginEdit()
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        let mark = model.store.historyMark
         try await Task.sleep(for: .milliseconds(150))
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         #expect(model.store.isEditing)
+        #expect(model.store.historyMark == mark, "no move is a step of its own")
         model.store.endEdit()
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.origin.x == x)
+        #expect(model.store.screen(screen.id)?.name == "Checkout")
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1215,7 +1609,7 @@ struct FormatPanelEditTests {
             model.store.beginHeldEdit()
             panel()
         }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         try await Task.sleep(for: .milliseconds(150))
         model.store.endHeldEdit()
         #expect(try await pauseEnds(model))
@@ -1233,7 +1627,7 @@ struct FormatPanelEditTests {
         model.adjustmentPause = .milliseconds(200)
         model.store.beginHeldEdit()
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.store.endHeldEdit()
         #expect(model.store.isEditing, "the panel's edit goes on until its pause")
         #expect(try await pauseEnds(model))
@@ -1243,17 +1637,26 @@ struct FormatPanelEditTests {
         #expect(model.store.historyMark == mark + 1)
     }
 
+    /// A change in the panel during a drag is a step of its own, which the panel's pause
+    /// ends while the drag goes on in its own.
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
-        model.store.beginEdit()
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        let x = screen.origin.x
+        // The drag's frames are made for its edit, as a canvas drag's are.
+        let drag = model.store.beginEdit()
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         try await Task.sleep(for: .milliseconds(150))
         #expect(model.store.isEditing)
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
-        model.store.endEdit()
+        let mark = model.store.historyMark
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
+        #expect(model.store.historyMark == mark, "the move after the pause is still the drag's")
+        model.store.endEdit(drag)
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.name == before.screens.first?.name)
+        #expect(model.store.screen(screen.id)?.origin.x == x + 20)
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1392,8 +1795,31 @@ struct TurnedCodeTests {
         #expect(turn < stretch)
     }
 
-    @Test func anUprightStyledButtonIsWrittenAsBefore() throws {
-        // Recorded from the generator before elements could turn: placed, then finished.
+    /// Upright, an element was placed and then finished, so a centred element's border went
+    /// round the full width it was centred in, and an inset one's round its padding too (G7).
+    /// It is finished first now, as a turned one is, so the border is round the element.
+    @Test func anUprightElementIsFinishedBeforeItIsPlaced() throws {
+        var image = element(.image, (393 - 200) / 2, 300, 200, 150)
+        image.borderWidth = 2
+        var title = element(.title, 82.5, 112, 228, 40)
+        title.borderWidth = 2
+        let centred = lines(of: screen([title, image]))
+        for kind in ["Text(\"Title\")", "Image("] {
+            let start = try #require(centred.firstIndex { $0.hasPrefix(kind) })
+            let border = try #require(centred[start...].firstIndex(of: ".overlay {"))
+            let placement = try #require(centred[start...].firstIndex(of: ".frame(maxWidth: .infinity)"))
+            #expect(border < placement, "\(kind)")
+        }
+        let inset = lines(of: styledButton(turnedBy: nil))
+        let border = try #require(inset.firstIndex(of: ".overlay {"))
+        let shadow = try #require(inset.firstIndex { $0.hasPrefix(".shadow(") })
+        let placement = try #require(inset.firstIndex { $0.hasPrefix(".padding(.leading,") })
+        #expect(border < placement && shadow < placement)
+    }
+
+    @Test func anUprightStyledButtonIsWrittenInFull() throws {
+        // Finished, then placed (G7): before, the padding that places it came first, and
+        // the border went round the padding too.
         let lines = lines(of: styledButton(turnedBy: nil))
         let start = try #require(lines.firstIndex(of: "Button {"))
         #expect(Array(lines[start...].prefix(16)) == [
@@ -1405,12 +1831,12 @@ struct TurnedCodeTests {
             ".frame(width: 200, height: 50)",
             ".background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)",
             "}",
-            ".padding(.leading, 40)",
             ".overlay {",
             "Capsule()",
             ".strokeBorder(Color(red: 0.17, green: 0.16, blue: 0.15), lineWidth: 2)",
             "}",
             ".shadow(color: .black.opacity(0.18), radius: 10, y: 5)",
+            ".padding(.leading, 40)",
             ".padding(.top, 144)",
             "}",
         ])

@@ -1,5 +1,7 @@
 import CoreGraphics
 import Testing
+import Foundation
+import PencilKit
 @testable import Layer
 
 private func observe(_ paths: [[CGPoint]]) -> SketchObservation? {
@@ -192,6 +194,34 @@ private actor CallCounter {
     func record() { count += 1 }
 }
 
+/// Answers nothing until it is cancelled.
+private struct HangingInterpreter: SketchInterpreter {
+    func read(_ request: SketchRequest) async throws -> SketchReading {
+        try await Task.sleep(for: .seconds(60))
+        return .unknown
+    }
+
+    func suggestTitle(for board: String) async throws -> String {
+        try await Task.sleep(for: .seconds(60))
+        return ""
+    }
+}
+
+/// Answers after a short wait.
+private struct SlowInterpreter: SketchInterpreter {
+    let answer: SketchReading
+
+    func read(_ request: SketchRequest) async throws -> SketchReading {
+        try await Task.sleep(for: .milliseconds(150))
+        return answer
+    }
+
+    func suggestTitle(for board: String) async throws -> String {
+        try await Task.sleep(for: .milliseconds(150))
+        return "Board"
+    }
+}
+
 private struct StubInterpreter: SketchInterpreter {
     let answer: SketchReading
     /// The second choice it names alongside its answer, if any.
@@ -332,6 +362,60 @@ struct SketchEngineTests {
         #expect(outcome.alternative == ranked[1])
     }
 
+    // MARK: Switching provider
+
+    /// A provider whose every request waits until it is cancelled, counting how often an
+    /// interpreter is made for it.
+    private func hanging(_ name: String, made: CallCounter = CallCounter()) -> SketchProvider {
+        SketchProvider(
+            id: "\(name)-\(UUID().uuidString)", name: name, symbol: "sparkle", needsAPIKey: false,
+            readiness: { .ready },
+            makeInterpreter: { _ in
+                Task { await made.record() }
+                return HangingInterpreter()
+            }
+        )
+    }
+
+    /// The model changed while the last one's check was still waiting: the old check,
+    /// cancelled, used to be recorded as the new model failing, which rested it for two
+    /// minutes, and it let go of the new model's own check (G3). A cancellation isn't a
+    /// failure either (G12).
+    @Test func aCheckCancelledBySwitchingModelDoesNotRestTheNextOne() async throws {
+        let engine = SketchEngine(provider: hanging("Old"))
+        engine.prepare()
+        let checks = CallCounter()
+        engine.use(hanging("New", made: checks))
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!engine.isResting)
+        #expect(!engine.lastAttemptFailed)
+        #expect(engine.statusLine == "New decides the close calls")
+        // The new model's check is still the one under way: preparing again doesn't start another.
+        engine.prepare()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await checks.count == 1)
+    }
+
+    /// A close call asked of the old model that comes back wrong after the switch is the
+    /// old model's failure, not the new one's.
+    @Test func aReadAnsweredAfterSwitchingModelIsNotCountedAgainstTheNextOne() async throws {
+        let box = roundedWideBox(at: 740)
+        let sketch = try request(box.paths, local: box.rect)
+        // A title is not one of this sketch's candidates, so its answer is a failure.
+        let old = SketchProvider(
+            id: "old-\(UUID().uuidString)", name: "Old", symbol: "sparkle", needsAPIKey: false,
+            readiness: { .ready },
+            makeInterpreter: { _ in SlowInterpreter(answer: .element(.title)) }
+        )
+        let engine = SketchEngine(provider: old)
+        let reading = Task { await engine.read(sketch) }
+        try await Task.sleep(for: .milliseconds(20))
+        engine.use(hanging("New"))
+        #expect(await reading.value == .element(.textField))
+        #expect(!engine.lastAttemptFailed)
+        #expect(!engine.isResting)
+    }
+
     @Test func aClearSketchOffersNothingElse() async throws {
         let pill = CGRect(x: 28, y: 738, width: 337, height: 60)
         let outcome = await engine(answering: .element(.textField)).outcome(for: try request([SketchSamples.box(pill, radius: 30)], local: pill))
@@ -456,5 +540,42 @@ struct AskedReadingTests {
         #expect(SketchPrompt.label(in: "a button saying Sign up") == "Sign up")
         #expect(SketchPrompt.label(in: "title “Welcome back”") == "Welcome back")
         #expect(SketchPrompt.label(in: "a big picture") == nil)
+    }
+}
+
+/// A stand-in for PencilKit's recognizer that reads a drawing as its number of strokes, and
+/// that, like any actor, lets another call in while it waits: a drawing handed over is
+/// taken in only after a pause.
+private actor CountingRecognizer: StrokeTextRecognizing {
+    private var drawing = PKDrawing()
+
+    func updateDrawing(_ drawing: PKDrawing) async {
+        try? await Task.sleep(for: .milliseconds(30))
+        self.drawing = drawing
+    }
+
+    func recognizedText(strokeIDs: Set<UUID>?) async -> String? {
+        "\(drawing.strokes.count) strokes"
+    }
+}
+
+@Suite("Reading handwriting")
+struct HandwritingRecognizerTests {
+    private func strokes(_ count: Int) -> [[CGPoint]] {
+        (0..<count).map { index in [CGPoint(x: 0, y: index * 20), CGPoint(x: 40, y: index * 20)] }
+    }
+
+    /// Two sketches read at once used to share the recognizer between taking in their
+    /// drawings and asking what they say, so one could be told the other's words (G1).
+    /// Each read is one turn of the recognizer now.
+    @Test func sketchesReadTogetherEachGetTheirOwnWords() async {
+        let reader = HandwritingRecognizer.Reader(recognizer: CountingRecognizer())
+        for _ in 0..<5 {
+            async let one = HandwritingRecognizer.recognize(strokes(1), with: reader)
+            async let two = HandwritingRecognizer.recognize(strokes(2), with: reader)
+            async let three = HandwritingRecognizer.recognize(strokes(3), with: reader)
+            let read = await [one, two, three]
+            #expect(read == ["1 strokes", "2 strokes", "3 strokes"])
+        }
     }
 }

@@ -14,7 +14,38 @@ enum SwiftUICodeGenerator {
         screen.typeName + ".swift"
     }
 
-    static func code(for screen: DesignScreen, settings: CodeSettings = CodeSettings()) -> String {
+    /// The file a screen is written to among the design's `screens`, named after its view.
+    static func fileName(for screen: DesignScreen, among screens: [DesignScreen]) -> String {
+        (typeNames(for: screens)[screen.id] ?? screen.typeName) + ".swift"
+    }
+
+    /// The name of each screen's view, told apart where two would be the same: "Screen 2"
+    /// again after a screen was deleted, or "Sign In" beside "Sign-In". Two files declaring
+    /// the same view don't compile in one target. Names that differ only in case are told
+    /// apart too, since a Mac's disk doesn't tell their files apart. The first keeps its name.
+    static func typeNames(for screens: [DesignScreen]) -> [DesignScreen.ID: String] {
+        var used: Set<String> = []
+        var names: [DesignScreen.ID: String] = [:]
+        for screen in screens {
+            var name = screen.typeName
+            var number = 2
+            while used.contains(name.lowercased()) {
+                name = "\(screen.typeName)\(number)"
+                number += 1
+            }
+            used.insert(name.lowercased())
+            names[screen.id] = name
+        }
+        return names
+    }
+
+    /// A screen's code, its view named as it is among the design's `screens`.
+    static func code(for screen: DesignScreen, among screens: [DesignScreen], settings: CodeSettings = CodeSettings()) -> String {
+        code(for: screen, typeName: typeNames(for: screens)[screen.id], settings: settings)
+    }
+
+    static func code(for screen: DesignScreen, typeName: String? = nil, settings: CodeSettings = CodeSettings()) -> String {
+        let typeName = typeName ?? screen.typeName
         var elements = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
 
         // The topmost title becomes the navigation title rather than a view of its own.
@@ -31,27 +62,21 @@ enum SwiftUICodeGenerator {
             root = ["NavigationStack {"] + indented(root + [".navigationTitle(\(literal(navigationTitle)))"]) + ["}"]
         }
 
-        var lines = ["import SwiftUI", "", "struct \(screen.typeName): View {", "    var body: some View {"]
+        var lines = ["import SwiftUI", "", "struct \(typeName): View {", "    var body: some View {"]
         lines += root.map { "        " + $0 }
         lines += ["    }", "}"]
         if settings.includesPreview {
-            lines += ["", "#Preview {", "    \(screen.typeName)()", "}"]
+            lines += ["", "#Preview {", "    \(typeName)()", "}"]
         }
         return lines.joined(separator: "\n")
     }
 
-    /// Every screen of a design, as files named after them.
+    /// Every screen of a design, as files named after their views, each view a name of its own.
     static func files(for screens: [DesignScreen], settings: CodeSettings = CodeSettings()) -> [(name: String, source: String)] {
-        var used: Set<String> = []
+        let names = typeNames(for: screens)
         return screens.map { screen in
-            var name = fileName(for: screen)
-            var number = 2
-            while used.contains(name) {
-                name = "\(screen.typeName)\(number).swift"
-                number += 1
-            }
-            used.insert(name)
-            return (name, code(for: screen, settings: settings))
+            let typeName = names[screen.id] ?? screen.typeName
+            return (typeName + ".swift", code(for: screen, typeName: typeName, settings: settings))
         }
     }
 
@@ -91,7 +116,7 @@ enum SwiftUICodeGenerator {
                 }
             }
             if row.count == 1, let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                lines.insert("// \(name.replacingOccurrences(of: "\n", with: " "))", at: 0)
+                lines.insert("// \(commentText(name))", at: 0)
             }
             body += lines
             previousBottom = bounds.maxY
@@ -140,7 +165,7 @@ enum SwiftUICodeGenerator {
         var body: [String] = []
         for (element, next) in zip(row, row.dropFirst().map { Optional($0) } + [nil]) {
             if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+                body.append("// \(commentText(name))")
             }
             // Each element at its own width, flush with the one before it.
             body += view(for: element, margin: element.frame.minX, contentWidth: .infinity, screenWidth: .infinity)
@@ -178,11 +203,9 @@ enum SwiftUICodeGenerator {
                 "    .font(\(font(of: element, usual: titleFont(height: frame.height))))",
             ] + textColor(of: element, usual: nil)
             if centered && (element.textAlignment ?? .center) == .center {
-                // A turned title is turned before it is stretched across the screen.
-                lines += element.resolvedRotation == 0
-                    ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
-                    : ["    .multilineTextAlignment(.center)"]
-                tail = element.resolvedRotation == 0 ? [] : ["    .frame(maxWidth: .infinity)"]
+                // Stretched across the screen as it is placed: finished, and turned, before that.
+                lines += ["    .multilineTextAlignment(.center)"]
+                tail = ["    .frame(maxWidth: .infinity)"]
             } else {
                 lines += ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"]
             }
@@ -257,11 +280,10 @@ enum SwiftUICodeGenerator {
             return []
         }
 
-        // Upright, an element is finished and then placed. A turned one is finished first, so
-        // its border and shadow turn with it, then turned, then placed.
-        return element.resolvedRotation == 0
-            ? lines + tail + finish(element)
-            : lines + finish(element) + turn(element) + tail
+        // An element is finished before it is placed, so that its border goes round it, as on
+        // the canvas, rather than round the width it is centred in or the padding that insets
+        // it. A turned one is turned in between, so its border and shadow turn with it.
+        return lines + finish(element) + turn(element) + tail
     }
 
     // MARK: Exact positions
@@ -273,7 +295,7 @@ enum SwiftUICodeGenerator {
         var body = ["Color.clear"]
         for element in elements {
             if let name = element.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                body.append("// \(name.replacingOccurrences(of: "\n", with: " "))")
+                body.append("// \(commentText(name))")
             }
             body += positioned(element)
         }
@@ -512,16 +534,37 @@ enum SwiftUICodeGenerator {
 
     // MARK: Literals
 
+    /// Text as a Swift string literal. A carriage return or another control character,
+    /// pasted from Windows or set by a Siri intent, is escaped too: left in, it ended the
+    /// literal, and the file didn't compile.
     private static func literal(_ text: String) -> String {
-        let escaped = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        var escaped = ""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\\": escaped += "\\\\"
+            case "\"": escaped += "\\\""
+            case "\n": escaped += "\\n"
+            case "\r": escaped += "\\r"
+            case "\t": escaped += "\\t"
+            case _ where scalar.value < 0x20 || scalar.value == 0x7F: escaped += String(format: "\\u{%02X}", scalar.value)
+            default: escaped.unicodeScalars.append(scalar)
+            }
+        }
         return "\"\(escaped)\""
+    }
+
+    /// A layer's name for a comment line: a line break or control character in it would
+    /// end the comment and leave the rest of the name as code.
+    private static func commentText(_ name: String) -> String {
+        String(String.UnicodeScalarView(name.unicodeScalars.map { CharacterSet.newlines.contains($0) || CharacterSet.controlCharacters.contains($0) ? " " : $0 }))
     }
 
     private static func number(_ value: CGFloat) -> String {
         let rounded = (value * 10).rounded() / 10
+        guard rounded.isFinite else { return rounded.isNaN ? "0" : rounded > 0 ? ".infinity" : "-.infinity" }
+        // Past what an Int holds it is written as it is: a size like that is a mistake,
+        // but writing it out mustn't stop the app.
+        guard rounded.magnitude < 1e15 else { return String(Double(rounded)) }
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(Double(rounded))
     }
 

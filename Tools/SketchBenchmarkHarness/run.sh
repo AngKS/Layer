@@ -17,6 +17,7 @@ swiftc \
     -target arm64-apple-macos27.0 \
     -O \
     "$REPO_ROOT/Layer/Model/Design.swift" \
+    "$REPO_ROOT/Layer/Model/ShapeKind.swift" \
     "$REPO_ROOT/Layer/Components/ComponentSpec.swift" \
     "$REPO_ROOT/Layer/Components/Catalogue.swift" \
     "$REPO_ROOT/Layer/Document/JSONValue.swift" \
@@ -34,6 +35,7 @@ swiftc \
     "$REPO_ROOT/Layer/Sketch/SketchEngine.swift" \
     "$REPO_ROOT/Layer/Sketch/AppleIntelligenceInterpreter.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Stubs.swift" \
+    "$REPO_ROOT/Tools/Shared/RotationStub.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Generate.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Harness.swift" \
     -o "$BIN"

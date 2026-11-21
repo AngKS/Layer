@@ -53,6 +53,232 @@ struct VoiceAgentTests {
         #expect(steps == ["Restyling…", "Rewording…"])
     }
 
+    // MARK: Several tools in one answer
+
+    /// The on-device model asks for all of a command's tools in one answer, and the session
+    /// runs those at the same time: the second screen was refused with "A screen is
+    /// already being written" while the first was. They run one at a time (V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func toolsAskedForTogetherRunOneAtATime() async throws {
+        let bench = bench(["a profile and a settings screen": Step.together([
+            Step(tool: "createScreen", arguments: #"{"name":"Profile","description":"a profile screen"}"#),
+            Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#),
+        ])])
+        // Each screen is written a moment after it is asked for.
+        bench.app.screenStream = { description, _, _ in
+            AsyncThrowingStream { feed in
+                Task {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.finish()
+                }
+            }
+        }
+
+        let outcome = await bench.agent.run("a profile and a settings screen")
+
+        #expect(outcome.problem == nil)
+        #expect(bench.app.store.screens.map(\.name) == ["Login", "Profile", "Settings"])
+        #expect(outcome.lines.count == 2)
+        #expect(outcome.lines.first?.contains("Profile") == true)
+    }
+
+    /// A screen that takes longer to write than a call waits for its turn: the second
+    /// screen of the answer still waits for it, as the call ahead is running, not left
+    /// out. It ran early and was refused, "A screen is already being written" (review of V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCallWaitsAsLongAsTheCallAheadIsRunning() async throws {
+        let (app, _) = VoiceFixture.undoableLogin()
+        let handles = VoiceHandles()
+        let toolbox = VoiceToolbox(model: app, handles: handles)
+        let turns = VoiceToolTurns()
+        turns.patience = .milliseconds(100)
+        let model = ScriptedLanguageModel(script: ["a profile and a settings screen": Step.together([
+            Step(tool: "createScreen", arguments: #"{"name":"Profile","description":"a profile screen"}"#),
+            Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#),
+        ])])
+        let session = LanguageModelSession(profile: VoiceProfile(
+            actor: toolbox, hooks: VoiceHooks(willRun: { _ in }, didRun: {}, mayRun: { true }), turns: turns, testModel: model
+        ))
+        turns.session = session
+        // Each screen takes four times as long to write as a call waits for its turn.
+        app.screenStream = { description, _, _ in
+            AsyncThrowingStream { feed in
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.finish()
+                }
+            }
+        }
+        session.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
+
+        app.store.beginHeldEdit()
+        _ = try await session.respond(to: "a profile and a settings screen")
+        app.store.endHeldEdit()
+
+        #expect(toolbox.failures.isEmpty)
+        #expect(app.store.screens.map(\.name) == ["Login", "Profile", "Settings"])
+    }
+
+    // MARK: Taking turns
+
+    /// A session whose transcript a test writes, and the turns taken against it.
+    private static func turnsWithATranscript() -> (session: LanguageModelSession, turns: VoiceToolTurns) {
+        let session = LanguageModelSession(model: ScriptedLanguageModel(script: [:]))
+        let turns = VoiceToolTurns()
+        turns.session = session
+        return (session, turns)
+    }
+
+    /// An answer asking for calls with these ids, as its transcript entry.
+    private static func answer(_ ids: String...) -> Transcript.Entry {
+        .toolCalls(Transcript.ToolCalls(ids.map { Transcript.ToolCall(id: $0, toolName: "setText", arguments: GeneratedContent(properties: [:])) }))
+    }
+
+    /// Waits for `call`'s turn, giving up after a second. False if it didn't come.
+    private static func turnComes(for call: String, in turns: VoiceToolTurns) async -> Bool {
+        let waiting = Task { await turns.waitForTurn(of: call) }
+        let timer = Task {
+            try await Task.sleep(for: .seconds(1))
+            waiting.cancel()
+        }
+        defer { timer.cancel() }
+        return await waiting.value
+    }
+
+    /// A call id the model used in an earlier answer takes its place in the new one. It
+    /// kept its old place: run out of turn, and when it ran first the call after it waited
+    /// for good. An answer is known by its transcript entry (review of V2).
+    @Test func aCallIdUsedAgainTakesItsPlaceInItsNewAnswer() async {
+        let (session, turns) = Self.turnsWithATranscript()
+        session.transcript.append(Self.answer("a"))
+        #expect(await Self.turnComes(for: "a", in: turns))
+        turns.finished()
+
+        // "a" again, then "c": "a" goes first, and "c" once "a" has run.
+        session.transcript.append(Self.answer("a", "c"))
+        #expect(await Self.turnComes(for: "a", in: turns))
+        turns.finished()
+        #expect(await Self.turnComes(for: "c", in: turns))
+        turns.finished()
+
+        // "x", then "a" again: "a" waits for "x".
+        session.transcript.append(Self.answer("x", "a"))
+        #expect(!(await Self.turnComes(for: "a", in: turns)))
+    }
+
+    /// A call whose turn never comes, because the session left out the call ahead of it
+    /// without cancelling the rest, runs anyway once it has waited long enough (review of V2).
+    @Test func aCallWaitsOnlySoLongForItsTurn() async {
+        let (session, turns) = Self.turnsWithATranscript()
+        turns.patience = .milliseconds(100)
+        session.transcript.append(Self.answer("left out", "next"))
+        #expect(await Self.turnComes(for: "next", in: turns))
+    }
+
+    /// A tool that throws ends its answer: the calls waiting behind it give up rather
+    /// than run (review of V2).
+    @Test func aToolThatThrowsStopsTheRestOfItsAnswer() async throws {
+        let (session, turns) = Self.turnsWithATranscript()
+        session.transcript.append(Self.answer("1", "2"))
+        #expect(await Self.turnComes(for: "1", in: turns))
+        let second = Task { await turns.waitForTurn(of: "2") }
+        try await Task.sleep(for: .milliseconds(50))
+
+        let failing = TakingTurns(FailingTool(), turns: turns)
+        await #expect(throws: FailingTool.Failure.self) {
+            try await failing.call(arguments: FailingTool.Arguments(GeneratedContent(properties: ["note": "x"])))
+        }
+
+        #expect(await second.value == false)
+    }
+
+    /// End to end: a call id used again in a later answer of the same command, with a
+    /// call after it. The command finishes, each step in the order asked (review of V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCallIdUsedAgainTakesItsPlaceInTheNewAnswer() async throws {
+        for _ in 1...5 {
+            let bench = bench(["two answers": [Step(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#, id: "a")] + Step.together([
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#, id: "a"),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Two"}"#, id: "c"),
+            ])])
+
+            let outcome = try #require(await Self.run("two answers", on: bench.agent, within: .seconds(3)))
+
+            #expect(outcome.lines.count == 3)
+            #expect(bench.button?.text == "Two")
+            #expect(bench.button?.tint == ColourWords.parse("blue"))
+        }
+    }
+
+    /// Runs `command`, and stops it if it is still running after `limit`. Nil if it had to be stopped.
+    private static func run(_ command: String, on agent: VoiceAgent, within limit: Duration) async -> VoiceOutcome? {
+        let running = Task { await agent.run(command) }
+        let timer = Task {
+            try await Task.sleep(for: limit)
+            running.cancel()
+        }
+        let outcome = await running.value
+        timer.cancel()
+        return outcome.wasCancelled ? nil : outcome
+    }
+
+    /// "Make the title bold and duplicate it", asked for in one answer: the copy is made
+    /// after the bold, so it is bold too, every time (V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func toolsAskedForTogetherRunInTheOrderAsked() async throws {
+        for _ in 1...20 {
+            let bench = bench(["make the title bold and duplicate it": Step.together([
+                Step(tool: "styleElement", arguments: #"{"element":"E1","look":"bold"}"#),
+                Step(tool: "duplicateElement", arguments: #"{"element":"E1"}"#),
+            ])])
+            var steps: [String] = []
+            bench.agent.onStep = { steps.append($0) }
+
+            let outcome = await bench.agent.run("make the title bold and duplicate it")
+
+            let titles = try #require(bench.app.store.screen(bench.screen)?.elements.filter { $0.kind == .title })
+            #expect(titles.count == 2)
+            #expect(titles.allSatisfy { $0.fontWeight == .bold })
+            #expect(steps == ["Restyling…", "Duplicating…"])
+            #expect(outcome.lines.first?.hasPrefix("Restyled") == true)
+        }
+    }
+
+    /// "Undo that and make it blue" in one answer undoes the last command, not the blue
+    /// (V2). The undo is slow to start, so that left to the session the blue would always
+    /// go first, and its undo would take back the blue instead.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func anUndoAskedForWithAChangeUndoesTheCommandBefore() async throws {
+        let (app, screen) = VoiceFixture.undoableLogin()
+        let handles = VoiceHandles()
+        let turns = VoiceToolTurns()
+        let hooks = VoiceHooks(
+            willRun: { tool in if tool == "undo" { try? await Task.sleep(for: .milliseconds(200)) } },
+            didRun: {}, mayRun: { true }
+        )
+        let model = ScriptedLanguageModel(script: ["undo that and make it blue": Step.together([
+            Step(tool: "undo", arguments: "{}"),
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+        ])])
+        let session = LanguageModelSession(profile: VoiceProfile(actor: VoiceToolbox(model: app, handles: handles), hooks: hooks, turns: turns, testModel: model))
+        turns.session = session
+        // The command before: the button says Ahoy, a step of its own.
+        let button = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screen(screen)?.elements[1].id))
+        app.store.update(button) { $0.text = "Ahoy" }
+        session.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
+
+        // Held as one step, as `VoiceAgent.run` holds a command.
+        app.store.beginHeldEdit()
+        _ = try await session.respond(to: "undo that and make it blue")
+        app.store.endHeldEdit()
+
+        let after = try #require(app.store.resolve(button)?.element)
+        #expect(after.text == "Sign in")
+        #expect(after.tint == ColourWords.parse("blue"))
+    }
+
     /// Where the pencil pointed is told with the command it was pointed for, and only that one.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aHintFromThePencilGoesWithItsCommandOnly() async throws {
@@ -87,6 +313,22 @@ struct VoiceAgentTests {
         undo.undo()
         #expect(bench.app.store.content == before)
         #expect(!undo.canUndo)
+    }
+
+    /// The Edit menu, the shortcut list and the undo HUD name a spoken command's step,
+    /// rather than a bare "Undo" (V8).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandsUndoStepIsNamed() async throws {
+        // Both ways a history can group: the tests' own, and the document's, by event.
+        for groupsByEvent in [false, true] {
+            let bench = bench(["make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)]])
+            let undo = try #require(bench.undo)
+            undo.groupsByEvent = groupsByEvent
+            _ = await bench.agent.run("make the button blue")
+            #expect(undo.undoActionName == "Voice Command")
+            undo.undo()
+            #expect(undo.redoActionName == "Voice Command")
+        }
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
@@ -167,8 +409,15 @@ struct VoiceAgentTests {
 
     @Test func whichModelsAreToldAboutTheCanvasAgainBetweenSteps() {
         #expect(!VoiceAgent.looksAgainBetweenSteps(with: .appleIntelligence))
-        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")))
-        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")) == HostedLanguageModel.isSupported)
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")) == HostedLanguageModel.isSupported)
+    }
+
+    /// A design that names a provider but no model is carried out by the on-device model,
+    /// so it isn't told about the canvas again between steps either: three seconds a
+    /// command, measured on an iPad (V9).
+    @Test func aChoiceThatFallsBackOnTheDeviceIsntToldAgain() {
+        #expect(!VoiceAgent.looksAgainBetweenSteps(with: ModelChoice(provider: HostedProvider.openAI.rawValue, model: nil)))
     }
 
     /// Getting the model ready asks it nothing, and leaves it ready to be asked.
@@ -242,6 +491,194 @@ struct VoiceAgentTests {
         #expect(bench.button?.text == "Ahoy")
     }
 
+    /// Ink drawn, or anything else done by hand, while a command runs is a step of its
+    /// own. It used to join the command's step, so "No, …" undid it with the command, and
+    /// the command's next change cleared the redo that could have brought it back (V1).
+    /// Here the command changes nothing itself, and its correction has nothing to undo.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionNeverUndoesInkDrawnWhileTheCommandRan() async throws {
+        let bench = bench(["show me the first screen": [Step(tool: "show", arguments: #"{"target":"S1"}"#, delay: .milliseconds(300))]])
+        async let first = bench.agent.run("show me the first screen")
+        try await Task.sleep(for: .milliseconds(50))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }  // as `inkChanged` does
+        _ = await first
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+    }
+
+    /// The command restyles the button, then rewords it; between the two, a finger moves
+    /// that same button. The command's step can't go back above the move without the move
+    /// being taken back with it, so a correction leaves both alone rather than undo the move.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionNeverUndoesAMoveByHandMadeWhileTheCommandRan() async throws {
+        let bench = bench(["make the button blue and say ahoy": [
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+            Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
+        ]])
+        let button = try #require(bench.button)
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        async let first = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await first
+        #expect(bench.button?.text == "Ahoy")
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+    }
+
+    /// When the correction can't undo the command, the model is asked, and its `undo`
+    /// tool took back the top step: the person's own move (review I-2). The model's undo
+    /// takes back only a command's step; told so, it goes on with what was asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func theModelsUndoNeverTakesBackAMoveByHand() async throws {
+        let correct = [
+            Step(tool: "undo", arguments: "{}"),
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"red"}"#),
+        ]
+        let bench = bench([
+            "make the button blue and say ahoy": [
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
+            ],
+            "no, make it red": correct,
+            "(the last change was not undone: something has been changed by hand since, and that must not be undone.) no, make it red": correct,
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let button = try #require(bench.button)
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        async let first = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await first
+
+        _ = await bench.agent.run("No, make it red")
+        #expect(bench.button?.frame.origin.y == 300)
+        #expect(bench.button?.tint == ColourWords.parse("red"))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+    }
+
+    /// "Undo" said outright is the Undo button, whoever made the last change; a correction
+    /// takes back only the command's own (I-2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func undoSaidOutrightIsTheUndoButtonAndACorrectionIsNot() async throws {
+        let bench = bench([
+            "undo": [Step(tool: "undo", arguments: "{}")],
+            "make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        // A move by hand, then "undo": the move is undone.
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await bench.agent.run("undo")
+        #expect(bench.button?.frame.origin.y == 420)
+        // A move by hand, then "No, that's wrong.": the move stays.
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+        // A command, then "undo": the command is undone.
+        _ = await bench.agent.run("make the button blue")
+        #expect(bench.button?.tint == ColourWords.parse("blue"))
+        _ = await bench.agent.run("undo")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.button?.frame.origin.y == 300)
+    }
+
+    /// Ink drawn while a command that changed nothing ran, then "No, that's wrong.": the
+    /// model, asked, undid the ink (review I-2). A correction with nothing of the command's
+    /// to undo says so, without asking the model.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionWithNothingToUndoDoesNotAskTheModel() async throws {
+        let bench = bench([
+            "show me the first screen": [Step(tool: "show", arguments: #"{"target":"S1"}"#, delay: .milliseconds(300))],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        async let first = bench.agent.run("show me the first screen")
+        try await Task.sleep(for: .milliseconds(50))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }
+        _ = await first
+        let asked = bench.recorder.requests.count
+        let outcome = await bench.agent.run("No, that's wrong.")
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+        #expect(bench.recorder.requests.count == asked)
+        #expect(outcome.problem != nil)
+    }
+
+    /// A drag made while a command ran and let go where it began leaves no step. The
+    /// command's step was on top again, but was taken not to be, so "No, …" declined
+    /// (review M-4).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionUndoesTheCommandAfterADragThatCameToNothing() async throws {
+        let bench = bench(["make the button blue and say ahoy": [
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+            Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
+        ]])
+        let image = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: image.id)
+        async let first = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        let drag = bench.app.store.beginEdit()
+        bench.app.store.act(for: drag) { bench.app.store.update(ref) { $0.frame.origin.x = 60 } }
+        bench.app.store.act(for: drag) { bench.app.store.update(ref) { $0.frame.origin.x = image.frame.origin.x } }
+        bench.app.store.endEdit(drag)
+        _ = await first
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.button?.text == "Sign in")
+    }
+
+    /// The corrections above with the history the document really has, which groups by
+    /// event: the agent's work turns the run loop between its steps.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func correctionsWorkWithAHistoryGroupedByEvent() async throws {
+        let bench = bench([
+            "make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#, delay: .milliseconds(100))],
+            "make the button blue and say ahoy": [
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(200)),
+            ],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let undo = try #require(bench.undo)
+        undo.groupsByEvent = true
+        try await Task.sleep(for: .milliseconds(5))
+        undo.removeAllActions()
+        // Ink drawn before the command changed anything: the correction takes back the command.
+        async let first = bench.agent.run("make the button blue")
+        try await Task.sleep(for: .milliseconds(20))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }
+        _ = await first
+        try await Task.sleep(for: .milliseconds(5))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+        // A move by hand of what the command changed: neither it nor the command is undone.
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        async let second = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await second
+        try await Task.sleep(for: .milliseconds(5))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+    }
+
+    /// Ink drawn while the model was still thinking, before the command changed anything:
+    /// the correction takes back the command, and only the command.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionTakesBackTheCommandAndLeavesInkDrawnMeanwhile() async throws {
+        let bench = bench(["make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#, delay: .milliseconds(300))]])
+        async let first = bench.agent.run("make the button blue")
+        try await Task.sleep(for: .milliseconds(50))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }
+        _ = await first
+        #expect(bench.button?.tint == ColourWords.parse("blue"))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+    }
+
     @Test func whatIsACorrection() {
         #expect(VoiceAgent.correction(in: "Not the check marks.") == .undoThenAsk)
         #expect(VoiceAgent.correction(in: "No, make it red") == .undoThenAsk)
@@ -252,6 +689,78 @@ struct VoiceAgentTests {
         #expect(VoiceAgent.correction(in: "Now make it red") == nil)
         #expect(VoiceAgent.correction(in: "Notes screen please") == nil)
         #expect(VoiceAgent.correction(in: "undo") == nil)
+    }
+
+    /// "No border", "Not bold": a look said with "no" or "not" is a command of its own.
+    /// It was taken for a correction, and undid the last command (V3).
+    @Test func aLookSaidWithNoOrNotIsNotACorrection() {
+        #expect(VoiceAgent.correction(in: "No border on the button") == nil)
+        #expect(VoiceAgent.correction(in: "not bold") == nil)
+        #expect(VoiceAgent.correction(in: "Not bold.") == nil)
+        #expect(VoiceAgent.correction(in: "No shadow") == nil)
+        #expect(VoiceAgent.correction(in: "No rounded corners") == nil)
+        #expect(VoiceAgent.correction(in: "no more shadow on the card") == nil)
+        #expect(VoiceAgent.correction(in: "Not so big") == nil)
+    }
+
+    /// A correction says so: "no" or "not" with a pause after it, or words that correct.
+    @Test func aCorrectionSaysItIsOne() {
+        #expect(VoiceAgent.correction(in: "No, make it red") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No. The title.") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Not the check marks.") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Not that, the title") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No I meant the title") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "no the other one") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Nope, bigger") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "No.") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "no not that one") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "No that's wrong") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "Oops") == .undoOnly)
+    }
+
+    /// The fallback recogniser writes no commas, and phrases are joined with a space, so
+    /// "No, make it red" can arrive as "No make it red". Words that can't follow the "no"
+    /// of a look still make it a correction, and "not X, Y" says what was meant instead.
+    /// A pause that ends a sentence, as in "No. Border.", is one only when what follows is
+    /// one; "no thanks" turns something down and undoes nothing (review of V3).
+    @Test func correctionsWithoutACommaAndLooksWithNo() {
+        let expected: [(String, VoiceAgent.Correction?)] = [
+            ("no, make it red", .undoThenAsk), ("No make it red", .undoThenAsk), ("no I meant the title", .undoThenAsk),
+            ("not that one, the button", .undoThenAsk), ("no — bigger", .undoThenAsk), ("no - bigger", .undoThenAsk),
+            ("no—bigger", .undoThenAsk), ("No bigger", .undoThenAsk), ("No it should be blue", .undoThenAsk),
+            ("no it's the title", .undoThenAsk), ("no change it to blue", .undoThenAsk), ("no put it at the top", .undoThenAsk),
+            ("no just the title", .undoThenAsk), ("no actually the title", .undoThenAsk), ("not red, blue", .undoThenAsk),
+            ("not bigger, smaller", .undoThenAsk), ("Not bold, italic", .undoThenAsk), ("no, no border", .undoThenAsk),
+            ("no the button", .undoThenAsk), ("no I said blue", .undoThenAsk), ("No... the title", .undoThenAsk),
+            ("no move it down", .undoThenAsk), ("no use the other one", .undoThenAsk), ("no instead make it green", .undoThenAsk),
+            ("not it", .undoOnly),
+            ("No border", nil), ("not bold", nil), ("no shadow on it", nil), ("nothing on the left", nil), ("No. Border.", nil),
+            ("Not so big", nil), ("No, thanks", nil), ("no thanks", nil), ("not italic", nil), ("no more shadow on the card", nil),
+        ]
+        for (said, correction) in expected {
+            #expect(VoiceAgent.correction(in: said) == correction, "\(said)")
+        }
+    }
+
+    /// "No border on the button" after "make the title blue" is put to the model as it was
+    /// said, and leaves the blue title alone (V3).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aLookSaidWithNoLeavesTheLastCommandAlone() async throws {
+        let bench = bench([
+            "make the title blue": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"blue"}"#)],
+            "no border on the button": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"plain"}"#)],
+        ])
+        _ = await bench.agent.run("make the title blue")
+
+        let outcome = await bench.agent.run("No border on the button")
+
+        #expect(outcome.problem == nil)
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == ColourWords.parse("blue"))
+        #expect(bench.recorder.requests.last?.prompts.last == "No border on the button")
+        // Two commands, two steps: the first undo takes back only the second.
+        bench.undo?.undo()
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == ColourWords.parse("blue"))
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
@@ -454,5 +963,21 @@ struct VoiceAgentTests {
         #expect(bench.recorder.requests.last?.prompts == ["one", "two"])
         _ = await bench.agent.run("three")
         #expect(bench.recorder.requests.last?.prompts == ["three"])
+    }
+}
+
+/// A tool that always throws.
+private struct FailingTool: Tool {
+    struct Failure: Error {}
+    let name = "fail"
+    let description = "Always fails."
+
+    @Generable
+    struct Arguments {
+        var note: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        throw Failure()
     }
 }

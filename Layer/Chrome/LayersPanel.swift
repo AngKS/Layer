@@ -284,17 +284,19 @@ private struct CodePane: View {
     var body: some View {
         let screens = model.store.screens
         if let screen = screens.first(where: { $0.id == screenID }) ?? screens.first {
-            let shown = CodePreview.Shown(screen: screen, settings: model.store.canvas.code)
+            // Each view named as the shared files name it, so no two are the same.
+            let typeNames = SwiftUICodeGenerator.typeNames(for: screens)
+            let shown = CodePreview.Shown(screen: screen, typeName: typeNames[screen.id], settings: model.store.canvas.code)
             HStack {
                 Menu {
                     ForEach(screens) { other in
-                        Button(SwiftUICodeGenerator.fileName(for: other)) { screenID = other.id }
+                        Button((typeNames[other.id] ?? other.typeName) + ".swift") { screenID = other.id }
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text")
                             .foregroundStyle(.secondary)
-                        Text(SwiftUICodeGenerator.fileName(for: screen))
+                        Text((typeNames[screen.id] ?? screen.typeName) + ".swift")
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
@@ -320,9 +322,11 @@ private struct CodePane: View {
 /// A screen's code as the Code tab shows it, and its lines coloured.
 @MainActor @Observable
 private final class CodePreview {
-    /// What the code is made from.
+    /// What the code is made from: the screen, the name its view is given among the
+    /// design's screens, and the code settings.
     struct Shown: Equatable {
         var screen: DesignScreen
+        var typeName: String?
         var settings: CodeSettings
     }
 
@@ -342,7 +346,7 @@ private final class CodePreview {
             guard !Task.isCancelled else { return }
         }
         shown = wanted
-        source = SwiftUICodeGenerator.code(for: wanted.screen, settings: wanted.settings)
+        source = SwiftUICodeGenerator.code(for: wanted.screen, typeName: wanted.typeName, settings: wanted.settings)
         lines = source.components(separatedBy: "\n").map(SwiftHighlighter.attributed)
         #if DEBUG
         LayersPanelWork.codeMade()

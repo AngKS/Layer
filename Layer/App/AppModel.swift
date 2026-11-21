@@ -82,7 +82,19 @@ final class AppModel {
             guard fileURL != oldValue else { return }
             let previousID = designID
             designID = fileURL.map(DesignLibrary.id(for:))
-            if let previousID, previousID != designID { DesignIndexer.forget(design: previousID) }
+            if let previousID, previousID != designID {
+                DesignIndexer.forget(design: previousID)
+                // What Siri and Shortcuts hold from before the move still finds the design.
+                if let designID { OpenDesigns.shared.designMoved(from: previousID, to: designID) }
+            }
+            // A rename that finishes after the design closed doesn't list it again, but the
+            // design is indexed under its new identifier now: nothing here will change it again.
+            guard !isClosed else {
+                if previousID != designID, let snapshot = DesignActions.snapshot(of: self) {
+                    Task { await DesignIndexer.index(snapshot) }
+                }
+                return
+            }
             OpenDesigns.shared.opened(self)
             DesignIndexer.designChanged(self)
             matchNameAndFile()
@@ -337,6 +349,7 @@ final class AppModel {
             }
             self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
+            self?.stopGeneratingForAScreenThatIsGone()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
@@ -397,9 +410,6 @@ final class AppModel {
 
     var isGenerating: Bool { generation?.phase == .writing }
 
-    /// Whether the screen being generated opened an undo step of its own to close.
-    @ObservationIgnored private var generationOwnsEdit = true
-
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
     ///
@@ -409,11 +419,10 @@ final class AppModel {
     /// `anchor` is a canvas point to put the screen at, where the pencil pointed for a
     /// spoken command; without one it goes where new screens always go.
     ///
-    /// `partOfHeldEdit` is for a screen a spoken command asks for. The command's undo step
-    /// is already being held open and the screen is part of it, so it opens none of its
-    /// own. That is also how an edit by hand made in the meantime is told from it: see
-    /// `DesignStore.endHeldEdit()`.
-    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, partOfHeldEdit: Bool = false, device: DeviceFrame? = nil) {
+    /// The screen is an undo step of its own (`DesignStore.Edit`), or, asked for by a spoken
+    /// command, part of the command's: either way, what the person does while it is
+    /// written is a step of its own, which the screen's never takes in or closes (G4).
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, device: DeviceFrame? = nil) {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
         generationTask?.cancel()
@@ -423,18 +432,27 @@ final class AppModel {
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
-        generationOwnsEdit = !partOfHeldEdit
-        if generationOwnsEdit { store.beginEdit() }
+        // Part of a spoken command's step, which waits for the screen; otherwise a step of its
+        // own, even when asked for inside a one-off step that ends at once (review M-5).
+        let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
+        let ownsEdit = joined == nil
+        let edit = joined ?? store.beginEditOfItsOwn(by: .app)
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
-        let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
-        store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
+        let screen = store.act(for: edit) { () -> DesignScreen in
+            let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
+            store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
+            return screen
+        }
         // Shown, not selected: a new screen comes in without selection handles round it.
         DesignActions.reveal(.screen(screen.id), in: self, selecting: false)
         generation = ScreenGeneration(screenID: screen.id, description: prompt)
 
         let choice = modelChoice
         let stream = screenStream(prompt, board, choice)
+        generationWasStopped = false
         generationTask = Task { [weak self] in
+            // What the generation has written, by place in its latest version.
+            var written: [DesignElement?] = []
             do {
                 for try await update in stream {
                     guard let self else { return }
@@ -446,21 +464,35 @@ final class AppModel {
                         generation?.isThinking = false
                     case .screen(let blueprint):
                         withAnimation(.snappy(duration: 0.25)) {
-                            _ = store.setElements(blueprint.layout(on: current.device), on: screen.id, replacing: true)
+                            written = store.act(for: edit) {
+                                store.writeGenerated(blueprint.layout(on: current.device), on: screen.id, over: written)
+                            }
                         }
                         generation?.isThinking = false
                         generation?.elementCount = blueprint.itemCount
                     }
                 }
-                self?.finishGeneration(error: nil)
+                self?.finishGeneration(error: nil, edit: edit, ownsEdit: ownsEdit)
             } catch {
-                self?.finishGeneration(error: error is CancellationError ? nil : error)
+                self?.finishGeneration(error: error is CancellationError ? nil : error, edit: edit, ownsEdit: ownsEdit)
             }
         }
     }
 
     /// Stops the model; what it has written so far stays.
     func stopGenerating() {
+        generationWasStopped = isGenerating
+        generationTask?.cancel()
+    }
+
+    /// Whether the generation under way was stopped, rather than finished or failed.
+    @ObservationIgnored private var generationWasStopped = false
+
+    /// A screen taken away while it is being written, by undo or by hand, stops the model:
+    /// a reasoning model can think for tens of seconds, a paid request, before it writes
+    /// the line that would find the screen gone (G11).
+    private func stopGeneratingForAScreenThatIsGone() {
+        guard isGenerating, let generation, store.screen(generation.screenID) == nil else { return }
         generationTask?.cancel()
     }
 
@@ -474,18 +506,31 @@ final class AppModel {
         ScreenGenerator.stream($0, board: $1, using: $2)
     }
 
-    private func finishGeneration(error: (any Error)?) {
+    /// Ends a generation, and the screen's undo step if it has one of its own (`ownsEdit`):
+    /// that and nothing else, so a drag still under way goes on as its own step (G4).
+    private func finishGeneration(error: (any Error)?, edit: DesignStore.Edit, ownsEdit: Bool) {
         generationTask = nil
+        let wasStopped = generationWasStopped
+        generationWasStopped = false
+        defer { if ownsEdit { store.endEdit(edit) } }
         guard var finished = generation else { return }
         // Nothing is written to a design that has closed, and nothing is left to show.
         guard !isClosed else {
             generation = nil
             return
         }
-        // A screen taken away while it was written has nothing to show either. Its edit,
-        // if it opened one, is still closed.
-        guard store.screen(finished.screenID) != nil else {
-            if generationOwnsEdit { store.endEdit() }
+        // A screen taken away while it was written has nothing to show either.
+        guard let screen = store.screen(finished.screenID) else {
+            generation = nil
+            return
+        }
+        // A screen nothing was written on isn't left behind, unless something was put on it
+        // by hand meanwhile: it stays, with that on it (M1).
+        if finished.elementCount == 0, screen.elements.isEmpty {
+            store.act(for: edit) { store.deleteScreen(finished.screenID) }
+        }
+        // Stopped before it wrote anything: there is nothing to say (G10).
+        if wasStopped, finished.elementCount == 0 {
             generation = nil
             return
         }
@@ -494,9 +539,6 @@ final class AppModel {
         } else {
             finished.phase = finished.elementCount > 0 ? .finished : .failed(ScreenGenerator.GenerationError.nothingWritten.localizedDescription)
         }
-        // A screen nothing was written on isn't left behind.
-        if finished.elementCount == 0 { store.deleteScreen(finished.screenID) }
-        if generationOwnsEdit { store.endEdit() }
         finished.isThinking = false
         generation = finished
         // Success says so briefly; a failure stays until it is dismissed.
@@ -637,25 +679,57 @@ final class AppModel {
     /// browser has already listed.
     @ObservationIgnored private(set) var isClosed = false
 
+    /// Whether the design's canvas is inside `view`: the view of the controller that shows it.
+    func isShown(in view: UIView) -> Bool {
+        ink?.canvases.contains { $0.isDescendant(of: view) } == true
+    }
+
     /// Gets a design ready to go back to the document browser: its picture as the board
-    /// was left, its name decided, and its file given that name. False when the design is
-    /// already on its way out, so that a second tap of the back button doesn't dismiss it
-    /// again, or early, while the first still waits for the file's name.
+    /// was left, its name decided, and its file given that name. Asked again while it is
+    /// getting ready, by a second tap of the back button or by an action opening another
+    /// design, it waits for that to finish rather than going on early, and says false, so
+    /// that only the first asker dismisses the design.
     @discardableResult
     func prepareToClose() async -> Bool {
-        guard !isClosing, !isClosed else { return false }
-        isClosing = true
-        refreshPreview()
-        // A name still being thought up is settled now, from the design's own words.
-        if titleSuggestion != nil, store.title == nil {
-            store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+        if let closing {
+            await closing.value
+            return false
         }
-        await settleFileName()
-        close()
+        guard !isClosed else { return false }
+        let getting = Task {
+            refreshPreview()
+            // A name still being thought up is settled now, from the design's own words.
+            if titleSuggestion != nil, store.title == nil {
+                store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
+            }
+            await settleFileName()
+            close()
+        }
+        closing = getting
+        await getting.value
         return true
     }
 
-    @ObservationIgnored private var isClosing = false
+    /// The design getting ready to close, once something has asked it to.
+    @ObservationIgnored private var closing: Task<Void, Never>?
+
+    /// Actions Siri and Shortcuts took on this design that their own undo can still take
+    /// back. Each is taken out of their history once it can't be: see `TakenAction`.
+    @ObservationIgnored var takenActions: [TakenAction] = []
+    /// Said when Siri's undo of an action found nothing left to take back.
+    var undoNotice: String?
+
+    /// Takes out of Siri's history the actions everything of which has been changed since,
+    /// so that Siri isn't left to undo one, do nothing, and say it did. Done as the app
+    /// stops being active, which is when Siri can next be asked.
+    func withdrawTakenActionsWithNothingLeft() {
+        let content = store.content
+        takenActions.removeAll { action in
+            guard !action.canTakeBack(from: content) else { return false }
+            action.withdraw()
+            return true
+        }
+    }
 
     func close() {
         // Closed by the back button, then again as the canvas goes from the screen.
@@ -668,14 +742,19 @@ final class AppModel {
         // by hand below leaves open.
         endTurn()
         // A change made in the format panel moments ago is still an edit waiting for the
-        // panel's pause to end it: it ends now, while the design can still be saved.
+        // panel's pause to end it: it ends now, while the design can still be saved, with
+        // whatever else is still under way.
         adjustmentEnd?.cancel()
         adjustmentEnd = nil
-        store.endEdit()
+        adjustment = nil
+        store.endAllEdits()
         // What was written without an undo step, or after the last save within an edit,
         // reaches the disk only if the system is told there is something to save.
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
         isClosed = true
+        // Siri's undo can't reach a closed design: it is given nothing to undo.
+        for action in takenActions { action.withdraw() }
+        takenActions.removeAll()
         voice?.end()
         // Listening stops. A pencil command already running isn't cancelled, but it ends at
         // its next tool call, since nothing more is done to a closed design.
@@ -839,6 +918,34 @@ final class AppModel {
         return previewedBoard != board
     }
 
+    /// A copy of the design as it is now, to share. The file on disk can be some seconds
+    /// behind, since the system saves a while after each change. The ink still waiting
+    /// for the pen to be put down is taken in and the board's picture drawn first; the
+    /// copy is written on another thread, under the file's name, in a folder of its own in
+    /// `temporary`, which the share menu takes away when its sheet closes (see `ShareItem`).
+    /// Old copies whose sheet closed unheard are cleared first, and a copy that can't be
+    /// written leaves nothing behind.
+    func fileToShare(in temporary: URL = FileManager.default.temporaryDirectory) async throws -> URL {
+        ink?.flushPendingInk()
+        refreshPreview()
+        let file = document.current
+        let name = [fileURL?.deletingPathExtension().lastPathComponent, store.title.map(DesignFileName.fileName(for:))]
+            .compactMap(\.self).first { !$0.isEmpty } ?? DesignFileName.untitled
+        return try await Task.detached(priority: .userInitiated) {
+            ShareItem.clearOldCopies(in: temporary)
+            let folder = temporary.appendingPathComponent(ShareItem.copyPrefix + UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent(name).appendingPathExtension("layer")
+                try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+                return url
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                throw error
+            }
+        }.value
+    }
+
     /// Redraws the board's picture now. Done before a design closes or the app leaves the
     /// screen, so that the picture saved is of the board as it was left.
     func refreshPreview() {
@@ -858,6 +965,7 @@ final class AppModel {
     func leavingTheScreen() {
         ink?.flushPendingInk()
         refreshPreview()
+        withdrawTakenActionsWithNothingLeft()
         if document.hasChangesSinceSnapshot { store.markNeedsSaving() }
     }
 
@@ -1226,7 +1334,7 @@ final class AppModel {
     /// Returns whether a turn began: none does while another is under way, or when what
     /// is selected can't turn.
     @discardableResult
-    func beginTurn() -> Bool {
+    func beginTurn(cuttingDragShort: Bool = false) -> Bool {
         guard !isTurning, canTurnSelection else { return false }
         let start: Double
         if let turnable = turnableElement {
@@ -1241,10 +1349,10 @@ final class AppModel {
         }
         let (mark, isOnMark) = Rotation.snapped(start)
         startMark = isOnMark ? mark : nil
-        // The turn's own part of the step: a drag, a command or a screen being generated
-        // that is under way, or that begins or ends meanwhile, shares the step without
-        // closing it while the turn goes on, and the turn doesn't close theirs.
-        store.beginEdit(by: .turn)
+        // The turn's own step: a drag, a command or a screen being generated that is under
+        // way, or that begins or ends meanwhile, has its own, and neither ends the other.
+        // A drag the turn cuts short goes on as the turn, one step with it.
+        turnEdit = store.beginEdit(by: .turn, takingOver: cuttingDragShort ? drags?.handOverEdit() : nil)
         isAdjusting = true
         isTurning = true
         return true
@@ -1261,7 +1369,7 @@ final class AppModel {
         case .element(let ref, let start)?:
             guard selection == .element(ref) else { return false }
             let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
-            store.update(ref) { $0.setRotation(angle) }
+            store.act(for: turnEdit) { store.update(ref) { $0.setRotation(angle) } }
             snapped = isSnapped ? angle : nil
         case .several(let start)?:
             // Changed by something else meanwhile, they are left as that left them.
@@ -1269,7 +1377,7 @@ final class AppModel {
             var turned = Rotation.normalized(start + degrees)
             let (angle, isSnapped) = snaps ? Rotation.snapped(session.outline.degrees + turned) : (0, false)
             if isSnapped { turned = Rotation.normalized(angle - session.outline.degrees) }
-            turn(&session, to: turned)
+            store.act(for: turnEdit) { turn(&session, to: turned) }
             snapped = isSnapped ? angle : nil
         case nil:
             return false
@@ -1283,8 +1391,8 @@ final class AppModel {
         return snapped != nil
     }
 
-    /// Ends the turn, and its step with it unless something else still has the step open.
-    /// Does nothing when no turn began.
+    /// Ends the turn and its own step, and nothing else under way. Does nothing when no
+    /// turn began.
     func endTurn() {
         guard isTurning else { return }
         turnStart = nil
@@ -1293,8 +1401,12 @@ final class AppModel {
         isAdjusting = false
         snappedTurn = nil
         startMark = nil
-        store.endEdit(by: .turn)
+        if let turnEdit { store.endEdit(turnEdit) }
+        turnEdit = nil
     }
+
+    /// The turn under way's own step.
+    @ObservationIgnored private var turnEdit: DesignStore.Edit?
 
     // MARK: Twisting with two fingers
 
@@ -1309,7 +1421,7 @@ final class AppModel {
     /// when what is selected can't turn.
     @discardableResult
     func beginTwist() -> Bool {
-        guard beginTurn() else { return false }
+        guard beginTurn(cuttingDragShort: true) else { return false }
         isTwisting = true
         drags?.endAny(model: self)
         return true
@@ -1456,7 +1568,20 @@ final class AppModel {
             }
             if present.count != selection.things.count { self.selection = CanvasSelection(present) }
         }
-        if let suggestion, store.resolve(suggestion.ref) == nil { dismissSuggestion() }
+        // Taking an offer lays the element out again from its sketch: once it, or its
+        // screen, has been moved, resized or turned, that would undo the move.
+        if suggestion != nil, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+    }
+
+    /// Where a suggestion's element is: its frame and turn, and where its screen is.
+    private struct SuggestedPlace: Equatable {
+        var frame: CGRect
+        var rotation: Double
+        var placement: Placement
+    }
+
+    private func place(of suggestion: KindSuggestion) -> SuggestedPlace? {
+        store.resolve(suggestion.ref).map { SuggestedPlace(frame: $0.element.frame, rotation: $0.element.resolvedRotation, placement: $0.placement) }
     }
 
     // MARK: Did you mean
@@ -1464,6 +1589,8 @@ final class AppModel {
     /// What the last close call nearly was, while that is on offer.
     private(set) var suggestion: KindSuggestion?
     @ObservationIgnored private var suggestionExpiry: Task<Void, Never>?
+    /// Where the suggestion's element was when it was offered.
+    @ObservationIgnored private var suggestedPlace: SuggestedPlace?
     /// How long a suggestion stays up when it is left alone.
     static let suggestionLifetime: Duration = .seconds(8)
 
@@ -1471,6 +1598,7 @@ final class AppModel {
     /// time, and goes by itself after a while.
     func offer(_ suggestion: KindSuggestion) {
         suggestionExpiry?.cancel()
+        suggestedPlace = place(of: suggestion)
         self.suggestion = suggestion
         suggestionExpiry = Task { [weak self] in
             try? await Task.sleep(for: Self.suggestionLifetime)
@@ -1495,66 +1623,47 @@ final class AppModel {
         suggestionExpiry?.cancel()
         suggestionExpiry = nil
         suggestion = nil
+        suggestedPlace = nil
     }
 
     /// True while a number field is being scrubbed.
     @ObservationIgnored private var isScrubbing = false
 
-    /// Starts scrubbing a field. Everything until `endScrubbing()` undoes as one step.
+    /// Starts scrubbing a field. Everything until `endScrubbing()` undoes as one step,
+    /// together with a run of changes in the format panel just before it.
     func beginScrubbing() {
         adjustmentEnd?.cancel()
         isScrubbing = true
-        store.beginEdit()
+        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
     }
 
     func endScrubbing() {
         isScrubbing = false
-        store.endEdit()
+        if let adjustment { store.endEdit(adjustment) }
+        adjustment = nil
     }
 
     /// How long the format panel waits after its last change before ending its step.
     @ObservationIgnored var adjustmentPause: Duration = .milliseconds(600)
 
-    /// While the format panel's edit is its own, how many edits the store had seen begun
-    /// when the panel last joined it. Anything else beginning an edit since, a drag, a
-    /// stroke or a scrub, makes the edit theirs to end: ended by the panel's pause, a drag
-    /// begun just after a colour was tapped lost its step halfway, and each later move was
-    /// a step of its own.
-    @ObservationIgnored private var adjustmentOwnsEditAt: Int?
-    /// How many edits the store had seen begun at the panel's last change: while it is the
-    /// same, nothing else has begun one since.
-    @ObservationIgnored private var adjustmentLastBegin: Int?
-    /// Whether the panel's change was made inside a spoken command's hold. Its pause may
-    /// come after the command has ended, which leaves the step open for the panel to end.
-    @ObservationIgnored private var adjustmentBeganInHold = false
+    /// The format panel's own edit: its run of quick changes, or a scrub. Its pause, or the
+    /// scrub's end, ends it and nothing else: a drag, a stroke, a turn or a spoken command
+    /// under way meanwhile has its own, which the panel's end leaves open, and theirs leave
+    /// the panel's open.
+    @ObservationIgnored private var adjustment: DesignStore.Edit?
 
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
-        // The panel's own edit if it opens one, or goes on with one it opened that nothing
-        // else has joined. Inside another's edit by hand, the change joins that one. A turn
-        // or a spoken command under way has a part of its own, which an end by hand leaves
-        // open, so beside one of those the panel's part by hand is still the panel's to end.
-        let ownsEdit = !store.isEditing(by: .hand) || adjustmentOwnsEditAt == store.editBegins
-        store.beginEdit()
-        adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
-        adjustmentLastBegin = store.editBegins
-        if store.isHoldingEdit { adjustmentBeganInHold = true }
-        body()
+        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
+        store.act(for: adjustment, body)
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
         adjustmentEnd?.cancel()
         adjustmentEnd = Task { [weak self] in
             try? await Task.sleep(for: self?.adjustmentPause ?? .zero)
             guard !Task.isCancelled, let self else { return }
-            // Its own edit, or, inside a spoken command's hold, its own part of it: there
-            // an end only says the panel's edit by hand is over, and the command then
-            // closes its step. Left, the hold would wait for an end that never comes.
-            if adjustmentLastBegin == store.editBegins, adjustmentOwnsEditAt != nil || adjustmentBeganInHold || store.isHoldingEdit {
-                store.endEdit()
-            }
-            adjustmentOwnsEditAt = nil
-            adjustmentLastBegin = nil
-            adjustmentBeganInHold = false
+            if let adjustment { store.endEdit(adjustment) }
+            adjustment = nil
         }
     }
 
@@ -1615,11 +1724,12 @@ final class AppModel {
     func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
         guard let blueprint = AssetLibrary.template(named: name) else { return }
         let device = store.canvas.sketchDevice
-        store.beginEdit()
-        defer { store.endEdit() }
-        let screen = addFrame(device, centeredAt: point)
-        store.updateScreen(screen.id) { $0.name = name }
-        _ = store.setElements(blueprint.layout(on: device), on: screen.id, replacing: true)
+        // Its own step even in the middle of a drag, which it leaves open (M3).
+        store.asOwnStep {
+            let screen = addFrame(device, centeredAt: point)
+            store.updateScreen(screen.id) { $0.name = name }
+            _ = store.setElements(blueprint.layout(on: device), on: screen.id, replacing: true)
+        }
     }
 
     func addSymbol(_ name: String) {
@@ -1837,52 +1947,57 @@ final class AppModel {
 
         withAnimation(.smooth(duration: 0.45)) {
             effects.removeAll { $0.id == effect.id }
-            // A drawing and what it becomes change places as one undo step.
-            if isDrawing { store.beginEdit() }
-            defer { if isDrawing { store.endEdit() } }
-            var converted = false
-            var added: DesignStore.ElementRef?
-            switch reading {
-            case .screen:
-                _ = store.addScreen(from: bounds)
-                converted = true
-            case .element(let kind):
-                if let host {
-                    if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {
-                        converted = true
-                        added = .init(host: .screen(host.id), element: element.id)
-                    }
-                } else if !kind.belongsOnScreens || kind == .text {
-                    added = store.addFloating(kind, from: bounds)
+            // What a sketch becomes, with the words written in it, is one undo step of its own,
+            // and a drawing changes places with it in that step: made in one turn of the run
+            // loop but not for an edit, they were two steps, and the first undo only put the
+            // placeholder back (review N-1). A drag under way meanwhile keeps its own (M3).
+            let conversion = store.beginEdit(by: .app)
+            defer { store.endEdit(conversion) }
+            store.act(for: conversion) {
+                var converted = false
+                var added: DesignStore.ElementRef?
+                switch reading {
+                case .screen:
+                    _ = store.addScreen(from: bounds)
                     converted = true
+                case .element(let kind):
+                    if let host {
+                        if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {
+                            converted = true
+                            added = .init(host: .screen(host.id), element: element.id)
+                        }
+                    } else if !kind.belongsOnScreens || kind == .text {
+                        added = store.addFloating(kind, from: bounds)
+                        converted = true
+                    }
+                    if let added, let readingLogID {
+                        Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                    }
+                    if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
+                        store.update(added) { $0.text = recognizedText }
+                    }
+                    // A close call says what else it nearly was, in case that is what was meant.
+                    if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
+                        offer(KindSuggestion(ref: added, kind: other, sketch: bounds, observation: observation))
+                    }
+                case .scratchOut, .unknown:
+                    // A scribble deletes nothing: scratching out is no longer a way to delete.
+                    break
                 }
-                if let added, let readingLogID {
-                    Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                // Words the prompt gave for the element go on it, and a drawing read on request
+                // ends with what it became selected.
+                if let added, isDrawing {
+                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.resolve(added)?.element.kind.hasText == true {
+                        store.update(added) { $0.text = label }
+                    }
+                    selection = .element(added)
                 }
-                if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
-                    store.update(added) { $0.text = recognizedText }
+                if converted {
+                    if let drawing { store.delete(drawing) } else { ink?.removeSketch(keys) }
+                    if reading != .scratchOut { suggestTitleIfNeeded() }
+                } else if !isDrawing {
+                    reject(keys)
                 }
-                // A close call says what else it nearly was, in case that is what was meant.
-                if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
-                    offer(KindSuggestion(ref: added, kind: other, sketch: bounds, observation: observation))
-                }
-            case .scratchOut, .unknown:
-                // A scribble deletes nothing: scratching out is no longer a way to delete.
-                break
-            }
-            // Words the prompt gave for the element go on it, and a drawing read on request
-            // ends with what it became selected.
-            if let added, isDrawing {
-                if let label = prompt.flatMap(SketchPrompt.label(in:)), store.resolve(added)?.element.kind.hasText == true {
-                    store.update(added) { $0.text = label }
-                }
-                selection = .element(added)
-            }
-            if converted {
-                if let drawing { store.delete(drawing) } else { ink?.removeSketch(keys) }
-                if reading != .scratchOut { suggestTitleIfNeeded() }
-            } else if !isDrawing {
-                reject(keys)
             }
         }
     }
