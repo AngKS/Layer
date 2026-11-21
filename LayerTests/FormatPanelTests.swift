@@ -31,6 +31,21 @@ private struct TypingIntoTheSelection: View {
     }
 }
 
+/// The X field of a real element, bound as the Format panel binds it: reading the frame the
+/// element had at the last update, and setting it as one adjustment, which undoes as a step.
+private struct TypingIntoAnElement: View {
+    let model: AppModel
+    let ref: DesignStore.ElementRef
+
+    var body: some View {
+        let x = model.store.resolve(ref)?.element.frame.origin.x ?? 0
+        TypedNumber(label: "X", value: Binding(get: { x }, set: { value in
+            model.adjusting { model.store.update(ref) { $0.frame.origin.x = value } }
+        }), range: -99_999...99_999, wraps: false) {}
+            .frame(width: 200, height: 40)
+    }
+}
+
 /// SwiftUI's own formatted text field, bound the same way.
 private struct PlainFieldOnTheSelection: View {
     let elements: TwoElements
@@ -156,6 +171,62 @@ struct TypingIntoTheFormatPanelTests {
         let notFinite = elements.setOnFirst.filter { !$0.isFinite }
         #expect(notFinite.isEmpty, "set: \(elements.setOnFirst)")
         #expect(elements.first.isFinite)
+    }
+
+    /// The element changed another way while its field has the keyboard (an Align in the
+    /// panel, a drag, the knob, voice): as typing ends, the number typed earlier isn't set
+    /// again over that change. SwiftUI sets the field's value once more as typing ends, and
+    /// the field, which keeps what was typed, put it back (review I1).
+    @Test func aChangeMadeWhileTheFieldIsFocusedStandsAsTypingEnds() async throws {
+        let elements = TwoElements()
+        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+        defer { window.isHidden = true }
+        let field = try await focusedField(in: view)
+        type("100", into: field)
+        try await settle(view)
+        #expect(elements.first == 100)
+
+        elements.first = 0
+        elements.setOnFirst = []
+        try await settle(view)
+        field.resignFirstResponder()
+        try await settle(view)
+        #expect(elements.first == 0)
+        #expect(!elements.setOnFirst.contains(100), "set again as typing ended: \(elements.setOnFirst)")
+    }
+
+    /// Undo pressed while the field has the keyboard takes back the typed number, and stays
+    /// taken back as typing ends, with redo still there to put it back (review I1).
+    @Test func undoWhileTheFieldIsFocusedStandsAndKeepsItsRedo() async throws {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.adjustmentPause = .milliseconds(10)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+        var button = DesignStore.newElement(.button)
+        button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
+        let ref = model.store.setElements([button], on: screen, replacing: true)[0]
+        func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
+
+        let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
+        defer { window.isHidden = true }
+        let field = try await focusedField(in: view)
+        type("100", into: field)
+        try await settle(view)
+        #expect(x() == 100)
+        #expect(!model.store.isEditing, "the panel's pause should have ended its edit")
+
+        undo.undo()
+        #expect(x() == 20)
+        #expect(undo.canRedo)
+        try await settle(view)
+        field.resignFirstResponder()
+        try await settle(view)
+        #expect(x() == 20, "typing ending set the typed number again over the undo")
+        #expect(undo.canRedo, "and threw away the redo")
+        undo.redo()
+        #expect(x() == 100)
     }
 
     /// Return ends typing as well, and sets the number on the same element.

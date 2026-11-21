@@ -856,6 +856,10 @@ struct TypedNumber: View {
                 // can't be saved, and scrubbing it traps.
                 guard number.isFinite else { return }
                 let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
+                // Only a number newly typed. SwiftUI sets each change twice, and once more as
+                // typing ends; set again then, the number typed earlier undid whatever changed
+                // the element meanwhile: an Align, Undo, a drag, the knob, voice.
+                guard Double(value) != typed else { return }
                 typed = Double(value)
                 target.wrappedValue = value
             }),
