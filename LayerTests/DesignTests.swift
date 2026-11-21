@@ -794,6 +794,29 @@ struct DesignFileTests {
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)
     }
 
+    @Test func theSharedDesignFileHasTheLatestEdit() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("Untitled 4.layer")
+        try DesignFile().wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+
+        // Changed since the system last saved it.
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let shared = try await model.fileToShare()
+        defer { try? FileManager.default.removeItem(at: shared.deletingLastPathComponent()) }
+
+        #expect(shared.lastPathComponent == "Untitled 4.layer")
+        #expect(try DesignFile.content(at: shared).screens.count == 1)
+        let copy = try DesignFile(wrapper: FileWrapper(url: shared))
+        #expect(copy.preview != nil, "with a picture of the board as it is")
+        // The design's own file is left to the system to save.
+        #expect(try DesignFile.content(at: url).screens.isEmpty)
+        model.close()
+    }
+
     @Test func openingADesignShowsItsContent() throws {
         let file = sampleFile()
         let document = LayerDocument()

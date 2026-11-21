@@ -6,7 +6,8 @@ import UIKit
 struct ShareMenu: View {
     @Environment(AppModel.self) private var model
     @State private var picture: SharedPicture?
-    @State private var nothingToShare = false
+    /// What went wrong in making something to share, said in an alert.
+    @State private var problem: String?
 
     var body: some View {
         Menu {
@@ -30,12 +31,19 @@ struct ShareMenu: View {
                 if let url = BoardSnapshot.file(of: model) {
                     picture = SharedPicture(urls: [url])
                 } else {
-                    nothingToShare = true
+                    problem = "There is nothing on the board to make a picture of yet."
                 }
             }
-            if let url = model.fileURL {
-                ShareLink(item: url) {
-                    Label("Design File", systemImage: "doc")
+            if model.fileURL != nil {
+                // A copy of the design as it is, rather than the file as last saved.
+                Button("Design File", systemImage: "doc") {
+                    Task {
+                        do {
+                            picture = SharedPicture(urls: [try await model.fileToShare()])
+                        } catch {
+                            problem = "Layer couldn't make a copy of the design to share."
+                        }
+                    }
                 }
             }
         } label: {
@@ -45,7 +53,7 @@ struct ShareMenu: View {
         .popover(item: $picture) { picture in
             ActivityView(items: picture.urls)
         }
-        .alert("There is nothing on the board to make a picture of yet.", isPresented: $nothingToShare) {
+        .alert(problem ?? "", isPresented: Binding { problem != nil } set: { if !$0 { problem = nil } }) {
             Button("OK", role: .cancel) {}
         }
     }
