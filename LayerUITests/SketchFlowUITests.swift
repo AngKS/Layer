@@ -781,10 +781,6 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(of: suggestion), "the suggestion should go once it is taken")
     }
 
-    // MARK: Documents
-
-    /// Launches into the document browser and creates a design, ending on its canvas with
-    /// the Magic Pen in hand.
     // MARK: Rotation
 
     func testTheRotationFieldTurnsTheSelection() {
@@ -874,8 +870,10 @@ final class SketchFlowUITests: XCTestCase {
         add(shot)
     }
 
-    // MARK: Opening
+    // MARK: Documents
 
+    /// Launches into the document browser and creates a design, ending on its canvas with
+    /// the Magic Pen in hand.
     private func openNewDesign() {
         app.launch()
         XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 45), "the document browser should appear at launch")

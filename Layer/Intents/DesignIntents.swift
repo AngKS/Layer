@@ -198,17 +198,23 @@ struct GenerateSwiftUICodeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let source: (screen: DesignScreen, settings: CodeSettings)
+        let source: (screen: DesignScreen, content: DesignContent)
         if let screen, let id = screen.screenID, let snapshot = await DesignActions.snapshot(design: screen.designID),
            let found = snapshot.content.screens.first(where: { $0.id == id }) {
-            source = (found, snapshot.content.canvas.code)
+            source = (found, snapshot.content)
         } else if screen == nil {
             let current = try await DesignActions.screenOrCurrent(nil)
-            source = (current.screen, current.model.store.canvas.code)
+            source = (current.screen, current.model.store.content)
         } else {
             throw LayerIntentError.screenNotFound
         }
-        let code = SwiftUICodeGenerator.code(for: source.screen, settings: source.settings)
+        let code = Self.code(for: source.screen, in: source.content)
         return .result(value: code, dialog: "Here's the SwiftUI for \(source.screen.name).")
+    }
+
+    /// The code for one screen of a design, its view named as the shared files and the code
+    /// panel name it: two screens called "Home" are `Home` and `Home2` (review M-8).
+    static func code(for screen: DesignScreen, in content: DesignContent) -> String {
+        SwiftUICodeGenerator.code(for: screen, among: content.screens, settings: content.canvas.code)
     }
 }

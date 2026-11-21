@@ -172,6 +172,129 @@ struct DesignContent: Equatable, Sendable {
         elements.removeAll { $0.parent == id }
     }
 
+    // MARK: Taking a change back
+
+    /// The screens themselves, without what is on them.
+    var screenFrames: [DesignScreen] { frames }
+
+    /// Elements that say they are on a screen the design doesn't have. They are drawn
+    /// nowhere, can't be touched and are left out of the code, so a design should never
+    /// have any: tests check it after every undo and redo.
+    var elementsOnMissingScreens: [DesignElement.ID] {
+        let screens = Set(frames.map(\.id))
+        return elements.filter { $0.parent.map { !screens.contains($0) } ?? false }.map(\.id)
+    }
+
+    /// Puts every element left on a screen the design no longer has onto the open canvas,
+    /// where it was on that screen in `previous`, at the screen's scale, and takes the scale
+    /// off anything on a screen, which has none of its own. Undo uses it: a step that took a
+    /// screen away may leave there something another edit put on it meanwhile.
+    mutating func rehostElementsOnMissingScreens(from previous: DesignContent) {
+        let screens = Set(frames.map(\.id))
+        for element in elements {
+            guard let parent = element.parent, !screens.contains(parent) else { continue }
+            guard let gone = previous.frames.first(where: { $0.id == parent }), gone.scale > 0 else {
+                move(element.id, to: nil, scale: 1, frame: element.frame)
+                continue
+            }
+            let onCanvas = gone.placement.canvasRect(for: element.frame)
+            let origin = CGPoint(x: onCanvas.minX / gone.scale, y: onCanvas.minY / gone.scale)
+            move(element.id, to: nil, scale: gone.scale, frame: CGRect(origin: origin, size: element.frame.size))
+        }
+        for index in elements.indices where elements[index].parent != nil && elements[index].scale != nil {
+            elements[index].scale = nil
+        }
+    }
+
+    /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
+    func boardDiffers(from other: DesignContent) -> Bool {
+        title != other.title || canvas != other.canvas || unread != other.unread
+    }
+
+    /// This content with the change that turned `before` into `after` taken back, and only
+    /// that change: whatever has changed since `after` stays as it is now. With nothing
+    /// else changed since, that is `before` itself.
+    ///
+    /// An undo step is taken back this way, so that a step made while something else was
+    /// changing the design too (a screen being written, a spoken command, a drag) takes
+    /// back its own changes and leaves the others'.
+    func reverting(_ after: DesignContent, to before: DesignContent) -> DesignContent {
+        if self == after { return before }
+        var result = self
+        if after.title != before.title { result.title = before.title }
+        if after.canvas != before.canvas { result.canvas = before.canvas }
+        if after.unread != before.unread { result.unread = before.unread }
+        result.frames = Self.reverting(frames, after: after.frames, before: before.frames, id: \.id, fields: DesignScreen.reverting)
+        result.elements = Self.reverting(elements, after: after.elements, before: before.elements, id: \.id, fields: DesignElement.reverting)
+        return result
+    }
+
+    /// `current` with what turned `before` into `after` taken back: what was added goes;
+    /// what was taken away comes back where it was; what was altered goes back to how it
+    /// was; what was moved among the rest goes back where it was. Anything else, in
+    /// `current` alone, stays.
+    private static func reverting<Item: Equatable, ID: Hashable>(
+        _ current: [Item], after: [Item], before: [Item], id: (Item) -> ID,
+        fields: (_ current: Item, _ after: Item, _ before: Item) -> Item
+    ) -> [Item] {
+        guard after != before else { return current }
+        let beforeIDs = Set(before.map(id))
+        var kept: [ID: Item] = [:]
+        for item in after where kept[id(item)] == nil { kept[id(item)] = item }
+        var result = current
+
+        let added = Set(kept.keys).subtracting(beforeIDs)
+        if !added.isEmpty { result.removeAll { added.contains(id($0)) } }
+
+        // Of what was there before and after, what the change moved among the rest: what
+        // has something else just before it now.
+        let stayedBefore = before.map(id).filter { kept[$0] != nil }
+        let stayedAfter = after.map(id).filter { beforeIDs.contains($0) }
+        var moved: Set<ID> = []
+        if stayedBefore != stayedAfter {
+            func predecessors(_ order: [ID]) -> [ID: ID] {
+                Dictionary(zip(order.dropFirst(), order), uniquingKeysWith: { first, _ in first })
+            }
+            let was = predecessors(stayedBefore)
+            let now = predecessors(stayedAfter)
+            moved = Set(stayedBefore.filter { was[$0] != now[$0] })
+        }
+
+        for (index, item) in before.enumerated() {
+            let key = id(item)
+            let afterwards = kept[key]
+            let altered = afterwards.map { $0 != item } ?? true
+            let isMoved = moved.contains(key)
+            guard altered || isMoved else { continue }
+            let at = result.firstIndex { id($0) == key }
+            // Altered: what the change altered goes back, and what something else has
+            // altered since stays, as when a handle is dragged while the knob turns.
+            func restored(_ now: Item) -> Item { afterwards.map { fields(now, $0, item) } ?? item }
+            if let at, !isMoved {
+                // Altered in place, or taken away and since put back.
+                result[at] = restored(result[at])
+                continue
+            }
+            // Altered or moved, and since taken away by something else: it stays away.
+            if at == nil, afterwards != nil { continue }
+            // Taken away by the change: back as it was. Moved: as it is now, or as it was
+            // in what the change altered.
+            let value = at.map { altered ? restored(result[$0]) : result[$0] } ?? item
+            if let at { result.remove(at: at) }
+            // Just after the nearest of those before it that is still there, or first.
+            var place = 0
+            for earlier in before[..<index].reversed() {
+                let earlierID = id(earlier)
+                if let found = result.firstIndex(where: { id($0) == earlierID }) {
+                    place = found + 1
+                    break
+                }
+            }
+            result.insert(value, at: place)
+        }
+        return result
+    }
+
     /// Changes a screen. `body` is given the screen with what is on it, and may change that too.
     mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
         guard let index = frames.firstIndex(where: { $0.id == id }) else { return }

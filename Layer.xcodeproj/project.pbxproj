@@ -103,6 +103,7 @@
 		528C0029C832681E7AD098C4 /* VoiceAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 624D93A1FDF26289B861D388 /* VoiceAgentTests.swift */; };
 		52D0E757FF88AE6B826D54BA /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13116FD862E660E5BE098CF /* ModelSettingsView.swift */; };
 		52D3ED38C02DB3840D1C430D /* VoiceHandles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60371249C0F94DB75A00F668 /* VoiceHandles.swift */; };
+		5312CD8E17306FB20F9B4388 /* ConcurrentEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */; };
 		5366C1AC84EBB37F5F78B29B /* PencilVoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94018B0CE474C089DF26FFB /* PencilVoiceTests.swift */; };
 		54A68555300666BC78765A6E /* SelectionActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5452CD081F6C2087ED80C9C4 /* SelectionActions.swift */; };
 		559C6A230578664E0579BF7E /* divider_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = C95AF62786EE1A26726943AD /* divider_jittered_2a.json */; };
@@ -480,6 +481,7 @@
 		75038A2AE7C9F3344E801F1B /* AssetLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetLibraryTests.swift; sourceTree = "<group>"; };
 		764B7346C716553C4EA3B0D7 /* button_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_clean_1.json; sourceTree = "<group>"; };
 		76965ECC52982C4D8C3B4362 /* unknown_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_noisy_1.json; sourceTree = "<group>"; };
+		7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrentEditTests.swift; sourceTree = "<group>"; };
 		7942B5562158100754E89A7B /* scratchOut_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = scratchOut_noisy_2.json; sourceTree = "<group>"; };
 		79B8A40EF02A85E637D35B6F /* avatar_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_clean_1.json; sourceTree = "<group>"; };
 		7ABFEA276705A10EA9154E0C /* avatar_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_noisy_1.json; sourceTree = "<group>"; };
@@ -820,6 +822,7 @@
 			children = (
 				75038A2AE7C9F3344E801F1B /* AssetLibraryTests.swift */,
 				80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */,
+				7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */,
 				FA837C44409075331387E5B4 /* CorrectedReadingTests.swift */,
 				01548CA8886933886FFD4CCD /* DesignTests.swift */,
 				0836F6346DA257E439EE7077 /* DictationRouteTests.swift */,
@@ -1451,6 +1454,7 @@
 			files = (
 				0456A2D9BE73FB50F88700C3 /* AssetLibraryTests.swift in Sources */,
 				AE217498FB6664260CE3D179 /* ComponentCatalogueTests.swift in Sources */,
+				5312CD8E17306FB20F9B4388 /* ConcurrentEditTests.swift in Sources */,
 				F570CE4CD3F43F48892C0B64 /* CorrectedReadingTests.swift in Sources */,
 				3A7846E3163FA2ACB288B943 /* DesignTests.swift in Sources */,
 				17ECB60AEE5827A50390D330 /* DictationRouteTests.swift in Sources */,

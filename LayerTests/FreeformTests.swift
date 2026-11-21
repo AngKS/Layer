@@ -346,6 +346,83 @@ struct MoreCodeTests {
         let files = SwiftUICodeGenerator.files(for: [one, two])
         #expect(files.map(\.name) == ["Home.swift", "Home2.swift"])
     }
+
+    /// The view a file declares, from its `struct X: View` line.
+    private func structName(in source: String) -> String? {
+        source.split(separator: "\n").first { $0.hasPrefix("struct ") }
+            .map { String($0.dropFirst("struct ".count).prefix { $0 != ":" }) }
+    }
+
+    /// Two screens whose names clean to the same type used to be written as two files that
+    /// both declared it, which won't compile in one target (G2): "Screen 2" again after a
+    /// screen was deleted, or "Sign In" beside "Sign-In". Names that differ only in case
+    /// are told apart too, as a Mac's disk doesn't tell their files apart.
+    @Test func screensWhoseNamesCleanToTheSameTypeDeclareDifferentViews() throws {
+        let screens = ["Sign In", "Sign-In", "Sign in"].map { DesignScreen(name: $0, origin: .zero, scale: 1) }
+        let files = SwiftUICodeGenerator.files(for: screens)
+        let names = files.map { structName(in: $0.source) }
+        #expect(names == ["SignIn", "SignIn2", "Signin3"])
+        #expect(files.map(\.name) == ["SignIn.swift", "SignIn2.swift", "Signin3.swift"])
+        // Each file's preview shows its own view.
+        #expect(files[1].source.hasSuffix("#Preview {\n    SignIn2()\n}"))
+        // The code panel names each one as its file is named.
+        let typeNames = SwiftUICodeGenerator.typeNames(for: screens)
+        #expect(screens.map { typeNames[$0.id] } == ["SignIn", "SignIn2", "Signin3"])
+        #expect(structName(in: SwiftUICodeGenerator.code(for: screens[1], among: screens)) == "SignIn2")
+    }
+
+    /// A carriage return or other control character in an element's words, pasted from
+    /// Windows or set by a Siri intent, broke the string literal it was written into, and
+    /// in a layer's name ended the comment, leaving the rest as code (G16).
+    @Test func controlCharactersAreEscapedInStringsAndDroppedFromComments() {
+        var body = element(.body, 48, 580, 297, 44)
+        body.text = "a\r\nb\tc\u{7}d"
+        body.name = "Hero\r\nText"
+        let code = SwiftUICodeGenerator.code(for: screenWith([body]))
+        #expect(!code.contains("\r") && !code.contains("\t") && !code.contains("\u{7}"))
+        #expect(code.contains(#"Text("a\r\nb\tc\u{07}d")"#))
+        #expect(code.contains("// Hero  Text"))
+    }
+
+    /// A size past Int's range trapped writing it out, and the code panel works its code
+    /// out as it draws (G18).
+    @Test func aHugeNumberIsWrittenRatherThanATrap() {
+        var wide = element(.button, 20, 744, 353, 50)
+        wide.frame.size.width = 1e19
+        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        #expect(code.contains("Button"))
+    }
+
+    /// Siri's code for a screen names its view as the shared files and the code panel do:
+    /// a second "Home" is `Home2` there too (review M-8).
+    @MainActor @Test func siriNamesAScreensViewAsItsFileDoes() throws {
+        var content = DesignContent()
+        let first = DesignScreen(name: "Home", origin: .zero, scale: 1)
+        let second = DesignScreen(name: "Home", origin: CGPoint(x: 500, y: 0), scale: 1)
+        content.addScreen(first)
+        content.addScreen(second)
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: second, in: content)) == "Home2")
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: first, in: content)) == "Home")
+    }
+
+    /// A non-finite size is written as Swift reads it, not as `nan` or `inf`.
+    @Test func aSizeThatIsNotANumberStillCompiles() {
+        var wide = element(.button, 20, 744, 353, 50)
+        wide.frame.size.width = .infinity
+        wide.frame.size.height = .nan
+        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        #expect(!code.contains("inf,") && !code.contains("nan"))
+    }
+
+    /// A screen named after a type its own code uses ("Image", "Text") shadowed it, and
+    /// one named for a keyword wasn't a type name at all (G17).
+    @Test func aScreenNamedAfterATypeItsCodeUsesGetsAnotherName() {
+        for name in ["Image", "Text", "Button", "Color", "View", "Any", "Self", "default", "Menu", "List", "Form", "Label", "Group", "Section", "App"] {
+            let typeName = DesignScreen(name: name, origin: .zero, scale: 1).typeName
+            #expect(typeName == name + "Screen")
+        }
+        #expect(DesignScreen(name: "Images", origin: .zero, scale: 1).typeName == "Images")
+    }
 }
 
 @Suite("Scrubbing number fields")

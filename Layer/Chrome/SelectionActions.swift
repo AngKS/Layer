@@ -201,13 +201,15 @@ struct SelectionActions: View {
 private struct TextEditor: View {
     @Environment(AppModel.self) private var model
     let ref: DesignStore.ElementRef
+    /// The sitting's own step: see `DesignStore.Edit`.
+    @State private var edit: DesignStore.Edit?
 
     var body: some View {
         TextField(
             model.selectedElement?.element.kind.layerName ?? "Text",
             text: Binding(
                 get: { model.selectedElement?.element.text ?? "" },
-                set: { text in model.store.update(ref) { $0.text = text } }
+                set: { text in model.store.act(for: edit) { model.store.update(ref) { $0.text = text } } }
             ),
             axis: .vertical
         )
@@ -215,7 +217,10 @@ private struct TextEditor: View {
         .textFieldStyle(.roundedBorder)
         .padding(16)
         .frame(width: 320)
-        .onAppear { model.store.beginEdit() }
-        .onDisappear { model.store.endEdit() }
+        .onAppear { if edit?.isOpen != true { edit = model.store.beginEdit() } }
+        .onDisappear {
+            if let edit { model.store.endEdit(edit) }
+            edit = nil
+        }
     }
 }

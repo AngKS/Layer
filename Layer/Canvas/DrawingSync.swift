@@ -170,10 +170,13 @@ struct DrawingSync {
                 continue
             }
             // A turned drawing's strokes lie turned on the canvas: they go back in upright,
-            // and it keeps its angle.
+            // and it keeps its angle. Back by the angle they were last placed at, about where
+            // they were placed: a turn that has landed since, not yet shown, isn't in them, and
+            // keeps its angle as only the frame and the ink are written.
             let drawn: DesignElement?
-            if let known = existing[id], known.resolvedRotation != 0 {
-                drawn = DesignElement.drawing(strokes, id: id, keepingTurn: known.resolvedRotation, about: CGPoint(x: known.frame.midX, y: known.frame.midY))
+            let lies = existing[id].map { known in shown[id] ?? Shown(frame: known.frame, ink: known.ink, rotation: known.resolvedRotation) }
+            if let lies, lies.rotation != 0 {
+                drawn = DesignElement.drawing(strokes, id: id, keepingTurn: lies.rotation, about: CGPoint(x: lies.frame.midX, y: lies.frame.midY))
             } else {
                 drawn = DesignElement.drawing(strokes, id: id)
             }

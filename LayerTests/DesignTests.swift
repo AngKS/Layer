@@ -200,11 +200,11 @@ struct DesignStoreTests {
         let before = store.content
 
         store.beginHeldEdit()
-        store.update(ref) { $0.text = "One" }
+        store.actingForCommand { store.update(ref) { $0.text = "One" } }
         undo.undo()
         // The command's change so far is what goes; the title added before it stays.
         #expect(store.content == before)
-        store.update(ref) { $0.text = "Two" }
+        store.actingForCommand { store.update(ref) { $0.text = "Two" } }
         store.endHeldEdit()
         #expect(store.resolve(ref)?.element.text == "Two")
 
@@ -224,7 +224,7 @@ struct DesignStoreTests {
         store.beginHeldEdit()
         undo.redo()
         #expect(store.content == withTitle)
-        store.updateScreen(screen.id) { $0.name = "Renamed" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Renamed" } }
         store.endHeldEdit()
         undo.undo()
         #expect(store.content == withTitle)
@@ -240,9 +240,9 @@ struct DesignStoreTests {
         store.setTitle("Quiet", undoable: false)
         #expect(store.historyMark == afterAdd)
         store.beginHeldEdit()
-        store.updateScreen(screen.id) { $0.name = "One" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "One" } }
         let inEdit = store.historyMark
-        store.updateScreen(screen.id) { $0.name = "Two" }
+        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Two" } }
         store.endHeldEdit()
         #expect(store.historyMark == inEdit, "a held edit is one step, however many changes")
         undo.undo()
@@ -900,8 +900,8 @@ struct CodeGenerationTests {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Title")
                             .font(.title.bold())
-                            .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                         Image("photo")
                             .resizable()
                             .scaledToFill()
@@ -1570,19 +1570,26 @@ struct FormatPanelEditTests {
     }
 
     /// A drag begun just after a colour was tapped: the pause used to end the drag's edit
-    /// halfway, and every later move of the drag was an undo step of its own.
+    /// halfway, and every later move of the drag was an undo step of its own. The pause
+    /// ends the panel's own step; the drag is one step of its own.
     @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
+        let x = screen.origin.x
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         model.store.beginEdit()
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        let mark = model.store.historyMark
         try await Task.sleep(for: .milliseconds(150))
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         model.store.updateScreen(screen.id) { $0.origin.x += 10 }
         #expect(model.store.isEditing)
+        #expect(model.store.historyMark == mark, "no move is a step of its own")
         model.store.endEdit()
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.origin.x == x)
+        #expect(model.store.screen(screen.id)?.name == "Checkout")
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1602,7 +1609,7 @@ struct FormatPanelEditTests {
             model.store.beginHeldEdit()
             panel()
         }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         try await Task.sleep(for: .milliseconds(150))
         model.store.endHeldEdit()
         #expect(try await pauseEnds(model))
@@ -1620,7 +1627,7 @@ struct FormatPanelEditTests {
         model.adjustmentPause = .milliseconds(200)
         model.store.beginHeldEdit()
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.store.endHeldEdit()
         #expect(model.store.isEditing, "the panel's edit goes on until its pause")
         #expect(try await pauseEnds(model))
@@ -1630,17 +1637,26 @@ struct FormatPanelEditTests {
         #expect(model.store.historyMark == mark + 1)
     }
 
+    /// A change in the panel during a drag is a step of its own, which the panel's pause
+    /// ends while the drag goes on in its own.
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
-        model.store.beginEdit()
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        let x = screen.origin.x
+        // The drag's frames are made for its edit, as a canvas drag's are.
+        let drag = model.store.beginEdit()
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         try await Task.sleep(for: .milliseconds(150))
         #expect(model.store.isEditing)
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
-        model.store.endEdit()
+        let mark = model.store.historyMark
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
+        #expect(model.store.historyMark == mark, "the move after the pause is still the drag's")
+        model.store.endEdit(drag)
 
+        undo.undo()
+        #expect(model.store.screen(screen.id)?.name == before.screens.first?.name)
+        #expect(model.store.screen(screen.id)?.origin.x == x + 20)
         undo.undo()
         #expect(model.store.content == before)
     }
@@ -1779,8 +1795,31 @@ struct TurnedCodeTests {
         #expect(turn < stretch)
     }
 
-    @Test func anUprightStyledButtonIsWrittenAsBefore() throws {
-        // Recorded from the generator before elements could turn: placed, then finished.
+    /// Upright, an element was placed and then finished, so a centred element's border went
+    /// round the full width it was centred in, and an inset one's round its padding too (G7).
+    /// It is finished first now, as a turned one is, so the border is round the element.
+    @Test func anUprightElementIsFinishedBeforeItIsPlaced() throws {
+        var image = element(.image, (393 - 200) / 2, 300, 200, 150)
+        image.borderWidth = 2
+        var title = element(.title, 82.5, 112, 228, 40)
+        title.borderWidth = 2
+        let centred = lines(of: screen([title, image]))
+        for kind in ["Text(\"Title\")", "Image("] {
+            let start = try #require(centred.firstIndex { $0.hasPrefix(kind) })
+            let border = try #require(centred[start...].firstIndex(of: ".overlay {"))
+            let placement = try #require(centred[start...].firstIndex(of: ".frame(maxWidth: .infinity)"))
+            #expect(border < placement, "\(kind)")
+        }
+        let inset = lines(of: styledButton(turnedBy: nil))
+        let border = try #require(inset.firstIndex(of: ".overlay {"))
+        let shadow = try #require(inset.firstIndex { $0.hasPrefix(".shadow(") })
+        let placement = try #require(inset.firstIndex { $0.hasPrefix(".padding(.leading,") })
+        #expect(border < placement && shadow < placement)
+    }
+
+    @Test func anUprightStyledButtonIsWrittenInFull() throws {
+        // Finished, then placed (G7): before, the padding that places it came first, and
+        // the border went round the padding too.
         let lines = lines(of: styledButton(turnedBy: nil))
         let start = try #require(lines.firstIndex(of: "Button {"))
         #expect(Array(lines[start...].prefix(16)) == [
@@ -1792,12 +1831,12 @@ struct TurnedCodeTests {
             ".frame(width: 200, height: 50)",
             ".background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)",
             "}",
-            ".padding(.leading, 40)",
             ".overlay {",
             "Capsule()",
             ".strokeBorder(Color(red: 0.17, green: 0.16, blue: 0.15), lineWidth: 2)",
             "}",
             ".shadow(color: .black.opacity(0.18), radius: 10, y: 5)",
+            ".padding(.leading, 40)",
             ".padding(.top, 144)",
             "}",
         ])

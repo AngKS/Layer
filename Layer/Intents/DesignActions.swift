@@ -134,9 +134,10 @@ enum DesignActions {
     /// when the system offers one, in the action's undo manager too.
     static func edit<T>(_ model: AppModel, undoManager: UndoManager?, actionName: String, _ body: () throws -> T) rethrows -> T {
         let before = model.store.content
-        model.store.beginEdit()
+        // Its own step, even in the middle of a drag, which goes on as its own (M3).
+        let edit = model.store.beginEdit(by: .app)
         defer {
-            model.store.endEdit()
+            model.store.endEdit(edit)
             let after = model.store.content
             if before != after, let undoManager, undoManager !== model.store.undoManager {
                 let action = TakenAction(name: actionName, before: before, after: after, model: model, undoManager: undoManager)
@@ -151,7 +152,7 @@ enum DesignActions {
                 undoManager.endUndoGrouping()
             }
         }
-        return try body()
+        return try model.store.act(for: edit, body)
     }
 
     /// Selects something and glides the canvas to show it.
@@ -255,10 +256,12 @@ final class TakenAction {
         model.takenActions.removeAll { $0 === self }
         guard !model.isClosed else { return }
         let store = model.store
+        // A one-off step of its own, as the action was: a drag under way meanwhile stays
+        // one step of its own, rather than taking this in.
         if store.content == after {
-            store.restore(before)
+            store.asOwnStep { store.restore(before) }
         } else if canTakeBack(from: store.content) {
-            store.apply { $0.takeBack(after, to: before) }
+            store.asOwnStep { store.apply { $0.takeBack(after, to: before) } }
         } else {
             model.undoNotice = "Siri couldn't undo “\(name)”: everything it changed has been changed since. Use Undo in Layer to go back step by step."
         }

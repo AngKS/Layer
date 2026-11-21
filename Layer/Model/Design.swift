@@ -130,6 +130,27 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
 }
 
 extension DesignElement {
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now. With a property ever missing from the
+    /// list below, the element as it was before, whole.
+    static func reverting(_ current: DesignElement, after: DesignElement, to before: DesignElement) -> DesignElement {
+        func reverted(_ current: DesignElement) -> DesignElement {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignElement, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.kind); back(\.parent); back(\.scale); back(\.frame); back(\.rotation); back(\.text)
+            back(\.tint); back(\.symbol); back(\.shape); back(\.imageID); back(\.fontSize); back(\.fontWeight)
+            back(\.textColor); back(\.cornerRadius); back(\.opacity); back(\.textAlignment); back(\.borderColor)
+            back(\.borderWidth); back(\.hasShadow); back(\.name); back(\.isLocked); back(\.isHidden); back(\.isOn)
+            back(\.value); back(\.buttonLook); back(\.ink)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
+    }
+}
+
+extension DesignElement {
     /// Reads every property that is present, so elements saved before one existed still open.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -138,7 +159,8 @@ extension DesignElement {
         parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
         scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
         frame = try container.decode(CGRect.self, forKey: .frame)
-        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation)
+        // Kept as an angle set here is: from 0 up to 360, nothing when upright or not a number.
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation).flatMap(Rotation.kept)
         text = try container.decode(String.self, forKey: .text)
         tint = try container.decode(RGBColor.self, forKey: .tint)
         symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
@@ -303,6 +325,20 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
 
     var device: DeviceFrame { DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }
+
+    /// `current` with the properties that changed from `before` to `after` back as they
+    /// were before, and the rest as they are now; see `DesignElement.reverting`.
+    static func reverting(_ current: DesignScreen, after: DesignScreen, to before: DesignScreen) -> DesignScreen {
+        func reverted(_ current: DesignScreen) -> DesignScreen {
+            var result = current
+            func back<Value: Equatable>(_ property: WritableKeyPath<DesignScreen, Value>) {
+                if after[keyPath: property] != before[keyPath: property] { result[keyPath: property] = before[keyPath: property] }
+            }
+            back(\.id); back(\.name); back(\.origin); back(\.scale); back(\.deviceID); back(\.elements); back(\.isLocked)
+            return result
+        }
+        return reverted(after) == before ? reverted(current) : before
+    }
     var placement: Placement { Placement(origin: origin, scale: scale) }
 
     var canvasFrame: CGRect {
@@ -318,12 +354,31 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     func canvasRect(for local: CGRect) -> CGRect { placement.canvasRect(for: local) }
     func localRect(for canvas: CGRect) -> CGRect { placement.localRect(for: canvas) }
 
-    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file.
+    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name
+    /// that is one of the types the view's own code uses, or a Swift keyword, has "Screen"
+    /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
     var typeName: String {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }
-        return cleaned
+        return Self.reservedTypeNames.contains(cleaned) ? cleaned + "Screen" : cleaned
     }
+
+    /// The types generated code uses, and the keywords a name of letters alone can be.
+    private static let reservedTypeNames: Set<String> = [
+        "View", "Text", "Image", "Button", "Color", "Toggle", "Divider", "Path", "Spacer", "TextField", "ProgressView",
+        "VStack", "HStack", "ZStack", "NavigationStack", "Rectangle", "RoundedRectangle", "Circle", "Capsule", "Ellipse",
+        "StrokeStyle", "CGPoint", "CGSize", "CGFloat", "String", "Int", "Double", "Bool", "Optional", "SwiftUI",
+        "Any", "Self", "Type", "Protocol", "Never",
+        // SwiftUI and Foundation types a screen is often named for, which a view of the
+        // name would hide throughout the target it is added to.
+        "Menu", "List", "Form", "Label", "Group", "Section", "Link", "Picker", "Slider", "Stepper", "Grid", "Table",
+        "Canvas", "Shape", "Font", "Gradient", "Animation", "Scene", "Window", "App", "Date", "Data", "URL", "Error",
+        "as", "associatedtype", "break", "case", "catch", "class", "continue", "default", "defer", "deinit", "do",
+        "else", "enum", "extension", "fallthrough", "false", "fileprivate", "for", "func", "guard", "if", "import",
+        "in", "init", "inout", "internal", "is", "let", "nil", "open", "operator", "private", "protocol", "public",
+        "repeat", "rethrows", "return", "self", "some", "static", "struct", "subscript", "super", "switch", "throw",
+        "throws", "true", "try", "typealias", "var", "where", "while",
+    ]
 }
 
 extension DesignScreen {
