@@ -67,6 +67,26 @@ struct RotationGeometryTests {
         #expect(!String(decoding: upright, as: UTF8.self).contains("\"rotation\""))
         #expect(try JSONDecoder().decode(DesignElement.self, from: upright).rotation == nil)
     }
+
+    /// An angle read from a file, written by hand or by a later Layer, is kept as one set
+    /// here is: from 0 up to 360, nothing when upright, and upright when it isn't a number.
+    @Test func anAngleReadFromAFileIsKeptAsAnyOther() throws {
+        var turned = element()
+        turned.setRotation(30)
+        let saved = String(decoding: try JSONEncoder().encode(turned), as: UTF8.self)
+        try #require(saved.contains("\"rotation\":30"))
+        func read(_ value: String) throws -> Double? {
+            let decoder = JSONDecoder()
+            decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+            let file = saved.replacingOccurrences(of: "\"rotation\":30", with: "\"rotation\":\(value)")
+            return try decoder.decode(DesignElement.self, from: Data(file.utf8)).rotation
+        }
+        #expect(try read("720") == nil)
+        #expect(try read("-30") == 330)
+        #expect(try read("390") == 30)
+        #expect(try read("\"nan\"") == nil)
+        #expect(try read("\"-inf\"") == nil)
+    }
 }
 
 private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> DesignElement {
