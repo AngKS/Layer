@@ -8,6 +8,11 @@ final class OpenDesigns {
     static let shared = OpenDesigns()
 
     @ObservationIgnored private var models: [Weak] = []
+    /// The identifier each design had before its file was renamed, with the one it moved
+    /// to. A design is known by its file's path (see `DesignLibrary`), so a rename, Layer's
+    /// own included, would leave Siri and Shortcuts holding an identifier that finds
+    /// nothing. Kept while Layer runs.
+    @ObservationIgnored private var renamed: [String: String] = [:]
 
     private struct Weak {
         weak var model: AppModel?
@@ -20,6 +25,16 @@ final class OpenDesigns {
     func opened(_ model: AppModel) {
         models.removeAll { $0.model == nil || $0.model === model }
         models.append(Weak(model: model))
+        // A design open under an identifier is the one it means now.
+        if let id = model.designID { renamed[id] = nil }
+    }
+
+    /// A design's file moved, as when it was renamed: it is known by `new` from now on,
+    /// and still found by `old`.
+    func designMoved(from old: String, to new: String) {
+        guard old != new else { return }
+        renamed[old] = new
+        renamed[new] = nil
     }
 
     /// The design came to the front, or its window became the active one.
@@ -38,18 +53,31 @@ final class OpenDesigns {
         models.last(where: { $0.model?.designID != nil })?.model ?? models.last?.model
     }
 
+    /// The open design an identifier means, which may be one it had before its file was renamed.
     func model(forDesign id: String) -> AppModel? {
-        models.last(where: { $0.model?.designID == id })?.model
+        let id = currentID(for: id)
+        return models.last(where: { $0.model?.designID == id })?.model
     }
 
     var all: [AppModel] { models.compactMap(\.model) }
+
+    /// The identifier a design is known by now, following its renames from `id`. A design
+    /// open under `id` itself is the one it means.
+    func currentID(for id: String) -> String {
+        var id = id
+        var seen: Set<String> = [id]
+        while !models.contains(where: { $0.model?.designID == id }), let next = renamed[id], seen.insert(next).inserted {
+            id = next
+        }
+        return id
+    }
 
     // MARK: Opening and making designs
 
     /// Opens a design, if it isn't open already, and waits for its window.
     func open(design id: String) async throws -> AppModel {
         if let model = model(forDesign: id) { return model }
-        guard let url = DesignLibrary.url(for: id) else { throw LayerIntentError.designNotFound }
+        guard let url = DesignLibrary.url(for: currentID(for: id)) else { throw LayerIntentError.designNotFound }
         guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
         // A design still closing can keep the browser from taking the request, so it is
         // asked again if the design hasn't opened after a few seconds.
@@ -85,7 +113,10 @@ final class OpenDesigns {
             if let error = coordinationError ?? writeError { throw error }
             return destination
         }.value
-        return try await open(design: DesignLibrary.id(for: url))
+        let id = DesignLibrary.id(for: url)
+        // A design renamed away from this name earlier isn't what the new one is.
+        renamed[id] = nil
+        return try await open(design: id)
     }
 }
 

@@ -82,7 +82,13 @@ final class AppModel {
             guard fileURL != oldValue else { return }
             let previousID = designID
             designID = fileURL.map(DesignLibrary.id(for:))
-            if let previousID, previousID != designID { DesignIndexer.forget(design: previousID) }
+            if let previousID, previousID != designID {
+                DesignIndexer.forget(design: previousID)
+                // What Siri and Shortcuts hold from before the move still finds the design.
+                if let designID { OpenDesigns.shared.designMoved(from: previousID, to: designID) }
+            }
+            // A rename that finishes after the design closed doesn't list it again.
+            guard !isClosed else { return }
             OpenDesigns.shared.opened(self)
             DesignIndexer.designChanged(self)
             matchNameAndFile()

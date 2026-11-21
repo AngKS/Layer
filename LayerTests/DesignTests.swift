@@ -1036,6 +1036,49 @@ struct DesignFileNameTests {
         #expect(!exists("Onboarding 3.layer", beside: url))
     }
 
+    @Test func aDesignStillAnswersToItsIdentifierAfterItsFileIsRenamed() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let before = try #require(model.designID)
+        // What a Shortcut holds from its first step: the design, and a screen of it.
+        let screen = try #require(DesignActions.snapshot(of: model)?.screens.first)
+
+        model.store.setTitle("Login")
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        #expect(model.designID != before)
+
+        #expect(OpenDesigns.shared.model(forDesign: before) === model)
+        #expect(try await OpenDesigns.shared.open(design: before) === model)
+        let snapshot = await DesignActions.snapshot(design: before)
+        #expect(snapshot?.id == before, "the design answers to the identifier it was asked for")
+        #expect(snapshot?.screens.map(\.id) == [screen.id])
+        #expect(try await DesignActions.screen(screen).model === model)
+
+        // A design made later under the old name is that design, not the renamed one.
+        try DesignFile().wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
+        let newer = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        newer.fileURL = url
+        #expect(OpenDesigns.shared.model(forDesign: before) === newer)
+        newer.close()
+        model.close()
+    }
+
+    @Test func aClosedDesignIsNotListedAgainWhenItsFileMoves() throws {
+        let model = AppModel(document: LayerDocument(file: DesignFile()))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        model.fileURL = folder.appendingPathComponent("A.layer")
+        let old = try #require(model.designID)
+        model.close()
+        // A rename that finishes after the design closed.
+        model.fileURL = folder.appendingPathComponent("B.layer")
+        #expect(!OpenDesigns.shared.all.contains { $0 === model })
+        // The old identifier still leads to the file where it is now.
+        #expect(OpenDesigns.shared.currentID(for: old) == model.designID)
+    }
+
     @Test func aFileRenamedElsewhereNamesTheBoard() {
         let document = LayerDocument()
         document.update {

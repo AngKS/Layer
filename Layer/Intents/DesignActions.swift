@@ -38,10 +38,15 @@ enum DesignActions {
         return DesignSnapshot(id: id, name: name, content: model.store.content, modified: .now)
     }
 
+    /// A design by the identifier Siri or Shortcuts holds for it, which may be one it had
+    /// before its file was renamed. The snapshot keeps that identifier, so that the design
+    /// and its screens and elements answer to the identifiers they were asked for by.
     static func snapshot(design id: String) async -> DesignSnapshot? {
-        if let model = OpenDesigns.shared.model(forDesign: id) { return snapshot(of: model) }
-        guard let summary = await DesignLibrary.summary(for: id) else { return nil }
-        return DesignSnapshot(id: summary.id, name: summary.title, content: summary.content, modified: summary.modified)
+        if let model = OpenDesigns.shared.model(forDesign: id), let open = snapshot(of: model) {
+            return DesignSnapshot(id: id, name: open.name, content: open.content, modified: open.modified)
+        }
+        guard let summary = await DesignLibrary.summary(for: OpenDesigns.shared.currentID(for: id)) else { return nil }
+        return DesignSnapshot(id: id, name: summary.title, content: summary.content, modified: summary.modified)
     }
 
     /// Every design: the open ones as they are now, the rest as saved. Newest first.
