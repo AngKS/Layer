@@ -1001,9 +1001,9 @@ struct VoiceToolsTests {
         #expect(!undo.canUndo)
     }
 
-    /// The model's undo takes back what a command did, never what was done by hand: a
-    /// model asked to correct a command undid the person's own move instead (review I-2).
-    @Test func undoByVoiceNeverTakesBackAChangeByHand() throws {
+    /// Asked to correct a command, the model's undo takes back what the command did, never
+    /// what was done by hand: it undid the person's own move instead (review I-2).
+    @Test func undoForACorrectionNeverTakesBackAChangeByHand() throws {
         let bench = bench()
         let store = bench.app.store
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
@@ -1012,12 +1012,27 @@ struct VoiceToolsTests {
         store.endHeldEdit()
         store.update(image) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
+        bench.box.spokenCommand = "No, that's wrong."
         let said = bench.box.undo()
         store.endHeldEdit()
         #expect(said != "Undid the last change.")
         #expect(bench.box.lastFailed)
         #expect(try #require(bench.element("E3")).frame.origin.x == 40)
         #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
+    }
+
+    /// "Undo" said outright is the Undo button: it takes back the last change, whoever
+    /// made it, a move by hand included.
+    @Test func undoSaidOutrightTakesBackTheLastChangeWhoeverMadeIt() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.update(image) { $0.frame.origin.x = 40 }
+        store.beginHeldEdit()
+        bench.box.spokenCommand = "Undo that."
+        #expect(bench.box.undo() == "Undid the last change.")
+        store.endHeldEdit()
+        #expect(try #require(bench.element("E3")).frame.origin.x == 20)
     }
 
     @Test func undoInsideACommandUndoesTheLastCommand() throws {

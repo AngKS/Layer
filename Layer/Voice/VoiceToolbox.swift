@@ -793,9 +793,11 @@ final class VoiceToolbox: VoiceActing {
         guard let history = model.store.undoManager, isUndo ? history.canUndo : history.canRedo else {
             return failed(isUndo ? "There is nothing to undo." : "There is nothing to redo.")
         }
-        // What was done by hand is the person's to undo, not a command's: a model asked to
-        // correct a command undid the person's own change instead (review I-2).
-        guard !isUndo || model.store.lastStepIsCommand else { return failed(Self.changedByHand) }
+        // "Undo" said outright is the Undo button: the last change goes, whoever made it. A
+        // correction ("No, …") is about the command, and takes back only a command's step:
+        // a model asked to correct a command undid the person's own change instead (I-2).
+        let isCorrection = spokenCommand.flatMap(VoiceAgent.correction(in:)) != nil
+        guard !isUndo || !isCorrection || model.store.lastStepIsCommand else { return failed(Self.changedByHand) }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
     }

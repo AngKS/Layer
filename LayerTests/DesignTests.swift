@@ -1256,15 +1256,16 @@ struct FormatPanelEditTests {
         let (model, undo, screen) = makeModel()
         let before = model.store.content
         let x = screen.origin.x
-        model.store.beginEdit()
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        // The drag's frames are made for its edit, as a canvas drag's are.
+        let drag = model.store.beginEdit()
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
         try await Task.sleep(for: .milliseconds(150))
         #expect(model.store.isEditing)
         let mark = model.store.historyMark
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
         #expect(model.store.historyMark == mark, "the move after the pause is still the drag's")
-        model.store.endEdit()
+        model.store.endEdit(drag)
 
         undo.undo()
         #expect(model.store.screen(screen.id)?.name == before.screens.first?.name)

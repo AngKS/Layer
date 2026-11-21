@@ -309,6 +309,32 @@ struct VoiceAgentTests {
         #expect(bench.button?.frame.origin.y == 300)
     }
 
+    /// "Undo" said outright is the Undo button, whoever made the last change; a correction
+    /// takes back only the command's own (I-2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func undoSaidOutrightIsTheUndoButtonAndACorrectionIsNot() async throws {
+        let bench = bench([
+            "undo": [Step(tool: "undo", arguments: "{}")],
+            "make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        // A move by hand, then "undo": the move is undone.
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await bench.agent.run("undo")
+        #expect(bench.button?.frame.origin.y == 420)
+        // A move by hand, then "No, that's wrong.": the move stays.
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+        // A command, then "undo": the command is undone.
+        _ = await bench.agent.run("make the button blue")
+        #expect(bench.button?.tint == ColourWords.parse("blue"))
+        _ = await bench.agent.run("undo")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.button?.frame.origin.y == 300)
+    }
+
     /// Ink drawn while a command that changed nothing ran, then "No, that's wrong.": the
     /// model, asked, undid the ink (review I-2). A correction with nothing of the command's
     /// to undo says so, without asking the model.
