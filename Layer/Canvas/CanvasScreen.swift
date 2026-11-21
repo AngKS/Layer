@@ -235,6 +235,14 @@ private struct CanvasEvents: ViewModifier {
         .appEntityUIElements { [model] context in model.onscreenEntities(context) }
         .appEntityIdentifier(model.designEntityIdentifier)
         .background { Color.clear.modifier(ImagePlaygroundPresenter()) }
+        .alert("Couldn't Undo", isPresented: Binding(
+            get: { model.undoNotice != nil },
+            set: { if !$0 { model.undoNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.undoNotice ?? "")
+        }
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
             set: { if !$0 { model.keptVersionsNotice = nil } }

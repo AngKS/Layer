@@ -66,6 +66,7 @@ private struct DesignEditor: View {
                     model.leavingTheScreen()
                 } else {
                     model.refreshPreview()
+                    model.withdrawTakenActionsWithNothingLeft()
                 }
             }
             // The system's own document object says when a save finishes or a conflict turns up.
