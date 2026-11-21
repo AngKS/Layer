@@ -203,11 +203,9 @@ enum SwiftUICodeGenerator {
                 "    .font(\(font(of: element, usual: titleFont(height: frame.height))))",
             ] + textColor(of: element, usual: nil)
             if centered && (element.textAlignment ?? .center) == .center {
-                // A turned title is turned before it is stretched across the screen.
-                lines += element.resolvedRotation == 0
-                    ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
-                    : ["    .multilineTextAlignment(.center)"]
-                tail = element.resolvedRotation == 0 ? [] : ["    .frame(maxWidth: .infinity)"]
+                // Stretched across the screen as it is placed: finished, and turned, before that.
+                lines += ["    .multilineTextAlignment(.center)"]
+                tail = ["    .frame(maxWidth: .infinity)"]
             } else {
                 lines += ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"]
             }
@@ -282,11 +280,10 @@ enum SwiftUICodeGenerator {
             return []
         }
 
-        // Upright, an element is finished and then placed. A turned one is finished first, so
-        // its border and shadow turn with it, then turned, then placed.
-        return element.resolvedRotation == 0
-            ? lines + tail + finish(element)
-            : lines + finish(element) + turn(element) + tail
+        // An element is finished before it is placed, so that its border goes round it, as on
+        // the canvas, rather than round the width it is centred in or the padding that insets
+        // it. A turned one is turned in between, so its border and shadow turn with it.
+        return lines + finish(element) + turn(element) + tail
     }
 
     // MARK: Exact positions

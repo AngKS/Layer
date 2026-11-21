@@ -695,8 +695,8 @@ struct CodeGenerationTests {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Title")
                             .font(.title.bold())
-                            .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                         Image("photo")
                             .resizable()
                             .scaledToFill()
@@ -1392,8 +1392,31 @@ struct TurnedCodeTests {
         #expect(turn < stretch)
     }
 
-    @Test func anUprightStyledButtonIsWrittenAsBefore() throws {
-        // Recorded from the generator before elements could turn: placed, then finished.
+    /// Upright, an element was placed and then finished, so a centred element's border went
+    /// round the full width it was centred in, and an inset one's round its padding too (G7).
+    /// It is finished first now, as a turned one is, so the border is round the element.
+    @Test func anUprightElementIsFinishedBeforeItIsPlaced() throws {
+        var image = element(.image, (393 - 200) / 2, 300, 200, 150)
+        image.borderWidth = 2
+        var title = element(.title, 82.5, 112, 228, 40)
+        title.borderWidth = 2
+        let centred = lines(of: screen([title, image]))
+        for kind in ["Text(\"Title\")", "Image("] {
+            let start = try #require(centred.firstIndex { $0.hasPrefix(kind) })
+            let border = try #require(centred[start...].firstIndex(of: ".overlay {"))
+            let placement = try #require(centred[start...].firstIndex(of: ".frame(maxWidth: .infinity)"))
+            #expect(border < placement, "\(kind)")
+        }
+        let inset = lines(of: styledButton(turnedBy: nil))
+        let border = try #require(inset.firstIndex(of: ".overlay {"))
+        let shadow = try #require(inset.firstIndex { $0.hasPrefix(".shadow(") })
+        let placement = try #require(inset.firstIndex { $0.hasPrefix(".padding(.leading,") })
+        #expect(border < placement && shadow < placement)
+    }
+
+    @Test func anUprightStyledButtonIsWrittenInFull() throws {
+        // Finished, then placed (G7): before, the padding that places it came first, and
+        // the border went round the padding too.
         let lines = lines(of: styledButton(turnedBy: nil))
         let start = try #require(lines.firstIndex(of: "Button {"))
         #expect(Array(lines[start...].prefix(16)) == [
@@ -1405,12 +1428,12 @@ struct TurnedCodeTests {
             ".frame(width: 200, height: 50)",
             ".background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)",
             "}",
-            ".padding(.leading, 40)",
             ".overlay {",
             "Capsule()",
             ".strokeBorder(Color(red: 0.17, green: 0.16, blue: 0.15), lineWidth: 2)",
             "}",
             ".shadow(color: .black.opacity(0.18), radius: 10, y: 5)",
+            ".padding(.leading, 40)",
             ".padding(.top, 144)",
             "}",
         ])
