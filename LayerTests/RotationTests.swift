@@ -1425,11 +1425,12 @@ struct TwistTests {
 
     // MARK: Two fingers that move together
 
-    /// Two fingers on the selection, 100 points apart, the second landing 0.1 s after the first.
-    private func trackerWithTwoFingersDown() -> TwistTracker {
+    /// Two fingers on the selection, `apart` points apart, the second landing 0.1 s after
+    /// the first.
+    private func trackerWithTwoFingersDown(apart: Double = 100) -> TwistTracker {
         var tracker = TwistTracker()
         tracker.landed(at: .zero, time: 0, first: .zero, isOnSelection: true, canTurn: true)
-        tracker.landed(at: CGPoint(x: 100, y: 0), time: 0.1, first: .zero, isOnSelection: true, canTurn: true)
+        tracker.landed(at: CGPoint(x: apart, y: 0), time: 0.1, first: .zero, isOnSelection: true, canTurn: true)
         return tracker
     }
 
@@ -1458,6 +1459,23 @@ struct TwistTests {
         #expect(tracker.verdict == .notATwist)
         let further = finger(at: 10, 100)
         tracker.moved(first: CGPoint(x: 25, y: 0), second: CGPoint(x: 25 + further.x, y: further.y), time: 0.25)
+        #expect(tracker.verdict == .notATwist)
+    }
+
+    /// Fingers far apart, going 10° round one still finger, move the point between them
+    /// further than 12 points (about 17 at 200 apart, 26 at 300), but no further past the
+    /// pan's mark, which grows with their spread, than at 100 apart: it is still a twist.
+    @Test(arguments: [200.0, 300.0])
+    func aTwistAboutOneFingerFarFromTheOtherIsStillATwist(apart: Double) {
+        var tracker = trackerWithTwoFingersDown(apart: apart)
+        tracker.moved(first: .zero, second: finger(at: 10, apart), time: 0.2)
+        #expect(tracker.verdict == .twist)
+    }
+
+    /// Fingers 300 points apart, moved together 40 points without turning, are scrolling.
+    @Test func fingersFarApartThatMoveTogetherArentATwist() {
+        var tracker = trackerWithTwoFingersDown(apart: 300)
+        tracker.moved(first: CGPoint(x: 40, y: 0), second: CGPoint(x: 340, y: 0), time: 0.2)
         #expect(tracker.verdict == .notATwist)
     }
 }

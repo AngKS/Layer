@@ -4,7 +4,8 @@ import UIKit
 /// Tells two fingers that turn from two that pinch or spread, or that move together, from
 /// where they were when both were down and where they are now. They must turn about 8°
 /// before the distance between them changes by about 8%, and before the point between them
-/// moves about 12 points, for the selection to turn; otherwise the canvas zooms or scrolls.
+/// moves about 12 points (or 12% of how far apart they landed, if more), for the selection
+/// to turn; otherwise the canvas zooms or scrolls.
 enum TwistClassifier {
     enum Decision { case undecided, twist, pinch, pan }
 
@@ -13,10 +14,15 @@ enum TwistClassifier {
     /// How much the distance between the fingers changes, as a share of what it was, before
     /// it is a pinch.
     static let spreadThreshold = 0.08
-    /// How far, in points, the point halfway between the fingers moves before it is a pan.
-    /// One finger still and the other going round it moves that point about 7 points by 8°
-    /// at 100 points apart, which stays a twist.
+    /// How far, in points, the point halfway between the fingers moves before it is a pan,
+    /// at least: see `panShareOfSpread`. One finger still and the other going round it moves
+    /// that point about 7 points by 8° at 100 points apart, which stays a twist.
     static let panThreshold = 12.0
+    /// The pan's mark as a share of how far apart the fingers were as the second landed,
+    /// where that is more than `panThreshold`. Going round one still finger moves the point
+    /// between them in proportion to their spread (by 8°, about 7% of it), so a fixed mark
+    /// would make a twist of fingers far apart a pan.
+    static let panShareOfSpread = 0.12
 
     /// How far the line from the first finger to the second has turned, in degrees clockwise
     /// on the screen, the short way round: from -180 to 180.
@@ -32,7 +38,8 @@ enum TwistClassifier {
         let turned = abs(turn(from: start, to: now)) / turnThreshold
         let spread = abs(distance(now) / max(distance(start), 1) - 1) / spreadThreshold
         let (was, mid) = (middle(start), middle(now))
-        let travelled = hypot(mid.x - was.x, mid.y - was.y) / panThreshold
+        let panMark = max(panThreshold, panShareOfSpread * distance(start))
+        let travelled = hypot(mid.x - was.x, mid.y - was.y) / panMark
         guard max(turned, spread, travelled) >= 1 else { return .undecided }
         if turned > spread, turned > travelled { return .twist }
         return spread >= travelled ? .pinch : .pan
