@@ -41,11 +41,30 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Whether a command says the last one was wrong: "No, …", "Not the …", "That's
     /// wrong". `undoOnly` when it says nothing more; `undoThenAsk` when it goes on to say
     /// what was meant.
+    ///
+    /// "No" and "not" also begin commands of their own: "No border on the button", "Not
+    /// bold". Taken for corrections, those undid the command before. So "no" corrects
+    /// only with a pause after it ("No, the title", "No.") or words after it that correct
+    /// ("no I meant…", "no the other one"), and "not" only with a pause or when it points
+    /// at what was done ("Not the check marks", "not that one").
     static func correction(in command: String) -> Correction? {
-        let words = command.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let said = command.lowercased()
+        let words = said.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
         guard let first = words.first else { return nil }
-        let opens = ["no", "nope", "nah", "not", "wrong", "oops"].contains(first)
-            || (words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong")
+        let next = words.dropFirst().first
+        // A comma, a full stop or a dash between the first word and the next, or nothing after it.
+        let isInWord: (Character) -> Bool = { $0.isLetter || $0.isNumber }
+        var pauses = true
+        if let start = said.firstIndex(where: isInWord), let end = said[start...].firstIndex(where: { !isInWord($0) }),
+           let following = said[end...].first(where: { !$0.isWhitespace }) {
+            pauses = !isInWord(following)
+        }
+        let opens = switch first {
+        case "nope", "nah", "wrong", "oops": true
+        case "no": pauses || next.map(correctsAfterNo.contains) == true
+        case "not": pauses || next.map(correctsAfterNot.contains) == true
+        default: words.count > 2 && words[0] == "that" && ["s", "is", "was"].contains(words[1]) && words[2] == "wrong"
+        }
         guard opens else { return nil }
         let saysNoMore: Set<String> = [
             "no", "nope", "nah", "not", "wrong", "oops", "undo", "revert", "that", "s", "is", "was", "it", "one", "go", "back",
@@ -53,6 +72,17 @@ final class VoiceAgent: VoiceCommandRunner {
         ]
         return words.allSatisfy(saysNoMore.contains) ? .undoOnly : .undoThenAsk
     }
+
+    /// Words that, after "no" with no pause, make it a correction: none of them can follow
+    /// the "no" of "no border".
+    private static let correctsAfterNo: Set<String> = [
+        "no", "not", "i", "the", "that", "this", "wrong", "undo", "revert", "sorry", "wait", "go", "oops",
+    ]
+
+    /// Words that, after "not", point at what was done rather than say a look.
+    private static let correctsAfterNot: Set<String> = [
+        "the", "that", "this", "it", "one", "those", "these", "there", "here", "what", "like",
+    ]
 
     /// The history mark the last command left, when it changed the design: its step is on
     /// top of the history for as long as the mark hasn't moved, and only then does a

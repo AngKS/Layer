@@ -328,6 +328,54 @@ struct VoiceAgentTests {
         #expect(VoiceAgent.correction(in: "undo") == nil)
     }
 
+    /// "No border", "Not bold": a look said with "no" or "not" is a command of its own.
+    /// It was taken for a correction, and undid the last command (V3).
+    @Test func aLookSaidWithNoOrNotIsNotACorrection() {
+        #expect(VoiceAgent.correction(in: "No border on the button") == nil)
+        #expect(VoiceAgent.correction(in: "not bold") == nil)
+        #expect(VoiceAgent.correction(in: "Not bold.") == nil)
+        #expect(VoiceAgent.correction(in: "No shadow") == nil)
+        #expect(VoiceAgent.correction(in: "No rounded corners") == nil)
+        #expect(VoiceAgent.correction(in: "no more shadow on the card") == nil)
+        #expect(VoiceAgent.correction(in: "Not so big") == nil)
+    }
+
+    /// A correction says so: "no" or "not" with a pause after it, or words that correct.
+    @Test func aCorrectionSaysItIsOne() {
+        #expect(VoiceAgent.correction(in: "No, make it red") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No. The title.") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Not the check marks.") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Not that, the title") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No I meant the title") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "no the other one") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "Nope, bigger") == .undoThenAsk)
+        #expect(VoiceAgent.correction(in: "No") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "No.") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "no not that one") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "No that's wrong") == .undoOnly)
+        #expect(VoiceAgent.correction(in: "Oops") == .undoOnly)
+    }
+
+    /// "No border on the button" after "make the title blue" is put to the model as it was
+    /// said, and leaves the blue title alone (V3).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aLookSaidWithNoLeavesTheLastCommandAlone() async throws {
+        let bench = bench([
+            "make the title blue": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"blue"}"#)],
+            "no border on the button": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"plain"}"#)],
+        ])
+        _ = await bench.agent.run("make the title blue")
+
+        let outcome = await bench.agent.run("No border on the button")
+
+        #expect(outcome.problem == nil)
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == ColourWords.parse("blue"))
+        #expect(bench.recorder.requests.last?.prompts.last == "No border on the button")
+        // Two commands, two steps: the first undo takes back only the second.
+        bench.undo?.undo()
+        #expect(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .title }?.tint == ColourWords.parse("blue"))
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func theNextCommandSeesWhatTheLastOneDid() async throws {
         let bench = bench([
