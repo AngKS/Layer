@@ -136,8 +136,9 @@ struct DesignContent: Equatable, Sendable {
     /// their places in the list.
     mutating func reorder(_ parent: DesignScreen.ID?, to order: [DesignElement.ID]) {
         let slots = elements.indices.filter { elements[$0].parent == parent }
-        let siblings = Dictionary(uniqueKeysWithValues: slots.map { (elements[$0].id, elements[$0]) })
-        guard order.count == slots.count, Set(order) == Set(siblings.keys) else { return }
+        let siblings = Dictionary(slots.map { (elements[$0].id, elements[$0]) }, uniquingKeysWith: { first, _ in first })
+        // Two with one identifier, which only a damaged file has, can't be told apart: they stay as they are.
+        guard siblings.count == slots.count, order.count == slots.count, Set(order) == Set(siblings.keys) else { return }
         for (slot, id) in zip(slots, order) {
             if let element = siblings[id] { elements[slot] = element }
         }
