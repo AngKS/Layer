@@ -638,6 +638,57 @@ struct DesignFileTests {
         #expect(reopened.images == [shown.uuidString: Data([1, 2, 3])])
     }
 
+    /// A package as a newer Layer might save it: an image and a drawing this version can't
+    /// read (a text alignment it doesn't know), their picture and ink, a picture nothing
+    /// shows, and a folder of a kind it has never heard of.
+    private func packageFromANewerLayer() throws -> (package: FileWrapper, picture: UUID, drawing: UUID, orphan: UUID) {
+        let picture = UUID(), drawing = UUID(), orphan = UUID()
+        let tint = ["red": 0, "green": 0, "blue": 0]
+        let elements: [[String: Any]] = [
+            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "textAlignment": "justified",
+             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "text": "", "tint": tint],
+            ["id": drawing.uuidString, "kind": "drawing", "textAlignment": "justified",
+             "frame": [[0, 0], [10, 10]], "text": "", "tint": tint],
+        ]
+        let manifest = try JSONSerialization.data(withJSONObject: ["version": 3, "content": ["screens": [], "elements": elements]])
+        let package = FileWrapper(directoryWithFileWrappers: [
+            "design.json": FileWrapper(regularFileWithContents: manifest),
+            "images": FileWrapper(directoryWithFileWrappers: [
+                picture.uuidString: FileWrapper(regularFileWithContents: Data([1, 2, 3])),
+                orphan.uuidString: FileWrapper(regularFileWithContents: Data([4, 5, 6])),
+            ]),
+            "ink": FileWrapper(directoryWithFileWrappers: [drawing.uuidString: FileWrapper(regularFileWithContents: Data([5, 5, 5]))]),
+            "fonts": FileWrapper(directoryWithFileWrappers: ["Brand.otf": FileWrapper(regularFileWithContents: Data([7, 7]))]),
+        ])
+        return (package, picture, drawing, orphan)
+    }
+
+    @Test func savingKeepsThePictureAndInkOfElementsThisVersionCannotRead() throws {
+        let (package, picture, drawing, orphan) = try packageFromANewerLayer()
+        let file = try DesignFile(wrapper: package)
+        #expect(file.content.elements.isEmpty, "neither element can be read here")
+
+        // Saved over the file it came from, and written afresh, as a copy to share is.
+        for saved in [try file.wrapper(replacing: package), try file.wrapper()] {
+            #expect(saved.fileWrappers?["images"]?.fileWrappers?[picture.uuidString]?.regularFileContents == Data([1, 2, 3]))
+            #expect(saved.fileWrappers?["ink"]?.fileWrappers?[drawing.uuidString]?.regularFileContents == Data([5, 5, 5]))
+            #expect(saved.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"]?.regularFileContents == Data([7, 7]))
+            // A picture nothing shows, read or not, still goes.
+            #expect(saved.fileWrappers?["images"]?.fileWrappers?[orphan.uuidString] == nil)
+
+            // And again, from what was saved.
+            let again = try DesignFile(wrapper: saved).wrapper()
+            #expect(again.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] != nil)
+            #expect(again.fileWrappers?["ink"]?.fileWrappers?[drawing.uuidString] != nil)
+            #expect(again.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"] != nil)
+            let manifest = try #require(again.fileWrappers?["design.json"]?.regularFileContents)
+            let root = try #require(try JSONSerialization.jsonObject(with: manifest) as? [String: Any])
+            let written = try #require((root["content"] as? [String: Any])?["elements"] as? [[String: Any]])
+            #expect(written.first?["rotation"] as? Double == 30)
+            #expect(written.first?["blur"] as? Double == 4)
+        }
+    }
+
     @Test func aFileFromANewerVersionIsRefusedRatherThanHalfRead() throws {
         var file = sampleFile()
         file.version = DesignFile.currentVersion + 1

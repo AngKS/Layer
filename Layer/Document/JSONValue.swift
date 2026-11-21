@@ -38,4 +38,15 @@ enum JSONValue: Codable, Equatable, Sendable {
         case .object(let value): try container.encode(value)
         }
     }
+
+    /// Every string in the value, however deeply it is held. What a design doesn't
+    /// understand may still name its files this way: a picture's identifier, a drawing's.
+    var strings: Set<String> {
+        switch self {
+        case .null, .bool, .number: []
+        case .string(let value): [value]
+        case .array(let values): values.reduce(into: []) { $0.formUnion($1.strings) }
+        case .object(let values): values.values.reduce(into: []) { $0.formUnion($1.strings) }
+        }
+    }
 }

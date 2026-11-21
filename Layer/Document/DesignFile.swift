@@ -35,6 +35,13 @@ struct DesignContent: Equatable, Sendable {
         Set(elements.compactMap(\.imageID))
     }
 
+    /// Every string in the elements this version couldn't read, their identifiers and
+    /// those of the pictures they show among them. The files they name are kept when the
+    /// design is saved, so that the newer Layer that wrote them still finds them.
+    var unreadNames: Set<String> {
+        unread.reduce(into: []) { $0.formUnion($1.json.strings) }
+    }
+
     // MARK: Views of the list
 
     /// Each screen with what is on it.
@@ -268,6 +275,12 @@ struct DesignFile: Sendable {
     /// The name the file had when the app last looked. A different name on disk means
     /// the file was renamed somewhere else, in Files for instance.
     var fileName: String?
+    /// The ink of drawings this version couldn't read, as it was read, by file name. It
+    /// is written back for as long as those drawings are in the design.
+    var unreadInk: [String: Data] = [:]
+    /// Parts of the package this version doesn't know, which a newer Layer may have added,
+    /// as they were read. They are written back unchanged.
+    var unknownParts: [String: PackagePart] = [:]
 
     /// `drawing` is ink for the board as one PencilKit drawing, which is taken in as
     /// drawings: strokes that touch become one drawing each.
@@ -301,6 +314,14 @@ struct DesignFile: Sendable {
             let strokes = ink[drawing.id.uuidString]?.regularFileContents
             content.update(drawing.id) { $0.ink = strokes }
         }
+        // So is the ink of drawings this version can't read, which is kept for writing back.
+        let unreadNames = content.unreadNames
+        for (name, strokes) in ink where unreadNames.contains(name) {
+            unreadInk[name] = strokes.regularFileContents
+        }
+        for (name, part) in parts where !Self.knownParts.contains(name) {
+            unknownParts[name] = PackagePart(part)
+        }
         // Until version 3 all the ink was one drawing.
         if manifest.version < 3, let whole = parts[DesignPackage.drawing]?.regularFileContents {
             content.adopt(try PKDrawing(data: whole))
@@ -325,7 +346,9 @@ struct DesignFile: Sendable {
 
     /// The design as a package, ready to be written. Parts that are already on disk
     /// unchanged are handed back as they are, which leaves their files untouched.
-    /// Pictures that nothing in the design shows any more are left out.
+    /// Pictures that nothing in the design shows any more are left out. What this
+    /// version doesn't understand, elements of a kind it doesn't know and parts of the
+    /// package it has never heard of, is written back with the files it names.
     func wrapper(replacing existing: FileWrapper? = nil) throws -> FileWrapper {
         let old = existing?.isDirectory == true ? existing?.fileWrappers ?? [:] : [:]
         var parts: [String: FileWrapper] = [:]
@@ -343,11 +366,16 @@ struct DesignFile: Sendable {
             let name = drawing.id.uuidString
             ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
         }
+        // Elements this version couldn't read keep the ink and pictures they name.
+        let unreadNames = content.unreadNames
+        for (name, strokes) in unreadInk where ink[name] == nil && unreadNames.contains(name) {
+            ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
+        }
         if !ink.isEmpty {
             parts[DesignPackage.ink] = Self.folder(ink, named: DesignPackage.ink)
         }
 
-        let shown = Set(content.imageIDs.map(\.uuidString))
+        let shown = Set(content.imageIDs.map(\.uuidString)).union(unreadNames)
         let savedPictures = old[DesignPackage.images]?.fileWrappers ?? [:]
         var pictures: [String: FileWrapper] = [:]
         for (name, data) in images where shown.contains(name) {
@@ -362,8 +390,19 @@ struct DesignFile: Sendable {
             let saved = old[DesignPackage.quickLook]?.fileWrappers?[DesignPackage.thumbnail]
             parts[DesignPackage.quickLook] = Self.folder([DesignPackage.thumbnail: Self.file(preview, named: DesignPackage.thumbnail, onDisk: saved)], named: DesignPackage.quickLook)
         }
+
+        // Parts a newer Layer added stay as they are: as on disk when they are, or as read.
+        for name in Set(unknownParts.keys).union(old.keys) where !Self.knownParts.contains(name) {
+            parts[name] = old[name] ?? unknownParts[name]?.wrapper(named: name)
+        }
         return FileWrapper(directoryWithFileWrappers: parts)
     }
+
+    /// The parts of a package this version knows what to do with. Anything else in one is
+    /// kept as it is.
+    private static let knownParts: Set<String> = [
+        DesignPackage.design, DesignPackage.ink, DesignPackage.drawing, DesignPackage.images, DesignPackage.quickLook,
+    ]
 
     private static func file(_ data: Data, named name: String, onDisk saved: FileWrapper?) -> FileWrapper {
         if let saved, saved.isRegularFile, saved.regularFileContents == data { return saved }
@@ -416,5 +455,34 @@ struct DesignFile: Sendable {
         let old = try JSONDecoder().decode(SingleFileContent.self, from: Data(contentsOf: url))
         guard old.version <= currentVersion else { throw ReadError.newerVersion(old.version) }
         return old.content
+    }
+}
+
+/// A part of a design's package that this version of Layer doesn't know, kept as it was
+/// read so that saving writes it back: a file's bytes, or a folder of further parts.
+enum PackagePart: Equatable, Sendable {
+    case file(Data)
+    case folder([String: PackagePart])
+
+    /// Nil for what is neither a file nor a folder, such as a symbolic link.
+    init?(_ wrapper: FileWrapper) {
+        if wrapper.isRegularFile, let data = wrapper.regularFileContents {
+            self = .file(data)
+        } else if wrapper.isDirectory {
+            self = .folder((wrapper.fileWrappers ?? [:]).compactMapValues(PackagePart.init))
+        } else {
+            return nil
+        }
+    }
+
+    func wrapper(named name: String) -> FileWrapper {
+        let wrapper = switch self {
+        case .file(let data):
+            FileWrapper(regularFileWithContents: data)
+        case .folder(let parts):
+            FileWrapper(directoryWithFileWrappers: Dictionary(uniqueKeysWithValues: parts.map { ($0.key, $0.value.wrapper(named: $0.key)) }))
+        }
+        wrapper.preferredFilename = name
+        return wrapper
     }
 }
