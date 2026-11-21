@@ -277,6 +277,81 @@ struct VoiceAgentTests {
         #expect(bench.button?.frame.origin.y == 300)
     }
 
+    /// When the correction can't undo the command, the model is asked, and its `undo`
+    /// tool took back the top step: the person's own move (review I-2). The model's undo
+    /// takes back only a command's step; told so, it goes on with what was asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func theModelsUndoNeverTakesBackAMoveByHand() async throws {
+        let correct = [
+            Step(tool: "undo", arguments: "{}"),
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"red"}"#),
+        ]
+        let bench = bench([
+            "make the button blue and say ahoy": [
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
+            ],
+            "no, make it red": correct,
+            "(the last change was not undone: something has been changed by hand since, and that must not be undone.) no, make it red": correct,
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        let button = try #require(bench.button)
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        async let first = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        bench.app.store.update(ref) { $0.frame.origin.y = 300 }
+        _ = await first
+
+        _ = await bench.agent.run("No, make it red")
+        #expect(bench.button?.frame.origin.y == 300)
+        #expect(bench.button?.tint == ColourWords.parse("red"))
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.frame.origin.y == 300)
+    }
+
+    /// Ink drawn while a command that changed nothing ran, then "No, that's wrong.": the
+    /// model, asked, undid the ink (review I-2). A correction with nothing of the command's
+    /// to undo says so, without asking the model.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionWithNothingToUndoDoesNotAskTheModel() async throws {
+        let bench = bench([
+            "show me the first screen": [Step(tool: "show", arguments: #"{"target":"S1"}"#, delay: .milliseconds(300))],
+            "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
+        ])
+        async let first = bench.agent.run("show me the first screen")
+        try await Task.sleep(for: .milliseconds(50))
+        bench.app.store.apply { _ = $0.add(DesignStore.newElement(.drawing), to: nil, scale: nil) }
+        _ = await first
+        let asked = bench.recorder.requests.count
+        let outcome = await bench.agent.run("No, that's wrong.")
+        #expect(bench.app.store.content.elements.contains { $0.kind == .drawing })
+        #expect(bench.recorder.requests.count == asked)
+        #expect(outcome.problem != nil)
+    }
+
+    /// A drag made while a command ran and let go where it began leaves no step. The
+    /// command's step was on top again, but was taken not to be, so "No, …" declined
+    /// (review M-4).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionUndoesTheCommandAfterADragThatCameToNothing() async throws {
+        let bench = bench(["make the button blue and say ahoy": [
+            Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+            Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
+        ]])
+        let image = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: image.id)
+        async let first = bench.agent.run("make the button blue and say ahoy")
+        #expect(await eventually { bench.button?.tint == ColourWords.parse("blue") })
+        let drag = bench.app.store.beginEdit()
+        bench.app.store.act(for: drag) { bench.app.store.update(ref) { $0.frame.origin.x = 60 } }
+        bench.app.store.act(for: drag) { bench.app.store.update(ref) { $0.frame.origin.x = image.frame.origin.x } }
+        bench.app.store.endEdit(drag)
+        _ = await first
+        _ = await bench.agent.run("No, that's wrong.")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.button?.text == "Sign in")
+    }
+
     /// Ink drawn while the model was still thinking, before the command changed anything:
     /// the correction takes back the command, and only the command.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))

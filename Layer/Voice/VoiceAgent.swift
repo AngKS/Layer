@@ -96,6 +96,10 @@ final class VoiceAgent: VoiceCommandRunner {
         await run(command, about: nil)
     }
 
+    /// What the model is told with a correction whose command's step can't be undone,
+    /// because the person has changed the design since. Its undo tool refuses anyway.
+    static let notUndoneHint = "(The last change was not undone: something has been changed by hand since, and that must not be undone.)"
+
     /// What the model is told with a command the pencil pointed at empty canvas for.
     static let canvasHint = "(The person pointed at empty canvas: a description of a screen means a new screen there.)"
 
@@ -152,16 +156,28 @@ final class VoiceAgent: VoiceCommandRunner {
         // "Not the check marks": the last change is undone before what was meant is done.
         // Left to the model, it did what was meant and left the mistake.
         var prompt = command
-        if let correction = Self.correction(in: command), let step = lastCommandStep, model.store.historyMark == step {
-            VoiceLog.log.info("agent: a correction, so the last change is undone first")
-            _ = toolbox.undo()
-            lastCommandStep = nil
-            if correction == .undoOnly {
+        if let correction = Self.correction(in: command) {
+            if let step = lastCommandStep, model.store.historyMark == step {
+                VoiceLog.log.info("agent: a correction, so the last change is undone first")
+                _ = toolbox.undo()
+                lastCommandStep = nil
+                if correction == .undoOnly {
+                    outcome.lines = toolbox.lines
+                    return outcome
+                }
+                prompt = "(The last change has been undone.) " + command
+                lookAtTheCanvas()
+            } else if correction == .undoOnly {
+                // Nothing of the command's to undo. Asked, the model undid the person's own
+                // change in its place (review I-2), so it isn't asked.
+                VoiceLog.log.info("agent: a correction with nothing of the last command's to undo")
+                _ = toolbox.refuseCorrection()
                 outcome.lines = toolbox.lines
+                outcome.problem = toolbox.failures.last
                 return outcome
+            } else {
+                prompt = Self.notUndoneHint + " " + command
             }
-            prompt = "(The last change has been undone.) " + command
-            lookAtTheCanvas()
         }
         if let hint {
             prompt = hint + " " + prompt

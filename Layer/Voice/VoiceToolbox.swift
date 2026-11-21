@@ -793,8 +793,20 @@ final class VoiceToolbox: VoiceActing {
         guard let history = model.store.undoManager, isUndo ? history.canUndo : history.canRedo else {
             return failed(isUndo ? "There is nothing to undo." : "There is nothing to redo.")
         }
+        // What was done by hand is the person's to undo, not a command's: a model asked to
+        // correct a command undid the person's own change instead (review I-2).
+        guard !isUndo || model.store.lastStepIsCommand else { return failed(Self.changedByHand) }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
+    }
+
+    /// Why undo by voice won't take back the last change.
+    static let changedByHand = "The last change was made by hand, not by voice, so I'll leave it. The Undo button takes it back."
+
+    /// A correction with nothing of the last command's to undo: the command changed
+    /// nothing, or something has been changed by hand since, which isn't undone in its place.
+    func refuseCorrection() -> String {
+        failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
     }
 
     func endCall() -> String {

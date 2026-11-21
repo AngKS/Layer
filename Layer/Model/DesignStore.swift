@@ -638,6 +638,7 @@ final class DesignStore {
         let above = edit.later.compactMap(\.step)
         guard !above.isEmpty, !above.contains(where: { $0.touched.meets(step.touched) }) else { return }
         let moved = HistoryStep(runs: step.runs)
+        moved.isCommand = step.isCommand
         withdraw(step)
         register(moved)
         edit.step = moved
@@ -776,6 +777,7 @@ final class DesignStore {
             step = existing
         } else {
             step = HistoryStep()
+            step.isCommand = owner != nil && owner === heldEdit
             owner?.step = step
             register(step)
         }
@@ -797,6 +799,9 @@ final class DesignStore {
         }
 
         private(set) var runs: [Run] = []
+        /// Whether it is what a spoken command did: the only kind of step the command's own
+        /// undo tool takes back.
+        var isCommand = false
         /// `changeCount` after the step's last change.
         private var lastChange = -1
 
@@ -882,9 +887,20 @@ final class DesignStore {
         }
     }
 
-    /// The step on top of the history, as far as this store knows: nil after an undo, when
-    /// it is whatever was below.
-    @ObservationIgnored private weak var lastStep: HistoryStep?
+    /// The steps undo would take back, oldest first, as the history holds them: one is
+    /// added as it is registered, and taken off as it is undone or taken out. Those the
+    /// history lets go of, past its cap, go by themselves.
+    @ObservationIgnored private var undoable: [Weak] = []
+
+    /// The step on top of the history: the one undo would take back.
+    private var lastStep: HistoryStep? { undoable.last { $0.step != nil }?.step }
+
+    private func forget(_ step: HistoryStep) {
+        undoable.removeAll { $0.step == nil || $0.step === step }
+    }
+
+    /// Whether the step undo would take back now is a spoken command's.
+    var lastStepIsCommand: Bool { lastStep?.isCommand == true }
 
     /// Steps to take out of the history once the group they are in has closed.
     @ObservationIgnored private var stepsToWithdraw: [HistoryStep] = []
@@ -898,7 +914,7 @@ final class DesignStore {
     private func withdraw(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
-        if lastStep === step { lastStep = nil }
+        forget(step)
         guard undoManager.groupingLevel > 0 else {
             undoManager.removeAllActions(withTarget: step)
             Self.tellHistoryChanged(undoManager)
@@ -936,7 +952,7 @@ final class DesignStore {
         guard let undoManager else { return }
         historyMark += 1
         // Registering while undoing makes the step the redo step.
-        lastStep = undoManager.isUndoing ? nil : step
+        if !undoManager.isUndoing { undoable.append(Weak(step: step)) }
         if !undoManager.isUndoing {
             for edit in edits where edit.step != nil && edit.step !== step { edit.later.append(Weak(step: step)) }
         }
@@ -952,6 +968,7 @@ final class DesignStore {
     /// Undoes a step, or redoes one, by taking back its own changes, and registers the
     /// reverse.
     private func takeBack(_ step: HistoryStep) {
+        forget(step)
         let current = content
         var result = step.undone(from: current)
         // A screen the step took away may have had something put on it by another edit
@@ -959,7 +976,9 @@ final class DesignStore {
         // nowhere and saved so (review C-1).
         result.rehostElementsOnMissingScreens(from: current)
         content = result
-        register(HistoryStep(runs: [.init(before: current, after: result)]))
+        let reverse = HistoryStep(runs: [.init(before: current, after: result)])
+        reverse.isCommand = step.isCommand
+        register(reverse)
         // An edit still open whose step this was goes on from here, as a step of its own.
         for edit in edits where edit.step === step { edit.step = nil }
     }

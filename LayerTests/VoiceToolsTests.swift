@@ -999,6 +999,25 @@ struct VoiceToolsTests {
         #expect(!undo.canUndo)
     }
 
+    /// The model's undo takes back what a command did, never what was done by hand: a
+    /// model asked to correct a command undid the person's own move instead (review I-2).
+    @Test func undoByVoiceNeverTakesBackAChangeByHand() throws {
+        let bench = bench()
+        let store = bench.app.store
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        store.beginHeldEdit()
+        _ = bench.box.styleElement(element: "E2", look: "green")
+        store.endHeldEdit()
+        store.update(image) { $0.frame.origin.x = 40 }
+        store.beginHeldEdit()
+        let said = bench.box.undo()
+        store.endHeldEdit()
+        #expect(said != "Undid the last change.")
+        #expect(bench.box.lastFailed)
+        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
+        #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
+    }
+
     @Test func undoInsideACommandUndoesTheLastCommand() throws {
         let bench = bench()
         let undo = try #require(bench.app.store.undoManager)
