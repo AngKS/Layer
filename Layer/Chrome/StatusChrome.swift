@@ -149,11 +149,16 @@ struct UndoControl: View {
         .transition(.opacity.combined(with: .scale(scale: 0.6)))
     }
 
-    private var undoChanges: some Publisher<Notification, Never> {
+    private var undoChanges: some Publisher<Notification, Never> { Self.changes(of: undoManager) }
+
+    /// Every notice that what undo and redo can do may have changed: a step put in, undone,
+    /// redone, or taken out again by the design (see `DesignStore.historyDidChange`).
+    static func changes(of undoManager: UndoManager?) -> some Publisher<Notification, Never> {
         let center = NotificationCenter.default
         return center.publisher(for: .NSUndoManagerDidCloseUndoGroup, object: undoManager)
             .merge(with: center.publisher(for: .NSUndoManagerDidUndoChange, object: undoManager))
             .merge(with: center.publisher(for: .NSUndoManagerDidRedoChange, object: undoManager))
+            .merge(with: center.publisher(for: DesignStore.historyDidChange, object: undoManager))
     }
 }
 

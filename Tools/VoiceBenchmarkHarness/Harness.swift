@@ -198,6 +198,14 @@ final class Recorder: VoiceActing {
 /// The canvases the commands are spoken over.
 enum Canvas: String {
     case empty, one, three
+    /// One screen pointed at with the pencil, as a whole: the screen selected.
+    case screenPointed
+    /// One screen, the sign in button pointed at with the pencil.
+    case buttonPointed
+    /// One screen, the title and the image selected together.
+    case twoPointed
+    /// One iPad-sized screen, pointed at as a whole.
+    case iPadPointed
 
     private static let login = CanvasPicture.Screen(
         handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), visibleShare: 1,
@@ -234,6 +242,45 @@ enum Canvas: String {
                 ]
             )
             return CanvasPicture(screens: [login, profile, settings])
+        case .screenPointed:
+            var login = Self.login
+            login.elements[1].isSelected = false
+            login.isSelected = true
+            return CanvasPicture(screens: [login])
+        case .buttonPointed:
+            return CanvasPicture(screens: [Self.login])
+        case .twoPointed:
+            var login = Self.login
+            login.elements[1].isSelected = false
+            login.elements[0].isSelected = true
+            login.elements[2].isSelected = true
+            return CanvasPicture(screens: [login])
+        case .iPadPointed:
+            var login = Self.login
+            login.size = CGSize(width: 1024, height: 1366)
+            login.elements[1].isSelected = false
+            login.isSelected = true
+            login.elements = login.elements.map { var element = $0; element.frame?.size.width = 984; return element }
+            return CanvasPicture(screens: [login])
+        }
+    }
+}
+
+/// Where the pencil pointed as the command was said, which the app tells the model ahead
+/// of the words (`VoiceAgent.canvasHint` and `thingHint`, copied here as the harness
+/// doesn't compile the agent). The pencil's call has no tool to end it.
+enum Pointing {
+    /// At empty canvas.
+    case canvas
+    /// At what is selected in the canvas picture.
+    case thing
+
+    func hint(_ picture: CanvasPicture) -> String {
+        switch self {
+        case .canvas:
+            return "(The person pointed at empty canvas: a description of a screen means a new screen there.)"
+        case .thing:
+            return "(The person is pointing at \(picture.selectionInWords ?? "nothing"). \"This\", \"it\", \"that\" and a change that names nothing mean what is pointed at, and nothing else.)"
         }
     }
 }
@@ -253,6 +300,8 @@ struct Case {
     var isFresh = false
     /// Whether the command is one a person spoke to an iPad, written as it was heard.
     var isFromTheIPad = false
+    /// Where the pencil pointed; nil for a command spoken in voice mode.
+    var pointing: Pointing? = nil
 }
 
 private func has(_ key: String, _ words: String...) -> ([String: String]) -> Bool {
@@ -351,11 +400,57 @@ let cases: [Case] = [
     Case(canvas: .one, command: "make the baby photo title rate.", tools: [], isFromTheIPad: true),
 ]
 
+/// The tools added on 2026-11-18 (`tidyScreen`, `changeScreenDevice`, and a device for
+/// `createScreen`), with commands that must still go to the older tools. Run with
+/// `newtools`, each several times. See "New tools (2026-11-18)" in the benchmark notes.
+private func tidied(_ handles: String...) -> ([String: String]) -> Bool {
+    { arguments in arguments["screen"].map { handles.contains($0) } ?? true }
+}
+
+private func device(_ words: String...) -> ([String: String]) -> Bool {
+    { arguments in
+        let said = (arguments["device"] ?? "").lowercased()
+        return words.contains { said.contains($0) }
+    }
+}
+
+private let centred: Set<String> = ["centre", "center", "centrally", "middle"]
+
+let newToolCases: [Case] = {
+    var list: [Case] = []
+    for command in ["Align everything nicely", "Tidy this up", "Clean up the layout", "Make it look nice", "Space things out evenly"] {
+        list.append(Case(canvas: .screenPointed, command: command, tools: ["tidyScreen"], isRight: tidied("S1"), pointing: .thing))
+        list.append(Case(canvas: .buttonPointed, command: command, tools: ["tidyScreen"], isRight: tidied("S1", "E2"), pointing: .thing))
+    }
+    // As heard on the iPad before the tools were there.
+    list.append(Case(canvas: .screenPointed, command: "Align everything in the layout nicely", tools: ["tidyScreen"], isRight: tidied("S1"), pointing: .thing))
+    list.append(Case(canvas: .screenPointed, command: "Convert this screen into a iPad screen", tools: ["changeScreenDevice"], isRight: both(tidied("S1"), device("ipad")), pointing: .thing))
+    list.append(Case(canvas: .screenPointed, command: "Convert this screen into an iPad screen", tools: ["changeScreenDevice"], isRight: both(tidied("S1"), device("ipad")), pointing: .thing))
+    list.append(Case(canvas: .screenPointed, command: "Make this a Mac screen", tools: ["changeScreenDevice"], isRight: both(tidied("S1"), device("mac")), pointing: .thing))
+    list.append(Case(canvas: .screenPointed, command: "Turn it into a web page", tools: ["changeScreenDevice"], isRight: both(tidied("S1"), device("web", "mac")), pointing: .thing))
+    list.append(Case(canvas: .iPadPointed, command: "Make it an iPhone again", tools: ["changeScreenDevice"], isRight: both(tidied("S1"), device("iphone")), pointing: .thing))
+    // A new screen: by voice on an empty canvas, and with the pencil on empty canvas beside a screen.
+    for (canvas, pointing) in [(Canvas.empty, Pointing?.none), (.one, .canvas)] {
+        list.append(Case(canvas: canvas, command: "Make an Apple product page on iPad", tools: ["createScreen"], isRight: both(has("description", "product"), device("ipad")), pointing: pointing))
+        list.append(Case(canvas: canvas, command: "A Chinese calligraphy webpage", tools: ["createScreen"], isRight: both(has("description", "calligraphy"), device("web", "mac")), pointing: pointing))
+        list.append(Case(canvas: canvas, command: "A settings screen", tools: ["createScreen"], isRight: { ($0["description"] ?? "").lowercased().contains("settings") && ($0["device"] ?? "").isEmpty }, pointing: pointing))
+    }
+    // Controls, which must not go to the new tools.
+    list.append(Case(canvas: .buttonPointed, command: "Align it to the left", tools: ["alignElement", "placeElement"], isRight: { $0["element"] == "E2" }, pointing: .thing))
+    list.append(Case(canvas: .twoPointed, command: "Centre these two", tools: ["alignElement"], isRight: { ["E1", "E3"].allSatisfy(($0["element"] ?? "").contains) && centred.contains(($0["alignment"] ?? "").lowercased()) }, pointing: .thing))
+    list.append(Case(canvas: .buttonPointed, command: "Make this blue", tools: ["styleElement"], isRight: both(has("element", "E2"), has("look", "blue")), pointing: .thing))
+    list.append(Case(canvas: .one, command: "Align the image to the left", tools: ["alignElement"], isRight: both(has("element", "E3"), has("alignment", "left"))))
+    list.append(Case(canvas: .one, command: "Rename this screen to Sign In", tools: ["renameScreen"], isRight: both(has("screen", "S1"), has("name", "sign in"))))
+    return list
+}()
+
 /// The on-device branch of the app's `VoiceProfile`, with optional changes to try.
 struct BenchProfile: LanguageModelSession.DynamicProfile {
     let picture: CanvasPicture
     let actor: any VoiceActing
     let variant: Variant
+    /// False for the pencil's call, which has no tool to end it.
+    var canEndCall = true
 
     enum Variant: String {
         /// The model's own sampling, which varies from run to run.
@@ -403,9 +498,9 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
                 Instructions("The canvas now:\n\(picture.text(.compact))")
             }
             if picture.hasScreens {
-                VoiceTools.all(actor)
+                VoiceTools.all(actor, canEndCall: canEndCall)
             } else {
-                VoiceTools.forEmptyCanvas(actor)
+                VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall)
             }
         }
         .maximumResponseTokens(200)
@@ -435,12 +530,14 @@ struct Outcome {
 @MainActor
 func run(_ testCase: Case, variant: BenchProfile.Variant) async -> Outcome {
     let recorder = Recorder(picture: testCase.canvas.picture)
-    let session = LanguageModelSession(profile: BenchProfile(picture: testCase.canvas.picture, actor: recorder, variant: variant))
+    let session = LanguageModelSession(profile: BenchProfile(picture: testCase.canvas.picture, actor: recorder, variant: variant, canEndCall: testCase.pointing == nil))
     let start = ContinuousClock.now
     var reply = ""
     var failure: String?
+    // As the app puts it: the pencil's hint, a space, then the words.
+    let hint = testCase.pointing.map { $0.hint(testCase.canvas.picture) + " " } ?? ""
     do {
-        reply = try await session.respond(to: variant.form.prompt(testCase.command, picture: testCase.canvas.picture)).content
+        reply = try await session.respond(to: hint + variant.form.prompt(testCase.command, picture: testCase.canvas.picture)).content
     } catch {
         failure = String(describing: error).prefix(160).description
     }
@@ -773,6 +870,11 @@ struct Main {
             }
             return
         }
+        if CommandLine.arguments.dropFirst().first == "newtools" {
+            await newTools(runs: CommandLine.arguments.dropFirst(2).first.flatMap(Int.init) ?? 5,
+                           variant: CommandLine.arguments.dropFirst(3).first.flatMap(BenchProfile.Variant.init(rawValue:)) ?? .baseline)
+            return
+        }
         print("variant: \(variant.rawValue)")
         print("context size: \(model.contextSize) tokens")
         // How much of that the app's on-device profile takes before a word is spoken.
@@ -814,5 +916,46 @@ struct Main {
         print(String(format: "latency: p50 %.1f s, p95 %.1f s, longest %.1f s", percentile(0.5), percentile(0.95), times.last ?? 0))
         let severalAtOnce = outcomes.filter { $0.calls.count > 1 }.count
         print("commands where more than one tool was called: \(severalAtOnce)")
+    }
+}
+
+/// The prompt's size before a word is spoken, for each canvas, as `main` prints it.
+@MainActor
+func printPromptSize(canEndCall: Bool) async {
+    let model = SystemLanguageModel.default
+    for canvas in [Canvas.empty, .one, .three] {
+        let picture = canvas.picture
+        let recorder = Recorder(picture: picture)
+        let tools = picture.hasScreens ? VoiceTools.all(recorder, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(recorder, canEndCall: canEndCall)
+        let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact))) ?? -1
+        let brief = (try? await model.tokenCount(for: Instructions("The canvas now:\n\(picture.text(.compact))"))) ?? -1
+        let toolTokens = (try? await model.tokenCount(for: tools)) ?? -1
+        print("canvas \(canvas.rawValue)\(canEndCall ? "" : " (pencil)"): rules \(rules) + canvas \(brief) + \(tools.count) tools \(toolTokens) = \(rules + brief + toolTokens) tokens")
+    }
+}
+
+/// Each of `newToolCases` run `runs` times; one line a run, then each case's rates.
+@MainActor
+func newTools(runs: Int, variant: BenchProfile.Variant) async {
+    print("newtools: \(runs) runs, variant \(variant.rawValue)")
+    await printPromptSize(canEndCall: true)
+    await printPromptSize(canEndCall: false)
+    var tallies: [(Case, right: Int, rightTool: Int, picks: [String: Int])] = newToolCases.map { ($0, 0, 0, [:]) }
+    for pass in 1...runs {
+        for index in newToolCases.indices {
+            let testCase = newToolCases[index]
+            let outcome = await run(testCase, variant: variant)
+            if outcome.right { tallies[index].right += 1 }
+            if outcome.rightTool { tallies[index].rightTool += 1 }
+            let pick = outcome.calls.first?.tool ?? "none"
+            tallies[index].picks[pick, default: 0] += 1
+            let did = outcome.calls.isEmpty ? "no tool" : outcome.calls.map(\.description).joined(separator: "; ")
+            print("R run\(pass) \(outcome.right ? "RIGHT" : outcome.rightTool ? "TOOL " : "WRONG") [\(testCase.canvas.rawValue)\(testCase.pointing == nil ? "" : ", pencil")] “\(testCase.command)” -> \(did)\(outcome.error.map { " ERROR \($0)" } ?? "")")
+        }
+    }
+    print("")
+    for tally in tallies {
+        let picks = tally.picks.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+        print("S \(tally.right)/\(runs) right, \(tally.rightTool)/\(runs) right tool | [\(tally.0.canvas.rawValue)\(tally.0.pointing == nil ? "" : ", pencil")] “\(tally.0.command)” | picks: \(picks)")
     }
 }

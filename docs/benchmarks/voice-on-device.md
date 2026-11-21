@@ -399,6 +399,55 @@ command costs about 0.7 s per edit, and it stays. Two ways back to this:
   (already noted above), and refuse tools for a kind of thing the canvas doesn't have.
 - Rules that hold with the canvas in the prompt, tuned on commands kept apart from these.
 
+## New tools (2026-11-18)
+
+Measured 2026-11-21 on the same Mac. The question was whether the on-device model picks
+the three tools added on 2026-11-18 for the words people use: `tidyScreen`,
+`changeScreenDevice`, and a `device` for `createScreen`. Five controls check that commands
+for the older tools still go to them.
+
+**What was run.** `Tools/VoiceBenchmarkHarness/run.sh newtools 5`: 27 commands, each run
+five times with the model's own sampling (the baseline variant). Commands spoken with the
+pencil carry its hint in front of the words, as the app sends them, and have no tool to end
+the call. Two descriptions were reworded before the run, and these numbers are for the new
+wording only; the old wording wasn't run for comparison.
+
+- `tidyScreen` now lists "space things out" and says it applies "even with one element
+  pointed at".
+- `createScreen`'s device says "webpage for a web page or website".
+
+The profile is 2,792 tokens with one screen (20 tools) and 806 on an empty canvas (6 tools).
+The pencil's profile is about 60 tokens smaller, because it has no end-call tool.
+
+**Results, 135 calls:** 115 right, 12 with the right tool but a wrong argument, 8 with the
+wrong tool.
+
+| Commands | Right | Right tool |
+|---|---|---|
+| Tidy, 11 commands (the screen or a button pointed at) | 50 of 55 | 52 of 55 |
+| Change device, 5 commands | 25 of 25 | 25 of 25 |
+| New screen, 6 commands (empty canvas, or the pencil beside a screen) | 25 of 30 | 30 of 30 |
+| Controls for the older tools, 5 commands | 15 of 25 | 20 of 25 |
+
+**What goes wrong:**
+
+- **"Make it look nice" with a button pointed at** went to `styleElement` 3 times in 5, and
+  each of those also restyled the button. Pointing at one thing pulls the model towards
+  editing it. Pointing at the screen gave the tidy 5 times in 5, and so did "tidy this up"
+  and "clean up the layout" over the button.
+- **"A Chinese calligraphy webpage" said with the pencil beside a screen** made a screen 5
+  times in 5 but never set the device. On an empty canvas the same words set "webpage"
+  every time.
+- **"Centre these two"** went to `alignElement` but said `vertical centre` 5 times in 5.
+  The tool's description says "centre" means side to side.
+- **"Align the image to the left"** with nothing pointed at went to `placeElement` (left of
+  the title) 5 times in 5, not to `alignElement`.
+
+**What it led to.** The new tools are picked as intended. Nothing in the app was changed
+for the misses. The last two are older tools and not part of this round. Two possible
+fixes for the missing device: read a device word out of the description when `device` is
+empty, or give the pencil's empty-canvas hint the same device sentence.
+
 ## Not measured here
 
 - Speech, on the Mac. The commands there were typed, so mishearing is not in its numbers.

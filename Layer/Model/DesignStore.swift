@@ -630,6 +630,7 @@ final class DesignStore {
         historyMark += 1
         guard undoManager.groupingLevel > 0 else {
             undoManager.removeAllActions(withTarget: step)
+            Self.tellHistoryChanged(undoManager)
             return
         }
         stepsToWithdraw.append(step)
@@ -641,8 +642,19 @@ final class DesignStore {
                 self.stepsToWithdraw = []
                 if let observer = self.groupCloseObserver { NotificationCenter.default.removeObserver(observer) }
                 self.groupCloseObserver = nil
+                Self.tellHistoryChanged(undoManager)
             }
         }
+    }
+
+    /// Posted, with the undo manager as its object, when a step is taken out of the history.
+    /// The undo manager says when a step goes in, is undone or is redone, but says nothing
+    /// when one is taken out, so Undo stayed lit after a generation that wrote nothing,
+    /// for a press that did nothing. Whatever shows undo and redo listens for this too.
+    nonisolated static let historyDidChange = Notification.Name("LayerDesignHistoryDidChange")
+
+    private static func tellHistoryChanged(_ undoManager: UndoManager) {
+        NotificationCenter.default.post(name: historyDidChange, object: undoManager)
     }
 
     deinit {
