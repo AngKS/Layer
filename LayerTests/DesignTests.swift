@@ -605,7 +605,9 @@ struct DesignFileTests {
         // Only the design changes: the ink and the picture on disk are handed back as they are.
         file.content.title = "Renamed"
         let second = try file.wrapper(replacing: first)
-        #expect(second.fileWrappers?["drawing.data"] === first.fileWrappers?["drawing.data"])
+        let drawing = try #require(file.content.elements.first { $0.kind == .drawing }).id.uuidString
+        let firstInk = try #require(first.fileWrappers?["ink"]?.fileWrappers?[drawing])
+        #expect(second.fileWrappers?["ink"]?.fileWrappers?[drawing] === firstInk)
         #expect(second.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] === first.fileWrappers?["images"]?.fileWrappers?[picture.uuidString])
         #expect(second.fileWrappers?["design.json"] !== first.fileWrappers?["design.json"])
         #expect(try DesignFile(wrapper: second).content.title == "Renamed")
