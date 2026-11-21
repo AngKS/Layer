@@ -167,7 +167,12 @@ struct ScreenTidyTests {
             element(.button, CGRect(x: 20, y: 770, width: 353, height: 50)),
         ]
         let frames = ScreenTidy.frames(for: elements, on: iPad, from: .iPhone)
-        #expect(frames[image.id]?.height == iPad.size.height / 2)
+        let held = try #require(frames[image.id])
+        #expect(held.height == iPad.size.height / 2)
+        // The width follows the height, so the picture isn't stretched, and it is centred.
+        #expect(abs(held.width / held.height - 353.0 / 400.0) < 0.01)
+        let column = ScreenTidy.column(on: iPad)
+        #expect(abs(held.midX - (column.x + column.width / 2)) <= 1)
         let tidied = elements.map { frames[$0.id]! }
         let bounds = CGRect(origin: .zero, size: iPad.size)
         for frame in tidied { #expect(bounds.contains(frame)) }
@@ -224,6 +229,53 @@ struct ScreenTidyTests {
         let title = element(.title, CGRect(x: 40, y: 90, width: 228, height: 40))
         let frames = ScreenTidy.frames(for: [card, label, title], on: .iPhone)
         #expect(frames[card.id] == nil && frames[label.id] == nil)
+        #expect(frames[title.id] != nil)
+    }
+
+    /// A background that fills the screen is not a card: nothing is laid on it, so the
+    /// title and the button on top of it are tidied as usual and the background stays.
+    @Test func aFullScreenBackgroundIsNotAHost() throws {
+        for kind in [ElementKind.shape, .image] {
+            let background = element(kind, CGRect(x: 0, y: 0, width: 393, height: 852))
+            let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Hello")
+            let button = element(.button, CGRect(x: 40, y: 300, width: 300, height: 50), text: "Go")
+            let frames = ScreenTidy.frames(for: [background, title, button], on: .iPhone)
+            let margin = ScreenTidy.margin(on: .iPhone)
+            #expect(frames[background.id] == nil, "\(kind)")
+            #expect(frames[title.id]?.minX == margin, "\(kind)")
+            #expect(frames[button.id]?.minX == margin, "\(kind)")
+            #expect(frames[button.id]?.width == 393 - margin * 2, "\(kind)")
+        }
+    }
+
+    /// A card with a label on it is kept clear: what is laid out round it doesn't land on it.
+    @Test func whatIsLaidOutKeepsClearOfACard() throws {
+        let card = element(.shape, CGRect(x: 20, y: 300, width: 353, height: 200))
+        let label = element(.text, CGRect(x: 40, y: 340, width: 200, height: 30), text: "Card")
+        let others = [
+            element(.title, CGRect(x: 20, y: 90, width: 300, height: 40), text: "Title"),
+            element(.body, CGRect(x: 20, y: 150, width: 300, height: 44)),
+            element(.textField, CGRect(x: 20, y: 230, width: 353, height: 48), text: "A"),
+            element(.textField, CGRect(x: 20, y: 530, width: 353, height: 48), text: "B"),
+            element(.textField, CGRect(x: 20, y: 600, width: 353, height: 48), text: "C"),
+            element(.textField, CGRect(x: 20, y: 670, width: 353, height: 48), text: "D"),
+        ]
+        let frames = ScreenTidy.frames(for: [card, label] + others, on: .iPhone)
+        #expect(frames[card.id] == nil && frames[label.id] == nil)
+        for other in others {
+            let frame = try #require(frames[other.id])
+            #expect(!frame.intersects(card.frame), "\(frame) is on the card")
+        }
+    }
+
+    /// What is laid on a locked picture stays where it is, with the picture.
+    @Test func whatRidesOnALockedPictureStaysPut() throws {
+        var image = element(.image, CGRect(x: 20, y: 300, width: 353, height: 200))
+        image.isLocked = true
+        let caption = element(.text, CGRect(x: 40, y: 450, width: 200, height: 30), text: "Caption")
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40))
+        let frames = ScreenTidy.frames(for: [image, caption, title], on: .iPhone)
+        #expect(frames[image.id] == nil && frames[caption.id] == nil)
         #expect(frames[title.id] != nil)
     }
 
@@ -321,7 +373,13 @@ struct VoiceScreenLayoutTests {
         let column = ScreenTidy.column(on: screen.device)
         for element in screen.elements {
             #expect(bounds.contains(element.frame))
-            #expect(element.frame.width == column.width)
+            if element.kind == .image {
+                // Held to half the screen's height, so narrower than the column, in its shape.
+                #expect(element.frame.width <= column.width)
+                #expect(abs(element.frame.width - element.frame.height) <= 1)
+            } else {
+                #expect(element.frame.width == column.width)
+            }
         }
         // Back to an iPhone is no device at all, as the Siri action keeps it.
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPhone").hasPrefix("Made S1 an iPhone screen"))
