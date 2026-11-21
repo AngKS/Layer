@@ -191,6 +191,76 @@ struct DesignLibraryTests {
     }
 }
 
+/// A Spotlight index kept in memory, to see what the indexer leaves in it.
+private actor FakeSpotlight: SpotlightIndex {
+    private(set) var designs: Set<String> = []
+    private(set) var screens: Set<String> = []
+
+    func index(designs entities: [DesignEntity]) { designs.formUnion(entities.map(\.id)) }
+    func index(screens entities: [ScreenEntity]) { screens.formUnion(entities.map(\.id)) }
+    func delete(designs ids: [String]) { designs.subtract(ids) }
+    func delete(screens ids: [String]) { screens.subtract(ids) }
+    func deleteAll() {
+        designs = []
+        screens = []
+    }
+}
+
+@Suite("Spotlight's index of designs")
+@MainActor
+struct DesignIndexTests {
+    private func snapshot(_ id: String, screens names: [String]) -> DesignSnapshot {
+        var content = DesignContent()
+        for (index, name) in names.enumerated() {
+            content.addScreen(DesignScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1))
+        }
+        return DesignSnapshot(id: id, name: name(of: id), content: content, modified: nil)
+    }
+
+    private func name(of id: String) -> String {
+        String(id.split(separator: ":").last ?? "")
+    }
+
+    @Test func aLaunchPassKeepsWhatItCouldNotReadAndTakesOutWhatHasGone() async throws {
+        let index = FakeSpotlight()
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let (systemIndex, systemRecord) = (DesignIndexer.spotlight, DesignIndexer.recordDefaults)
+        DesignIndexer.spotlight = index
+        DesignIndexer.recordDefaults = record
+        defer {
+            DesignIndexer.spotlight = systemIndex
+            DesignIndexer.recordDefaults = systemRecord
+            record.removePersistentDomain(forName: suite)
+        }
+
+        let tag = UUID().uuidString
+        let kept = snapshot("local:Kept \(tag).layer", screens: ["Login", "Home"])
+        let away = snapshot("icloud:Away \(tag).layer", screens: ["Map", "Trips"])
+        let gone = snapshot("local:Gone \(tag).layer", screens: ["Old"])
+        // A launch that read all three.
+        await DesignIndexer.reindex([kept, away, gone])
+        #expect(await index.designs.isSuperset(of: [kept.id, away.id, gone.id]))
+
+        // The next: Kept has lost a screen, Away is in iCloud and not on this iPad, and
+        // Gone has been deleted.
+        var fewer = kept.content
+        fewer.removeScreen(kept.content.screens[1].id)
+        let keptNow = DesignSnapshot(id: kept.id, name: kept.name, content: fewer, modified: nil)
+        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: DesignContent(), modified: nil, isRead: false)
+        await DesignIndexer.reindex([keptNow, awayNow])
+
+        let designs = await index.designs, screens = await index.screens
+        #expect(designs.contains(kept.id))
+        #expect(designs.contains(away.id))
+        #expect(Set(away.screens.map(\.id)).isSubset(of: screens), "what couldn't be read stays as it was indexed")
+        #expect(screens.contains(keptNow.screens[0].id))
+        #expect(!screens.contains(kept.screens[1].id), "a screen that has gone is taken out")
+        #expect(!designs.contains(gone.id), "a design that has gone is taken out")
+        #expect(!screens.contains(gone.screens[0].id))
+    }
+}
+
 @Suite("Actions on an open design")
 @MainActor
 struct DesignActionTests {

@@ -10,6 +10,9 @@ struct DesignSummary: Sendable {
     /// Empty when the file couldn't be read, or, in the list of every design, when iCloud
     /// hasn't downloaded it to this iPad.
     let content: DesignContent
+    /// False for a design listed by its name alone, which iCloud hasn't downloaded: its
+    /// content wasn't read, rather than empty.
+    var isRead = true
 }
 
 /// Finds Layer's designs on disk and reads them, for the system features that work with
@@ -124,7 +127,7 @@ enum DesignLibrary {
     nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary {
         guard isDownloaded(url) else {
             let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-            return DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent())
+            return DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent(), isRead: false)
         }
         let stamp = Stamp(of: url)
         if let stamp, let kept = listedSummaries.withLock({ $0[url] }), kept.stamp == stamp { return kept.summary }

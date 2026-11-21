@@ -9,6 +9,9 @@ struct DesignSnapshot: Sendable {
     let name: String
     let content: DesignContent
     let modified: Date?
+    /// False for a design listed by its name alone, which iCloud hasn't downloaded: see
+    /// `DesignSummary.isRead`.
+    var isRead = true
 
     var entity: DesignEntity {
         DesignEntity(id: id, content: content, fallbackName: name, modified: modified)
@@ -55,7 +58,7 @@ enum DesignActions {
         let openIDs = Set(open.map(\.id))
         let saved = await DesignLibrary.all()
             .filter { !openIDs.contains($0.id) }
-            .map { DesignSnapshot(id: $0.id, name: $0.title, content: $0.content, modified: $0.modified) }
+            .map { DesignSnapshot(id: $0.id, name: $0.title, content: $0.content, modified: $0.modified, isRead: $0.isRead) }
         return open.reversed() + saved
     }
 

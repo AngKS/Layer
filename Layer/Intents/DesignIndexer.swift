@@ -12,9 +12,22 @@ enum DesignIndexer {
     /// changes (every frame of a drag, say) reschedules one task instead of replacing it
     /// again and again.
     private static var dueAt: [String: ContinuousClock.Instant] = [:]
-    /// The screens indexed for each design, so that deleted ones can be taken out.
-    private static var indexedScreens: [String: Set<String>] = [:]
     private static let log = Logger(subsystem: "kahshin.Layer", category: "spotlight")
+
+    /// The index designs and screens go in: Spotlight's own, or a test's.
+    static var spotlight: any SpotlightIndex = SystemSpotlight()
+    /// Where the record of what is in the index is kept across launches: the app's
+    /// defaults, or a test's own.
+    static var recordDefaults = UserDefaults.standard
+    private static let recordKey = "spotlightIndexedScreens"
+    private static let recordCompleteKey = "spotlightIndexRecordComplete"
+
+    /// The screens indexed for each design, by the design's identifier: the record of what
+    /// is in the index, so that screens and designs that have gone can be taken out of it.
+    private static var indexedScreens: [String: Set<String>] {
+        get { ((recordDefaults.dictionary(forKey: recordKey) as? [String: [String]]) ?? [:]).mapValues(Set.init) }
+        set { recordDefaults.set(newValue.mapValues(Array.init), forKey: recordKey) }
+    }
 
     /// A design changed: it is indexed again once it has been left alone for a few seconds.
     static func designChanged(_ model: AppModel) {
@@ -41,9 +54,9 @@ enum DesignIndexer {
         let gone = Array((indexedScreens[snapshot.id] ?? []).subtracting(current))
         indexedScreens[snapshot.id] = current
         do {
-            try await Spotlight.index([snapshot.entity])
-            if !screens.isEmpty { try await Spotlight.index(screens) }
-            if !gone.isEmpty { try await Spotlight.delete(screens: gone) }
+            try await spotlight.index(designs: [snapshot.entity])
+            if !screens.isEmpty { try await spotlight.index(screens: screens) }
+            if !gone.isEmpty { try await spotlight.delete(screens: gone) }
         } catch {
             log.error("Couldn't index a design: \(error.localizedDescription)")
         }
@@ -52,40 +65,83 @@ enum DesignIndexer {
     /// Takes a design out of the index, as when it was renamed and is known by a new identifier.
     static func forget(design id: String) {
         let screens = Array(indexedScreens.removeValue(forKey: id) ?? [])
+        let spotlight = spotlight
         Task {
-            try? await Spotlight.delete(designs: [id])
-            if !screens.isEmpty { try? await Spotlight.delete(screens: screens) }
+            try? await spotlight.delete(designs: [id])
+            if !screens.isEmpty { try? await spotlight.delete(screens: screens) }
         }
     }
 
-    /// Indexes every design afresh, dropping designs that have gone. Done once at launch.
+    /// Brings the index up to date with every design. Done once at launch.
     static func reindexLibrary() async {
-        let snapshots = await DesignActions.allSnapshots()
-        do {
-            try await Spotlight.deleteAll()
-            for snapshot in snapshots { await index(snapshot) }
-        } catch {
-            log.error("Couldn't rebuild the design index: \(error.localizedDescription)")
-        }
+        await reindex(await DesignActions.allSnapshots())
     }
 
-    /// The calls into Spotlight, kept off the main actor.
-    private enum Spotlight {
-        nonisolated static func index<Entity: IndexedEntity>(_ entities: [Entity]) async throws {
-            try await CSSearchableIndex.default().indexAppEntities(entities)
+    /// Brings the index up to date with `snapshots`, which are every design there is. A
+    /// design that was read is indexed afresh, its screens that have gone taken out. A
+    /// design iCloud hasn't downloaded, listed by its name alone, is left as it was indexed,
+    /// or indexed by its name if it never was: reading it would download it. Designs that
+    /// have gone are taken out. Only the first time, with no record of what is in the
+    /// index, is the index cleared and built again.
+    static func reindex(_ snapshots: [DesignSnapshot]) async {
+        do {
+            if !recordDefaults.bool(forKey: recordCompleteKey) {
+                try await spotlight.deleteAll()
+                indexedScreens = [:]
+            }
+            let present = Set(snapshots.map(\.id))
+            let gone = indexedScreens.filter { !present.contains($0.key) }
+            if !gone.isEmpty {
+                indexedScreens = indexedScreens.filter { present.contains($0.key) }
+                try await spotlight.delete(designs: Array(gone.keys))
+                let screens = gone.values.flatMap(\.self)
+                if !screens.isEmpty { try await spotlight.delete(screens: screens) }
+            }
+            for snapshot in snapshots {
+                if snapshot.isRead {
+                    await index(snapshot)
+                } else if indexedScreens[snapshot.id] == nil {
+                    indexedScreens[snapshot.id] = []
+                    try await spotlight.index(designs: [snapshot.entity])
+                }
+            }
+            recordDefaults.set(true, forKey: recordCompleteKey)
+        } catch {
+            log.error("Couldn't bring the design index up to date: \(error.localizedDescription)")
         }
+    }
+}
 
-        nonisolated static func delete(screens: [String]) async throws {
-            try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: screens, ofType: ScreenEntity.self)
-        }
+/// Where designs and screens are indexed for Spotlight, which Apple Intelligence searches
+/// to find Layer's content for Siri: the system's index, or one a test keeps in memory.
+protocol SpotlightIndex: Sendable {
+    func index(designs: [DesignEntity]) async throws
+    func index(screens: [ScreenEntity]) async throws
+    func delete(designs: [String]) async throws
+    func delete(screens: [String]) async throws
+    func deleteAll() async throws
+}
 
-        nonisolated static func delete(designs: [String]) async throws {
-            try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: designs, ofType: DesignEntity.self)
-        }
+/// Spotlight's own index, called off the main actor.
+struct SystemSpotlight: SpotlightIndex {
+    func index(designs: [DesignEntity]) async throws {
+        try await CSSearchableIndex.default().indexAppEntities(designs)
+    }
 
-        nonisolated static func deleteAll() async throws {
-            try await CSSearchableIndex.default().deleteAppEntities(ofType: DesignEntity.self)
-            try await CSSearchableIndex.default().deleteAppEntities(ofType: ScreenEntity.self)
-        }
+    func index(screens: [ScreenEntity]) async throws {
+        try await CSSearchableIndex.default().indexAppEntities(screens)
+    }
+
+    func delete(designs: [String]) async throws {
+        try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: designs, ofType: DesignEntity.self)
+    }
+
+    func delete(screens: [String]) async throws {
+        try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: screens, ofType: ScreenEntity.self)
+    }
+
+    func deleteAll() async throws {
+        try await CSSearchableIndex.default().deleteAppEntities(ofType: DesignEntity.self)
+        try await CSSearchableIndex.default().deleteAppEntities(ofType: ScreenEntity.self)
     }
 }
