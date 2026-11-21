@@ -237,6 +237,7 @@
 		BB1268399BEB4DFC4C873C69 /* button_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = 1DE0E6A440DF2AA2B5692B26 /* button_jittered_2a.json */; };
 		BBA83BEC1F9DD40C18E1F416 /* screen_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 3548E5C4845A5E5853EB03AD /* screen_noisy_1.json */; };
 		BBD41C14BA97336EF912CF3C /* divider_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 0C2474707D9CE44292D1BEAD /* divider_jittered_2b.json */; };
+		BC22062B766C64855EF387B7 /* FormatPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F34A79C6F9F3993C28EB386 /* FormatPanelTests.swift */; };
 		BC7071F7DCC1454ABF783A72 /* StrokeScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A1BE05FEB2747C363F1535 /* StrokeScript.swift */; };
 		BCFAEB8475FD7C795F69E77E /* AppleSpeechRecogniser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E058E7CD5CAC405B9BB005 /* AppleSpeechRecogniser.swift */; };
 		BD6E2961D2742374AD2E63AE /* DesignIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61D240D664A446C47FDFA82 /* DesignIntents.swift */; };
@@ -512,6 +513,7 @@
 		8CA71CEDBBD286B0C46D1361 /* toggle_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_noisy_2.json; sourceTree = "<group>"; };
 		8E4F18ED8A42B00E288A3B65 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
 		8F31B37C442668A1FDD87701 /* progress_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_jittered_1a.json; sourceTree = "<group>"; };
+		8F34A79C6F9F3993C28EB386 /* FormatPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatPanelTests.swift; sourceTree = "<group>"; };
 		901F1846A502515BC823177E /* SketchReadingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchReadingTests.swift; sourceTree = "<group>"; };
 		904007057FC556ABF64376C1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9055A81B6CD8E98592D9BC27 /* progress_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_noisy_1.json; sourceTree = "<group>"; };
@@ -828,6 +830,7 @@
 				0836F6346DA257E439EE7077 /* DictationRouteTests.swift */,
 				070053D99B0A7C97A3F03527 /* DrawingTests.swift */,
 				21564DCF25E04B456CC7C6E5 /* FlatStoreTests.swift */,
+				8F34A79C6F9F3993C28EB386 /* FormatPanelTests.swift */,
 				477F1E99CE379C9A7BA707E3 /* FreeformTests.swift */,
 				C0E9CF91BDC7654B1CAA911E /* HostedModelTests.swift */,
 				FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */,
@@ -1460,6 +1463,7 @@
 				17ECB60AEE5827A50390D330 /* DictationRouteTests.swift in Sources */,
 				D79804427E2A772E95BC2021 /* DrawingTests.swift in Sources */,
 				170DAB099B7ED51F3B0D8A8D /* FlatStoreTests.swift in Sources */,
+				BC22062B766C64855EF387B7 /* FormatPanelTests.swift in Sources */,
 				2B00E81F69D26F110A11E197 /* FreeformTests.swift in Sources */,
 				98E5D0F3B4AB52DA3528CA7F /* HostedModelTests.swift in Sources */,
 				B40438032782589250C74E31 /* HostedToolCallingTests.swift in Sources */,
