@@ -53,6 +53,80 @@ struct VoiceAgentTests {
         #expect(steps == ["Restyling…", "Rewording…"])
     }
 
+    // MARK: Several tools in one answer
+
+    /// The on-device model asks for all of a command's tools in one answer, and the session
+    /// runs those at the same time: the second screen was refused with "A screen is
+    /// already being written" while the first was. They run one at a time (V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func toolsAskedForTogetherRunOneAtATime() async throws {
+        let bench = bench(["a profile and a settings screen": Step.together([
+            Step(tool: "createScreen", arguments: #"{"name":"Profile","description":"a profile screen"}"#),
+            Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#),
+        ])])
+        // Each screen is written a moment after it is asked for.
+        bench.app.screenStream = { description, _, _ in
+            AsyncThrowingStream { feed in
+                Task {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.finish()
+                }
+            }
+        }
+
+        let outcome = await bench.agent.run("a profile and a settings screen")
+
+        #expect(outcome.problem == nil)
+        #expect(bench.app.store.screens.map(\.name) == ["Login", "Profile", "Settings"])
+        #expect(outcome.lines.count == 2)
+        #expect(outcome.lines.first?.contains("Profile") == true)
+    }
+
+    /// "Make the title bold and duplicate it", asked for in one answer: the copy is made
+    /// after the bold, so it is bold too, every time (V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func toolsAskedForTogetherRunInTheOrderAsked() async throws {
+        for _ in 1...20 {
+            let bench = bench(["make the title bold and duplicate it": Step.together([
+                Step(tool: "styleElement", arguments: #"{"element":"E1","look":"bold"}"#),
+                Step(tool: "duplicateElement", arguments: #"{"element":"E1"}"#),
+            ])])
+            var steps: [String] = []
+            bench.agent.onStep = { steps.append($0) }
+
+            let outcome = await bench.agent.run("make the title bold and duplicate it")
+
+            let titles = try #require(bench.app.store.screen(bench.screen)?.elements.filter { $0.kind == .title })
+            #expect(titles.count == 2)
+            #expect(titles.allSatisfy { $0.fontWeight == .bold })
+            #expect(steps == ["Restyling…", "Duplicating…"])
+            #expect(outcome.lines.first?.hasPrefix("Restyled") == true)
+        }
+    }
+
+    /// "Undo that and make it blue" in one answer undoes the last command, not the blue (V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func anUndoAskedForWithAChangeUndoesTheCommandBefore() async throws {
+        for _ in 1...10 {
+            let bench = bench([
+                "make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)],
+                "undo that and make it blue": Step.together([
+                    Step(tool: "undo", arguments: "{}"),
+                    Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#),
+                ]),
+            ])
+            _ = await bench.agent.run("make the button say ahoy")
+
+            let outcome = await bench.agent.run("undo that and make it blue")
+
+            #expect(outcome.problem == nil)
+            let button = try #require(bench.button)
+            #expect(button.text == "Sign in")
+            #expect(button.tint == ColourWords.parse("blue"))
+        }
+    }
+
     /// Where the pencil pointed is told with the command it was pointed for, and only that one.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aHintFromThePencilGoesWithItsCommandOnly() async throws {
@@ -456,3 +530,4 @@ struct VoiceAgentTests {
         #expect(bench.recorder.requests.last?.prompts == ["three"])
     }
 }
+

@@ -204,7 +204,10 @@ final class VoiceAgent: VoiceCommandRunner {
             // Nothing more is done to a design once it has closed.
             mayRun: { @MainActor [weak model] in !Task.isCancelled && model?.isClosed == false }
         )
-        return LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, testModel: testModel, canEndCall: canEndCall))
+        let turns = VoiceToolTurns()
+        let session = LanguageModelSession(profile: VoiceProfile(actor: toolbox, hooks: hooks, turns: turns, testModel: testModel, canEndCall: canEndCall))
+        turns.session = session
+        return session
     }
 
     private func stepStarted(with tool: String) {

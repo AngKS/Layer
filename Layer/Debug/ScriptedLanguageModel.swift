@@ -4,9 +4,9 @@ import Foundation
 import os
 
 /// A model that does as it was told beforehand: for each command, the tools scripted for
-/// it, one per turn, and then a closing word. It goes wherever a real model does, so a
-/// whole voice command can be run, tools and all, with no model and no network: in tests,
-/// and in the simulator, where Apple Intelligence can't answer.
+/// it, one per turn unless they are asked for together, and then a closing word. It goes
+/// wherever a real model does, so a whole voice command can be run, tools and all, with no
+/// model and no network: in tests, and in the simulator, where Apple Intelligence can't answer.
 struct ScriptedLanguageModel: LanguageModel {
     typealias Executor = ScriptedModelExecutor
 
@@ -17,6 +17,18 @@ struct ScriptedLanguageModel: LanguageModel {
         var arguments: String
         /// How long the model takes to get round to it.
         var delay: Duration?
+        /// Whether the step after this one is asked for in the same answer, as the
+        /// on-device model asks for all of a command's tools at once.
+        var withNext = false
+
+        /// Steps the model asks for together, in one answer, in this order.
+        static func together(_ steps: [Step]) -> [Step] {
+            steps.enumerated().map { index, step in
+                var step = step
+                step.withNext = index < steps.count - 1
+                return step
+            }
+        }
     }
 
     /// What to do for each command. Commands are matched in lower case.
@@ -91,8 +103,8 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
             case .prompt(let prompt):
                 prompts.append(HostedModelExecutor.text(of: prompt.segments))
                 stepsTaken = 0
-            case .toolCalls:
-                stepsTaken += 1
+            case .toolCalls(let calls):
+                stepsTaken += calls.count
             default:
                 continue
             }
@@ -108,12 +120,17 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
             await channel.send(.response(action: .appendText(configuration.closing, tokenCount: 1)))
             return
         }
-        let step = steps[stepsTaken]
-        if let delay = step.delay { try await Task.sleep(for: delay) }
-        await channel.send(.toolCalls(action: .toolCall(
-            id: "call-\(prompts.count)-\(stepsTaken + 1)", name: step.tool,
-            action: .appendArguments(step.arguments, tokenCount: 1)
-        )))
+        // This step, and those asked for along with it.
+        var answer = stepsTaken
+        while steps[answer].withNext, answer + 1 < steps.count { answer += 1 }
+        for index in stepsTaken...answer {
+            let step = steps[index]
+            if let delay = step.delay { try await Task.sleep(for: delay) }
+            await channel.send(.toolCalls(action: .toolCall(
+                id: "call-\(prompts.count)-\(index + 1)", name: step.tool,
+                action: .appendArguments(step.arguments, tokenCount: 1)
+            )))
+        }
     }
 }
 #endif
