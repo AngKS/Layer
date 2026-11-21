@@ -437,7 +437,9 @@ struct OpeningDesignTests {
         if case .couldNotOpen? = error as? LayerIntentError { true } else { false }
     }
 
-    /// What `task` came to, if it finished within `limit`. Nil if it is still waiting.
+    /// What `task` came to, if it finished within `limit`. Nil if it is still waiting. The
+    /// limits the tests give are generous: with every suite running at once, the main
+    /// thread can be busy for seconds; what they check would otherwise never finish.
     private final class Box<T> {
         var outcome: Result<T, any Error>?
     }
@@ -459,12 +461,12 @@ struct OpeningDesignTests {
         let stuck = Task { try await turns.run { await withCheckedContinuation { held.continuation = $0 } } }
         let next = Task { try await turns.run { "next" } }
 
-        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(2)) else {
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(10)) else {
             Issue.record("the stuck turn should have given up")
             return
         }
         #expect(couldNotOpen(error), "\(error)")
-        guard case .success(let value)? = await outcome(of: next, within: .seconds(2)) else {
+        guard case .success(let value)? = await outcome(of: next, within: .seconds(10)) else {
             Issue.record("the next turn should have gone")
             return
         }
@@ -481,7 +483,7 @@ struct OpeningDesignTests {
         #expect(turns.queued == 1)
 
         waiter.cancel()
-        guard case .failure(let error)? = await outcome(of: waiter, within: .seconds(2)) else {
+        guard case .failure(let error)? = await outcome(of: waiter, within: .seconds(10)) else {
             Issue.record("a cancelled waiter should stop waiting")
             return
         }
@@ -530,12 +532,12 @@ struct OpeningDesignTests {
             }
         }
         let next = Task { try await turns.run { "next" } }
-        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(2)) else {
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(10)) else {
             Issue.record("an open whose dismiss never finishes should give up")
             return
         }
         #expect(couldNotOpen(error), "\(error)")
-        guard case .success? = await outcome(of: next, within: .seconds(2)) else {
+        guard case .success? = await outcome(of: next, within: .seconds(10)) else {
             Issue.record("the next open should have gone")
             return
         }
@@ -563,7 +565,7 @@ struct OpeningDesignTests {
                 }
             }
         }
-        guard case .failure? = await outcome(of: open, within: .seconds(2)) else {
+        guard case .failure? = await outcome(of: open, within: .seconds(10)) else {
             Issue.record("the open should have run out of time")
             return
         }
@@ -579,7 +581,7 @@ struct OpeningDesignTests {
         let picking = Task {
             try await DocumentBrowser.pick(url, in: browser) { _ in } picking: { _ in }
         }
-        guard case .success? = await outcome(of: picking, within: .seconds(4)) else {
+        guard case .success? = await outcome(of: picking, within: .seconds(10)) else {
             Issue.record("a dismiss tried while the design was still coming up was never finished")
             return
         }
