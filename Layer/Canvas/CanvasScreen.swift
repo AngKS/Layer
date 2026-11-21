@@ -389,12 +389,16 @@ private struct HoverOutline: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let target = model.hovered, model.selection?.contains(target) != true, let rect = model.viewRect(of: target) {
-            let outer = rect.insetBy(dx: -3, dy: -3)
+        if let target = model.hovered, model.selection?.contains(target) != true,
+           let canvasShape = model.store.canvasShape(of: target) {
+            // Drawn on the turned shape, so a turned element's outline turns with it.
+            let shape = model.viewport.viewShape(for: canvasShape)
+            let outer = shape.rect.insetBy(dx: -3, dy: -3)
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Theme.accent.color.opacity(0.55), lineWidth: 1.5)
                 .background(Theme.accent.color.opacity(0.05), in: .rect(cornerRadius: 6, style: .continuous))
                 .frame(width: outer.width, height: outer.height)
+                .rotationEffect(.degrees(shape.degrees))
                 .position(x: outer.midX, y: outer.midY)
                 .allowsHitTesting(false)
                 .transition(.opacity)

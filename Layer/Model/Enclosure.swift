@@ -64,6 +64,29 @@ enum Enclosure {
         return CGFloat(inside.dropFirst(corners.count).filter { $0 }.count) / CGFloat(across * across)
     }
 
+    /// The same for a turned box: the samples are laid over the box before it is turned,
+    /// and turned about its centre with it.
+    static func coverage(of shape: TurnedRect, by loop: [CGPoint], across: Int = 8) -> CGFloat {
+        guard shape.degrees != 0 else { return coverage(of: shape.rect, by: loop, across: across) }
+        guard let bounds = bounds(of: loop), bounds.intersects(shape.bounds) else { return 0 }
+        let rect = shape.rect
+        let corners = shape.corners
+        var samples = corners
+        for row in 0..<across {
+            for column in 0..<across {
+                let point = CGPoint(
+                    x: rect.minX + rect.width * (CGFloat(column) + 0.5) / CGFloat(across),
+                    y: rect.minY + rect.height * (CGFloat(row) + 0.5) / CGFloat(across)
+                )
+                samples.append(Rotation.rotate(point, about: shape.centre, by: shape.degrees))
+            }
+        }
+        let inside = samples.map { contains(loop, $0) }
+        if inside.allSatisfy({ $0 }) { return 1 }
+        if !inside.contains(true) { return 0 }
+        return CGFloat(inside.dropFirst(corners.count).filter { $0 }.count) / CGFloat(across * across)
+    }
+
     /// How many of some points lie inside a loop, from 0 to 1: for ink, which is picked
     /// by where its strokes run, not by the box round them.
     static func coverage(of points: [CGPoint], by loop: [CGPoint]) -> CGFloat {
@@ -83,13 +106,13 @@ extension DesignStore {
 
         func isPicked(_ element: DesignElement, _ placement: Placement) -> Bool {
             guard !element.isLocked, !element.isHidden else { return false }
-            let frame = placement.canvasRect(for: element.frame)
-            guard frame.intersects(bounds) else { return false }
+            let shape = TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation)
+            guard shape.bounds.intersects(bounds) else { return false }
             if element.kind == .drawing {
                 let ink = element.sketchStrokes.flatMap(\.points).map(placement.canvasPoint(for:))
                 if !ink.isEmpty { return Enclosure.coverage(of: ink, by: loop) >= Enclosure.share }
             }
-            return Enclosure.coverage(of: frame, by: loop) >= Enclosure.share
+            return Enclosure.coverage(of: shape, by: loop) >= Enclosure.share
         }
 
         for screen in screens {

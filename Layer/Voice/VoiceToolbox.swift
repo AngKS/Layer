@@ -569,6 +569,39 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
+    func rotateElement(element: String, angle: String?, by: String?) -> String {
+        guard let model else { return gone }
+        switch find(element: element) {
+        case .failure(let refusal): return failed(refusal.line)
+        case .success(let found):
+            let handle = handles.handle(forElement: found.element.id)
+            guard !found.element.isLocked else { return failed("\(handle) is locked.") }
+            let words = [angle, by].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
+            // The angle wins when both are given.
+            guard let written = words[0] ?? words[1] else {
+                return failed("Say an angle, such as 45, or how far to turn it, such as 15.")
+            }
+            guard let degrees = Self.degrees(written) else {
+                return failed("I didn't understand the angle “\(written)”.")
+            }
+            let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
+            DesignActions.reveal(.element(found.ref), in: model)
+            model.store.update(found.ref) { $0.setRotation(target) }
+            return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
+        }
+    }
+
+    /// Reads "45", "45°", "45 degrees" and "-15"; nil for anything else, including "nan".
+    private static func degrees(_ written: String) -> Double? {
+        var text = written.lowercased().trimmingCharacters(in: .whitespaces)
+        for unit in ["degrees", "degree", "deg", "°"] where text.hasSuffix(unit) {
+            text = String(text.dropLast(unit.count)).trimmingCharacters(in: .whitespaces)
+            break
+        }
+        guard let value = Double(text), value.isFinite else { return nil }
+        return value
+    }
+
     func alignElement(element: String, alignment: String) -> String {
         guard let model else { return gone }
         let named = Self.handleList(element)

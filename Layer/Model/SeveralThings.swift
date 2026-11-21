@@ -6,14 +6,27 @@ import Foundation
 /// the canvas, so that an element on a screen and a note on the open canvas can be lined
 /// up with each other. Each of these is one step to undo.
 extension DesignStore {
-    /// Where something is on the canvas: a screen's frame, an element's, or the area that
-    /// several things cover together. Nil when it is gone.
-    func canvasFrame(of selection: CanvasSelection) -> CGRect? {
+    /// The shape something takes up on the canvas: an element's rect with the angle it is
+    /// turned to, or a screen's frame, which never turns. Nil for several things, which
+    /// have no shape of their own, and when it is gone.
+    func canvasShape(of selection: CanvasSelection) -> TurnedRect? {
         switch selection {
         case .element(let ref):
-            return resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
+            return resolve(ref).map { TurnedRect(rect: $0.placement.canvasRect(for: $0.element.frame), degrees: $0.element.resolvedRotation) }
         case .screen(let id):
-            return screen(id)?.canvasFrame
+            return screen(id).map { TurnedRect(rect: $0.canvasFrame, degrees: 0) }
+        case .several:
+            return nil
+        }
+    }
+
+    /// Where something is on the canvas: a screen's frame, the upright box round an
+    /// element's turned shape, or the area that several things cover together. Nil when it
+    /// is gone.
+    func canvasFrame(of selection: CanvasSelection) -> CGRect? {
+        switch selection {
+        case .element, .screen:
+            return canvasShape(of: selection)?.bounds
         case .several(let things):
             let frames = things.compactMap(canvasFrame(of:))
             return frames.dropFirst().reduce(frames.first) { $0?.union($1) }
@@ -52,19 +65,20 @@ extension DesignStore {
         for screen in screens where !things.contains(.screen(screen.id)) {
             frames.append(screen.canvasFrame)
             for element in screen.elements where !element.isHidden && !things.contains(.element(ElementRef(host: .screen(screen.id), element: element.id))) {
-                frames.append(screen.placement.canvasRect(for: element.frame))
+                frames.append(screen.placement.canvasRect(for: element.shapeBounds))
             }
         }
         for floating in floating where !floating.element.isHidden && !things.contains(.element(ElementRef(host: .canvas, element: floating.id))) {
-            frames.append(floating.canvasFrame)
+            frames.append(floating.placement.canvasRect(for: floating.element.shapeBounds))
         }
         return frames
     }
 
-    /// Puts things where their top-left corners are given, in canvas points. Elements and
-    /// screens land on whole points of their own, so that those that started on whole
-    /// points keep their places relative to each other; a drawing, whose ink lies where
-    /// it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
+    /// Puts things where the top-left corners of their boxes (see `canvasFrame(of:)`) are
+    /// given, in canvas points; a turned element's own frame moves by the same distance.
+    /// Elements and screens land on whole points of their own, so that those that started
+    /// on whole points keep their places relative to each other; a drawing, whose ink lies
+    /// where it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
     func position(_ origins: [CanvasSelection: CGPoint]) {
         // Worked out first: the design can't be read while it is being changed.
         var elements: [DesignElement.ID: CGPoint] = [:]
@@ -72,8 +86,9 @@ extension DesignStore {
         for (thing, origin) in origins where !isLocked(thing) {
             switch thing {
             case .element(let ref):
-                guard let (element, placement) = resolve(ref) else { continue }
-                let local = placement.localPoint(for: origin)
+                guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
+                let target = placement.localPoint(for: origin), current = placement.localPoint(for: box.origin)
+                let local = CGPoint(x: element.frame.minX + target.x - current.x, y: element.frame.minY + target.y - current.y)
                 elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
             case .screen(let id):
                 guard screen(id) != nil else { continue }

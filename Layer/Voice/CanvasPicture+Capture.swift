@@ -19,7 +19,7 @@ extension CanvasPicture {
             Element(
                 handle: handles.handle(forElement: element.id), kind: element.kind.layerName.lowercased(),
                 text: element.kind == .symbol ? (element.symbol ?? "") : element.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                frame: frame, look: look(of: element),
+                frame: frame, rotation: element.resolvedRotation, look: look(of: element),
                 isSelected: selectedElements.contains(element.id), isLocked: element.isLocked, isHidden: element.isHidden
             )
         }

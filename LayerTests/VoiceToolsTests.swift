@@ -809,6 +809,62 @@ struct VoiceToolsTests {
         #expect(bench.box.newScreenAnchor == nil)
     }
 
+    // MARK: Turning
+
+    @Test func rotateElementTurnsToAnAngleOrByAnAmount() throws {
+        let bench = bench()
+        let line = bench.box.rotateElement(element: "E2", angle: "30", by: nil)
+        #expect(try #require(bench.element("E2")).rotation == 30)
+        #expect(line == "Turned E2 to 30°.")
+        _ = bench.box.rotateElement(element: "E2", angle: nil, by: "-45")
+        #expect(try #require(bench.element("E2")).rotation == 345)
+        // Said with a unit, and the angle wins when both are given.
+        _ = bench.box.rotateElement(element: "E2", angle: "45 degrees", by: "10")
+        #expect(try #require(bench.element("E2")).rotation == 45)
+        _ = bench.box.rotateElement(element: "E2", angle: "90°", by: nil)
+        #expect(try #require(bench.element("E2")).rotation == 90)
+        _ = bench.box.rotateElement(element: "E2", angle: "0", by: nil)
+        #expect(try #require(bench.element("E2")).rotation == nil)
+        #expect(bench.box.failures.isEmpty)
+    }
+
+    @Test func rotateElementRefusesALockedElementAndNonsense() throws {
+        let bench = bench()
+        bench.app.store.update(.init(host: .screen(bench.screen), element: try #require(bench.element("E2")).id)) { $0.isLocked = true }
+        let before = bench.app.store.content
+        #expect(bench.box.rotateElement(element: "E2", angle: "30", by: nil) == "E2 is locked.")
+        #expect(bench.box.rotateElement(element: "E1", angle: nil, by: nil) == "Say an angle, such as 45, or how far to turn it, such as 15.")
+        #expect(bench.box.rotateElement(element: "E1", angle: "sideways", by: nil) == "I didn't understand the angle “sideways”.")
+        #expect(bench.box.rotateElement(element: "E1", angle: "nan", by: nil) == "I didn't understand the angle “nan”.")
+        #expect(bench.box.rotateElement(element: "E1", angle: nil, by: "inf") == "I didn't understand the angle “inf”.")
+        #expect(bench.app.store.content == before)
+        #expect(bench.box.failures.count == 5)
+    }
+
+    @Test func aSpokenTurnIsOneUndoStep() throws {
+        let bench = bench()
+        let before = bench.app.store.content
+        let undo = try #require(bench.app.store.undoManager)
+        bench.app.store.beginHeldEdit()
+        _ = bench.box.rotateElement(element: "E2", angle: "30", by: nil)
+        _ = bench.box.rotateElement(element: "E2", angle: nil, by: "15")
+        bench.app.store.endHeldEdit()
+        #expect(try #require(bench.element("E2")).rotation == 45)
+        undo.undo()
+        #expect(bench.app.store.content == before)
+        #expect(!undo.canUndo)
+    }
+
+    @Test func theCanvasDescriptionSaysAnAngleOnlyWhenTurned() throws {
+        let bench = bench()
+        _ = bench.box.rotateElement(element: "E2", angle: "30", by: nil)
+        let text = CanvasPicture.capture(from: bench.app, handles: bench.handles).text(.full)
+        let lines = text.split(separator: "\n").map(String.init)
+        #expect(lines.contains { $0.contains(#"E2 button "Sign in""#) && $0.contains("w353 h50 turned 30°") })
+        #expect(!lines.filter { $0.hasPrefix("E1") || $0.hasPrefix("E3") || $0.contains("E1 ") }.contains { $0.contains("turned") })
+        #expect(lines.filter { $0.contains("turned") }.count == 1)
+    }
+
     // MARK: Undo
 
     @Test func aHeldEditIsOneUndoStep() throws {

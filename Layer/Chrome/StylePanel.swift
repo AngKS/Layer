@@ -112,6 +112,9 @@ private struct ElementSettings: View {
                         set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                     ), range: 5...100)
                 }
+                NumberField("°", label: "Rotation",
+                            value: Binding(get: { CGFloat(Rotation.shown(element.resolvedRotation)) }, set: { degrees in change { $0.setRotation(Double(degrees)) } }),
+                            range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
             }
             if case .screen = ref.host {
                 HStack(spacing: 6) {
@@ -286,7 +289,8 @@ private struct SeveralSettings: View {
 
         let rounded = elements.first(where: \.hasCornerRadius)
         let effects = elements.first { $0.kind.spec.hasEffects }
-        if rounded != nil || effects != nil {
+        let turnable = model.canTurnSelection
+        if rounded != nil || effects != nil || turnable {
             PanelSection {
                 HStack(spacing: 8) {
                     if let rounded {
@@ -300,6 +304,14 @@ private struct SeveralSettings: View {
                             get: { (effects.resolvedOpacity * 100).rounded() },
                             set: { percent in change(where: \.kind.spec.hasEffects) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
+                    }
+                    // Each element is turned to the angle shown (the first one's), on its own
+                    // pivot; a screen among them leaves nothing to turn.
+                    if turnable, let first = elements.first {
+                        NumberField("°", label: "Rotation", value: Binding(
+                            get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
+                            set: { degrees in change(where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
+                        ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
                     }
                 }
             }
@@ -700,6 +712,10 @@ private struct NumberField: View {
     let label: String
     @Binding var value: CGFloat
     let range: ClosedRange<CGFloat>
+    let pointsPerStep: CGFloat
+    let degreesPerStep: Double
+    let wraps: Bool
+    let ticksEvery: Int
     @State private var frame = CGRect.zero
     @GestureState private var isHeld = false
     /// Whether the number is being typed. Until it is tapped, it is shown as text, which
@@ -707,11 +723,17 @@ private struct NumberField: View {
     @State private var isTyping = false
     @FocusState private var isEditing: Bool
 
-    init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, range: ClosedRange<CGFloat> = -99_999...99_999) {
+    init(_ unit: String, label: String? = nil, value: Binding<CGFloat>, range: ClosedRange<CGFloat> = -99_999...99_999,
+         pointsPerStep: CGFloat = Scrubber.pointsPerStep, degreesPerStep: Double = Scrubber.degreesPerStep,
+         wraps: Bool = false, ticksEvery: Int = 1) {
         self.unit = unit
         self.label = label ?? unit
         _value = value
         self.range = range
+        self.pointsPerStep = pointsPerStep
+        self.degreesPerStep = degreesPerStep
+        self.wraps = wraps
+        self.ticksEvery = ticksEvery
     }
 
     var body: some View {
@@ -724,7 +746,7 @@ private struct NumberField: View {
             if isTyping {
                 TextField(
                     label,
-                    value: Binding(get: { Double(value) }, set: { value = min(max(CGFloat($0), range.lowerBound), range.upperBound) }),
+                    value: Binding(get: { Double(value) }, set: { value = Scrubber.typed(CGFloat($0), in: range, wraps: wraps) }),
                     format: Self.format
                 )
                 .keyboardType(.numbersAndPunctuation)
@@ -745,7 +767,7 @@ private struct NumberField: View {
                     .accessibilityAction { isTyping = true }
                     .accessibilityAdjustableAction { direction in
                         let step: CGFloat = direction == .increment ? 1 : -1
-                        value = Scrubber.value(from: value.rounded(), steps: Int(step), in: range)
+                        value = Scrubber.value(from: value.rounded(), steps: Int(step), in: range, wraps: wraps)
                     }
             }
         }
@@ -778,7 +800,7 @@ private struct NumberField: View {
                 .onChanged { value in
                     guard case .second(true, let drag) = value else { return }
                     if scrubber.target == nil { scrubber.begin(target) }
-                    scrubber.scrub(to: Scrubber.steps(forDrag: drag?.translation.width ?? 0))
+                    scrubber.scrub(to: Scrubber.steps(forDrag: drag?.translation.width ?? 0, pointsPerStep: pointsPerStep))
                 },
             isEnabled: !isTyping
         )
@@ -791,7 +813,8 @@ private struct NumberField: View {
     private var target: Scrubber.Target {
         Scrubber.Target(
             label: label, unit: unit, frame: frame, range: range,
-            get: { value }, set: { value = $0 }
+            get: { value }, set: { value = $0 },
+            pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery
         )
     }
 }

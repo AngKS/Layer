@@ -436,7 +436,11 @@ struct SeveralThingsOnTheCanvasTests {
         let board = Board()
         board.model.selection = CanvasSelection([.element(board.title), .element(board.note)])
         let rect = try #require(board.model.selectionViewRect)
-        #expect(rect == board.canvasFrame(board.title).union(board.canvasFrame(board.note)))
+        let things = board.canvasFrame(board.title).union(board.canvasFrame(board.note))
+        // Together they turn by a knob below them, which the popover keeps clear of too.
+        let knob = try #require(board.model.knobViewPoint)
+        let reach = AppModel.knobTarget / 2
+        #expect(rect == things.union(CGRect(x: knob.x - reach, y: knob.y - reach, width: AppModel.knobTarget, height: AppModel.knobTarget)))
     }
 
     @Test func tappingWhileAFingerRestsOnSomethingAddsToTheSelection() {

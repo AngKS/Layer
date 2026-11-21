@@ -24,6 +24,7 @@ enum VoiceRules {
         - Colour, text colour, size, weight and corners are styleElement. The colour of an element's \
         words is the look "text blue". setText is only for what the words say.
         - "Half width" is moveElement with width 50%. "Centre it" is alignElement with centre.
+        - "Turn", "rotate" and "tilt" are rotateElement; "straighten" is rotateElement with angle 0.
         - "Show me", "go to" and "pan to" are the show tool.
         - The words came from speech recognition, which mishears. If a word is close to a screen's name \
         or to the words on an element, take it as that.
@@ -45,6 +46,7 @@ enum VoiceRules {
         - A change: call the tool for it. For several changes, one tool each, in order.
         - "It" and "this" mean what is marked [selected].
         - To reword in a style, write the new words yourself and call setText.
+        - "Turn", "rotate" and "tilt" are rotateElement; "straighten" is rotateElement with angle 0.
         - "Half width" is moveElement with width 50%. "Show me" and "go to" are the show tool.
         - If nothing on the canvas fits, do nothing and say so briefly.
         When done, reply "Done".

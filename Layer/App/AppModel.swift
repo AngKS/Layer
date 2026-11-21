@@ -106,7 +106,10 @@ final class AppModel {
             guard tool != oldValue else { return }
             // Drawing chosen in a narrow window is kept, whatever the width does next.
             if tool == .draw { drawingWaitsForAWiderWindow = false }
+            // A drag or a turn whose end was never heard ends here: left live, a drag stops
+            // every other, and a turn keeps its part of the step open.
             drags?.endAny(model: self)
+            endTurn()
             if tool == .draw {
                 selection = nil
                 scheduleConversion()
@@ -119,7 +122,16 @@ final class AppModel {
 
     var selection: CanvasSelection? {
         didSet {
-            if selection != oldValue { isEditingText = false }
+            if selection != oldValue {
+                isEditingText = false
+                // Several things turn about a pivot fixed as they are selected, and forgotten
+                // when the selection changes: selected again, they form a new one.
+                turnSession = nil
+                // A turn of what was selected ends with it: the knob that was turning it goes,
+                // and may never hear its drag end. Not two fingers' twist, which ends as they
+                // lift, nor a turn of what a drag has given to other hosts, still the same things.
+                if !isRehosting, !isTwisting { endTurn() }
+            }
             // The format panel is for the selection: with nothing selected it goes.
             if selection == nil, isInspectorOpen {
                 withAnimation(.smooth(duration: 0.3)) { isInspectorOpen = false }
@@ -652,6 +664,9 @@ final class AppModel {
         // down goes into the design now, while it can still be saved.
         ink?.flushPendingInk()
         drags?.endAny(model: self)
+        // So is a turn the knob left live: its part of the step is its own, which the end
+        // by hand below leaves open.
+        endTurn()
         // A change made in the format panel moments ago is still an edit waiting for the
         // panel's pause to end it: it ends now, while the design can still be saved.
         adjustmentEnd?.cancel()
@@ -1001,11 +1016,23 @@ final class AppModel {
         store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
     }
 
-    /// Gives every element selected to whatever it now lies on, after a drag.
+    /// Gives every element selected to whatever it now lies on, after a drag. Several
+    /// things being turned go on turning about the same pivot: an element given to another
+    /// host is still the same thing, though the selection now names it differently.
     func rehostSelection() {
         guard let selection else { return }
-        self.selection = store.rehost(selection)
+        let session = turnSession.flatMap { $0.selection == selection && $0.matches(store) ? $0 : nil }
+        // Moved to its new host, an element drops out of the selection until it is named again.
+        isRehosting = true
+        defer { isRehosting = false }
+        let rehosted = store.rehost(selection)
+        self.selection = rehosted
+        // The new selection let go of the session as it was set; it is the same one.
+        if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
+
+    /// True while `rehostSelection()` names what is selected afresh.
+    @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
     private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
@@ -1026,12 +1053,12 @@ final class AppModel {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        for floating in store.floating.reversed() where floating.canvasFrame.contains(point) && floating.element.isPickedByItsFrame {
+        for floating in store.floating.reversed() where floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
             if skippingDrawings, floating.element.kind == .drawing { continue }
             return .element(.init(host: .canvas, element: floating.id))
         }
         for screen in store.screens.reversed() {
-            for element in screen.elements.reversed() where screen.placement.canvasRect(for: element.frame).contains(point) {
+            for element in screen.elements.reversed() where TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
                 return .element(.init(host: .screen(screen.id), element: element.id))
             }
             if screen.canvasFrame.contains(point) || screen.labelFrame.contains(point) {
@@ -1041,17 +1068,10 @@ final class AppModel {
         return nil
     }
 
-    /// Where something is, in the view's own points.
+    /// Where something is, in the view's own points: for a turned element, the box round
+    /// its turned shape.
     func viewRect(of target: CanvasSelection) -> CGRect? {
-        switch target {
-        case .element(let ref):
-            guard let found = store.resolve(ref) else { return nil }
-            return viewport.viewRect(for: found.placement.canvasRect(for: found.element.frame))
-        case .screen(let id):
-            return store.screen(id).map { viewport.viewRect(for: $0.canvasFrame) }
-        case .several:
-            return store.canvasFrame(of: target).map(viewport.viewRect(for:))
-        }
+        store.canvasFrame(of: target).map(viewport.viewRect(for:))
     }
 
     /// Whether what is selected is locked in place: all of it, when it is several things.
@@ -1114,21 +1134,291 @@ final class AppModel {
         store.update(ref) { $0.isLocked.toggle() }
     }
 
-    /// Where what is selected is, in the view's own points: for several things, the area
-    /// they cover together.
+    /// Where what is selected is, in the view's own points: for a turned element, the box
+    /// round its turned shape; for several things, the box round the outline they turn
+    /// within, which covers them all. When it can turn, the knob's touch target is
+    /// included, so that the popover, which places itself against this, never covers the knob.
     var selectionViewRect: CGRect? {
+        let area: CGRect?
         switch selection {
-        case .element:
-            guard let selected = selectedElement else { return nil }
-            return viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
+        case .element, .several:
+            area = selectionShape.map { viewport.viewShape(for: $0).bounds }
         case .screen:
-            guard let screen = selectedScreen else { return nil }
-            return viewport.viewRect(for: screen.canvasFrame.union(screen.labelFrame))
-        case .several(let things):
-            return store.canvasFrame(of: .several(things)).map(viewport.viewRect(for:))
+            area = selectedScreen.map { viewport.viewRect(for: $0.canvasFrame.union($0.labelFrame)) }
         case nil:
             return nil
         }
+        guard let area, let knob = knobViewPoint else { return area }
+        let reach = Self.knobTarget / 2
+        return area.union(CGRect(x: knob.x - reach, y: knob.y - reach, width: Self.knobTarget, height: Self.knobTarget))
+    }
+
+    // MARK: Turning
+
+    /// Whether what is selected can be turned: something is, no screen is among it, and
+    /// at least one element of it isn't locked.
+    var canTurnSelection: Bool {
+        var hasUnlocked = false
+        for thing in selectedThings {
+            // Screens never turn.
+            guard case .element(let ref) = thing else { return false }
+            if store.resolve(ref)?.element.isLocked == false { hasUnlocked = true }
+        }
+        return hasUnlocked
+    }
+
+    /// True from `beginTurn()` to `endTurn()`, while the knob or two fingers turn the selection.
+    private(set) var isTurning = false
+    /// The angle a turn has snapped to, while it is held there; nil between the 45s. A
+    /// tick plays as it snaps. Nil, too, while it is held at the mark it started on, until
+    /// it has left it: taking hold of an upright element is no snap.
+    private(set) var snappedTurn: Double?
+    /// The mark the turn under way started on, until it leaves it.
+    @ObservationIgnored private var startMark: Double?
+
+    /// What the turn under way turns, and how far it was turned when the turn began.
+    private enum TurnStart {
+        /// One element, and its angle.
+        case element(DesignStore.ElementRef, degrees: Double)
+        /// Several things, and how far their session had turned them.
+        case several(turned: Double)
+    }
+    @ObservationIgnored private var turnStart: TurnStart?
+    /// Several things selected, as their last turn or move left them: see `severalTurn`.
+    @ObservationIgnored private var turnSession: TurnSession?
+    /// That session as it was when the drag moving them began, if it held then.
+    @ObservationIgnored private var moveStart: TurnSession?
+
+    /// The one element selected, unless it is locked: what a turn turns.
+    private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
+        guard let selected = selectedElement, !selected.element.isLocked else { return nil }
+        return (selected.ref, selected.element)
+    }
+
+    /// What turns several things selected: the session kept from their last turn or move,
+    /// while it is for what is selected and each of them is as it left them; otherwise one
+    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
+    /// are selected, or when a screen is among them.
+    private var severalTurn: TurnSession? {
+        guard let selection, selection.isSeveral else { return nil }
+        if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
+        return TurnSession.form(for: selection, in: store)
+    }
+
+    /// Starts turning what is selected. Everything until `endTurn()` undoes as one step.
+    /// Returns whether a turn began: none does while another is under way, or when what
+    /// is selected can't turn.
+    @discardableResult
+    func beginTurn() -> Bool {
+        guard !isTurning, canTurnSelection else { return false }
+        let start: Double
+        if let turnable = turnableElement {
+            turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
+            start = turnable.element.resolvedRotation
+        } else if let session = severalTurn {
+            turnSession = session
+            turnStart = .several(turned: session.turned)
+            start = session.outline.degrees + session.turned
+        } else {
+            return false
+        }
+        let (mark, isOnMark) = Rotation.snapped(start)
+        startMark = isOnMark ? mark : nil
+        // The turn's own part of the step: a drag, a command or a screen being generated
+        // that is under way, or that begins or ends meanwhile, shares the step without
+        // closing it while the turn goes on, and the turn doesn't close theirs.
+        store.beginEdit(by: .turn)
+        isAdjusting = true
+        isTurning = true
+        return true
+    }
+
+    /// Turns what is selected `degrees` clockwise from the angle it had when the turn
+    /// began: the whole turn so far, not the latest step of it. With `snaps`, an angle
+    /// close to a multiple of 45° goes to it. Returns whether it did. Several things turn
+    /// as one about their pivot, and it is their outline's angle that snaps.
+    @discardableResult
+    func turnSelection(by degrees: Double, snaps: Bool) -> Bool {
+        let snapped: Double?
+        switch turnStart {
+        case .element(let ref, let start)?:
+            guard selection == .element(ref) else { return false }
+            let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
+            store.update(ref) { $0.setRotation(angle) }
+            snapped = isSnapped ? angle : nil
+        case .several(let start)?:
+            // Changed by something else meanwhile, they are left as that left them.
+            guard var session = turnSession, session.selection == selection, session.matches(store) else { return false }
+            var turned = Rotation.normalized(start + degrees)
+            let (angle, isSnapped) = snaps ? Rotation.snapped(session.outline.degrees + turned) : (0, false)
+            if isSnapped { turned = Rotation.normalized(angle - session.outline.degrees) }
+            turn(&session, to: turned)
+            snapped = isSnapped ? angle : nil
+        case nil:
+            return false
+        }
+        // Held at the mark it started on, it hasn't snapped to it: no tick until it has left.
+        var shown = snapped
+        if let mark = startMark {
+            if snapped == mark { shown = nil } else { startMark = nil }
+        }
+        if snappedTurn != shown { snappedTurn = shown }
+        return snapped != nil
+    }
+
+    /// Ends the turn, and its step with it unless something else still has the step open.
+    /// Does nothing when no turn began.
+    func endTurn() {
+        guard isTurning else { return }
+        turnStart = nil
+        isTurning = false
+        isTwisting = false
+        isAdjusting = false
+        snappedTurn = nil
+        startMark = nil
+        store.endEdit(by: .turn)
+    }
+
+    // MARK: Twisting with two fingers
+
+    /// True from `beginTwist()` until its turn ends: two fingers are turning what is
+    /// selected. A drag either of them makes meanwhile is left alone (see `CanvasDrags`).
+    @ObservationIgnored private(set) var isTwisting = false
+
+    /// Two fingers on the selection have turned before they pinched: their turn begins. A
+    /// drag the first finger was already making is ended after the turn has begun, so that
+    /// its move so far is part of the turn's step, and the rest of it is left alone.
+    /// Returns whether the turn began: not while another, the knob's, is under way, nor
+    /// when what is selected can't turn.
+    @discardableResult
+    func beginTwist() -> Bool {
+        guard beginTurn() else { return false }
+        isTwisting = true
+        drags?.endAny(model: self)
+        return true
+    }
+
+    /// Turns what is selected as far as the two fingers have turned since they landed,
+    /// snapping to the 45s. Only a turn the twist began.
+    func twist(by degrees: Double) {
+        guard isTwisting else { return }
+        turnSelection(by: degrees, snaps: true)
+    }
+
+    /// A finger lifted, or the twist was cancelled: its turn ends. A turn the twist didn't
+    /// begin is left alone.
+    func endTwist() {
+        guard isTwisting else { return }
+        endTurn()
+    }
+
+    /// Whether a point in the view is on what is selected, for a finger that would twist
+    /// it: within 8 points of its turned shape, so that a finger landing just off its edge
+    /// counts, and not on a control floating over it.
+    func isOnSelection(_ viewPoint: CGPoint) -> Bool {
+        guard let canvas = selectionShape, !chromeFrames.values.contains(where: { $0.contains(viewPoint) }) else { return false }
+        let shape = viewport.viewShape(for: canvas)
+        return TurnedRect(rect: shape.rect.insetBy(dx: -8, dy: -8), degrees: shape.degrees).contains(viewPoint)
+    }
+
+    /// Turns what is selected `degrees` clockwise in one step, without snapping.
+    func rotateSelection(by degrees: Double) {
+        if let turnable = turnableElement {
+            store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+        } else if canTurnSelection, var session = severalTurn {
+            turn(&session, to: Rotation.normalized(session.turned + degrees))
+        }
+    }
+
+    /// Stands what is selected upright again, in one step. Several things go back exactly
+    /// to where they were, and to the angles they had, when they were selected.
+    func resetSelectionTurn() {
+        if let turnable = turnableElement {
+            store.update(turnable.ref) { $0.setRotation(0) }
+        } else if canTurnSelection, var session = severalTurn {
+            turn(&session, to: 0)
+        }
+    }
+
+    /// VoiceOver's "Reset rotation": the knob's double tap, except for several things not
+    /// turned together since they were selected, where that has nothing to put back. Each of
+    /// them is then stood upright about its own centre, in one step, as the Rotation field
+    /// set to 0 does: an action that did nothing would read as broken.
+    func resetSelectionRotation() {
+        if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
+            changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(0) }
+        } else {
+            resetSelectionTurn()
+        }
+    }
+
+    /// Puts several things where their session turned `degrees` places them, as one change,
+    /// and keeps the session.
+    private func turn(_ session: inout TurnSession, to degrees: Double) {
+        session.turned = degrees
+        let placed = session.placed(turnedBy: degrees)
+        store.apply { content in
+            for (ref, place) in placed {
+                content.update(ref.element) {
+                    $0.frame = place.frame
+                    $0.rotation = place.rotation
+                }
+            }
+        }
+        session.expect(store)
+        turnSession = session
+    }
+
+    /// How far what is selected is turned, for the readout beside the knob: one element's
+    /// angle, or how far several things have turned since they were selected.
+    var selectionTurn: Double? {
+        if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
+        return selectedElement?.element.resolvedRotation
+    }
+
+    /// The shape of what is selected, in canvas points, turned as it is. For several
+    /// things, the outline they turn within (`TurnSession.shape`), or, with a screen
+    /// among them, the upright box round them all.
+    var selectionShape: TurnedRect? {
+        guard let selection else { return nil }
+        guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        if let session = severalTurn { return session.shape }
+        return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
+    }
+
+    /// How far the knob hangs below the selection's bottom edge, to its centre, in the
+    /// view's points: the same reach at any zoom.
+    static let knobStem: CGFloat = 28
+    /// The size of the knob's touch target, in the view's points.
+    static let knobTarget: CGFloat = 44
+
+    /// Where the knob is in the view: below the middle of the selection's bottom edge, in
+    /// its own axes, so that it goes round as the selection turns. Nil when what is
+    /// selected can't turn.
+    var knobViewPoint: CGPoint? {
+        guard canTurnSelection, let canvas = selectionShape else { return nil }
+        let shape = viewport.viewShape(for: canvas)
+        let reach = shape.rect.height / 2 + Self.knobStem
+        return CGPoint(x: shape.centre.x + shape.down.dx * reach, y: shape.centre.y + shape.down.dy * reach)
+    }
+
+    /// Several things selected are about to be dragged. If they are as their last turn
+    /// left them, their pivot goes with them: see `selectionMoved(by:)`.
+    func selectionWillMove() {
+        moveStart = nil
+        guard let turnSession, turnSession.selection == selection, turnSession.matches(store) else { return }
+        moveStart = turnSession
+    }
+
+    /// Several things selected have been dragged `canvasDelta` across the canvas in all
+    /// since `selectionWillMove()`. Their pivot, their outline and where each started go
+    /// with them, so that turned back they land where they were dragged to. Called as the
+    /// drag goes, so that their outline goes rigidly with them.
+    func selectionMoved(by canvasDelta: CGSize) {
+        guard var session = moveStart, session.selection == selection else { return }
+        session.translate(by: canvasDelta)
+        session.expect(store)
+        turnSession = session
     }
 
     /// Deletes what is selected. Of several things, those that are locked are left.
@@ -1224,8 +1514,10 @@ final class AppModel {
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
     func adjusting(_ body: () -> Void) {
         // The panel's own edit if it opens one, or goes on with one it opened that nothing
-        // else has joined. Inside another's edit, the change joins that one.
-        let ownsEdit = !store.isEditing || adjustmentOwnsEditAt == store.editBegins
+        // else has joined. Inside another's edit by hand, the change joins that one. A turn
+        // or a spoken command under way has a part of its own, which an end by hand leaves
+        // open, so beside one of those the panel's part by hand is still the panel's to end.
+        let ownsEdit = !store.isEditing(by: .hand) || adjustmentOwnsEditAt == store.editBegins
         store.beginEdit()
         adjustmentOwnsEditAt = ownsEdit ? store.editBegins : nil
         adjustmentLastBegin = store.editBegins

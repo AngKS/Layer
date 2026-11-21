@@ -6,7 +6,9 @@ import SwiftUI
 /// what a finger has selected takes touches here. A selected screen or
 /// drawing is dragged by its whole area; a screen can also be dragged by its name.
 /// A drawing is an element, moved and resized like the rest: its ink goes with its frame.
-/// When several things are selected, each is outlined and dragging any one moves them all.
+/// A selected element is outlined and handled on its turned box, and turned by its knob
+/// (`RotateKnob`). When several things are selected, each is outlined, dragging any one
+/// moves them all, and the knob turns them all as one piece.
 ///
 /// Everything here is in the view's own points, so handles and outlines stay the same
 /// size at any zoom. Screens and drawings that aren't selected have no handle of their
@@ -36,7 +38,7 @@ struct SelectionLayer: View {
             // selected drawing at any time: it has no target of its own among the elements'.
             if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
-                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)))
+                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
                     .canvasDrag(drags, model: model, isEnabled: !selected.element.isLocked) { owner in
                         drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model, owner: owner) {
                             drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)
@@ -44,14 +46,15 @@ struct SelectionLayer: View {
                     }
             }
 
-            // Several things at once: each is outlined, any of them drags them all, and a
-            // tap on one picks it out. They have no handles: together they aren't resized.
+            // Several things at once: each is outlined on its turned shape, any of them
+            // drags them all, and a tap on one picks it out. They have no handles: together
+            // they aren't resized, but they turn as one by the knob.
             if case .several = model.selection {
                 let things = model.selectedThings
                 let isLocked = model.isSelectionLocked
                 ForEach(things, id: \.self) { thing in
-                    if let frame = store.canvasFrame(of: thing) {
-                        dragArea(viewport.viewRect(for: frame))
+                    if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
+                        dragArea(shape.rect, degrees: shape.degrees)
                             .onTapGesture { model.pick(thing) }
                             .canvasDrag(drags, model: model, isEnabled: !isLocked) { drags.moveSelection(model: model, owner: $0) }
                     }
@@ -60,43 +63,50 @@ struct SelectionLayer: View {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
                 ForEach(things, id: \.self) { thing in
-                    if let frame = store.canvasFrame(of: thing) {
-                        outline(viewport.viewRect(for: frame), radius: cornerRadius(of: thing) * viewport.scale)
+                    if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
+                        outline(shape.rect, degrees: shape.degrees, radius: cornerRadius(of: thing) * viewport.scale)
                     }
                 }
-                if let area = model.selectionViewRect {
-                    groupOutline(area)
+                if let shape = model.selectionShape {
+                    groupOutline(viewport.viewShape(for: shape))
                 }
             }
 
             if let screen = model.selectedScreen {
                 outline(viewport.viewRect(for: screen.canvasFrame), radius: screen.device.cornerRadius * screen.scale * viewport.scale)
             }
+            // Below the corner handles, which win where a small element's handles and knob meet.
+            RotateKnob()
             if let selected = model.selectedElement {
-                let rect = viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame))
-                if model.isAdjusting, store.canvas.showsMeasurements, case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
+                // The element's turned box: its outline, handles and badge go round with it.
+                let shape = viewport.viewShape(for: TurnedRect(rect: selected.placement.canvasRect(for: selected.element.frame), degrees: selected.element.resolvedRotation))
+                // Not while it turns: the gaps jitter as it goes round, and their labels would
+                // cover the angle beside the knob.
+                if model.isAdjusting, !model.isTurning, store.canvas.showsMeasurements, case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
                     SpacingOverlay(guides: .measure(selected.element, in: screen), screen: screen, viewport: viewport)
                 }
                 if model.isAdjusting {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
-                outline(rect, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
+                outline(shape.rect, degrees: shape.degrees, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
                 if selected.element.isLocked {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 22, height: 22)
                         .background(Theme.accent.color, in: .circle)
-                        .position(x: rect.maxX + 4, y: rect.minY - 4)
+                        .position(TurnedRect(rect: shape.rect.insetBy(dx: -4, dy: -4), degrees: shape.degrees).corner(.topRight))
                         .accessibilityLabel("Locked")
                 } else {
                     ForEach(ElementLayout.Corner.allCases, id: \.self) { corner in
-                        handle(corner, at: rect, for: selected.element, ref: selected.ref, placement: selected.placement)
+                        handle(corner, on: shape, for: selected.element, ref: selected.ref, placement: selected.placement)
                     }
                 }
             }
 
         }
+        // A tick as a turn snaps to the 45s; none as it leaves.
+        .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
         // The model ends a drag left live: see `CanvasDrags.endAny`.
         .onAppear { model.drags = drags }
     }
@@ -113,40 +123,40 @@ struct SelectionLayer: View {
         }
     }
 
-    /// A light dashed box round everything selected, which shows several things as one selection.
-    private func groupOutline(_ rect: CGRect) -> some View {
-        let outer = rect.insetBy(dx: -9, dy: -9)
+    /// A light dashed box round everything selected, which shows several things as one
+    /// selection. It is turned as their outline is, and goes round with them as they turn.
+    private func groupOutline(_ shape: TurnedRect) -> some View {
+        let outer = shape.rect.insetBy(dx: -9, dy: -9)
         return RoundedRectangle(cornerRadius: 8, style: .continuous)
             .strokeBorder(Theme.accent.color.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             .frame(width: outer.width, height: outer.height)
+            .rotationEffect(.degrees(shape.degrees))
             .position(x: outer.midX, y: outer.midY)
             .allowsHitTesting(false)
     }
 
     // MARK: Pieces
 
-    /// An invisible area that takes touches, at least big enough for a finger.
-    private func dragArea(_ rect: CGRect) -> some View {
+    /// An invisible area that takes touches, at least big enough for a finger, turned
+    /// `degrees` about its centre so that a turned element's empty corners don't take them.
+    private func dragArea(_ rect: CGRect, degrees: Double = 0) -> some View {
         Color.clear
             .contentShape(Rectangle())
             .frame(width: max(rect.width, 30), height: max(rect.height, 30))
+            .rotationEffect(.degrees(degrees))
             .position(x: rect.midX, y: rect.midY)
     }
 
+    /// A corner handle just outside the element's turned box, in the view. Dragged, the
+    /// element is resized in its own axes, and the corner across from it stays put.
     private func handle(
         _ corner: ElementLayout.Corner,
-        at rect: CGRect,
+        on shape: TurnedRect,
         for element: DesignElement,
         ref: DesignStore.ElementRef,
         placement: Placement
     ) -> some View {
-        let outer = rect.insetBy(dx: -6, dy: -6)
-        let point = switch corner {
-        case .topLeft: CGPoint(x: outer.minX, y: outer.minY)
-        case .topRight: CGPoint(x: outer.maxX, y: outer.minY)
-        case .bottomLeft: CGPoint(x: outer.minX, y: outer.maxY)
-        case .bottomRight: CGPoint(x: outer.maxX, y: outer.maxY)
-        }
+        let point = TurnedRect(rect: shape.rect.insetBy(dx: -6, dy: -6), degrees: shape.degrees).corner(corner)
         return Circle()
             .fill(Theme.chrome)
             .overlay { Circle().strokeBorder(Theme.accent.color, lineWidth: 1.5) }
@@ -157,17 +167,19 @@ struct SelectionLayer: View {
             .canvasDrag(drags, model: model) { owner in
                 drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model, owner: owner) {
                     { origin, translation in
-                        (ElementLayout.resizedKeepingShape(origin, from: corner, by: translation, kind: element.kind), [])
+                        (ElementLayout.resizedTurned(origin, degrees: element.resolvedRotation, from: corner, by: translation, kind: element.kind), [])
                     }
                 }
             }
     }
 
-    private func outline(_ rect: CGRect, radius: CGFloat) -> some View {
+    /// The selection's outline round a box, turned `degrees` about its centre.
+    private func outline(_ rect: CGRect, degrees: Double = 0, radius: CGFloat) -> some View {
         let outer = rect.insetBy(dx: -3, dy: -3)
         return RoundedRectangle(cornerRadius: radius + 3, style: .continuous)
             .strokeBorder(Theme.accent.color, lineWidth: 1.5)
             .frame(width: outer.width, height: outer.height)
+            .rotationEffect(.degrees(degrees))
             .position(x: outer.midX, y: outer.midY)
             .allowsHitTesting(false)
     }
@@ -188,6 +200,13 @@ private struct SelectionSummary: View {
                 .accessibilityLabel("Selection")
                 .accessibilityValue(summary)
                 .accessibilityIdentifier("Selection")
+                .accessibilityActions {
+                    if model.canTurnSelection {
+                        Button("Rotate 15° clockwise") { model.rotateSelection(by: 15) }
+                        Button("Rotate 15° counterclockwise") { model.rotateSelection(by: -15) }
+                        Button("Reset rotation") { model.resetSelectionRotation() }
+                    }
+                }
         }
     }
 
@@ -218,6 +237,10 @@ private struct SelectionSummary: View {
 /// selection or the tool), or a system gesture takes the touch. Each view with a drag
 /// therefore has an `Owner`, and the drag under way is ended when its owner's gesture
 /// state resets or the view goes (see `canvasDrag`), or when a drag starts that isn't it.
+///
+/// Two fingers that twist the selection end the drag the first of them had begun, and
+/// SwiftUI may go on reporting it, or a drag either of them begins meanwhile, until they
+/// lift. Those are left alone: they neither move anything nor drop it.
 @MainActor @Observable
 final class CanvasDrags {
     /// Moves a dragged element: from its frame as the drag began, by the translation in its
@@ -249,10 +272,25 @@ final class CanvasDrags {
 
     /// Ends the drag under way, whoever's it is. A backstop for a cancel SwiftUI didn't
     /// report: while a drag is live every other is ignored, so one left live would stop all
-    /// dragging. Called as the design closes and when the tool changes.
+    /// dragging. Called as the design closes, when the tool changes, and as two fingers
+    /// begin to twist the selection. Whatever SwiftUI still reports of it is left alone.
     func endAny(model: AppModel) {
-        guard session != nil else { return }
+        guard let session else { return }
+        leaveAlone(session.owner, startingAt: session.start)
         endAbandoned(model: model)
+    }
+
+    /// A drag that is left alone until its finger lifts: whose it is, and where it began.
+    private struct LeftAlone {
+        weak var owner: Owner?
+        var start: CGPoint
+    }
+
+    @ObservationIgnored private var leftAlone: [LeftAlone] = []
+
+    private func leaveAlone(_ owner: Owner, startingAt start: CGPoint) {
+        leftAlone.removeAll { $0.owner == nil || $0.owner === owner }
+        leftAlone.append(LeftAlone(owner: owner, start: start))
     }
 
     /// Ends the drag under way if what it moves has been locked or taken away, by a spoken
@@ -272,7 +310,17 @@ final class CanvasDrags {
     /// frame a step. A drag SwiftUI cancelled has already been ended by its owner's gesture
     /// state resetting, or its view going (see `canvasDrag`). A new touch on the same view
     /// means the one before was cancelled: it is ended first, leaving nothing behind.
+    /// While two fingers twist the selection, a drag that begins is one of theirs.
     private func begins(_ owner: Owner, at start: CGPoint, model: AppModel) -> Turn {
+        if let index = leftAlone.firstIndex(where: { $0.owner === owner }) {
+            if leftAlone[index].start == start { return .ignored }
+            // That touch ended without a word: this is a new one.
+            leftAlone.remove(at: index)
+        }
+        if model.isTwisting {
+            leaveAlone(owner, startingAt: start)
+            return .ignored
+        }
         if let session {
             guard session.owner === owner else { return .ignored }
             if session.start == start { return .continuing }
@@ -293,9 +341,14 @@ final class CanvasDrags {
         model.store.endEdit()
     }
 
-    /// Whether `onEnded` belongs to the drag under way, or to the one just ended.
+    /// Whether `onEnded` belongs to the drag under way, or to the one just ended. That of a
+    /// drag left alone doesn't: its finger has lifted, and that is all.
     private func ends(_ owner: Owner) -> Bool {
-        session?.owner === owner || (session == nil && lastOwner === owner)
+        if let index = leftAlone.firstIndex(where: { $0.owner === owner }) {
+            leftAlone.remove(at: index)
+            return false
+        }
+        return session?.owner === owner || (session == nil && lastOwner === owner)
     }
 
     /// Whose the last drag was, after it ended: its `onEnded` may come after it was already
@@ -311,7 +364,9 @@ final class CanvasDrags {
         groupOrigins = nil
         rule = nil
         if !guides.isEmpty { guides = [] }
-        model.isAdjusting = false
+        // A turn still under way is still adjusting the selection: the twist that ended
+        // this drag, or the knob held while another finger let go.
+        if !model.isTurning { model.isAdjusting = false }
     }
 
     /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
@@ -322,20 +377,28 @@ final class CanvasDrags {
         let zoom = model.zoomScale
         // What the element can line up with, in its own host's points.
         let others: [CGRect] = if let screen {
-            screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.frame)
+            screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
         } else {
-            model.store.floating.filter { $0.id != element.id && !$0.element.isHidden }.map { placement.localRect(for: $0.canvasFrame) }
+            model.store.floating.filter { $0.id != element.id && !$0.element.isHidden }.map { placement.localRect(for: $0.placement.canvasRect(for: $0.element.shapeBounds)) }
         }
         let container = screen.map { CGRect(origin: .zero, size: $0.size) }
+        // A turned element snaps by the box round its shape; its frame moves with the box.
+        let box = element.shapeBounds
+        let shift = CGSize(width: box.minX - element.frame.minX, height: box.minY - element.frame.minY)
         return { origin, translation in
-            let moved = ElementLayout.moved(origin, by: translation, snapsToCenter: false)
-            if canvas.snapsToGrid {
-                return (ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement), [])
+            let start = CGRect(x: origin.minX + shift.width, y: origin.minY + shift.height, width: box.width, height: box.height)
+            func framed(_ box: CGRect) -> CGRect {
+                CGRect(x: box.minX - shift.width, y: box.minY - shift.height, width: origin.width, height: origin.height)
             }
-            guard canvas.snapsToGuides else { return (moved, []) }
+            let moved = ElementLayout.moved(start, by: translation, snapsToCenter: false)
+            if canvas.snapsToGrid {
+                return (framed(ElementLayout.snappedToGrid(moved, spacing: canvas.gridSpacing, placement: placement)), [])
+            }
+            guard canvas.snapsToGuides else { return (framed(moved), []) }
             // Close enough is the same few points on the glass at any zoom.
             let threshold = 6 / max(placement.scale * zoom, 0.01)
-            return ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
+            let (snapped, lines) = ElementLayout.snapped(moved, to: others, in: container, threshold: threshold)
+            return (framed(snapped), lines)
         }
     }
 
@@ -396,6 +459,7 @@ final class CanvasDrags {
     /// A drag that moves everything selected, each thing by the same distance across the
     /// canvas. Together they go to the grid's marks, or line up with what is around them,
     /// as one element does; and dropped, each element belongs to whatever it then lies on.
+    /// What they have been turned about goes with them.
     func moveSelection(model: AppModel, owner: Owner) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { [self] value in
@@ -411,6 +475,7 @@ final class CanvasDrags {
         guard turn != .ignored else { return }
         if turn == .new {
             model.store.beginEdit()
+            model.selectionWillMove()
             var origins: [CanvasSelection: CGRect] = [:]
             for thing in model.selectedThings where !model.store.isLocked(thing) {
                 origins[thing] = model.store.canvasFrame(of: thing)
@@ -441,6 +506,7 @@ final class CanvasDrags {
         // The lines are in canvas points, as the things lined up are.
         guidePlacement = Placement(origin: .zero, scale: 1)
         model.store.position(origins.mapValues { CGPoint(x: $0.minX + delta.width, y: $0.minY + delta.height) })
+        model.selectionMoved(by: delta)
     }
 
     func dropGroup(owner: Owner, model: AppModel) {
@@ -555,16 +621,17 @@ private struct ElementTargets: View {
     }
 
     /// An invisible area in canvas points that takes touches.
-    private func area(_ rect: CGRect, minimum: CGFloat) -> some View {
+    private func area(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -> some View {
         Color.clear
             .contentShape(Rectangle())
             .frame(width: max(rect.width, minimum), height: max(rect.height, minimum))
+            .rotationEffect(.degrees(degrees))
             .position(x: rect.midX, y: rect.midY)
     }
 
     /// `screen` is the screen the element is on, or nil on the open canvas.
     private func target(for element: DesignElement, ref: DesignStore.ElementRef, placement: Placement, on screen: DesignScreen?, minimum: CGFloat) -> some View {
-        area(placement.canvasRect(for: element.frame), minimum: minimum)
+        area(placement.canvasRect(for: element.frame), degrees: element.resolvedRotation, minimum: minimum)
             .onTapGesture { model.pick(.element(ref)) }
             .canvasDrag(drags, model: model, isEnabled: !element.isLocked) { owner in
                 drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: true, model: model, owner: owner) {

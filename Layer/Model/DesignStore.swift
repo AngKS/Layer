@@ -118,9 +118,10 @@ final class DesignStore {
         }
     }
 
-    /// The area everything in the design covers, or nil for an empty design.
+    /// The area everything in the design covers, or nil for an empty design. A turned loose
+    /// element covers the box round its turned shape.
     var contentBounds: CGRect? {
-        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map(\.canvasFrame)
+        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map { $0.placement.canvasRect(for: $0.element.shapeBounds) }
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
@@ -349,7 +350,13 @@ final class DesignStore {
     /// Lines an element on a screen up with an edge or the middle of that screen.
     func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
         guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
-        update(ref) { $0.frame = ElementLayout.aligned($0.frame, alignment, in: screen.size) }
+        // A turned element lines up by the box round its shape; its frame moves with it.
+        update(ref) {
+            let box = $0.shapeBounds
+            let aligned = ElementLayout.aligned(box, alignment, in: screen.size)
+            $0.frame.origin.x += aligned.minX - box.minX
+            $0.frame.origin.y += aligned.minY - box.minY
+        }
     }
 
     func deleteScreen(_ id: DesignScreen.ID) {
@@ -448,21 +455,35 @@ final class DesignStore {
 
     // MARK: Changes made gradually
 
-    /// Starts a change made in many small steps, such as a drag or typing. Everything
-    /// until `endEdit()` undoes as one step.
-    func beginEdit() {
-        editBegins += 1
-        if isHoldingEdit { isEditingByHandInHold = true }
-        if editStart == nil { openEdit() }
+    /// Who has a change made in many small steps open. Each opens and closes its own part
+    /// of it; the change is one undo step from when the first opens it until the last
+    /// closes it, so that one ending while another goes on doesn't cut the other's short.
+    enum Editor: Hashable, Sendable {
+        /// A drag, a slider, typing, or a screen being generated: `beginEdit()`. They
+        /// share one part, which may be opened again and again (a slider opens it with
+        /// every move) and is closed once.
+        case hand
+        /// A spoken command: `beginHeldEdit()`.
+        case command
+        /// The selection being turned, by its knob or two fingers.
+        case turn
     }
 
-    func endEdit() {
-        guard !isHoldingEdit else {
-            // The hold keeps the step open; the edit by hand is only noted as over.
-            isEditingByHandInHold = false
-            return
-        }
-        guard let start = editStart else { return }
+    /// Who has the change under way open; empty when none has. Its step began at `editStart`.
+    @ObservationIgnored private var editors: Set<Editor> = []
+
+    /// Starts a change made in many small steps, such as a drag or typing. Everything
+    /// until `endEdit()` undoes as one step, together with whatever else is open meanwhile.
+    func beginEdit(by editor: Editor = .hand) {
+        // Only edits by hand are counted: they share one part, which any of them ends.
+        if editor == .hand { editBegins += 1 }
+        if editors.isEmpty { openEdit() }
+        editors.insert(editor)
+    }
+
+    /// Ends `editor`'s part of the change. Its step is closed once no one else's is open.
+    func endEdit(by editor: Editor = .hand) {
+        guard editors.remove(editor) != nil, editors.isEmpty, let start = editStart else { return }
         editStart = nil
         defer {
             editIsInHistory = false
@@ -489,11 +510,16 @@ final class DesignStore {
         markNeedsSaving()
     }
 
-    /// Whether a gradual edit is under way.
+    /// Whether a gradual edit is under way, whoever has it open.
     var isEditing: Bool { editStart != nil }
 
-    /// Counts every `beginEdit()`, so that whatever began an edit can tell whether anything
-    /// else has joined it since. Edits don't nest: any end ends them.
+    /// Whether `editor` has its part of the change under way open.
+    func isEditing(by editor: Editor) -> Bool { editors.contains(editor) }
+
+    /// Counts every edit by hand begun, so that whatever began one can tell whether anything
+    /// else has joined it since. Edits by hand don't nest: they share one part, and any end
+    /// by hand ends it. A spoken command's hold and a turn aren't counted: each has a part
+    /// of its own, which an end by hand leaves open.
     @ObservationIgnored private(set) var editBegins = 0
 
     /// Tells the system the document has changes to save, without a step in the history.
@@ -516,36 +542,23 @@ final class DesignStore {
         editStep = nil
     }
 
-    /// Whether an edit is being held open: see `beginHeldEdit()`.
-    @ObservationIgnored private(set) var isHoldingEdit = false
-    /// Whether an edit by hand is under way inside the hold: a drag begun while a spoken
-    /// command runs, or one already begun when the command started. Not a count: like
-    /// `beginEdit()` itself, which a slider calls with every move and ends once.
-    @ObservationIgnored private var isEditingByHandInHold = false
+    /// Whether a spoken command is holding a step open: see `beginHeldEdit()`.
+    var isHoldingEdit: Bool { isEditing(by: .command) }
 
     /// Starts an edit that stays open until `endHeldEdit()`, whatever begins and ends
     /// inside it. A spoken command makes several changes; held, they undo as the one
     /// step the command was. What the command itself does inside the hold doesn't call
-    /// `beginEdit()`: that is how an edit by hand is told from it.
+    /// `beginEdit()`: that is how an edit by hand is told from it. An edit already under
+    /// way goes on inside the hold.
     func beginHeldEdit() {
-        guard !isHoldingEdit else { return }
-        // Not counted in `editBegins`: inside the hold, an end only notes that the edit by
-        // hand is over, so whoever began that edit by hand may still end it.
-        // An edit already under way goes on inside the hold.
-        isEditingByHandInHold = editStart != nil
-        if editStart == nil { openEdit() }
-        isHoldingEdit = true
+        beginEdit(by: .command)
     }
 
     /// Ends the hold. If an edit by hand is still under way inside it (a finger still
     /// dragging when the command finishes), the step stays open for that edit to close:
     /// closed here, every further move of the drag would be an undo step of its own.
     func endHeldEdit() {
-        guard isHoldingEdit else { return }
-        isHoldingEdit = false
-        let stillOpen = isEditingByHandInHold
-        isEditingByHandInHold = false
-        if !stillOpen { endEdit() }
+        endEdit(by: .command)
     }
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {

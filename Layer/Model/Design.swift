@@ -70,6 +70,9 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var scale: CGFloat?
     /// In its screen's own points, the same units the generated SwiftUI uses.
     var frame: CGRect
+    /// How far it is turned about its centre, in degrees clockwise from 0 up to 360.
+    /// Nil when upright. Set it with `setRotation`.
+    var rotation: Double?
     var text: String
     /// The element's own colour: a button's or sticky note's fill, a symbol's ink.
     var tint: RGBColor
@@ -112,7 +115,7 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
 
     /// Everything about an element that is saved with the design. `ink` is saved apart.
     enum CodingKeys: String, CodingKey {
-        case id, kind, parent, scale, frame, text, tint, symbol, shape, imageID
+        case id, kind, parent, scale, frame, rotation, text, tint, symbol, shape, imageID
         case fontSize, fontWeight, textColor, cornerRadius, opacity, textAlignment, borderColor, borderWidth, hasShadow
         case name, isLocked, isHidden, isOn, value, buttonLook
     }
@@ -132,6 +135,8 @@ extension DesignElement {
         parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
         scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
         frame = try container.decode(CGRect.self, forKey: .frame)
+        // Kept as an angle set here is: from 0 up to 360, nothing when upright or not a number.
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation).flatMap(Rotation.kept)
         text = try container.decode(String.self, forKey: .text)
         tint = try container.decode(RGBColor.self, forKey: .tint)
         symbol = try container.decodeIfPresent(String.self, forKey: .symbol)

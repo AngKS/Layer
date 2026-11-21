@@ -166,7 +166,9 @@ enum SwiftUICodeGenerator {
             let inset = frame.minX - margin
             return inset >= 1 ? ["    .padding(.leading, \(number(inset)))"] : []
         }
-        let lines: [String]
+        /// The view up to its sized frame, and the placement modifiers that follow it.
+        var lines: [String]
+        var tail = placement
 
         switch element.kind {
         case .title:
@@ -174,9 +176,16 @@ enum SwiftUICodeGenerator {
             lines = [
                 "Text(\(literal(element.text)))",
                 "    .font(\(font(of: element, usual: titleFont(height: frame.height))))",
-            ] + textColor(of: element, usual: nil) + (centered && (element.textAlignment ?? .center) == .center
-                ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
-                : ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"] + placement)
+            ] + textColor(of: element, usual: nil)
+            if centered && (element.textAlignment ?? .center) == .center {
+                // A turned title is turned before it is stretched across the screen.
+                lines += element.resolvedRotation == 0
+                    ? ["    .frame(maxWidth: .infinity)", "    .multilineTextAlignment(.center)"]
+                    : ["    .multilineTextAlignment(.center)"]
+                tail = element.resolvedRotation == 0 ? [] : ["    .frame(maxWidth: .infinity)"]
+            } else {
+                lines += ["    .frame(width: \(number(frame.width)), alignment: .\(alignment))"]
+            }
 
         case .body:
             lines = [
@@ -185,7 +194,7 @@ enum SwiftUICodeGenerator {
             ] + textColor(of: element, usual: nil) + [
                 "    .multilineTextAlignment(.\(element.resolvedTextAlignment.rawValue))",
                 fillsWidth ? "    .frame(maxWidth: .infinity)" : "    .frame(width: \(number(frame.width)))",
-            ] + placement
+            ]
 
         case .text:
             let alignment = element.resolvedTextAlignment
@@ -195,15 +204,15 @@ enum SwiftUICodeGenerator {
             ] + textColor(of: element, usual: nil)
                 + (alignment == .leading ? [] : ["    .multilineTextAlignment(.\(alignment.rawValue))"])
                 + ["    .frame(width: \(number(frame.width)), alignment: .\(alignment.rawValue))"]
-                + placement
+
 
         case .image, .avatar:
-            lines = picture(element) + placement
+            lines = picture(element)
 
         case .button:
             lines = button(element, frame: fillsWidth
                 ? "        .frame(maxWidth: .infinity, minHeight: \(number(frame.height)))"
-                : "        .frame(width: \(number(frame.width)), height: \(number(frame.height)))") + placement
+                : "        .frame(width: \(number(frame.width)), height: \(number(frame.height)))")
 
         case .textField:
             lines = [
@@ -214,7 +223,7 @@ enum SwiftUICodeGenerator {
                     ? "    .frame(maxWidth: .infinity, minHeight: \(number(frame.height)))"
                     : "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
                 "    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: \(number(element.resolvedCornerRadius))))",
-            ] + placement
+            ]
 
         case .symbol:
             lines = [
@@ -222,22 +231,22 @@ enum SwiftUICodeGenerator {
                 "    .resizable()",
                 "    .scaledToFit()",
                 "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
-            ] + (element.tint == Theme.inkTint ? [] : ["    .foregroundStyle(\(color(element.tint)))"]) + placement
+            ] + (element.tint == Theme.inkTint ? [] : ["    .foregroundStyle(\(color(element.tint)))"])
 
         case .divider:
-            lines = ["Divider()"] + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"] + placement)
+            lines = ["Divider()"] + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"])
 
         case .shape:
-            lines = shape(element) + ["    .frame(width: \(number(frame.width)), height: \(number(frame.height)))"] + placement
+            lines = shape(element) + ["    .frame(width: \(number(frame.width)), height: \(number(frame.height)))"]
 
         case .toggle:
-            lines = toggle(element) + placement
+            lines = toggle(element)
 
         case .checkbox, .radio:
-            lines = control(element) + placement
+            lines = control(element)
 
         case .progress:
-            lines = progress(element) + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"] + placement)
+            lines = progress(element) + (fillsWidth ? [] : ["    .frame(width: \(number(frame.width)))"])
 
         case .stickyNote:
             // Sticky notes stay on the canvas; this is only here to keep the switch whole.
@@ -248,7 +257,11 @@ enum SwiftUICodeGenerator {
             return []
         }
 
-        return lines + finish(element)
+        // Upright, an element is finished and then placed. A turned one is finished first, so
+        // its border and shadow turn with it, then turned, then placed.
+        return element.resolvedRotation == 0
+            ? lines + tail + finish(element)
+            : lines + finish(element) + turn(element) + tail
     }
 
     // MARK: Exact positions
@@ -334,7 +347,7 @@ enum SwiftUICodeGenerator {
             return []
         }
 
-        return lines + finish(element) + ["    .offset(x: \(number(frame.minX)), y: \(number(frame.minY)))"]
+        return lines + finish(element) + turn(element) + ["    .offset(x: \(number(frame.minX)), y: \(number(frame.minY)))"]
     }
 
     // MARK: Pieces shared by both layouts
@@ -444,6 +457,11 @@ enum SwiftUICodeGenerator {
             "}",
             element.isOn ? ".fill(\(paint))" : ".stroke(\(paint), style: StrokeStyle(lineWidth: \(width), lineJoin: .round))",
         ].map { $0.hasPrefix(".") ? "    " + $0 : $0 }
+    }
+
+    /// The turn of an element, clockwise, about its centre: nothing when it is upright.
+    private static func turn(_ element: DesignElement) -> [String] {
+        element.resolvedRotation == 0 ? [] : ["    .rotationEffect(.degrees(\(number(CGFloat(element.resolvedRotation)))))"]
     }
 
     /// The border, shadow and opacity that any element can have.
