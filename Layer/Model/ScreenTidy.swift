@@ -112,8 +112,25 @@ enum ScreenTidy {
         let keptClear = Set(hosts.values.filter { !moves($0) }.map(\.id))
         let blocks = elements.filter { keptClear.contains($0.id) }.map(\.frame)
         let flowing = elements.filter { moves($0) && hosts[$0.id] == nil && !isBackdrop($0, on: old) }
-        let laid = layout(flowing, among: elements, keeping: blocks, on: device, from: old)
+        var laid = layout(flowing, among: elements, keeping: blocks, on: device, from: old)
+        // An unlocked backdrop grows with its screen, and isn't laid out otherwise.
+        if old.size != device.size, old.size.width > 0, old.size.height > 0 {
+            let (sx, sy) = (device.size.width / old.size.width, device.size.height / old.size.height)
+            for element in elements where !element.isLocked && !element.isHidden && isBackdrop(element, on: old) {
+                let f = element.frame
+                laid[element.id] = CGRect(x: f.minX * sx, y: f.minY * sy, width: f.width * sx, height: f.height * sy)
+            }
+        }
         return rounded(carry(hosts, with: laid, in: elements))
+    }
+
+    /// The share of the screen's area at which a locked element is a background, not an
+    /// obstacle: a locked hero picture is in the layout's way, a locked wallpaper isn't.
+    static let wallpaperShare: CGFloat = 0.9
+
+    /// Whether an element covers at least `share` of `device`'s screen.
+    private static func covers(_ element: DesignElement, _ share: CGFloat, on device: DeviceFrame) -> Bool {
+        element.frame.width * element.frame.height >= device.size.width * device.size.height * share
     }
 
     /// Whether an element is a backdrop on `device`: see `backdropShare`.
@@ -129,9 +146,9 @@ enum ScreenTidy {
         let rows = rows(of: moving)
         guard !rows.isEmpty else { return [:] }
         // Locked things are in the way, and so are shapes with something laid on them.
-        // Hidden ones, backdrops, drawings and other shapes aren't: they are under or over
-        // the layout, not part of it.
-        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !isBackdrop($0, on: old) }.map(\.frame) + blocks
+        // Hidden ones, locked wallpaper (see `wallpaperShare`), drawings and other shapes
+        // aren't: they are under or over the layout, not part of it.
+        let obstacles = elements.filter { $0.isLocked && !$0.isHidden && $0.kind != .drawing && $0.kind != .shape && !covers($0, wallpaperShare, on: old) }.map(\.frame) + blocks
 
         // Each row laid out across the column, from a top of 0.
         let tallest = device.size.height / 2

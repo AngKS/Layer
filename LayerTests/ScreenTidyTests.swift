@@ -279,6 +279,48 @@ struct ScreenTidyTests {
         #expect(frames[title.id] != nil)
     }
 
+    /// A locked picture that covers much of the screen, but not all, is still in the way.
+    @Test func aLockedHeroPictureIsKeptClear() throws {
+        var hero = element(.image, CGRect(x: 0, y: 100, width: 393, height: 500))
+        hero.isLocked = true
+        let others = [
+            element(.title, CGRect(x: 20, y: 60, width: 300, height: 30), text: "Title"),
+            element(.textField, CGRect(x: 20, y: 620, width: 353, height: 48), text: "A"),
+            element(.textField, CGRect(x: 20, y: 690, width: 353, height: 48), text: "B"),
+            element(.button, CGRect(x: 20, y: 760, width: 353, height: 50), text: "Go"),
+        ]
+        let frames = ScreenTidy.frames(for: [hero] + others, on: .iPhone)
+        #expect(frames[hero.id] == nil)
+        for other in others {
+            let frame = try #require(frames[other.id])
+            #expect(!frame.intersects(hero.frame), "\(frame) is on the hero")
+        }
+    }
+
+    /// A locked background that fills the screen is no obstacle: the rest is still tidied.
+    @Test func aLockedFullScreenBackgroundIsNotAnObstacle() throws {
+        var background = element(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
+        background.isLocked = true
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Hello")
+        let button = element(.button, CGRect(x: 40, y: 300, width: 300, height: 50), text: "Go")
+        let frames = ScreenTidy.frames(for: [background, title, button], on: .iPhone)
+        #expect(frames[background.id] == nil)
+        #expect(frames[title.id]?.minX == ScreenTidy.margin(on: .iPhone))
+        #expect(frames[button.id]?.minX == ScreenTidy.margin(on: .iPhone))
+    }
+
+    /// A background grows with its screen when the device changes; a locked one stays.
+    @Test func aBackgroundFillsTheNewDevice() throws {
+        let iPad = try iPad()
+        let background = element(.shape, CGRect(x: 0, y: 0, width: 393, height: 852))
+        let title = element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Hello")
+        let frames = ScreenTidy.frames(for: [background, title], on: iPad, from: .iPhone)
+        #expect(frames[background.id] == CGRect(origin: .zero, size: iPad.size))
+        var locked = background
+        locked.isLocked = true
+        #expect(ScreenTidy.frames(for: [locked, title], on: iPad, from: .iPhone)[locked.id] == nil)
+    }
+
     @Test func aMacKeepsAReadableColumn() throws {
         guard let mac = DeviceFrame.all.first(where: { $0.id == "imac" }) else { throw CancellationError() }
         let column = ScreenTidy.column(on: mac)
