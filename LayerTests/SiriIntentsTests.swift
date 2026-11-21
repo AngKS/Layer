@@ -541,6 +541,36 @@ struct OpeningDesignTests {
         }
     }
 
+    @Test func anOpenThatTimedOutNeverPicksLate() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: false)
+        defer { window.isHidden = true }
+        for _ in 0..<100 where design.isBeingPresented { try await Task.sleep(for: .milliseconds(10)) }
+        // The turn runs out while the dismiss is still on its way; the dismiss then finishes.
+        let turns = OneAtATime(limit: .milliseconds(100))
+        let steps = Steps()
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let open = Task {
+            try await turns.run {
+                try await DocumentBrowser.pick(url, in: browser, dismissing: { _, done in
+                    steps.all.append("dismissing")
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        steps.all.append("dismissed")
+                        done()
+                    }
+                }) { _ in steps.all.append("prepared") } picking: { _ in
+                    steps.all.append("picked")
+                }
+            }
+        }
+        guard case .failure? = await outcome(of: open, within: .seconds(2)) else {
+            Issue.record("the open should have run out of time")
+            return
+        }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(steps.all == ["prepared", "dismissing", "dismissed"], "a design was picked after the open gave up: \(steps.all)")
+    }
+
     @Test func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
         let (window, browser, design) = try browserShowingADesign(animated: true)
         defer { window.isHidden = true }

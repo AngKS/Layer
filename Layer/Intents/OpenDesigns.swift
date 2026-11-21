@@ -287,6 +287,8 @@ enum DocumentBrowser {
     ) async throws {
         if let presented = browser.presentedViewController {
             await prepare(presented)
+            // An open given up on meanwhile goes no further: the next may already be under way.
+            try Task.checkCancellation()
             let deadline = ContinuousClock.now + limit
             while presented.isBeingPresented, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
@@ -297,6 +299,8 @@ enum DocumentBrowser {
                 }
             }
         }
+        // Nor does one given up on while its design was being dismissed.
+        try Task.checkCancellation()
         picking(url)
     }
 
