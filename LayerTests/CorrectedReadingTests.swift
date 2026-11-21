@@ -107,6 +107,34 @@ struct KindSuggestionTests {
         model.store.delete(ref)
         #expect(model.suggestion == nil)
     }
+
+    /// Taking the suggestion lays the element out again from where it was sketched. Moved,
+    /// resized or turned since, or with its screen moved, taking it threw that away and
+    /// could put the element off its screen (G6). The offer goes once that happens.
+    @Test(arguments: ["moved", "resized", "turned", "screen moved"])
+    func aSuggestionGoesOnceItsElementOrScreenIsMoved(change: String) throws {
+        let (model, ref, suggestion) = try makeModel()
+        model.offer(suggestion)
+        guard case .screen(let screen) = ref.host else { return }
+        switch change {
+        case "moved": model.store.update(ref) { $0.frame.origin.y += 100 }
+        case "resized": model.store.update(ref) { $0.frame.size.width -= 40 }
+        case "turned": model.store.update(ref) { $0.rotation = 15 }
+        default: model.store.updateScreen(screen) { $0.origin.x += 200 }
+        }
+        let changed = try #require(model.store.resolve(ref)?.element)
+        #expect(model.suggestion == nil)
+        model.acceptSuggestion()
+        #expect(model.store.resolve(ref)?.element == changed)
+    }
+
+    /// Words put on it, as Magic Pen does just after offering, don't take the offer away.
+    @Test func aSuggestionStaysWhenOnlyItsWordsChange() throws {
+        let (model, ref, suggestion) = try makeModel()
+        model.offer(suggestion)
+        model.store.update(ref) { $0.text = "Email" }
+        #expect(model.suggestion == suggestion)
+    }
 }
 
 @Suite("Logging readings")

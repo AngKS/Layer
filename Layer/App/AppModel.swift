@@ -1403,7 +1403,20 @@ final class AppModel {
             }
             if present.count != selection.things.count { self.selection = CanvasSelection(present) }
         }
-        if let suggestion, store.resolve(suggestion.ref) == nil { dismissSuggestion() }
+        // Taking an offer lays the element out again from its sketch: once it, or its
+        // screen, has been moved, resized or turned, that would undo the move.
+        if suggestion != nil, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+    }
+
+    /// Where a suggestion's element is: its frame and turn, and where its screen is.
+    private struct SuggestedPlace: Equatable {
+        var frame: CGRect
+        var rotation: Double
+        var placement: Placement
+    }
+
+    private func place(of suggestion: KindSuggestion) -> SuggestedPlace? {
+        store.resolve(suggestion.ref).map { SuggestedPlace(frame: $0.element.frame, rotation: $0.element.resolvedRotation, placement: $0.placement) }
     }
 
     // MARK: Did you mean
@@ -1411,6 +1424,8 @@ final class AppModel {
     /// What the last close call nearly was, while that is on offer.
     private(set) var suggestion: KindSuggestion?
     @ObservationIgnored private var suggestionExpiry: Task<Void, Never>?
+    /// Where the suggestion's element was when it was offered.
+    @ObservationIgnored private var suggestedPlace: SuggestedPlace?
     /// How long a suggestion stays up when it is left alone.
     static let suggestionLifetime: Duration = .seconds(8)
 
@@ -1418,6 +1433,7 @@ final class AppModel {
     /// time, and goes by itself after a while.
     func offer(_ suggestion: KindSuggestion) {
         suggestionExpiry?.cancel()
+        suggestedPlace = place(of: suggestion)
         self.suggestion = suggestion
         suggestionExpiry = Task { [weak self] in
             try? await Task.sleep(for: Self.suggestionLifetime)
@@ -1442,6 +1458,7 @@ final class AppModel {
         suggestionExpiry?.cancel()
         suggestionExpiry = nil
         suggestion = nil
+        suggestedPlace = nil
     }
 
     /// True while a number field is being scrubbed.
