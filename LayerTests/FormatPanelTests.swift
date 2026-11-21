@@ -50,10 +50,8 @@ private struct PlainFieldOnTheSelection: View {
 @MainActor
 @Suite("Typing into the Format panel")
 struct TypingIntoTheFormatPanelTests {
-    private func host<Content: View>(_ content: Content) throws -> (window: UIWindow, view: UIView) {
-        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+    private func host<Content: View>(_ content: Content) async throws -> (window: UIWindow, view: UIView) {
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         let host = UIHostingController(rootView: content)
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -96,7 +94,7 @@ struct TypingIntoTheFormatPanelTests {
     /// that value in place of what was typed, and what is typed next goes to the new value.
     @Test func swiftUIsFormattedFieldSetsAsItIsTypedAndFollowsANewBinding() async throws {
         let elements = TwoElements()
-        let (window, view) = try host(PlainFieldOnTheSelection(elements: elements))
+        let (window, view) = try await host(PlainFieldOnTheSelection(elements: elements))
         defer { window.isHidden = true }
         let field = try #require(Self.textFields(in: view).first)
         #expect(field.becomeFirstResponder())
@@ -117,7 +115,7 @@ struct TypingIntoTheFormatPanelTests {
 
     @Test func aNumberTypedIsSetOnWhatWasSelectedWhenTypingBegan() async throws {
         let elements = TwoElements()
-        let (window, view) = try host(TypingIntoTheSelection(elements: elements))
+        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
         defer { window.isHidden = true }
         let field = try await focusedField(in: view)
         #expect(field.text == "10")
@@ -144,7 +142,7 @@ struct TypingIntoTheFormatPanelTests {
     /// Return ends typing as well, and sets the number on the same element.
     @Test func returnSetsItOnWhatWasSelectedWhenTypingBegan() async throws {
         let elements = TwoElements()
-        let (window, view) = try host(TypingIntoTheSelection(elements: elements))
+        let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
         defer { window.isHidden = true }
         let field = try await focusedField(in: view)
         type("100", into: field)

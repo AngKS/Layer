@@ -194,13 +194,11 @@ struct InkOverAnElementTests {
 @MainActor
 @Suite("The canvas and the keyboard")
 struct CanvasFocusTests {
-    @Test func aSketchTakenAwayLeavesTheKeyboardWithTheFieldBeingTypedIn() throws {
+    @Test func aSketchTakenAwayLeavesTheKeyboardWithTheFieldBeingTypedIn() async throws {
         let model = AppModel(document: LayerDocument())
         let coordinator = InkCanvas.Coordinator(model: model)
         model.ink = coordinator
-        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
         let container = UIView(frame: window.bounds)
         let field = UITextField(frame: CGRect(x: 20, y: 20, width: 200, height: 40))
         window.addSubview(container)
