@@ -73,9 +73,18 @@ struct DrawingSync {
     /// already. `current` is what the canvas holds now: strokes that stay keep their
     /// place and are handed back as they are, so that PencilKit still knows them.
     mutating func strokes(showing content: DesignContent, on current: [PKStroke]) -> [PKStroke]? {
+        strokes(showing: content, reading: { current })
+    }
+
+    /// The same, reading what the canvas holds only once it is plain that the design's
+    /// drawings have changed. Reading it bridges every stroke on the canvas out of PencilKit,
+    /// which every change to the design did, each frame of an element's drag among them,
+    /// though most changes leave every drawing as it was (audit C6).
+    mutating func strokes(showing content: DesignContent, reading current: () -> [PKStroke]) -> [PKStroke]? {
         let drawings = Self.onCanvas(content)
         let wanted = Dictionary(uniqueKeysWithValues: drawings.map { ($0.id, Shown(frame: $0.frame, ink: $0.ink, rotation: $0.resolvedRotation)) })
         guard wanted != shown else { return nil }
+        let current = current()
 
         let held = Dictionary(current.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var placed: [Double: PKStroke] = [:]

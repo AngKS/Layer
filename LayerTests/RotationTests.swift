@@ -537,6 +537,26 @@ struct TurningOneElementTests {
         #expect(board.rotation(of: board.note) == nil)
     }
 
+    /// The knob is let go while another finger still drags what it turned: the drag is still
+    /// adjusting the selection, so the action bar stays away, the guides stay up and the
+    /// screen it came from stays on top until it is dropped (audit C9).
+    @Test func lettingGoOfTheKnobMidDragLeavesTheSelectionBeingAdjusted() throws {
+        let board = TurnBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 10, snaps: false)
+        let owner = CanvasDrags.Owner()
+        board.drag(drags, board.note, by: 10, from: CGPoint(x: 560, y: 160), owner: owner)
+        board.model.endTurn()
+        #expect(board.model.isAdjusting, "the drag goes on")
+        board.drag(drags, board.note, by: 20, from: CGPoint(x: 560, y: 160), owner: owner)
+        drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        #expect(!board.model.isAdjusting)
+    }
+
     /// A screen being written is a step of its own (`AppModel.generateScreen`): a turn
     /// made meanwhile is another, and no line written after the turn is a step of its own.
     @Test func aTurnWhileAScreenIsGeneratedIsAStepOfItsOwn() {
@@ -1317,10 +1337,11 @@ struct TwistTests {
     // MARK: The twist and the drag under the first finger
 
     /// The first finger is already moving the button when the twist is told apart. The
-    /// turn begins first, so the move joins its step; then the drag ends. The second finger
-    /// turns about the first, which stays still, and lifts, ending the twist; the first then
-    /// moves on and lifts. SwiftUI still reports that drag, and its end, but neither moves
-    /// the button nor lets it join the screen it lies over.
+    /// turn begins first, so the move joins its step; then the drag ends, and the button
+    /// lands on the screen it lies over, in that step, as a drop would land it (audit C4).
+    /// The second finger turns about the first, which stays still, and lifts, ending the
+    /// twist; the first then moves on and lifts. SwiftUI still reports that drag, and its
+    /// end, but neither moves the button nor lands it again.
     @Test func aTwistAfterTheFingerBeganDraggingIsOneUndoStep() throws {
         let board = TurnBoard()
         board.store.updateCanvas { $0.snapsToGuides = false }
@@ -1330,7 +1351,8 @@ struct TwistTests {
         let drags = CanvasDrags()
         board.model.drags = drags
         board.model.selection = .element(button)
-        let frame = try #require(board.frame(of: button))
+        let (element, placement) = try #require(board.store.resolve(button))
+        let frame = element.frame
         let owner = CanvasDrags.Owner()
         let finger = CGPoint(x: 300, y: 420)
 
@@ -1340,19 +1362,27 @@ struct TwistTests {
         #expect(!drags.isDragging)
         #expect(board.store.isEditing(by: .turn) && !board.store.isEditing(by: .hand))
         #expect(board.model.isAdjusting, "the twist is still adjusting the selection")
+        let onScreen = DesignStore.ElementRef(host: .screen(board.screen), element: button.element)
+        #expect(board.model.selection == .element(onScreen), "it lands on the screen it lies over as its drag is cut short")
+        let landed = try #require(board.frame(of: onScreen))
+        let middle = board.canvasFrame(onScreen)
+        #expect(isClose(CGPoint(x: middle.midX, y: middle.midY), CGPoint(x: frame.midX + 3, y: frame.midY)))
 
         board.model.twist(by: 20)
         board.model.endTwist()
-        board.drag(drags, button, by: 15, from: finger, owner: owner)
+        // SwiftUI goes on with the drag as its view had it, on the open canvas, until it lifts.
+        drags.moveElement(button, from: frame, placement: placement, by: CGSize(width: 15, height: 0), startingAt: finger, owner: owner, model: board.model) {
+            drags.moveRule(for: element, placement: placement, on: nil, model: board.model)
+        }
         drags.dropElement(button, findsNewHome: true, owner: owner, model: board.model)
-        #expect(board.frame(of: button) == frame.offsetBy(dx: 3, dy: 0))
-        #expect(board.model.selection == .element(button), "it stays on the open canvas")
+        #expect(board.frame(of: onScreen) == landed, "neither moved nor landed again")
+        #expect(board.model.selection == .element(onScreen))
         #expect(!drags.isDragging && !board.store.isEditing && !board.model.isTurning && !board.model.isAdjusting)
-        #expect(board.rotation(of: button) == 20)
+        #expect(board.rotation(of: onScreen) == 20)
         board.undo.undo()
         #expect(board.rotation(of: button) == nil)
         #expect(board.frame(of: button) == frame)
-        #expect(!board.undo.canUndo, "the move and the turn were one step")
+        #expect(!board.undo.canUndo, "the move, its landing and the turn were one step")
     }
 
     /// The finger that was dragging lands again, after the twist, whether SwiftUI cancelled

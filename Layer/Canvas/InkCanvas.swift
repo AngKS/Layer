@@ -165,7 +165,7 @@ struct InkCanvas: UIViewRepresentable {
         /// along with every gesture.
         let twist = TwistGestureRecognizer()
         private var fingerDraws = true
-        private let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
+        let palette = PKToolPicker(toolItems: MagicPen.paletteItems())
         private var tool: AppModel.Tool?
         private var isFollowing = false
         /// The view size the viewport was last arranged for.
@@ -283,7 +283,10 @@ struct InkCanvas: UIViewRepresentable {
                 canvas.pinchGestureRecognizer?.require(toFail: twist)
             }
 
-            palette.stateAutosaveName = "app.layer.palette"
+            // Not while unit tests run inside the app: a test that picked up the eraser or
+            // the lasso changed the pen the app opened with afterwards. Left unset, the palette
+            // saves under a name of PencilKit's own, so it is told to save nothing.
+            palette.stateAutosaveName = AppSettings.isRunningUnitTests ? nil : "app.layer.palette"
             palette.colorUserInterfaceStyle = .light
             // Every design opens with the Magic Pen in hand, whatever was used last.
             palette.selectedToolItemIdentifier = MagicPen.identifier
@@ -779,7 +782,15 @@ struct InkCanvas: UIViewRepresentable {
             // The design changed while a tool is in use (a spoken command, say): what the tool
             // has done so far is followed first, not drawn over.
             followInkNotYetFollowed()
-            guard let strokes = drawings.strokes(showing: model.store.content, on: documentCanvas.drawing.strokes) else { return }
+            // The canvas's strokes are read only if a drawing has changed: see `DrawingSync`.
+            let canvas = documentCanvas
+            guard let strokes = drawings.strokes(showing: model.store.content, reading: {
+                let current = canvas.drawing.strokes
+                #if DEBUG
+                CanvasWork.strokesRead += current.count
+                #endif
+                return current
+            }) else { return }
             isShowingDrawings = true
             defer { isShowingDrawings = false }
             documentCanvas.drawing = PKDrawing(strokes: strokes)
@@ -800,6 +811,11 @@ struct InkCanvas: UIViewRepresentable {
             documentCanvas.inkUndoManager.removeAllActions()
         }
 
+        /// What Undo calls a use of a tool on the document canvas.
+        static func stepName(for tool: any PKTool) -> String {
+            tool is PKEraserTool ? String(localized: "Erase") : String(localized: "Drawing")
+        }
+
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isAtOpeningViewport = false
             if canvasView === sketchCanvas {
@@ -812,6 +828,7 @@ struct InkCanvas: UIViewRepresentable {
                 hasFollowedThisUse = false
                 if let toolEdit { model.store.endEdit(toolEdit) }
                 toolEdit = model.store.beginEdit()
+                model.store.name(toolEdit, Self.stepName(for: canvasView.tool))
             }
         }
 

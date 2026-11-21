@@ -497,6 +497,28 @@ final class SketchFlowUITests: XCTestCase {
         attach("ink-over-a-button")
     }
 
+    /// A selected drawing is dragged by its whole box, but a tap inside the box, off its ink,
+    /// reaches what lies under it: here a button that a line drawn across the screen's corner
+    /// has in its box. The box used to swallow the tap (audit C12).
+    func testATapInsideASelectedDrawingsBoxPicksWhatIsUnderIt() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        control("Draw").tap()
+        choosePaletteTool("Pen")
+        // A line from above the button's left to below its right: its box holds the button,
+        // and it passes 40 points or more from where the button is tapped below.
+        let centre = button.centre
+        stroke(CGPoint(x: centre.x - 150, y: centre.y - 100), CGPoint(x: centre.x + 150, y: centre.y + 100))
+        control("Draw").tap()
+
+        point(CGPoint(x: centre.x - 120, y: centre.y - 80)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on the ink should pick the drawing")
+        point(CGPoint(x: centre.x + 80, y: centre.y)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button inside the drawing's box should pick the button")
+        attach("tap-inside-a-drawings-box")
+    }
+
     /// In Draw the palette goes while text is typed, and comes back as the keyboard goes
     /// (audit C5, follow-up).
     func testThePaletteComesBackWhenTypingEndsInDraw() {

@@ -136,6 +136,8 @@ final class AppModel {
         didSet {
             if selection != oldValue {
                 isEditingText = false
+                // The format panel's changes so far are a step, apart from the next selection's.
+                endAdjustmentNow()
                 // Several things turn about a pivot fixed as they are selected, and forgotten
                 // when the selection changes: selected again, they form a new one.
                 turnSession = nil
@@ -370,19 +372,34 @@ final class AppModel {
             if content.title != nil { self?.hasHadName = true }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
-            // After this change is done with: ending a drag ends the edit it is part of.
-            if self?.drags?.isDragging == true {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    drags?.endIfDraggedIsGone(model: self)
-                }
-            }
+            // Something else may have locked or taken away what a finger is dragging.
+            self?.checkDragAfterChange()
             self?.followModelChoice()
             self?.dropSelectionOfMissingThings()
             self?.stopGeneratingForAScreenThatIsGone()
             self?.matchNameAndFile()
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
+        }
+    }
+
+    /// The check put off until after a change, of whether what a drag moves is still there.
+    @ObservationIgnored private var dragCheck: Task<Void, Never>?
+
+    /// Sees, once the change being told of is done with, whether a drag under way still has
+    /// what it moves: ending the drag ends the edit the change may be part of. Not for the
+    /// drag's own frames, which neither lock nor take away what it moves, and once for all
+    /// the changes made before it runs. A task was made for every change, each frame of a
+    /// drag among them (audit C6).
+    private func checkDragAfterChange() {
+        guard dragCheck == nil, let drags, drags.isDragging, !drags.isMakingChange(in: store) else { return }
+        #if DEBUG
+        CanvasWork.dragChecks += 1
+        #endif
+        dragCheck = Task { @MainActor [weak self] in
+            guard let self else { return }
+            dragCheck = nil
+            drags.endIfDraggedIsGone(model: self)
         }
     }
 
@@ -467,6 +484,7 @@ final class AppModel {
         let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
         let ownsEdit = joined == nil
         let edit = joined ?? store.beginEditOfItsOwn(by: .app)
+        store.name(edit, String(localized: "Generate Screen"))
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
         let screen = store.act(for: edit) { () -> DesignScreen in
             let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
@@ -1070,6 +1088,20 @@ final class AppModel {
         }
     }
 
+    /// A tap in the area that drags the selected element, at a point in the view: a selected
+    /// drawing's box, or the selected element's with the palette up. It reaches what it would
+    /// have reached with no area there: in Draw the canvas, as a finger's tap does when a
+    /// finger doesn't draw; in Select whatever is drawn on top there, as the targets under
+    /// the area would pick it. The area used to take the tap and do nothing (audit C12).
+    func selectionAreaTapped(at viewPoint: CGPoint) {
+        if tool == .draw {
+            guard !fingerDraws else { return }
+            canvasTapped(at: viewPoint)
+        } else {
+            pick(hoverTarget(at: viewPoint))
+        }
+    }
+
     /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
     /// is drawn over every element and screen, so where a drawing's ink lies over the target
     /// the tap picks the drawing, as hover and a tap with the palette up do.
@@ -1189,7 +1221,37 @@ final class AppModel {
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
 
-    /// True while `rehostSelection()` names what is selected afresh.
+    /// Gives things a drag moved to whatever they now lie on, as the drag ends some way other
+    /// than its finger lifting: SwiftUI cancelled it, the tool changed, a twist cut it short
+    /// (see `CanvasDrags`). The selection goes on naming those of them it named, wherever they
+    /// now are, and a turn of them under way goes on: they are still the same things.
+    func rehost(_ things: [CanvasSelection]) {
+        let selected = selection
+        let session = turnSession.flatMap { $0.selection == selected && $0.matches(store) ? $0 : nil }
+        // Moved to its new host, an element drops out of the selection until it is named again.
+        isRehosting = true
+        defer { isRehosting = false }
+        var renamed: [CanvasSelection: CanvasSelection] = [:]
+        // In the design's order, back to front: each lands on top of its new host's things, so
+        // landed in any other order they would be stacked differently there (review I1).
+        let inOrder = CanvasSelection(things).map { store.things(in: $0) } ?? []
+        store.asOneStep {
+            for case .element(let ref) in inOrder {
+                let now = store.rehost(ref)
+                if now != ref { renamed[.element(ref)] = .element(now) }
+            }
+        }
+        guard let selected, selected.things.contains(where: { renamed[$0] != nil }) else { return }
+        let rehosted = CanvasSelection(selected.things.map { renamed[$0] ?? $0 })
+        selection = rehosted
+        // The new selection let go of the session as it was set; it is the same one.
+        if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
+        if case .element(let ref, let degrees)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
+            turnStart = .element(now, degrees: degrees)
+        }
+    }
+
+    /// True while `rehostSelection()` or `rehost(_:)` names what is selected afresh.
     @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
@@ -1389,7 +1451,13 @@ final class AppModel {
         // The turn's own step: a drag, a command or a screen being generated that is under
         // way, or that begins or ends meanwhile, has its own, and neither ends the other.
         // A drag the turn cuts short goes on as the turn, one step with it.
-        turnEdit = store.beginEdit(by: .turn, takingOver: cuttingDragShort ? drags?.handOverEdit() : nil)
+        let drag = cuttingDragShort ? drags?.handOverEdit() : nil
+        turnEdit = store.beginEdit(by: .turn, takingOver: drag)
+        if let drag, drag === turnEdit {
+            store.rename(turnEdit, String(localized: "Move and Rotate"))
+        } else {
+            store.name(turnEdit, String(localized: "Rotate"))
+        }
         isAdjusting = true
         isTurning = true
         return true
@@ -1435,7 +1503,8 @@ final class AppModel {
         turnStart = nil
         isTurning = false
         isTwisting = false
-        isAdjusting = false
+        // A drag still under way, another finger's, is still adjusting the selection (C9).
+        isAdjusting = drags?.isDragging ?? false
         snappedTurn = nil
         startMark = nil
         if let turnEdit { store.endEdit(turnEdit) }
@@ -1671,7 +1740,7 @@ final class AppModel {
     func beginScrubbing() {
         adjustmentEnd?.cancel()
         isScrubbing = true
-        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
+        beginAdjustment()
     }
 
     func endScrubbing() {
@@ -1690,8 +1759,10 @@ final class AppModel {
     @ObservationIgnored private var adjustment: DesignStore.Edit?
 
     /// Makes a run of quick changes, such as dragging a slider or a colour, one undo step.
+    /// Only the panel's own: what else is done meanwhile, a delete or a lock, is a step of its
+    /// own, and so is a change made once the selection has changed (M14).
     func adjusting(_ body: () -> Void) {
-        if adjustment?.isOpen != true { adjustment = store.beginEdit() }
+        beginAdjustment()
         store.act(for: adjustment, body)
         // A scrub ends its own edit when it ends.
         guard !isScrubbing else { return }
@@ -1702,6 +1773,23 @@ final class AppModel {
             if let adjustment { store.endEdit(adjustment) }
             adjustment = nil
         }
+    }
+
+    /// Opens the panel's own edit, unless it is open already.
+    private func beginAdjustment() {
+        guard adjustment?.isOpen != true else { return }
+        adjustment = store.beginEdit(takingOnlyItsOwn: true)
+        store.name(adjustment, String(localized: "Format"))
+    }
+
+    /// Ends the panel's run of changes now rather than at its pause: the panel is for another
+    /// selection. A scrub under way ends its own as it ends.
+    private func endAdjustmentNow() {
+        guard !isScrubbing, let adjustment else { return }
+        adjustmentEnd?.cancel()
+        adjustmentEnd = nil
+        store.endEdit(adjustment)
+        self.adjustment = nil
     }
 
     // MARK: Adding things

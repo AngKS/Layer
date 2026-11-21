@@ -217,7 +217,11 @@ private struct TextEditor: View {
         .textFieldStyle(.roundedBorder)
         .padding(16)
         .frame(width: 320)
-        .onAppear { if edit?.isOpen != true { edit = model.store.beginEdit() } }
+        .onAppear {
+            guard edit?.isOpen != true else { return }
+            edit = model.store.beginEdit()
+            model.store.name(edit, String(localized: "Typing"))
+        }
         .onDisappear {
             if let edit { model.store.endEdit(edit) }
             edit = nil

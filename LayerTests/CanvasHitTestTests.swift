@@ -427,3 +427,35 @@ struct GlideAndFingerTests {
         #expect(model.zoomScale == 2)
     }
 }
+
+/// The unit tests run inside the app. The palettes their canvases make don't save which pen
+/// is in hand: a test that picked up the eraser or the lasso changed the pen the app opened
+/// with afterwards.
+@MainActor
+@Suite("The palette in unit tests")
+struct PaletteStateInTestsTests {
+    @Test func aCanvasMadeInATestDoesntSaveItsPalettesState() {
+        let model = AppModel(document: LayerDocument())
+        let coordinator = InkCanvas.Coordinator(model: model)
+        #expect(coordinator.palette.stateAutosaveName == nil)
+    }
+}
+
+/// A tap in a selected drawing's box, which takes the drag that moves the drawing, reaches what
+/// lies under it there (audit C12; the UI test `testATapInsideASelectedDrawingsBoxPicksWhatIsUnderIt`
+/// covers the area itself).
+@MainActor
+@Suite("A tap in the selection's area")
+struct SelectionAreaTapTests {
+    @Test func inSelectItPicksWhatIsDrawnOnTopThere() {
+        let board = HitBoard()
+        board.model.tool = .select
+        board.model.selection = .element(board.note)
+        board.model.selectionAreaTapped(at: board.middle(of: .element(board.button)))
+        #expect(board.model.selection == .element(board.button))
+        board.model.selectionAreaTapped(at: CGPoint(x: board.middle(of: .element(board.button)).x, y: 200))
+        #expect(board.model.selection == .screen(board.screen))
+        board.model.selectionAreaTapped(at: CGPoint(x: 1000, y: 700))
+        #expect(board.model.selection == nil)
+    }
+}
