@@ -234,6 +234,39 @@ struct TurningOneElementTests {
         board.model.endTurn()
     }
 
+    /// Taken hold of on a mark (upright, say), the knob holds there for its first few degrees
+    /// without a tick: the tick is for snapping to a mark on the way, not for the angle it
+    /// started at. Back into that mark once it has left it, it ticks.
+    @Test func noTickForTheMarkATurnStartsOn() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        #expect(board.model.turnSelection(by: 2, snaps: true))
+        #expect(board.rotation(of: board.note) == nil, "it holds upright")
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: -3, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 20, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 2, snaps: true)
+        #expect(board.model.snappedTurn == 0)
+        board.model.endTurn()
+
+        // From 43°, near the 45 mark, and for several things at once.
+        board.turn(board.note, to: 43)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 3, snaps: true)
+        #expect(board.rotation(of: board.note) == 45 && board.model.snappedTurn == nil)
+        board.model.endTurn()
+        board.select([board.title, board.note])
+        board.model.beginTurn()
+        board.model.turnSelection(by: 1, snaps: true)
+        #expect(board.model.snappedTurn == nil)
+        board.model.turnSelection(by: 44, snaps: true)
+        #expect(board.model.snappedTurn == 45)
+        board.model.endTurn()
+    }
+
     @Test func aTurnCarriesOnFromTheAngleItHad() {
         let board = TurnBoard()
         board.turn(board.note, to: 100)

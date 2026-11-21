@@ -1170,8 +1170,11 @@ final class AppModel {
     /// True from `beginTurn()` to `endTurn()`, while the knob or two fingers turn the selection.
     private(set) var isTurning = false
     /// The angle a turn has snapped to, while it is held there; nil between the 45s. A
-    /// tick plays as it snaps.
+    /// tick plays as it snaps. Nil, too, while it is held at the mark it started on, until
+    /// it has left it: taking hold of an upright element is no snap.
     private(set) var snappedTurn: Double?
+    /// The mark the turn under way started on, until it leaves it.
+    @ObservationIgnored private var startMark: Double?
 
     /// What the turn under way turns, and how far it was turned when the turn began.
     private enum TurnStart {
@@ -1208,14 +1211,19 @@ final class AppModel {
     @discardableResult
     func beginTurn() -> Bool {
         guard !isTurning, canTurnSelection else { return false }
+        let start: Double
         if let turnable = turnableElement {
             turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
+            start = turnable.element.resolvedRotation
         } else if let session = severalTurn {
             turnSession = session
             turnStart = .several(turned: session.turned)
+            start = session.outline.degrees + session.turned
         } else {
             return false
         }
+        let (mark, isOnMark) = Rotation.snapped(start)
+        startMark = isOnMark ? mark : nil
         // The turn's own part of the step: a drag, a command or a screen being generated
         // that is under way, or that begins or ends meanwhile, shares the step without
         // closing it while the turn goes on, and the turn doesn't close theirs.
@@ -1249,7 +1257,12 @@ final class AppModel {
         case nil:
             return false
         }
-        if snappedTurn != snapped { snappedTurn = snapped }
+        // Held at the mark it started on, it hasn't snapped to it: no tick until it has left.
+        var shown = snapped
+        if let mark = startMark {
+            if snapped == mark { shown = nil } else { startMark = nil }
+        }
+        if snappedTurn != shown { snappedTurn = shown }
         return snapped != nil
     }
 
@@ -1262,6 +1275,7 @@ final class AppModel {
         isTwisting = false
         isAdjusting = false
         snappedTurn = nil
+        startMark = nil
         store.endEdit(by: .turn)
     }
 
