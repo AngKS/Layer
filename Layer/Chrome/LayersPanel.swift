@@ -107,7 +107,7 @@ private struct LayersList: View {
     private func row(_ element: DesignElement, ref: DesignStore.ElementRef, selection: CanvasSelection?, hovered: CanvasSelection?) -> some View {
         let target = CanvasSelection.element(ref)
         return LayerRow(
-            model: model, ref: ref, symbol: element.symbol ?? element.kind.symbol, name: element.displayName,
+            model: model, ref: ref, symbol: element.symbol.map(SystemSymbol.resolve) ?? element.kind.symbol, name: element.displayName,
             isLocked: element.isLocked, isHidden: element.isHidden,
             isSelected: selection?.contains(target) == true, isHovered: hovered == target
         )

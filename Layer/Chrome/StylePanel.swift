@@ -73,7 +73,7 @@ private struct ElementSettings: View {
 
     var body: some View {
         PanelHeader(
-            symbol: element.symbol ?? element.kind.symbol,
+            symbol: element.symbol.map(SystemSymbol.resolve) ?? element.kind.symbol,
             name: Binding(get: { element.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }),
             placeholder: element.kind.layerName,
             onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }

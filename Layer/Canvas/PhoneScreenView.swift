@@ -225,7 +225,7 @@ struct ElementView: View {
                 .fill(Theme.dividerLine)
 
         case .symbol:
-            Image(systemName: element.symbol ?? "questionmark.square.dashed")
+            Image(systemName: SystemSymbol.resolve(element.symbol ?? "questionmark.square.dashed"))
                 .resizable()
                 .scaledToFit()
                 .foregroundStyle(element.tint.color)
