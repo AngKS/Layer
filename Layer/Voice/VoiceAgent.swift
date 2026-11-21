@@ -27,7 +27,9 @@ final class VoiceAgent: VoiceCommandRunner {
     /// under one where the canvas was the same. A step that makes something still hands
     /// back its handle, which is what a further step needs.
     static func looksAgainBetweenSteps(with choice: ModelChoice) -> Bool {
-        choice.hostedProvider != nil
+        // Hosted only where the profile runs a hosted model: one is named, and this system
+        // can run it. Otherwise the on-device model carries the command out.
+        choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported
     }
 
     /// Gets the model ready to be asked: the conversation is made, told the rules, the

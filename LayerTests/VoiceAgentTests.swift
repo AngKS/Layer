@@ -241,8 +241,15 @@ struct VoiceAgentTests {
 
     @Test func whichModelsAreToldAboutTheCanvasAgainBetweenSteps() {
         #expect(!VoiceAgent.looksAgainBetweenSteps(with: .appleIntelligence))
-        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")))
-        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")))
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.anthropic, model: "claude-test")) == HostedLanguageModel.isSupported)
+        #expect(VoiceAgent.looksAgainBetweenSteps(with: .hosted(.lmStudio, model: "local")) == HostedLanguageModel.isSupported)
+    }
+
+    /// A design that names a provider but no model is carried out by the on-device model,
+    /// so it isn't told about the canvas again between steps either: three seconds a
+    /// command, measured on an iPad (V9).
+    @Test func aChoiceThatFallsBackOnTheDeviceIsntToldAgain() {
+        #expect(!VoiceAgent.looksAgainBetweenSteps(with: ModelChoice(provider: HostedProvider.openAI.rawValue, model: nil)))
     }
 
     /// Getting the model ready asks it nothing, and leaves it ready to be asked.
