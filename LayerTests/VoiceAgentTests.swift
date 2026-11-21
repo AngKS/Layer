@@ -83,6 +83,100 @@ struct VoiceAgentTests {
         #expect(outcome.lines.first?.contains("Profile") == true)
     }
 
+    // MARK: Taking turns
+
+    /// A session whose transcript a test writes, and the turns taken against it.
+    private static func turnsWithATranscript() -> (session: LanguageModelSession, turns: VoiceToolTurns) {
+        let session = LanguageModelSession(model: ScriptedLanguageModel(script: [:]))
+        let turns = VoiceToolTurns()
+        turns.session = session
+        return (session, turns)
+    }
+
+    /// An answer asking for calls with these ids, as its transcript entry.
+    private static func answer(_ ids: String...) -> Transcript.Entry {
+        .toolCalls(Transcript.ToolCalls(ids.map { Transcript.ToolCall(id: $0, toolName: "setText", arguments: GeneratedContent(properties: [:])) }))
+    }
+
+    /// Waits for `call`'s turn, giving up after a second. False if it didn't come.
+    private static func turnComes(for call: String, in turns: VoiceToolTurns) async -> Bool {
+        let waiting = Task { await turns.waitForTurn(of: call) }
+        let timer = Task {
+            try await Task.sleep(for: .seconds(1))
+            waiting.cancel()
+        }
+        defer { timer.cancel() }
+        return await waiting.value
+    }
+
+    /// A call id the model used in an earlier answer takes its place in the new one. It
+    /// kept its old place: run out of turn, and when it ran first the call after it waited
+    /// for good. An answer is known by its transcript entry (review of V2).
+    @Test func aCallIdUsedAgainTakesItsPlaceInItsNewAnswer() async {
+        let (session, turns) = Self.turnsWithATranscript()
+        session.transcript.append(Self.answer("a"))
+        #expect(await Self.turnComes(for: "a", in: turns))
+        turns.finished()
+
+        // "a" again, then "c": "a" goes first, and "c" once "a" has run.
+        session.transcript.append(Self.answer("a", "c"))
+        #expect(await Self.turnComes(for: "a", in: turns))
+        turns.finished()
+        #expect(await Self.turnComes(for: "c", in: turns))
+        turns.finished()
+
+        // "x", then "a" again: "a" waits for "x".
+        session.transcript.append(Self.answer("x", "a"))
+        #expect(!(await Self.turnComes(for: "a", in: turns)))
+    }
+
+    /// A tool that throws ends its answer: the calls waiting behind it give up rather
+    /// than run (review of V2).
+    @Test func aToolThatThrowsStopsTheRestOfItsAnswer() async throws {
+        let (session, turns) = Self.turnsWithATranscript()
+        session.transcript.append(Self.answer("1", "2"))
+        #expect(await Self.turnComes(for: "1", in: turns))
+        let second = Task { await turns.waitForTurn(of: "2") }
+        try await Task.sleep(for: .milliseconds(50))
+
+        let failing = TakingTurns(FailingTool(), turns: turns)
+        await #expect(throws: FailingTool.Failure.self) {
+            try await failing.call(arguments: FailingTool.Arguments(GeneratedContent(properties: ["note": "x"])))
+        }
+
+        #expect(await second.value == false)
+    }
+
+    /// End to end: a call id used again in a later answer of the same command, with a
+    /// call after it. The command finishes, each step in the order asked (review of V2).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCallIdUsedAgainTakesItsPlaceInTheNewAnswer() async throws {
+        for _ in 1...5 {
+            let bench = bench(["two answers": [Step(tool: "setText", arguments: #"{"element":"E2","text":"One"}"#, id: "a")] + Step.together([
+                Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#, id: "a"),
+                Step(tool: "setText", arguments: #"{"element":"E2","text":"Two"}"#, id: "c"),
+            ])])
+
+            let outcome = try #require(await Self.run("two answers", on: bench.agent, within: .seconds(3)))
+
+            #expect(outcome.lines.count == 3)
+            #expect(bench.button?.text == "Two")
+            #expect(bench.button?.tint == ColourWords.parse("blue"))
+        }
+    }
+
+    /// Runs `command`, and stops it if it is still running after `limit`. Nil if it had to be stopped.
+    private static func run(_ command: String, on agent: VoiceAgent, within limit: Duration) async -> VoiceOutcome? {
+        let running = Task { await agent.run(command) }
+        let timer = Task {
+            try await Task.sleep(for: limit)
+            running.cancel()
+        }
+        let outcome = await running.value
+        timer.cancel()
+        return outcome.wasCancelled ? nil : outcome
+    }
+
     /// "Make the title bold and duplicate it", asked for in one answer: the copy is made
     /// after the bold, so it is bold too, every time (V2).
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
@@ -610,3 +704,18 @@ struct VoiceAgentTests {
     }
 }
 
+/// A tool that always throws.
+private struct FailingTool: Tool {
+    struct Failure: Error {}
+    let name = "fail"
+    let description = "Always fails."
+
+    @Generable
+    struct Arguments {
+        var note: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        throw Failure()
+    }
+}

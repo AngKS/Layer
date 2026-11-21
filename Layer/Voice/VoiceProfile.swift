@@ -119,7 +119,7 @@ private extension LanguageModelSession.DynamicProfile {
         onToolCall { call in
             guard await turns.waitForTurn(of: call.id) else { throw CancellationError() }
             guard await hooks.mayRun() else {
-                await turns.finished()
+                await turns.failed()
                 throw CancellationError()
             }
             await hooks.willRun(call.toolName)
@@ -142,76 +142,117 @@ private extension LanguageModelSession.DynamicProfile {
 /// ahead of it to have run.
 ///
 /// The order is the answer's own: the session's transcript holds the answer's calls before
-/// any of them runs. A call's turn begins in `onToolCall` and ends when its tool returns
-/// (`TakingTurns`), as `onToolOutput` comes only once every call of the answer has run.
-/// If one call fails, the session cancels the rest, and a call waiting here gives up.
+/// any of them runs, and an answer is known by its transcript entry, as a model may use a
+/// call id again in a later answer. A call's turn begins in `onToolCall` and ends when its
+/// tool returns (`TakingTurns`), as `onToolOutput` comes only once every call of the
+/// answer has run. A tool that throws ends the answer: the session cancels the rest, and
+/// whatever is waiting here gives up.
 @MainActor
 final class VoiceToolTurns {
     /// The conversation whose answers are taken in turn.
     weak var session: LanguageModelSession?
-    /// The calls of the answer under way, in the order the model asked for them.
+
+    /// The transcript entry of the answer under way.
+    private var answer: String?
+    /// Its calls, in the order the model asked for them.
     private var order: [String] = []
+    /// Which places in `order` a call has arrived for.
+    private var arrived: Set<Int> = []
     /// How many of them have had their turn.
     private var taken = 0
-    private var waiting: [(id: UUID, position: Int, turn: CheckedContinuation<Bool, Never>)] = []
+    /// Whether a call of the answer threw, or was refused.
+    private var hasFailed = false
+
+    private struct Waiter {
+        let id: UUID
+        let position: Int
+        let turn: CheckedContinuation<Bool, Never>
+    }
+
+    private var waiting: [Waiter] = []
 
     /// Waits until the calls asked for ahead of `call` have run. False if the command was
-    /// stopped while it waited.
+    /// stopped, or its answer ended, while it waited.
     func waitForTurn(of call: String) async -> Bool {
         let position = position(of: call)
+        guard !hasFailed else { return false }
         guard position > taken else { return true }
         let id = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { turn in
                 if Task.isCancelled {
                     turn.resume(returning: false)
-                } else {
-                    waiting.append((id, position, turn))
+                    return
                 }
+                waiting.append(Waiter(id: id, position: position, turn: turn))
             }
         } onCancel: {
             Task { @MainActor in self.giveUp(id) }
         }
     }
 
-    /// The call whose turn it was has run, or won't: the next one goes.
+    /// The call whose turn it was has run: the next one goes.
     func finished() {
         taken += 1
         let due = waiting.filter { $0.position <= taken }
         waiting.removeAll { $0.position <= taken }
-        for waiter in due { waiter.turn.resume(returning: true) }
+        for waiter in due { resume(waiter, goes: true) }
     }
 
-    /// Where `call` comes in its answer.
+    /// The call whose turn it was threw, or was refused: nothing behind it runs.
+    func failed() {
+        hasFailed = true
+        giveUpEveryone()
+    }
+
+    /// Where `call` comes in its answer, which it starts if it is the first heard from.
     private func position(of call: String) -> Int {
-        if let position = order.firstIndex(of: call) { return position }
-        if let asked = calls(alongside: call) {
-            // The first heard from of a new answer. The session runs every call of an
-            // answer before it asks for the next, so nothing of the last one should still
-            // be waiting; anything that is gives up.
-            for waiter in waiting { waiter.turn.resume(returning: false) }
-            waiting = []
-            order = asked
-            taken = 0
-        } else {
+        guard let asked = calls(alongside: call) else {
             // Not in the transcript: it goes after those already heard from.
             order.append(call)
+            arrived.insert(order.count - 1)
+            return order.count - 1
         }
-        return order.firstIndex(of: call) ?? order.count - 1
+        if asked.entry != answer {
+            // A new answer. The session runs every call of an answer before it asks for
+            // the next, so nothing of the last one should still be waiting; anything that
+            // is gives up.
+            giveUpEveryone()
+            answer = asked.entry
+            order = asked.ids
+            arrived = []
+            taken = 0
+            hasFailed = false
+        }
+        // An id twice in one answer: each arrival takes the next place it has.
+        let places = order.indices.filter { order[$0] == call }
+        let position = places.first { !arrived.contains($0) } ?? places.first ?? order.count
+        arrived.insert(position)
+        return position
     }
 
-    /// The ids of the calls `call` was asked for with, in the order they were asked for.
-    private func calls(alongside call: String) -> [String]? {
+    /// The transcript entry `call` was asked for in, and the ids of its calls in order.
+    private func calls(alongside call: String) -> (entry: String, ids: [String])? {
         guard let transcript = session?.transcript else { return nil }
         for case .toolCalls(let calls) in transcript.reversed() where calls.contains(where: { $0.id == call }) {
-            return calls.map(\.id)
+            return (calls.id, calls.map(\.id))
         }
         return nil
     }
 
     private func giveUp(_ id: UUID) {
         guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
-        waiting.remove(at: index).turn.resume(returning: false)
+        resume(waiting.remove(at: index), goes: false)
+    }
+
+    private func giveUpEveryone() {
+        let given = waiting
+        waiting = []
+        for waiter in given { resume(waiter, goes: false) }
+    }
+
+    private func resume(_ waiter: Waiter, goes: Bool) {
+        waiter.turn.resume(returning: goes)
     }
 }
 
@@ -242,7 +283,7 @@ struct TakingTurns<Arguments: ConvertibleFromGeneratedContent, Output: PromptRep
             await turns.finished()
             return output
         } catch {
-            await turns.finished()
+            await turns.failed()
             throw error
         }
     }

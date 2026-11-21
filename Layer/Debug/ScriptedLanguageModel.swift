@@ -20,6 +20,9 @@ struct ScriptedLanguageModel: LanguageModel {
         /// Whether the step after this one is asked for in the same answer, as the
         /// on-device model asks for all of a command's tools at once.
         var withNext = false
+        /// The call's id, for a test that needs it to be one an earlier call had. Nil for
+        /// one of its own.
+        var id: String?
 
         /// Steps the model asks for together, in one answer, in this order.
         static func together(_ steps: [Step]) -> [Step] {
@@ -84,6 +87,9 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
 
     let configuration: Configuration
 
+    /// How many calls scripted models have asked for, so that each has an id of its own.
+    private static let callsAskedFor = OSAllocatedUnfairLock(initialState: 0)
+
     init(configuration: Configuration) throws {
         self.configuration = configuration
     }
@@ -126,8 +132,12 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
         for index in stepsTaken...answer {
             let step = steps[index]
             if let delay = step.delay { try await Task.sleep(for: delay) }
+            let number = Self.callsAskedFor.withLock { count in
+                count += 1
+                return count
+            }
             await channel.send(.toolCalls(action: .toolCall(
-                id: "call-\(prompts.count)-\(index + 1)", name: step.tool,
+                id: step.id ?? "call-\(number)", name: step.tool,
                 action: .appendArguments(step.arguments, tokenCount: 1)
             )))
         }
