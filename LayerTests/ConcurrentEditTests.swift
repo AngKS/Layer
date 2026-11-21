@@ -82,6 +82,31 @@ struct ConcurrentEditTests {
         #expect(!board.undo.canUndo)
     }
 
+    /// A knob turn ends when the selection changes (the knob goes with it). Ending, it ends
+    /// its own step and nothing else: a drag still under way goes on as one step.
+    @Test func aTurnEndedByASelectionChangeEndsOnlyItsOwnStep() throws {
+        let (board, _) = board()
+        let start = board.store.content
+        let drag = board.store.beginEdit()
+        board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = 30 } }
+        board.model.selection = .element(board.title)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 10, snaps: false)
+        board.model.selection = .element(board.button)
+        #expect(!board.model.isTurning)
+        #expect(board.store.isEditing(by: .hand))
+        let mark = board.store.historyMark
+        for x in 31...60 { board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = CGFloat(x) } } }
+        #expect(board.store.historyMark == mark, "the drag's frames are still the drag's one step")
+        board.store.endEdit(drag)
+        board.undo.undo()
+        #expect(board.rotation(of: board.title) == nil)
+        #expect(board.frame(of: board.button)?.minX == 60)
+        board.undo.undo()
+        #expect(board.store.content == start)
+        #expect(!board.undo.canUndo)
+    }
+
     /// A template added, or a Siri action, in the middle of a drag: its begin and end used
     /// to close the drag's step, and the drag's remaining frames were each a step (M3).
     @Test(arguments: ["template", "Siri"])
