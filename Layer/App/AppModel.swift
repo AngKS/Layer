@@ -608,6 +608,10 @@ final class AppModel {
     /// Lets one spoken command at a time act on the design, whichever call it came from.
     let voiceCommands = VoiceCommandGate()
 
+    /// The line the design's phone calls are made on: the app's, so that one started in
+    /// any window ends one up in another. A test gives its design a line of its own.
+    @ObservationIgnored var phoneLine = PhoneLine.shared
+
     /// Said when a command reaches a design that has closed.
     static let closedProblem = "The design has closed."
 
@@ -626,7 +630,7 @@ final class AppModel {
         // pencil command already sent still runs, in its turn.
         for design in OpenDesigns.shared.all where design !== self { design.stopPencilListening() }
         stopPencilListening()
-        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] })
+        let call = VoiceCall(route: route, runner: runner, vocabulary: { [weak self] in self?.voiceVocabulary ?? [] }, line: phoneLine)
         call.gate = voiceCommands
         // What the agent is doing, tool by tool, is what the pill says while it works.
         (runner as? VoiceAgent)?.onStep = { [weak call] step in call?.showStep(step) }

@@ -8,6 +8,20 @@ enum VoiceTarget: Equatable, Sendable {
     case canvas(CGPoint)
 }
 
+/// Where the phone call that is up, in whichever window, is kept. Only one listens the
+/// whole time, so starting another ends it. A pencil call isn't counted: it holds the
+/// microphone only while asked, and lives alongside a phone call.
+///
+/// The app has one line. A test gives its designs and calls a line of their own: on the
+/// one line, a call started by one test ended the call of another running alongside.
+@MainActor
+final class PhoneLine {
+    static let shared = PhoneLine()
+
+    /// The call that is up on this line.
+    weak var call: VoiceCall?
+}
+
 /// One call in voice mode, from the phone button being tapped to hanging up: what it is
 /// doing, what it has to say, how loud the room is, and the commands waiting their turn.
 ///
@@ -75,10 +89,9 @@ final class VoiceCall {
     /// How many microphone levels are kept, which is how many bars the waveform has.
     static let levelCount = 28
 
-    /// The phone call that is up, in whichever window. Only one listens the whole time, so
-    /// starting another ends this one. A pencil call isn't counted: it holds the microphone
-    /// only while asked, and lives alongside a phone call.
-    static weak var current: VoiceCall?
+    /// The line phone calls are made on. Only one call on it listens the whole time, so
+    /// starting another ends the one that is up.
+    @ObservationIgnored let line: PhoneLine
 
     private(set) var phase = Phase.starting
     private(set) var caption: Caption?
@@ -135,14 +148,15 @@ final class VoiceCall {
     @ObservationIgnored private var running: Task<VoiceOutcome, Never>?
     @ObservationIgnored private var captionClearing: Task<Void, Never>?
 
-    init(listening: Listening, runner: any VoiceCommandRunner, vocabulary: @escaping @MainActor () -> [String] = { [] }) {
+    init(listening: Listening, runner: any VoiceCommandRunner, vocabulary: @escaping @MainActor () -> [String] = { [] }, line: PhoneLine = .shared) {
         listeningStyle = listening
         self.runner = runner
         self.vocabulary = vocabulary
+        self.line = line
     }
 
-    convenience init(route: any VoiceRoute, runner: any VoiceCommandRunner, vocabulary: @escaping @MainActor () -> [String] = { [] }) {
-        self.init(listening: .continuous(route), runner: runner, vocabulary: vocabulary)
+    convenience init(route: any VoiceRoute, runner: any VoiceCommandRunner, vocabulary: @escaping @MainActor () -> [String] = { [] }, line: PhoneLine = .shared) {
+        self.init(listening: .continuous(route), runner: runner, vocabulary: vocabulary, line: line)
     }
 
     private var listensOnRequest: Bool {
@@ -174,8 +188,8 @@ final class VoiceCall {
             startedAt = .now
             return
         }
-        if let other = Self.current, other !== self { other.end() }
-        Self.current = self
+        if let other = line.call, other !== self { other.end() }
+        line.call = self
         // Asking for the microphone, or fetching what speech recognition needs, can take a while.
         show(.working, "Getting ready to listen…")
         VoiceLog.log.info("call: getting ready")
@@ -229,7 +243,7 @@ final class VoiceCall {
         queue.removeAll()
         queuedCount = 0
         caption = nil
-        if Self.current === self { Self.current = nil }
+        if line.call === self { line.call = nil }
         onEnd?()
     }
 

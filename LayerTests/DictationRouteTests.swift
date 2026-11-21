@@ -621,7 +621,7 @@ struct DictationRouteTests {
     @Test func aCallHungUpWhileGettingReadyNeverListens() async throws {
         let bench = bench()
         bench.recogniser.holdsPrepare = true
-        let call = VoiceCall(route: bench.route, runner: FakeRunner())
+        let call = VoiceCall(route: bench.route, runner: FakeRunner(), line: PhoneLine())
         let starting = Task { await call.start() }
         #expect(await eventually { call.caption?.text == "Getting ready to listen…" })
         call.end()

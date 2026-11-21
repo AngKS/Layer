@@ -785,10 +785,12 @@ struct PencilVoiceTests {
     @Test func aSqueezeDuringAnotherWindowsCallDoesNothing() async {
         let bench = Bench()
         let other = VoiceFixture.login().app
+        // Two windows of the app: one line.
+        other.phoneLine = bench.app.phoneLine
         await other.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
         let call = other.voice
-        bench.pencil.phoneCallIsUp = { VoiceCall.current === call && call != nil }
-        #expect(VoiceCall.current === other.voice)
+        bench.pencil.phoneCallIsUp = { [line = bench.app.phoneLine] in line.call === call && call != nil }
+        #expect(bench.app.phoneLine.call === other.voice)
         bench.pencil.hovered()
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         bench.pencil.squeezeEnded()
