@@ -269,7 +269,16 @@ final class AppModel {
     /// Sketches being read, so that a design that closes can stop them.
     @ObservationIgnored private var conversions: [Task<Void, Never>] = []
     @ObservationIgnored private(set) var isPenDown = false
-    @ObservationIgnored private var titleSuggestion: Task<Void, Never>?
+    /// The name being thought up for the board, while it is.
+    @ObservationIgnored private(set) var titleSuggestion: Task<Void, Never>?
+    /// Whether the board has had a name here, given by hand or by the app.
+    @ObservationIgnored private var hasHadName = false
+    /// Whether the board has been named: it has had a name here, or its file has one
+    /// somebody chose. A name is suggested only for a board that hasn't, so one cleared or
+    /// undone stays so, rather than a suggestion renaming the file again (M4).
+    private var hasBeenNamed: Bool {
+        hasHadName || store.title != nil || document.current.fileName.map { !DesignFileName.isUntitled($0) } == true
+    }
     @ObservationIgnored private var adjustmentEnd: Task<Void, Never>?
 
     /// Whether a finger draws while the palette is up. Once Apple Pencil has been seen,
@@ -333,11 +342,13 @@ final class AppModel {
         images = ImageLibrary(file.images)
         engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
         appliedModel = .some(file.content.canvas.model)
+        hasHadName = file.content.title != nil
         store.onChange = { [weak self, document] content in
             // A command or generation still unwinding after the design closed doesn't
             // write to a document the browser has already let go of.
             guard self?.isClosed != true else { return }
             document.update { $0.content = content }
+            if content.title != nil { self?.hasHadName = true }
             // A drawing moved, locked, hidden, deleted or put back by undo shows on the ink canvas.
             self?.ink?.showDrawings()
             // After this change is done with: ending a drag ends the edit it is part of.
@@ -699,7 +710,7 @@ final class AppModel {
         let getting = Task {
             refreshPreview()
             // A name still being thought up is settled now, from the design's own words.
-            if titleSuggestion != nil, store.title == nil {
+            if titleSuggestion != nil, store.title == nil, !hasBeenNamed {
                 store.setTitle(engine.fallbackTitle(for: store.content), undoable: false)
             }
             await settleFileName()
@@ -814,7 +825,7 @@ final class AppModel {
             let name = moved.deletingPathExtension().lastPathComponent
             document.update { $0.fileName = name }
             // The name was taken, so the file has a number on the end: the board takes it too.
-            if name != wanted, store.title == title { store.setTitle(name, undoable: false) }
+            if name != wanted { store.numberTitle(name, for: title) }
             fileURL = moved
             matchNameAndFile()
         }
@@ -1761,11 +1772,11 @@ final class AppModel {
 
     /// Names the board once, the first time it has something on it worth naming.
     private func suggestTitleIfNeeded() {
-        guard store.title == nil, titleSuggestion == nil else { return }
+        guard store.title == nil, !hasBeenNamed, titleSuggestion == nil else { return }
         titleSuggestion = Task { [weak self] in
             guard let self else { return }
             let title = await engine.suggestTitle(for: store.content)
-            if store.title == nil, !isClosed { store.setTitle(title, undoable: false) }
+            if store.title == nil, !hasBeenNamed, !isClosed { store.setTitle(title, undoable: false) }
             titleSuggestion = nil
         }
     }

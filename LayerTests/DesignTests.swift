@@ -402,6 +402,41 @@ struct DesignStoreTests {
         #expect(!undo.canUndo)
     }
 
+    /// A name the app gives the board has no step, so no undo takes it away: not one of a
+    /// step made before it, nor of a step under way as it came (M4).
+    @Test func undoLeavesANameTheAppGaveTheBoard() {
+        let (store, undo) = makeStore()
+        store.addScreen(from: leftScreenSketch)
+        store.setTitle("Suggested", undoable: false)
+        undo.undo()
+        #expect(store.screens.isEmpty)
+        #expect(store.title == "Suggested")
+        undo.redo()
+        #expect(store.title == "Suggested")
+
+        let screen = store.screens[0]
+        store.beginEdit()
+        store.updateScreen(screen.id) { $0.name = "Home" }
+        store.setTitle("Login", undoable: false)
+        store.updateScreen(screen.id) { $0.name = "Start" }
+        store.endEdit()
+        undo.undo()
+        #expect(store.screen(screen.id)?.name == "Screen 1")
+        #expect(store.title == "Login")
+    }
+
+    /// A name given since by something that isn't a step, the file renamed in Files for
+    /// instance, is the board's name now: undoing the naming it replaced leaves it (M4).
+    @Test func undoingANamingLeavesANameGivenSinceWithoutAStep() {
+        let (store, undo) = makeStore()
+        store.setTitle("Login")
+        store.setTitle("Client pitch", undoable: false)
+        undo.undo()
+        #expect(store.title == "Client pitch")
+        undo.redo()
+        #expect(store.title == "Client pitch")
+    }
+
     @Test func theContentBoundsCoverEverythingInTheDesign() throws {
         let (store, _) = makeStore()
         #expect(store.contentBounds == nil)
@@ -1119,6 +1154,88 @@ struct DesignFileNameTests {
         #expect(model.fileURL?.lastPathComponent == "Onboarding 2.layer")
         #expect(model.store.title == "Onboarding 2")
         #expect(!exists("Onboarding 3.layer", beside: url))
+    }
+
+    /// A design open in Layer, its board named twice: first by the app, then by hand.
+    private func renamedTwice() async throws -> (model: AppModel, undo: UndoManager, url: URL) {
+        let url = try savedDesign(named: "Untitled")
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+        model.store.setTitle("Login", undoable: false)
+        await wait { model.fileURL?.lastPathComponent == "Login.layer" }
+        model.store.setTitle("Checkout")
+        await wait { model.fileURL?.lastPathComponent == "Checkout.layer" }
+        #expect(model.fileURL?.lastPathComponent == "Checkout.layer")
+        return (model, undo, url)
+    }
+
+    /// Renamed in Files while it is open, the design takes the name. Undoing the naming
+    /// by hand before it put the old name back, and the file was renamed back to it (M4).
+    @Test func aFileRenamedInFilesIsNotRenamedBackByUndo() async throws {
+        let (model, undo, url) = try await renamedTwice()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let pitch = url.deletingLastPathComponent().appendingPathComponent("Client pitch.layer")
+        try FileManager.default.moveItem(at: try #require(model.fileURL), to: pitch)
+        model.fileURL = pitch
+        #expect(model.store.title == "Client pitch")
+
+        undo.undo()
+        await model.settleFileName()
+        #expect(model.store.title == "Client pitch")
+        #expect(model.fileURL?.lastPathComponent == "Client pitch.layer")
+        #expect(exists("Client pitch.layer", beside: url))
+        model.close()
+    }
+
+    /// Once a board has had a name, given by hand or by the app, none is suggested for it
+    /// again: not after the name is cleared, nor after it is undone. A suggestion then
+    /// renamed the file a second time (M4).
+    @Test func aBoardThatHasHadANameIsNotGivenASuggestionAgain() async throws {
+        let (model, _, url) = try await renamedTwice()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        model.store.setTitle(nil)
+        model.addFrame(.iPhone)
+        #expect(model.titleSuggestion == nil)
+        #expect(model.store.title == nil)
+        model.close()
+
+        // Opened again with its board's name undone, and only its file's name to go on.
+        var file = DesignFile()
+        file.fileName = "Login"
+        let login = url.deletingLastPathComponent().appendingPathComponent("Login.layer")
+        try file.wrapper().write(to: login, options: .atomic, originalContentsURL: nil)
+        let reopened = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: login))))
+        reopened.fileURL = login
+        #expect(reopened.store.title == nil)
+        reopened.addText()
+        #expect(reopened.titleSuggestion == nil)
+        reopened.close()
+    }
+
+    /// A name given by hand that another design has takes a number, and that is part of
+    /// the naming: undoing it takes the number away too, and redoing puts it back.
+    @Test func undoingANameThatNeededANumberTakesTheNumberWithIt() async throws {
+        let url = try savedDesign(named: "Untitled")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.fileURL = url
+
+        model.store.setTitle("Onboarding")
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.store.title == "Onboarding 2")
+        undo.undo()
+        #expect(model.store.title == nil)
+        #expect(!undo.canUndo)
+        undo.redo()
+        #expect(model.store.title == "Onboarding 2")
+        model.close()
     }
 
     @Test func aDesignStillAnswersToItsIdentifierAfterItsFileIsRenamed() async throws {
