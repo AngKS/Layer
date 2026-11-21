@@ -185,5 +185,51 @@ extension HostedWindowSuites {
             // line dragged, once a frame (60).
             #expect(built <= 70, "targets built during a 60-frame drag: \(built)")
         }
+
+        /// A pinch changes the zoom on every frame. The targets' smallest size follows the zoom
+        /// the canvas comes to rest at, so a pinch builds none of them until it ends (audit C8).
+        @Test func aPinchBuildsTheTargetsOnlyAsItEnds() async throws {
+            let board = BusyBoard()
+            CanvasWork.reset()
+            let (window, view) = try await show(board)
+            defer { window.isHidden = true }
+            var built = Int.max
+            for _ in 0..<3 where built > 0 {
+                try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
+                CanvasWork.reset()
+                for frame in 1...30 {
+                    board.model.zoomScale = 1 + CGFloat(frame) / 50
+                    view.layoutIfNeeded()
+                    try await Task.sleep(for: .milliseconds(4))
+                }
+                try await settle(view)
+                built = CanvasWork.targetsBuilt
+                board.model.zoomScale = 1
+                try await settle(view)
+            }
+            // Every target on every frame then: 40 lines, 30 times.
+            #expect(built == 0, "targets built during a 30-frame pinch: \(built)")
+        }
+
+        /// With the palette up the targets take no touches, and none are built (audit C8).
+        @Test func inDrawNoTargetsAreBuilt() async throws {
+            let board = BusyBoard()
+            CanvasWork.reset()
+            let (window, view) = try await show(board)
+            defer { window.isHidden = true }
+            board.model.tool = .draw
+            try await settle(view)
+            CanvasWork.reset()
+            for frame in 1...60 {
+                board.store.update(board.lines[5]) { $0.frame.origin.x = 20 + CGFloat(frame) }
+                view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(4))
+            }
+            try await settle(view)
+            #expect(CanvasWork.targetsBuilt == 0, "targets built in Draw for 60 changes: \(CanvasWork.targetsBuilt)")
+            board.model.tool = .select
+            try await settle(view)
+            #expect(CanvasWork.targetsBuilt >= 40, "back in Select, every element has its target again")
+        }
     }
 }

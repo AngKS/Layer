@@ -30,11 +30,13 @@ struct SelectionLayer: View {
                     .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
             }
             // Every element's target, laid out once in canvas points and moved as one by
-            // the viewport. Panning changes a single transform rather than every target.
-            InViewport {
-                ElementTargets(drags: drags)
+            // the viewport. Panning changes a single transform rather than every target. With
+            // the palette up they take no touches, and aren't built at all (audit C8).
+            if model.tool == .select {
+                InViewport {
+                    ElementTargets(drags: drags)
+                }
             }
-            .allowsHitTesting(model.tool == .select)
 
             // With the palette up, the selected element is moved by its own area. So is a
             // selected drawing at any time: it has no target of its own among the elements'.
@@ -730,8 +732,8 @@ private struct CanvasDragModifier<G: Gesture>: ViewModifier {
 }
 
 /// The tap and drag target of every visible element, and of every screen's name, laid
-/// out in canvas points. Its body depends on the design and the zoom, not on where the
-/// canvas has scrolled to, so panning doesn't rebuild it. Each target is a view of its own,
+/// out in canvas points. Its body depends on the design and the zoom the canvas has come to
+/// rest at, not on where the canvas has scrolled to, so panning and pinching don't rebuild it. Each target is a view of its own,
 /// given where it lies and compared by that alone: a change to the design builds only the
 /// targets of what it moved, where every target, with its tap and its drag, was built again
 /// for every change, each frame of a drag among them (audit C6).
@@ -741,8 +743,9 @@ private struct ElementTargets: View {
 
     var body: some View {
         let store = model.store
-        // A finger's worth of target at any zoom.
-        let minimum = 30 / max(model.zoomScale, 0.01)
+        // A finger's worth of target at the zoom the canvas comes to rest at: following the
+        // zoom itself, every target was built again on every frame of a pinch (audit C8).
+        let minimum = 30 / max(model.settledScale, 0.01)
         ZStack(alignment: .topLeading) {
             ForEach(store.screens) { screen in
                 if store.canvas.showsFrameNames {
