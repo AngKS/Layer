@@ -297,6 +297,35 @@ struct ConcurrentEditTests {
         #expect(board.store.content == start)
     }
 
+    /// A generation started as part of a one-off step, which ends at once, took that step
+    /// for its own: every line after it was then a step of its own (review M-5). Only a
+    /// spoken command's step, which waits for the screen, is joined.
+    @Test func aGenerationStartedInsideAOneOffStepIsAStepOfItsOwn() async throws {
+        let (board, feed) = board()
+        board.store.asOwnStep { board.model.generateScreen(from: "a settings screen") }
+        let generated = try #require(board.model.generation?.screenID)
+        feed.yield(Self.written("title: Settings\n"))
+        feed.yield(Self.written("title: Settings\nbutton: Save\n"))
+        feed.finish()
+        await board.model.waitForGeneration()
+        #expect(board.store.screen(generated)?.elements.count == 2)
+        board.undo.undo()
+        #expect(board.store.screen(generated) == nil)
+        #expect(!board.undo.canUndo)
+    }
+
+    /// A turn that would take over a drag but begins inside another edit's work ended
+    /// nothing: the drag's edit, already given up, was left open for good (review M-10).
+    @Test func aTurnThatCannotTakeOverADragEndsIt() {
+        let (board, _) = board()
+        let drag = board.store.beginEdit()
+        let other = board.store.beginEdit(by: .app)
+        let turn = board.store.act(for: other) { board.store.beginEdit(by: .turn, takingOver: drag) }
+        board.store.endEdit(turn)
+        board.store.endEdit(other)
+        #expect(!board.store.isEditing)
+    }
+
     /// A change by hand ended between two lines of a generation used to close the screen's
     /// step: every later line was then a step of its own, and one undo took back only the
     /// last (G4). The screen is one step, taken back by one undo, and the hand's change,

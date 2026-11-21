@@ -416,8 +416,11 @@ final class AppModel {
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
         let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
-        let ownsEdit = store.actingEdit == nil
-        let edit = store.actingEdit ?? store.beginEdit(by: .app)
+        // Part of a spoken command's step, which waits for the screen; otherwise a step of its
+        // own, even when asked for inside a one-off step that ends at once (review M-5).
+        let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
+        let ownsEdit = joined == nil
+        let edit = joined ?? store.beginEditOfItsOwn(by: .app)
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
         let screen = store.act(for: edit) { () -> DesignScreen in
             let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))

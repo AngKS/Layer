@@ -556,8 +556,20 @@ final class DesignStore {
     /// Starts a turn that goes on from `edit`, a drag the turn cut short, so that the two
     /// are one step. Without an edit still under way, a turn of its own begins.
     func beginEdit(by editor: Editor, takingOver edit: Edit?) -> Edit {
-        guard let edit, edit.isOpen, acting == nil else { return beginEdit(by: editor) }
+        guard let edit, edit.isOpen, acting == nil else {
+            // Given up by the drag, it is this one's to end (review M-10).
+            if let edit, edit !== acting { endEdit(edit) }
+            return beginEdit(by: editor)
+        }
         edit.editor = editor
+        return edit
+    }
+
+    /// Begins an edit of its own even inside another's work: for work that outlives what
+    /// started it, as a screen being written outlives a one-off step it was asked for in.
+    func beginEditOfItsOwn(by editor: Editor) -> Edit {
+        let edit = Edit(editor: editor)
+        edits.append(edit)
         return edit
     }
 

@@ -949,18 +949,20 @@ struct VoiceToolsTests {
 
     /// A slider moved and let go while a command runs is a step of its own, and the
     /// command's step is closed when the command ends: a change made next is a step of its own.
-    @Test func aSliderMovedAndLetGoDuringACommandLeavesTheStepToTheCommand() throws {
+    /// The slider goes through the format panel, as a slider does: a run of changes the
+    /// panel's pause ends.
+    @Test func aSliderMovedAndLetGoDuringACommandLeavesTheStepToTheCommand() async throws {
         let bench = bench()
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        bench.app.adjustmentPause = .milliseconds(20)
         store.beginHeldEdit()
-        let slider = store.beginEdit()
         for width in [180, 160, 140] {
-            store.act(for: slider) { store.update(image) { $0.frame.size.width = CGFloat(width) } }
+            bench.app.adjusting { store.update(image) { $0.frame.size.width = CGFloat(width) } }
         }
-        store.endEdit(slider)
+        #expect(await eventually { !store.isEditing }, "the panel's pause ends the slider's step")
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         #expect(!store.isEditing && !store.isHoldingEdit)

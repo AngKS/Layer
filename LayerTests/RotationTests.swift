@@ -550,8 +550,12 @@ struct TurningOneElementTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(!board.store.isEditing)
-        // The panel's change and the turn are a step each, neither left open.
+        // The panel's change and the turn are a step each, neither left open: one undo
+        // takes back one of them, whole, and leaves the other.
         board.undo.undo()
+        let titleBack = board.store.resolve(board.title)?.element.frame.minX == 80
+        let turnBack = board.rotation(of: board.note) == nil
+        #expect(titleBack != turnBack)
         board.undo.undo()
         #expect(board.store.content == before)
         #expect(!board.undo.canUndo)
