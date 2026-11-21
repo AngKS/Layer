@@ -87,8 +87,14 @@ final class AppModel {
                 // What Siri and Shortcuts hold from before the move still finds the design.
                 if let designID { OpenDesigns.shared.designMoved(from: previousID, to: designID) }
             }
-            // A rename that finishes after the design closed doesn't list it again.
-            guard !isClosed else { return }
+            // A rename that finishes after the design closed doesn't list it again, but the
+            // design is indexed under its new identifier now: nothing here will change it again.
+            guard !isClosed else {
+                if previousID != designID, let snapshot = DesignActions.snapshot(of: self) {
+                    Task { await DesignIndexer.index(snapshot) }
+                }
+                return
+            }
             OpenDesigns.shared.opened(self)
             DesignIndexer.designChanged(self)
             matchNameAndFile()

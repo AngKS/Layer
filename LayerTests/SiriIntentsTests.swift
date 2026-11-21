@@ -310,6 +310,27 @@ struct DesignIndexTests {
         }
     }
 
+    @Test func aDesignRenamedAfterItClosedIsIndexedUnderItsNewIdentifier() async throws {
+        let suite = "DesignIndexTests-\(UUID().uuidString)"
+        let record = try #require(UserDefaults(suiteName: suite))
+        let index = FakeSpotlight()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try await using(index, record: record, suite: suite) {
+            let model = AppModel(document: LayerDocument(file: DesignFile()))
+            model.fileURL = folder.appendingPathComponent("Untitled.layer")
+            model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+            model.close()
+            // The rename the board's name started finishes now.
+            model.fileURL = folder.appendingPathComponent("Login.layer")
+            let renamed = try #require(model.designID)
+            for _ in 0..<40 where !(await index.designs.contains(renamed)) {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            #expect(await index.designs.contains(renamed))
+            #expect(await index.screens.count { $0.hasPrefix(renamed) } == 1)
+        }
+    }
+
     @Test func designsInAFolderThatCouldNotBeLookedThroughAreKept() async throws {
         let suite = "DesignIndexTests-\(UUID().uuidString)"
         let record = try #require(UserDefaults(suiteName: suite))
