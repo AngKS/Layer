@@ -88,6 +88,13 @@ final class Scrubber {
         begin(field)
     }
 
+    /// A finger holding a field has dragged this far sideways since it was held: the field
+    /// is scrubbed a step for every `pointsPerStep`.
+    func fingerDragged(_ field: Target, by width: CGFloat) {
+        hold(field)
+        scrub(to: Self.steps(forDrag: width, pointsPerStep: field.pointsPerStep))
+    }
+
     // MARK: Apple Pencil
 
     /// A squeeze over a field brings up its ruler, and the pencil need not stay squeezed:
@@ -269,7 +276,7 @@ struct PencilBridge: UIViewRepresentable {
             hover = recognizer
         }
 
-        @objc private func hovered(_ recognizer: UIHoverGestureRecognizer) {
+        @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {
             guard let scrubber, scrubber.target != nil else { return }
             scrubber.hover(recognizer.state, roll: .radians(recognizer.rollAngle))
         }

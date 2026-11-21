@@ -264,6 +264,23 @@ private final class ScrubbedField {
     }
 }
 
+/// The pencil hovering, as the window's hover recogniser tells the panel's bridge: in a
+/// state, at a roll of the barrel.
+private final class PencilHovering: UIHoverGestureRecognizer {
+    var now: UIGestureRecognizer.State = .possible
+    var roll: CGFloat = 0
+    override var state: UIGestureRecognizer.State {
+        get { now }
+        set { now = newValue }
+    }
+    override var rollAngle: CGFloat { roll }
+
+    func moved(_ state: UIGestureRecognizer.State, toDegrees degrees: Double) {
+        now = state
+        roll = degrees * .pi / 180
+    }
+}
+
 /// The ruler that scrubs a field: rolled by the pencil's barrel after a squeeze, or dragged
 /// by a finger holding the field (audit M8).
 @MainActor
@@ -293,6 +310,22 @@ struct ScrubbingAFieldTests {
         #expect(rotation.value == 8)
     }
 
+    /// The same, through the bridge that follows the pencil's hover in the window: what the
+    /// recogniser says reaches the scrubber with its state (review m9 b).
+    @Test func theBridgePassesTheHoversStateOn() {
+        let scrubber = Scrubber()
+        let bridge = PencilBridge.BridgeView()
+        bridge.scrubber = scrubber
+        let hover = PencilHovering()
+        let rotation = ScrubbedField(0)
+        scrubber.begin(rotation.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
+        for (state, degrees) in [(UIGestureRecognizer.State.began, 0.0), (.changed, 5), (.ended, 5), (.began, 60), (.changed, 62)] {
+            hover.moved(state, toDegrees: degrees)
+            bridge.hovered(hover)
+        }
+        #expect(rotation.value == 7)
+    }
+
     /// While the pencil's ruler is up on one field, a finger holding another scrubs that one:
     /// the pencil's is put away first.
     @Test func aFingerHoldingAnotherFieldScrubsThatOne() {
@@ -307,16 +340,15 @@ struct ScrubbingAFieldTests {
         let opacityTarget = opacity.target("Opacity", at: CGRect(x: 90, y: 0, width: 80, height: 32), range: 5...100)
         scrubber.begin(rotationTarget)
 
-        scrubber.hold(opacityTarget)
-        scrubber.scrub(to: 3)
+        // Three steps' worth of finger, as the field's hold gesture reports it.
+        scrubber.fingerDragged(opacityTarget, by: 3 * Scrubber.pointsPerStep)
         #expect(rotation.sets.isEmpty)
         #expect(opacity.value == 53)
         #expect(scrubber.target?.label == "Opacity")
         #expect(begins == 2 && ends == 1, "the pencil's scrub ended, and the finger's began")
 
         // The finger goes on holding: it is the same scrub.
-        scrubber.hold(opacityTarget)
-        scrubber.scrub(to: 5)
+        scrubber.fingerDragged(opacityTarget, by: 5 * Scrubber.pointsPerStep)
         #expect(opacity.value == 55)
         #expect(begins == 2)
     }
