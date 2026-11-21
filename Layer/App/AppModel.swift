@@ -1440,7 +1440,8 @@ final class AppModel {
         turnStart = nil
         isTurning = false
         isTwisting = false
-        isAdjusting = false
+        // A drag still under way, another finger's, is still adjusting the selection (C9).
+        isAdjusting = drags?.isDragging ?? false
         snappedTurn = nil
         startMark = nil
         if let turnEdit { store.endEdit(turnEdit) }

@@ -537,6 +537,26 @@ struct TurningOneElementTests {
         #expect(board.rotation(of: board.note) == nil)
     }
 
+    /// The knob is let go while another finger still drags what it turned: the drag is still
+    /// adjusting the selection, so the action bar stays away, the guides stay up and the
+    /// screen it came from stays on top until it is dropped (audit C9).
+    @Test func lettingGoOfTheKnobMidDragLeavesTheSelectionBeingAdjusted() throws {
+        let board = TurnBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 10, snaps: false)
+        let owner = CanvasDrags.Owner()
+        board.drag(drags, board.note, by: 10, from: CGPoint(x: 560, y: 160), owner: owner)
+        board.model.endTurn()
+        #expect(board.model.isAdjusting, "the drag goes on")
+        board.drag(drags, board.note, by: 20, from: CGPoint(x: 560, y: 160), owner: owner)
+        drags.dropElement(board.note, findsNewHome: true, owner: owner, model: board.model)
+        #expect(!board.model.isAdjusting)
+    }
+
     /// A screen being written is a step of its own (`AppModel.generateScreen`): a turn
     /// made meanwhile is another, and no line written after the turn is a step of its own.
     @Test func aTurnWhileAScreenIsGeneratedIsAStepOfItsOwn() {
