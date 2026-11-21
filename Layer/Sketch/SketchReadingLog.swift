@@ -150,23 +150,38 @@ actor SketchReadingLog {
         let lineData = Data((line + "\n").utf8)
         if let handle = try? FileHandle(forWritingTo: fileURL) {
             defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            handle.write(lineData)
+            // The throwing calls: the older ones raise an exception nothing can catch when
+            // the disk is full.
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: lineData)
         } else {
             try? lineData.write(to: fileURL)
         }
     }
 
-    /// Rewrites the whole log so a correction recorded after the fact is reflected. The log
-    /// is one person's on-device history of Magic Pen readings, so this stays small enough
+    /// Rewrites the log so a correction recorded after the fact is reflected. The file
+    /// holds every launch's readings and this launch knows only its own, so only the lines
+    /// of readings known here are written anew; the rest are kept as they are. The log is
+    /// one person's on-device history of Magic Pen readings, so this stays small enough
     /// that rewriting it on every correction is cheap.
     private func rewrite() {
         guard let fileURL else { return }
         let encoder = JSONEncoder()
-        let lines = order.compactMap { entries[$0] }.compactMap { entry -> String? in
+        func line(for entry: SketchReadingLogEntry) -> String? {
             guard let data = try? encoder.encode(entry) else { return nil }
             return String(data: data, encoding: .utf8)
         }
+        struct Identified: Decodable { var id: UUID }
+        let existing = (try? String(contentsOf: fileURL, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
+        var written: Set<UUID> = []
+        var lines = existing.map { existingLine -> String in
+            guard let id = try? JSONDecoder().decode(Identified.self, from: Data(existingLine.utf8)).id,
+                  let entry = entries[id], let updated = line(for: entry) else { return existingLine }
+            written.insert(id)
+            return updated
+        }
+        // A reading whose line never reached the file goes on the end.
+        lines += order.filter { !written.contains($0) }.compactMap { entries[$0] }.compactMap(line(for:))
         try? (lines.joined(separator: "\n") + "\n").write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }
