@@ -335,7 +335,8 @@ struct GlideAndFingerTests {
         let coordinator = InkCanvas.Coordinator(model: model)
         model.ink = coordinator
         coordinator.zoom(to: 2)
-        try await Task.sleep(for: .milliseconds(600))
+        // 0.3 s, on the display's clock, which a busy main thread can hold up.
+        for _ in 0..<100 where model.zoomScale != 2 { try await Task.sleep(for: .milliseconds(50)) }
         #expect(model.zoomScale == 2)
     }
 }
