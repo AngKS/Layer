@@ -1,4 +1,5 @@
 import Observation
+import os
 import UIKit
 
 /// The designs open in Layer's windows, so that Siri and Shortcuts can work on them, and
@@ -103,32 +104,23 @@ final class OpenDesigns {
         }
     }
 
-    /// One action opens a design at a time: two at once would each put away the design
-    /// the other was opening and pick their own over it.
-    @ObservationIgnored private let opening = OneAtATime()
-
-    /// Opens a design, if it isn't open already, and waits for its window. An action that
-    /// asks while another is opening a design waits its turn.
+    /// Opens a design, if it isn't open already, and waits for its window.
     func open(design id: String) async throws -> AppModel {
         if let model = model(forDesign: id) { return model }
-        return try await opening.run {
-            // Opened while this waited its turn.
-            if let model = model(forDesign: id) { return model }
-            guard let url = DesignLibrary.url(for: currentID(for: id)) else { throw LayerIntentError.designNotFound }
-            guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
-            // A design still closing can keep the browser from taking the request, so it is
-            // asked again if the design hasn't opened after a few seconds.
-            for _ in 0..<3 {
-                try await DocumentBrowser.open(url) { presented in
-                    await self.prepareToPutAway(presented, keeping: id)
-                }
-                for _ in 0..<30 {
-                    if let model = model(forDesign: id) { return model }
-                    try await Task.sleep(for: .milliseconds(100))
-                }
+        guard let url = DesignLibrary.url(for: currentID(for: id)) else { throw LayerIntentError.designNotFound }
+        guard FileManager.default.fileExists(atPath: url.path) else { throw LayerIntentError.designNotFound }
+        // A design still closing can keep the browser from taking the request, so it is
+        // asked again if the design hasn't opened after a few seconds.
+        for _ in 0..<3 {
+            try await DocumentBrowser.open(url) { [weak self] presented in
+                await self?.prepareToPutAway(presented, keeping: id)
             }
-            throw LayerIntentError.couldNotOpen
+            for _ in 0..<30 {
+                if let model = model(forDesign: id) { return model }
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
+        throw LayerIntentError.couldNotOpen
     }
 
     /// Makes a new, empty design in Layer's folder, opens it, and waits for its window.
@@ -161,26 +153,95 @@ final class OpenDesigns {
 }
 
 /// Runs one piece of work at a time, in the order asked: each waits for the one before
-/// it to finish.
+/// it to finish, or to run out of time. A waiter that is cancelled leaves the queue.
 @MainActor
 final class OneAtATime {
+    /// How long one piece of work may hold the turn. Its caller is then told the design
+    /// couldn't be opened, and the next goes, whatever the work is still waiting for.
+    let limit: Duration
     private var isRunning = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var waiting: [(id: Int, continuation: CheckedContinuation<Void, any Error>)] = []
+    private var lastWaiter = 0
 
-    func run<T>(_ work: () async throws -> T) async rethrows -> T {
-        if isRunning {
-            await withCheckedContinuation { waiting.append($0) }
+    init(limit: Duration) {
+        self.limit = limit
+    }
+
+    /// How many are waiting for their turn.
+    var queued: Int { waiting.count }
+
+    func run<T: Sendable>(_ work: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
+        try await waitForTurn()
+        // The turn passes straight to the next in line, given up on or not.
+        defer { passTurnOn() }
+        try Task.checkCancellation()
+        return try await withinLimit(work)
+    }
+
+    private func waitForTurn() async throws {
+        guard isRunning else {
+            isRunning = true
+            return
         }
-        isRunning = true
-        // The next in line is let go as this one finishes, the turn passing straight to it.
-        defer {
-            if waiting.isEmpty {
-                isRunning = false
-            } else {
-                waiting.removeFirst().resume()
+        lastWaiter += 1
+        let id = lastWaiter
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                waiting.append((id, continuation))
+            }
+        } onCancel: {
+            Task { @MainActor in self.leave(id) }
+        }
+    }
+
+    /// A waiter that was cancelled before its turn came stops waiting.
+    private func leave(_ id: Int) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+
+    private func passTurnOn() {
+        if waiting.isEmpty {
+            isRunning = false
+        } else {
+            waiting.removeFirst().continuation.resume()
+        }
+    }
+
+    /// The work's outcome, or, if it hasn't one within `limit`, that the design couldn't be
+    /// opened. Work still waiting then is cancelled and left to end by itself.
+    private func withinLimit<T: Sendable>(_ work: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
+        let limit = limit
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
+            let first = FirstToFinish()
+            let job = Task { @MainActor in
+                do {
+                    let value = try await work()
+                    if first.claim() { continuation.resume(returning: value) }
+                } catch {
+                    if first.claim() { continuation.resume(throwing: error) }
+                }
+            }
+            Task {
+                try? await Task.sleep(for: limit)
+                guard first.claim() else { return }
+                job.cancel()
+                continuation.resume(throwing: LayerIntentError.couldNotOpen)
             }
         }
-        return try await work()
+    }
+}
+
+/// Of several ways a wait can end, lets the first through and no other.
+final class FirstToFinish: Sendable {
+    private let finished = OSAllocatedUnfairLock(initialState: false)
+
+    /// True for the first caller only.
+    func claim() -> Bool {
+        finished.withLock { finished in
+            defer { finished = true }
+            return !finished
+        }
     }
 }
 
@@ -190,15 +251,22 @@ final class OneAtATime {
 /// itself opens what is picked.
 @MainActor
 enum DocumentBrowser {
+    /// One action puts away a design and picks another at a time: two at once would each
+    /// put away the design the other picked. A turn holds up to three waits of two seconds,
+    /// for a rename, a design coming up and its dismissal, so may last eight.
+    private static let turns = OneAtATime(limit: .seconds(8))
+
     /// `prepare` is given the controller of a design open over the browser, before it is
-    /// put away.
-    static func open(_ url: URL, preparing prepare: (UIViewController) async -> Void = { _ in }) async throws {
+    /// put away. Throws `couldNotOpen` when putting it away doesn't finish in time.
+    static func open(_ url: URL, preparing prepare: @escaping @MainActor @Sendable (UIViewController) async -> Void = { _ in }) async throws {
         // An app Siri has just launched may not have its window up yet.
         for _ in 0..<30 {
             if let browser = find(), let delegate = browser.delegate,
                delegate.responds(to: #selector(UIDocumentBrowserViewControllerDelegate.documentBrowser(_:didPickDocumentsAt:))) {
-                await pick(url, in: browser, preparing: prepare) { url in
-                    delegate.documentBrowser?(browser, didPickDocumentsAt: [url])
+                try await turns.run {
+                    try await pick(url, in: browser, preparing: prepare) { url in
+                        delegate.documentBrowser?(browser, didPickDocumentsAt: [url])
+                    }
                 }
                 return
             }
@@ -209,17 +277,41 @@ enum DocumentBrowser {
 
     /// Picks `url` in a browser, with `picking`, as the browser itself does. A design open
     /// over the browser is put away first, as tapping Back would: given to `prepare` while
-    /// it is still shown, then dismissed, unless it went or began to go meanwhile.
-    static func pick(_ url: URL, in browser: UIViewController, preparing prepare: (UIViewController) async -> Void, picking: (URL) -> Void) async {
+    /// it is still shown, then dismissed, unless it went or began to go meanwhile. A design
+    /// still coming up is waited for first, since UIKit can leave a dismiss asked for then
+    /// unanswered. Each wait lasts at most `limit`; past it, the design couldn't be opened.
+    static func pick(
+        _ url: URL, in browser: UIViewController, limit: Duration = .seconds(2),
+        dismissing dismiss: (UIViewController, @escaping @Sendable () -> Void) -> Void = { controller, done in controller.dismiss(animated: false) { done() } },
+        preparing prepare: (UIViewController) async -> Void, picking: (URL) -> Void
+    ) async throws {
         if let presented = browser.presentedViewController {
             await prepare(presented)
+            let deadline = ContinuousClock.now + limit
+            while presented.isBeingPresented, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
             if browser.presentedViewController === presented, !presented.isBeingDismissed {
-                await withCheckedContinuation { continuation in
-                    presented.dismiss(animated: false) { continuation.resume() }
+                guard !presented.isBeingPresented, await finishes(within: limit, { done in dismiss(presented, done) }) else {
+                    throw LayerIntentError.couldNotOpen
                 }
             }
         }
         picking(url)
+    }
+
+    /// Whether `start` says it has finished within `limit`.
+    private static func finishes(within limit: Duration, _ start: (@escaping @Sendable () -> Void) -> Void) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let first = FirstToFinish()
+            start {
+                if first.claim() { continuation.resume(returning: true) }
+            }
+            Task {
+                try? await Task.sleep(for: limit)
+                if first.claim() { continuation.resume(returning: false) }
+            }
+        }
     }
 
     /// The document browser in every window.

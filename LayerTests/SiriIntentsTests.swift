@@ -409,39 +409,150 @@ struct OpeningDesignTests {
     }
 
     @Test func oneOpeningWaitsForTheOneBefore() async {
-        let turns = OneAtATime()
+        let turns = OneAtATime(limit: .seconds(2))
         let steps = Steps()
         let opens = ["A", "B"].map { name in
             Task {
-                await turns.run {
+                try await turns.run {
                     steps.all.append("start \(name)")
                     try? await Task.sleep(for: .milliseconds(50))
                     steps.all.append("end \(name)")
                 }
             }
         }
-        for open in opens { await open.value }
+        for open in opens { _ = try? await open.value }
         #expect(steps.all == ["start A", "end A", "start B", "end B"], "\(steps.all)")
     }
 
-    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+    /// A wait that may never end, let go when the test is done with it.
+    private final class Held {
+        var continuation: CheckedContinuation<Void, Never>?
+        func letGo() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    private func couldNotOpen(_ error: any Error) -> Bool {
+        if case .couldNotOpen? = error as? LayerIntentError { true } else { false }
+    }
+
+    /// What `task` came to, if it finished within `limit`. Nil if it is still waiting.
+    private final class Box<T> {
+        var outcome: Result<T, any Error>?
+    }
+
+    private func outcome<T>(of task: Task<T, any Error>, within limit: Duration) async -> Result<T, any Error>? {
+        let box = Box<T>()
+        Task { box.outcome = await task.result }
+        let deadline = ContinuousClock.now + limit
+        while box.outcome == nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return box.outcome
+    }
+
+    @Test func aTurnThatRunsOverGivesUpAndTheNextGoes() async throws {
+        let turns = OneAtATime(limit: .milliseconds(300))
+        let held = Held()
+        defer { held.letGo() }
+        let stuck = Task { try await turns.run { await withCheckedContinuation { held.continuation = $0 } } }
+        let next = Task { try await turns.run { "next" } }
+
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(2)) else {
+            Issue.record("the stuck turn should have given up")
+            return
+        }
+        #expect(couldNotOpen(error), "\(error)")
+        guard case .success(let value)? = await outcome(of: next, within: .seconds(2)) else {
+            Issue.record("the next turn should have gone")
+            return
+        }
+        #expect(value == "next")
+    }
+
+    @Test func aWaiterThatIsCancelledLeavesTheQueue() async throws {
+        let turns = OneAtATime(limit: .seconds(30))
+        let held = Held()
+        defer { held.letGo() }
+        let stuck = Task { try await turns.run { await withCheckedContinuation { held.continuation = $0 } } }
+        let waiter = Task { try await turns.run { "never" } }
+        for _ in 0..<50 where turns.queued == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(turns.queued == 1)
+
+        waiter.cancel()
+        guard case .failure(let error)? = await outcome(of: waiter, within: .seconds(2)) else {
+            Issue.record("a cancelled waiter should stop waiting")
+            return
+        }
+        #expect(error is CancellationError)
+        #expect(turns.queued == 0)
+        _ = stuck
+    }
+
+    /// A window with a stand-in browser and a design presented over it.
+    private func browserShowingADesign(animated: Bool) throws -> (window: UIWindow, browser: UIViewController, design: UIViewController) {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         let browser = UIViewController(), design = UIViewController()
         window.rootViewController = browser
         window.isHidden = false
+        browser.present(design, animated: animated)
+        return (window, browser, design)
+    }
+
+    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: false)
         defer { window.isHidden = true }
-        browser.present(design, animated: false)
         #expect(browser.presentedViewController === design)
 
         var steps: [String] = []
         let url = URL(fileURLWithPath: "/designs/B.layer")
-        await DocumentBrowser.pick(url, in: browser) { presented in
+        try await DocumentBrowser.pick(url, in: browser) { presented in
             steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
         } picking: { picked in
             steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
         }
         #expect(steps == ["readied while shown", "picked B.layer"])
+        #expect(browser.presentedViewController == nil)
+    }
+
+    @Test func aDismissThatNeverFinishesGivesUpAndTheNextOpenGoes() async throws {
+        let (window, browser, _) = try browserShowingADesign(animated: false)
+        defer { window.isHidden = true }
+        let turns = OneAtATime(limit: .seconds(5))
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let stuck = Task {
+            try await turns.run {
+                try await DocumentBrowser.pick(url, in: browser, limit: .milliseconds(300), dismissing: { _, _ in }) { _ in } picking: { _ in
+                    Issue.record("picked over a design that wasn't put away")
+                }
+            }
+        }
+        let next = Task { try await turns.run { "next" } }
+        guard case .failure(let error)? = await outcome(of: stuck, within: .seconds(2)) else {
+            Issue.record("an open whose dismiss never finishes should give up")
+            return
+        }
+        #expect(couldNotOpen(error), "\(error)")
+        guard case .success? = await outcome(of: next, within: .seconds(2)) else {
+            Issue.record("the next open should have gone")
+            return
+        }
+    }
+
+    @Test func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: true)
+        defer { window.isHidden = true }
+        #expect(design.isBeingPresented)
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let picking = Task {
+            try await DocumentBrowser.pick(url, in: browser) { _ in } picking: { _ in }
+        }
+        guard case .success? = await outcome(of: picking, within: .seconds(4)) else {
+            Issue.record("a dismiss tried while the design was still coming up was never finished")
+            return
+        }
         #expect(browser.presentedViewController == nil)
     }
 }
