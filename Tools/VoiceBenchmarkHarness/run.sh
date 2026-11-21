@@ -5,6 +5,7 @@
 # macOS. Those three files need nothing else from the app.
 #
 # Usage: Tools/VoiceBenchmarkHarness/run.sh [baseline|sampled|required|examples|canvasfirst|quoted|commandfirst]
+#        Tools/VoiceBenchmarkHarness/run.sh newtools [runs] [baseline|sampled]   (the 2026-11-18 tools, each case several times)
 #        Tools/VoiceBenchmarkHarness/run.sh latency [runs] [instructions,plain,quoted,quotedkeep,commandfirst]   (commands in a row)
 # Results and what they led to: docs/benchmarks/voice-on-device.md
 set -eu
