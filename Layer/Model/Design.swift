@@ -359,6 +359,10 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
         "VStack", "HStack", "ZStack", "NavigationStack", "Rectangle", "RoundedRectangle", "Circle", "Capsule", "Ellipse",
         "StrokeStyle", "CGPoint", "CGSize", "CGFloat", "String", "Int", "Double", "Bool", "Optional", "SwiftUI",
         "Any", "Self", "Type", "Protocol", "Never",
+        // SwiftUI and Foundation types a screen is often named for, which a view of the
+        // name would hide throughout the target it is added to.
+        "Menu", "List", "Form", "Label", "Group", "Section", "Link", "Picker", "Slider", "Stepper", "Grid", "Table",
+        "Canvas", "Shape", "Font", "Gradient", "Animation", "Scene", "Window", "App", "Date", "Data", "URL", "Error",
         "as", "associatedtype", "break", "case", "catch", "class", "continue", "default", "defer", "deinit", "do",
         "else", "enum", "extension", "fallthrough", "false", "fileprivate", "for", "func", "guard", "if", "import",
         "in", "init", "inout", "internal", "is", "let", "nil", "open", "operator", "private", "protocol", "public",

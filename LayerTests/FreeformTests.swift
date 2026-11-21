@@ -393,10 +393,31 @@ struct MoreCodeTests {
         #expect(code.contains("Button"))
     }
 
+    /// Siri's code for a screen names its view as the shared files and the code panel do:
+    /// a second "Home" is `Home2` there too (review M-8).
+    @MainActor @Test func siriNamesAScreensViewAsItsFileDoes() throws {
+        var content = DesignContent()
+        let first = DesignScreen(name: "Home", origin: .zero, scale: 1)
+        let second = DesignScreen(name: "Home", origin: CGPoint(x: 500, y: 0), scale: 1)
+        content.addScreen(first)
+        content.addScreen(second)
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: second, in: content)) == "Home2")
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: first, in: content)) == "Home")
+    }
+
+    /// A non-finite size is written as Swift reads it, not as `nan` or `inf`.
+    @Test func aSizeThatIsNotANumberStillCompiles() {
+        var wide = element(.button, 20, 744, 353, 50)
+        wide.frame.size.width = .infinity
+        wide.frame.size.height = .nan
+        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        #expect(!code.contains("inf,") && !code.contains("nan"))
+    }
+
     /// A screen named after a type its own code uses ("Image", "Text") shadowed it, and
     /// one named for a keyword wasn't a type name at all (G17).
     @Test func aScreenNamedAfterATypeItsCodeUsesGetsAnotherName() {
-        for name in ["Image", "Text", "Button", "Color", "View", "Any", "Self", "default"] {
+        for name in ["Image", "Text", "Button", "Color", "View", "Any", "Self", "default", "Menu", "List", "Form", "Label", "Group", "Section", "App"] {
             let typeName = DesignScreen(name: name, origin: .zero, scale: 1).typeName
             #expect(typeName == name + "Screen")
         }

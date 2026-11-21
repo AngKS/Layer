@@ -561,6 +561,7 @@ enum SwiftUICodeGenerator {
 
     private static func number(_ value: CGFloat) -> String {
         let rounded = (value * 10).rounded() / 10
+        guard rounded.isFinite else { return rounded.isNaN ? "0" : rounded > 0 ? ".infinity" : "-.infinity" }
         // Past what an Int holds it is written as it is: a size like that is a mistake,
         // but writing it out mustn't stop the app.
         guard rounded.magnitude < 1e15 else { return String(Double(rounded)) }
