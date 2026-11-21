@@ -184,6 +184,75 @@ struct DesignActionTests {
         #expect(model.store.content == before)
     }
 
+    @Test func siriUndoTakesBackOnlyItsOwnAction() {
+        let model = model()
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Rename Design") { model.store.setTitle("A") }
+        // Then a screen is added by hand.
+        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        siri.undo()
+        #expect(model.store.title == nil)
+        #expect(model.store.screens.count == 1)
+        // Taking it back is a step of the design's own, which its Undo can take back in turn.
+        model.store.undoManager?.undo()
+        #expect(model.store.title == "A")
+        #expect(model.store.screens.count == 1)
+    }
+
+    @Test func siriUndoLeavesWhatWasChangedSinceAndBringsBackWhatItTookAway() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let other = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
+        let title = DesignStore.newElement(.title), button = DesignStore.newElement(.button), note = DesignStore.newElement(.body)
+        model.store.setElements([title, button, note], on: screen.id, replacing: false)
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        let red = RGBColor(hex: 0xFF0000)
+
+        // One action recolours the title and the button, deletes the note, adds a symbol
+        // and moves the second screen.
+        DesignActions.edit(model, undoManager: siri, actionName: "Restyle") {
+            model.store.update(.init(host: .screen(screen.id), element: title.id)) { $0.tint = red }
+            model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.tint = red }
+            model.store.delete(.init(host: .screen(screen.id), element: note.id))
+            model.store.setElements([DesignStore.newElement(.symbol)], on: screen.id, replacing: false)
+            model.store.updateScreen(other.id) { $0.origin.x = 900 }
+        }
+        // By hand since: the button is given words of its own, and a screen is added.
+        model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.text = "Go" }
+        let third = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 1400, y: 0), scale: 1))
+
+        siri.undo()
+        let elements = try #require(model.store.screen(screen.id)?.elements)
+        #expect(elements.map(\.id) == [title.id, button.id, note.id], "the note is back where it was, the symbol gone")
+        #expect(elements[0].tint == title.tint, "the title is as it was")
+        #expect(elements[1].tint == red && elements[1].text == "Go", "the button, changed since, is left as it is")
+        #expect(model.store.screen(other.id)?.origin.x == 500)
+        #expect(model.store.screen(third.id) != nil)
+    }
+
+    @Test func siriUndoReachesTheDesignOpenedAgain() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = folder.appendingPathComponent("Shop.layer")
+        let model = model()
+        model.fileURL = url
+        let siri = UndoManager()
+        siri.groupsByEvent = false
+        DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
+            model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        }
+        // The design is closed and opened again, as it was saved.
+        model.close()
+        let reopened = AppModel(document: LayerDocument(file: model.document.current))
+        reopened.fileURL = url
+        #expect(reopened.store.screens.count == 1)
+
+        siri.undo()
+        #expect(reopened.store.screens.isEmpty)
+        reopened.close()
+    }
+
     @Test func newElementsGoBelowWhatIsThere() {
         let model = model()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))

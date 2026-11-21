@@ -172,6 +172,65 @@ struct DesignContent: Equatable, Sendable {
         frames[index] = screen.withoutElements
         if screen.elements != before { setChildren(of: id, to: screen.elements) }
     }
+
+    // MARK: Taking a change back
+
+    /// Takes back the change that turned `before` into `after`, as far as what it changed
+    /// is still as the change left it. Whatever has been changed since, the same things
+    /// included, is left as it is now. Siri's undo of an action taken a while ago works this
+    /// way, so that it doesn't take back what was done by hand meanwhile.
+    mutating func takeBack(_ after: DesignContent, to before: DesignContent) {
+        if before.title != after.title, title == after.title { title = before.title }
+        if before.canvas != after.canvas, canvas == after.canvas { canvas = before.canvas }
+
+        // Screens it changed are put back, and those it removed come back, first, so that
+        // what was on them can come back too.
+        let screensAfter = Dictionary(after.frames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for (index, screen) in before.frames.enumerated() {
+            if let left = screensAfter[screen.id] {
+                if left != screen, let here = frames.firstIndex(where: { $0.id == screen.id }), frames[here] == left {
+                    frames[here] = screen
+                }
+            } else if !frames.contains(where: { $0.id == screen.id }) {
+                frames.insert(screen, at: min(index, frames.count))
+            }
+        }
+
+        // Elements it changed are put back, those it removed come back where they were,
+        // and those it added go.
+        let elementsAfter = Dictionary(after.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let screenIDs = Set(frames.map(\.id))
+        for (index, element) in before.elements.enumerated() {
+            if let left = elementsAfter[element.id] {
+                guard left != element, let here = elements.firstIndex(where: { $0.id == element.id }), elements[here] == left else { continue }
+                if left.parent == element.parent {
+                    elements[here] = element
+                } else {
+                    elements.remove(at: here)
+                    elements.insert(element, at: min(index, elements.count))
+                }
+            } else if !elements.contains(where: { $0.id == element.id }), element.parent.map(screenIDs.contains) ?? true {
+                elements.insert(element, at: min(index, elements.count))
+            }
+        }
+        let wereThere = Set(before.elements.map(\.id))
+        elements.removeAll { !wereThere.contains($0.id) && elementsAfter[$0.id] == $0 }
+
+        // Screens it added go too, once nothing is left on them.
+        let screensBefore = Set(before.frames.map(\.id))
+        frames.removeAll { screen in
+            !screensBefore.contains(screen.id) && screensAfter[screen.id] == screen && !elements.contains { $0.parent == screen.id }
+        }
+
+        // Things it only put in a new order go back to the old one, unless they have been
+        // put in another since.
+        for parent in Set(before.elements.map(\.parent)) {
+            let order = before.children(of: parent).map(\.id)
+            let left = after.children(of: parent).map(\.id)
+            guard order != left, Set(order) == Set(left), children(of: parent).map(\.id) == left else { continue }
+            reorder(parent, to: order)
+        }
+    }
 }
 
 private extension DesignScreen {

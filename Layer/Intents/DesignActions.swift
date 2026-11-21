@@ -131,15 +131,49 @@ enum DesignActions {
             model.store.endEdit()
             let after = model.store.content
             if before != after, let undoManager, undoManager !== model.store.undoManager {
+                let action = TakenAction(before: before, after: after, design: model.designID, model: model)
                 undoManager.beginUndoGrouping()
-                undoManager.registerUndo(withTarget: model.store) { store in
-                    MainActor.assumeIsolated { store.restore(before) }
+                // The system's history holds its target weakly: the action is kept alive by
+                // its own handler, as the design's store may be gone by the time it is undone.
+                undoManager.registerUndo(withTarget: action) { [action] _ in
+                    MainActor.assumeIsolated { action.takeBack() }
                 }
                 undoManager.setActionName(actionName)
                 undoManager.endUndoGrouping()
             }
         }
         return try body()
+    }
+
+    /// An action Siri or Shortcuts took on a design, as the system's undo takes it back.
+    @MainActor
+    private final class TakenAction {
+        let before: DesignContent
+        let after: DesignContent
+        /// The design it was taken on, found again by this when it is undone: it may have
+        /// been renamed, or closed and opened again, since.
+        let design: String?
+        weak var model: AppModel?
+
+        init(before: DesignContent, after: DesignContent, design: String?, model: AppModel) {
+            self.before = before
+            self.after = after
+            self.design = design
+            self.model = model
+        }
+
+        /// Puts back what the action changed, as one step in the design's own history.
+        /// Undone straight away, the design goes back as it was. Undone after more has
+        /// been done, only what the action changed and nothing has changed since goes back.
+        func takeBack() {
+            let open = design.flatMap { OpenDesigns.shared.model(forDesign: $0) } ?? model.flatMap { $0.isClosed ? nil : $0 }
+            guard let store = open?.store else { return }
+            if store.content == after {
+                store.restore(before)
+            } else {
+                store.apply { $0.takeBack(after, to: before) }
+            }
+        }
     }
 
     /// Selects something and glides the canvas to show it.
