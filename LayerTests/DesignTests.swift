@@ -1015,6 +1015,27 @@ struct DesignFileNameTests {
         #expect(model.store.title == "Onboarding 2")
     }
 
+    @Test func aBoardNamedAfterItsOwnNumberedFileKeepsThatFile() async throws {
+        let url = try savedDesign(named: "Onboarding 2")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try DesignFile().wrapper().write(to: url.deletingLastPathComponent().appendingPathComponent("Onboarding.layer"), options: .atomic, originalContentsURL: nil)
+
+        let moved = try await DesignFileName.rename(url, to: "Onboarding")
+        #expect(moved.lastPathComponent == "Onboarding 2.layer")
+        #expect(exists("Onboarding 2.layer", beside: url))
+        #expect(!exists("Onboarding 3.layer", beside: url))
+
+        // The same through the board: named "Onboarding" over that file, it keeps the file
+        // and takes its number, as a name taken by another design does.
+        let model = AppModel(document: LayerDocument(file: try DesignFile(wrapper: FileWrapper(url: url))))
+        model.fileURL = url
+        model.store.setTitle("Onboarding")
+        await wait { model.store.title == "Onboarding 2" }
+        #expect(model.fileURL?.lastPathComponent == "Onboarding 2.layer")
+        #expect(model.store.title == "Onboarding 2")
+        #expect(!exists("Onboarding 3.layer", beside: url))
+    }
+
     @Test func aFileRenamedElsewhereNamesTheBoard() {
         let document = LayerDocument()
         document.update {
