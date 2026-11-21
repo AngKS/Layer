@@ -153,6 +153,16 @@ struct TurnedThingsOnTheBoardTests {
         #expect(board.canvasFrame(board.note) == TurnedRect(rect: rect, degrees: 30).bounds)
     }
 
+    /// What the design covers, for its thumbnail, its share picture and zoom to fit, takes in
+    /// a turned note's corners where it lies at the board's edge.
+    @Test func whatTheDesignCoversTakesInATurnedShape() throws {
+        let board = TurnBoard()
+        board.turn(board.note, to: 45)
+        let shape = try #require(board.store.canvasShape(of: .element(board.note)))
+        let covered = try #require(board.store.contentBounds)
+        #expect(covered.contains(shape.bounds), "\(covered) crops the turned note's \(shape.bounds)")
+    }
+
     @Test func movingSeveralThingsMovesATurnedOneByItsBox() throws {
         let board = TurnBoard()
         board.turn(board.note, to: 30)
