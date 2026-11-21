@@ -169,6 +169,34 @@ struct DesignLibraryTests {
         #expect(DesignLibrary.read(url).title == "Travel")
     }
 
+    @Test func everyDesignIsListedWithThoseICloudHasNotDownloadedByTheirNamesAlone() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent(".Trash"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // A design, one iCloud keeps here only as its placeholder, one in a hidden folder,
+        // and something that isn't a design.
+        var file = DesignFile()
+        file.content.title = "Travel"
+        try file.wrapper().write(to: folder.appendingPathComponent("Real.layer"), options: .atomic, originalContentsURL: nil)
+        try Data().write(to: folder.appendingPathComponent(".Away.layer.icloud"))
+        try file.wrapper().write(to: folder.appendingPathComponent(".Trash/Old.layer"), options: .atomic, originalContentsURL: nil)
+        try Data("notes".utf8).write(to: folder.appendingPathComponent("notes.txt"))
+
+        let listing = DesignLibrary.list(in: [folder], isDownloaded: { _ in true })
+        #expect(Set(listing.designs.map(\.url.lastPathComponent)) == ["Real.layer", "Away.layer"])
+        #expect(listing.folders == [folder])
+        let away = try #require(listing.designs.first { $0.url.lastPathComponent == "Away.layer" })
+        #expect(!away.isRead)
+        #expect(away.title == "Away")
+        #expect(away.id == DesignLibrary.id(for: folder.appendingPathComponent("Away.layer")))
+        #expect(listing.designs.first { $0.url.lastPathComponent == "Real.layer" }?.title == "Travel")
+
+        // The list goes by what iCloud has downloaded, and reads nothing that it hasn't.
+        let undownloaded = DesignLibrary.list(in: [folder], isDownloaded: { _ in false })
+        #expect(undownloaded.designs.allSatisfy { !$0.isRead && $0.content.screens.isEmpty })
+        #expect(undownloaded.designs.contains { $0.title == "Real" })
+    }
+
     @Test func aDesignUnchangedSinceItWasListedIsNotReadAgain() throws {
         let url = try savedDesign()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
