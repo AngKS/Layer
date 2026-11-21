@@ -425,6 +425,50 @@ struct TurnedDrawingTests {
         }
     }
 
+    /// A rub of the eraser still to be followed as a turn lands on the same drawing (two
+    /// hands, or a spoken command mid-rub): its strokes on the canvas still lie at the angle
+    /// they were last placed at. They go back upright by that angle, not the new one, so the
+    /// difference isn't turned into the ink, and the turn's angle stays.
+    @Test func inkFollowedAsATurnLandsGoesBackUprightByTheAngleItLies() throws {
+        var content = DesignContent()
+        var drawing = try #require(DesignElement.drawing([
+            stroke(from: CGPoint(x: 400, y: 300), to: CGPoint(x: 460, y: 300)),
+            stroke(from: CGPoint(x: 400, y: 300), to: CGPoint(x: 400, y: 360)),
+            stroke(from: CGPoint(x: 460, y: 300), to: CGPoint(x: 460, y: 420)),
+        ]))
+        drawing.setRotation(20)
+        content.add(drawing, to: nil, scale: 1)
+        var sync = DrawingSync()
+        let first = sync.strokes(showing: content, on: [])
+        let kept = Array(try #require(first).dropLast())
+        // The turn lands before the canvas has shown it.
+        content.update(drawing.id) { $0.setRotation(50) }
+
+        sync.changes(for: kept, in: content).apply(to: &content)
+
+        let after = try #require(content.element(drawing.id))
+        #expect(after.resolvedRotation == 50)
+        #expect(after.strokeCount == 2)
+        func ends(_ stroke: PKStroke) -> [CGPoint] {
+            [stroke.path.first!, stroke.path.last!].map { $0.location.applying(stroke.transform) }
+        }
+        // Its ink is still upright: the L's arms lie along its own axes.
+        var upright = after
+        upright.setRotation(0)
+        for arm in upright.canvasStrokes.map(ends) {
+            #expect(min(abs(arm[0].x - arm[1].x), abs(arm[0].y - arm[1].y)) <= 0.5, "\(arm) is askew")
+        }
+        // At the angle the canvas showed, it is where the rub left it.
+        var asShown = after
+        asShown.setRotation(20)
+        for before in kept {
+            let now = try #require(asShown.canvasStrokes.first { $0.key == before.key })
+            for (a, b) in zip(ends(before), ends(now)) {
+                #expect(abs(a.x - b.x) <= 0.5 && abs(a.y - b.y) <= 0.5)
+            }
+        }
+    }
+
     @Test func aStrokeThatJoinsATurnedDrawingStaysWhereItWasDrawn() throws {
         var (content, drawing) = try turnedCross(by: 30)
         var sync = DrawingSync()

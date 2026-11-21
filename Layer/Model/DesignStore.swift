@@ -118,9 +118,10 @@ final class DesignStore {
         }
     }
 
-    /// The area everything in the design covers, or nil for an empty design.
+    /// The area everything in the design covers, or nil for an empty design. A turned loose
+    /// element covers the box round its turned shape.
     var contentBounds: CGRect? {
-        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map(\.canvasFrame)
+        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map { $0.placement.canvasRect(for: $0.element.shapeBounds) }
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 

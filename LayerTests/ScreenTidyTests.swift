@@ -337,6 +337,98 @@ struct ScreenTidyTests {
         expectNoOverlaps(tidied)
     }
 
+    // MARK: Turned elements
+
+    private func turned(_ element: DesignElement, by degrees: Double) -> DesignElement {
+        var element = element
+        element.setRotation(degrees)
+        return element
+    }
+
+    /// The box a turned element takes up where the tidy put it.
+    private func box(of element: DesignElement, at frame: CGRect) -> CGRect {
+        var placed = element
+        placed.frame = frame
+        return placed.shapeBounds
+    }
+
+    /// A button turned 15° stands about 140 points tall: the tidy lays out that box, so the
+    /// rows round it keep clear of it, rather than giving it a row 50 points tall.
+    @Test func nothingIsLaidOverATurnedButton() throws {
+        let button = turned(element(.button, CGRect(x: 20, y: 330, width: 353, height: 50), text: "Go"), by: 15)
+        let elements = [
+            element(.title, CGRect(x: 50, y: 100, width: 228, height: 40), text: "Sign up"),
+            element(.body, CGRect(x: 30, y: 170, width: 300, height: 44)),
+            element(.textField, CGRect(x: 10, y: 260, width: 250, height: 48), text: "Email"),
+            button,
+            element(.textField, CGRect(x: 35, y: 420, width: 333, height: 48), text: "Password"),
+            element(.textField, CGRect(x: 35, y: 490, width: 333, height: 48), text: "Code"),
+        ]
+        let frames = ScreenTidy.frames(for: elements, on: .iPhone)
+        let frame = try #require(frames[button.id])
+        #expect(frame.size == button.frame.size, "a turned element keeps its size")
+        let box = box(of: button, at: frame)
+        for other in elements where other.id != button.id {
+            let laid = try #require(frames[other.id])
+            #expect(!laid.intersects(box), "\(laid) is laid over the turned button's \(box)")
+        }
+        // In its place in the order, and on the screen.
+        #expect(try #require(frames[elements[2].id]).maxY <= box.minY)
+        #expect(box.maxY <= (try #require(frames[elements[4].id])).minY)
+        #expect(CGRect(origin: .zero, size: DeviceFrame.iPhone.size).contains(box))
+    }
+
+    /// Stood on end on a phone, a button moved to an iPad keeps its size: stretched to the
+    /// iPad's column it was 756 points long, and stood on end ran off the top of the screen.
+    @Test func aQuarterTurnedButtonKeepsItsSizeOnANewDevice() throws {
+        let iPad = try iPad()
+        let button = turned(element(.button, CGRect(x: 20, y: 300, width: 353, height: 50), text: "Go"), by: 90)
+        let elements = [
+            element(.title, CGRect(x: 20, y: 70, width: 353, height: 40), text: "Title"),
+            button,
+            element(.textField, CGRect(x: 20, y: 520, width: 353, height: 48), text: "A"),
+        ]
+        let frames = ScreenTidy.frames(for: elements, on: iPad, from: .iPhone)
+        let frame = try #require(frames[button.id])
+        #expect(frame.size == button.frame.size)
+        let box = box(of: button, at: frame)
+        #expect(CGRect(origin: .zero, size: iPad.size).contains(box), "\(box) is off the screen")
+        for other in elements where other.id != button.id {
+            #expect(!(try #require(frames[other.id])).intersects(box))
+        }
+    }
+
+    /// A turned picture isn't widened to the column either: it keeps its size, so it can't
+    /// grow taller than half the screen on its end.
+    @Test func aTurnedPictureKeepsItsSize() throws {
+        let iPad = try iPad()
+        let image = turned(element(.image, CGRect(x: 20, y: 200, width: 353, height: 200)), by: 90)
+        let title = element(.title, CGRect(x: 20, y: 70, width: 353, height: 40), text: "Title")
+        let frames = ScreenTidy.frames(for: [title, image], on: iPad, from: .iPhone)
+        let frame = try #require(frames[image.id])
+        #expect(frame.size == image.frame.size)
+        let box = box(of: image, at: frame)
+        #expect(box.height <= iPad.size.height / 2)
+        #expect(!(try #require(frames[title.id])).intersects(box))
+    }
+
+    /// A turned caption on a photo goes with the photo as it grows, in the same place on it,
+    /// at its own size.
+    @Test func aTurnedCaptionRidesOnItsPhotoAtItsOwnSize() throws {
+        let iPad = try iPad()
+        let image = element(.image, CGRect(x: 20, y: 140, width: 353, height: 200))
+        let caption = turned(element(.text, CGRect(x: 60, y: 260, width: 160, height: 30), text: "Sale"), by: 10)
+        let title = element(.title, CGRect(x: 30, y: 80, width: 300, height: 40), text: "Shop")
+        let frames = ScreenTidy.frames(for: [title, image, caption], on: iPad, from: .iPhone)
+        let photo = try #require(frames[image.id])
+        let frame = try #require(frames[caption.id])
+        #expect(frame.size == caption.frame.size)
+        #expect(photo.contains(box(of: caption, at: frame)))
+        let before = ((caption.frame.midX - image.frame.minX) / image.frame.width, (caption.frame.midY - image.frame.minY) / image.frame.height)
+        let after = ((frame.midX - photo.minX) / photo.width, (frame.midY - photo.minY) / photo.height)
+        #expect(abs(before.0 - after.0) < 0.02 && abs(before.1 - after.1) < 0.02)
+    }
+
     @Test func aMacKeepsAReadableColumn() throws {
         guard let mac = DeviceFrame.all.first(where: { $0.id == "imac" }) else { throw CancellationError() }
         let column = ScreenTidy.column(on: mac)
@@ -443,6 +535,20 @@ struct VoiceScreenLayoutTests {
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPhone").hasPrefix("Made S1 an iPhone screen"))
         #expect(bench.app.store.screen(bench.screen)?.deviceID == nil)
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "watch").hasPrefix("I can make it"))
+    }
+
+    /// A button stood on end keeps its angle and its size on an iPad, and stays on the screen.
+    @Test func aTurnedElementKeepsItsAngleAndSizeOnANewDevice() throws {
+        let bench = bench()
+        let button = try #require(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .button })
+        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        bench.app.store.update(ref) { $0.setRotation(90) }
+        #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPad").hasPrefix("Made S1 an iPad screen"))
+        let screen = try #require(bench.app.store.screen(bench.screen))
+        let after = try #require(screen.elements.first { $0.id == button.id })
+        #expect(after.rotation == 90)
+        #expect(after.frame.size == button.frame.size)
+        #expect(CGRect(origin: .zero, size: screen.size).contains(after.shapeBounds))
     }
 
     @Test func aNewScreenIsOnTheDeviceAskedFor() async throws {

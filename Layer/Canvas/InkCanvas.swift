@@ -268,8 +268,11 @@ struct InkCanvas: UIViewRepresentable {
                 guard let model = self?.model else { return false }
                 return model.canTurnSelection && !model.isTurning
             }
-            twist.isOnSelection = { [weak self] point in
-                guard let self, let container = documentCanvas.superview else { return false }
+            twist.isOnSelection = { [weak self] point, touched in
+                // A finger on a sheet or a popover over the selection is on that, as the
+                // Pencil is: it doesn't turn what is hidden under it.
+                guard let self, let container = documentCanvas.superview,
+                      !Self.isInAnotherPresentation(touched, than: container) else { return false }
                 return model.isOnSelection(container.convert(point, from: twist.view))
             }
             // The canvases scroll and zoom only once it is plain that two fingers on the

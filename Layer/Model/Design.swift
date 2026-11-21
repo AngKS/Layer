@@ -156,7 +156,8 @@ extension DesignElement {
         parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
         scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
         frame = try container.decode(CGRect.self, forKey: .frame)
-        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation)
+        // Kept as an angle set here is: from 0 up to 360, nothing when upright or not a number.
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation).flatMap(Rotation.kept)
         text = try container.decode(String.self, forKey: .text)
         tint = try container.decode(RGBColor.self, forKey: .tint)
         symbol = try container.decodeIfPresent(String.self, forKey: .symbol)

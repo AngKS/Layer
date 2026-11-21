@@ -204,7 +204,7 @@ private struct SelectionSummary: View {
                     if model.canTurnSelection {
                         Button("Rotate 15° clockwise") { model.rotateSelection(by: 15) }
                         Button("Rotate 15° counterclockwise") { model.rotateSelection(by: -15) }
-                        Button("Reset rotation") { model.resetSelectionTurn() }
+                        Button("Reset rotation") { model.resetSelectionRotation() }
                     }
                 }
         }

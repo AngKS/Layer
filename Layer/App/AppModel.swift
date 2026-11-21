@@ -127,6 +127,10 @@ final class AppModel {
                 // Several things turn about a pivot fixed as they are selected, and forgotten
                 // when the selection changes: selected again, they form a new one.
                 turnSession = nil
+                // A turn of what was selected ends with it: the knob that was turning it goes,
+                // and may never hear its drag end. Not two fingers' twist, which ends as they
+                // lift, nor a turn of what a drag has given to other hosts, still the same things.
+                if !isRehosting, !isTwisting { endTurn() }
             }
             // The format panel is for the selection: with nothing selected it goes.
             if selection == nil, isInspectorOpen {
@@ -1050,11 +1054,17 @@ final class AppModel {
     func rehostSelection() {
         guard let selection else { return }
         let session = turnSession.flatMap { $0.selection == selection && $0.matches(store) ? $0 : nil }
+        // Moved to its new host, an element drops out of the selection until it is named again.
+        isRehosting = true
+        defer { isRehosting = false }
         let rehosted = store.rehost(selection)
         self.selection = rehosted
         // The new selection let go of the session as it was set; it is the same one.
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
+
+    /// True while `rehostSelection()` names what is selected afresh.
+    @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
     private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
@@ -1192,8 +1202,11 @@ final class AppModel {
     /// True from `beginTurn()` to `endTurn()`, while the knob or two fingers turn the selection.
     private(set) var isTurning = false
     /// The angle a turn has snapped to, while it is held there; nil between the 45s. A
-    /// tick plays as it snaps.
+    /// tick plays as it snaps. Nil, too, while it is held at the mark it started on, until
+    /// it has left it: taking hold of an upright element is no snap.
     private(set) var snappedTurn: Double?
+    /// The mark the turn under way started on, until it leaves it.
+    @ObservationIgnored private var startMark: Double?
 
     /// What the turn under way turns, and how far it was turned when the turn began.
     private enum TurnStart {
@@ -1230,14 +1243,19 @@ final class AppModel {
     @discardableResult
     func beginTurn(cuttingDragShort: Bool = false) -> Bool {
         guard !isTurning, canTurnSelection else { return false }
+        let start: Double
         if let turnable = turnableElement {
             turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
+            start = turnable.element.resolvedRotation
         } else if let session = severalTurn {
             turnSession = session
             turnStart = .several(turned: session.turned)
+            start = session.outline.degrees + session.turned
         } else {
             return false
         }
+        let (mark, isOnMark) = Rotation.snapped(start)
+        startMark = isOnMark ? mark : nil
         // The turn's own step: a drag, a command or a screen being generated that is under
         // way, or that begins or ends meanwhile, has its own, and neither ends the other.
         // A drag the turn cuts short goes on as the turn, one step with it.
@@ -1271,12 +1289,17 @@ final class AppModel {
         case nil:
             return false
         }
-        if snappedTurn != snapped { snappedTurn = snapped }
+        // Held at the mark it started on, it hasn't snapped to it: no tick until it has left.
+        var shown = snapped
+        if let mark = startMark {
+            if snapped == mark { shown = nil } else { startMark = nil }
+        }
+        if snappedTurn != shown { snappedTurn = shown }
         return snapped != nil
     }
 
-    /// Ends the turn, and its step with it unless something else still has the step open.
-    /// Does nothing when no turn began.
+    /// Ends the turn and its own step, and nothing else under way. Does nothing when no
+    /// turn began.
     func endTurn() {
         guard isTurning else { return }
         turnStart = nil
@@ -1284,6 +1307,7 @@ final class AppModel {
         isTwisting = false
         isAdjusting = false
         snappedTurn = nil
+        startMark = nil
         if let turnEdit { store.endEdit(turnEdit) }
         turnEdit = nil
     }
@@ -1349,6 +1373,18 @@ final class AppModel {
             store.update(turnable.ref) { $0.setRotation(0) }
         } else if canTurnSelection, var session = severalTurn {
             turn(&session, to: 0)
+        }
+    }
+
+    /// VoiceOver's "Reset rotation": the knob's double tap, except for several things not
+    /// turned together since they were selected, where that has nothing to put back. Each of
+    /// them is then stood upright about its own centre, in one step, as the Rotation field
+    /// set to 0 does: an action that did nothing would read as broken.
+    func resetSelectionRotation() {
+        if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
+            changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(0) }
+        } else {
+            resetSelectionTurn()
         }
     }
 
