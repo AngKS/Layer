@@ -76,6 +76,27 @@ enum StrokeScript {
         return numbers
     }
 
+    /// Refuses a stroke that would have more points than one may, before it is built: a
+    /// line of a thousand long segments was built, tens of millions of points, and only
+    /// then refused (review M-6).
+    private static func fits(_ points: CGFloat) throws {
+        guard points <= CGFloat(mostPointsPerStroke) else {
+            throw Reason(text: "That stroke is too long to draw: keep each under about \(mostPointsPerStroke * 3) points long.")
+        }
+    }
+
+    /// How many points a stroke through `points` has once filled in by `densified`.
+    private static func pointsAlong(_ points: [CGPoint], spacing: CGFloat = 3) -> CGFloat {
+        zip(points, points.dropFirst()).reduce(1) { total, segment in
+            total + max(1, (hypot(segment.1.x - segment.0.x, segment.1.y - segment.0.y) / spacing).rounded(.up))
+        }
+    }
+
+    /// Roughly how many points a shape drawn round `rect` has.
+    private static func pointsRound(_ rect: CGRect) -> CGFloat {
+        2 * (rect.width + rect.height) / 3 + 64
+    }
+
     private static func drawable(_ strokes: [[CGPoint]]) throws -> [[CGPoint]] {
         guard strokes.allSatisfy({ $0.count <= mostPointsPerStroke }) else {
             throw Reason(text: "That stroke is too long to draw: keep each under about \(mostPointsPerStroke * 3) points long.")
@@ -96,6 +117,7 @@ enum StrokeScript {
             guard numbers.count >= 4 else { throw Reason(text: "A freehand stroke needs at least two x,y points.") }
             guard numbers.count.isMultiple(of: 2) else { throw Reason(text: "Points come in x,y pairs, and one number is left over.") }
             let points = stride(from: 0, to: numbers.count, by: 2).map { CGPoint(x: numbers[$0], y: numbers[$0 + 1]) }
+            try fits(pointsAlong(points))
             return [densified(points)]
         }
 
@@ -106,6 +128,9 @@ enum StrokeScript {
         func rect() -> CGRect {
             CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3]).standardized
         }
+        // Weighed before anything is built: every shape but a line stays within its box.
+        if name != "line", name != "polyline", name != "path", numbers.count >= 4 { try fits(pointsRound(rect())) }
+        if name == "circle", numbers.count >= 3 { try fits(pointsRound(CGRect(x: 0, y: 0, width: abs(numbers[2]) * 2, height: abs(numbers[2]) * 2))) }
 
         switch name {
         case "box", "rect", "rectangle", "square":
@@ -128,6 +153,7 @@ enum StrokeScript {
             try need(4, "at least two x,y points")
             guard numbers.count.isMultiple(of: 2) else { throw Reason(text: "line's points come in x,y pairs, and one number is left over.") }
             let points = stride(from: 0, to: numbers.count, by: 2).map { CGPoint(x: numbers[$0], y: numbers[$0 + 1]) }
+            try fits(pointsAlong(points))
             return [wobbled(densified(points), by: 0.8)]
         case "wave", "zigzag", "squiggle":
             try need(4, "x y width height")
@@ -212,6 +238,7 @@ enum StrokeScript {
             guard parsed.count >= 2 else { throw fail("Each stroke needs at least two points.") }
             do {
                 _ = try checked(parsed.flatMap { [$0.x, $0.y] })
+                try fits(pointsAlong(parsed))
                 return try drawable([densified(parsed)])[0]
             } catch let reason as Reason {
                 throw fail(reason.text)

@@ -152,7 +152,8 @@ actor SketchReadingLog {
             defer { try? handle.close() }
             // The throwing calls: the older ones raise an exception nothing can catch when
             // the disk is full.
-            _ = try? handle.seekToEnd()
+            // A seek that fails would write over the start of the log.
+            guard (try? handle.seekToEnd()) != nil else { return }
             try? handle.write(contentsOf: lineData)
         } else {
             try? lineData.write(to: fileURL)

@@ -369,6 +369,18 @@ struct StrokeScriptTests {
         #expect(try StrokeScript.parse("wave 0 0 300 40 12").count == 1)
     }
 
+    /// A line of many long segments was built, tens of millions of points, before it was
+    /// refused (review M-6). Its length is weighed first.
+    @Test func aStrokeTooLongIsRefusedBeforeItIsBuilt() {
+        let corners = (0..<1000).map { $0.isMultiple(of: 2) ? "0 0" : "100000 100000" }.joined(separator: " ")
+        let clock = ContinuousClock()
+        let took = clock.measure {
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse("line " + corners) }
+            #expect(throws: StrokeScript.ParseError.self) { try StrokeScript.parse(corners.replacingOccurrences(of: " 100000", with: ",100000")) }
+        }
+        #expect(took < .milliseconds(200))
+    }
+
     @Test func aScriptedBoxIsReadLikeADrawnOne() throws {
         let observed = try #require(observation(try StrokeScript.parse("box 100 80 260 560 10")))
         guard case .enclosure = observed.form else {
