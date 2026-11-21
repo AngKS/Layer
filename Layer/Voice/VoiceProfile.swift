@@ -151,6 +151,9 @@ private extension LanguageModelSession.DynamicProfile {
 final class VoiceToolTurns {
     /// The conversation whose answers are taken in turn.
     weak var session: LanguageModelSession?
+    /// How long a call waits for those ahead of it before it runs anyway. A session that
+    /// left out a call without cancelling the rest would otherwise hold the command for good.
+    var patience: Duration = .seconds(10)
 
     /// The transcript entry of the answer under way.
     private var answer: String?
@@ -167,6 +170,7 @@ final class VoiceToolTurns {
         let id: UUID
         let position: Int
         let turn: CheckedContinuation<Bool, Never>
+        var timeout: Task<Void, Never>?
     }
 
     private var waiting: [Waiter] = []
@@ -184,7 +188,12 @@ final class VoiceToolTurns {
                     turn.resume(returning: false)
                     return
                 }
-                waiting.append(Waiter(id: id, position: position, turn: turn))
+                let patience = patience
+                let timeout = Task { @MainActor [weak self] in
+                    guard (try? await Task.sleep(for: patience)) != nil else { return }
+                    self?.runAnyway(id)
+                }
+                waiting.append(Waiter(id: id, position: position, turn: turn, timeout: timeout))
             }
         } onCancel: {
             Task { @MainActor in self.giveUp(id) }
@@ -240,6 +249,12 @@ final class VoiceToolTurns {
         return nil
     }
 
+    private func runAnyway(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        VoiceLog.log.error("turns: a tool waited \(self.patience, privacy: .public) for the one ahead of it, and runs anyway")
+        resume(waiting.remove(at: index), goes: true)
+    }
+
     private func giveUp(_ id: UUID) {
         guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
         resume(waiting.remove(at: index), goes: false)
@@ -252,6 +267,7 @@ final class VoiceToolTurns {
     }
 
     private func resume(_ waiter: Waiter, goes: Bool) {
+        waiter.timeout?.cancel()
         waiter.turn.resume(returning: goes)
     }
 }

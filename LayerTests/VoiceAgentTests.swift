@@ -130,6 +130,15 @@ struct VoiceAgentTests {
         #expect(!(await Self.turnComes(for: "a", in: turns)))
     }
 
+    /// A call whose turn never comes, because the session left out the call ahead of it
+    /// without cancelling the rest, runs anyway once it has waited long enough (review of V2).
+    @Test func aCallWaitsOnlySoLongForItsTurn() async {
+        let (session, turns) = Self.turnsWithATranscript()
+        turns.patience = .milliseconds(100)
+        session.transcript.append(Self.answer("left out", "next"))
+        #expect(await Self.turnComes(for: "next", in: turns))
+    }
+
     /// A tool that throws ends its answer: the calls waiting behind it give up rather
     /// than run (review of V2).
     @Test func aToolThatThrowsStopsTheRestOfItsAnswer() async throws {
