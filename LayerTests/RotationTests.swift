@@ -532,6 +532,59 @@ struct TurningOneElementTests {
         #expect(board.model.document.current.content.element(board.note.element)?.rotation == 20)
     }
 
+    /// What the knob was turning let go of mid-turn, by the Pencil landing on it with the
+    /// palette up for one, the turn ends with it: the knob goes, and may never hear its drag
+    /// end. Left open, it kept the popover away, refused every other turn, and made each
+    /// later change part of its step.
+    @Test func aTurnEndsWhenWhatItTurnsIsLetGo() throws {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 20, snaps: false)
+        let note = try #require(board.model.selectionViewRect)
+        board.model.pencilTouched(at: CGPoint(x: note.midX, y: note.midY))
+        #expect(board.model.selection == nil)
+        #expect(!board.model.isTurning && !board.model.isAdjusting)
+        #expect(!board.store.isEditing)
+        // The next change is a step of its own.
+        board.turn(board.title, to: 10)
+        board.undo.undo()
+        #expect(board.rotation(of: board.title) == nil)
+        #expect(board.rotation(of: board.note) == 20)
+        // And two fingers, or the knob, can turn what is selected next.
+        board.model.selection = .element(board.title)
+        #expect(board.model.beginTwist())
+        board.model.endTwist()
+        #expect(board.model.beginTurn())
+        board.model.endTurn()
+    }
+
+    /// Something else selected mid-turn, by a finger tapping it say, the turn ends too: what
+    /// it was turning is no longer selected.
+    @Test func aTurnEndsWhenSomethingElseIsSelected() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        board.model.beginTurn()
+        board.model.turnSelection(by: 20, snaps: false)
+        board.model.selection = .element(board.title)
+        #expect(!board.model.isTurning && !board.store.isEditing)
+        // What the knob's drag goes on to do turns nothing.
+        #expect(!board.model.turnSelection(by: 30, snaps: false))
+        #expect(board.rotation(of: board.title) == nil && board.rotation(of: board.note) == 20)
+    }
+
+    /// Two fingers end their own turn as they lift, wherever the selection has gone meanwhile:
+    /// the drags they make until then are left alone.
+    @Test func aTwistEndsItsTurnOnlyAsItsFingersLift() {
+        let board = TurnBoard()
+        board.model.selection = .element(board.note)
+        #expect(board.model.beginTwist())
+        board.model.selection = nil
+        #expect(board.model.isTurning && board.model.isTwisting)
+        board.model.endTwist()
+        #expect(!board.model.isTurning && !board.store.isEditing)
+    }
+
     @Test func resettingTheTurnStandsItUpright() {
         let board = TurnBoard()
         board.turn(board.note, to: 70)
@@ -913,6 +966,32 @@ struct TurningSeveralThingsTests {
             #expect(isClose(now.origin, CGPoint(x: was.minX + delta.width, y: was.minY + delta.height)) && now.size == was.size)
             #expect(board.rotation(of: ref) == nil)
         }
+    }
+
+    /// Several things dropped onto other hosts by a drag while they turn are still the same
+    /// things: though the selection now names them differently, the turn goes on.
+    @Test func aTurnGoesOnWhenADragGivesWhatItTurnsToAnotherHost() {
+        let board = TurnBoard()
+        let far = board.store.addFloating(element(.stickyNote, 1200, 600, 140, 130), scale: 1)
+        let things = [board.button, far]
+        board.select(things)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 90, snaps: false)
+        board.model.selectionWillMove()
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for ref in things {
+            let box = board.canvasFrame(ref)
+            origins[.element(ref)] = CGPoint(x: box.minX + 10, y: box.minY + 6)
+        }
+        board.store.position(origins)
+        board.model.selectionMoved(by: CGSize(width: 10, height: 6))
+        board.model.rehostSelection()
+        let button = DesignStore.ElementRef(host: .canvas, element: board.button.element)
+        #expect(board.model.selection == CanvasSelection([.element(button), .element(far)]))
+        #expect(board.model.isTurning)
+        board.model.turnSelection(by: 100, snaps: false)
+        #expect(board.rotation(of: button) == 100 && board.rotation(of: far) == 100)
+        board.model.endTurn()
     }
 }
 

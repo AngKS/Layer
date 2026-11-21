@@ -127,6 +127,10 @@ final class AppModel {
                 // Several things turn about a pivot fixed as they are selected, and forgotten
                 // when the selection changes: selected again, they form a new one.
                 turnSession = nil
+                // A turn of what was selected ends with it: the knob that was turning it goes,
+                // and may never hear its drag end. Not two fingers' twist, which ends as they
+                // lift, nor a turn of what a drag has given to other hosts, still the same things.
+                if !isRehosting, !isTwisting { endTurn() }
             }
             // The format panel is for the selection: with nothing selected it goes.
             if selection == nil, isInspectorOpen {
@@ -1018,11 +1022,17 @@ final class AppModel {
     func rehostSelection() {
         guard let selection else { return }
         let session = turnSession.flatMap { $0.selection == selection && $0.matches(store) ? $0 : nil }
+        // Moved to its new host, an element drops out of the selection until it is named again.
+        isRehosting = true
+        defer { isRehosting = false }
         let rehosted = store.rehost(selection)
         self.selection = rehosted
         // The new selection let go of the session as it was set; it is the same one.
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
     }
+
+    /// True while `rehostSelection()` names what is selected afresh.
+    @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
     private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
