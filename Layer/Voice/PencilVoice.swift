@@ -50,6 +50,8 @@ final class PencilVoice {
     /// Said when a finger let go of a screen's field before the microphone came on. A hold
     /// gets no Pencil tap to wait for, as a squeeze does (`VoiceCall.tooSoon`).
     static let tooSoonForAHold = "Didn't catch that. Keep holding until it listens, then speak."
+    /// Said when the field a finger held went away before it let go (`holdLost()`).
+    static let holdLost = "Stopped listening as the field closed. Nothing was sent."
 
     /// How long a hover waits before asking again whether an unavailable model can be
     /// used now. Asking can read the Keychain, and the pen hovers many times a second.
@@ -300,6 +302,19 @@ final class PencilVoice {
     func holdEnded() {
         guard listenIsAHold, case .listening(_, toggled: false, _) = mode else { return }
         send()
+    }
+
+    /// The field a finger is holding went away before the finger let go: its screen was
+    /// deselected, locked or deleted, or the bar hid. Nobody said the change was over, so
+    /// what was heard isn't sent: the microphone goes off and the bubble says so. A
+    /// squeeze's listen isn't the field's, and is left alone.
+    func holdLost() {
+        guard holdIsListening else { return }
+        VoiceLog.log.info("pencil: the field went away mid-hold, so nothing is sent")
+        stopHearing()
+        holdTimer?.cancel()
+        bubble?.state = .problem(Self.holdLost)
+        say()
     }
 
     /// Typed words from a screen's field, as a command about `target`. They go through the
@@ -626,17 +641,20 @@ final class PencilVoice {
     }
 
     /// A command is about to run: what it was spoken about is selected again, as a later
-    /// squeeze may have moved the selection on. Where a new screen goes goes with the
-    /// command itself, to the agent.
+    /// squeeze may have moved the selection on, and the agent reads what was pointed at
+    /// from the selection. Where a new screen goes goes with the command itself, to the
+    /// agent.
+    ///
+    /// A change for one screen moves nothing: its screen goes with it, and was selected
+    /// when it was typed or held for. A selection the person has moved since, to another
+    /// screen's field, say, is theirs: taking it away would take that field with it, and
+    /// words typed or held there.
     private func commandStarts(_ target: VoiceTarget?) {
         guard let model else { return }
         switch target {
         case .thing(let thing)?: model.selection = thing
         case .canvas?: model.selection = nil
-        // The screen a change is for, with the field it was typed in; not one that has
-        // gone since, which leaves the selection as it is.
-        case .screenEdit(let id)?: if model.store.screen(id) != nil { model.selection = .screen(id) }
-        case nil: break
+        case .screenEdit?, nil: break
         }
     }
 

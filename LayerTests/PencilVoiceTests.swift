@@ -1186,9 +1186,10 @@ struct PencilVoiceTests {
         #expect(bench.pencil.bubble == nil && bench.pencil.call == nil && bench.routes.isEmpty)
     }
 
-    /// A change for one screen selects that screen as it starts, so that it runs with its
-    /// field. A screen that has gone by then isn't selected: the selection stays as it is.
-    @Test func aChangeForAScreenThatHasGoneSelectsNothing() async {
+    /// A change for one screen leaves the selection as it is when it starts: its scope is
+    /// its own, and the screen was selected when it was typed or held for. Selected again,
+    /// it would take away whatever field the person has moved on to (final review I1).
+    @Test func aChangeForAScreenLeavesTheSelectionAsItIs() async {
         let bench = Bench()
         #expect(await bench.toggle())
         bench.pencil.call?.captionTimes = (.milliseconds(100), .milliseconds(100))
@@ -1196,10 +1197,40 @@ struct PencilVoiceTests {
         #expect(bench.pencil.call?.submit("make it blue", about: .screenEdit(UUID())) != nil)
         #expect(await eventually { bench.runner.commands == ["make it blue"] })
         #expect(bench.app.selection == bench.button)
-        // A screen that is there is selected.
         #expect(bench.pencil.call?.submit("make it green", about: .screenEdit(bench.screen)) != nil)
         #expect(await eventually { bench.runner.commands == ["make it blue", "make it green"] })
-        #expect(bench.app.selection == .screen(bench.screen))
+        #expect(bench.app.selection == bench.button)
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
+    /// The scenario of final review I1: a change typed for Login waits behind a spoken
+    /// command, the person selects Profile and starts on its field, and Login's change
+    /// starts. Profile stays selected, so its field, and a hold or words typed there, stay
+    /// too. A spoken command about a thing still selects it as it starts: the agent reads
+    /// what was pointed at from the selection.
+    @Test func aQueuedChangeForLoginLeavesProfileSelected() async {
+        let bench = Bench()
+        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6)).id
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(bench.app.selection == bench.button)
+        // Typed in Login's field while that runs.
+        bench.app.selection = .screen(bench.screen)
+        #expect(await bench.pencil.submit("make it dark", about: .screenEdit(bench.screen)) != nil)
+        // Then Profile, whose field is held.
+        bench.app.selection = .screen(profile)
+        bench.pencil.holdBegan(about: profile, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.runner.holds = false
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it dark"] })
+        #expect(bench.runner.targets.last == .screenEdit(bench.screen))
+        #expect(bench.app.selection == .screen(profile))
+        #expect(bench.state == .listening && bench.routes[1].finishCount == 0)
+        bench.pencil.holdEnded()
+        #expect(bench.routes[1].finishCount == 1)
         bench.end()
     }
 
@@ -1298,6 +1329,31 @@ struct PencilVoiceTests {
         #expect(bench.app.selection == nil && bench.pencil.retarget == nil)
     }
 
+    /// The field a finger holds goes away before the finger lets go: its screen deselected,
+    /// locked or deleted, or the bar hidden. Nobody said the change was over, so nothing
+    /// heard is sent, the microphone goes off, and the bubble says nothing was sent. The
+    /// hold's end, should it still come, sends nothing either (final review I1).
+    @Test func aHoldWhoseFieldWentAwaySendsNothing() async {
+        let bench = Bench()
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        #expect(await bench.hear("make the title"))
+        bench.pencil.holdLost()
+        #expect(bench.routes[0].finishCount == 0 && bench.routes[0].isStopped)
+        #expect(!bench.pencil.isListening && bench.pencil.call?.isListeningAsAsked != true)
+        #expect(bench.state == .problem(PencilVoice.holdLost))
+        bench.pencil.holdEnded()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.routes[0].finishCount == 0)
+        #expect(bench.pencil.call?.settling.isEmpty != false)
+        // A squeeze's listen isn't a field's to lose.
+        #expect(await bench.toggle())
+        bench.pencil.holdLost()
+        #expect(bench.state == .listening && !bench.routes[1].isStopped)
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
     /// One listen at a time: a second hold while one listens is the same one.
     @Test func aSecondHoldWhileListeningIsIgnored() async {
         let bench = Bench()
@@ -1394,8 +1450,8 @@ struct PencilVoiceTests {
         #expect(number != nil)
         #expect(await eventually { bench.runner.commands == ["make the title red"] })
         #expect(bench.runner.targets == [.screenEdit(bench.screen)])
-        // Selected as it started.
-        #expect(bench.app.selection == .screen(bench.screen))
+        // The selection is left as it was: the change's screen goes with it.
+        #expect(bench.app.selection == nil)
         #expect(!bench.routes.contains { $0.wasStarted })
         #expect(await bench.pencil.submit("   ", about: .screenEdit(bench.screen)) == nil)
         bench.end()
@@ -2153,6 +2209,50 @@ struct ScreenEditorTests {
         bench.end()
     }
 
+    /// Words typed in a screen's field are kept by the design's editor, screen by screen,
+    /// not by the field: the field goes whenever its screen stops being selected or the bar
+    /// hides, and they are there when it comes back (final review I1, Task 10's minor).
+    @Test func aDraftOutlivesItsField() {
+        let bench = Bench()
+        let editor = bench.app.screenEditor
+        let profile = addProfile(to: bench)
+        #expect(editor.draft(for: bench.screen).text.isEmpty)
+        editor.setDraft("make the title", for: bench.screen)
+        // Login's field goes, and Profile's is typed in.
+        bench.app.selection = .screen(profile)
+        editor.setDraft("add a photo", for: profile)
+        // Login's comes back.
+        bench.app.selection = .screen(bench.screen)
+        #expect(editor.draft(for: bench.screen).text == "make the title")
+        #expect(editor.draft(for: profile).text == "add a photo")
+        editor.setDraft("", for: profile)
+        #expect(editor.draft(for: profile) == ScreenEditor.Draft())
+    }
+
+    /// A draft sent clears as it goes, and comes back if it couldn't be sent, unless more
+    /// has been typed since; blank, it is cleared and nothing is sent.
+    @Test func aDraftIsSentFromTheEditor() async {
+        let unavailable = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let refused = unavailable.app.screenEditor
+        refused.setDraft("make it dark ", for: unavailable.screen)
+        let sending = refused.sendDraft(for: unavailable.screen)
+        #expect(refused.draft(for: unavailable.screen).text.isEmpty && refused.draft(for: unavailable.screen).isSending)
+        #expect(await sending?.value == false)
+        #expect(refused.draft(for: unavailable.screen) == ScreenEditor.Draft(text: "make it dark "))
+
+        let bench = Bench()
+        let editor = bench.app.screenEditor
+        editor.setDraft("make it dark", for: bench.screen)
+        let sent = editor.sendDraft(for: bench.screen)
+        #expect(await sent?.value == true)
+        #expect(editor.draft(for: bench.screen) == ScreenEditor.Draft())
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        editor.setDraft("  ", for: bench.screen)
+        #expect(editor.sendDraft(for: bench.screen) == nil)
+        #expect(editor.draft(for: bench.screen) == ScreenEditor.Draft())
+        bench.end()
+    }
+
     /// The design's field model, made once.
     @Test func theDesignHasOneScreenEditor() {
         let bench = Bench()
@@ -2168,7 +2268,7 @@ struct ScreenEditFieldTests {
     @Test func aChangeThatCouldNotBeSentIsPutBack() async throws {
         let bench = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
         let editor = ScreenEditor(model: bench.app)
-        var draft = ScreenEditField.Draft()
+        var draft = ScreenEditor.Draft()
         draft.text = "make it dark "
         let taken = draft.takeForSending()
         let words = try #require(taken)
@@ -2181,7 +2281,7 @@ struct ScreenEditFieldTests {
     @Test func aChangeSentLeavesTheFieldClear() async throws {
         let bench = Bench()
         let editor = ScreenEditor(model: bench.app)
-        var draft = ScreenEditField.Draft()
+        var draft = ScreenEditor.Draft()
         draft.text = "make it dark"
         let taken = draft.takeForSending()
         let words = try #require(taken)
@@ -2193,7 +2293,7 @@ struct ScreenEditFieldTests {
 
     /// Blank words aren't sent, and leave nothing in the field.
     @Test func blankWordsAreNotSent() {
-        var draft = ScreenEditField.Draft()
+        var draft = ScreenEditor.Draft()
         draft.text = "  \n"
         let taken = draft.takeForSending()
         #expect(taken == nil)
@@ -2202,7 +2302,7 @@ struct ScreenEditFieldTests {
 
     /// Words typed while a change was being sent aren't replaced by its words.
     @Test func wordsTypedSinceStay() {
-        var draft = ScreenEditField.Draft()
+        var draft = ScreenEditor.Draft()
         draft.text = "make it dark"
         let taken = draft.takeForSending()
         #expect(taken == "make it dark")

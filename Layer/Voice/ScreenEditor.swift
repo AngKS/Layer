@@ -1,8 +1,9 @@
 import Foundation
 import Observation
 
-/// A selected screen's field, "Describe a change…": what it sends, and how the change
-/// typed there is getting on, which the field shows in place of the words.
+/// A selected screen's field, "Describe a change…": what is typed there until it is sent,
+/// what it sends, and how the change typed there is getting on, which the field shows in
+/// place of the words.
 ///
 /// A change goes through the pencil's call (`PencilVoice.submit`) as a command about that
 /// screen and everything on it, waiting its turn behind any command spoken a moment
@@ -33,16 +34,94 @@ final class ScreenEditor {
         var number: Int
     }
 
+    /// What is typed in a screen's field, as it is sent: the field clears as the change goes,
+    /// and the words come back if it couldn't be sent, rather than being lost.
+    struct Draft: Equatable {
+        var text: String
+        /// The words on their way, as typed, until the send says whether they went.
+        private var sending: String?
+
+        init(text: String = "") {
+            self.text = text
+        }
+
+        var isSending: Bool { sending != nil }
+
+        var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+        /// Nothing typed and nothing on its way.
+        var isEmpty: Bool { text.isEmpty && sending == nil }
+
+        /// The words to send, trimmed, clearing the field; nil, with the field cleared, when
+        /// they are blank.
+        mutating func takeForSending() -> String? {
+            let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let typed = text
+            text = ""
+            guard !words.isEmpty else { return nil }
+            sending = typed
+            return words
+        }
+
+        /// The send is over: words that couldn't be sent are put back, unless something
+        /// has been typed since.
+        mutating func sendEnded(_ wasSent: Bool) {
+            guard let typed = sending else { return }
+            sending = nil
+            if !wasSent, isBlank { text = typed }
+        }
+    }
+
     @ObservationIgnored private weak var model: AppModel?
     /// Screens whose change is being sent: waiting on the call to get ready, or behind a
     /// command spoken a moment earlier whose words are still settling. It has no number yet.
     private var sending: Set<DesignScreen.ID> = []
     /// Each screen's last change sent.
     private var sent: [DesignScreen.ID: Sent] = [:]
+    /// Words typed in each screen's field and not sent. Kept here, not by the field, which
+    /// goes whenever its screen stops being selected or the bar hides: they are there when
+    /// it comes back. Only a screen with something typed, or on its way, has one.
+    private var drafts: [DesignScreen.ID: Draft] = [:]
 
     init(model: AppModel) {
         self.model = model
     }
+
+    // MARK: Drafts
+
+    /// What is typed in `screen`'s field.
+    func draft(for screen: DesignScreen.ID) -> Draft {
+        drafts[screen] ?? Draft()
+    }
+
+    /// The person typed in `screen`'s field: it now holds `text`.
+    func setDraft(_ text: String, for screen: DesignScreen.ID) {
+        guard draft(for: screen).text != text else { return }
+        changeDraft(for: screen) { $0.text = text }
+    }
+
+    /// Sends what is typed in `screen`'s field as a change to that screen. The words are
+    /// taken at once, clearing the field, and come back if they couldn't be sent, unless
+    /// something has been typed since. Returns the send, whose value says whether the
+    /// change went; nil, with the field cleared, when only blanks were typed.
+    func sendDraft(for screen: DesignScreen.ID) -> Task<Bool, Never>? {
+        var taken: String?
+        changeDraft(for: screen) { taken = $0.takeForSending() }
+        guard let words = taken else { return nil }
+        return Task {
+            let wasSent = await send(words, to: screen)
+            changeDraft(for: screen) { $0.sendEnded(wasSent) }
+            return wasSent
+        }
+    }
+
+    private func changeDraft(for screen: DesignScreen.ID, _ change: (inout Draft) -> Void) {
+        var draft = draft(for: screen)
+        change(&draft)
+        drafts[screen] = draft.isEmpty ? nil : draft
+    }
+
+    // MARK: Changes
 
     /// Sends `text`, trimmed, as a change to `screen` and everything on it. Returns false,
     /// sending nothing, for blank text, a model that can't be asked, a change to that

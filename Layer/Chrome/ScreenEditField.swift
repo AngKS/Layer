@@ -16,14 +16,13 @@ struct ScreenEditField: View {
     @Environment(\.scenePhase) private var scenePhase
     let screen: DesignScreen.ID
 
-    @State private var draft = Draft()
     @State private var isTyping = false
     @FocusState private var isFocused: Bool
     @GestureState private var isHeld = false
     /// Whether this field began a listen with `holdBegan` and hasn't ended it. A field taken
-    /// away mid-hold (the selection moved on, the screen locked or deleted, the canvas
-    /// adjusting) never hears the hold end, so it ends the listen as it goes: otherwise the
-    /// microphone stays on for up to `PencilVoice.maximumHold`.
+    /// away mid-hold (the selection moved on, the screen locked or deleted, the bar hidden)
+    /// never hears the hold end, so it lets go of the listen as it goes, sending nothing:
+    /// otherwise the microphone stays on for up to `PencilVoice.maximumHold`.
     @State private var holdIsOpen = false
     /// Why no change can be sent, when no model can be asked. Asking can read the Keychain,
     /// so it is asked as the field appears and as the model preferences change, never as
@@ -80,7 +79,7 @@ struct ScreenEditField: View {
             model.pencilVoice.prepare()
             whyUnavailable = model.screenEditor.whyUnavailable()
         }
-        .onDisappear(perform: endHold)
+        .onDisappear(perform: loseHold)
         // A key added or a model chosen in Settings may have changed whether one can be asked.
         .onReceive(NotificationCenter.default.publisher(for: ModelPreferences.changed)) { _ in askAgain() }
         // So may Apple Intelligence, turned on in the system's Settings and come back from.
@@ -130,6 +129,7 @@ struct ScreenEditField: View {
     /// sent; then words typed; then the last change's reply, while it lasts.
     private var shown: Shown {
         let editor = model.screenEditor
+        let draft = editor.draft(for: screen)
         // Until the editor has the change, the field says it is on its way itself.
         let line = editor.line(for: screen) ?? (draft.isSending ? .working(ScreenEditor.noStepYet) : nil)
         if case .working(let step)? = line { return .working(step) }
@@ -195,11 +195,20 @@ struct ScreenEditField: View {
 
     // MARK: Typing
 
+    /// What is typed, kept by the design's editor rather than here: the field goes whenever
+    /// its screen stops being selected or the bar hides, and the words wait for it.
+    private var typed: Binding<String> {
+        let editor = model.screenEditor
+        let screen = screen
+        return Binding(get: { editor.draft(for: screen).text }, set: { editor.setDraft($0, for: screen) })
+    }
+
     private var typing: some View {
-        HStack(spacing: 0) {
+        let draft = model.screenEditor.draft(for: screen)
+        return HStack(spacing: 0) {
             // Untitled: the placeholder under it is the idle line's, so it doesn't move or
             // change size as typing begins.
-            TextField("", text: $draft.text)
+            TextField("", text: typed)
                 .font(.system(size: 15))
                 .textFieldStyle(.plain)
                 .submitLabel(.send)
@@ -237,19 +246,16 @@ struct ScreenEditField: View {
     }
 
     /// Sends what was typed, clearing the field and ending typing; blank, it only ends
-    /// typing. Words that couldn't be sent come back.
+    /// typing. Words that couldn't be sent come back (`ScreenEditor.sendDraft`).
     private func send() {
-        let words = draft.takeForSending()
+        let editor = model.screenEditor
+        let sending = editor.sendDraft(for: screen)
         isFocused = false
         isTyping = false
-        guard let words else { return }
-        let editor = model.screenEditor
-        let screen = screen
+        guard let sending else { return }
         Task {
-            let sent = await editor.send(words, to: screen)
-            draft.sendEnded(sent)
             // The model may have gone since the field appeared.
-            if !sent { whyUnavailable = editor.whyUnavailable() }
+            if await !sending.value { whyUnavailable = editor.whyUnavailable() }
         }
     }
 
@@ -282,6 +288,14 @@ struct ScreenEditField: View {
         model.pencilVoice.holdEnded()
     }
 
+    /// The field went away with the finger still holding it: nothing is sent, as nobody
+    /// said the change was over, and the microphone goes off (`PencilVoice.holdLost`).
+    private func loseHold() {
+        guard holdIsOpen else { return }
+        holdIsOpen = false
+        model.pencilVoice.holdLost()
+    }
+
     /// VoiceOver's "Speak a change": the first use listens, as a hold does, and the next
     /// sends, as letting go does.
     private func speakForVoiceOver() {
@@ -291,39 +305,6 @@ struct ScreenEditField: View {
             model.pencilVoice.holdEnded()
         } else if canHold(shown) {
             beginHold()
-        }
-    }
-}
-
-extension ScreenEditField {
-    /// What is typed in the field, as it is sent: the field clears as the change goes, and
-    /// the words come back if it couldn't be sent, rather than being lost.
-    struct Draft: Equatable {
-        var text = ""
-        /// The words on their way, as typed, until the send says whether they went.
-        private var sending: String?
-
-        var isSending: Bool { sending != nil }
-
-        var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-        /// The words to send, trimmed, clearing the field; nil, with the field cleared, when
-        /// they are blank.
-        mutating func takeForSending() -> String? {
-            let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let typed = text
-            text = ""
-            guard !words.isEmpty else { return nil }
-            sending = typed
-            return words
-        }
-
-        /// The send is over: words that couldn't be sent are put back, unless something
-        /// has been typed since.
-        mutating func sendEnded(_ wasSent: Bool) {
-            guard let typed = sending else { return }
-            sending = nil
-            if !wasSent, isBlank { text = typed }
         }
     }
 }
