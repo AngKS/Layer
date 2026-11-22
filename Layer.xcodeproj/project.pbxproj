@@ -159,6 +159,7 @@
 		74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBA2EA20C0A640CC214D6D82 /* RuleInterpreter.swift */; };
 		75518C3509FEA53C1413CD34 /* TurnSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFF91C2500602D5D27B28C62 /* TurnSession.swift */; };
 		770E95BA7B0FF085109EBA46 /* unknown_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 733503B17F94F98C8D4DF7DB /* unknown_jittered_1b.json */; };
+		78CD73F08E732197ADC53262 /* ScreenEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4882E4611490DB1BB59778 /* ScreenEditor.swift */; };
 		790565CF0FB4A72244743AE7 /* MicrophoneTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB239428396D7072334A272 /* MicrophoneTap.swift */; };
 		7A8BE347EE1EA15D5A91125D /* Enclosure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C8D400C25205290C8095E63 /* Enclosure.swift */; };
 		7B149E6DC025E6DB4A6D6A35 /* SuggestionPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2378BF1C976284C911BAF263 /* SuggestionPill.swift */; };
@@ -514,6 +515,7 @@
 		7E9A47BE672AF5C474731DD7 /* divider_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_noisy_1.json; sourceTree = "<group>"; };
 		7EF06558001F9646F506F005 /* text_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_noisy_2.json; sourceTree = "<group>"; };
 		7F2BF93CE41926C0591EE8B7 /* VoiceRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRoute.swift; sourceTree = "<group>"; };
+		7F4882E4611490DB1BB59778 /* ScreenEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenEditor.swift; sourceTree = "<group>"; };
 		800E83124DC63477FF49470B /* ScreenGenerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGenerationTests.swift; sourceTree = "<group>"; };
 		807E021B6A5C95E3E3B01891 /* stickyNote_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_noisy_1.json; sourceTree = "<group>"; };
 		80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentCatalogueTests.swift; sourceTree = "<group>"; };
@@ -729,6 +731,7 @@
 				EE54558C303693792ED4E2B5 /* DictationRoute.swift */,
 				5EB239428396D7072334A272 /* MicrophoneTap.swift */,
 				2BD7C010B0BC879191EAB904 /* PencilVoice.swift */,
+				7F4882E4611490DB1BB59778 /* ScreenEditor.swift */,
 				ADBED814500825C7C9D467D7 /* VoiceAgent.swift */,
 				3094A5EBA18C9078BE1DE192 /* VoiceCall.swift */,
 				60371249C0F94DB75A00F668 /* VoiceHandles.swift */,
@@ -1607,6 +1610,7 @@
 				CDEBAB3349C20B804B8285EB /* Rotation.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
 				3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */,
+				78CD73F08E732197ADC53262 /* ScreenEditor.swift in Sources */,
 				1DBB19348CF9BA5AE385AE72 /* ScreenGenerator.swift in Sources */,
 				AD04D9FCE3FC4E442D3885D6 /* ScreenIntents.swift in Sources */,
 				2C5602DB846AC7061B6AAA6B /* ScreenPrompt.swift in Sources */,

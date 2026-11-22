@@ -1499,6 +1499,33 @@ struct PencilVoiceTests {
         #expect(!bench.pencil.isListening)
         bench.end()
     }
+
+    /// A typed change's reply is its own line, which can outlast the call's caption when
+    /// the next command takes that at once: Squeeze to Talk going off ends the call only
+    /// once the reply has gone too.
+    @Test func aFieldsReplyKeepsTheCallThoughTheCaptionHasMovedOn() async throws {
+        let bench = Bench()
+        bench.pencil.prepare()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .milliseconds(100), problem: .milliseconds(1500))
+        bench.runner.holds = true
+        bench.runner.outcomes = [VoiceOutcome(problem: "No connection."), VoiceOutcome(lines: ["Done"])]
+        let first = try #require(await bench.pencil.submit("make it red", about: .screenEdit(bench.screen)))
+        let second = try #require(await bench.pencil.submit("make it blue", about: .screenEdit(bench.screen)))
+        #expect(await eventually { bench.runner.commands == ["make it red"] })
+        bench.app.squeezesToTalk = false
+        bench.runner.holds = false
+        #expect(await until { call.progress(of: second) == .done("Done") || call.phase == .ended })
+        // The second's reply has come and gone; the first's problem is still shown.
+        #expect(await until { call.caption == nil || call.phase == .ended })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(bench.pencil.call === call)
+        #expect(call.progress(of: first) == .problem("No connection."))
+        // Once it has gone, so does the call, as Squeeze to Talk going off asked.
+        #expect(await until { bench.pencil.call == nil })
+        bench.end()
+    }
 }
 
 /// The window's one squeeze handler, which decides once per squeeze who has it: a ruler
@@ -1880,5 +1907,219 @@ struct SqueezeRouterTests {
         router.ended()
         scrubber.end()
         bench.end()
+    }
+}
+
+/// A selected screen's field, "Describe a change…": what it sends, through the pencil's
+/// call, and how each screen's change is getting on, which the field shows in place of
+/// the words typed.
+@Suite("What a screen's field sends and shows", .serialized)
+@MainActor
+struct ScreenEditorTests {
+    /// A second screen, Profile, to the right of Login.
+    private func addProfile(to bench: Bench) -> DesignScreen.ID {
+        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
+        bench.app.store.updateScreen(profile.id) { $0.name = "Profile" }
+        return profile.id
+    }
+
+    @Test func aChangeShowsItsStepThenItsReplyThenClears() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let screen = bench.screen
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .milliseconds(100), problem: .milliseconds(100))
+        #expect(editor.isBusy(for: screen))
+        guard case .working = editor.progress(for: screen) else {
+            Issue.record("a change just sent is on its way")
+            return
+        }
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        #expect(bench.runner.targets == [.screenEdit(screen)])
+        call.showStep("Restyling…")
+        #expect(editor.progress(for: screen) == .working("Restyling…"))
+        #expect(editor.line(for: screen) == .working("Restyling…"))
+        bench.runner.outcomes = [VoiceOutcome(lines: ["Restyled the screen."])]
+        bench.runner.holds = false
+        #expect(await until { editor.progress(for: screen) == .done("Restyled the screen.") })
+        #expect(editor.line(for: screen) == .reply("Restyled the screen."))
+        #expect(!editor.isBusy(for: screen))
+        #expect(await until { editor.progress(for: screen) == .over })
+        #expect(editor.line(for: screen) == nil)
+        bench.end()
+    }
+
+    @Test func aBlankChangeSendsNothing() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        #expect(await !editor.send("  ", to: bench.screen))
+        #expect(await !editor.send("\n", to: bench.screen))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.call == nil)
+        #expect(editor.progress(for: bench.screen) == .over)
+    }
+
+    @Test func aSecondChangeToTheSameScreenWaitsForTheFirst() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(await !editor.send("make it light", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.count == 1 && bench.pencil.call?.queuedCount == 0)
+        // Once the first is done, its reply showing, the next goes.
+        bench.runner.holds = false
+        #expect(await until { !editor.isBusy(for: bench.screen) })
+        #expect(await editor.send("make it light", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark", "make it light"] })
+        bench.end()
+    }
+
+    /// A change still being sent, waiting on the call to get ready, keeps its screen busy:
+    /// a second one isn't sent behind it.
+    @Test func aChangeStillBeingSentKeepsItsScreenBusy() async {
+        let runner = SlowWarmingRunner()
+        let bench = Bench(runner: runner)
+        let editor = ScreenEditor(model: bench.app)
+        let first = Task { await editor.send("make it dark", to: bench.screen) }
+        #expect(await until { editor.isBusy(for: bench.screen) })
+        #expect(editor.progress(for: bench.screen) == .working(nil))
+        // No step of its own yet: the field says it is under way all the same.
+        #expect(editor.line(for: bench.screen) == .working(ScreenEditor.noStepYet))
+        #expect(await !editor.send("make it light", to: bench.screen))
+        runner.holdsWarmUp = false
+        #expect(await first.value)
+        #expect(await eventually { runner.commands == ["make it dark"] })
+        bench.end()
+    }
+
+    @Test func changesToTwoScreensAreFollowedApart() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(editor.progress(for: second) == .over)
+        #expect(editor.isBusy(for: bench.screen) && !editor.isBusy(for: second))
+        // The second screen's change waits its turn behind the first's, with no step yet.
+        #expect(await editor.send("make it light", to: second))
+        #expect(editor.isBusy(for: second))
+        #expect(editor.line(for: second) == .working(ScreenEditor.noStepYet))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.pencil.call?.showStep("Restyling…")
+        #expect(editor.progress(for: bench.screen) == .working("Restyling…"))
+        #expect(editor.progress(for: second) == .working(nil))
+        bench.runner.holds = false
+        #expect(await eventually { bench.runner.targets == [.screenEdit(bench.screen), .screenEdit(second)] })
+        bench.end()
+    }
+
+    @Test func theFieldSaysWhyWhenNoModelCanBeAsked() async {
+        let bench = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let editor = ScreenEditor(model: bench.app)
+        #expect(editor.whyUnavailable() == "Turn on Apple Intelligence.")
+        #expect(await !editor.send("make it dark", to: bench.screen))
+        #expect(bench.pencil.call == nil && bench.runner.commands.isEmpty)
+        #expect(editor.progress(for: bench.screen) == .over)
+        let ready = Bench()
+        #expect(ScreenEditor(model: ready.app).whyUnavailable() == nil)
+    }
+
+    /// A screen that has gone, or a design that has closed, takes no change.
+    @Test func aGoneScreenOrAClosedDesignTakesNoChange() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.app.store.deleteScreen(second)
+        #expect(await !editor.send("make it dark", to: second))
+        bench.app.close()
+        #expect(await !editor.send("make it dark", to: bench.screen))
+        #expect(bench.pencil.call == nil && bench.runner.commands.isEmpty)
+    }
+
+    /// Words heard for another listen take the call's caption while a change runs: the
+    /// field still shows the step its change is on (carried from Task 5).
+    @Test func aChangesStepStaysWhileWordsAreHeard() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.pencil.call?.showStep("Restyling…")
+        #expect(await bench.toggle())
+        #expect(await bench.hear("make the title"))
+        #expect(editor.progress(for: bench.screen) == .working("Restyling…"))
+        #expect(editor.line(for: bench.screen) == .working("Restyling…"))
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
+    /// The next change starting the moment one is over takes the call's caption at once:
+    /// each field still shows its own change's reply (carried from Task 5).
+    @Test func eachChangeKeepsItsOwnReply() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .seconds(1), problem: .seconds(1))
+        #expect(await editor.send("make it light", to: second))
+        bench.runner.outcomes = [VoiceOutcome(lines: ["Restyled Login."]), VoiceOutcome(problem: "No connection.")]
+        bench.runner.holds = false
+        #expect(await until { editor.progress(for: second) == .problem("No connection.") })
+        #expect(editor.line(for: second) == .problem("No connection."))
+        #expect(editor.progress(for: bench.screen) == .done("Restyled Login."))
+        #expect(await until { editor.progress(for: bench.screen) == .over && editor.progress(for: second) == .over })
+        bench.end()
+    }
+
+    /// Numbers start again with each call: a change is followed on the call it was sent
+    /// on, never by its number on the next, and is over once that call ends (carried from
+    /// Task 5).
+    @Test func aChangeIsFollowedOnTheCallItWasSentOn() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        #expect(await editor.send("make it dark", to: bench.screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .seconds(30), problem: .seconds(30))
+        #expect(await until { editor.progress(for: bench.screen) == .done("Done") })
+        call.end()
+        #expect(editor.progress(for: bench.screen) == .over)
+        // The next call numbers its first command as the last one's was numbered.
+        bench.runner.holds = true
+        #expect(await editor.send("make it light", to: second))
+        #expect(bench.pencil.call !== call)
+        #expect(editor.isBusy(for: second))
+        #expect(editor.progress(for: bench.screen) == .over)
+        bench.end()
+    }
+
+    /// A send whose field went away, cancelling the task it was sent from, still waits
+    /// its turn behind a command spoken a moment earlier whose words are still settling
+    /// (carried from Task 8).
+    @Test func aSendCancelledByItsFieldStillWaitsItsTurn() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        #expect(await bench.hold())
+        #expect(bench.pencil.call?.settling.isEmpty == false)
+        let typed = Task { await editor.send("make it red", to: bench.screen) }
+        try? await Task.sleep(for: .milliseconds(50))
+        typed.cancel()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.call?.queuedCount == 0)
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] })
+        #expect(await typed.value)
+        bench.end()
+    }
+
+    /// The design's field model, made once.
+    @Test func theDesignHasOneScreenEditor() {
+        let bench = Bench()
+        #expect(bench.app.screenEditor === bench.app.screenEditor)
     }
 }

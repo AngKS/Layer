@@ -83,19 +83,20 @@ final class VoiceCall {
         }
     }
 
-    /// How one command is getting on, told from the lines about it: what a typed change's
+    /// How one command is getting on, told from its own lines: what a typed change's
     /// field shows in place of its words.
     enum Progress: Equatable {
         /// Waiting its turn or being carried out, with the step its line says it is on.
-        /// Without a line of its own (waiting behind another command, its route still
-        /// settling, or its line replaced by words being heard) there is no step to show.
+        /// Without a line of its own yet (waiting behind another command, or its route
+        /// still settling) there is no step to show.
         case working(String?)
         /// What was done, as its line says.
         case done(String)
         /// What the model said when it did nothing.
         case said(String)
         case problem(String)
-        /// Nothing more to show: its line has gone or been replaced, or it was never taken.
+        /// Nothing more to show: its reply has shown for as long as a caption lasts, it
+        /// ended with nothing to say, or it was never taken.
         case over
     }
 
@@ -127,6 +128,11 @@ final class VoiceCall {
     @ObservationIgnored private(set) var commandsTaken = 0
     /// The numbers of listens sent whose routes are still settling what they heard.
     private(set) var settling: Set<Int> = []
+    /// Each command's own last line, by its number: the step it is on and then its reply,
+    /// which lasts as long as the caption would. The caption is shared, and moves on to
+    /// words being heard or to the next command, which can start the moment one is over;
+    /// a command's own line stays its own.
+    private(set) var commandLines: [Int: Caption] = [:]
     /// Why the call ended, when it wasn't hung up.
     private(set) var endReason: String?
     /// Whether a route asked for is open, from its starting until it stops. Only a call
@@ -265,6 +271,7 @@ final class VoiceCall {
         // The worker stops without reporting the command under way, so it is over here.
         working = nil
         caption = nil
+        commandLines = [:]
         if line.call === self { line.call = nil }
         onEnd?()
     }
@@ -391,18 +398,19 @@ final class VoiceCall {
         settling.contains(number) || working == number || queue.contains { $0.number == number }
     }
 
-    /// How the command numbered `number` is getting on: its own line while the caption is
-    /// about it, and otherwise only whether it is still to come or under way.
+    /// How the command numbered `number` is getting on: its own line, which the caption
+    /// moving on to something else doesn't take away, and without one only whether it is
+    /// still to come or under way.
     func progress(of number: Int) -> Progress {
         // The queue isn't observed, its count is: read so that whatever follows this
         // hears a command leave the queue.
         _ = queuedCount
-        if let caption, caption.command == number {
-            switch caption.kind {
-            case .hearing, .working: return .working(caption.text)
-            case .done: return .done(caption.text)
-            case .said: return .said(caption.text)
-            case .problem: return .problem(caption.text)
+        if let line = commandLines[number] {
+            switch line.kind {
+            case .hearing, .working: return .working(line.text)
+            case .done: return .done(line.text)
+            case .said: return .said(line.text)
+            case .problem: return .problem(line.text)
             }
         }
         return isUnderWay(number) ? .working(nil) : .over
@@ -730,6 +738,8 @@ final class VoiceCall {
             show(.said, outcome.said, about: command)
         } else {
             caption = nil
+            // Over with nothing to say: the step it was on isn't left showing.
+            commandLines[command] = nil
         }
     }
 
@@ -738,6 +748,7 @@ final class VoiceCall {
         captionClearing?.cancel()
         let shown = Caption(kind: kind, text: text, command: command)
         caption = shown
+        if let command { commandLines[command] = shown }
         // Words being heard and work under way stay until something replaces them.
         let time: Duration
         switch kind {
@@ -749,6 +760,13 @@ final class VoiceCall {
             try? await Task.sleep(for: time)
             guard !Task.isCancelled, let self, self.caption?.id == shown.id else { return }
             self.caption = nil
+        }
+        // A command's own line lasts as long, though the caption moves on before then.
+        guard let command else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: time)
+            guard let self, self.commandLines[command]?.id == shown.id else { return }
+            self.commandLines[command] = nil
         }
     }
 }

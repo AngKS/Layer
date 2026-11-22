@@ -455,10 +455,11 @@ final class PencilVoice {
         call.end()
     }
 
-    /// Whether a screen's field is waiting on `call` or showing one of its commands. Its
-    /// commands that are over, and shown, are forgotten.
+    /// Whether a screen's field is waiting on `call` or showing one of its commands: still
+    /// to run, or with its own line still up, which can outlast the caption. Its commands
+    /// that are over, and shown, are forgotten.
     private func isUsedByTheField(_ call: VoiceCall) -> Bool {
-        fieldCommands = fieldCommands.filter { call.isUnderWay($0) || call.caption?.command == $0 }
+        fieldCommands = fieldCommands.filter { call.progress(of: $0) != .over }
         return submitsWaiting > 0 || !fieldCommands.isEmpty
     }
 
@@ -677,6 +678,7 @@ final class PencilVoice {
             _ = call.phase
             _ = call.settling
             _ = call.working
+            _ = call.commandLines
         } onChange: { [weak self, weak call] in
             // Held weakly: the call keeps this closure, and mustn't keep itself through it.
             Task { @MainActor [weak self, weak call] in

@@ -1154,9 +1154,55 @@ struct VoiceCallTests {
         #expect(await until { call.progress(of: first) == .problem("No connection.") })
         let second = try #require(call.submit("write me a poem", about: nil))
         #expect(await until { call.progress(of: second) == .said("I can only change the design.") })
-        // The second's line has taken the place of the first's.
-        #expect(call.progress(of: first) == .over)
+        // The second's line has taken the caption, and the first's problem is still its own.
+        #expect(call.caption?.command == second)
+        #expect(call.progress(of: first) == .problem("No connection."))
         call.end()
+    }
+
+    /// A command's line is its own: words heard for the next listen, or the next command
+    /// starting the moment it is over, take the caption without taking away its step or
+    /// its reply, which lasts as long as the caption would have.
+    @Test func aCommandKeepsItsOwnLineWhenTheCaptionMovesOn() async throws {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        call.captionTimes = (done: .seconds(1), problem: .seconds(1))
+        await call.start()
+        let n = try #require(call.submit("restyle the button", about: nil))
+        #expect(await eventually { runner.commands == ["restyle the button"] })
+        call.showStep("Restyling…")
+        // Words heard for the next listen.
+        await call.listen(for: nil)
+        routes[0].send(.hearing("make it"))
+        #expect(await until { call.caption?.kind == .hearing })
+        #expect(call.progress(of: n) == .working("Restyling…"))
+        call.cancelListening()
+        // The next command starts as soon as this one is over, and has the caption at once.
+        let m = try #require(call.submit("make it blue", about: nil))
+        runner.outcomes = [VoiceOutcome(lines: ["Restyled the button."]), VoiceOutcome(problem: "No connection.")]
+        runner.holds = false
+        #expect(await until { call.progress(of: m) == .problem("No connection.") })
+        #expect(call.caption?.command == m)
+        #expect(call.progress(of: n) == .done("Restyled the button."))
+        #expect(await until { call.progress(of: n) == .over && call.progress(of: m) == .over })
+        // A command over with nothing to say has no line left behind.
+        runner.outcomes = [VoiceOutcome()]
+        let quiet = try #require(call.submit("do nothing", about: nil))
+        #expect(await eventually { runner.commands.count == 3 })
+        #expect(await until { call.progress(of: quiet) == .over })
+        call.end()
+    }
+
+    /// Ending the call takes every command's line with it.
+    @Test func aCommandsLineGoesWithTheCall() async throws {
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        await call.start()
+        let n = try #require(call.submit("make it blue", about: nil))
+        #expect(await until { call.progress(of: n) == .done("Done") })
+        call.end()
+        #expect(call.progress(of: n) == .over)
     }
 
     /// A change typed while a spoken command runs waits its turn behind it.

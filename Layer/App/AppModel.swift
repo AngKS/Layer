@@ -746,6 +746,17 @@ final class AppModel {
 
     @ObservationIgnored private var pencilVoiceIfMade: PencilVoice?
 
+    /// What a selected screen's field sends, and how each screen's change is getting on.
+    /// Made when first asked for.
+    var screenEditor: ScreenEditor {
+        if let screenEditorIfMade { return screenEditorIfMade }
+        let made = ScreenEditor(model: self)
+        screenEditorIfMade = made
+        return made
+    }
+
+    @ObservationIgnored private var screenEditorIfMade: ScreenEditor?
+
     /// Decides who has each of Apple Pencil Pro's squeezes in this window: a ruler,
     /// push-to-talk, or nobody. Made when first asked for.
     var squeezeRouter: SqueezeRouter {
