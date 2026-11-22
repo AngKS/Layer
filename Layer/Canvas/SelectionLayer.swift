@@ -27,6 +27,10 @@ struct SelectionLayer: View {
             SelectionSummary()
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
+                    // A tap reaches what it would without the area: the screen's empty area,
+                    // which lets go of it as the canvas does, or, with the palette up, an
+                    // element on it.
+                    .onTapGesture(coordinateSpace: .named(Self.space)) { model.selectionAreaTapped(at: $0) }
                     .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
             }
             // Every element's target, laid out once in canvas points and moved as one by
@@ -54,15 +58,19 @@ struct SelectionLayer: View {
             }
 
             // Several things at once: each is outlined on its turned shape, any of them
-            // drags them all, and a tap on one picks it out. They have no handles: together
-            // they aren't resized, but they turn as one by the knob.
+            // drags them all, and a tap on one takes it out. A screen's area lies over what
+            // is on it, so a tap there reaches that, or the screen's empty area, instead.
+            // They have no handles: together they aren't resized, but they turn as one by
+            // the knob.
             if case .several = model.selection {
                 let things = model.selectedThings
                 let isLocked = model.isSelectionLocked
                 ForEach(things, id: \.self) { thing in
                     if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
                         dragArea(shape.rect, degrees: shape.degrees)
-                            .onTapGesture { model.pick(thing) }
+                            .onTapGesture(coordinateSpace: .named(Self.space)) { point in
+                                if case .screen = thing { model.selectionAreaTapped(at: point) } else { model.pick(thing) }
+                            }
                             .canvasDrag(drags, model: model, isEnabled: !isLocked) { drags.moveSelection(model: model, owner: $0) }
                     }
                 }

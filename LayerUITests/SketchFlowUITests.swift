@@ -523,6 +523,36 @@ final class SketchFlowUITests: XCTestCase {
         attach("tap-inside-a-drawings-box")
     }
 
+    /// A screen selected with other things is dragged by its whole area, but a tap there
+    /// reaches what lies under it: an element on it takes the screen's place, and its empty
+    /// area lets go of everything. The area used to take the screen out of the selection.
+    func testATapOnAScreenSelectedWithOtherThingsReachesWhatIsOnIt() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        // A drawing off the screen, to select with it.
+        control("Draw").tap()
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 120, y: 420), CGPoint(x: 240, y: 470))
+        control("Draw").tap()
+        point(CGPoint(x: 180, y: 445)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on the ink should pick the drawing")
+        let name = app.staticTexts["Screen 1"]
+        name.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the screen's name should add the screen")
+        let withTheScreen = selectionSize
+
+        // On the screen's button: the button takes the screen's place beside the drawing.
+        point(button.centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the button should replace the screen with it")
+        XCTAssertLessThan(selectionSize.height, withTheScreen.height - 100, "the drawing and the button should cover less than the drawing and the screen")
+
+        // Added again, the screen folds the button in. A tap on its empty area lets go of all.
+        name.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the screen's name should add it again")
+        point(CGPoint(x: button.centre.x, y: button.centre.y - 150)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on the screen's empty area should let go of everything")
+        attach("tap-on-a-screen-among-several")
+    }
+
     /// In Draw the palette goes while text is typed, and comes back as the keyboard goes
     /// (audit C5, follow-up).
     func testThePaletteComesBackWhenTypingEndsInDraw() {
@@ -886,6 +916,11 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(of: selectionElement), "where the button's end was (100 points out from its centre) should hit no button, and let go of it")
         end.tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "tapped again, the spot should select its screen")
+        // The selected screen's own empty area lets go of it, as the canvas does.
+        end.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on the selected screen's empty area should let go of it")
+        end.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5))
         // A thing on a selected screen takes the screen's place.
         point(button.centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the centre should still select the button")
