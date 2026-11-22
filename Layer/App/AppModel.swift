@@ -1156,6 +1156,11 @@ final class AppModel {
             pick(.screen(id))
         } else if selection == nil, let screen = store.screen(at: point) {
             pick(.screen(screen.id))
+        } else if let screen = store.screen(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen.id)) {
+            // The finger that rested on the screen's empty area, lifting. What it rested
+            // on was the screen, but the tap would reach `pick` as a clearing, which its
+            // guard wouldn't know for the lift.
+            rested = nil
         } else if !isNearMiss(viewPoint) {
             pick(nil)
         }
@@ -1216,14 +1221,10 @@ final class AppModel {
     /// `selection(afterTapOn:from:)`. With another finger resting on the canvas, as in
     /// Freeform, the thing the resting finger is on is selected with it.
     func pick(_ thing: CanvasSelection?) {
-        let resting = restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
-        guard let finger = resting.first else {
-            if let rested {
-                self.rested = nil
-                // Lifting the finger that rested reaches whatever it was on as a tap.
-                let isLifting = rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
-                if isLifting, rested.on == thing { return }
-            }
+        guard let finger = restingOnCanvas.first else {
+            let isLift = isLiftOfRestedFinger(on: thing)
+            rested = nil
+            if isLift { return }
             selectByTap(thing.flatMap { selection(afterTapOn: $0, from: selection) })
             return
         }
@@ -1266,6 +1267,19 @@ final class AppModel {
         guard new != selection else { return }
         selection = new
         tapSelectionChanges += 1
+    }
+
+    /// Where fingers are resting on the canvas itself, in the view's points: not on a panel
+    /// or popover over it.
+    private var restingOnCanvas: [CGPoint] {
+        restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
+    }
+
+    /// Whether a tap on a thing, or on nothing, made with no finger resting, is only the
+    /// finger that rested lifting: lifting, it reaches whatever it was on as a tap.
+    private func isLiftOfRestedFinger(on thing: CanvasSelection?) -> Bool {
+        guard let rested, rested.on == thing else { return false }
+        return rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
     }
 
     /// The last finger resting on the canvas has lifted.

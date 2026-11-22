@@ -693,6 +693,29 @@ struct TapToAddTests {
         board.model.canvasTapped(at: CGPoint(x: name.midX, y: name.midY))
         #expect(board.model.selection == .several([.screen(board.screen), .element(board.note)]))
     }
+
+    /// Lifting, a finger that rested on a screen's empty area reaches it as a tap, which
+    /// isn't one: it neither clears what the taps built nor picks anything.
+    @Test func liftingAFingerThatRestedOnAScreensEmptyAreaKeepsTheSelection() throws {
+        // Resting on the screen while the note, off it, is tapped: the screen is held.
+        let board = Board()
+        let resting = try #require(board.store.screen(board.screen)).canvasPoint(for: CGPoint(x: 200, y: 500))
+        board.model.restingFingers = { [resting] }
+        board.model.pick(.element(board.note))
+        let both = CanvasSelection([.screen(board.screen), .element(board.note)])
+        #expect(board.model.selection == both)
+        board.model.restingFingers = { [] }
+        board.model.canvasTapped(at: resting)
+        #expect(board.model.selection == both)
+
+        // Resting there while the title, on it, is tapped: nothing is held.
+        let other = Board()
+        other.model.restingFingers = { [resting] }
+        other.model.pick(.element(other.title))
+        other.model.restingFingers = { [] }
+        other.model.canvasTapped(at: resting)
+        #expect(other.model.selection == .element(other.title))
+    }
 }
 
 /// Drags on the canvas, as `SelectionLayer`'s gestures drive them. SwiftUI doesn't call
