@@ -1158,6 +1158,26 @@ struct VoiceCallTests {
         #expect(await eventually { runner.commands == ["make it blue", "make it red"] })
         call.end()
     }
+
+    /// Ending the call ends its commands too: the one under way and the ones waiting are
+    /// over, and none is left showing as working with nothing to come.
+    @Test func aCommandUnderWayWhenTheCallEndsIsOver() async throws {
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        await call.start()
+        let n = try #require(call.submit("make it blue", about: nil))
+        #expect(await until { call.progress(of: n) == .working("Thinking…") })
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        let m = try #require(call.submit("make it red", about: nil))
+        #expect(call.progress(of: m) == .working(nil))
+        call.end()
+        #expect(call.progress(of: n) == .over)
+        #expect(call.progress(of: m) == .over)
+        #expect(!call.isUnderWay(n))
+        // Still over once the stopped command has come back.
+        #expect(await eventually { runner.cancelled == ["make it blue"] })
+        #expect(call.progress(of: n) == .over && !call.isUnderWay(n))
+    }
 }
 
 /// A runner whose getting ready lasts until the test lets it go.

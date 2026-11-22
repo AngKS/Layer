@@ -259,6 +259,8 @@ final class VoiceCall {
         letGoOfFragment()
         queue.removeAll()
         queuedCount = 0
+        // The worker stops without reporting the command under way, so it is over here.
+        working = nil
         caption = nil
         if line.call === self { line.call = nil }
         onEnd?()
