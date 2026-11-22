@@ -1021,5 +1021,10 @@ enum CanvasWork {
     static var ownersMade = 0
     /// Passes over the design's list to work out what can be touched on the canvas.
     static var targetPasses = 0
+    /// Turn sessions formed from the design: one for each read of a selection's shape that
+    /// had none held.
+    static var turnSessionsFormed = 0
+    /// Walks over a group's leaves, made to see whether anything in the group shows.
+    static var leafWalks = 0
 }
 #endif

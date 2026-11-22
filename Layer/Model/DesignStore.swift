@@ -40,6 +40,14 @@ final class DesignStore {
     /// the change before its own was its own too.
     @ObservationIgnored private var changeCount = 0
 
+    /// Moves on with every change to the content, and is read so that whatever draws from
+    /// something kept for one version is drawn again when the content changes. For keeping
+    /// what is worked out from the content, for as long as it is as it was.
+    var contentVersion: Int {
+        _ = content
+        return changeCount
+    }
+
     /// The document's undo manager. Ink is in its history too, as changes to the design's
     /// drawings: PencilKit keeps none of its own here. Its history is capped, so a
     /// long sitting doesn't keep every earlier version of the design alive.

@@ -58,6 +58,9 @@ struct TurnSession: Equatable {
     /// by its box, and its members, and the groups inside it, turn with it.
     @MainActor
     static func form(for selection: CanvasSelection, in store: DesignStore) -> TurnSession? {
+        #if DEBUG
+        CanvasWork.turnSessionsFormed += 1
+        #endif
         var baseline: [DesignStore.ElementRef: Member] = [:]
         var shapes: [TurnedRect] = []
         for thing in store.things(in: selection) {
