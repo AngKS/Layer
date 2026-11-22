@@ -200,6 +200,58 @@ final class VoiceModeUITests: XCTestCase {
         shoot("squeeze-to-talk-off")
     }
 
+    // MARK: A screen's field
+
+    /// The field's demo: what the model does with the change, typed or said. No
+    /// apostrophes: one in a launch argument swallows the arguments after it.
+    private let screenEdit = "make the button green and say Continue => styleElement element=E2 look=green && setText element=E2 text=Continue"
+
+    /// A change typed into a selected screen's field is made by the real agent and its
+    /// tools, the field says what was done, and one undo takes the whole change back.
+    func testATypedChangeToAScreenIsMadeAndUndoneInOneStep() {
+        openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerVoiceDemoDesign", "login", "-LayerScreenEditDemo", screenEdit])
+        let field = control("Describe a change")
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "a selected screen's bar should have the field")
+        shoot("screen-edit-idle")
+        field.tap()
+        sleep(1)
+        shoot("screen-edit-typing")
+        app.typeText("make the button green and say Continue\n")
+        XCTAssertTrue(app.staticTexts["Continue"].waitForExistence(timeout: 15), "the button on the canvas should say Continue")
+        XCTAssertTrue(wait(for: control("Describe a change"), toHave: "value CONTAINS %@", "Reworded", timeout: 10), "the field should say what was done")
+        shoot("screen-edit-reply")
+        // One undo takes the whole change back: both its tools' changes.
+        XCTAssertTrue(control("Undo").waitForExistence(timeout: 5), "a typed change should be undoable")
+        control("Undo").tap()
+        XCTAssertTrue(app.staticTexts["Sign in"].waitForExistence(timeout: 5), "undo should put the button's words back")
+        XCTAssertFalse(app.staticTexts["Continue"].exists, "one undo should take the whole change back")
+    }
+
+    /// Pressed and held, the field listens for the change instead, and letting go sends it.
+    func testHoldingTheChangeFieldSpeaksTheChange() {
+        openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerVoiceDemoDesign", "login", "-LayerScreenEditDemo", screenEdit])
+        let field = control("Describe a change")
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "a selected screen's bar should have the field")
+        field.press(forDuration: 5)
+        XCTAssertTrue(app.staticTexts["Continue"].waitForExistence(timeout: 15), "the change said while holding should be made")
+        shoot("screen-edit-held")
+        // Left as found, for the tests that open this design next.
+        if control("Undo").waitForExistence(timeout: 5) { control("Undo").tap() }
+    }
+
+    /// Without a model that can be asked, the field says why and can't be used.
+    func testTheChangeFieldSaysWhyItCannotBeUsed() {
+        openNewDesign(arguments: [
+            "-convertsAutomatically", "NO", "-LayerVoiceDemoDesign", "login", "-LayerScreenEditDemo", screenEdit,
+            "-LayerScreenEditDemoUnavailable", "Apple Intelligence is turned off",
+        ])
+        let field = control("Describe a change")
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "a selected screen's bar should have the field")
+        XCTAssertTrue(wait(for: field, toHave: "value CONTAINS %@", "Apple Intelligence is turned off", timeout: 5), "the field should say why it can't be used")
+        XCTAssertFalse(field.isEnabled, "the field should be disabled")
+        shoot("screen-edit-unavailable")
+    }
+
     // MARK: Helpers
 
     private var caption: XCUIElement {

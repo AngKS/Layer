@@ -1205,6 +1205,35 @@ struct VoiceCallTests {
         #expect(call.progress(of: n) == .over)
     }
 
+    /// A spoken "stop" drops the commands waiting their turn, and each says so on its own
+    /// line, which a typed change's field shows. The caption stays the one under way's,
+    /// which says it was stopped.
+    @Test func aStopSaysSoForEachCommandItDrops() async throws {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        call.captionTimes = (done: .milliseconds(300), problem: .milliseconds(300))
+        await call.start()
+        let running = try #require(call.submit("make it blue", about: nil))
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        let waiting = try #require(call.submit("make it red", about: nil))
+        let alsoWaiting = try #require(call.submit("make it bold", about: nil))
+        #expect(call.progress(of: waiting) == .working(nil))
+        await call.listen(for: nil)
+        call.send()
+        routes[0].send(.command("Stop."))
+        #expect(await eventually { runner.cancelled == ["make it blue"] && call.queuedCount == 0 })
+        #expect(call.progress(of: waiting) == .done("Stopped"))
+        #expect(call.progress(of: alsoWaiting) == .done("Stopped"))
+        #expect(await until { call.progress(of: running) == .done("Stopped") })
+        #expect(call.caption?.command == running)
+        // Neither ran, and their lines go as a caption would.
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(runner.commands == ["make it blue"])
+        #expect(await until { call.progress(of: waiting) == .over && call.progress(of: alsoWaiting) == .over })
+        call.end()
+    }
+
     /// A change typed while a spoken command runs waits its turn behind it.
     @Test func typedWordsWaitBehindASpokenCommand() async throws {
         var routes: [FakeRoute] = []

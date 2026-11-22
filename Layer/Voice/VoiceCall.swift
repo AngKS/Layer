@@ -510,8 +510,12 @@ final class VoiceCall {
         switch action {
         case .stop:
             // The command under way reports that it was stopped, which is what is shown.
+            // Those waiting their turn never run, and say so on their own lines, which a
+            // typed change's field shows: the caption is the one under way's.
+            let dropped = queue.map(\.number)
             queue.removeAll()
             queuedCount = 0
+            for number in dropped { keep(Caption(kind: .done, text: Self.stopped, command: number), for: number) }
             if let running { running.cancel() } else { caption = nil }
         case .hangUp:
             end()
@@ -728,7 +732,7 @@ final class VoiceCall {
             problem: \(outcome.problem ?? "none", privacy: .private), said: \(outcome.said, privacy: .private)
             """)
         if outcome.wasCancelled {
-            show(.done, "Stopped", about: command)
+            show(.done, Self.stopped, about: command)
         } else if let problem = outcome.problem {
             show(.problem, problem, about: command)
         } else if let line = outcome.lines.last {
@@ -743,30 +747,43 @@ final class VoiceCall {
         }
     }
 
+    /// Said of a command stopped, running or waiting its turn.
+    static let stopped = "Stopped"
+
     /// `command` is the number of the command the line is about, for a line that is.
     private func show(_ kind: Caption.Kind, _ text: String, about command: Int? = nil) {
         captionClearing?.cancel()
         let shown = Caption(kind: kind, text: text, command: command)
         caption = shown
-        if let command { commandLines[command] = shown }
+        if let command { keep(shown, for: command) }
         // Words being heard and work under way stay until something replaces them.
-        let time: Duration
-        switch kind {
-        case .done: time = captionTimes.done
-        case .problem, .said: time = captionTimes.problem
-        case .hearing, .working: return
-        }
+        guard let time = lasts(kind) else { return }
         captionClearing = Task { [weak self] in
             try? await Task.sleep(for: time)
             guard !Task.isCancelled, let self, self.caption?.id == shown.id else { return }
             self.caption = nil
         }
-        // A command's own line lasts as long, though the caption moves on before then.
-        guard let command else { return }
+    }
+
+    /// Sets the command's own line. An outcome lasts as long as the caption would, though
+    /// the caption moves on before then.
+    private func keep(_ line: Caption, for command: Int) {
+        commandLines[command] = line
+        guard let time = lasts(line.kind) else { return }
         Task { [weak self] in
             try? await Task.sleep(for: time)
-            guard let self, self.commandLines[command]?.id == shown.id else { return }
+            guard let self, self.commandLines[command]?.id == line.id else { return }
             self.commandLines[command] = nil
+        }
+    }
+
+    /// How long a line of `kind` stays once there is nothing more to add to it, or nil for
+    /// one that stays until something replaces it: words being heard and work under way.
+    private func lasts(_ kind: Caption.Kind) -> Duration? {
+        switch kind {
+        case .done: captionTimes.done
+        case .problem, .said: captionTimes.problem
+        case .hearing, .working: nil
         }
     }
 }

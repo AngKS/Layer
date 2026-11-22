@@ -1310,6 +1310,42 @@ struct PencilVoiceTests {
         bench.end()
     }
 
+    /// A finger let go of the field before the microphone came on. A hold gets no Pencil
+    /// tap to wait for, so it is told to keep holding rather than to wait for the tap:
+    /// whether the call was still getting ready or the microphone was coming on.
+    @Test func aHoldLetGoBeforeTheMicrophoneIsOnSaysToKeepHolding() async {
+        let hold = PencilVoice.State.problem(PencilVoice.tooSoonForAHold)
+        #expect(PencilVoice.tooSoonForAHold != VoiceCall.tooSoon)
+        // The microphone coming on.
+        let bench = Bench()
+        bench.routesHoldStart = true
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.routes.count == 1 })
+        bench.pencil.holdEnded()
+        #expect(await eventually { bench.state == hold })
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+        // The call still getting ready.
+        let slow = SlowWarmingRunner()
+        let ready = Bench(runner: slow)
+        ready.pencil.holdBegan(about: ready.screen, at: CGPoint(x: 500, y: 300))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(ready.state == .gettingReady)
+        ready.pencil.holdEnded()
+        #expect(ready.state == hold)
+        slow.holdsWarmUp = false
+        ready.end()
+        // A squeeze's line is still the squeeze's.
+        let squeeze = Bench()
+        squeeze.routesHoldStart = true
+        squeeze.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { squeeze.routes.count == 1 })
+        squeeze.now += .seconds(1)
+        squeeze.pencil.squeezeEnded()
+        #expect(await eventually { squeeze.state == .problem(VoiceCall.tooSoon) })
+        squeeze.end()
+    }
+
     /// A squeeze listening keeps the microphone: a hold then is ignored, and its end sends
     /// nothing of the squeeze's, held or toggled.
     @Test func aHoldsEndLeavesASqueezesListenAlone() async {
@@ -2121,5 +2157,57 @@ struct ScreenEditorTests {
     @Test func theDesignHasOneScreenEditor() {
         let bench = Bench()
         #expect(bench.app.screenEditor === bench.app.screenEditor)
+    }
+}
+
+/// What is typed in a screen's field, as it is sent.
+@MainActor
+struct ScreenEditFieldTests {
+    /// Sent, the field clears; a change that couldn't be sent puts its words back, rather
+    /// than leaving the field blank and the words lost.
+    @Test func aChangeThatCouldNotBeSentIsPutBack() async throws {
+        let bench = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let editor = ScreenEditor(model: bench.app)
+        var draft = ScreenEditField.Draft()
+        draft.text = "make it dark "
+        let taken = draft.takeForSending()
+        let words = try #require(taken)
+        #expect(words == "make it dark")
+        #expect(draft.text.isEmpty && draft.isSending)
+        draft.sendEnded(await editor.send(words, to: bench.screen))
+        #expect(draft.text == "make it dark " && !draft.isSending)
+    }
+
+    @Test func aChangeSentLeavesTheFieldClear() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        var draft = ScreenEditField.Draft()
+        draft.text = "make it dark"
+        let taken = draft.takeForSending()
+        let words = try #require(taken)
+        draft.sendEnded(await editor.send(words, to: bench.screen))
+        #expect(draft.text.isEmpty && !draft.isSending)
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.end()
+    }
+
+    /// Blank words aren't sent, and leave nothing in the field.
+    @Test func blankWordsAreNotSent() {
+        var draft = ScreenEditField.Draft()
+        draft.text = "  \n"
+        let taken = draft.takeForSending()
+        #expect(taken == nil)
+        #expect(draft.text.isEmpty && !draft.isSending)
+    }
+
+    /// Words typed while a change was being sent aren't replaced by its words.
+    @Test func wordsTypedSinceStay() {
+        var draft = ScreenEditField.Draft()
+        draft.text = "make it dark"
+        let taken = draft.takeForSending()
+        #expect(taken == "make it dark")
+        draft.text = "make it light"
+        draft.sendEnded(false)
+        #expect(draft.text == "make it light")
     }
 }

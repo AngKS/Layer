@@ -47,6 +47,9 @@ final class PencilVoice {
     static let maximumHold: Duration = .seconds(60)
     /// Said when a squeeze listened for as long as one can.
     static let heldTooLong = "Stopped listening after a minute. Nothing was sent."
+    /// Said when a finger let go of a screen's field before the microphone came on. A hold
+    /// gets no Pencil tap to wait for, as a squeeze does (`VoiceCall.tooSoon`).
+    static let tooSoonForAHold = "Didn't catch that. Keep holding until it listens, then speak."
 
     /// How long a hover waits before asking again whether an unavailable model can be
     /// used now. Asking can read the Keychain, and the pen hovers many times a second.
@@ -148,8 +151,8 @@ final class PencilVoice {
     @ObservationIgnored private var endIsIgnored = false
     /// Whether the listen under way is a finger's, holding a screen's field, not a
     /// squeeze's: only the finger letting go sends it, and a squeeze's end, a squeeze
-    /// failing or Squeeze to Talk going off leave it alone. Read only while `mode` is
-    /// `.listening`.
+    /// failing or Squeeze to Talk going off leave it alone. Read while `mode` is
+    /// `.listening`, and once it is sent for what the bubble says of it (`said(_:)`).
     @ObservationIgnored private var listenIsAHold = false
     /// The numbers of this call's commands from a screen's field, typed or held. The field
     /// shows each one's line, so Squeeze to Talk going off doesn't end the call until
@@ -516,7 +519,7 @@ final class PencilVoice {
             // Let go of before the call was even ready to listen, so nothing was heard.
             pendingListen.cancel()
             self.pendingListen = nil
-            bubble?.state = .problem(VoiceCall.tooSoon)
+            bubble?.state = .problem(said(VoiceCall.tooSoon))
             say()
             return
         }
@@ -639,6 +642,12 @@ final class PencilVoice {
 
     // MARK: The bubble
 
+    /// A line the call has about this listen, as the bubble says it: a hold let go of
+    /// before the microphone came on is told to keep holding, not to wait for a tap.
+    private func said(_ text: String) -> String {
+        listenIsAHold && text == VoiceCall.tooSoon ? Self.tooSoonForAHold : text
+    }
+
     private func open(at anchor: CGPoint, azimuth: Angle?, _ state: State) {
         closing?.cancel()
         silenceTimer?.cancel()
@@ -721,7 +730,7 @@ final class PencilVoice {
                 case .hearing, .working: bubble?.state = .working
                 case .done: bubble?.state = .done
                 // What the model said when it did nothing is never shown as done.
-                case .said, .problem: bubble?.state = .problem(caption.text)
+                case .said, .problem: bubble?.state = .problem(said(caption.text))
                 }
             } else if call.isUnderWay(number) {
                 // Still settling, waiting its turn, or running: whatever else the call is doing.

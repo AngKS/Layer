@@ -274,6 +274,7 @@
 		CF9F3B8C3003209A64C3249C /* SiriIntentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFEFB654B701753D17A905FE /* SiriIntentsTests.swift */; };
 		D145658BBD6C2E131C865FD8 /* PencilVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BD7C010B0BC879191EAB904 /* PencilVoice.swift */; };
 		D27047D66FD7BB932DEFAFD5 /* progress_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = EF6B6A8D905D4BA8ACE0771F /* progress_jittered_2a.json */; };
+		D2DA2F3B24202571D0F19339 /* ScreenEditField.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAEE5FE263F0A81E79ECED8E /* ScreenEditField.swift */; };
 		D2F444550187A4D8362DA410 /* button_textField_textField_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 5B0F5DA2A3FD075C29339026 /* button_textField_textField_3.json */; };
 		D414B9D52993D0B7F38AFBF0 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = FCF81A42DC1853F2DD4AB403 /* AppIcon.icon */; };
 		D4E23540F6C2C650C8051F11 /* unknown_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D122FA3665A59285EC5D151 /* unknown_jittered_2b.json */; };
@@ -653,6 +654,7 @@
 		E640E46BE098DAC8B9033770 /* ZoomStops.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomStops.swift; sourceTree = "<group>"; };
 		E7E2116D4DDC5F0C161AB670 /* avatar_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_clean_2.json; sourceTree = "<group>"; };
 		E9F0B5812BDDAD1996295A16 /* toggle_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_noisy_1.json; sourceTree = "<group>"; };
+		EAEE5FE263F0A81E79ECED8E /* ScreenEditField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenEditField.swift; sourceTree = "<group>"; };
 		EB4B972000CD48B0ADB8FD5A /* textField_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_jittered_2b.json; sourceTree = "<group>"; };
 		ED047D577FD94F4FA71A0E68 /* SiriIntentsLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriIntentsLiveTests.swift; sourceTree = "<group>"; };
 		EDE8BABA66FA091E2804AC9F /* image_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_noisy_1.json; sourceTree = "<group>"; };
@@ -695,6 +697,7 @@
 				DDE6E4E41B010D0B7EE9ACE3 /* LayersPanel.swift */,
 				E13116FD862E660E5BE098CF /* ModelSettingsView.swift */,
 				CE1446FA55E59D7D056A0197 /* PencilVoiceBubble.swift */,
+				EAEE5FE263F0A81E79ECED8E /* ScreenEditField.swift */,
 				EE02CD3BF12421A236346FDA /* Scrubber.swift */,
 				5452CD081F6C2087ED80C9C4 /* SelectionActions.swift */,
 				37B53B86609548F6683ECF34 /* SettingsButton.swift */,
@@ -1610,6 +1613,7 @@
 				CDEBAB3349C20B804B8285EB /* Rotation.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
 				3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */,
+				D2DA2F3B24202571D0F19339 /* ScreenEditField.swift in Sources */,
 				78CD73F08E732197ADC53262 /* ScreenEditor.swift in Sources */,
 				1DBB19348CF9BA5AE385AE72 /* ScreenGenerator.swift in Sources */,
 				AD04D9FCE3FC4E442D3885D6 /* ScreenIntents.swift in Sources */,
