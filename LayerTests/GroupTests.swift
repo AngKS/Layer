@@ -973,9 +973,10 @@ struct GroupCommandTests {
 }
 
 /// A clock for taps that a test moves on by hand: a second tap is a double-tap by the time
-/// since the first.
+/// since the first. Tests that tap the same thing twice wait between taps on it, so that
+/// the second is a tap of its own however fast the test runs.
 @MainActor
-private final class TapClock {
+final class TapClock {
     private(set) var now = ContinuousClock.now
 
     init(_ model: AppModel) {
@@ -1280,6 +1281,84 @@ struct SelectingGroupsTests {
         drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
         #expect(!board.store.isEditing)
         #expect(board.model.selection == board.selection(board.a, g))
+    }
+
+    /// The several-things area over a selected group taps through to what is under it, as
+    /// the group's own target does: a double-tap there goes into the group.
+    @Test func aDoubleTapOnASelectedGroupAmongSeveralGoesIntoIt() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+        board.model.selection = board.selection(board.a, g)
+        let onB = board.middle(of: board.b)
+        board.model.targetTapped(.element(g), at: onB)
+        #expect(board.model.selection == .element(board.a))
+        clock.wait(100)
+        board.model.targetTapped(.element(g), at: onB)
+        #expect(board.model.selection == board.selection(board.a, board.b))
+    }
+
+    /// Hover asks on every move of the pen; what can be touched is worked out once, and again
+    /// only when the design changes or a group is gone into.
+    @Test func hoverWorksOutTheTargetsOnceUntilSomethingChanges() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let (onA, onB) = (board.middle(of: board.a), board.middle(of: board.b))
+        let b = try #require(board.store.canvasFrame(of: .element(board.b)))
+        let c = try #require(board.store.canvasFrame(of: .element(board.c)))
+        let gap = CGPoint(x: b.midX, y: (b.maxY + c.minY) / 2)
+        let start = CanvasWork.targetPasses
+        for step in 0..<50 {
+            _ = board.model.hoverTarget(at: step.isMultiple(of: 2) ? onA : onB)
+        }
+        #expect(CanvasWork.targetPasses - start == 1)
+        #expect(board.model.hoverTarget(at: gap) == .element(g))
+
+        // Gone into, the group's gap is looked through.
+        board.model.selection = .element(board.b)
+        #expect(board.model.hoverTarget(at: gap) == .screen(board.screen))
+        #expect(board.model.hoverTarget(at: onB) == .element(board.b))
+        #expect(CanvasWork.targetPasses - start == 2)
+
+        // Hidden, it isn't there to hover over.
+        board.model.selection = nil
+        board.store.update(g) { $0.isHidden = true }
+        #expect(board.model.hoverTarget(at: onB) == .screen(board.screen))
+        #expect(CanvasWork.targetPasses - start == 3)
+    }
+
+    /// The thing under a tap on a group's target is looked for in the group's own block,
+    /// which a drawing keeping its slot can lie inside.
+    @Test func aMemberIsFoundPastADrawingInsideItsGroupsBlock() {
+        let board = OrderBoard()
+        let note3 = board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        let g = board.group(board.note1, note3)
+        #expect(board.canvasOrder == ["note 2", "note 1", "drawing", "note 3", "G"])
+        #expect(board.store.leaf(at: board.middle(of: board.note1), in: g.element) == board.note1)
+        #expect(board.store.leaf(at: board.middle(of: note3), in: g.element) == note3)
+        #expect(board.store.leaf(at: board.middle(of: board.note2), in: g.element) == nil)
+    }
+
+    /// With a finger resting, a double-tap is read against what the first tap started from,
+    /// the thing the finger holds included; and the finger lifting is still no tap.
+    @Test func aDoubleTapWithAFingerRestingKeepsWhatItHolds() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+        let i = board.group(board.c, board.e, named: "I")
+        let onB = board.middle(of: board.b)
+        board.model.restingFingers = { [onB] }
+        board.model.pick(.element(board.c))
+        #expect(board.model.selection == board.selection(g, i))
+        clock.wait(100)
+        board.model.pick(.element(board.c))
+        #expect(board.model.selection == board.selection(g, board.c))
+
+        board.model.restingFingers = { [] }
+        board.model.fingersLifted()
+        clock.wait(1000)
+        board.model.targetTapped(.element(g), at: onB)
+        #expect(board.model.selection == board.selection(g, board.c))
     }
 
     /// The thing a resting finger holds is what a tap there would pick: the member's group.

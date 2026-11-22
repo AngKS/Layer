@@ -988,5 +988,7 @@ enum CanvasWork {
     static var targetsBuilt = 0
     /// Drag owners made: one each time a view carrying a drag is made.
     static var ownersMade = 0
+    /// Passes over the design's list to work out what can be touched on the canvas.
+    static var targetPasses = 0
 }
 #endif

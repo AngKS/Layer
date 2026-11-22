@@ -1140,6 +1140,8 @@ final class AppModel {
     ///   otherwise a drawing, or any element with the palette up.
     /// - A screen's name strip, while names are shown, picks the screen, which adds it.
     /// - A screen's empty area clears the selection, or selects the screen when nothing is.
+    ///   Tapped again quickly, after a tap selected the screen, it keeps the screen: that is
+    ///   a double-tap, which never takes a thing out.
     /// - Empty canvas clears the selection.
     ///
     /// A tap that would clear but only just missed something selected does nothing.
@@ -1161,6 +1163,10 @@ final class AppModel {
             // on was the screen, but the tap would reach `pick` as a clearing, which its
             // guard wouldn't know for the lift.
             rested = nil
+        } else if let screen = store.screen(at: point), isSecondTap(on: .screen(screen.id)) {
+            // A double-tap on the screen's empty area, whose first tap selected the screen:
+            // a double-tap never takes a thing out.
+            pick(.screen(screen.id))
         } else if !isNearMiss(viewPoint) {
             pick(nil)
         }
@@ -1290,7 +1296,7 @@ final class AppModel {
             return
         }
         let time = now()
-        if let last = lastTap, last.thing == thing, last.after == selection, time - last.at < Self.doubleTapInterval {
+        if isSecondTap(on: thing), let last = lastTap {
             let made = selection(afterDoubleTapOn: thing, from: last.before)
             // Read against what it made, a quick tap after it goes one level further in.
             lastTap = (thing, time, made, made)
@@ -1305,8 +1311,16 @@ final class AppModel {
             if let held, seeded?.things.contains(held) != true { seeded = held }
         }
         let made = selection(afterTapOn: target, from: seeded)
-        lastTap = (thing, time, selection, made)
+        // What the tap started from, the thing a resting finger holds included.
+        lastTap = (thing, time, seeded, made)
         selectByTap(made)
+    }
+
+    /// Whether a tap on a thing is the second of a double-tap: the last tap was on the same
+    /// thing, not long before, and the selection is as it left it.
+    private func isSecondTap(on thing: CanvasSelection) -> Bool {
+        guard let lastTap, lastTap.thing == thing, lastTap.after == selection else { return false }
+        return now() - lastTap.at < Self.doubleTapInterval
     }
 
     /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it

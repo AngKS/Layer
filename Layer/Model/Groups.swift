@@ -297,7 +297,7 @@ extension DesignStore {
     /// Whether an element is locked: by itself, or by a group above it. Looked up in the
     /// store's index rather than the list.
     func isLockedWithItsGroups(_ element: DesignElement) -> Bool {
-        element.isLocked || DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
+        element.isLocked || element.group != nil && DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
     }
 
     // MARK: Selecting with groups
@@ -333,13 +333,20 @@ extension DesignStore {
     /// The topmost thing in a group, at any depth, that isn't a group itself and is shown,
     /// whose turned frame holds a point on the canvas: what a tap on the group's target there
     /// is on. Nil in a gap between its members.
+    ///
+    /// Only the group's own block is looked at. Kept sound, a group's members, and theirs,
+    /// are one run just behind its item among the things on its host, drawings apart, so the
+    /// block is read from the item back, front to back, to the first thing on the host that
+    /// isn't in the group.
     func leaf(at point: CGPoint, in group: DesignElement.ID) -> ElementRef? {
-        guard let item = groupItem(group) else { return nil }
+        guard let item = groupItem(group), let end = indexInList(of: group) else { return nil }
         let host: ElementRef.Host = item.parent.map { .screen($0) } ?? .canvas
         let onScreen = item.parent.flatMap { screen($0)?.placement }
-        for element in children(on: host).reversed() where element.kind != .group && !element.isHidden {
+        let elements = content.elements
+        for element in elements[..<end].reversed() where element.parent == item.parent && element.kind != .drawing {
             let above = groups(above: element)
-            guard above.contains(where: { $0.id == group }), !above.contains(where: \.isHidden),
+            guard above.contains(where: { $0.id == group }) else { break }
+            guard element.kind != .group, !element.isHidden, !above.contains(where: \.isHidden),
                   let placement = onScreen ?? (element.parent == nil ? Placement(origin: .zero, scale: element.scale ?? 1) : nil),
                   TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point)
             else { continue }
@@ -362,13 +369,19 @@ extension DesignStore {
 
     /// `targets(on:entered:)` for every screen and the open canvas at once, as the elements
     /// themselves, each with its own lock and hide: one pass over the list, where a pass for
-    /// each host went over all of it once a screen.
+    /// each host went over all of it once a screen. Kept until the content changes, or other
+    /// groups are gone into: hover asks on every move of the pen.
     func targetElements(entered: Set<DesignElement.ID>) -> [ElementRef.Host: [DesignElement]] {
-        var found: [ElementRef.Host: [DesignElement]] = [:]
-        for element in content.elements where isTarget(element, entered: entered) {
-            found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
+        keptTargets(entered: entered) {
+            #if DEBUG
+            CanvasWork.targetPasses += 1
+            #endif
+            var found: [ElementRef.Host: [DesignElement]] = [:]
+            for element in content.elements where isTarget(element, entered: entered) {
+                found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
+            }
+            return found
         }
-        return found
     }
 
     private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>) -> Bool {

@@ -634,16 +634,47 @@ struct TapToAddTests {
     /// far more than a near miss.
     @Test func aScreensEmptyAreaClearsASelectionAndOtherwiseSelectsTheScreen() throws {
         let board = Board()
+        let clock = TapClock(board.model)
         let screen = try #require(board.store.screen(board.screen))
         let point = screen.canvasPoint(for: CGPoint(x: 200, y: 500))
         board.model.selection = CanvasSelection([.element(board.title), .element(board.body)])
 
         board.model.canvasTapped(at: point)
         #expect(board.model.selection == nil)
+        clock.wait(1000)
         board.model.canvasTapped(at: point)
         #expect(board.model.selection == .screen(board.screen))
         // Inside the selected screen, but away from the band along its outline.
+        clock.wait(1000)
         board.model.canvasTapped(at: point)
+        #expect(board.model.selection == nil)
+    }
+
+    /// A quick second tap on a screen's empty area, after the first selected the screen, is a
+    /// double-tap, which never takes a thing out: the screen stays selected.
+    @Test func aQuickSecondTapOnAScreenATapPickedKeepsIt() throws {
+        let board = Board()
+        let clock = TapClock(board.model)
+        let point = try #require(board.store.screen(board.screen)).canvasPoint(for: CGPoint(x: 200, y: 500))
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        clock.wait(100)
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        // In Select, the selected screen's own area takes the tap, to the same end.
+        board.model.tool = .select
+        clock.wait(1000)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == nil)
+        clock.wait(100)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        clock.wait(100)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        // Later, it is a tap of its own, which lets go of the screen.
+        clock.wait(500)
+        board.model.selectionAreaTapped(at: point)
         #expect(board.model.selection == nil)
     }
 

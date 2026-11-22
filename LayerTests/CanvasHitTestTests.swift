@@ -449,16 +449,20 @@ struct PaletteStateInTestsTests {
 struct SelectionAreaTapTests {
     @Test func inSelectItPicksWhatIsDrawnOnTopThere() {
         let board = HitBoard()
+        let clock = TapClock(board.model)
         board.model.tool = .select
         board.model.selection = .element(board.note)
         board.model.selectionAreaTapped(at: board.middle(of: .element(board.button)))
         #expect(board.model.selection == CanvasSelection([.element(board.note), .element(board.button)]))
         // The screen's empty area clears what is selected, and then selects the screen.
         let onTheScreen = CGPoint(x: board.middle(of: .element(board.button)).x, y: 200)
+        clock.wait(1000)
         board.model.selectionAreaTapped(at: onTheScreen)
         #expect(board.model.selection == nil)
+        clock.wait(1000)
         board.model.selectionAreaTapped(at: onTheScreen)
         #expect(board.model.selection == .screen(board.screen))
+        clock.wait(1000)
         board.model.selectionAreaTapped(at: CGPoint(x: 1000, y: 700))
         #expect(board.model.selection == nil)
     }

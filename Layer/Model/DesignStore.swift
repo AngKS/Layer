@@ -26,6 +26,7 @@ final class DesignStore {
         didSet {
             guard content != oldValue else { return }
             views = nil
+            targets = nil
             changeCount += 1
             // A change made through `change(_:)` is told once it has been recorded: see there.
             if !isChanging { onChange?(content) }
@@ -74,6 +75,27 @@ final class DesignStore {
         )
         views = made
         return made
+    }
+
+    /// What can be touched on each host, for the groups that had been gone into when it was
+    /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
+    /// for it on every move of the pen.
+    @ObservationIgnored private var targets: (entered: Set<DesignElement.ID>, found: [ElementRef.Host: [DesignElement]])?
+
+    /// What `make` works out about what can be touched while the groups in `entered` have been
+    /// gone into: kept until the content changes, or other groups are gone into.
+    func keptTargets(entered: Set<DesignElement.ID>, _ make: () -> [ElementRef.Host: [DesignElement]]) -> [ElementRef.Host: [DesignElement]] {
+        // Read first, so that whatever draws from it is redrawn when the content changes.
+        _ = content
+        if let targets, targets.entered == entered { return targets.found }
+        let found = make()
+        targets = (entered, found)
+        return found
+    }
+
+    /// Where an element is in the design's own list.
+    func indexInList(of id: DesignElement.ID) -> Int? {
+        current.index[id]
     }
 
     /// Each screen with what is on it.
