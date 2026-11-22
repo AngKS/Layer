@@ -1057,6 +1057,107 @@ struct VoiceCallTests {
         #expect(call.caption?.command == nil)
         call.end()
     }
+
+    // MARK: Typed words
+
+    /// Typed words wait for the call to be up. Taken while it starts, a command would set
+    /// it working at once, and the start would never finish: no listening, no timer.
+    @Test func aCallStillStartingTakesNoTypedWords() async {
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        #expect(call.phase == .starting)
+        #expect(call.submit("make it blue", about: nil) == nil)
+        await call.start()
+        #expect(call.phase == .listening && call.startedAt != nil)
+        // The words refused took no number.
+        #expect(call.submit("make it blue", about: nil) == 1)
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        call.end()
+    }
+
+    @Test func typedWordsAreACommandOfTheirOwn() async {
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        await call.start()
+        #expect(call.submit("make it blue", about: .canvas(CGPoint(x: 1, y: 2))) == 1)
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        #expect(runner.targets == [.canvas(CGPoint(x: 1, y: 2))])
+        // Nothing typed is no command.
+        #expect(call.submit("  \n", about: nil) == nil)
+        call.end()
+        #expect(call.submit("make it red", about: nil) == nil)
+        #expect(runner.commands == ["make it blue"])
+    }
+
+    /// Typed words are sent as typed: a word on its own is a command, and "stop" or "hang
+    /// up" is put to the model like anything else, not acted on by the call (Review Focus 4).
+    @Test func typedWordsAreTakenAsTheyAre() async {
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        await call.start()
+        #expect(call.submit("blue", about: nil) == 1)
+        #expect(call.submit("stop", about: nil) == 2)
+        #expect(call.submit("hang up", about: nil) == 3)
+        #expect(await eventually { runner.commands == ["blue", "stop", "hang up"] })
+        #expect(runner.cancelled.isEmpty)
+        #expect(call.phase != .ended)
+        call.end()
+    }
+
+    /// What a typed change's field shows: the command's own lines, the step it is on and
+    /// then its reply, for as long as the line lasts.
+    @Test func aCommandsProgressFollowsItsOwnLines() async throws {
+        let runner = FakeRunner()
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        call.captionTimes = (done: .milliseconds(100), problem: .milliseconds(100))
+        runner.holds = true
+        await call.start()
+        let n = try #require(call.submit("restyle the button", about: nil))
+        // Waiting its turn, with no line of its own yet.
+        #expect(call.progress(of: n) == .working(nil))
+        #expect(await until { call.progress(of: n) == .working("Thinking…") })
+        call.showStep("Restyling…")
+        #expect(call.progress(of: n) == .working("Restyling…"))
+        // A command the call never took has nothing to show.
+        #expect(call.progress(of: n + 1) == .over)
+        runner.outcomes = [VoiceOutcome(lines: ["Restyled the button."])]
+        runner.holds = false
+        #expect(await until { call.progress(of: n) == .done("Restyled the button.") })
+        #expect(await until { call.progress(of: n) == .over })
+        call.end()
+    }
+
+    @Test func aCommandsProblemAndWhatTheModelSaidAreFollowedToo() async throws {
+        let runner = FakeRunner()
+        runner.outcomes = [VoiceOutcome(problem: "No connection."), VoiceOutcome(said: "I can only change the design.")]
+        let call = VoiceCall(listening: .onRequest { FakeRoute() }, runner: runner)
+        await call.start()
+        let first = try #require(call.submit("make it blue", about: nil))
+        #expect(await until { call.progress(of: first) == .problem("No connection.") })
+        let second = try #require(call.submit("write me a poem", about: nil))
+        #expect(await until { call.progress(of: second) == .said("I can only change the design.") })
+        // The second's line has taken the place of the first's.
+        #expect(call.progress(of: first) == .over)
+        call.end()
+    }
+
+    /// A change typed while a spoken command runs waits its turn behind it.
+    @Test func typedWordsWaitBehindASpokenCommand() async throws {
+        var routes: [FakeRoute] = []
+        let runner = FakeRunner(); runner.holds = true
+        let call = VoiceCall(listening: .onRequest { let r = FakeRoute(); routes.append(r); return r }, runner: runner)
+        await call.start()
+        await call.listen(for: nil); call.send(); routes[0].send(.command("make it blue"))
+        #expect(await eventually { runner.commands == ["make it blue"] })
+        let typed = try #require(call.submit("make it red", about: nil))
+        // The spoken command was numbered as it was sent.
+        #expect(typed == 2)
+        #expect(call.queuedCount == 1)
+        #expect(call.progress(of: typed) == .working(nil))
+        runner.holds = false
+        #expect(await eventually { runner.commands == ["make it blue", "make it red"] })
+        call.end()
+    }
 }
 
 /// A runner whose getting ready lasts until the test lets it go.

@@ -80,6 +80,22 @@ final class VoiceCall {
         }
     }
 
+    /// How one command is getting on, told from the lines about it: what a typed change's
+    /// field shows in place of its words.
+    enum Progress: Equatable {
+        /// Waiting its turn or being carried out, with the step its line says it is on.
+        /// Without a line of its own (waiting behind another command, its route still
+        /// settling, or its line replaced by words being heard) there is no step to show.
+        case working(String?)
+        /// What was done, as its line says.
+        case done(String)
+        /// What the model said when it did nothing.
+        case said(String)
+        case problem(String)
+        /// Nothing more to show: its line has gone or been replaced, or it was never taken.
+        case over
+    }
+
     /// Said when a listen is sent before its route could hear anything.
     static let tooSoon = "Didn't catch that. Wait for the tap, then speak."
 
@@ -99,11 +115,12 @@ final class VoiceCall {
     private(set) var startedAt: Date?
     /// The latest microphone levels, newest last.
     private(set) var levels: [Float] = []
-    /// Commands spoken and not yet started.
+    /// Commands spoken or typed and not yet started.
     private(set) var queuedCount = 0
     /// How many commands the call has numbered, which is the number of the last one. A
     /// listen is numbered when it is sent, so that its outcome is told from one sent
-    /// before it whose words arrive later; a phone call's command when it is taken.
+    /// before it whose words arrive later; a phone call's command when it is taken, and
+    /// typed words when they are submitted.
     @ObservationIgnored private(set) var commandsTaken = 0
     /// The numbers of listens sent whose routes are still settling what they heard.
     private(set) var settling: Set<Int> = []
@@ -369,6 +386,23 @@ final class VoiceCall {
         settling.contains(number) || working == number || queue.contains { $0.number == number }
     }
 
+    /// How the command numbered `number` is getting on: its own line while the caption is
+    /// about it, and otherwise only whether it is still to come or under way.
+    func progress(of number: Int) -> Progress {
+        // The queue isn't observed, its count is: read so that whatever follows this
+        // hears a command leave the queue.
+        _ = queuedCount
+        if let caption, caption.command == number {
+            switch caption.kind {
+            case .hearing, .working: return .working(caption.text)
+            case .done: return .done(caption.text)
+            case .said: return .said(caption.text)
+            case .problem: return .problem(caption.text)
+            }
+        }
+        return isUnderWay(number) ? .working(nil) : .over
+    }
+
     /// Stops listening without acting on anything heard.
     func cancelListening() {
         guard let ear = open else { return }
@@ -494,11 +528,40 @@ final class VoiceCall {
             if caption?.kind == .hearing { caption = nil }
             return
         }
-        // A sent listen's command has its number already; any other is numbered now.
-        if number == nil { commandsTaken += 1 }
-        queue.append((command, target, number ?? commandsTaken))
+        enqueue(command, target: target, number: number)
+    }
+
+    /// Takes typed words as a command about `target`, to wait its turn behind any command
+    /// waiting or under way. They are taken as they were typed: none of speech's filters
+    /// apply, so "blue" is a command, and "stop" or "hang up" goes to the model like
+    /// anything else, never stopping or ending anything here.
+    ///
+    /// Returns the command's number, which every line about it carries, or nil when there
+    /// is nothing to take: blank text, or a call not up. A call still starting takes
+    /// nothing, as its first command would set it working and the start would then stop
+    /// short of listening.
+    func submit(_ text: String, about target: VoiceTarget?) -> Int? {
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, phase == .listening || phase == .working else { return nil }
+        VoiceLog.log.info("call: typed a command of \(command.count) characters: \(command, privacy: .private)")
+        return enqueue(command, target: target, number: nil)
+    }
+
+    /// Puts a command at the back of the queue and sets the worker going. A sent listen's
+    /// command has its number already; any other is numbered now. Returns its number.
+    @discardableResult
+    private func enqueue(_ command: String, target: VoiceTarget?, number: Int?) -> Int {
+        let numbered: Int
+        if let number {
+            numbered = number
+        } else {
+            commandsTaken += 1
+            numbered = commandsTaken
+        }
+        queue.append((command, target, numbered))
         queuedCount = queue.count
         startWorker()
+        return numbered
     }
 
     /// Keeps a sentence that stopped mid-way for the rest of it, and takes it as it is if
