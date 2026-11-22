@@ -124,7 +124,7 @@ private struct LayersList: View {
         }
         // The container is outside the scroll view, as in the spike. Its drag container is what
         // lets a closed group's row take a drop.
-        .reorderContainer(for: LayerItem.self, in: LayerList.self) { difference in
+        .reorderContainer(for: LayerItem.self, in: LayerDropList.self) { difference in
             move(difference)
         }
         .dragContainer(for: LayerItem.self) { ids in ids.map(LayerItem.init) }
@@ -133,15 +133,16 @@ private struct LayersList: View {
     /// What a drop in the list does: each row dragged lands where it was dropped, the whole
     /// drop one step to undo. A refused move leaves the list as it was, which is rebuilt from
     /// the design, so the row goes back.
-    private func move(_ difference: ReorderDifference<DesignElement.ID, LayerList>) {
+    private func move(_ difference: ReorderDifference<DesignElement.ID, LayerDropList>) {
+        let list = difference.destination.collectionID
         let before: DesignElement.ID? = switch difference.destination.position {
-        case .before(let id): id
-        case .end: nil
+        case .before(let id): list.landing(before: id)
+        case .end: list.landing(before: nil)
         }
         let store = model.store
         store.asOneStep {
             for id in difference.sources {
-                store.moveLayer(id, to: difference.destination.collectionID, before: before)
+                store.moveLayer(id, to: list.list, before: before)
             }
         }
     }
@@ -162,26 +163,21 @@ private struct LayersList: View {
         }
         return AnyView(Group {
             ForEach(Array(runs.enumerated()), id: \.offset) { runIndex, run in
+                // The end of a run that an open group's members come between and the rows after
+                // them is not the end of the list: dropped there, a row lands before the next run's.
+                let dropList = LayerDropList(list: list, endsBefore: runs[(runIndex + 1)...].first?.first?.node.id)
                 ForEach(run, id: \.node.id) { index, node in
                     row(Line(node: node, depth: depth, isOpen: isOpen(node, entered: entered)), selection: selection, hovered: hovered)
-                        .accessibilityAction(named: "Move Up") {
-                            guard index > 0 else { return }
-                            model.store.moveLayer(node.id, to: list, before: nodes[index - 1].id)
-                        }
-                        .accessibilityAction(named: "Move Down") {
-                            guard index + 1 < nodes.count else { return }
-                            model.store.moveLayer(node.id, to: list, before: index + 2 < nodes.count ? nodes[index + 2].id : nil)
-                        }
-                        .accessibilityAction(named: "Move Into Group Above") {
-                            guard index > 0, nodes[index - 1].element.kind == .group else { return }
-                            model.store.moveLayerToTop(node.id, of: .group(nodes[index - 1].id))
-                        }
-                        .accessibilityAction(named: "Move Out of Group") {
-                            guard let parent else { return }
-                            model.store.moveLayer(node.id, to: parent.list, before: parent.group)
-                        }
+                        .modifier(MoveActions(
+                            model: model, id: node.id,
+                            up: index > 0 ? .before(nodes[index - 1].id) : nil,
+                            down: index + 1 < nodes.count ? .before(index + 2 < nodes.count ? nodes[index + 2].id : nil) : nil,
+                            list: list,
+                            intoGroupAbove: index > 0 && nodes[index - 1].element.kind == .group ? nodes[index - 1].id : nil,
+                            outOf: parent
+                        ))
                 }
-                .reorderable(collectionID: list)
+                .reorderable(collectionID: dropList)
                 if let last = run.last, isOpen(last.node, entered: entered) {
                     branch(last.node.children, in: .group(last.node.id), parent: (list, last.node.id), depth: depth + 1, entered: entered, selection: selection, hovered: hovered)
                 }
@@ -204,6 +200,7 @@ private struct LayersList: View {
             GroupLayerRow(
                 model: model, ref: node.ref, name: node.element.displayName, isLocked: node.element.isLocked, isHidden: node.element.isHidden,
                 isLockedByGroup: isLockedByGroup, isDimmed: node.isHiddenWithItsGroups, depth: line.depth, isOpen: line.isOpen,
+                isHeldOpen: line.isOpen && !openGroups.contains(node.id),
                 isSelected: isSelected, isHovered: isHovered,
                 toggleOpen: { id in
                     if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
@@ -225,6 +222,57 @@ private struct LayersList: View {
             depth: depth, isSelected: isSelected, isHovered: isHovered
         )
         .equatable()
+    }
+}
+
+/// A list of rows that takes drops: one run of a list (see `LayersList.branch`).
+struct LayerDropList: Hashable, Sendable {
+    var list: LayerList
+    /// The row after this run's last in the list, which a row dropped at the run's end lands
+    /// before: the first row of the next run, past an open group's own members. Nil when the
+    /// run is the last, and a row dropped at its end goes to the back of the list.
+    var endsBefore: DesignElement.ID?
+
+    /// The row a drop lands before: the row dropped before, or for the end of this run, the
+    /// next run's first (nil: the back of the list).
+    func landing(before id: DesignElement.ID?) -> DesignElement.ID? {
+        id ?? endsBefore
+    }
+}
+
+/// What a row's VoiceOver actions are: each only where it applies, and run as a drag's drop
+/// is, animated.
+private struct MoveActions: ViewModifier {
+    enum Spot { case before(DesignElement.ID?) }
+
+    let model: AppModel
+    let id: DesignElement.ID
+    let up: Spot?
+    let down: Spot?
+    let list: LayerList
+    let intoGroupAbove: DesignElement.ID?
+    let outOf: (list: LayerList, group: DesignElement.ID)?
+
+    func body(content: Content) -> some View {
+        content.accessibilityActions {
+            if let up { Button("Move Up") { run(up) } }
+            if let down { Button("Move Down") { run(down) } }
+            if let group = intoGroupAbove {
+                Button("Move Into Group Above") {
+                    withAnimation(.snappy) { _ = model.store.moveLayerToTop(id, of: .group(group)) }
+                }
+            }
+            if let outOf {
+                Button("Move Out of Group") {
+                    withAnimation(.snappy) { _ = model.store.moveLayer(id, to: outOf.list, before: outOf.group) }
+                }
+            }
+        }
+    }
+
+    private func run(_ spot: Spot?) {
+        guard case .before(let before)? = spot else { return }
+        withAnimation(.snappy) { _ = model.store.moveLayer(id, to: list, before: before) }
     }
 }
 
@@ -434,6 +482,7 @@ private struct LayerRow: View, Equatable {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(name)
+            .accessibilityValue(rowValue(isGroup: false, isHidden: isHidden, isDimmed: isDimmed, isLocked: isLocked, isLockedByGroup: isLockedByGroup))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
             rowToggles(model: model, ref: ref, name: name, isLocked: isLocked, isHidden: isHidden, isLockedByGroup: isLockedByGroup, isSelected: isSelected)
@@ -458,6 +507,9 @@ private struct GroupLayerRow: View, Equatable {
     let isDimmed: Bool
     let depth: Int
     let isOpen: Bool
+    /// Open because something in it is selected or gone into, not because it was opened: it
+    /// closes when that does, and its chevron has nothing to do.
+    let isHeldOpen: Bool
     let isSelected: Bool
     let isHovered: Bool
     /// Opens or closes the group; not part of what the row shows.
@@ -466,7 +518,7 @@ private struct GroupLayerRow: View, Equatable {
     nonisolated static func == (a: Self, b: Self) -> Bool {
         a.ref == b.ref && a.name == b.name && a.isLocked == b.isLocked && a.isHidden == b.isHidden
             && a.isLockedByGroup == b.isLockedByGroup && a.isDimmed == b.isDimmed && a.depth == b.depth
-            && a.isOpen == b.isOpen && a.isSelected == b.isSelected && a.isHovered == b.isHovered
+            && a.isOpen == b.isOpen && a.isHeldOpen == b.isHeldOpen && a.isSelected == b.isSelected && a.isHovered == b.isHovered
     }
 
     var body: some View {
@@ -485,7 +537,9 @@ private struct GroupLayerRow: View, Equatable {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isOpen ? "Hide contents" : "Show contents")
+            .disabled(isHeldOpen)
+            .accessibilityLabel("Contents")
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
             .padding(.leading, 2 + CGFloat(depth) * layerIndent)
 
             Button {
@@ -507,6 +561,7 @@ private struct GroupLayerRow: View, Equatable {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(name)
+            .accessibilityValue(rowValue(isGroup: true, isHidden: isHidden, isDimmed: isDimmed, isLocked: isLocked, isLockedByGroup: isLockedByGroup))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
             rowToggles(model: model, ref: ref, name: name, isLocked: isLocked, isHidden: isHidden, isLockedByGroup: isLockedByGroup, isSelected: isSelected)
@@ -516,6 +571,16 @@ private struct GroupLayerRow: View, Equatable {
         .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
         .onHover { hoverLayer(.element(ref), $0, in: model) }
     }
+}
+
+/// What VoiceOver says of a row besides its name: that it is a group, and hidden or locked,
+/// by itself or only by the group above it.
+func rowValue(isGroup: Bool, isHidden: Bool, isDimmed: Bool, isLocked: Bool, isLockedByGroup: Bool) -> String {
+    var parts: [String] = []
+    if isGroup { parts.append("Group") }
+    if isHidden { parts.append("Hidden") } else if isDimmed { parts.append("Hidden by its group") }
+    if isLocked { parts.append("Locked") } else if isLockedByGroup { parts.append("Locked by its group") }
+    return parts.joined(separator: ", ")
 }
 
 // MARK: Code

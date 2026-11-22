@@ -77,4 +77,36 @@ struct GroupFinalFixTests {
         board.undo.undo()
         #expect(board.store.content == hidden, "one step")
     }
+
+    /// The Format panel is for the selection: with nothing selected it closes.
+    @Test func deselectingClosesTheFormatPanel() {
+        let board = OrderBoard()
+        board.model.selection = .element(board.b)
+        board.model.isInspectorOpen = true
+
+        board.model.selection = nil
+
+        #expect(!board.model.isInspectorOpen)
+    }
+
+    // MARK: The Layers panel
+
+    /// A drop at the end of a run that an open group's members come after lands before the next
+    /// run's first row, just under the group, and not at the back of the whole list.
+    @Test func aDropAtTheEndOfARunBeforeAnOpenGroupsRowsLandsBeforeTheNextRun() {
+        let board = OrderBoard()
+        let next = board.c.element
+        let middle = LayerDropList(list: .host(.screen(board.screen)), endsBefore: next)
+        #expect(middle.landing(before: nil) == next)
+        #expect(middle.landing(before: board.b.element) == board.b.element, "dropped before a row, it lands before that row")
+        let last = LayerDropList(list: .host(.screen(board.screen)), endsBefore: nil)
+        #expect(last.landing(before: nil) == nil, "the last run's end is the back of the list")
+    }
+
+    @Test func aRowSaysWhatItIsAndWhatHidesOrLocksIt() {
+        #expect(rowValue(isGroup: true, isHidden: false, isDimmed: false, isLocked: false, isLockedByGroup: false) == "Group")
+        #expect(rowValue(isGroup: false, isHidden: false, isDimmed: true, isLocked: false, isLockedByGroup: true) == "Hidden by its group, Locked by its group")
+        #expect(rowValue(isGroup: false, isHidden: true, isDimmed: true, isLocked: true, isLockedByGroup: true) == "Hidden, Locked")
+        #expect(rowValue(isGroup: false, isHidden: false, isDimmed: false, isLocked: false, isLockedByGroup: false) == "")
+    }
 }
