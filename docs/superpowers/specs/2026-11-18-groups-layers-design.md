@@ -225,8 +225,11 @@ Facts from the code (main d5274ef plus rotation) and the platform:
   settings the several-things panel shows today, applied to every member that has them.
 - **Popover** for a group: Ungroup beside Duplicate, Lock, Arrange and Delete; for several
   things: Group.
-- **Older builds** keep a group item as an element they can't read (written back unchanged)
-  and drop members' pointers when they save, so grouping is lost there and nothing else is.
+- **Older builds** keep a group item as an element they can't read (written back unchanged).
+  From 0.2.0 (4) on they also write members' pointers back, so saving there keeps the grouping,
+  which comes back here; a member they duplicate keeps the pointer and joins the group, and one
+  they move to another screen leaves it. Builds up to 0.2.0 (3) drop the pointers when they
+  save, so grouping is lost there and nothing else is. (Ruling A, 2026-11-22.)
 
 ### Layer order
 
@@ -289,7 +292,7 @@ Facts from the code (main d5274ef plus rotation) and the platform:
 | Hide a group | Its members aren't drawn and can't be tapped; its row and members' rows are dimmed. |
 | Turn a group, then ungroup | Members keep their turned positions and angles. |
 | Resize a group holding a turned member | The member scales uniformly with the box; no shear. |
-| Open a design with groups in an older build | Everything opens in place, ungrouped; saving there drops the grouping. |
+| Open a design with groups in an older build | Everything opens in place, ungrouped there. Saving in 0.2.0 (4) or later keeps the grouping, which comes back here (a member duplicated there joins the group); 0.2.0 (3) and earlier drop it. |
 | Voice "make the title blue" when the title is grouped | Works as today: voice sees elements, not groups. |
 
 ## Spike result
