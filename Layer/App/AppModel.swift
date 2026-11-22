@@ -1165,7 +1165,17 @@ final class AppModel {
     }
 
     /// Everything selected, one thing at a time, in the design's own order.
-    var selectedThings: [CanvasSelection] { store.things(in: selection) }
+    var selectedThings: [CanvasSelection] {
+        let version = store.contentVersion
+        if let kept = thingsKept, kept.version == version, kept.selection == selection { return kept.things }
+        let things = store.things(in: selection)
+        thingsKept = (selection, version, things)
+        return things
+    }
+
+    /// `selectedThings` for the selection and design it was last worked out for: it is asked
+    /// for by several views on every frame of a drag or a pan.
+    @ObservationIgnored private var thingsKept: (selection: CanvasSelection?, version: Int, things: [CanvasSelection])?
 
     /// Every element selected, alone or among other things, from the back to the front.
     var selectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
@@ -1861,8 +1871,16 @@ final class AppModel {
     private var severalTurn: TurnSession? {
         guard let selection, selection.isSeveral || selectsOneGroup else { return nil }
         if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
-        return TurnSession.form(for: selection, in: store)
+        // Formed once for the selection and design as they are, not for each read.
+        let version = store.contentVersion
+        if let kept = formedTurn, kept.version == version, kept.selection == selection { return kept.session }
+        let session = TurnSession.form(for: selection, in: store)
+        formedTurn = (selection, version, session)
+        return session
     }
+
+    /// The session `severalTurn` last formed, and what it was formed for.
+    @ObservationIgnored private var formedTurn: (selection: CanvasSelection, version: Int, session: TurnSession?)?
 
     /// Starts turning what is selected. Everything until `endTurn()` undoes as one step.
     /// Returns whether a turn began: none does while another is under way, or when what

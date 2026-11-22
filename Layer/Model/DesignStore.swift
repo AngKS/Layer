@@ -40,6 +40,14 @@ final class DesignStore {
     /// the change before its own was its own too.
     @ObservationIgnored private var changeCount = 0
 
+    /// Moves on with every change to the content, and is read so that whatever draws from
+    /// something kept for one version is drawn again when the content changes. For keeping
+    /// what is worked out from the content, for as long as it is as it was.
+    var contentVersion: Int {
+        _ = content
+        return changeCount
+    }
+
     /// The document's undo manager. Ink is in its history too, as changes to the design's
     /// drawings: PencilKit keeps none of its own here. Its history is capped, so a
     /// long sitting doesn't keep every earlier version of the design alive.
@@ -232,7 +240,7 @@ final class DesignStore {
         change { $0.remove(ids) }
         // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
         // deleted soon after it was made. See SketchReadingLog.
-        for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
+        tellTheReadingLogOfDeleted(ids)
     }
 
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
@@ -274,7 +282,17 @@ final class DesignStore {
         let ids = withWhatIsInThem([ref.element])
         change { $0.remove(ids) }
         // See the matching note on delete(_ refs:).
-        for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
+        tellTheReadingLogOfDeleted(ids)
+    }
+
+    /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
+    private func tellTheReadingLogOfDeleted(_ ids: Set<DesignElement.ID>) {
+        // One task for them all: a group of 200 is not 200 hops to the log's actor.
+        guard !ids.isEmpty else { return }
+        #if DEBUG
+        CanvasWork.readingLogTasks += 1
+        #endif
+        Task { await SketchReadingLog.shared.noteDeleted(ids) }
     }
 
     /// Some elements, and everything in any group among them, at any depth.

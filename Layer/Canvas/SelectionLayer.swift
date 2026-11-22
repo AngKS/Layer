@@ -1021,5 +1021,12 @@ enum CanvasWork {
     static var ownersMade = 0
     /// Passes over the design's list to work out what can be touched on the canvas.
     static var targetPasses = 0
+    /// Turn sessions formed from the design: one for each read of a selection's shape that
+    /// had none held.
+    static var turnSessionsFormed = 0
+    /// Walks over the design's list to find the single things a selection is.
+    static var thingsListed = 0
+    /// Tasks started to tell the sketch reading log of elements deleted.
+    static var readingLogTasks = 0
 }
 #endif
