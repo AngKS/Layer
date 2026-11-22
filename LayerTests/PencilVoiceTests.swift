@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+import UIKit
 @testable import Layer
 
 /// A runner whose getting ready takes as long as the test says, as the real agent's does
@@ -1014,5 +1015,171 @@ struct PencilVoiceTests {
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         #expect(bench.app.selection == both)
         bench.end()
+    }
+
+    // MARK: Squeeze to Talk
+
+    @Test func squeezeToTalkIsOnUntilTurnedOffInSettings() {
+        withOwnSettings { settings in
+            let open = AppModel(document: LayerDocument(), settings: settings)
+            #expect(open.squeezesToTalk)
+            settings.set(false, forKey: AppModel.squeezesToTalkKey)
+            // A design opened afterwards has it off, and one already open once it reads it again.
+            #expect(!AppModel(document: LayerDocument(), settings: settings).squeezesToTalk)
+            open.readSqueezesToTalk()
+            #expect(!open.squeezesToTalk)
+            settings.set(true, forKey: AppModel.squeezesToTalkKey)
+            open.readSqueezesToTalk()
+            #expect(open.squeezesToTalk)
+        }
+    }
+
+    /// The board's Magic Pen tab and Settings › Voice are one setting, the app's: either
+    /// writes where both read, and every open design follows at once, unasked.
+    @Test func theMagicPenTabAndSettingsShareSqueezeToTalk() {
+        // Watched by key, and a dot in a key is a key path to whatever watches it.
+        #expect(!AppModel.squeezesToTalkKey.contains("."))
+        withOwnSettings { settings in
+            let design = AppModel(document: LayerDocument(), settings: settings)
+            let other = AppModel(document: LayerDocument(), settings: settings)
+            let elsewhere = AppModel(document: LayerDocument())
+            design.openDesigns = { [design, other, elsewhere] }
+            // From the tab: this design, the other window's, and the setting itself.
+            design.setSqueezesToTalk(false)
+            #expect(!design.squeezesToTalk && !other.squeezesToTalk)
+            #expect(settings.object(forKey: AppModel.squeezesToTalkKey) as? Bool == false)
+            // A design whose settings are kept elsewhere, as in a test, keeps its own.
+            #expect(elsewhere.squeezesToTalk)
+            // From Settings: both again.
+            AppModel.setSqueezesToTalk(true, in: settings, designs: [design, other])
+            #expect(design.squeezesToTalk && other.squeezesToTalk)
+            #expect(settings.object(forKey: AppModel.squeezesToTalkKey) as? Bool == true)
+        }
+    }
+
+    /// On, the canvas has the squeeze in Select, and PencilKit has it in Draw, as before.
+    @Test func withSqueezeToTalkOnTheCanvasHasTheSqueezeOutsideDraw() {
+        let bench = Bench()
+        #expect(bench.app.squeezesToTalk && bench.app.canvasHearsSqueezes)
+        bench.app.tool = .draw
+        #expect(!bench.app.canvasHearsSqueezes)
+    }
+
+    /// Off, the squeeze is the system's: the canvas has no squeeze action at all, and a
+    /// squeeze anywhere, over an element, a screen or the open canvas, starts nothing.
+    @Test func withSqueezeToTalkOffASqueezeStartsNothing() async {
+        let bench = Bench()
+        bench.app.squeezesToTalk = false
+        #expect(!bench.app.canvasHearsSqueezes)
+        bench.app.tool = .draw
+        #expect(!bench.app.canvasHearsSqueezes)
+        bench.app.tool = .select
+        #expect(!bench.app.canvasHearsSqueezes)
+        // The pen coming near gets nothing ready either.
+        bench.pencil.hovered()
+        for point in [Bench.overButton, Bench.overScreen, Bench.overCanvas] {
+            bench.pencil.squeezeBegan(at: point, azimuth: nil)
+            #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
+            bench.now += .milliseconds(200)
+            bench.pencil.squeezeEnded()
+            #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call == nil && bench.routes.isEmpty && bench.runner.warmUps == 0)
+        #expect(bench.app.selection == nil)
+        #expect(bench.runner.commands.isEmpty)
+    }
+
+    /// Turned off mid-listen, the listen ends unsent, and nothing is left on screen or
+    /// listening: a toggle waiting for the squeeze that sends it, or a squeeze still held.
+    @Test func turningSqueezeToTalkOffMidListenStopsListening() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        #expect(await bench.hear("make it blue"))
+        bench.app.squeezesToTalk = false
+        #expect(bench.pencil.bubble == nil && bench.routes[0].isStopped)
+        // The squeeze that would have sent it is the system's now.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.pencil.squeezeEnded()
+        #expect(bench.pencil.bubble == nil && bench.routes[0].finishCount == 0)
+
+        // Back on, a held squeeze listens, and turning it off again lets go of that too.
+        bench.app.squeezesToTalk = true
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.routes.count == 2 })
+        bench.app.squeezesToTalk = false
+        #expect(bench.pencil.bubble == nil && bench.routes[1].isStopped)
+        // Its end, should it still come, sends nothing.
+        bench.now += .seconds(1)
+        bench.pencil.squeezeEnded()
+        #expect(bench.routes[1].finishCount == 0)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.bubble == nil)
+        bench.end()
+    }
+
+    /// Turned off, the pencil's call goes too, once it has nothing left to finish: the
+    /// next squeeze, with it back on, starts another.
+    @Test func turningSqueezeToTalkOffEndsThePencilsCall() async throws {
+        let bench = Bench()
+        bench.pencil.hovered()
+        #expect(await eventually { bench.runner.warmUps == 1 })
+        #expect(bench.pencil.call != nil)
+        bench.app.squeezesToTalk = false
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A command still running when it goes off is left to finish, and then the call ends.
+        bench.app.squeezesToTalk = true
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        // The new call's route: each call gets one ready as it starts.
+        try #require(bench.routes.last).send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        bench.app.squeezesToTalk = false
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // Back on, a squeeze starts a call of its own.
+        bench.app.squeezesToTalk = true
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.pencil.call != nil })
+        bench.end()
+    }
+
+    /// The format panel's scrubber hears every squeeze over a number field, and leaves one
+    /// alone only while the pencil owns it. Off, the pencil owns none.
+    @Test func withSqueezeToTalkOffTheScrubberHasEverySqueeze() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        #expect(await bench.hear("make it blue"))
+        // The squeeze that sends, still held when the setting goes off.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(bench.pencil.ownsSqueeze)
+        bench.app.squeezesToTalk = false
+        #expect(!bench.pencil.ownsSqueeze)
+        bench.pencil.squeezeEnded()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(!bench.pencil.ownsSqueeze)
+        bench.pencil.squeezeEnded()
+        #expect(!bench.pencil.ownsSqueeze)
+        bench.end()
+    }
+
+    /// The system's own squeeze setting comes first: turned off, or running a shortcut,
+    /// the squeeze isn't Layer's, and the pen hovering gets nothing ready for one.
+    @Test func theSystemsSqueezeSettingComesFirst() async {
+        #expect(PencilVoice.systemKeepsSqueeze(.ignore))
+        #expect(PencilVoice.systemKeepsSqueeze(.runSystemShortcut))
+        for action: UIPencilPreferredAction in [.switchEraser, .switchPrevious, .showColorPalette, .showInkAttributes, .showContextualPalette] {
+            #expect(!PencilVoice.systemKeepsSqueeze(action))
+        }
+        let bench = Bench()
+        bench.pencil.squeezeIsOff = { true }
+        bench.pencil.hovered()
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.pencil.call == nil && bench.routes.isEmpty)
     }
 }

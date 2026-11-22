@@ -73,7 +73,7 @@ private struct ElementSettings: View {
 
     var body: some View {
         PanelHeader(
-            symbol: element.symbol ?? element.kind.symbol,
+            symbol: element.symbol.map(SystemSymbol.resolve) ?? element.kind.symbol,
             name: Binding(get: { element.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }),
             placeholder: element.kind.layerName,
             onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
@@ -572,6 +572,14 @@ private struct MagicPenTab: View {
         PanelSection {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
             Toggle("Draw with Finger", isOn: Binding(get: { model.fingerDraws }, set: { model.setFingerDraws($0) }))
+            // The app's setting, the same as in Settings, rather than this design's.
+            Toggle("Squeeze to Talk", isOn: Binding(get: { model.squeezesToTalk }, set: { model.setSqueezesToTalk($0) }))
+            Text(model.squeezesToTalk
+                ? "Squeeze Apple Pencil Pro over the canvas to speak a command."
+                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("New Screens")
                 Spacer(minLength: 8)
