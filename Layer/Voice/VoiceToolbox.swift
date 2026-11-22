@@ -127,7 +127,7 @@ final class VoiceToolbox: VoiceActing {
             case .leftOf: CGPoint(x: by.minX - gap - frame.width, y: by.minY)
             case .rightOf: CGPoint(x: by.maxX + gap, y: by.minY)
             }
-            DesignActions.reveal(.element(moving.ref), in: model)
+            reveal(.element(moving.ref), in: model)
             store.position([.element(moving.ref): origin])
             return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
         }
@@ -213,10 +213,10 @@ final class VoiceToolbox: VoiceActing {
                 origins[.element(ref)] = isColumn ? CGPoint(x: left, y: next) : CGPoint(x: next, y: top)
                 next += (isColumn ? frame.height : frame.width) + gap
             }
-            DesignActions.reveal(.element(placed[0].ref), in: model)
+            reveal(.element(placed[0].ref), in: model)
             store.position(origins)
             // All of them stay selected, so that "them" goes on meaning them.
-            model.selection = .several(Set(placed.map { .element($0.ref) }))
+            select(.several(Set(placed.map { .element($0.ref) })), in: model)
             return done("Stacked \(placed.count) elements in a \(isColumn ? "column" : "row").")
         }
     }
@@ -341,7 +341,7 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 model.store.updateScreen(found.id) { $0.name = name }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 return done("Renamed \(handles.handle(forScreen: found.id)) to “\(name)”.")
             }
         }
@@ -378,7 +378,7 @@ final class VoiceToolbox: VoiceActing {
                 let frames = ScreenTidy.frames(for: found.elements, on: found.device)
                 let handle = handles.handle(forScreen: found.id)
                 guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
                 return done("Tidied the layout of \(handle).")
             }
@@ -405,7 +405,7 @@ final class VoiceToolbox: VoiceActing {
                     screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
                     Self.apply(frames, to: &screen)
                 }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
         }
@@ -473,12 +473,7 @@ final class VoiceToolbox: VoiceActing {
             return find(screen: tidy)
         }
         // A change for one screen is for that one, whatever is selected.
-        if let scope {
-            guard let screen = model.store.screen(scope) else {
-                return .failure(Refusal(line: "There is no \(handles.handle(forScreen: scope))."))
-            }
-            return .success(screen)
-        }
+        if let scoped = scopedScreen(in: model) { return scoped }
         if let selected = model.selectedScreen { return .success(selected) }
         let holding = Set(model.selectedElements.compactMap { found -> DesignScreen.ID? in
             if case .screen(let id) = found.ref.host { id } else { nil }
@@ -508,10 +503,11 @@ final class VoiceToolbox: VoiceActing {
                 case .failure(let refusal): return failed(refusal.line)
                 case .success(let found): host = found
                 }
-            } else if let current = currentScreen(in: model) {
-                host = current
             } else {
-                return failed("There is no screen to add to yet.")
+                switch currentScreen(in: model) {
+                case .failure(let refusal): return failed(refusal.line)
+                case .success(let current): host = current
+                }
             }
             guard let kind = ScreenBlueprint.kind(named: kind), kind.belongsOnScreens else {
                 return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
@@ -522,7 +518,7 @@ final class VoiceToolbox: VoiceActing {
             if let look { Self.apply(look: look, to: &element) }
             element.frame = DesignActions.frameForNewElement(element, on: host)
             let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
-            DesignActions.reveal(.element(ref), in: model)
+            reveal(.element(ref), in: model)
             let handle = handles.handle(forElement: element.id)
             let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
             // "Add an image below the title": put by the other one as it is added.
@@ -548,7 +544,7 @@ final class VoiceToolbox: VoiceActing {
                 guard found.element.kind.hasText else {
                     return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0.text = text }
                 return done("Reworded the \(found.element.kind.layerName.lowercased()) to “\(text)”.")
             }
@@ -565,7 +561,7 @@ final class VoiceToolbox: VoiceActing {
                 guard Self.apply(look: look, to: &restyled) else {
                     return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0 = restyled }
                 return done("Restyled \(Self.describe(found.element)).")
             }
@@ -602,7 +598,7 @@ final class VoiceToolbox: VoiceActing {
                     }
                     values.append(value / scale)
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { element in
                     if let x = values[0] { element.frame.origin.x = x }
                     if let y = values[1] { element.frame.origin.y = y }
@@ -632,7 +628,7 @@ final class VoiceToolbox: VoiceActing {
                     return failed("I didn't understand the angle “\(written)”.")
                 }
                 let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0.setRotation(target) }
                 return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
             }
@@ -663,7 +659,7 @@ final class VoiceToolbox: VoiceActing {
                 }
                 guard found.screen != nil else { return failed("\(handles.handle(forElement: found.element.id)) isn't on a screen to line up with.") }
                 guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.align(found.ref, edge)
                 return done("Aligned \(Self.describe(found.element)) to the \(name).")
             }
@@ -689,9 +685,9 @@ final class VoiceToolbox: VoiceActing {
         guard found.count > 1 else { return alignElement(element: named[0], alignment: alignment) }
         guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
         let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
-        DesignActions.reveal(.element(found[0].ref), in: model)
+        reveal(.element(found[0].ref), in: model)
         model.store.align(together, edge)
-        model.selection = together
+        select(together, in: model)
         let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
         return done("Lined up \(found.count) elements by their \(by).")
     }
@@ -703,7 +699,7 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 guard let copy = model.store.duplicate(found.ref) else { return failed("That couldn't be duplicated.") }
-                DesignActions.reveal(.element(copy), in: model)
+                reveal(.element(copy), in: model)
                 return done("Duplicated \(Self.describe(found.element)) as \(handles.handle(forElement: copy.element)).")
             }
         }
@@ -745,7 +741,7 @@ final class VoiceToolbox: VoiceActing {
         if VoiceHandles.tidied(target)?.hasPrefix("S") == true {
             switch find(screen: target) {
             case .success(let screen):
-                DesignActions.reveal(.screen(screen.id), in: model)
+                DesignActions.reveal(.screen(screen.id), in: model, selecting: scope == nil)
                 return done("Showing “\(screen.name)”.")
             case .failure(let refusal):
                 return failed(refusal.line)
@@ -753,7 +749,9 @@ final class VoiceToolbox: VoiceActing {
         }
         switch find(element: target) {
         case .success(let found):
-            DesignActions.reveal(.element(found.ref), in: model)
+            // Asked for, the view moves even in a change for one screen; the screen stays
+            // selected.
+            DesignActions.reveal(.element(found.ref), in: model, selecting: scope == nil)
             return done("Showing \(Self.describe(found.element)).")
         case .failure(let refusal):
             return failed(refusal.line)
@@ -856,6 +854,31 @@ final class VoiceToolbox: VoiceActing {
 
     private var gone: String { failed("The design has closed.") }
 
+    /// Selects what a tool changed and brings it into view, so that "it" means that one
+    /// next. A change for one screen leaves both alone: the screen stays selected, with
+    /// the field the change was typed in, and the view stays where the person put it.
+    private func reveal(_ target: CanvasSelection, in model: AppModel) {
+        guard scope == nil else { return }
+        DesignActions.reveal(target, in: model)
+    }
+
+    /// Selects several things a tool changed together; not in a change for one screen.
+    private func select(_ together: CanvasSelection, in model: AppModel) {
+        guard scope == nil else { return }
+        model.selection = together
+    }
+
+    /// The screen a tool means when none is named in a change for one screen: that one,
+    /// or a refusal once it has gone, so that nothing is done to another in its place.
+    /// Nil when a command can go anywhere.
+    private func scopedScreen(in model: AppModel) -> Result<DesignScreen, Refusal>? {
+        guard let scope else { return nil }
+        guard let screen = model.store.screen(scope) else {
+            return .failure(Refusal(line: "That screen has gone, so nothing can be changed here."))
+        }
+        return .success(screen)
+    }
+
     /// The screen a change is for, as a refusal names it: `S1 “Login”`. Nil without one.
     private var scopeNamed: String? {
         guard let scope else { return nil }
@@ -913,13 +936,14 @@ final class VoiceToolbox: VoiceActing {
 
     /// The screen a new element goes on when none is named: the one a change is for, the
     /// selected one, the one holding the selection, or the newest.
-    private func currentScreen(in model: AppModel) -> DesignScreen? {
-        if let scope { return model.store.screen(scope) }
-        if let screen = model.selectedScreen { return screen }
+    private func currentScreen(in model: AppModel) -> Result<DesignScreen, Refusal> {
+        if let scoped = scopedScreen(in: model) { return scoped }
+        if let screen = model.selectedScreen { return .success(screen) }
         if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
-            return screen
+            return .success(screen)
         }
-        return model.store.screens.last
+        guard let newest = model.store.screens.last else { return .failure(Refusal(line: "There is no screen to add to yet.")) }
+        return .success(newest)
     }
 
     // MARK: Results
