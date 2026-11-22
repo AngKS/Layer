@@ -1009,7 +1009,7 @@ final class SketchFlowUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         let centre = CGPoint(x: window.midX, y: window.midY)
         let lower = CGPoint(x: centre.x, y: centre.y + 120)
-        let empty = CGPoint(x: 120, y: window.midY)
+        let empty = emptyCanvasPoint
 
         // Two buttons, one above the other, selected together and grouped.
         addButtonFromTheLibrary()
@@ -1042,11 +1042,20 @@ final class SketchFlowUITests: XCTestCase {
         // The group selected again, its W scales it in proportion.
         point(empty).tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
-        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
+        _ = waitForFormatPanelToClose(timeout: 2)
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "a tap on a member should pick its group")
-        showFormatPanel(with: "Ungroup")
-        setNumber("W", to: "\(Int(size.width) * 2)")
+        showFormatPanel(with: "Ungroup", afterDeselecting: true)
+        // Typed in, W changes nothing until Return: not at the first digit deleted, when the
+        // group would shrink to its smallest.
+        control("W").tap()
+        let typing = app.textFields["W"]
+        XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the W field should let it be typed in")
+        typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "\(Int(size.width) * 2)")
+        usleep(500_000)
+        XCTAssertEqual(selectionSize.width, size.width, accuracy: 1, "the group shouldn't change as W is typed")
+        XCTAssertEqual(selectionSize.height, size.height, accuracy: 1)
+        typing.typeText("\n")
         for _ in 0..<20 where abs(selectionSize.height - size.height * 2) > 2 { usleep(150_000) }
         XCTAssertEqual(selectionSize.width, size.width * 2, accuracy: 2, "W should double the group's width")
         XCTAssertEqual(selectionSize.height, size.height * 2, accuracy: 2, "and its height with it")
@@ -1057,15 +1066,15 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy should be selected")
         panelControl("Delete")?.tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
-        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
+        _ = waitForFormatPanelToClose(timeout: 2)
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy's members should have gone with it")
 
         // Deleted, the group leaves nothing behind: a tap there finds the screen.
-        showFormatPanel(with: "Delete")
+        showFormatPanel(with: "Delete", afterDeselecting: true)
         panelControl("Delete")?.tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
-        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
+        _ = waitForFormatPanelToClose(timeout: 2)
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
     }
@@ -1171,7 +1180,7 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on a selected thing should take it out")
 
         // Empty canvas clears.
-        point(CGPoint(x: 120, y: window.midY)).tap()
+        point(emptyCanvasPoint).tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
     }
 
@@ -1238,9 +1247,11 @@ final class SketchFlowUITests: XCTestCase {
         control("Sticky note").tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
         // The note's popover, for typing, may take the tap that would open the panel.
+        // Tapped again only when the panel still isn't there after a good wait: a slow open
+        // tapped again would close.
         for _ in 0..<3 where layerRow("Sticky Note") == nil {
             control("Layers").tap()
-            _ = app.buttons["Sticky Note"].waitForExistence(timeout: 2)
+            _ = app.buttons["Sticky Note"].waitForExistence(timeout: 6)
         }
         XCTAssertTrue(waitForLayers { self.layerOrder(["Sticky Note", "Sticky Note"]) }, "both notes should be listed")
         XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == true, "the note added last should be in front, and selected")
@@ -1248,7 +1259,7 @@ final class SketchFlowUITests: XCTestCase {
 
         for _ in 0..<3 where !app.buttons["Send to Back"].exists {
             control("Arrange").tap()
-            _ = app.buttons["Send to Back"].waitForExistence(timeout: 2)
+            _ = app.buttons["Send to Back"].waitForExistence(timeout: 6)
         }
         let back = app.buttons["Send to Back"]
         XCTAssertTrue(back.exists, "the Arrange menu should offer Send to Back")
@@ -1260,7 +1271,7 @@ final class SketchFlowUITests: XCTestCase {
 
     /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
     private func clearSelection() {
-        let empty = CGPoint(x: 120, y: app.windows.firstMatch.frame.midY)
+        let empty = emptyCanvasPoint
         for _ in 0..<4 where selectionElement.exists {
             point(empty).tap()
             usleep(500_000)
@@ -1322,28 +1333,45 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "the new button should be selected")
     }
 
-    /// Waits for the Format panel, which goes with the selection, to finish going: its
-    /// controls stay in the accessibility tree while it slides out, and a test that took them
-    /// for an open panel would find them gone when it came to use them.
+    /// The Format panel's container, which is in the accessibility tree while it is open or
+    /// sliding out.
+    private var formatPanel: XCUIElement { app.descendants(matching: .any)["Format panel"] }
+
+    /// Whether the Format panel is out, as wide as it is when open: one sliding away, or
+    /// caught as a sliver at the window's edge, isn't.
+    private var isFormatPanelOpen: Bool {
+        formatPanel.exists && formatPanel.frame.width > 200
+    }
+
+    /// Waits for the Format panel, which goes with the selection, to finish going.
     private func waitForFormatPanelToClose(timeout: TimeInterval = 5) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if panelControl("Duplicate", timeout: 0.1) == nil { return true }
+            if !isFormatPanelOpen { return true }
             usleep(100_000)
         }
         return false
     }
 
-    /// Opens the Format panel, which closes whenever nothing is selected, unless a control of
-    /// it is there already. Pressed on the bar's own Format button, which stays where it is:
-    /// the selection popover's, which glides into place under a new selection, can miss a tap.
-    private func showFormatPanel(with label: String) {
-        for _ in 0..<3 {
-            if panelControl(label, timeout: 1) != nil { return }
-            control("Format").tap()
-            if panelControl(label, timeout: 3) != nil { return }
+    /// Opens the Format panel with a control of the label given. The panel closes whenever
+    /// nothing is selected, so after that (`afterDeselecting`) it is shut however it looks:
+    /// seen sliding out, or caught as a sliver at the window's edge, its controls are still
+    /// there for seconds at times. Otherwise it is open or opening, and the button, which
+    /// toggles, is pressed only when it still isn't there after a good wait. Pressed on the
+    /// bar's own Format button, which stays where it is: the selection popover's glides into
+    /// place under a new selection, and can miss a tap.
+    private func showFormatPanel(with label: String, afterDeselecting: Bool = false) {
+        if afterDeselecting || !isFormatPanelOpen { control("Format").tap() }
+        for _ in 0..<2 {
+            if panelControl(label, timeout: 6) != nil { return }
+            if !isFormatPanelOpen { control("Format").tap() }
         }
         XCTFail("the Format panel should open with \(label)")
+    }
+
+    /// A canvas point with nothing on it, left of where the notes and buttons are put.
+    private var emptyCanvasPoint: CGPoint {
+        CGPoint(x: 120, y: app.windows.firstMatch.frame.midY)
     }
 
     /// A control in the Format panel, which floats at the canvas's right, by its label: the

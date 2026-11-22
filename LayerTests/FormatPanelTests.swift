@@ -150,7 +150,8 @@ extension HostedWindowSuites {
             #expect(field.text == "10")
             type("100", into: field)
             try await settle(view)
-            #expect(elements.first == 100)
+            #expect(elements.first == 10, "nothing is set while it is typed")
+            #expect(elements.setOnFirst.isEmpty)
 
             // The second element is tapped on the canvas: the panel now shows it, and binds the
             // field being typed in to it. What is being typed stays, and is still the first's.
@@ -185,31 +186,42 @@ extension HostedWindowSuites {
             #expect(elements.first.isFinite)
         }
 
-        /// The element changed another way while its field has the keyboard (an Align in the
-        /// panel, a drag, the knob, voice): as typing ends, the number typed earlier isn't set
-        /// again over that change. SwiftUI sets the field's value once more as typing ends, and
-        /// the field, which keeps what was typed, put it back (review I1).
-        @Test func aChangeMadeWhileTheFieldIsFocusedStandsAsTypingEnds() async throws {
+        /// Nothing is set while a number is typed, however many digits go in: the element only
+        /// changes, once, as typing ends, so that a group doesn't shrink to its smallest at
+        /// the first digit deleted and the panel isn't rebuilt under the keyboard.
+        @Test func nothingIsSetUntilTypingEndsAndThenOnce() async throws {
             let elements = TwoElements()
             let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
             defer { window.isHidden = true }
             let field = try await focusedField(in: view)
-            type("100", into: field)
-            try await settle(view)
-            #expect(elements.first == 100)
-
-            elements.first = 0
-            elements.setOnFirst = []
-            try await settle(view)
+            for text in ["", "1", "10", "100"] {
+                type(text, into: field)
+                try await settle(view)
+                #expect(elements.setOnFirst.isEmpty, "set while typing \(text): \(elements.setOnFirst)")
+            }
             field.resignFirstResponder()
             try await settle(view)
-            #expect(elements.first == 0)
-            #expect(!elements.setOnFirst.contains(100), "set again as typing ended: \(elements.setOnFirst)")
+            #expect(elements.setOnFirst == [100])
+            #expect(elements.first == 100)
         }
 
-        /// Undo pressed while the field has the keyboard takes back the typed number, and stays
-        /// taken back as typing ends, with redo still there to put it back (review I1).
-        @Test func undoWhileTheFieldIsFocusedStandsAndKeepsItsRedo() async throws {
+        /// Text that isn't a number leaves the value as it was.
+        @Test func textThatIsntANumberSetsNothing() async throws {
+            let elements = TwoElements()
+            let (window, view) = try await host(TypingIntoTheSelection(elements: elements))
+            defer { window.isHidden = true }
+            let field = try await focusedField(in: view)
+            type("abc", into: field)
+            field.resignFirstResponder()
+            try await settle(view)
+            #expect(elements.setOnFirst.isEmpty)
+            #expect(elements.first == 10)
+        }
+
+        /// Undo pressed while the field has the keyboard takes back the step before, and the
+        /// number typed, set as typing ends, is a step of its own that undo takes back and
+        /// redo puts back.
+        @Test func undoWhileTheFieldIsFocusedThenTheTypedNumberIsOneStep() async throws {
             let model = AppModel(document: LayerDocument())
             let undo = UndoManager()
             undo.groupsByEvent = false
@@ -220,23 +232,23 @@ extension HostedWindowSuites {
             button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
             let ref = model.store.setElements([button], on: screen, replacing: true)[0]
             func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
+            undo.removeAllActions()
 
             let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
             defer { window.isHidden = true }
             let field = try await focusedField(in: view)
             type("100", into: field)
             try await settle(view)
-            #expect(x() == 100)
-            #expect(!model.store.isEditing, "the panel's pause should have ended its edit")
+            #expect(x() == 20, "not set until typing ends")
+            #expect(!undo.canUndo)
 
-            undo.undo()
-            #expect(x() == 20)
-            #expect(undo.canRedo)
-            try await settle(view)
             field.resignFirstResponder()
             try await settle(view)
-            #expect(x() == 20, "typing ending set the typed number again over the undo")
-            #expect(undo.canRedo, "and threw away the redo")
+            #expect(x() == 100)
+            for _ in 0..<100 where model.store.isEditing { try await Task.sleep(for: .milliseconds(20)) }
+            undo.undo()
+            #expect(x() == 20, "one undo takes the typed number back")
+            #expect(undo.canRedo)
             undo.redo()
             #expect(x() == 100)
         }
@@ -611,5 +623,52 @@ extension HostedWindowSuites {
             window.layoutIfNeeded()
             #expect(scrubber.panelOrigin == CGPoint(x: 16, y: 114))
         }
+    }
+}
+
+/// What typing a number into a Format field comes to, as typing ends.
+@MainActor
+@Suite("A number typed into a Format field")
+struct NumberDraftTests {
+    private let wide: ClosedRange<CGFloat> = -99_999...99_999
+
+    @Test func beginsAsTheValueShown() {
+        #expect(NumberDraft(353).text == "353")
+        #expect(NumberDraft(12.5).text == "12.5")
+    }
+
+    @Test func aNumberTypedCommitsOnce() {
+        var draft = NumberDraft(353)
+        draft.text = "706"
+        #expect(draft.committed(in: wide, wraps: false) == 706)
+    }
+
+    @Test(arguments: ["", " ", "abc", "nan", "inf", "-inf", "1e999"])
+    func textThatIsntANumberCommitsNothing(_ text: String) {
+        var draft = NumberDraft(353)
+        draft.text = text
+        #expect(draft.committed(in: wide, wraps: false) == nil)
+    }
+
+    @Test func theSameNumberCommitsNothing() {
+        var draft = NumberDraft(353)
+        draft.text = "353"
+        #expect(draft.committed(in: wide, wraps: false) == nil)
+    }
+
+    @Test func aNumberIsHeldToItsRange() {
+        var draft = NumberDraft(10)
+        draft.text = "99999"
+        #expect(draft.committed(in: 1...4000, wraps: false) == 4000)
+        draft.text = "-5"
+        #expect(draft.committed(in: 1...4000, wraps: false) == 1)
+    }
+
+    @Test func aTurnWrapsRoundTheCircle() {
+        var draft = NumberDraft(10)
+        draft.text = "370"
+        #expect(draft.committed(in: 0...360, wraps: true) == nil, "370 comes round to the 10 it began with")
+        draft.text = "-90"
+        #expect(draft.committed(in: 0...360, wraps: true) == 270)
     }
 }

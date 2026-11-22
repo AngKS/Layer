@@ -2197,10 +2197,10 @@ struct GroupAsOneThingTests {
         #expect(board.undo.undoActionName == "Format")
     }
 
-    /// Typed digit by digit, as the field applies each one: deleting "353" to nothing, then
-    /// "706". The group goes down to what it can hold and stays selected, and the last number
-    /// typed is what it comes to.
-    @Test func aGroupsWidthFieldTypedDigitByDigitEndsAtTheNumberTyped() throws {
+    /// The model alone, given widths one after another as digits would give them (down to
+    /// what it can hold, then up to 706): the group stays selected and comes to the last
+    /// width. It covers `setGroupBox`, not the typed field, which now sets once as typing ends.
+    @Test func setGroupBoxGivenSuccessiveWidthsKeepsTheGroupSelectedAndEndsAtTheLast() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         board.model.selection = .element(g)

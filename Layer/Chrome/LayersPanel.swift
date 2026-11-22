@@ -350,6 +350,7 @@ private struct LayerHeadingRow: View, Equatable {
 private let layerIndent: CGFloat = 16
 
 /// A lock or eye on a layer's row.
+@MainActor
 private func rowToggle(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Image(systemName: symbol)

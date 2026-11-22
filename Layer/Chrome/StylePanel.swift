@@ -933,12 +933,14 @@ struct TypedNumber: View {
     let onEnd: () -> Void
     /// The value typed into: the binding as typing began, kept for as long as it goes on.
     @State private var target: Binding<CGFloat>
-    /// The number as typed, which the field shows. The binding kept may read the value it
-    /// had as typing began, as the panel's do.
-    @State private var typed: Double
+    /// What is typed so far. Nothing is set until typing ends, on Return or as the field
+    /// loses focus: set on each key, the element changed under the field at every digit (a
+    /// group shrank to its smallest at the first one deleted), and the panel was rebuilt as
+    /// it was typed into.
+    @State private var draft: NumberDraft
     @FocusState private var isEditing: Bool
 
-    static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+    static let format = NumberDraft.format
 
     init(label: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, wraps: Bool, onEnd: @escaping () -> Void) {
         self.label = label
@@ -948,35 +950,51 @@ struct TypedNumber: View {
         // Only as the field appears: later bindings, made for whatever is selected then, are
         // passed in but not taken.
         _target = State(initialValue: value)
-        _typed = State(initialValue: Double(value.wrappedValue))
+        _draft = State(initialValue: NumberDraft(value.wrappedValue))
     }
 
     var body: some View {
-        TextField(
-            label,
-            value: Binding(get: { typed }, set: { number in
-                // "NaN", or a number too big to hold, isn't one: a frame that isn't finite
-                // can't be saved, and scrubbing it traps.
-                guard number.isFinite else { return }
-                let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
-                // Only a number newly typed. SwiftUI sets each change twice, and once more as
-                // typing ends; set again then, the number typed earlier undid whatever changed
-                // the element meanwhile: an Align, Undo, a drag, the knob, voice.
-                guard Double(value) != typed else { return }
-                typed = Double(value)
-                target.wrappedValue = value
-            }),
-            format: Self.format
-        )
-        .keyboardType(.numbersAndPunctuation)
-        .focused($isEditing)
-        // Focus taken as the field appears is dropped; a moment later it holds.
-        .task {
-            try? await Task.sleep(for: .milliseconds(50))
-            isEditing = true
-        }
-        .onChange(of: isEditing) { _, focused in if !focused { onEnd() } }
-        .accessibilityLabel(label)
+        TextField(label, text: $draft.text)
+            .keyboardType(.numbersAndPunctuation)
+            .focused($isEditing)
+            .onSubmit { isEditing = false }
+            // Focus taken as the field appears is dropped; a moment later it holds.
+            .task {
+                try? await Task.sleep(for: .milliseconds(50))
+                isEditing = true
+            }
+            .onChange(of: isEditing) { _, focused in
+                guard !focused else { return }
+                if let value = draft.committed(in: range, wraps: wraps) { target.wrappedValue = value }
+                onEnd()
+            }
+            .accessibilityLabel(label)
+    }
+}
+
+/// The number typed into a field, as text, until typing ends. What is typed commits once:
+/// text that isn't a number, or is too big to hold, commits nothing, and a number the same as
+/// the one the field began with commits nothing either, so that Return and then losing focus
+/// are one change.
+@MainActor
+struct NumberDraft: Equatable {
+    var text: String
+    /// The number the field began with.
+    let start: CGFloat
+
+    static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+
+    init(_ value: CGFloat) {
+        start = value
+        text = Double(value).formatted(Self.format)
+    }
+
+    /// The value the text comes to, within `range` (or turned round it, if `wraps`), when it
+    /// differs from the one the field began with; nil to leave the value as it was.
+    func committed(in range: ClosedRange<CGFloat>, wraps: Bool) -> CGFloat? {
+        guard let number = try? Self.format.parseStrategy.parse(text.trimmingCharacters(in: .whitespaces)), number.isFinite else { return nil }
+        let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
+        return Double(value) == Double(start) ? nil : value
     }
 }
 

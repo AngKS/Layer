@@ -125,6 +125,8 @@ struct CanvasScreen: View {
                         Spacer(minLength: 0)
                         if model.isInspectorOpen {
                             StylePanel(maxHeight: panelRoom)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("Format panel")
                                 .reportsChromeFrame(AppModel.formatChrome, to: model)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
