@@ -9,6 +9,11 @@ import UIKit
 /// It has a call of its own, which listens only while asked and lives alongside a phone
 /// call. While a phone call is up, that call hears everything, and a squeeze only says
 /// what the next command is about.
+///
+/// A screen's field uses it too: pressing and holding the field listens for a change to
+/// that screen until the finger lets go (`holdBegan`, `holdEnded`), and typed words go
+/// through the same call (`submit`). Holding the field isn't a squeeze: Squeeze to Talk,
+/// the system's squeeze setting and Draw have no say in it.
 @Observable
 @MainActor
 final class PencilVoice {
@@ -67,6 +72,14 @@ final class PencilVoice {
     var ownsSqueeze: Bool {
         if endIsIgnored { return true }
         if case .listening(_, toggled: true, _) = mode { return true }
+        return false
+    }
+
+    /// Whether the pencil is listening, for a squeeze or a hold on the field, held or
+    /// toggled. Not observed: VoiceOver's "Speak a change" reads it as it is used, and its
+    /// second use sends.
+    var isListening: Bool {
+        if case .listening = mode { return true }
         return false
     }
 
@@ -133,6 +146,18 @@ final class PencilVoice {
     @ObservationIgnored private var squeezeWentOff = false
     /// Set when a squeeze sent a toggle: letting go of that squeeze does nothing more.
     @ObservationIgnored private var endIsIgnored = false
+    /// Whether the listen under way is a finger's, holding a screen's field, not a
+    /// squeeze's: only the finger letting go sends it, and a squeeze's end, a squeeze
+    /// failing or Squeeze to Talk going off leave it alone. Read only while `mode` is
+    /// `.listening`.
+    @ObservationIgnored private var listenIsAHold = false
+    /// The numbers of this call's commands from a screen's field, typed or held. The field
+    /// shows each one's line, so Squeeze to Talk going off doesn't end the call until
+    /// they have run and their replies have shown.
+    @ObservationIgnored private var fieldCommands: Set<Int> = []
+    /// How many typed changes are waiting on the call, to get ready or for their turn, and
+    /// aren't numbered yet. They keep the call as their commands will.
+    @ObservationIgnored private var submitsWaiting = 0
     @ObservationIgnored private var silenceTimer: Task<Void, Never>?
     /// Ends a held squeeze whose end never comes: see `maximumHold`.
     @ObservationIgnored private var holdTimer: Task<Void, Never>?
@@ -198,12 +223,29 @@ final class PencilVoice {
     /// The pen came into hover range. The first time, the model gets ready, so that the
     /// first squeeze doesn't wait on it. Nothing listens.
     func hovered() {
+        // In Draw the squeeze is PencilKit's, so the pen hovering there isn't on its way to
+        // one, nor anywhere when squeezing doesn't talk.
+        guard let model, model.tool != .draw, model.squeezesToTalk, !squeezeIsOff() else { return }
+        // The pen hovers many times a second: an unavailable model is asked again seldom.
+        startCallIfReady(throttled: true)
+    }
+
+    /// A screen's field came up: the model gets ready, so that the first change typed or
+    /// held for doesn't wait on it. Nothing listens. Holding the field and typing in it
+    /// aren't squeezes, so neither Draw nor Squeeze to Talk nor the system's squeeze
+    /// setting has a say.
+    func prepare() {
+        startCallIfReady(throttled: false)
+    }
+
+    /// Starts the pencil's call, which gets the model ready, unless one is up already, a
+    /// phone call hears instead, or the model can't be asked. `throttled`, an unavailable
+    /// model isn't asked again within `readinessRetry` of the last time.
+    private func startCallIfReady(throttled: Bool) {
         // A phone call hears everything while it is up, in this window or another: the
-        // pencil's own isn't needed. In Draw the squeeze is PencilKit's, so the pen hovering
-        // there isn't on its way to one, nor anywhere when squeezing doesn't talk.
-        guard call == nil, let model, model.tool != .draw, model.squeezesToTalk, !squeezeIsOff(),
-              model.voice == nil, !phoneCallIsUp() else { return }
-        if let lastReadinessCheck, clock() - lastReadinessCheck < Self.readinessRetry { return }
+        // pencil's own isn't needed.
+        guard call == nil, let model, model.voice == nil, !phoneCallIsUp() else { return }
+        if throttled, let lastReadinessCheck, clock() - lastReadinessCheck < Self.readinessRetry { return }
         guard case .ready = readiness() else {
             lastReadinessCheck = clock()
             return
@@ -234,26 +276,91 @@ final class PencilVoice {
         // A phone call in another window has the microphone, and its commands are about that
         // window's design: a squeeze here has nothing to say to it, so it does nothing.
         if model.voice == nil, phoneCallIsUp() { return }
+        beginListening(about: target(at: viewPoint, in: model), at: viewPoint, azimuth: azimuth, byHold: false)
+    }
+
+    /// A finger pressed and held a screen's field, at `anchor` in the view: the pencil
+    /// listens for a change to that screen until it lets go. It isn't a squeeze, so neither
+    /// Squeeze to Talk, the system's squeeze setting, Draw nor where it is has a say. One
+    /// listen at a time: while one is open, a squeeze's or another hold's, it is ignored.
+    func holdBegan(about screen: DesignScreen.ID, at anchor: CGPoint) {
+        if case .listening = mode { return }
+        guard let model else { return }
+        // A phone call in another window has the microphone, and its commands are about that
+        // window's design: holding here does nothing, as a squeeze here does.
+        if model.voice == nil, phoneCallIsUp() { return }
+        beginListening(about: .screenEdit(screen), at: anchor, azimuth: nil, byHold: true)
+    }
+
+    /// The finger holding the field let go: what it held to say is sent, however long it was
+    /// held. A squeeze's listen, open when the hold began, isn't the hold's to send.
+    func holdEnded() {
+        guard listenIsAHold, case .listening(_, toggled: false, _) = mode else { return }
+        send()
+    }
+
+    /// Typed words from a screen's field, as a command about `target`. They go through the
+    /// pencil's call, started for them if it isn't up, and wait their turn behind whatever
+    /// is waiting or under way, a command spoken a moment earlier whose words are still
+    /// settling included: that was given first, and goes first. The microphone isn't used.
+    ///
+    /// Returns the command's number, which the call's lines about it carry, or nil for
+    /// blank text, a design that has closed, or a call that ended while the words waited.
+    func submit(_ text: String, about target: VoiceTarget) async -> Int? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !designHasClosed,
+              let call = startCall() else { return nil }
+        // Waiting, the words keep the call as their command will: see `endIfIdle()`.
+        submitsWaiting += 1
+        defer { submitsWaiting -= 1 }
+        await starting?.value
+        await Self.settled(call.settling, on: call)
+        guard self.call === call, !designHasClosed, let number = call.submit(text, about: target) else { return nil }
+        fieldCommands.insert(number)
+        return number
+    }
+
+    /// Returns once none of the listens numbered `numbers` is still settling what it heard,
+    /// into a command or into nothing, or the call has ended. Listens sent later aren't
+    /// waited for.
+    private static func settled(_ numbers: Set<Int>, on call: VoiceCall) async {
+        guard !numbers.isEmpty else { return }
+        let isSettled = Observations { @MainActor in call.phase == .ended || call.settling.isDisjoint(with: numbers) }
+        for await settled in isSettled where settled { return }
+    }
+
+    /// Listens for a command about `target`, with the bubble at `anchor`: after a squeeze's
+    /// checks, or a hold's. With this window's phone call up, it only says what the next
+    /// command is about.
+    private func beginListening(about target: VoiceTarget, at anchor: CGPoint, azimuth: Angle?, byHold: Bool) {
+        guard let model else { return }
         endIsIgnored = false
-        let target = target(at: viewPoint, in: model)
         select(target, in: model)
-        // This window's phone call hears the command: the squeeze only said what it is about.
+        // This window's phone call hears the command: the squeeze, or the hold, only said
+        // what it is about.
         guard model.voice == nil else {
-            retarget = Retarget(point: viewPoint)
+            retarget = Retarget(point: anchor)
             return
         }
         if case .unavailable(let reason) = readiness() {
-            open(at: viewPoint, azimuth: azimuth, .problem(reason))
+            open(at: anchor, azimuth: azimuth, .problem(reason))
             say()
             return
         }
         // One microphone at a time: a pencil listening in another window lets go, unsent.
         for other in otherWindows() { other.stopPencilListening() }
         guard let call = startCall() else { return }
-        open(at: viewPoint, azimuth: azimuth, .gettingReady)
+        open(at: anchor, azimuth: azimuth, .gettingReady)
         mode = .listening(began: clock(), toggled: false, stale: call.caption?.id)
+        listenIsAHold = byHold
         listen(for: target, on: call)
         startHoldTimer()
+    }
+
+    /// Whether a finger holding a screen's field is listening: that listen is the hold's to
+    /// send, and nothing that happens to a squeeze lets go of it.
+    private var holdIsListening: Bool {
+        guard listenIsAHold, case .listening = mode else { return false }
+        return true
     }
 
     func squeezeEnded() {
@@ -261,6 +368,8 @@ final class PencilVoice {
             endIsIgnored = false
             return
         }
+        // A squeeze while a finger holds the field isn't the hold's end (F7).
+        if holdIsListening { return }
         guard case .listening(let began, toggled: false, let stale) = mode else { return }
         if clock() - began < Self.holdThreshold {
             mode = .listening(began: began, toggled: true, stale: stale)
@@ -279,8 +388,13 @@ final class PencilVoice {
 
     /// Squeeze to Talk was turned off, which takes the squeeze away as Draw does: whatever
     /// was being listened to is let go of, unsent. The call isn't needed until it is back
-    /// on, so it ends, once a command already sent has finished.
+    /// on, so it ends, once a command already sent has finished and any from a screen's
+    /// field has shown its reply there.
+    ///
+    /// A finger holding the field isn't squeezing: it goes on listening, and the call stays
+    /// up for its command and reply (F7).
     func squeezeToTalkTurnedOff() {
+        if holdIsListening { return }
         letGoOfSqueeze()
         squeezeWentOff = true
         endIfIdle()
@@ -295,12 +409,14 @@ final class PencilVoice {
     }
 
     /// The squeeze's gesture failed, or the view it was on went away: its end won't come.
-    /// A held squeeze is let go of unsent, since nobody said it was over.
+    /// A held squeeze is let go of unsent, since nobody said it was over. A finger holding
+    /// the field isn't that squeeze, and goes on listening (F7).
     func squeezeFailed() {
         if endIsIgnored {
             endIsIgnored = false
             return
         }
+        if holdIsListening { return }
         guard case .listening(_, toggled: false, _) = mode else { return }
         stopHearing()
         close()
@@ -332,7 +448,18 @@ final class PencilVoice {
 
     private func endIfIdle() {
         guard designHasClosed || squeezeWentOff, let call, !call.isHearing, call.queuedCount == 0, call.phase != .working else { return }
+        // Squeeze to Talk going off doesn't take the field's call away while the field is
+        // using it: a change typed and waiting for the call, or one typed or held that is
+        // still to run or whose reply the field still shows. A closed design has no field.
+        if !designHasClosed, isUsedByTheField(call) { return }
         call.end()
+    }
+
+    /// Whether a screen's field is waiting on `call` or showing one of its commands. Its
+    /// commands that are over, and shown, are forgotten.
+    private func isUsedByTheField(_ call: VoiceCall) -> Bool {
+        fieldCommands = fieldCommands.filter { call.isUnderWay($0) || call.caption?.command == $0 }
+        return submitsWaiting > 0 || !fieldCommands.isEmpty
     }
 
     // MARK: Listening
@@ -355,6 +482,8 @@ final class PencilVoice {
             guard let self, self.call === call else { return }
             self.call = nil
             self.starting = nil
+            // Numbers are a call's own: the next call's start again from one.
+            self.fieldCommands = []
             self.close()
         }
         self.call = call
@@ -403,6 +532,7 @@ final class PencilVoice {
             close()
             return
         }
+        if listenIsAHold { fieldCommands.insert(number) }
         mode = .sent(command: number)
         bubble?.state = .working
         refresh()
