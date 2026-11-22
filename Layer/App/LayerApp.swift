@@ -38,6 +38,10 @@ private struct DesignEditor: View {
     /// is renamed, for instance), and throw all but the first away.
     @State private var made = MadeOnce()
     @Environment(\.scenePhase) private var scenePhase
+    /// Squeeze to Talk, watched in case it is changed some way that doesn't tell the open
+    /// designs itself, as Settings and the Magic Pen tab do. The design reads the setting
+    /// itself, as it does when it opens.
+    @AppStorage(AppModel.squeezesToTalkKey, store: AppSettings.defaults) private var squeezesToTalk = true
 
     private let document: LayerDocument
     private let fileURL: URL?
@@ -81,6 +85,7 @@ private struct DesignEditor: View {
                 model.applyModelChoice()
                 model.engine.prepare()
             }
+            .onChange(of: squeezesToTalk) { model.readSqueezesToTalk() }
             .preferredColorScheme(.light)
             .toolbar(.hidden, for: .navigationBar)
             .persistentSystemOverlays(.hidden)

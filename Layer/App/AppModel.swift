@@ -355,9 +355,10 @@ final class AppModel {
     init(document: LayerDocument, settings: UserDefaults = AppSettings.defaults) {
         self.document = document
         self.settings = settings
-        // Both on until set otherwise.
+        // All on until set otherwise.
         fingerDraws = settings.object(forKey: AppModel.fingerDrawsKey) == nil || settings.bool(forKey: AppModel.fingerDrawsKey)
         convertsAutomatically = settings.object(forKey: AppModel.convertsAutomaticallyKey) == nil || settings.bool(forKey: AppModel.convertsAutomaticallyKey)
+        squeezesToTalk = settings.object(forKey: AppModel.squeezesToTalkKey) == nil || settings.bool(forKey: AppModel.squeezesToTalkKey)
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
@@ -708,6 +709,47 @@ final class AppModel {
     }
 
     @ObservationIgnored private var pencilVoiceIfMade: PencilVoice?
+
+    /// Whether squeezing Apple Pencil Pro talks to the design: Squeeze to Talk, in
+    /// Settings and the board's Magic Pen tab, on until turned off there. Off, the squeeze
+    /// is the system's, as in any other app, and whatever the pencil is listening to is let
+    /// go of, unsent. Either place sets it for every open design at once.
+    var squeezesToTalk: Bool {
+        didSet {
+            guard squeezesToTalk != oldValue else { return }
+            if !squeezesToTalk { pencilVoiceIfMade?.squeezeToTalkTurnedOff() }
+        }
+    }
+
+    /// Where the app keeps Squeeze to Talk. Without dots: it is watched by key, and a dot
+    /// would make the key a path.
+    static let squeezesToTalkKey = "squeezesToTalk"
+
+    /// Reads Squeeze to Talk again, once it has been changed.
+    func readSqueezesToTalk() {
+        squeezesToTalk = settings.object(forKey: AppModel.squeezesToTalkKey) == nil || settings.bool(forKey: AppModel.squeezesToTalkKey)
+    }
+
+    /// Turns Squeeze to Talk on or off from the board's Magic Pen tab. It is the app's
+    /// setting, the one in Settings too, so every open design follows it.
+    func setSqueezesToTalk(_ on: Bool) {
+        AppModel.setSqueezesToTalk(on, in: settings, designs: [self] + openDesigns().filter { $0 !== self })
+    }
+
+    /// Turns Squeeze to Talk on or off, in Settings or a board's Magic Pen tab, and has
+    /// each of `designs` that keeps its settings in `settings` follow it at once. In the
+    /// app that is every open design.
+    static func setSqueezesToTalk(_ on: Bool, in settings: UserDefaults = AppSettings.defaults, designs: [AppModel] = OpenDesigns.shared.all) {
+        settings.set(on, forKey: squeezesToTalkKey)
+        for design in designs where design.settings === settings { design.readSqueezesToTalk() }
+    }
+
+    /// The designs open in the app's windows, which a setting of the app's reaches. A test says.
+    @ObservationIgnored var openDesigns: @MainActor () -> [AppModel] = { OpenDesigns.shared.all }
+
+    /// Whether the canvas has a squeeze action, for the pencil to talk with. Not with
+    /// Squeeze to Talk off, nor in Draw, where the squeeze is PencilKit's.
+    var canvasHearsSqueezes: Bool { squeezesToTalk && tool != .draw }
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
     /// the names of the screens and what their elements say.

@@ -250,7 +250,7 @@ enum SwiftUICodeGenerator {
 
         case .symbol:
             lines = [
-                "Image(systemName: \(literal(element.symbol ?? "questionmark.square.dashed")))",
+                "Image(systemName: \(literal(SystemSymbol.resolve(element.symbol ?? "questionmark.square.dashed"))))",
                 "    .resizable()",
                 "    .scaledToFit()",
                 "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))",
@@ -344,7 +344,7 @@ enum SwiftUICodeGenerator {
 
         case .symbol:
             lines = [
-                "Image(systemName: \(literal(element.symbol ?? "questionmark.square.dashed")))",
+                "Image(systemName: \(literal(SystemSymbol.resolve(element.symbol ?? "questionmark.square.dashed"))))",
                 "    .resizable()",
                 "    .scaledToFit()",
                 "    .frame(\(size))",
