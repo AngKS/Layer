@@ -146,3 +146,79 @@ struct SiblingLists {
         return (lists[nil] ?? []).flatMap(block)
     }
 }
+
+// MARK: Moving a layer
+
+/// A list of layers the Layers panel shows, in which a row can be dropped: a screen's top
+/// level, or the open canvas's (`host`), or what is in one group.
+enum LayerList: Hashable, Sendable {
+    case host(DesignStore.ElementRef.Host)
+    case group(DesignElement.ID)
+}
+
+extension DesignStore {
+    /// Moves a thing to a list on its own host: into a group, or out of one, or to another
+    /// place in the list it is in. `before` is the row it lands above in the panel, so it
+    /// lands just in front of that thing in the list; nil is the bottom of the list, the back.
+    /// The thing's `group` becomes the list's group, or none. One step to undo, and a group
+    /// left with one member dissolves in that same change.
+    ///
+    /// Refused, returning false and changing nothing: a drawing, which keeps its place; a
+    /// locked thing (by itself or by a group above it), as when it is arranged; a list on
+    /// another host, or one that is locked; a move into the thing itself or into what is in
+    /// it; and a `before` that isn't in the list. The order is written through
+    /// `rawOrder(on:withDrawingsKept:)`, so drawings keep their slots here too.
+    @discardableResult
+    func moveLayer(_ id: DesignElement.ID, to list: LayerList, before: DesignElement.ID?) -> Bool {
+        moveLayer(id, to: list, landing: before.map(Landing.above) ?? .bottom)
+    }
+
+    /// Moves a thing to the top of a list: above every row in it, which is the front.
+    @discardableResult
+    func moveLayerToTop(_ id: DesignElement.ID, of list: LayerList) -> Bool {
+        moveLayer(id, to: list, landing: .top)
+    }
+
+    /// Where a moved row lands in a list, as the panel shows it.
+    private enum Landing {
+        case above(DesignElement.ID)
+        case top
+        case bottom
+    }
+
+    private func moveLayer(_ id: DesignElement.ID, to list: LayerList, landing: Landing) -> Bool {
+        guard let element = element(id), element.kind != .drawing, !isLockedWithItsGroups(element) else { return false }
+        let newGroup: DesignElement.ID?
+        switch list {
+        case .host(let host):
+            guard host.parent == element.parent else { return false }
+            newGroup = nil
+        case .group(let groupID):
+            guard let group = groupItem(groupID), group.parent == element.parent, groupID != id,
+                  !content.ancestors(of: groupID).contains(id), !isLockedWithItsGroups(group)
+            else { return false }
+            newGroup = groupID
+        }
+        var siblings = SiblingLists(content.children(of: element.parent))
+        let oldGroup = siblings.list(of: id)
+        siblings.lists[oldGroup]?.removeAll { $0 == id }
+        var target = siblings.lists[newGroup] ?? []
+        switch landing {
+        case .above(let row):
+            guard row != id, let index = target.firstIndex(of: row) else { return false }
+            target.insert(id, at: index + 1)
+        case .top:
+            target.append(id)
+        case .bottom:
+            target.insert(id, at: 0)
+        }
+        siblings.lists[newGroup] = target
+        let order = siblings.order
+        let parent = element.parent
+        apply { content in
+            if element.group != newGroup { content.update(id) { $0.group = newGroup } }
+            content.reorder(parent, to: content.rawOrder(on: parent, withDrawingsKept: order))
+        }
+        return true
+    }
+}

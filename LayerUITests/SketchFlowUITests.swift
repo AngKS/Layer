@@ -1028,6 +1028,104 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
     }
 
+    /// Rows in the Layers panel drag to reorder, into an open group, out of it and onto a closed
+    /// group's row, each by a long press then a drag; a quick swipe still scrolls.
+    func testLayersPanelRowsDragIntoAndOutOfGroups() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let lower = CGPoint(x: centre.x, y: centre.y + 120)
+
+        // Two buttons grouped, and a heart symbol in front of the group.
+        addButtonFromTheLibrary()
+        stroke(centre, lower)
+        addButtonFromTheLibrary()
+        point(lower).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5))
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("heart fill")
+        let heart = app.buttons["heart.fill"]
+        XCTAssertTrue(heart.waitForExistence(timeout: 5))
+        heart.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Symbol"), "the symbol should be listed")
+        XCTAssertNotNil(layerRow("Group"), "the group should be listed")
+        attach("layers-drag-start")
+
+        // Panel top to bottom: Symbol, Group (closed). Dropped on the closed group's row, the
+        // symbol goes inside it.
+        XCTAssertTrue(layerOrder(["Symbol", "Group"]), "the symbol should start above the group")
+        dragRow("Symbol", onto: "Group")
+        // The symbol is selected, so the group it is in opens on it.
+        let chevron = app.buttons["Show contents"].firstMatch
+        if chevron.waitForExistence(timeout: 2) { chevron.tap() }
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Group", "Symbol", "Button", "Button"]) }, "a row dropped on a closed group's row should go inside, at the top; it landed at the top of the group")
+        attach("layers-drag-into-group")
+
+        // Inside the group, dragged down below the buttons: still in the group, now at the back.
+        dragRow("Symbol", onto: "Button", index: 1, dy: 18)
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Group", "Button", "Button", "Symbol"]) }, "a row dropped below the last one in a group should go to its back")
+        attach("layers-drag-within-group")
+
+        // Out of the group: dropped above the group's own row.
+        dragRow("Symbol", onto: "Group", dy: -14)
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Symbol", "Group"]) && self.layerRow("Button") == nil }, "a row dropped above a group's row should leave the group, which closes with nothing selected in it")
+        attach("layers-drag-out-of-group")
+
+        // A quick swipe doesn't drag a row: nothing moves.
+        let row = layerRow("Group")!
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: -2)))
+        XCTAssertTrue(layerOrder(["Symbol", "Group"]), "a quick swipe shouldn't reorder rows")
+    }
+
+    /// A row of the Layers panel, which floats at the window's left, by its label; nil when
+    /// there is none. The first of several of one name, topmost first, unless `index` says.
+    private func layerRow(_ label: String, index: Int = 0) -> XCUIElement? {
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+            .filter { $0.exists && $0.frame.minX < 340 && $0.frame.width > 80 }
+            .sorted { $0.frame.minY < $1.frame.minY }
+        return index < rows.count ? rows[index] : nil
+    }
+
+    /// Whether the panel's rows, top to bottom, begin with these.
+    private func layerOrder(_ labels: [String]) -> Bool {
+        var last: CGFloat = -1
+        var seen: [String: Int] = [:]
+        for label in labels {
+            let n = seen[label, default: 0]
+            seen[label] = n + 1
+            guard let row = layerRow(label, index: n), row.frame.minY > last else { return false }
+            last = row.frame.minY
+        }
+        return true
+    }
+
+    private func waitForLayers(_ condition: () -> Bool) -> Bool {
+        for _ in 0..<20 {
+            if condition() { return true }
+            usleep(250_000)
+        }
+        return false
+    }
+
+    /// Long-presses a row and drags it onto another, `dy` points below the middle of that one.
+    private func dragRow(_ label: String, onto target: String, index: Int = 0, dy: CGFloat = 0) {
+        guard let from = layerRow(label), let to = layerRow(target, index: index) else { return XCTFail("rows \(label), \(target) should be listed") }
+        from.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+            .press(forDuration: 0.8, thenDragTo: to.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).withOffset(CGVector(dx: 0, dy: dy)))
+        usleep(800_000)
+        attach("layers-after-dragging-\(label)")
+    }
+
     /// Adds a button from the library, which lands selected in the middle of the view.
     private func addButtonFromTheLibrary() {
         control("Library").tap()

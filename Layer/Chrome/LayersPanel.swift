@@ -1,5 +1,7 @@
+import CoreTransferable
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The panel that opens from the left: the design's layers, or its generated SwiftUI.
 struct LayersPanel: View {
@@ -99,12 +101,10 @@ private struct LayersList: View {
                         isSelected: selection?.contains(target) == true, isHovered: hovered == target
                     )
                     .equatable()
-                    ForEach(lines(store.layerTree(on: .screen(screen.id)), entered: entered)) { line in
-                        row(line, selection: selection, hovered: hovered)
-                    }
+                    branch(store.layerTree(on: .screen(screen.id)), in: .host(.screen(screen.id)), parent: nil, depth: 0, entered: entered, selection: selection, hovered: hovered)
                 }
                 let drawings = store.drawings.compactMap { ref in store.element(ref.element).map { (ref, $0) } }
-                let floating = lines(store.layerTree(on: .canvas), entered: entered)
+                let floating = store.layerTree(on: .canvas)
                 if !drawings.isEmpty || !floating.isEmpty {
                     LayerHeadingRow(model: model, name: "Canvas", symbol: "square.dashed", target: nil, isSelected: false, isHovered: false)
                         .equatable()
@@ -116,22 +116,81 @@ private struct LayersList: View {
                         }
                     }
                     if !drawings.isEmpty && !floating.isEmpty { LayerSubheading(name: "Elements") }
-                    ForEach(floating) { line in
-                        row(line, selection: selection, hovered: hovered)
-                    }
+                    branch(floating, in: .host(.canvas), parent: nil, depth: 0, entered: entered, selection: selection, hovered: hovered)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 14)
         }
+        // The container is outside the scroll view, as in the spike. Its drag container is what
+        // lets a closed group's row take a drop.
+        .reorderContainer(for: LayerItem.self, in: LayerList.self) { difference in
+            move(difference)
+        }
+        .dragContainer(for: LayerItem.self) { ids in ids.map(LayerItem.init) }
     }
 
-    /// A list's rows, flattened: a group's members follow it, indented, while it is open.
-    private func lines(_ nodes: [LayerNode], entered: Set<DesignElement.ID>, depth: Int = 0) -> [Line] {
-        nodes.flatMap { node -> [Line] in
-            let isOpen = node.element.kind == .group && (entered.contains(node.id) || openGroups.contains(node.id))
-            return [Line(node: node, depth: depth, isOpen: isOpen)] + (isOpen ? lines(node.children, entered: entered, depth: depth + 1) : [])
+    /// What a drop in the list does: each row dragged lands where it was dropped, the whole
+    /// drop one step to undo. A refused move leaves the list as it was, which is rebuilt from
+    /// the design, so the row goes back.
+    private func move(_ difference: ReorderDifference<DesignElement.ID, LayerList>) {
+        let before: DesignElement.ID? = switch difference.destination.position {
+        case .before(let id): id
+        case .end: nil
         }
+        let store = model.store
+        store.asOneStep {
+            for id in difference.sources {
+                store.moveLayer(id, to: difference.destination.collectionID, before: before)
+            }
+        }
+    }
+
+    /// One list of rows: a screen's top level, the canvas's, or what is in a group, topmost
+    /// first, each an open group's own list under its row. Its rows can be dragged to reorder
+    /// them, and into and out of the groups.
+    private func branch(
+        _ nodes: [LayerNode], in list: LayerList, parent: (list: LayerList, group: DesignElement.ID)?, depth: Int,
+        entered: Set<DesignElement.ID>, selection: CanvasSelection?, hovered: CanvasSelection?
+    ) -> AnyView {
+        // An open group's own list sits between its row and the rows after it, so a list is
+        // shown in runs, each ending at an open group, as separate `ForEach`s of one collection.
+        var runs: [[(index: Int, node: LayerNode)]] = [[]]
+        for (index, node) in nodes.enumerated() {
+            runs[runs.count - 1].append((index, node))
+            if isOpen(node, entered: entered) { runs.append([]) }
+        }
+        return AnyView(Group {
+            ForEach(Array(runs.enumerated()), id: \.offset) { runIndex, run in
+                ForEach(run, id: \.node.id) { index, node in
+                    row(Line(node: node, depth: depth, isOpen: isOpen(node, entered: entered)), selection: selection, hovered: hovered)
+                        .accessibilityAction(named: "Move Up") {
+                            guard index > 0 else { return }
+                            model.store.moveLayer(node.id, to: list, before: nodes[index - 1].id)
+                        }
+                        .accessibilityAction(named: "Move Down") {
+                            guard index + 1 < nodes.count else { return }
+                            model.store.moveLayer(node.id, to: list, before: index + 2 < nodes.count ? nodes[index + 2].id : nil)
+                        }
+                        .accessibilityAction(named: "Move Into Group Above") {
+                            guard index > 0, nodes[index - 1].element.kind == .group else { return }
+                            model.store.moveLayerToTop(node.id, of: .group(nodes[index - 1].id))
+                        }
+                        .accessibilityAction(named: "Move Out of Group") {
+                            guard let parent else { return }
+                            model.store.moveLayer(node.id, to: parent.list, before: parent.group)
+                        }
+                }
+                .reorderable(collectionID: list)
+                if let last = run.last, isOpen(last.node, entered: entered) {
+                    branch(last.node.children, in: .group(last.node.id), parent: (list, last.node.id), depth: depth + 1, entered: entered, selection: selection, hovered: hovered)
+                }
+            }
+        })
+    }
+
+    private func isOpen(_ node: LayerNode, entered: Set<DesignElement.ID>) -> Bool {
+        node.element.kind == .group && (entered.contains(node.id) || openGroups.contains(node.id))
     }
 
     @ViewBuilder
@@ -151,6 +210,7 @@ private struct LayersList: View {
                 }
             )
             .equatable()
+            .modifier(DropIntoGroup(isClosed: !line.isOpen, model: model, group: node.id))
         } else {
             plainRow(node.element, ref: node.ref, depth: line.depth, isDimmed: node.isHiddenWithItsGroups, isLockedByGroup: isLockedByGroup, isSelected: isSelected, isHovered: isHovered)
         }
@@ -165,6 +225,38 @@ private struct LayersList: View {
             depth: depth, isSelected: isSelected, isHovered: isHovered
         )
         .equatable()
+    }
+}
+
+/// A closed group's row takes a row dropped on it: it goes inside, at the top. An open group's
+/// row takes none, so that a drop on it is a reorder, above or below it.
+private struct DropIntoGroup: ViewModifier {
+    let isClosed: Bool
+    let model: AppModel
+    let group: DesignElement.ID
+
+    func body(content: Content) -> some View {
+        if isClosed {
+            content.dropDestination(for: LayerItem.self) { items, _ in
+                let store = model.store
+                var moved = false
+                store.asOneStep {
+                    for item in items { moved = store.moveLayerToTop(item.id, of: .group(group)) || moved }
+                }
+                return moved
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// A row being dragged in the Layers panel: the thing it stands for.
+struct LayerItem: Identifiable, Sendable, Codable, Transferable {
+    var id: DesignElement.ID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .json)
     }
 }
 

@@ -295,3 +295,105 @@ struct LayerOrderTests {
         #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
     }
 }
+
+
+/// Dragging a row in the Layers panel moves a thing within its list, into a group or out of one
+/// (`moveLayer`), by the same rules as the arrange commands.
+@MainActor
+@Suite("Moving layers")
+struct MovingLayersTests {
+    @Test func aLayerMovesWithinItsList() {
+        let board = OrderBoard()
+        // Above D's row in the panel: just in front of D in the list.
+        #expect(board.store.moveLayer(board.a.element, to: .host(.screen(board.screen)), before: board.d.element))
+        #expect(board.screenOrder == ["B", "C", "D", "A", "E"])
+        // The bottom of the panel's list: the back.
+        #expect(board.store.moveLayer(board.e.element, to: .host(.screen(board.screen)), before: nil))
+        #expect(board.screenOrder == ["E", "B", "C", "D", "A"])
+    }
+
+    @Test func aLayerMovesIntoAGroupAndOut() {
+        let board = OrderBoard()
+        let group = board.group(board.b, board.d)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+
+        #expect(board.store.moveLayer(board.a.element, to: .group(group.element), before: board.b.element))
+        #expect(board.store.content.members(of: group.element).map { $0.name ?? "" } == ["B", "A", "D"])
+        #expect(board.store.element(board.a.element)?.group == group.element)
+
+        #expect(board.store.moveLayer(board.a.element, to: .host(.screen(board.screen)), before: nil))
+        #expect(board.store.element(board.a.element)?.group == nil)
+        #expect(board.store.content.members(of: group.element).map { $0.name ?? "" } == ["B", "D"])
+    }
+
+    @Test func aGroupLeftWithOneMemberByAMoveDissolves() {
+        let board = OrderBoard()
+        let group = board.group(board.b, board.d)
+        board.undo.removeAllActions()
+
+        #expect(board.store.moveLayer(board.b.element, to: .host(.screen(board.screen)), before: nil))
+        #expect(board.store.element(group.element) == nil)
+        #expect(board.store.element(board.d.element)?.group == nil)
+        #expect(board.screenOrder == ["B", "A", "C", "D", "E"])
+
+        board.undo.undo()
+        #expect(board.store.element(group.element) != nil)
+        #expect(board.store.element(board.b.element)?.group == group.element)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+    }
+
+    @Test func aLayerCannotBeMovedToAnotherHostsList() {
+        let board = OrderBoard()
+        let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 0.5)).id
+        let otherGroup = board.group(board.note1, board.note2)
+        let before = board.store.content
+
+        #expect(!board.store.moveLayer(board.a.element, to: .host(.screen(other)), before: nil))
+        #expect(!board.store.moveLayer(board.a.element, to: .host(.canvas), before: nil))
+        #expect(!board.store.moveLayer(board.a.element, to: .group(otherGroup.element), before: nil))
+        #expect(board.store.content == before)
+    }
+
+    @Test func aGroupCannotBeMovedIntoItself() {
+        let board = OrderBoard()
+        let inner = board.group(board.b, board.c, named: "inner")
+        let outer = board.group(inner, board.d, named: "outer")
+        let before = board.store.content
+
+        #expect(!board.store.moveLayer(outer.element, to: .group(outer.element), before: nil))
+        #expect(!board.store.moveLayer(outer.element, to: .group(inner.element), before: nil))
+        #expect(board.store.content == before)
+    }
+
+    @Test func aDrawingDoesntMove() {
+        let board = OrderBoard()
+        let before = board.store.content
+        #expect(!board.store.moveLayer(board.drawing.element, to: .host(.canvas), before: board.note1.element))
+        #expect(board.store.content == before)
+    }
+
+    @Test func drawingsKeepTheirSlotsWhenThingsMove() {
+        let board = OrderBoard()
+        #expect(board.store.moveLayer(board.note2.element, to: .host(.canvas), before: nil))
+        #expect(board.canvasOrder == ["note 2", "note 1", "drawing"])
+    }
+
+    @Test func aLockedLayerDoesntMove() {
+        let board = OrderBoard()
+        board.store.update(board.a) { $0.isLocked = true }
+        #expect(!board.store.moveLayer(board.a.element, to: .host(.screen(board.screen)), before: nil))
+        #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
+    }
+
+    @Test func eachMoveIsOneUndoStep() {
+        let board = OrderBoard()
+        let group = board.group(board.b, board.d)
+        board.undo.removeAllActions()
+
+        board.store.moveLayer(board.a.element, to: .group(group.element), before: board.b.element)
+        board.undo.undo()
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.store.element(board.a.element)?.group == nil)
+        #expect(!board.undo.canUndo)
+    }
+}
