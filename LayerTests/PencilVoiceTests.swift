@@ -1060,28 +1060,30 @@ struct PencilVoiceTests {
     /// On, the canvas has the squeeze in Select, and PencilKit has it in Draw, as before.
     @Test func withSqueezeToTalkOnTheCanvasHasTheSqueezeOutsideDraw() {
         let bench = Bench()
-        #expect(bench.app.squeezesToTalk && bench.app.canvasHearsSqueezes)
+        #expect(bench.app.squeezesToTalk && bench.app.squeezeRouter.hearsSqueezes)
         bench.app.tool = .draw
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!bench.app.squeezeRouter.hearsSqueezes)
     }
 
     /// Off, the squeeze is the system's: the canvas has no squeeze action at all, and a
     /// squeeze anywhere, over an element, a screen or the open canvas, starts nothing.
     @Test func withSqueezeToTalkOffASqueezeStartsNothing() async {
         let bench = Bench()
+        let router = bench.app.squeezeRouter
         bench.app.squeezesToTalk = false
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         bench.app.tool = .draw
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         bench.app.tool = .select
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         // The pen coming near gets nothing ready either.
         bench.pencil.hovered()
         for point in [Bench.overButton, Bench.overScreen, Bench.overCanvas] {
-            bench.pencil.squeezeBegan(at: point, azimuth: nil)
+            router.began(at: point, azimuth: nil, roll: nil)
+            #expect(router.taker == .nobody)
             #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
             bench.now += .milliseconds(200)
-            bench.pencil.squeezeEnded()
+            router.ended()
             #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
         }
         try? await Task.sleep(for: .milliseconds(50))
@@ -1148,8 +1150,8 @@ struct PencilVoiceTests {
         bench.end()
     }
 
-    /// The format panel's scrubber hears every squeeze over a number field, and leaves one
-    /// alone only while the pencil owns it. Off, the pencil owns none.
+    /// The window's squeeze router gives the scrubber every squeeze over a number field, and
+    /// leaves one to the pencil only while the pencil owns it. Off, the pencil owns none.
     @Test func withSqueezeToTalkOffTheScrubberHasEverySqueeze() async {
         let bench = Bench()
         #expect(await bench.toggle())
@@ -1181,5 +1183,166 @@ struct PencilVoiceTests {
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.pencil.bubble == nil && bench.pencil.call == nil && bench.routes.isEmpty)
+    }
+}
+
+/// The window's one squeeze handler, which decides once per squeeze who has it: a ruler
+/// (a field's or the zoom's), push-to-talk, or nobody. SwiftUI calls every visible view's
+/// squeeze action, in no fixed order, so two handlers could both act on one squeeze.
+@Suite("Routing Apple Pencil Pro's squeeze", .serialized)
+@MainActor
+struct SqueezeRouterTests {
+    /// The W field of a Format panel at the window's top left, where a pen at (100, 100) is
+    /// over the panel.
+    private func field(on bench: Bench) -> Scrubber.Target {
+        bench.app.chromeFrames["format"] = CGRect(x: 0, y: 0, width: 300, height: 600)
+        return ScrubbedField(10).target("W", at: .zero, range: 0...100)
+    }
+
+    private let overField = CGPoint(x: 100, y: 100)
+
+    @Test func aSqueezeOverAHoveredFieldBringsUpItsRulerNotTheBubble() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        #expect(router.taker == .ruler)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// Review focus 1: the squeeze that keeps a ruler's value, with the pen drifted over the
+    /// canvas, puts the ruler away and does nothing else.
+    @Test func theSqueezeThatKeepsAValueStartsNothingElse() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.begin(field(on: bench))
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        router.ended()
+        #expect(scrubber.target == nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        #expect(bench.app.selection == nil)
+        bench.end()
+    }
+
+    @Test func aSqueezeOverTheCanvasListens() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .voice)
+        #expect(await eventually { bench.state == .listening })
+        bench.now += .seconds(1)
+        router.ended()
+        #expect(bench.routes[0].finishCount == 1)
+        #expect(router.taker == nil)
+        bench.end()
+    }
+
+    /// A toggle left listening is sent by the next squeeze, even with the pen over a field.
+    @Test func aToggleListeningIsSentWhereverThePenIs() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        bench.now += .milliseconds(200)
+        router.ended()
+        #expect(await eventually { bench.state == .listening })
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(bench.routes[0].finishCount == 1)
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .voice)
+        router.ended()
+        bench.end()
+    }
+
+    /// A squeeze's `.active` comes every 10–20 ms while it lasts: only the first acts.
+    @Test func oneSqueezesRepeatedStartsActOnce() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        for _ in 0..<3 { router.began(at: overField, azimuth: nil, roll: .degrees(0)) }
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// Off, a squeeze is the system's, except over a field (or the zoom) or with a ruler up:
+    /// the handler is there only then.
+    @Test func withSqueezeToTalkOffOnlyARulerTakesASqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.squeezesToTalk = false
+        #expect(!router.talks && !router.hearsSqueezes)
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .nobody)
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        router.ended()
+
+        scrubber.hovered = field(on: bench)
+        #expect(router.hearsSqueezes)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        #expect(router.taker == .ruler)
+        bench.app.tool = .draw
+        #expect(!router.hearsSqueezes)
+        bench.end()
+    }
+
+    @Test func theHandlerIsThereOnlyWhileDrawIsOffAndSomethingWouldTakeIt() {
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: true, talks: true, rulerWantsSqueeze: true))
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: true, rulerWantsSqueeze: false))
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: false))
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: true))
+    }
+
+    /// Review focus 2: a field's hover left behind when its panel went isn't taken for a
+    /// field under a squeeze over the canvas.
+    @Test func aHoverLeftByAFieldThatWentAwayIsntARuler() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(bench.pencil.bubble != nil)
+        router.ended()
+        bench.end()
+    }
+
+    @Test func aHoverLeftBehindWithThePenOutOfRangeIsntARulerEither() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: nil, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(router.taker == .voice)
+        // Push-to-talk starts nothing with the pen out of range.
+        #expect(bench.pencil.bubble == nil)
+        router.ended()
+        bench.end()
+    }
+
+    @Test func drawComingOnPutsAPencilRulerAway() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target != nil)
+        bench.app.tool = .draw
+        #expect(scrubber.target == nil)
+        #expect(router.taker == nil)
+        bench.end()
     }
 }

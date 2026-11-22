@@ -15,7 +15,7 @@ final class Scrubber {
     struct Target {
         var label: String
         var unit: String
-        /// In `Scrubber.space`.
+        /// A panel field's is in `Scrubber.space`; the zoom control's is in the window.
         var frame: CGRect
         var range: ClosedRange<CGFloat>
         var get: () -> CGFloat
@@ -65,15 +65,16 @@ final class Scrubber {
     private(set) var wantsSqueeze = false
     @ObservationIgnored var onBegin: () -> Void = {}
     @ObservationIgnored var onEnd: () -> Void = {}
-    /// A step was taken, at this point in `Scrubber.space`.
+    /// A step was taken, at this point in the window.
     @ObservationIgnored var onStep: (CGPoint) -> Void = { _ in }
+    /// Where `Scrubber.space`'s origin is in the window: the Format panel's top left, which
+    /// the panel keeps current. A panel field's tick is felt there plus its frame's middle.
+    @ObservationIgnored var panelOrigin: CGPoint = .zero
 
     @ObservationIgnored private var start: CGFloat = 0
     @ObservationIgnored private var steps = 0
     @ObservationIgnored private var lastRoll: Angle?
     @ObservationIgnored private var rolled = Angle.zero
-    /// Whether a squeeze is under way, so that each squeeze acts once, as it starts.
-    @ObservationIgnored private var isSqueezing = false
 
     func begin(_ target: Target) {
         guard self.target == nil else { return }
@@ -95,7 +96,9 @@ final class Scrubber {
         value = new
         target.set(new)
         if Int(new.rounded()).isMultiple(of: target.ticksEvery) {
-            onStep(CGPoint(x: target.frame.midX, y: target.frame.midY))
+            // In the window: a panel field's frame is in the panel's space.
+            let origin = target.owner == .panel ? panelOrigin : .zero
+            onStep(CGPoint(x: origin.x + target.frame.midX, y: origin.y + target.frame.midY))
         }
     }
 
@@ -139,23 +142,10 @@ final class Scrubber {
 
     // MARK: Apple Pencil
 
-    /// A squeeze over a field brings up its ruler, and the pencil need not stay squeezed:
-    /// rolling the barrel then turns the value. The next squeeze keeps the value and puts
-    /// the ruler away.
-    func squeeze(_ phase: PencilSqueezeGesturePhase) {
-        switch phase {
-        case .active(let value):
-            guard !isSqueezing else { return }
-            isSqueezing = true
-            squeezeBegan(roll: value.hoverPose?.roll)
-        case .ended, .failed:
-            isSqueezing = false
-        }
-    }
-
     /// A squeeze with a ruler up keeps the value and puts it away; with a field hovered it
-    /// brings that field's ruler up, turning counted from `roll`. Returns whether the
-    /// scrubber took the squeeze. It doesn't filter repeats: the caller does.
+    /// brings that field's ruler up, turning counted from `roll`, and the pencil need not
+    /// stay squeezed: rolling the barrel then turns the value. Returns whether the scrubber
+    /// took the squeeze. It doesn't filter repeats: the window's `SqueezeRouter` does.
     @discardableResult
     func squeezeBegan(roll: Angle?) -> Bool {
         if target != nil {
@@ -296,15 +286,22 @@ struct ScrubberOverlay: View {
 
 // MARK: Apple Pencil
 
-/// A view behind the panel that follows the pencil's roll as it hovers anywhere in the
+/// A view behind the canvas that follows the pencil's roll as it hovers anywhere in the
 /// window, and plays the Pencil Pro's haptic ticks.
 struct PencilBridge: UIViewRepresentable {
     let scrubber: Scrubber
 
     func makeUIView(context: Context) -> BridgeView {
         let view = BridgeView()
+        // It fills the window behind the canvas: touches are the canvas's. Its hover
+        // recogniser is on the window, which this doesn't stop.
+        view.isUserInteractionEnabled = false
         view.scrubber = scrubber
-        scrubber.onStep = { [weak view] point in view?.feedback?.alignmentOccurred(at: point) }
+        // A step's point is in the window.
+        scrubber.onStep = { [weak view] point in
+            guard let view else { return }
+            view.feedback?.alignmentOccurred(at: view.convert(point, from: nil))
+        }
         return view
     }
 

@@ -90,7 +90,8 @@ struct ModelSettingsView: View {
     @State private var providers = HostedProvider.allCases.map { ProviderSettings($0) }
     @State private var defaultChoice = ModelPreferences.defaultChoice
     /// Whether squeezing Apple Pencil Pro over the canvas listens for a command. Off, the
-    /// squeeze does what the system's Apple Pencil settings say, as in any other app.
+    /// squeeze does what the system's Apple Pencil settings say, as in any other app, except
+    /// over a number field or the zoom control, where it still scrubs.
     @AppStorage(AppModel.squeezesToTalkKey, store: AppSettings.defaults) private var squeezesToTalk = true
     /// Whether the pencil's bubble shows the words it hears, under the sound of them.
     /// Off, it is the model's icon and the waveform alone.
@@ -151,7 +152,8 @@ struct ModelSettingsView: View {
             ? "Squeeze Apple Pencil Pro over the canvas to speak a command about what the pen is over. "
                 + "The bubble at the tip shows the model listening, and the words it hears if you like. "
                 + "If the squeeze is turned off or runs a shortcut in Apple Pencil settings, that comes first."
-            : "Squeezing Apple Pencil Pro does what you chose for it in Apple Pencil settings, as in any other app. "
+            : "Squeezing Apple Pencil Pro does what you chose for it in Apple Pencil settings, as in any other app, "
+                + "except over a number field or the zoom control, where it still scrubs. "
                 + "Turn this on to speak a command by squeezing over the canvas."
     }
 

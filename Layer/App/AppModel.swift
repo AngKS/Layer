@@ -126,6 +126,7 @@ final class AppModel {
                 selection = nil
                 scheduleConversion()
                 pencilVoiceIfMade?.drawTurnedOn()
+                squeezeRouterIfMade?.drawTurnedOn()
             } else {
                 settle?.cancel()
             }
@@ -342,6 +343,18 @@ final class AppModel {
     /// Read when the Pencil touches down, not drawn from, so not observed.
     @ObservationIgnored var chromeFrames: [String: CGRect] = [:]
 
+    /// Whether a point in the view is over the bar across the top or a control floating over
+    /// the canvas, for a squeeze. The pencil's bubble still on screen from the last squeeze
+    /// isn't counted: a squeeze over it is a new one, which replaces it.
+    func isOverChrome(_ viewPoint: CGPoint) -> Bool {
+        viewPoint.y < topBarBottom
+            || chromeFrames.contains { $0.key != PencilVoiceBubble.chromeName && $0.value.contains(viewPoint) }
+    }
+
+    /// The ruler that scrubs a Format field or the zoom, one for the window: one ruler is up
+    /// at a time, and a squeeze has only the one to keep or bring up.
+    let scrubber = Scrubber()
+
     /// Whether the Pencil detector has anything to do: notice a first Pencil, or let go of
     /// what a finger selected when the Pencil lands on it.
     var needsPencilDetector: Bool {
@@ -382,6 +395,10 @@ final class AppModel {
             self?.schedulePreview()
             if let self { DesignIndexer.designChanged(self) }
         }
+        // A Format field's scrub undoes as one step, however long it takes. The zoom's
+        // isn't an edit, and the scrubber calls neither for it.
+        scrubber.onBegin = { [weak self] in self?.beginScrubbing() }
+        scrubber.onEnd = { [weak self] in self?.endScrubbing() }
     }
 
     /// The check put off until after a change, of whether what a drag moves is still there.
@@ -710,10 +727,22 @@ final class AppModel {
 
     @ObservationIgnored private var pencilVoiceIfMade: PencilVoice?
 
+    /// Decides who has each of Apple Pencil Pro's squeezes in this window: a ruler,
+    /// push-to-talk, or nobody. Made when first asked for.
+    var squeezeRouter: SqueezeRouter {
+        if let squeezeRouterIfMade { return squeezeRouterIfMade }
+        let made = SqueezeRouter(model: self)
+        squeezeRouterIfMade = made
+        return made
+    }
+
+    @ObservationIgnored private var squeezeRouterIfMade: SqueezeRouter?
+
     /// Whether squeezing Apple Pencil Pro talks to the design: Squeeze to Talk, in
     /// Settings and the board's Magic Pen tab, on until turned off there. Off, the squeeze
-    /// is the system's, as in any other app, and whatever the pencil is listening to is let
-    /// go of, unsent. Either place sets it for every open design at once.
+    /// is the system's, as in any other app, except over a Format field or the zoom control,
+    /// where it still scrubs (see `SqueezeRouter`), and whatever the pencil is listening to
+    /// is let go of, unsent. Either place sets it for every open design at once.
     var squeezesToTalk: Bool {
         didSet {
             guard squeezesToTalk != oldValue else { return }
@@ -746,10 +775,6 @@ final class AppModel {
 
     /// The designs open in the app's windows, which a setting of the app's reaches. A test says.
     @ObservationIgnored var openDesigns: @MainActor () -> [AppModel] = { OpenDesigns.shared.all }
-
-    /// Whether the canvas has a squeeze action, for the pencil to talk with. Not with
-    /// Squeeze to Talk off, nor in Draw, where the squeeze is PencilKit's.
-    var canvasHearsSqueezes: Bool { squeezesToTalk && tool != .draw }
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
     /// the names of the screens and what their elements say.

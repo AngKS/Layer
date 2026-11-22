@@ -61,8 +61,9 @@ final class PencilVoice {
 
     /// Whether the squeeze under way, or the next one, is the pencil's to send with: a
     /// toggle is listening, or a squeeze has just sent one and hasn't been let go of. The
-    /// format panel's scrubber leaves such a squeeze alone, whichever of them hears it first.
-    /// With Squeeze to Talk off, neither can be so: see `squeezeToTalkTurnedOff()`.
+    /// window's squeeze router leaves such a squeeze to the pencil, even with the pen over a
+    /// field, unless a ruler is up. With Squeeze to Talk off, neither can be so: see
+    /// `squeezeToTalkTurnedOff()`.
     var ownsSqueeze: Bool {
         if endIsIgnored { return true }
         if case .listening(_, toggled: true, _) = mode { return true }
@@ -455,8 +456,7 @@ final class PencilVoice {
     /// The bubble still on screen from the last squeeze isn't counted: a squeeze over it is
     /// a new one, which replaces it. A Pencil tap on it is still a tap on chrome.
     private func isOverChrome(_ viewPoint: CGPoint, in model: AppModel) -> Bool {
-        viewPoint.y < model.topBarBottom
-            || model.chromeFrames.contains { $0.key != PencilVoiceBubble.chromeName && $0.value.contains(viewPoint) }
+        model.isOverChrome(viewPoint)
     }
 
     /// What the pen is over. Drawings are looked through, since voice can't change one.

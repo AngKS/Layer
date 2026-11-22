@@ -444,6 +444,25 @@ struct ScrubbingAFieldTests {
         #expect(scrubber.wantsSqueeze == false)
     }
 
+    /// The bridge that plays a step's tick sits behind the canvas, so it is told where the
+    /// field is in the window: a panel field's frame is in the panel's space, which starts at
+    /// `panelOrigin`; the zoom control's is in the window already.
+    @Test func aStepsTickIsFeltWhereItsFieldIsInTheWindow() {
+        let scrubber = Scrubber()
+        var points: [CGPoint] = []
+        scrubber.onStep = { points.append($0) }
+        scrubber.panelOrigin = CGPoint(x: 700, y: 50)
+        scrubber.begin(ScrubbedField(10).target("W", at: CGRect(x: 20, y: 30, width: 80, height: 32), range: 0...100))
+        scrubber.scrub(to: 1)
+        #expect(points == [CGPoint(x: 760, y: 96)])
+        scrubber.end()
+
+        scrubber.begin(ZoomStops.target(frame: CGRect(x: 10, y: 700, width: 60, height: 40), current: { 1 }, zoom: { _ in }))
+        scrubber.scrub(to: 1)
+        #expect(points.last == CGPoint(x: 40, y: 720))
+        scrubber.end()
+    }
+
     @Test func aRulerShowsItsOwnWordsAndMarks() {
         let frame = CGRect.zero
         func make(_ build: (inout Scrubber.Target) -> Void = { _ in }) -> Scrubber.Target {
