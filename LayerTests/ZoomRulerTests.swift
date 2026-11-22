@@ -58,6 +58,45 @@ struct ZoomStopsTests {
         #expect(target.owner == .zoom)
     }
 
+    /// Undo or Redo coming or going mid-hold moves the zoom control along: it is still the
+    /// same hold, not a new scrub that takes the whole drag again from where the zoom is now.
+    @Test func aZoomHoldIsOneScrubWhenTheControlMoves() {
+        var scale: CGFloat = 1
+        var zooms: [CGFloat] = []
+        func zoom(at x: CGFloat) -> Scrubber.Target {
+            ZoomStops.target(
+                frame: CGRect(x: x, y: 770, width: 60, height: 44),
+                current: { scale }, zoom: { scale = $0; zooms.append($0) }
+            )
+        }
+        let scrubber = Scrubber()
+        var begins = 0
+        var ends = 0
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+
+        // Two stops' worth of finger.
+        scrubber.fingerDragged(zoom(at: 108), by: 32)
+        #expect(zooms == [1.5])
+        // Undo appears, and the control is 51 pt along at the next drag event.
+        scrubber.fingerDragged(zoom(at: 159), by: 32)
+        #expect(zooms == [1.5], "the same hold, so no more stops")
+        scrubber.fingerDragged(zoom(at: 159), by: 48)
+        #expect(zooms == [1.5, 2])
+        #expect(begins == 0 && ends == 0)
+
+        // A finger holding the zoom still puts a Format field's ruler away first.
+        scrubber.end()
+        let field = Scrubber.Target(
+            label: "Opacity", unit: "%", frame: CGRect(x: 0, y: 0, width: 80, height: 32), range: 0...100,
+            get: { 50 }, set: { _ in }
+        )
+        scrubber.begin(field)
+        scrubber.fingerDragged(zoom(at: 159), by: 16)
+        #expect(scrubber.target?.owner == .zoom)
+        #expect(begins == 1 && ends == 1)
+    }
+
     @Test func sixteenPointsOfFingerOrTenDegreesOfBarrelIsAStop() {
         #expect(Scrubber.steps(forDrag: 40, pointsPerStep: ZoomStops.pointsPerStop) == 2)
         #expect(Scrubber.steps(forRoll: .degrees(25), degreesPerStep: ZoomStops.degreesPerStop) == 2)

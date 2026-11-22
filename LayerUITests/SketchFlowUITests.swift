@@ -270,6 +270,11 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"), "dragging left should zoom out two stops")
         XCTAssertFalse(app.buttons["Lock Canvas"].exists)
 
+        // Held still, it brings up the ruler only: no menu, and the zoom stays.
+        control("Zoom").press(forDuration: 1.0)
+        XCTAssertFalse(app.buttons["Lock Canvas"].waitForExistence(timeout: 1), "a hold without a drag shouldn't open the zoom's menu")
+        XCTAssertEqual(zoom, "100 percent")
+
         // A tap still opens the menu, with its levels.
         control("Zoom").tap()
         XCTAssertTrue(app.buttons["Lock Canvas"].waitForExistence(timeout: 5), "a tap should open the zoom's menu")
@@ -300,9 +305,9 @@ final class SketchFlowUITests: XCTestCase {
         app.buttons["100%"].tap()
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"))
         XCTAssertEqual(label.frame.width, small.width, accuracy: 1)
-        scrubZoom(by: 20)
+        scrubZoom(by: 24)
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '125 percent'"))
-        scrubZoom(by: -20)
+        scrubZoom(by: -24)
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"))
 
         // With the palette away, a one-finger drag across empty canvas pans it.
@@ -1106,7 +1111,8 @@ final class SketchFlowUITests: XCTestCase {
     }
 
     /// Holds the zoom control and drags sideways from its middle, which steps through the
-    /// zoom stops: one every 16 pt, right to zoom in.
+    /// zoom stops: one every 16 pt, right to zoom in. The drag is counted from its first move
+    /// after the hold, which XCUITest makes some 4 pt along, so a width is that much short.
     private func scrubZoom(by width: CGFloat) {
         let start = control("Zoom").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: width, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.3)

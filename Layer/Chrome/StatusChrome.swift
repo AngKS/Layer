@@ -87,7 +87,7 @@ struct ZoomControl: View {
             scrubber.end(.zoom)
             scrubber.forgetHovered(.zoom)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ZoomButton(isHeld: isHeld))
         .modifier(ControlCapsule(isBare: isBare, axis: .horizontal))
     }
 
@@ -141,6 +141,17 @@ private struct ZoomMenu: View {
         .buttonStyle(ZoomMenuRow())
         .accessibilityLabel(title)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// The percentage: dimmed while a tap presses it, as a plain button is, but at full strength
+/// while a hold scrubs, for the zoom it reads is the one being stepped through.
+private struct ZoomButton: ButtonStyle {
+    let isHeld: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed && !isHeld ? 0.4 : 1)
     }
 }
 

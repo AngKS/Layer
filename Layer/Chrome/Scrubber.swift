@@ -129,9 +129,17 @@ final class Scrubber {
 
     /// A finger holds a field to scrub it. A ruler the pencil left up on another field is put
     /// away first: the finger's steps are this field's, not the one the pencil was scrubbing.
+    /// The zoom is one control, known by its owner: Undo or Redo coming or going mid-hold
+    /// moves it along, and taken for another field it began again, with the whole drag's
+    /// steps taken a second time from where the zoom had got to.
     func hold(_ field: Target) {
-        if let target, target.label != field.label || target.frame != field.frame { end() }
+        if let target, Self.isAnother(field, than: target) { end() }
         begin(field)
+    }
+
+    private static func isAnother(_ field: Target, than target: Target) -> Bool {
+        guard target.owner == field.owner else { return true }
+        return field.owner == .panel && (target.label != field.label || target.frame != field.frame)
     }
 
     /// A finger holding a field has dragged this far sideways since it was held: the field
