@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 /// Writes a screen out as a SwiftUI view. By default that is a vertical stack of its
 /// elements, top to bottom, with the spacing, sizes and styling they have on the canvas;
@@ -46,7 +47,7 @@ enum SwiftUICodeGenerator {
 
     static func code(for screen: DesignScreen, typeName: String? = nil, settings: CodeSettings = CodeSettings()) -> String {
         #if DEBUG
-        CodeWork.generated += 1
+        CodeWork.wrote(screen.id)
         #endif
         let typeName = typeName ?? screen.typeName
         var elements = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
@@ -583,9 +584,19 @@ enum SwiftUICodeGenerator {
 }
 
 #if DEBUG
-/// How much code is written: for the tests that hold what is drawn on every frame to writing
-/// none (the share menu). The count only grows: a test measures the difference it makes.
+/// How much code is written, for each screen: for the tests that hold what is drawn on every
+/// frame to writing none (the share menu). Kept for each screen under a lock, since suites
+/// that run alongside write code for screens of their own, from any thread. The counts only
+/// grow: a test measures the difference it makes.
 enum CodeWork {
-    nonisolated(unsafe) static var generated = 0
+    private static let counts = OSAllocatedUnfairLock(initialState: [DesignScreen.ID: Int]())
+
+    static func wrote(_ screen: DesignScreen.ID) {
+        counts.withLock { $0[screen, default: 0] += 1 }
+    }
+
+    static func generated(for screen: DesignScreen.ID) -> Int {
+        counts.withLock { $0[screen] ?? 0 }
+    }
 }
 #endif

@@ -413,13 +413,10 @@ extension DesignStore {
     /// groups above each member that shows marked as it goes, where asking each group for its
     /// leaves went over the list for every group.
     private func groupsWithSomethingShowing() -> Set<DesignElement.ID> {
+        // A design without groups costs one scan, and no dictionary.
+        guard content.elements.contains(where: { $0.kind == .group }) else { return [] }
         var byID: [DesignElement.ID: DesignElement] = [:]
-        var hasGroups = false
-        for element in content.elements {
-            if byID[element.id] == nil { byID[element.id] = element }
-            if element.kind == .group { hasGroups = true }
-        }
-        guard hasGroups else { return [] }
+        for element in content.elements where byID[element.id] == nil { byID[element.id] = element }
         var showing: Set<DesignElement.ID> = []
         for leaf in content.elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
             guard !DesignContent.groups(above: leaf, find: { byID[$0] }).contains(where: \.isHidden) else { continue }

@@ -38,6 +38,77 @@ struct PerformanceFixTests {
         #expect(after == board.store.canvasShape(of: .element(g)))
     }
 
+    @Test func theSelectedThingsAreListedOnceForAnyNumberOfReads() {
+        let board = OrderBoard()
+        board.model.selection = CanvasSelection([.element(board.a), .element(board.c)])
+        let listed = CanvasWork.thingsListed
+        for _ in 0..<50 { _ = board.model.selectedThings }
+        #expect(CanvasWork.thingsListed - listed <= 1, "listed \(CanvasWork.thingsListed - listed) times")
+        board.store.update(board.a) { $0.frame.origin.x += 3 }
+        _ = board.model.selectedThings
+        #expect(CanvasWork.thingsListed - listed <= 2)
+    }
+
+    /// What the outline and the turn are, read through the kept ones, against ones formed afresh.
+    private func expectFresh(_ board: OrderBoard, _ label: String) {
+        guard let selection = board.model.selection else { return }
+        #expect(board.model.selectedThings == board.store.things(in: selection), "things, \(label)")
+        let isGroup: Bool
+        if case .element(let ref) = selection { isGroup = board.store.element(ref.element)?.kind == .group } else { isGroup = false }
+        guard selection.isSeveral || isGroup else { return }
+        let fresh = TurnSession.form(for: selection, in: board.store)
+        if let fresh {
+            #expect(board.model.selectionShape == fresh.shape, "shape, \(label)")
+            if selection.isSeveral { #expect(board.model.selectionTurn == Rotation.normalized(fresh.turned), "turn, \(label)") }
+        }
+    }
+
+    @Test func theKeptOutlineFollowsUndoLocksHidingAndMembership() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(g)
+        expectFresh(board, "formed")
+
+        board.undo.groupsByEvent = false
+        board.undo.beginUndoGrouping()
+        board.store.update(board.b) { $0.frame.origin.x += 60 }
+        board.undo.endUndoGrouping()
+        expectFresh(board, "moved")
+        let moved = board.model.selectionShape
+        board.undo.undo()
+        expectFresh(board, "undone")
+        #expect(board.model.selectionShape != moved)
+        board.undo.redo()
+        expectFresh(board, "redone")
+        #expect(board.model.selectionShape == moved)
+
+        board.store.update(board.b) { $0.isLocked = true }
+        expectFresh(board, "member locked")
+        board.store.update(board.b) { $0.isHidden = true }
+        expectFresh(board, "member hidden")
+        board.store.update(g) { $0.isLocked = true }
+        expectFresh(board, "group locked")
+        #expect(!board.model.canTurnSelection)
+        board.store.update(g) { $0.isLocked = false }
+        #expect(board.model.canTurnSelection)
+
+        // A member added to the group and one taken out.
+        board.store.apply { $0.update(board.a.element) { $0.group = g.element } }
+        expectFresh(board, "member added")
+        board.store.apply { $0.update(board.d.element) { $0.group = nil } }
+        expectFresh(board, "member taken out")
+
+        // Several things selected, and one of them changed.
+        board.model.selection = CanvasSelection([.element(board.a), .element(board.c), .element(board.e)])
+        expectFresh(board, "several")
+        board.store.update(board.c) { $0.isLocked = true }
+        expectFresh(board, "several, one locked")
+        board.store.update(board.e) { $0.rotation = 20 }
+        expectFresh(board, "several, one turned")
+        board.store.delete(board.a)
+        expectFresh(board, "several, one deleted")
+    }
+
     @Test func severalThingsSelectedFormOneTurnSessionToo() throws {
         let board = OrderBoard()
         board.model.selection = CanvasSelection([.element(board.a), .element(board.c)])
@@ -62,12 +133,14 @@ extension HostedWindowSuites {
             defer { window.isHidden = true }
             try await Task.sleep(for: .milliseconds(200))
 
-            let written = CodeWork.generated
+            // Counted for this board's screen alone: suites alongside write code for their own.
+            let screen = board.screen
+            let written = CodeWork.generated(for: screen)
             for step in 0..<30 {
                 board.store.update(board.a) { $0.frame.origin.x += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(20))
             }
-            #expect(CodeWork.generated - written == 0, "code written \(CodeWork.generated - written) times over 30 frames")
+            #expect(CodeWork.generated(for: screen) - written == 0, "code written \(CodeWork.generated(for: screen) - written) times over 30 frames")
         }
     }
 }
@@ -174,24 +247,28 @@ extension HostedWindowSuites {
             window.isHidden = false
             defer { window.isHidden = true }
             func hovers() -> Int { (window.gestureRecognizers?.filter { $0 is UIHoverGestureRecognizer }.count ?? 0) - baseline }
-            func settle() async throws { try await Task.sleep(for: .milliseconds(150)) }
-            try await settle()
+            /// Waits, up to two seconds, for the window to carry `count` of the bridge's recognisers.
+            func settle(toward count: Int) async throws {
+                for _ in 0..<100 where hovers() != count { try await Task.sleep(for: .milliseconds(20)) }
+            }
+            // Idle from the start: given time to be wrong, since a recogniser would come on first.
+            try await Task.sleep(for: .milliseconds(150))
             #expect(hovers() == 0, "idle, the window has \(hovers()) hover recognisers of the bridge's")
 
             let field = ScrubbedField(0)
             scrubber.begin(field.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
-            try await settle()
+            try await settle(toward: 1)
             #expect(hovers() == 1, "with a ruler up there is one")
 
             scrubber.end()
-            try await settle()
+            try await settle(toward: 0)
             #expect(hovers() == 0, "and none once it is put away")
 
             scrubber.hovered = field.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32))
-            try await settle()
+            try await settle(toward: 1)
             #expect(hovers() == 1, "the pencil over a field, which a squeeze would scrub, has it ready")
             scrubber.hovered = nil
-            try await settle()
+            try await settle(toward: 0)
             #expect(hovers() == 0)
         }
     }

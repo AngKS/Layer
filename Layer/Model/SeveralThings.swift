@@ -47,6 +47,9 @@ extension DesignStore {
     /// The single things of a selection that are still there, in the design's own order:
     /// its screens, then its elements from the back to the front.
     func things(in selection: CanvasSelection?) -> [CanvasSelection] {
+        #if DEBUG
+        CanvasWork.thingsListed += 1
+        #endif
         guard let selection else { return [] }
         let picked = selection.things
         guard picked.count > 1 else { return Array(picked.filter { canvasFrame(of: $0) != nil }) }
