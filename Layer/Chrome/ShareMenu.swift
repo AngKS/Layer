@@ -16,7 +16,7 @@ struct ShareMenu: View {
             // The code of the selected screen, or of the first one.
             if let screen = model.selectedScreen ?? model.store.screens.first {
                 ShareLink(
-                    item: SwiftUICodeGenerator.code(for: screen, among: model.store.screens, settings: model.store.canvas.code),
+                    item: SharedSwiftUICode(screen: screen, among: model.store.screens, settings: model.store.canvas.code),
                     preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, among: model.store.screens))
                 ) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -63,6 +63,31 @@ struct ShareMenu: View {
                 problem = item.problem
             }
         }
+    }
+}
+
+/// A screen's SwiftUI code, written when it is shared and not before: the menu is made again
+/// on every change to the design, a frame of a drag among them, and the code is as long as
+/// the screen is full. It shares what `SwiftUICodeGenerator.code(for:among:settings:)` gives
+/// for the design as it was when the menu was made, as text.
+struct SharedSwiftUICode: Transferable, Sendable {
+    let screen: DesignScreen
+    let screens: [DesignScreen]
+    let settings: CodeSettings
+
+    init(screen: DesignScreen, among screens: [DesignScreen], settings: CodeSettings) {
+        self.screen = screen
+        self.screens = screens
+        self.settings = settings
+    }
+
+    /// The code itself.
+    var source: String {
+        SwiftUICodeGenerator.code(for: screen, among: screens, settings: settings)
+    }
+
+    static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation(exporting: \.source)
     }
 }
 

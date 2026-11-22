@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import Layer
 
 /// Counter tests for the contained fixes of the 2026-11-23 performance review: each holds one
@@ -45,5 +47,44 @@ struct PerformanceFixTests {
         #expect(board.model.selectedThings == [.element(board.a), .element(board.c)])
         board.model.selection = .element(board.c)
         #expect(board.model.selectedThings == [.element(board.c)])
+    }
+}
+
+extension HostedWindowSuites {
+    @MainActor
+    @Suite("The share menu during a drag", .serialized)
+    struct ShareMenuWorkTests {
+        @Test func theShareMenuWritesNoCodeUntilSomethingIsShared() async throws {
+            let board = OrderBoard()
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 600, height: 200))
+            window.rootViewController = UIHostingController(rootView: ShareMenu().environment(board.model))
+            window.isHidden = false
+            defer { window.isHidden = true }
+            try await Task.sleep(for: .milliseconds(200))
+
+            let written = CodeWork.generated
+            for step in 0..<30 {
+                board.store.update(board.a) { $0.frame.origin.x += step.isMultiple(of: 2) ? 1 : -1 }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(CodeWork.generated - written == 0, "code written \(CodeWork.generated - written) times over 30 frames")
+        }
+    }
+}
+
+extension PerformanceFixTests {
+    @Test func theSharedCodeIsWhatTheGeneratorGivesForTheScreen() async throws {
+        let board = OrderBoard()
+        let screens = board.store.screens
+        let screen = try #require(screens.first)
+        let settings = board.store.canvas.code
+        let shared = SharedSwiftUICode(screen: screen, among: screens, settings: settings)
+
+        let written = CodeWork.generated
+        let data = try await shared.exported(as: .utf8PlainText)
+        #expect(CodeWork.generated - written == 1, "written when shared, once")
+        #expect(data == Data(SwiftUICodeGenerator.code(for: screen, among: screens, settings: settings).utf8))
+        let asString = try await "x".exported(as: .utf8PlainText)
+        #expect(asString == Data("x".utf8), "as a String shares it")
     }
 }

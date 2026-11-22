@@ -45,6 +45,9 @@ enum SwiftUICodeGenerator {
     }
 
     static func code(for screen: DesignScreen, typeName: String? = nil, settings: CodeSettings = CodeSettings()) -> String {
+        #if DEBUG
+        CodeWork.generated += 1
+        #endif
         let typeName = typeName ?? screen.typeName
         var elements = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
 
@@ -578,3 +581,11 @@ enum SwiftUICodeGenerator {
         return "Color(red: \(component(tint.red)), green: \(component(tint.green)), blue: \(component(tint.blue)))"
     }
 }
+
+#if DEBUG
+/// How much code is written: for the tests that hold what is drawn on every frame to writing
+/// none (the share menu). The count only grows: a test measures the difference it makes.
+enum CodeWork {
+    nonisolated(unsafe) static var generated = 0
+}
+#endif
