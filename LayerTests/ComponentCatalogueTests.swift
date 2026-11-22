@@ -124,7 +124,7 @@ private func describeEveryKind() throws -> String {
     var lines: [String] = []
     // A group item has no members of its own here, so the design's views leave it out and
     // it has no layout data to describe. Its entry is checked on its own.
-    for kind in ElementKind.placeable {
+    for kind in ElementKind.allCases where kind != .group {
         lines += try describe(kind)
         lines.append("")
     }
@@ -162,8 +162,8 @@ struct ComponentCatalogueTests {
 
     @Test func theKindsOfferedToShortcutsAreTheKindsThereAre() {
         // Every kind that can be placed: a group is made by grouping, not offered as a kind.
-        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.placeable.map(\.rawValue)))
-        for kind in ElementKind.placeable {
+        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.allCases.filter { $0 != .group }.map(\.rawValue)))
+        for kind in ElementKind.allCases where kind != .group {
             #expect(ElementKindChoice(kind).element == kind)
             #expect(ElementKindChoice.caseDisplayRepresentations[ElementKindChoice(kind)] != nil)
         }
@@ -172,7 +172,6 @@ struct ComponentCatalogueTests {
     /// F9: a group is made by grouping. No word names it, nothing written or sketched
     /// becomes one, and it shows no words of its own.
     @Test func aGroupIsAKindNothingIsSketchedAsOrWrittenAs() {
-        #expect(ElementKind.placeable == ElementKind.allCases.filter { $0 != .group })
         #expect(ScreenBlueprint.kindWords.first { $0.kind == .group }?.words == [])
         #expect(ScreenBlueprint.kind(named: "group") != .group)
         #expect(ScreenBlueprint.kind(named: "Group") != .group)

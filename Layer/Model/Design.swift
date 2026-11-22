@@ -15,10 +15,6 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
 
     // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
 
-    /// Every kind an element can be placed, sketched or written as: all but `.group`, which
-    /// is made by grouping.
-    static var placeable: [ElementKind] { allCases.filter { $0 != .group } }
-
     var layerName: String { spec.name }
 
     var symbol: String { spec.symbol }

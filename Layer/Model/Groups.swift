@@ -405,6 +405,8 @@ extension DesignStore {
 
     private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>) -> Bool {
         guard !element.isHidden, element.isPickedByItsFrame else { return false }
+        // A group with nothing showing in it has nothing to touch.
+        if element.kind == .group, !content.leaves(of: element.id).contains(where: { !content.isHiddenWithItsGroups($0.id) }) { return false }
         if element.group != nil {
             guard groups(above: element).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) else { return false }
         }
@@ -451,6 +453,9 @@ extension DesignStore {
         return pose
     }
 
+    /// The most a group can be scaled to, by a frame asked for in one go.
+    static let largestGroupScale: CGFloat = 100
+
     /// Resizes a group to `frame`, in its own points, as one change: from `start`, the group as
     /// a handle drag on it began, or from where it is now. With s the new box's width over the
     /// start's, the middle of each thing in it, at any depth, goes where it was in the start box,
@@ -465,7 +470,12 @@ extension DesignStore {
         guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
+        // A typed number can be anything Double reads, infinity included: finite, and at most a
+        // hundred times the box it began as, or its members go non-finite and the design can't be saved.
+        guard frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite else { return }
         var frame = frame
+        frame.size.width = min(frame.width, pose.box.width * Self.largestGroupScale)
+        frame.size.height = min(frame.height, pose.box.height * Self.largestGroupScale)
         var scale = frame.width / pose.box.width
         if scale < pose.smallestScale {
             // The point the frame asked for is scaled about stays where it is: the corner across

@@ -548,11 +548,24 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let (model, ref, _) = try await DesignActions.elementOrSelected(element)
+        try Self.setHidden(hidden, ref, in: model, undoManager: undoManager)
+        return .result()
+    }
+
+    /// Hides an element, or shows it as one undo step.
+    @MainActor
+    static func setHidden(_ hidden: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: hidden ? "Hide" : "Show") {
-            model.store.update(ref) { $0.isHidden = hidden }
+            // Shown, it has to be showing: the hidden groups above it are shown too, as unlocking
+            // unlocks the groups above (ruling D), or a member hidden only by its group stays hidden.
+            let groups = hidden ? [] : model.store.content.ancestors(of: ref.element).filter { model.store.element($0)?.isHidden == true }
+            model.store.apply { content in
+                content.update(ref.element) { $0.isHidden = hidden }
+                for id in groups { content.update(id) { $0.isHidden = false } }
+            }
         }
         if hidden { model.deselect(.element(ref)) }
-        return .result()
     }
 }
 

@@ -56,7 +56,16 @@ extension DesignStore {
             let thing = CanvasSelection.element(ElementRef(host: host, element: element.id))
             if picked.contains(thing) { ordered.append(thing) }
         }
-        return ordered
+        // What is in a group selected goes with it: a member picked beside its group would be
+        // copied or moved twice, and the lone copy would join the original group.
+        let groups = Set(ordered.compactMap { thing -> DesignElement.ID? in
+            if case .element(let ref) = thing, groupItem(ref.element) != nil { ref.element } else { nil }
+        })
+        guard !groups.isEmpty else { return ordered }
+        return ordered.filter { thing in
+            guard case .element(let ref) = thing else { return true }
+            return content.ancestors(of: ref.element).allSatisfy { !groups.contains($0) }
+        }
     }
 
     /// The frames of everything showing on the canvas apart from some things, and apart
@@ -99,7 +108,9 @@ extension DesignStore {
         // What moves with a group: put after the rest, it wins over the same thing given alone.
         var grouped: [DesignElement.ID: CGPoint] = [:]
         var screens: [DesignScreen.ID: CGPoint] = [:]
-        for (thing, origin) in origins where !isLocked(thing) {
+        // A member given beside its group moves with the group, not on its own.
+        let alone = Set(things(in: CanvasSelection(origins.keys)))
+        for (thing, origin) in origins where !isLocked(thing) && alone.contains(thing) {
             switch thing {
             case .element(let ref):
                 guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
