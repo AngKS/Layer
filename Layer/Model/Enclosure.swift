@@ -98,8 +98,9 @@ enum Enclosure {
 extension DesignStore {
     /// The things a loop drawn on the canvas goes round, in canvas points: every element
     /// that at least half lies inside it, and every screen that all but lies inside it. A
-    /// screen picked this way stands for what is on it. Locked and hidden things are
-    /// left alone.
+    /// screen picked this way stands for what is on it. A group is picked whole, by its box,
+    /// as an element is; what is in a group is never picked on its own. Locked and hidden
+    /// things are left alone.
     func things(enclosedBy loop: [CGPoint]) -> [CanvasSelection] {
         guard let bounds = Enclosure.bounds(of: loop) else { return [] }
         var found: [CanvasSelection] = []
@@ -115,18 +116,28 @@ extension DesignStore {
             return Enclosure.coverage(of: shape, by: loop) >= Enclosure.share
         }
 
+        // The screens not picked themselves, whose things may be.
+        var placements: [DesignScreen.ID: Placement] = [:]
         for screen in screens {
             // Measured finely: all but all of a screen is a close call.
             if screen.isLocked != true, Enclosure.coverage(of: screen.canvasFrame, by: loop, across: 32) >= Enclosure.screenShare {
                 found.append(.screen(screen.id))
-                continue
-            }
-            for element in screen.elements where isPicked(element, screen.placement) {
-                found.append(.element(ElementRef(host: .screen(screen.id), element: element.id)))
+            } else {
+                placements[screen.id] = screen.placement
             }
         }
-        for floating in floating where isPicked(floating.element, floating.placement) {
-            found.append(.element(ElementRef(host: .canvas, element: floating.id)))
+        // The list itself, group items in it: only what is in no group is picked, a group
+        // standing for everything in it. Its own lock and hide are then all it has.
+        for element in content.elements where element.group == nil {
+            let placement: Placement
+            if let parent = element.parent {
+                guard let onScreen = placements[parent] else { continue }
+                placement = onScreen
+            } else {
+                placement = Placement(origin: .zero, scale: element.scale ?? 1)
+            }
+            guard isPicked(element, placement) else { continue }
+            found.append(.element(ElementRef(host: element.parent.map { .screen($0) } ?? .canvas, element: element.id)))
         }
         return found
     }

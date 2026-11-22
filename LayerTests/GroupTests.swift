@@ -971,3 +971,331 @@ struct GroupCommandTests {
         #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
     }
 }
+
+/// A clock for taps that a test moves on by hand: a second tap is a double-tap by the time
+/// since the first.
+@MainActor
+private final class TapClock {
+    private(set) var now = ContinuousClock.now
+
+    init(_ model: AppModel) {
+        model.now = { self.now }
+    }
+
+    func wait(_ milliseconds: Int) {
+        now += .milliseconds(milliseconds)
+    }
+}
+
+extension OrderBoard {
+    /// The middle of something, in the view: the board shows the canvas unscrolled and
+    /// unzoomed, so it is the same point on the canvas.
+    fileprivate func middle(of ref: DesignStore.ElementRef) -> CGPoint {
+        let frame = store.canvasFrame(of: .element(ref)) ?? .null
+        return CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    /// A loop round an area of the canvas, its corners in turn.
+    fileprivate func loop(round area: CGRect) -> [CGPoint] {
+        [CGPoint(x: area.minX, y: area.minY), CGPoint(x: area.maxX, y: area.minY), CGPoint(x: area.maxX, y: area.maxY), CGPoint(x: area.minX, y: area.maxY)]
+    }
+}
+
+/// Selecting with groups: a tap on a grouped thing picks its outermost group, a quick second
+/// tap goes one level in, and once something inside a group is selected, taps there pick
+/// the next level only. A group is one target, hit anywhere in its box, until something in
+/// it is selected; a loop picks whole groups; a drag on a group's target moves the group.
+@MainActor
+@Suite("Selecting groups")
+struct SelectingGroupsTests {
+    @Test func aTapOnAMemberPicksItsOutermostGroup() throws {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+        let g2 = board.group(g, board.c, named: "G2")
+
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g2))
+
+        // A tap on the group's target, over the member, picks the same; the hover there
+        // finds the member, and outlines what a tap would pick.
+        board.model.selection = nil
+        clock.wait(1000)
+        let onB = board.middle(of: board.b)
+        board.model.targetTapped(.element(g2), at: onB)
+        #expect(board.model.selection == .element(g2))
+        let hovered = try #require(board.model.hoverTarget(at: onB))
+        #expect(hovered == .element(board.b))
+        #expect(board.model.pickTarget(hovered) == .element(g2))
+
+        // Something in no group is picked itself, and added.
+        clock.wait(1000)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == .several([.element(g2), .element(board.a)]))
+    }
+
+    @Test func aSecondTapWithin350msGoesOneLevelIn() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g))
+        clock.wait(100)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(board.b))
+
+        // Further apart, they are two taps: the second takes the group out again.
+        let slow = OrderBoard()
+        let slowClock = TapClock(slow.model)
+        let h = slow.group(slow.b, slow.d)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == .element(h))
+        slowClock.wait(500)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == nil)
+    }
+
+    @Test func aDoubleTapIsReadAgainstTheSelectionBeforeIt() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+
+        // G selected: the first tap takes it out at once, and the second goes into it.
+        board.model.selection = .element(g)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == nil)
+        clock.wait(100)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(board.b))
+
+        // A selected: the first tap adds G, and the second goes into it, keeping A.
+        clock.wait(1000)
+        board.model.selection = .element(board.a)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == board.selection(board.a, g))
+        clock.wait(100)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == board.selection(board.a, board.b))
+    }
+
+    @Test func aDoubleTapNeverTakesAThingOut() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        // Two taps that each acted alone would add A and take it out again.
+        board.model.pick(.element(board.a))
+        clock.wait(100)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == .element(board.a))
+        clock.wait(1000)
+        board.model.selection = .element(board.c)
+        board.model.pick(.element(board.a))
+        clock.wait(100)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == board.selection(board.c, board.a))
+
+        // A selected: the first tap takes it out at once, and the second puts it back.
+        clock.wait(1000)
+        board.model.selection = .element(board.a)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == nil)
+        clock.wait(100)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == .element(board.a))
+
+        // Nor does it add a selected member's group: the member is as far in as it goes.
+        let i = board.group(board.b, board.d, named: "I")
+        board.group(i, board.c, named: "G2")
+        clock.wait(1000)
+        board.model.selection = .element(board.b)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == nil)
+        clock.wait(100)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(board.b))
+    }
+
+    /// Each quick tap after a double-tap goes one level further in, down to the thing itself,
+    /// rather than taking what the double-tap picked out again.
+    @Test func quickTapsGoOneLevelFurtherInEach() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let i = board.group(board.b, board.d, named: "I")
+        let g2 = board.group(i, board.c, named: "G2")
+        var picked: [CanvasSelection?] = []
+        for _ in 0..<4 {
+            board.model.pick(.element(board.b))
+            picked.append(board.model.selection)
+            clock.wait(100)
+        }
+        #expect(picked == [.element(g2), .element(i), .element(board.b), .element(board.b)])
+    }
+
+    /// Review Focus 2: x is in I, which is in G2 with z; A is in H, outside G2.
+    @Test func tapsInsideAnEnteredGroupPickTheNextLevelOnly() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let (x, y, z) = (board.b, board.d, board.c)
+        let i = board.group(x, y, named: "I")
+        let g2 = board.group(i, z, named: "G2")
+        let h = board.group(board.a, board.e, named: "H")
+
+        // x, selected by double-taps: into G2, and then into I.
+        board.model.pick(.element(x))
+        clock.wait(100)
+        board.model.pick(.element(x))
+        #expect(board.model.selection == .element(i))
+        clock.wait(1000)
+        board.model.pick(.element(x))
+        clock.wait(100)
+        board.model.pick(.element(x))
+        #expect(board.model.selection == .element(x))
+        #expect(board.model.enteredGroups == [i.element, g2.element])
+
+        clock.wait(1000)
+        board.model.pick(.element(y))
+        #expect(board.model.selection == board.selection(x, y))
+        clock.wait(1000)
+        board.model.pick(.element(z))
+        #expect(board.model.selection == board.selection(x, y, z))
+        clock.wait(1000)
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == board.selection(x, y, z, h))
+    }
+
+    @Test func aTapInAGapInsideAGroupsBoxPicksTheGroup() throws {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        board.model.tool = .select
+        let g = board.group(board.b, board.d)
+        // Between B and C, inside G's box.
+        let b = try #require(board.store.canvasFrame(of: .element(board.b)))
+        let c = try #require(board.store.canvasFrame(of: .element(board.c)))
+        let gap = CGPoint(x: b.midX, y: (b.maxY + c.minY) / 2)
+        #expect(try #require(board.store.canvasShape(of: .element(g))).contains(gap))
+        #expect(board.store.leaf(at: gap, in: g.element) == nil)
+
+        board.model.targetTapped(.element(g), at: gap)
+        #expect(board.model.selection == .element(g))
+
+        // In Draw a finger's tap reaches the canvas, which finds the group by its gap too.
+        clock.wait(1000)
+        board.model.tool = .draw
+        #expect(board.model.selection == nil)
+        board.model.canvasTapped(at: gap)
+        #expect(board.model.selection == .element(g))
+        #expect(board.model.hoverTarget(at: gap) == .element(g))
+
+        // Voice looks through a group's gap, as through ink: it sees elements, not groups.
+        #expect(board.model.hoverTarget(at: gap, skippingDrawings: true) == .screen(board.screen))
+    }
+
+    /// Review Focus 6: a group is one target until something in it is selected; then its
+    /// one target is swapped for its members' own.
+    @Test func aGroupIsOneTargetUntilItIsEntered() {
+        let board = OrderBoard()
+        let host = DesignStore.ElementRef.Host.screen(board.screen)
+        let g = board.group(board.b, board.d)
+        #expect(board.store.targets(on: host, entered: []) == [board.a, board.c, g, board.e])
+
+        board.model.selection = .element(board.b)
+        #expect(board.model.enteredGroups == [g.element])
+        #expect(board.store.targets(on: host, entered: board.model.enteredGroups) == [board.a, board.c, board.b, board.d, board.e])
+
+        // Inside a group gone into, a group in it is one target, and the rest are their own.
+        let g2 = board.group(g, board.c, named: "G2")
+        #expect(board.store.targets(on: host, entered: []) == [board.a, g2, board.e])
+        #expect(board.store.targets(on: host, entered: [g2.element]) == [board.a, board.c, g, board.e])
+
+        // A hidden group has none, and nor do its members.
+        board.store.update(g2) { $0.isHidden = true }
+        #expect(board.store.targets(on: host, entered: []) == [board.a, board.e])
+        #expect(board.store.targets(on: host, entered: [g.element, g2.element]) == [board.a, board.e])
+
+        // On the open canvas a drawing is picked by its ink, and has no target.
+        #expect(board.store.targets(on: .canvas, entered: []) == [board.note1, board.note2])
+    }
+
+    @Test func aLoopPicksWholeGroupsNeverMembersAlone() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let b = try #require(board.store.canvasFrame(of: .element(board.b)))
+        #expect(board.store.things(enclosedBy: board.loop(round: b.insetBy(dx: -5, dy: -5))).isEmpty)
+
+        // G's box holds C as well, which isn't in it.
+        let box = try #require(board.store.canvasFrame(of: .element(g)))
+        #expect(Set(board.store.things(enclosedBy: board.loop(round: box.insetBy(dx: -5, dy: -5)))) == [.element(g), .element(board.c)])
+
+        let all = try #require(board.store.canvasFrame(of: board.selection(board.a, board.e))).insetBy(dx: -5, dy: -5)
+        #expect(Set(board.store.things(enclosedBy: board.loop(round: all))) == [.element(board.a), .element(board.c), .element(g), .element(board.e)])
+
+        // Locked or hidden, the group is left alone, and so are its members.
+        board.store.setLocked(true, .element(g))
+        #expect(Set(board.store.things(enclosedBy: board.loop(round: all))) == [.element(board.a), .element(board.c), .element(board.e)])
+        board.store.setLocked(false, .element(g))
+        board.store.update(g) { $0.isHidden = true }
+        #expect(Set(board.store.things(enclosedBy: board.loop(round: all))) == [.element(board.a), .element(board.c), .element(board.e)])
+    }
+
+    @Test func aDragOnAGroupsTargetSelectsTheGroup() throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let g = board.group(board.b, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let screen = board.store.screen(board.screen)
+        func drag(by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) throws {
+            let (element, placement) = try #require(board.store.resolve(g))
+            drags.moveOnTarget(g, element: element, placement: placement, on: screen, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: board.model)
+        }
+
+        // Nothing selected, or something else: the group alone is selected, and moves.
+        for before in [nil, CanvasSelection.element(board.a)] {
+            board.model.selection = before
+            let owner = CanvasDrags.Owner()
+            let start = board.middle(of: board.b)
+            try drag(by: 10, from: start, owner: owner)
+            #expect(board.model.selection == .element(g))
+            #expect(drags.isDragging)
+            #expect(board.store.isEditing)
+            // It moves as what is selected does, not as one element by its frame.
+            #expect(drags.groupOrigins.map { Set($0.keys) } == [.element(g)])
+            #expect(drags.elementOrigin == nil)
+            try drag(by: 20, from: start, owner: owner)
+            drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
+            #expect(!drags.isDragging)
+            #expect(!board.store.isEditing)
+            #expect(board.model.selection == .element(g))
+        }
+
+        // Among what is selected, it moves with the rest.
+        board.model.selection = board.selection(board.a, g)
+        let a = try #require(board.store.canvasFrame(of: .element(board.a)))
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.d)
+        try drag(by: 10, from: start, owner: owner)
+        #expect(board.model.selection == board.selection(board.a, g))
+        #expect(board.store.isEditing)
+        #expect(board.store.canvasFrame(of: .element(board.a)) == a.offsetBy(dx: 10, dy: 0))
+        drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
+        #expect(!board.store.isEditing)
+        #expect(board.model.selection == board.selection(board.a, g))
+    }
+
+    /// The thing a resting finger holds is what a tap there would pick: the member's group.
+    /// Lifting, the finger reaches the group's target as a tap, which isn't one.
+    @Test func aFingerRestingOnAMemberHoldsItsGroup() {
+        let board = OrderBoard()
+        _ = TapClock(board.model)
+        let g = board.group(board.b, board.d)
+        let onB = board.middle(of: board.b)
+        board.model.restingFingers = { [onB] }
+        board.model.pick(.element(board.a))
+        #expect(board.model.selection == board.selection(g, board.a))
+
+        board.model.restingFingers = { [] }
+        board.model.fingersLifted()
+        board.model.targetTapped(.element(g), at: onB)
+        #expect(board.model.selection == board.selection(g, board.a))
+    }
+}

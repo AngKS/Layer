@@ -1194,11 +1194,20 @@ final class AppModel {
         return min(back.x - rect.minX, rect.maxX - back.x, back.y - rect.minY, rect.maxY - back.y)
     }
 
-    /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
-    /// is drawn over every element and screen, so where a drawing's ink lies over the target
-    /// the tap picks the drawing, as hover and a tap with the palette up do.
+    /// A tap on the target of an element, a group or a screen's name, or on something among
+    /// several selected, at a point in the view. Ink is drawn over every element and screen,
+    /// so where a drawing's ink lies over the target the tap picks the drawing, as hover and
+    /// a tap with the palette up do. On a group's target it is on the thing in the group
+    /// under it, or on the group itself in a gap between them: both taps of a double-tap find
+    /// the same one, and `pick` works out what it picks.
     func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
-        pick(inkTarget(at: viewPoint).map { .element($0) } ?? thing)
+        if let drawing = inkTarget(at: viewPoint) {
+            pick(.element(drawing))
+        } else if case .element(let ref) = thing, store.groupItem(ref.element) != nil {
+            pick(.element(store.leaf(at: viewport.canvasPoint(for: viewPoint), in: ref.element) ?? ref))
+        } else {
+            pick(thing)
+        }
     }
 
     /// The drawing whose ink is at a point in the view. It lies over everything else and
@@ -1216,47 +1225,129 @@ final class AppModel {
     /// isn't taken for a tap; and when it lifted, once that is known.
     @ObservationIgnored private var rested: (on: CanvasSelection?, lifted: ContinuousClock.Instant?)?
 
+    /// The time now, which tells a double-tap's second tap from a tap of its own. A test
+    /// sets a clock of its own.
+    @ObservationIgnored var now: () -> ContinuousClock.Instant = { .now }
+    /// How soon a second tap on the same thing makes a double-tap. It stands in for the
+    /// system double-tap interval the spec names: iPadOS gives no public value for it to
+    /// read (L4).
+    static let doubleTapInterval: Duration = .milliseconds(350)
+    /// The last tap that picked a thing: what it was on (a thing in a group, or a group's
+    /// gap, before `pickTarget`), when, and the selection before and after it. A second tap
+    /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
+    @ObservationIgnored private var lastTap: (thing: CanvasSelection, at: ContinuousClock.Instant, before: CanvasSelection?, after: CanvasSelection?)?
+
+    /// Every group that holds something selected, at any depth: those that have been gone
+    /// into. A tap picks what is inside them, one level at a time, and their members have
+    /// targets of their own in place of theirs.
+    var enteredGroups: Set<DesignElement.ID> {
+        enteredGroups(in: selection)
+    }
+
+    private func enteredGroups(in selection: CanvasSelection?) -> Set<DesignElement.ID> {
+        var entered: Set<DesignElement.ID> = []
+        for case .element(let ref) in selection?.things ?? [] {
+            entered.formUnion(store.groups(holding: ref).map(\.element))
+        }
+        return entered
+    }
+
+    /// What a tap on a thing picks as things are selected now: for something in a group,
+    /// its outermost group that hasn't been gone into, or itself once all of them have; for
+    /// anything else, itself. A tap, a drag and hover all go by it.
+    func pickTarget(_ thing: CanvasSelection) -> CanvasSelection {
+        guard case .element(let ref) = thing else { return thing }
+        return .element(store.pickTarget(for: ref, entered: enteredGroups))
+    }
+
     /// A tap picked something, or nothing when it landed on empty space, which clears the
-    /// selection. A thing is added to what is selected, or taken out if it was: see
-    /// `selection(afterTapOn:from:)`. With another finger resting on the canvas, as in
-    /// Freeform, the thing the resting finger is on is selected with it.
+    /// selection. What it picks is worked out by `pickTarget(_:)`: a thing in a group picks
+    /// its outermost group first. That is added to what is selected, or taken out if it was:
+    /// see `selection(afterTapOn:from:)`. With another finger resting on the canvas, as in
+    /// Freeform, what a tap where the resting finger is would pick is selected with it.
+    ///
+    /// The first tap acts at once. A second on the same thing, soon after, is a double-tap,
+    /// which goes one level in: see `selection(afterDoubleTapOn:from:)`. Each quick tap after
+    /// that goes one level further in again.
     func pick(_ thing: CanvasSelection?) {
-        guard let finger = restingOnCanvas.first else {
-            let isLift = isLiftOfRestedFinger(on: thing)
+        let finger = restingOnCanvas.first
+        var held: CanvasSelection?
+        if let finger {
+            held = hoverTarget(at: finger).map(pickTarget(_:))
+            // A finger resting on a screen while its elements are tapped is only holding the
+            // selection open: the screen isn't picked along with what is on it.
+            if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
+            rested = (held, nil)
+        } else {
+            // Told by what a tap there picks, as what the finger held was.
+            let isLift = isLiftOfRestedFinger(on: thing.map(pickTarget(_:)))
             rested = nil
             if isLift { return }
-            selectByTap(thing.flatMap { selection(afterTapOn: $0, from: selection) })
-            return
         }
-        var held = hoverTarget(at: finger)
-        // A finger resting on a screen while its elements are tapped is only holding the
-        // selection open: the screen isn't picked along with what is on it.
-        if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
-        rested = (held, nil)
         guard let thing else {
+            lastTap = nil
             selectByTap(nil)
             return
         }
-        guard thing != held else { return }
+        let time = now()
+        if let last = lastTap, last.thing == thing, last.after == selection, time - last.at < Self.doubleTapInterval {
+            let made = selection(afterDoubleTapOn: thing, from: last.before)
+            // Read against what it made, a quick tap after it goes one level further in.
+            lastTap = (thing, time, made, made)
+            selectByTap(made)
+            return
+        }
+        let target = pickTarget(thing)
         var seeded = selection
-        // Resting on something that isn't selected starts again from it.
-        if let held, seeded?.things.contains(held) != true { seeded = held }
-        selectByTap(selection(afterTapOn: thing, from: seeded))
+        if finger != nil {
+            guard target != held else { return }
+            // Resting on something that isn't selected starts again from it.
+            if let held, seeded?.things.contains(held) != true { seeded = held }
+        }
+        let made = selection(afterTapOn: target, from: seeded)
+        lastTap = (thing, time, selection, made)
+        selectByTap(made)
     }
 
     /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it
     /// lands.
     /// - With nothing selected, the thing is selected.
     /// - A selected thing is taken out.
-    /// - A thing on a selected screen takes the screen's place: the same as going one level in.
+    /// - A thing on a selected screen, or in a selected group, takes the screen's or the
+    ///   group's place: the same as going one level in.
     /// - Anything else is added. A screen added folds in its elements that were selected.
     private func selection(afterTapOn thing: CanvasSelection, from current: CanvasSelection?) -> CanvasSelection? {
         guard let current else { return thing }
         if current.contains(thing) { return current.removing(thing) }
-        if case .element(let ref) = thing, case .screen(let id) = ref.host, current.contains(.screen(id)) {
-            return CanvasSelection(current.things.subtracting([.screen(id)]).union([thing]))
+        if case .element(let ref) = thing {
+            var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
+            if case .screen(let id) = ref.host { holders.append(.screen(id)) }
+            let selected = holders.filter(current.contains)
+            if !selected.isEmpty {
+                return CanvasSelection(current.things.subtracting(selected).union([thing]))
+            }
         }
         return CanvasSelection(current.things.union([thing]))
+    }
+
+    /// What a double-tap on a thing makes of the selection as it was before its first tap:
+    /// one level in from what that first tap picked from there, and never less than that
+    /// selection.
+    /// - A thing on a selected screen takes the screen's place with what a tap picks on it:
+    ///   its outermost group, or itself.
+    /// - Otherwise the double-tap picks one level in from what a tap would have: the group
+    ///   just inside it on the way to the thing, or the thing itself. A selected group
+    ///   holding that takes its place; otherwise it is added.
+    /// - What is selected already stays selected: a double-tap never takes a thing out.
+    private func selection(afterDoubleTapOn thing: CanvasSelection, from before: CanvasSelection?) -> CanvasSelection? {
+        var target = thing
+        if case .element(let leaf) = thing {
+            let first = store.pickTarget(for: leaf, entered: enteredGroups(in: before))
+            let isOnSelectedScreen = if case .screen(let id) = leaf.host { before?.contains(.screen(id)) == true } else { false }
+            target = .element(isOnSelectedScreen ? first : store.nextLevel(in: first, towards: leaf))
+        }
+        if before?.contains(target) == true { return before }
+        return selection(afterTapOn: target, from: before)
     }
 
     /// A tap changed the selection this many times: each change plays a selection tick.
@@ -1416,27 +1507,52 @@ final class AppModel {
 
     /// The topmost element or screen at a point in the view, for hover, and for a tap or a
     /// resting finger that reaches the model. Only what is drawn there: a hidden element is
-    /// looked through, as is a screen's name strip while names aren't shown.
+    /// looked through, as is a screen's name strip while names aren't shown. Each screen's
+    /// things, and the open canvas's, are looked at as their targets lie
+    /// (`DesignStore.targets(on:entered:)`): a group that hasn't been gone into is hit
+    /// anywhere in its box, giving the thing in it there, or the group itself in a gap
+    /// between them; `pickTarget(_:)` makes either what a tap picks.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing.
+    /// change a drawing; and through a group's gaps, so that voice sees elements, not groups.
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         // A hidden drawing's ink isn't on the canvas.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        for floating in store.floating.reversed() where !floating.element.isHidden && floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
-            if skippingDrawings, floating.element.kind == .drawing { continue }
-            return .element(.init(host: .canvas, element: floating.id))
+        let targets = store.targetElements(entered: enteredGroups)
+        if let hit = topmost(at: point, among: targets[.canvas] ?? [], on: .canvas, placement: nil, skippingDrawings: skippingDrawings) {
+            return .element(hit)
         }
         let showsNames = store.canvas.showsFrameNames
         for screen in store.screens.reversed() {
-            for element in screen.elements.reversed() where !element.isHidden && TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
-                return .element(.init(host: .screen(screen.id), element: element.id))
+            if let hit = topmost(at: point, among: targets[.screen(screen.id)] ?? [], on: .screen(screen.id), placement: screen.placement, skippingDrawings: skippingDrawings) {
+                return .element(hit)
             }
             if screen.canvasFrame.contains(point) || (showsNames && screen.labelFrame.contains(point)) {
                 return .screen(screen.id)
             }
+        }
+        return nil
+    }
+
+    /// The topmost of one host's targets, given back to front, that holds a canvas point: see
+    /// `hoverTarget(at:skippingDrawings:)`. `placement` is the screen's; on the open canvas,
+    /// where each thing has its own, it is nil.
+    private func topmost(
+        at point: CGPoint, among targets: [DesignElement], on host: DesignStore.ElementRef.Host,
+        placement: Placement?, skippingDrawings: Bool
+    ) -> DesignStore.ElementRef? {
+        for element in targets.reversed() {
+            let placement = placement ?? Placement(origin: .zero, scale: element.scale ?? 1)
+            guard TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) else { continue }
+            if element.kind == .group {
+                if let leaf = store.leaf(at: point, in: element.id) { return leaf }
+                if skippingDrawings { continue }
+            } else if skippingDrawings, element.kind == .drawing {
+                continue
+            }
+            return .init(host: host, element: element.id)
         }
         return nil
     }

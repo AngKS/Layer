@@ -300,6 +300,86 @@ extension DesignStore {
         element.isLocked || DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
     }
 
+    // MARK: Selecting with groups
+
+    /// The groups above an element on its host, the nearest first, looked up in the store's
+    /// index rather than the list.
+    private func groups(above element: DesignElement) -> [DesignElement] {
+        Array(DesignContent.groups(above: element, find: self.element(_:)).prefix { $0.parent == element.parent })
+    }
+
+    /// The groups that hold something, at any depth, the nearest first.
+    func groups(holding ref: ElementRef) -> [ElementRef] {
+        guard let element = element(ref.element) else { return [] }
+        return groups(above: element).map { ElementRef(host: ref.host, element: $0.id) }
+    }
+
+    /// What a tap on `leaf` picks while the groups in `entered` have been gone into (something
+    /// in each is selected): the outermost of it and the groups above it that hasn't been,
+    /// which is `leaf` itself once all of them have. A group item stands for a tap in the gap
+    /// between its members.
+    func pickTarget(for leaf: ElementRef, entered: Set<DesignElement.ID>) -> ElementRef {
+        groups(holding: leaf).last { !entered.contains($0.element) } ?? leaf
+    }
+
+    /// One level in from `outer` towards `leaf`: the group just inside `outer` on the way to
+    /// `leaf`, or `leaf` itself. `leaf` when `outer` is `leaf`, or doesn't hold it.
+    func nextLevel(in outer: ElementRef, towards leaf: ElementRef) -> ElementRef {
+        let path = [leaf] + groups(holding: leaf)
+        guard let index = path.firstIndex(of: outer), index > 0 else { return leaf }
+        return path[index - 1]
+    }
+
+    /// The topmost thing in a group, at any depth, that isn't a group itself and is shown,
+    /// whose turned frame holds a point on the canvas: what a tap on the group's target there
+    /// is on. Nil in a gap between its members.
+    func leaf(at point: CGPoint, in group: DesignElement.ID) -> ElementRef? {
+        guard let item = groupItem(group) else { return nil }
+        let host: ElementRef.Host = item.parent.map { .screen($0) } ?? .canvas
+        let onScreen = item.parent.flatMap { screen($0)?.placement }
+        for element in children(on: host).reversed() where element.kind != .group && !element.isHidden {
+            let above = groups(above: element)
+            guard above.contains(where: { $0.id == group }), !above.contains(where: \.isHidden),
+                  let placement = onScreen ?? (element.parent == nil ? Placement(origin: .zero, scale: element.scale ?? 1) : nil),
+                  TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point)
+            else { continue }
+            return ElementRef(host: host, element: element.id)
+        }
+        return nil
+    }
+
+    /// What can be touched on a screen, or on the open canvas, back to front as it is drawn,
+    /// while the groups in `entered` have been gone into:
+    /// - each thing that isn't in a group, or is only in groups gone into;
+    /// - each group that hasn't been gone into but whose groups above it have, in its block's
+    ///   place, standing for its members, which have none of their own.
+    ///
+    /// What is hidden, by itself or with a group above it, has none. Nor has a drawing that
+    /// isn't locked: its ink is picked, not its frame.
+    func targets(on host: ElementRef.Host, entered: Set<DesignElement.ID>) -> [ElementRef] {
+        children(on: host).filter { isTarget($0, entered: entered) }.map { ElementRef(host: host, element: $0.id) }
+    }
+
+    /// `targets(on:entered:)` for every screen and the open canvas at once, as the elements
+    /// themselves, each with its own lock and hide: one pass over the list, where a pass for
+    /// each host went over all of it once a screen.
+    func targetElements(entered: Set<DesignElement.ID>) -> [ElementRef.Host: [DesignElement]] {
+        var found: [ElementRef.Host: [DesignElement]] = [:]
+        for element in content.elements where isTarget(element, entered: entered) {
+            found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
+        }
+        return found
+    }
+
+    private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>) -> Bool {
+        guard !element.isHidden, element.isPickedByItsFrame else { return false }
+        if element.group != nil {
+            guard groups(above: element).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) else { return false }
+        }
+        // A group gone into is stood for by what is in it.
+        return element.kind != .group || !entered.contains(element.id)
+    }
+
     // MARK: Group and Ungroup
 
     /// Whether Group would make a group of what is selected: see `group(_:)`.

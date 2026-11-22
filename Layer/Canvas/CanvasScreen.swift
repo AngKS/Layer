@@ -73,7 +73,8 @@ struct CanvasScreen: View {
             var target: CanvasSelection?
             if case .active(let point) = phase, model.tool == .select, point.y > model.topBarBottom,
                !model.chromeFrames.values.contains(where: { $0.contains(point) }) {
-                target = model.hoverTarget(at: point)
+                // What a tap there would pick: a grouped thing's outermost group, say.
+                target = model.hoverTarget(at: point).map { model.pickTarget($0) }
             }
             if model.hovered != target { model.hovered = target }
         }
