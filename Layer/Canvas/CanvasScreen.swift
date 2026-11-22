@@ -79,15 +79,10 @@ struct CanvasScreen: View {
             }
             if model.hovered != target { model.hovered = target }
         }
-        // Apple Pencil Pro's squeeze listens for a command about what the pen is over. Every
-        // visible view's squeeze action is called, so this one goes on a layer of its own
-        // behind the canvas: that way it can be left out in Draw, where the squeeze must stay
-        // PencilKit's, and with Squeeze to Talk off, where it is the system's, without the
-        // canvas itself being made anew each time.
-        .background {
-            // Not `Color.clear`, which SwiftUI may count as nothing there to squeeze.
-            Color.black.opacity(0.001).modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.canvasHearsSqueezes))
-        }
+        // Apple Pencil Pro's squeeze: the window's one handler, and the pencil's roll and
+        // ticks for a ruler. On a layer of their own behind the canvas, so that the handler
+        // can be left out without the canvas itself being made anew each time.
+        .background { WindowSqueeze() }
         // Things dragged out of the library land where they are dropped: on a screen when
         // dropped over one, on the open canvas otherwise.
         .dropDestination(for: String.self) { ids, location in
@@ -130,7 +125,7 @@ struct CanvasScreen: View {
                         Spacer(minLength: 0)
                         if model.isInspectorOpen {
                             StylePanel(maxHeight: panelRoom)
-                                .reportsChromeFrame("format", to: model)
+                                .reportsChromeFrame(AppModel.formatChrome, to: model)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
@@ -196,7 +191,7 @@ struct CanvasScreen: View {
     /// Whether a panel is showing as a sheet, which it only does in a compact window.
     private func sheet(_ isOpen: ReferenceWritableKeyPath<AppModel, Bool>) -> Binding<Bool> {
         Binding(
-            get: { model.isCompactSizeClass && model[keyPath: isOpen] },
+            get: { model.panelIsASheet && model[keyPath: isOpen] },
             set: { model[keyPath: isOpen] = $0 }
         )
     }
@@ -276,9 +271,14 @@ private struct PanelSheet<Content: View>: View {
 
     var body: some View {
         content
-            // The sheet is chrome too: a pencil over it isn't over the canvas beneath. In
-            // window points, which a sheet's own global space may not be.
-            .background { WindowFrameReporter(name: "panel sheet", model: model) }
+            .background {
+                // The sheet is chrome too: a pencil over it isn't over the canvas beneath. In
+                // window points, which a sheet's own global space may not be.
+                WindowFrameReporter(name: AppModel.panelSheetChrome, model: model)
+                // The squeeze, on the very view the frame is of: its points start where that
+                // frame does.
+                SheetSqueeze(model: model)
+            }
             .environment(model)
             .environment(model.images)
             .preferredColorScheme(.light)
@@ -346,52 +346,82 @@ private struct BottomCorner: ViewModifier {
     }
 }
 
-/// Feeds Apple Pencil Pro's squeezes to the pencil's push-to-talk while `isOn`. While off
-/// the action is not there at all: an action that is there, even one that ignores the
-/// squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the iPad), and
-/// the system's own squeeze action elsewhere.
-private struct SqueezeToSpeak: ViewModifier {
-    let pencil: PencilVoice
+/// The window's one Apple Pencil Pro squeeze handler: the router says who each squeeze is
+/// for, a Format field's or the zoom's ruler, or push-to-talk. Every visible view's squeeze
+/// action is called, in no fixed order, so there is only this one. Behind it, the bridge
+/// that follows the pencil's roll anywhere in the window and plays a ruler's ticks.
+private struct WindowSqueeze: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let router = model.squeezeRouter
+        // Draw, Squeeze to Talk, whether a ruler would take a squeeze, a squeeze under way
+        // and a panel's sheet, all observed.
+        let isOn = router.windowHandlerIsOn
+        ZStack {
+            PencilBridge(scrubber: model.scrubber)
+            // Not `Color.clear`, which gets no squeezes on the iPad.
+            Color.black.opacity(0.001)
+                .modifier(Squeezable(router: router, isOn: isOn))
+        }
+        .onChange(of: isOn, initial: true) { _, isOn in
+            VoiceLog.log.info("pencil: the window's squeeze handler is \(isOn ? "on" : "off", privacy: .public)")
+            // Draw on, Squeeze to Talk off with nothing to scrub, or a panel's sheet up: the
+            // squeeze under way, if any, won't be heard to end here.
+            if !isOn { router.failed() }
+        }
+        // Nor once the canvas has gone.
+        .onDisappear { router.failed() }
+    }
+}
+
+/// A panel's sheet's squeeze handler. While a panel is a sheet, it has the squeezes rather
+/// than the window's under it: the system doesn't promise squeezes to a view under a sheet,
+/// and only one handler is there at a time. Its points are the sheet's, put in the window's.
+private struct SheetSqueeze: View {
+    let model: AppModel
+
+    var body: some View {
+        let router = model.squeezeRouter
+        let isOn = router.sheetHandlerIsOn
+        // Not `Color.clear`, which gets no squeezes on the iPad.
+        Color.black.opacity(0.001)
+            .modifier(Squeezable(router: router, isOn: isOn, offset: { router.sheetOrigin }))
+            .onChange(of: isOn) { _, isOn in
+                VoiceLog.log.info("pencil: the panel sheet's squeeze handler is \(isOn ? "on" : "off", privacy: .public)")
+                if !isOn { router.failed() }
+            }
+            .onDisappear { if isOn { router.failed() } }
+    }
+}
+
+/// Gives `router` Apple Pencil Pro's squeezes while `isOn`: the only place a squeeze action
+/// is set. While off, the action is not there at all: an action that is there, even one that
+/// ignores the squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the
+/// iPad), and the system's own squeeze action elsewhere.
+private struct Squeezable: ViewModifier {
+    let router: SqueezeRouter
     let isOn: Bool
-    /// Whether a squeeze is under way. Its `.active` comes every 10–20 ms while it lasts,
-    /// and only the first one starts anything, as with the scrubber.
-    @State private var isSqueezing = false
+    /// Where the view is in the window, which its points are counted from.
+    var offset: () -> CGPoint = { .zero }
 
     func body(content: Content) -> some View {
-        Group {
-            let _ = VoiceLog.log.info("pencil: squeeze to speak \(isOn ? "on" : "off", privacy: .public)")
-            if isOn {
-                squeezable(content)
-            } else {
-                content
+        if isOn {
+            content.onPencilSqueeze { phase in
+                switch phase {
+                case .active(let value):
+                    // It comes every 10–20 ms while the squeeze lasts: the router acts on the first.
+                    let pose = value.hoverPose
+                    router.began(at: SqueezeRouter.windowPoint(pose?.location, offsetBy: offset()), azimuth: pose?.azimuth, roll: pose?.roll)
+                case .ended:
+                    router.ended()
+                case .failed:
+                    // Nobody said the squeeze was over, so a held one sends nothing.
+                    router.failed()
+                }
             }
-        }
-        // Draw coming on, or Squeeze to Talk going off, mid-squeeze means its end never
-        // arrives here.
-        .onChange(of: isOn) { isSqueezing = false }
-        // Nor does it once the canvas has gone.
-        .onDisappear {
-            if isSqueezing { pencil.squeezeFailed() }
-            isSqueezing = false
-        }
-    }
-
-    private func squeezable(_ content: Content) -> some View {
-        content.onPencilSqueeze { phase in
-            switch phase {
-            case .active(let value):
-                guard !isSqueezing else { return }
-                VoiceLog.log.info("pencil: squeeze began at \(String(describing: value.hoverPose?.location), privacy: .public)")
-                isSqueezing = true
-                pencil.squeezeBegan(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth)
-            case .ended:
-                isSqueezing = false
-                pencil.squeezeEnded()
-            case .failed:
-                // Nobody said the squeeze was over, so a held one sends nothing.
-                isSqueezing = false
-                pencil.squeezeFailed()
-            }
+        } else {
+            content
         }
     }
 }

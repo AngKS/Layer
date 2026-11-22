@@ -504,4 +504,37 @@ struct ScrubbingTests {
         undo.undo()
         #expect(model.store.resolve(ref)?.element.frame.width == start)
     }
+
+    /// The window's one scrubber: the zoom's ruler is no edit, and a Format field's undoes
+    /// as one step, as the model wires it.
+    @Test func scrubbingTheZoomLeavesNoUndoStep() throws {
+        let model = AppModel(document: LayerDocument())
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.store.undoManager = undo
+        model.scrubber.begin(ZoomStops.target(frame: .zero, current: { 1 }, zoom: { _ in }))
+        model.scrubber.scrub(to: 2)
+        model.scrubber.end()
+        #expect(undo.canUndo == false)
+        #expect(model.store.isEditing == false)
+
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let start = title.frame.width
+        model.scrubber.begin(Scrubber.Target(
+            label: "W", unit: "W", frame: .zero, range: 0...4000,
+            get: { model.store.resolve(ref)?.element.frame.width ?? 0 },
+            set: { width in model.adjusting { model.store.update(ref) { $0.frame.size.width = width } } }
+        ))
+        // The model wired its scrubber: a field's scrub is the model's, from begin to end.
+        #expect(model.isScrubbing)
+        model.scrubber.scrub(to: 3)
+        model.scrubber.end()
+        #expect(!model.isScrubbing)
+        #expect(!model.store.isEditing)
+        #expect(model.store.resolve(ref)?.element.frame.width == start + 3)
+        undo.undo()
+        #expect(model.store.resolve(ref)?.element.frame.width == start)
+    }
 }

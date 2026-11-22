@@ -252,6 +252,40 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertGreaterThan(label.frame.minX - before.minX, 40, "a finger should pan the canvas")
     }
 
+    func testTheZoomScrubsWhenHeldAndOpensItsMenuWhenTapped() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        XCTAssertEqual(zoom, "100 percent")
+
+        // Held and dragged right, the zoom steps up a stop every 16 pt: 40 pt is two stops.
+        // No menu opens for a hold.
+        scrubZoom(by: 40)
+        XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '150 percent'"), "holding the zoom and dragging right should zoom in two stops")
+        XCTAssertFalse(app.buttons["Lock Canvas"].exists, "a hold shouldn't open the zoom's menu")
+
+        // Dragged back left, two stops down again.
+        scrubZoom(by: -40)
+        XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"), "dragging left should zoom out two stops")
+        XCTAssertFalse(app.buttons["Lock Canvas"].exists)
+
+        // Held still, it brings up the ruler only: no menu, and the zoom stays.
+        control("Zoom").press(forDuration: 1.0)
+        XCTAssertFalse(app.buttons["Lock Canvas"].waitForExistence(timeout: 1), "a hold without a drag shouldn't open the zoom's menu")
+        XCTAssertEqual(zoom, "100 percent")
+
+        // A tap still opens the menu, with its levels.
+        control("Zoom").tap()
+        XCTAssertTrue(app.buttons["Lock Canvas"].waitForExistence(timeout: 5), "a tap should open the zoom's menu")
+        app.buttons["200%"].tap()
+        XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '200 percent'"))
+
+        // The −/+ buttons are gone.
+        XCTAssertFalse(control("Zoom in").exists)
+        XCTAssertFalse(control("Zoom out").exists)
+    }
+
     func testTheCanvasPansZoomsLocksAndFramesCanBeMoved() {
         openNewDesign()
         box(sketch)
@@ -260,8 +294,8 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(label.waitForExistence(timeout: 10))
         XCTAssertEqual(zoom, "100 percent")
 
-        // The zoom control jumps to a level, and steps in and out. (Pinching is checked by
-        // hand: the pinch XCUITest synthesizes never reaches a PencilKit canvas.)
+        // The zoom control jumps to a level, and held, steps in and out. (Pinching is checked
+        // by hand: the pinch XCUITest synthesizes never reaches a PencilKit canvas.)
         let small = label.frame
         control("Zoom").tap()
         app.buttons["200%"].tap()
@@ -271,9 +305,9 @@ final class SketchFlowUITests: XCTestCase {
         app.buttons["100%"].tap()
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"))
         XCTAssertEqual(label.frame.width, small.width, accuracy: 1)
-        control("Zoom in").tap()
+        scrubZoom(by: 24)
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '125 percent'"))
-        control("Zoom out").tap()
+        scrubZoom(by: -24)
         XCTAssertTrue(wait(for: control("Zoom"), toHave: "value == '100 percent'"))
 
         // With the palette away, a one-finger drag across empty canvas pans it.
@@ -868,7 +902,7 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
             "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image",
-            "Share", "Zoom out", "Zoom", "Zoom in", "Magic Pen",
+            "Share", "Zoom", "Magic Pen",
         ]
         for label in controls {
             XCTAssertTrue(control(label).isHittable, "\(label) should be on screen and tappable")
@@ -1502,6 +1536,14 @@ final class SketchFlowUITests: XCTestCase {
 
     private func control(_ label: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    /// Holds the zoom control and drags sideways from its middle, which steps through the
+    /// zoom stops: one every 16 pt, right to zoom in. The drag is counted from its first move
+    /// after the hold, which XCUITest makes some 4 pt along, so a width is that much short.
+    private func scrubZoom(by width: CGFloat) {
+        let start = control("Zoom").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: width, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.3)
     }
 
     /// Adds a frame of the device whose name starts with `device`, from the library's wireframes.

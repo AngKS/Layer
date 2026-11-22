@@ -263,7 +263,7 @@ extension HostedWindowSuites {
 
 /// A field's value, and every value set on it.
 @MainActor
-private final class ScrubbedField {
+final class ScrubbedField {
     var value: CGFloat
     var sets: [CGFloat] = []
     init(_ value: CGFloat) { self.value = value }
@@ -365,6 +365,143 @@ struct ScrubbingAFieldTests {
         #expect(opacity.value == 55)
         #expect(begins == 2)
     }
+
+    /// A ruler put away under a finger that goes on dragging (a squeeze that keeps it, Draw
+    /// coming on) comes back from the value it was left at, counting the drag from there:
+    /// not the whole drag over again (final review M6).
+    @Test func aRulerRestartedUnderADraggingFingerCountsFromWhereItRestarted() {
+        let scrubber = Scrubber()
+        let opacity = ScrubbedField(50)
+        let target = opacity.target("Opacity", at: CGRect(x: 90, y: 0, width: 80, height: 32), range: 5...100)
+        scrubber.fingerDragged(target, by: 3 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 53)
+
+        scrubber.end()
+        // The finger is still down, and has dragged a little further.
+        scrubber.fingerDragged(target, by: 4 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 53, "the restarted ruler hasn't moved yet")
+        scrubber.fingerDragged(target, by: 6 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 55)
+
+        // A new touch counts from its own start.
+        scrubber.fingerLifted(.panel)
+        #expect(scrubber.target == nil)
+        scrubber.fingerDragged(target, by: 2 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 57)
+    }
+
+    /// A zoom scrub is no edit: only a panel field's scrub opens and closes one.
+    @Test func aZoomScrubIsNoEdit() {
+        let scrubber = Scrubber()
+        var begins = 0
+        var ends = 0
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+        let zoom = ScrubbedField(0)
+        let frame = CGRect(x: 0, y: 0, width: 80, height: 32)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { zoom.value }, set: { zoom.value = $0 }, owner: .zoom
+        ))
+        scrubber.scrub(to: 2)
+        scrubber.end()
+        #expect(begins == 0 && ends == 0)
+        #expect(zoom.value == 2)
+
+        let panel = ScrubbedField(0)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { panel.value }, set: { panel.value = $0 }
+        ))
+        scrubber.scrub(to: 2)
+        scrubber.end()
+        #expect(begins == 1 && ends == 1)
+        #expect(panel.value == 2)
+    }
+
+    @Test func endingOneOwnersRulerLeavesTheOthers() {
+        let scrubber = Scrubber()
+        let zoom = ScrubbedField(0)
+        let frame = CGRect(x: 0, y: 0, width: 80, height: 32)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { zoom.value }, set: { zoom.value = $0 }, owner: .zoom
+        ))
+        scrubber.end(.panel)
+        #expect(scrubber.target?.owner == .zoom)
+        scrubber.end(.zoom)
+        #expect(scrubber.target == nil)
+
+        scrubber.hovered = ScrubbedField(0).target("Rotation", at: frame)
+        scrubber.forgetHovered(.zoom)
+        #expect(scrubber.hovered != nil)
+        scrubber.forgetHovered(.panel)
+        #expect(scrubber.hovered == nil)
+    }
+
+    @Test func aSqueezeKeepsTheValueOrBringsUpTheHoveredRuler() {
+        let scrubber = Scrubber()
+        #expect(scrubber.squeezeBegan(roll: .degrees(30)) == false)
+        let rotation = ScrubbedField(10)
+        scrubber.hovered = rotation.target("Rotation", at: .zero)
+        #expect(scrubber.squeezeBegan(roll: .degrees(30)) == true)
+        #expect(scrubber.target?.label == "Rotation")
+        scrubber.rolled(to: .degrees(35))
+        #expect(rotation.value == 15)
+        #expect(scrubber.squeezeBegan(roll: nil) == true)
+        #expect(scrubber.target == nil)
+        #expect(rotation.value == 15)
+    }
+
+    @Test func theScrubberSaysWhenASqueezeWouldBeItsOwn() {
+        let scrubber = Scrubber()
+        let rotation = ScrubbedField(10)
+        let target = rotation.target("Rotation", at: .zero)
+        #expect(scrubber.wantsSqueeze == false)
+        scrubber.hovered = target
+        #expect(scrubber.wantsSqueeze == true)
+        scrubber.hovered = nil
+        #expect(scrubber.wantsSqueeze == false)
+        scrubber.begin(target)
+        #expect(scrubber.wantsSqueeze == true)
+        scrubber.end()
+        #expect(scrubber.wantsSqueeze == false)
+    }
+
+    /// The bridge that plays a step's tick sits behind the canvas, so it is told where the
+    /// field is in the window: a panel field's frame is in the panel's space, which starts at
+    /// `panelOrigin`; the zoom control's is in the window already.
+    @Test func aStepsTickIsFeltWhereItsFieldIsInTheWindow() {
+        let scrubber = Scrubber()
+        var points: [CGPoint] = []
+        scrubber.onStep = { points.append($0) }
+        scrubber.panelOrigin = CGPoint(x: 700, y: 50)
+        scrubber.begin(ScrubbedField(10).target("W", at: CGRect(x: 20, y: 30, width: 80, height: 32), range: 0...100))
+        scrubber.scrub(to: 1)
+        #expect(points == [CGPoint(x: 760, y: 96)])
+        scrubber.end()
+
+        scrubber.begin(ZoomStops.target(frame: CGRect(x: 10, y: 700, width: 60, height: 40), current: { 1 }, zoom: { _ in }))
+        scrubber.scrub(to: 1)
+        #expect(points.last == CGPoint(x: 40, y: 720))
+        scrubber.end()
+    }
+
+    @Test func aRulerShowsItsOwnWordsAndMarks() {
+        let frame = CGRect.zero
+        func make(_ build: (inout Scrubber.Target) -> Void = { _ in }) -> Scrubber.Target {
+            var target = Scrubber.Target(label: "X", unit: "W", frame: frame, range: 0...100, get: { 0 }, set: { _ in })
+            build(&target)
+            return target
+        }
+        #expect(make().shown(12) == "12 W")
+        #expect(make { $0.text = { "\(Int($0))%" } }.shown(8) == "8%")
+        #expect(make().isMajor(10) && !make().isMajor(5))
+        let fifteens = make { $0.ticksEvery = 15 }
+        #expect(fifteens.isMajor(30) && !fifteens.isMajor(10))
+        let marks = make { $0.majorMarks = [3, 8] }
+        #expect(marks.isMajor(8) && !marks.isMajor(10))
+    }
 }
 
 /// The Format panel's own changes beside a drag, under the store's edits that each have an
@@ -446,5 +583,33 @@ struct PanelChangesBesideADragTests {
         #expect(frame(button) == moved)
         undo.undo()
         #expect(frame(button) == buttonBefore)
+    }
+}
+
+extension HostedWindowSuites {
+    /// Where the Format panel's space starts in the window, measured by UIKit: in a sheet,
+    /// SwiftUI's global space is the sheet's, not the window's.
+    @MainActor
+    @Suite("The panel's place in the window")
+    struct PanelOriginTests {
+        @Test func thePanelsOriginIsMeasuredInTheWindow() async throws {
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            defer { window.isHidden = true }
+            let scrubber = Scrubber()
+            let sheet = UIView(frame: CGRect(x: 0, y: 420, width: 1000, height: 380))
+            let panel = UIView(frame: CGRect(x: 16, y: 14, width: 300, height: 300))
+            let reporter = PanelOriginReporter.ReportingView(frame: panel.bounds)
+            reporter.scrubber = scrubber
+            window.addSubview(sheet)
+            sheet.addSubview(panel)
+            panel.addSubview(reporter)
+            window.layoutIfNeeded()
+            #expect(scrubber.panelOrigin == CGPoint(x: 16, y: 434))
+            // The sheet pulled up: told again as it is laid out.
+            sheet.frame = CGRect(x: 0, y: 100, width: 1000, height: 700)
+            reporter.setNeedsLayout()
+            window.layoutIfNeeded()
+            #expect(scrubber.panelOrigin == CGPoint(x: 16, y: 114))
+        }
     }
 }

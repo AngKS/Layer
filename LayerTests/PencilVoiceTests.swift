@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftUI
 import Testing
 import UIKit
@@ -1080,28 +1081,30 @@ struct PencilVoiceTests {
     /// On, the canvas has the squeeze in Select, and PencilKit has it in Draw, as before.
     @Test func withSqueezeToTalkOnTheCanvasHasTheSqueezeOutsideDraw() {
         let bench = Bench()
-        #expect(bench.app.squeezesToTalk && bench.app.canvasHearsSqueezes)
+        #expect(bench.app.squeezesToTalk && bench.app.squeezeRouter.hearsSqueezes)
         bench.app.tool = .draw
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!bench.app.squeezeRouter.hearsSqueezes)
     }
 
     /// Off, the squeeze is the system's: the canvas has no squeeze action at all, and a
     /// squeeze anywhere, over an element, a screen or the open canvas, starts nothing.
     @Test func withSqueezeToTalkOffASqueezeStartsNothing() async {
         let bench = Bench()
+        let router = bench.app.squeezeRouter
         bench.app.squeezesToTalk = false
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         bench.app.tool = .draw
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         bench.app.tool = .select
-        #expect(!bench.app.canvasHearsSqueezes)
+        #expect(!router.hearsSqueezes)
         // The pen coming near gets nothing ready either.
         bench.pencil.hovered()
         for point in [Bench.overButton, Bench.overScreen, Bench.overCanvas] {
-            bench.pencil.squeezeBegan(at: point, azimuth: nil)
+            router.began(at: point, azimuth: nil, roll: nil)
+            #expect(router.taker == .nobody)
             #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
             bench.now += .milliseconds(200)
-            bench.pencil.squeezeEnded()
+            router.ended()
             #expect(bench.pencil.bubble == nil && !bench.pencil.ownsSqueeze)
         }
         try? await Task.sleep(for: .milliseconds(50))
@@ -1168,8 +1171,8 @@ struct PencilVoiceTests {
         bench.end()
     }
 
-    /// The format panel's scrubber hears every squeeze over a number field, and leaves one
-    /// alone only while the pencil owns it. Off, the pencil owns none.
+    /// The window's squeeze router gives the scrubber every squeeze over a number field, and
+    /// leaves one to the pencil only while the pencil owns it. Off, the pencil owns none.
     @Test func withSqueezeToTalkOffTheScrubberHasEverySqueeze() async {
         let bench = Bench()
         #expect(await bench.toggle())
@@ -1201,5 +1204,1206 @@ struct PencilVoiceTests {
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.pencil.bubble == nil && bench.pencil.call == nil && bench.routes.isEmpty)
+    }
+
+    /// A change for one screen leaves the selection as it is when it starts: its scope is
+    /// its own, and the screen was selected when it was typed or held for. Selected again,
+    /// it would take away whatever field the person has moved on to (final review I1).
+    @Test func aChangeForAScreenLeavesTheSelectionAsItIs() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        bench.pencil.call?.captionTimes = (.milliseconds(100), .milliseconds(100))
+        #expect(bench.app.selection == bench.button)
+        #expect(bench.pencil.call?.submit("make it blue", about: .screenEdit(UUID())) != nil)
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(bench.app.selection == bench.button)
+        #expect(bench.pencil.call?.submit("make it green", about: .screenEdit(bench.screen)) != nil)
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it green"] })
+        #expect(bench.app.selection == bench.button)
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
+    /// The scenario of final review I1: a change typed for Login waits behind a spoken
+    /// command, the person selects Profile and starts on its field, and Login's change
+    /// starts. Profile stays selected, so its field, and a hold or words typed there, stay
+    /// too. A spoken command about a thing still selects it as it starts: the agent reads
+    /// what was pointed at from the selection.
+    @Test func aQueuedChangeForLoginLeavesProfileSelected() async {
+        let bench = Bench()
+        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6)).id
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(bench.app.selection == bench.button)
+        // Typed in Login's field while that runs.
+        bench.app.selection = .screen(bench.screen)
+        #expect(await bench.pencil.submit("make it dark", about: .screenEdit(bench.screen)) != nil)
+        // Then Profile, whose field is held.
+        bench.app.selection = .screen(profile)
+        bench.pencil.holdBegan(about: profile, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.runner.holds = false
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it dark"] })
+        #expect(bench.runner.targets.last == .screenEdit(bench.screen))
+        #expect(bench.app.selection == .screen(profile))
+        #expect(bench.state == .listening && bench.routes[1].finishCount == 0)
+        bench.pencil.holdEnded()
+        #expect(bench.routes[1].finishCount == 1)
+        bench.end()
+    }
+
+    // MARK: A screen's field
+
+    /// Pressing and holding a screen's field listens for a change to that screen, with
+    /// push-to-talk's bubble at the field, and letting go sends it.
+    @Test func holdingTheFieldListensAboutItsScreenAndLettingGoSends() async {
+        let bench = Bench()
+        let screen = bench.screen
+        bench.pencil.holdBegan(about: screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        #expect(bench.app.selection == .screen(screen))
+        #expect(bench.pencil.bubble?.anchor == CGPoint(x: 500, y: 300))
+        bench.pencil.holdEnded()
+        #expect(bench.routes[0].finishCount == 1)
+        bench.routes[0].send(.command("make it dark"))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        #expect(bench.runner.targets == [.screenEdit(screen)])
+        bench.end()
+    }
+
+    /// Holding the field isn't a squeeze: neither Squeeze to Talk, nor the system's squeeze
+    /// setting, nor Draw has a say in it.
+    @Test func holdingTheFieldIsntASqueeze() async {
+        let bench = Bench()
+        bench.pencil.squeezeIsOff = { true }
+        bench.app.tool = .draw
+        bench.app.squeezesToTalk = false
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.pencil.holdEnded()
+        #expect(bench.routes[0].finishCount == 1)
+        bench.end()
+    }
+
+    /// A Pencil squeeze while a finger holds the field is the squeeze's own: it neither
+    /// turns the hold into a toggle nor sends or drops it, whether it ends or fails.
+    @Test func aSqueezeDuringAHoldLeavesItListening() async {
+        let bench = Bench()
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.now += .milliseconds(100)
+        bench.pencil.squeezeEnded()
+        #expect(bench.state == .listening && !bench.pencil.ownsSqueeze)
+        #expect(bench.routes[0].finishCount == 0)
+        #expect(bench.app.selection == .screen(bench.screen))
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        bench.pencil.squeezeFailed()
+        #expect(bench.state == .listening && !bench.routes[0].isStopped)
+        bench.pencil.holdEnded()
+        #expect(bench.routes[0].finishCount == 1)
+        bench.end()
+    }
+
+    /// Squeeze to Talk going off leaves a hold listening, and its call up: its command and
+    /// its reply need it.
+    @Test func turningSqueezeToTalkOffLeavesAHoldListening() async {
+        let bench = Bench()
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.app.squeezesToTalk = false
+        #expect(bench.state == .listening && !bench.routes[0].isStopped)
+        #expect(bench.pencil.call != nil)
+        bench.pencil.holdEnded()
+        #expect(bench.routes[0].finishCount == 1)
+        bench.routes[0].send(.command("make it dark"))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.end()
+    }
+
+    /// With this window's phone call up, the call hears everything: holding the field only
+    /// says what the next command is about, as a squeeze does.
+    @Test func holdingDuringAPhoneCallOnlySelects() async {
+        let bench = Bench()
+        await bench.app.startVoiceCall(route: FakeRoute(), runner: FakeRunner())
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(bench.app.selection == .screen(bench.screen))
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        #expect(bench.pencil.retarget?.point == CGPoint(x: 500, y: 300))
+        bench.pencil.holdEnded()
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        bench.end()
+    }
+
+    /// A phone call in another window has the microphone, and its commands are about that
+    /// window's design: holding the field here does nothing.
+    @Test func holdingDuringAnotherWindowsCallDoesNothing() async {
+        let bench = Bench()
+        bench.pencil.phoneCallIsUp = { true }
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        bench.pencil.holdEnded()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call == nil && bench.routes.isEmpty && bench.pencil.bubble == nil)
+        #expect(bench.app.selection == nil && bench.pencil.retarget == nil)
+    }
+
+    /// The field a finger holds goes away before the finger lets go: its screen deselected,
+    /// locked or deleted, or the bar hidden. Nobody said the change was over, so nothing
+    /// heard is sent, the microphone goes off, and the bubble says nothing was sent. The
+    /// hold's end, should it still come, sends nothing either (final review I1).
+    @Test func aHoldWhoseFieldWentAwaySendsNothing() async {
+        let bench = Bench()
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        #expect(await bench.hear("make the title"))
+        bench.pencil.holdLost()
+        #expect(bench.routes[0].finishCount == 0 && bench.routes[0].isStopped)
+        #expect(!bench.pencil.isListening && bench.pencil.call?.isListeningAsAsked != true)
+        #expect(bench.state == .problem(PencilVoice.holdLost))
+        bench.pencil.holdEnded()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.routes[0].finishCount == 0)
+        #expect(bench.pencil.call?.settling.isEmpty != false)
+        // A squeeze's listen isn't a field's to lose.
+        #expect(await bench.toggle())
+        bench.pencil.holdLost()
+        #expect(bench.state == .listening && !bench.routes[1].isStopped)
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
+    /// One listen at a time: a second hold while one listens is the same one.
+    @Test func aSecondHoldWhileListeningIsIgnored() async {
+        let bench = Bench()
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 600, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.routes.count == 1)
+        #expect(bench.pencil.bubble?.anchor == CGPoint(x: 500, y: 300))
+        bench.end()
+    }
+
+    /// A finger let go of the field before the microphone came on. A hold gets no Pencil
+    /// tap to wait for, so it is told to keep holding rather than to wait for the tap:
+    /// whether the call was still getting ready or the microphone was coming on.
+    @Test func aHoldLetGoBeforeTheMicrophoneIsOnSaysToKeepHolding() async {
+        let hold = PencilVoice.State.problem(PencilVoice.tooSoonForAHold)
+        #expect(PencilVoice.tooSoonForAHold != VoiceCall.tooSoon)
+        // The microphone coming on.
+        let bench = Bench()
+        bench.routesHoldStart = true
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.routes.count == 1 })
+        bench.pencil.holdEnded()
+        #expect(await eventually { bench.state == hold })
+        #expect(bench.runner.commands.isEmpty)
+        bench.end()
+        // The call still getting ready.
+        let slow = SlowWarmingRunner()
+        let ready = Bench(runner: slow)
+        ready.pencil.holdBegan(about: ready.screen, at: CGPoint(x: 500, y: 300))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(ready.state == .gettingReady)
+        ready.pencil.holdEnded()
+        #expect(ready.state == hold)
+        slow.holdsWarmUp = false
+        ready.end()
+        // A squeeze's line is still the squeeze's.
+        let squeeze = Bench()
+        squeeze.routesHoldStart = true
+        squeeze.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { squeeze.routes.count == 1 })
+        squeeze.now += .seconds(1)
+        squeeze.pencil.squeezeEnded()
+        #expect(await eventually { squeeze.state == .problem(VoiceCall.tooSoon) })
+        squeeze.end()
+    }
+
+    /// A squeeze listening keeps the microphone: a hold then is ignored, and its end sends
+    /// nothing of the squeeze's, held or toggled.
+    @Test func aHoldsEndLeavesASqueezesListenAlone() async {
+        let bench = Bench()
+        // A squeeze still held.
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening })
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        bench.pencil.holdEnded()
+        #expect(bench.state == .listening && bench.routes[0].finishCount == 0)
+        #expect(bench.app.selection == bench.button)
+        // Its own end sends it.
+        bench.now += .seconds(1)
+        bench.pencil.squeezeEnded()
+        #expect(bench.routes[0].finishCount == 1)
+
+        // A toggle.
+        #expect(await bench.toggle())
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        bench.pencil.holdEnded()
+        #expect(bench.state == .listening && bench.routes[1].finishCount == 0)
+        #expect(bench.pencil.ownsSqueeze)
+        bench.end()
+    }
+
+    /// One microphone at a time, in every window: holding the field stops a pencil listening
+    /// in another, which sends nothing.
+    @Test func holdingTheFieldStopsAPencilListeningInAnotherWindow() async {
+        let bench = Bench()
+        let other = Bench()
+        bench.pencil.otherWindows = { [other.app] }
+        #expect(await other.toggle())
+        #expect(await other.hear("make it"))
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(other.routes[0].isStopped && other.pencil.bubble == nil)
+        #expect(await eventually { bench.state == .listening })
+        #expect(other.runner.commands.isEmpty)
+        other.end()
+        bench.end()
+    }
+
+    /// Typed words go through the pencil's call, about the screen, without the microphone.
+    @Test func typedWordsGoThroughThePencilsCall() async {
+        let bench = Bench()
+        let number = await bench.pencil.submit("make the title red", about: .screenEdit(bench.screen))
+        #expect(number != nil)
+        #expect(await eventually { bench.runner.commands == ["make the title red"] })
+        #expect(bench.runner.targets == [.screenEdit(bench.screen)])
+        // The selection is left as it was: the change's screen goes with it.
+        #expect(bench.app.selection == nil)
+        #expect(!bench.routes.contains { $0.wasStarted })
+        #expect(await bench.pencil.submit("   ", about: .screenEdit(bench.screen)) == nil)
+        bench.end()
+    }
+
+    /// Typed words wait their turn behind a command spoken a moment earlier (Review Focus 5).
+    @Test func typedWordsWaitTheirTurnBehindAHeldCommand() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(await bench.pencil.submit("make it red", about: .screenEdit(bench.screen)) != nil)
+        #expect(bench.pencil.call?.queuedCount == 1)
+        bench.runner.holds = false
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] })
+        bench.end()
+    }
+
+    /// A command spoken a moment earlier whose words are still settling was given first, and
+    /// goes first: typed words wait for it, and go anyway when it turns out to be nothing.
+    @Test func typedWordsWaitBehindASpokenCommandStillSettling() async {
+        let bench = Bench()
+        #expect(await bench.hold())
+        #expect(bench.pencil.call?.settling.isEmpty == false)
+        let typed = Task { await bench.pencil.submit("make it red", about: .screenEdit(bench.screen)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.call?.queuedCount == 0)
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] })
+        #expect(await typed.value != nil)
+
+        // Nothing heard: the typed words don't wait on it any longer.
+        #expect(await bench.hold())
+        let next = Task { await bench.pencil.submit("make it green", about: .screenEdit(bench.screen)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.count == 2)
+        bench.routes[1].send(.nothingHeard)
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red", "make it green"] })
+        #expect(await next.value != nil)
+        bench.end()
+    }
+
+    /// A typed change keeps the pencil's call until its reply has shown, though Squeeze to
+    /// Talk goes off while it runs: the field shows that reply.
+    @Test func aTypedChangeKeepsItsCallUntilItsReplyHasShown() async {
+        let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.prepare()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        bench.pencil.call?.captionTimes = (.seconds(1), .seconds(1))
+        bench.runner.holds = true
+        let number = await bench.pencil.submit("make it red", about: .screenEdit(bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it red"] })
+        bench.app.squeezesToTalk = false
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .done && bench.pencil.call?.caption?.command == number })
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(bench.pencil.call?.caption?.command == number)
+        // Once it has shown, the call goes, as Squeeze to Talk going off asked.
+        #expect(await eventually { bench.pencil.call == nil })
+        bench.end()
+    }
+
+    /// A held change keeps the call until its reply has shown, in the same way.
+    @Test func aHeldChangeKeepsItsCallUntilItsReplyHasShown() async {
+        let bench = Bench()
+        bench.runner.holds = true
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.pencil.call?.captionTimes = (.seconds(1), .seconds(1))
+        bench.pencil.holdEnded()
+        bench.routes[0].send(.command("make it dark"))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.app.squeezesToTalk = false
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil && bench.state == .working)
+        bench.runner.holds = false
+        #expect(await eventually { bench.state == .done })
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(bench.pencil.call != nil && bench.state == .done)
+        #expect(await eventually { bench.pencil.call == nil && bench.pencil.bubble == nil })
+        bench.end()
+    }
+
+    /// Typed words still waiting on the call to get ready keep it, though Squeeze to Talk
+    /// goes off meanwhile.
+    @Test func typedWordsWaitingOnTheCallKeepIt() async {
+        let runner = SlowWarmingRunner()
+        let bench = Bench(runner: runner)
+        let typed = Task { await bench.pencil.submit("make it red", about: .screenEdit(bench.screen)) }
+        #expect(await eventually { bench.pencil.call != nil })
+        bench.app.squeezesToTalk = false
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        runner.holdsWarmUp = false
+        #expect(await typed.value != nil)
+        #expect(await eventually { runner.commands == ["make it red"] })
+        bench.end()
+    }
+
+    /// The field coming up gets the model ready, once, without the microphone. A phone call
+    /// up stops it, as it stops a hover; Squeeze to Talk and the system's setting don't.
+    @Test func preparingGetsTheModelReadyOnce() async {
+        let bench = Bench()
+        bench.pencil.prepare()
+        bench.pencil.prepare()
+        #expect(await eventually { bench.runner.warmUps == 1 })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.warmUps == 1 && !bench.routes.contains { $0.wasStarted })
+        bench.end()
+
+        let duringACall = Bench()
+        duringACall.pencil.phoneCallIsUp = { true }
+        duringACall.pencil.prepare()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(duringACall.pencil.call == nil && duringACall.runner.warmUps == 0)
+
+        let squeezeOff = Bench()
+        squeezeOff.app.squeezesToTalk = false
+        squeezeOff.pencil.squeezeIsOff = { true }
+        squeezeOff.app.tool = .draw
+        squeezeOff.pencil.prepare()
+        #expect(await eventually { squeezeOff.runner.warmUps == 1 })
+        squeezeOff.end()
+    }
+
+    /// A call a screen's field started, as it was first tapped to type or held, ends once
+    /// idle when its screen is deselected: speech and the model aren't kept ready for
+    /// nothing. One the pen started by hovering, with Squeeze to Talk on, or has used since,
+    /// is Squeeze to Talk's, and stays as it always has (final review M3).
+    @Test func aCallTheFieldStartedEndsWhenItsScreenIsDeselected() async {
+        let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.prepare()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        bench.app.selection = nil
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A change still running keeps it until its reply has shown.
+        bench.app.selection = .screen(bench.screen)
+        bench.runner.holds = true
+        #expect(await bench.pencil.submit("make it dark", about: .screenEdit(bench.screen)) != nil)
+        bench.pencil.call?.captionTimes = (.milliseconds(200), .milliseconds(200))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.app.selection = nil
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .done })
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A hold whose field went away: the call ends, and the bubble still says why.
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.app.selection = nil
+        bench.pencil.holdLost()
+        #expect(await eventually { bench.pencil.call == nil })
+        #expect(bench.state == .problem(PencilVoice.holdLost))
+        bench.end()
+
+        // Started by the pen hovering: Squeeze to Talk's.
+        let hovered = Bench()
+        hovered.pencil.hovered()
+        #expect(await eventually { hovered.pencil.call?.phase == .listening })
+        hovered.app.selection = .screen(hovered.screen)
+        hovered.pencil.prepare()
+        hovered.app.selection = nil
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(hovered.pencil.call != nil)
+        hovered.end()
+
+        // Started by the field, then used by the pen, whose squeeze moves the selection off
+        // the screen: Squeeze to Talk's from then on.
+        let used = Bench()
+        used.app.selection = .screen(used.screen)
+        used.pencil.prepare()
+        #expect(await eventually { used.pencil.call?.phase == .listening })
+        let call = used.pencil.call
+        #expect(await used.toggle())
+        #expect(used.app.selection == used.button && used.pencil.call === call)
+        used.pencil.tapBubble()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(used.pencil.call === call)
+        used.end()
+    }
+
+    /// The pen hovers many times a second: with a call up, the system's squeeze setting isn't
+    /// read for each (final review M2).
+    @Test func hoveringWithACallUpDoesNotReadTheSystemsSqueezeSetting() async {
+        let bench = Bench()
+        bench.pencil.hovered()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        var reads = 0
+        bench.pencil.squeezeIsOff = { reads += 1; return false }
+        for _ in 0..<5 { bench.pencil.hovered() }
+        #expect(reads == 0)
+        bench.end()
+    }
+
+    /// Whether the pencil is listening, for VoiceOver's "Speak a change", whose second use sends.
+    @Test func isListeningFollowsAHeldListen() async {
+        let bench = Bench()
+        #expect(!bench.pencil.isListening)
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        #expect(bench.pencil.isListening)
+        bench.pencil.holdEnded()
+        #expect(!bench.pencil.isListening)
+        bench.end()
+    }
+
+    /// A typed change's reply is its own line, which can outlast the call's caption when
+    /// the next command takes that at once: Squeeze to Talk going off ends the call only
+    /// once the reply has gone too.
+    @Test func aFieldsReplyKeepsTheCallThoughTheCaptionHasMovedOn() async throws {
+        let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.prepare()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .milliseconds(100), problem: .milliseconds(1500))
+        bench.runner.holds = true
+        bench.runner.outcomes = [VoiceOutcome(problem: "No connection."), VoiceOutcome(lines: ["Done"])]
+        let first = try #require(await bench.pencil.submit("make it red", about: .screenEdit(bench.screen)))
+        let second = try #require(await bench.pencil.submit("make it blue", about: .screenEdit(bench.screen)))
+        #expect(await eventually { bench.runner.commands == ["make it red"] })
+        bench.app.squeezesToTalk = false
+        bench.runner.holds = false
+        #expect(await until { call.progress(of: second) == .done("Done") || call.phase == .ended })
+        // The second's reply has come and gone; the first's problem is still shown.
+        #expect(await until { call.caption == nil || call.phase == .ended })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(bench.pencil.call === call)
+        #expect(call.progress(of: first) == .problem("No connection."))
+        // Once it has gone, so does the call, as Squeeze to Talk going off asked.
+        #expect(await until { bench.pencil.call == nil })
+        bench.end()
+    }
+}
+
+/// The window's one squeeze handler, which decides once per squeeze who has it: a ruler
+/// (a field's or the zoom's), push-to-talk, or nobody. SwiftUI calls every visible view's
+/// squeeze action, in no fixed order, so two handlers could both act on one squeeze.
+@Suite("Routing Apple Pencil Pro's squeeze", .serialized)
+@MainActor
+struct SqueezeRouterTests {
+    /// The W field of a Format panel at the window's top left, where a pen at (100, 100) is
+    /// over the panel.
+    private func field(on bench: Bench) -> Scrubber.Target {
+        bench.app.chromeFrames["format"] = CGRect(x: 0, y: 0, width: 300, height: 600)
+        return ScrubbedField(10).target("W", at: .zero, range: 0...100)
+    }
+
+    private let overField = CGPoint(x: 100, y: 100)
+
+    @Test func aSqueezeOverAHoveredFieldBringsUpItsRulerNotTheBubble() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        #expect(router.taker == .ruler)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// Review focus 1: the squeeze that keeps a ruler's value, with the pen drifted over the
+    /// canvas, puts the ruler away and does nothing else.
+    @Test func theSqueezeThatKeepsAValueStartsNothingElse() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.begin(field(on: bench))
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        router.ended()
+        #expect(scrubber.target == nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        #expect(bench.app.selection == nil)
+        bench.end()
+    }
+
+    @Test func aSqueezeOverTheCanvasListens() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .voice)
+        #expect(await eventually { bench.state == .listening })
+        bench.now += .seconds(1)
+        router.ended()
+        #expect(bench.routes[0].finishCount == 1)
+        #expect(router.taker == nil)
+        bench.end()
+    }
+
+    /// A toggle left listening is sent by the next squeeze, even with the pen over a field.
+    @Test func aToggleListeningIsSentWhereverThePenIs() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        bench.now += .milliseconds(200)
+        router.ended()
+        #expect(await eventually { bench.state == .listening })
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(bench.routes[0].finishCount == 1)
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .voice)
+        router.ended()
+        bench.end()
+    }
+
+    /// A squeeze's `.active` comes every 10–20 ms while it lasts: only the first acts.
+    @Test func oneSqueezesRepeatedStartsActOnce() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        for _ in 0..<4 {
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            // Not put away by the second, nor brought up again by the third.
+            #expect(scrubber.target?.label == "W")
+        }
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// Off, a squeeze is the system's, except over a field (or the zoom) or with a ruler up:
+    /// the handler is there only then.
+    @Test func withSqueezeToTalkOffOnlyARulerTakesASqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.squeezesToTalk = false
+        #expect(!router.talks && !router.hearsSqueezes)
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .nobody)
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+        router.ended()
+
+        scrubber.hovered = field(on: bench)
+        #expect(router.hearsSqueezes)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        #expect(router.taker == .ruler)
+        bench.app.tool = .draw
+        #expect(!router.hearsSqueezes)
+        bench.end()
+    }
+
+    @Test func theHandlerIsThereOnlyWhileDrawIsOffAndSomethingWouldTakeIt() {
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: true, talks: true, rulerWantsSqueeze: true))
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: true, rulerWantsSqueeze: false))
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: false))
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: true))
+        // A squeeze under way keeps it until it ends, except in Draw.
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: false, squeezeUnderWay: true))
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: true, talks: false, rulerWantsSqueeze: false, squeezeUnderWay: true))
+    }
+
+    /// Review focus 2: a field's hover left behind when its panel went isn't taken for a
+    /// field under a squeeze over the canvas.
+    @Test func aHoverLeftByAFieldThatWentAwayIsntARuler() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(bench.pencil.bubble != nil)
+        router.ended()
+        bench.end()
+    }
+
+    @Test func aHoverLeftBehindWithThePenOutOfRangeIsntARulerEither() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: nil, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(router.taker == .voice)
+        // Push-to-talk starts nothing with the pen out of range.
+        #expect(bench.pencil.bubble == nil)
+        router.ended()
+        bench.end()
+    }
+
+    @Test func drawComingOnPutsAPencilRulerAway() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target != nil)
+        bench.app.tool = .draw
+        #expect(scrubber.target == nil)
+        #expect(router.taker == nil)
+        bench.end()
+    }
+
+    /// Step 1 is push-to-talk's only with no ruler up: with a finger's ruler up while a toggle
+    /// listens, the squeeze keeps the ruler's value and the toggle goes on listening.
+    @Test func aRulerUpTakesTheSqueezeThoughAToggleListens() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        bench.now += .milliseconds(200)
+        router.ended()
+        #expect(await eventually { bench.state == .listening })
+        scrubber.begin(field(on: bench))
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .ruler)
+        #expect(scrubber.target == nil)
+        #expect(bench.routes[0].finishCount == 0 && bench.state == .listening)
+        router.ended()
+        bench.end()
+    }
+
+    /// The handler stays until the squeeze under way ends: with Squeeze to Talk off, the
+    /// squeeze that puts a ruler away with the pen off its field would otherwise take the
+    /// handler with it, and the same squeeze, brought back as the pen crossed another field,
+    /// would bring that field's ruler up.
+    @Test func theHandlerStaysForTheWholeSqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.squeezesToTalk = false
+        let width = field(on: bench)
+        scrubber.hovered = width
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        router.ended()
+        // The pen leaves the field: the ruler keeps the handler.
+        scrubber.hovered = nil
+        #expect(router.hearsSqueezes)
+
+        // The squeeze that keeps the value, over the canvas: the ruler goes, the handler stays.
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil)
+        #expect(router.hearsSqueezes)
+        // Still squeezed, the pen crosses a field: that squeeze brings no ruler up.
+        scrubber.hovered = width
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        scrubber.hovered = nil
+        #expect(router.hearsSqueezes)
+        // Only its end lets the handler go, and a view reading it hears so.
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = router.hearsSqueezes } onChange: { changed.withLock { $0 = true } }
+        router.ended()
+        #expect(!router.hearsSqueezes)
+        #expect(changed.withLock { $0 })
+        bench.end()
+    }
+
+    /// A field's hover goes with the selection it was for: the pen still over the panel
+    /// doesn't scrub the element that was selected before.
+    @Test func aNewSelectionForgetsTheFieldThePenWasOver() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.selection = bench.button
+        let width = ScrubbedField(10)
+        bench.app.chromeFrames["format"] = CGRect(x: 0, y: 0, width: 300, height: 600)
+        scrubber.hovered = width.target("W", at: .zero, range: 0...100)
+        bench.app.selection = bench.title
+        #expect(scrubber.hovered == nil)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil && width.sets.isEmpty)
+        router.ended()
+        // A panel ruler up as the selection changes goes too.
+        scrubber.begin(width.target("W", at: .zero, range: 0...100))
+        bench.app.selection = bench.button
+        #expect(scrubber.target == nil)
+        bench.end()
+    }
+
+    /// A Format field's hover is a field's only while the pen is over the Format panel, not
+    /// over other chrome; the zoom's hover is the zoom's over the controls.
+    @Test func aFieldsHoverIsAFieldsOnlyOverTheFormatPanel() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        let controls = CGRect(x: 20, y: 700, width: 200, height: 50)
+        bench.app.chromeFrames["view controls"] = controls
+        scrubber.hovered = field(on: bench)
+        router.began(at: CGPoint(x: controls.midX, y: controls.midY), azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        router.ended()
+
+        // In a narrow window the panel is a sheet, reported as "panel sheet".
+        bench.app.chromeFrames["format"] = nil
+        bench.app.chromeFrames["panel sheet"] = CGRect(x: 0, y: 400, width: 800, height: 400)
+        scrubber.hovered = ScrubbedField(10).target("W", at: .zero, range: 0...100)
+        router.began(at: CGPoint(x: 100, y: 500), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+
+        // The zoom's hover, over the controls, brings up the zoom's ruler.
+        scrubber.hovered = ZoomStops.target(frame: controls, current: { 1 }, zoom: { _ in })
+        router.began(at: CGPoint(x: controls.midX, y: controls.midY), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.owner == .zoom)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// The system's Apple Pencil setting comes first for the rulers too: with squeezing
+    /// turned off there, or running a shortcut, a squeeze neither brings a ruler up nor puts
+    /// one away.
+    @Test func theSystemsSqueezeSettingKeepsTheRulersAwayToo() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.pencil.squeezeIsOff = { true }
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .nobody)
+        router.ended()
+        scrubber.begin(field(on: bench))
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target != nil)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// A squeeze whose end was lost (the handler torn down, the gesture's end never
+    /// delivered) doesn't leave every later squeeze ignored: once its `.active` has stopped
+    /// coming for as long as a squeeze can listen, the next squeeze is a new one.
+    @Test func aSqueezeWhoseEndWasLostIsOverOnceItsStartsStop() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.clock = { [unowned bench] in bench.now }
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        // Its end never comes. A moment later, it is still the same squeeze.
+        bench.now += .seconds(1)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        // After that long, a squeeze is a new one: this one keeps the value.
+        bench.now += SqueezeRouter.longestSqueeze
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .ruler)
+        router.ended()
+        bench.end()
+    }
+
+    /// A squeeze held on, whose `.active` keeps coming, is never taken for a new one.
+    @Test func aSqueezeHeldOnIsOneSqueezeHoweverLong() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.clock = { [unowned bench] in bench.now }
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        for _ in 0..<200 {
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            bench.now += .milliseconds(500)
+        }
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// In a narrow window the Format panel is a sheet, and the sheet's handler has the
+    /// squeeze rather than the window's: exactly one is there at a time.
+    @Test func inANarrowWindowThePanelsSheetHasTheSqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        bench.app.isInspectorOpen = true
+        #expect(!bench.app.panelIsASheet)
+        #expect(router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        bench.app.isCompactSizeClass = true
+        #expect(bench.app.panelIsASheet)
+        #expect(!router.windowHandlerIsOn && router.sheetHandlerIsOn)
+        bench.app.isInspectorOpen = false
+        bench.app.isLayersOpen = true
+        #expect(bench.app.panelIsASheet && router.sheetHandlerIsOn)
+        bench.app.isLayersOpen = false
+        #expect(!bench.app.panelIsASheet)
+        #expect(router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        // With nothing to take a squeeze, neither is there.
+        bench.app.isInspectorOpen = true
+        bench.app.squeezesToTalk = false
+        #expect(!router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        bench.end()
+    }
+
+    /// The sheet's squeeze comes in the sheet's own points: it is put in the window's by the
+    /// sheet's place in the window before it is routed.
+    @Test func aSqueezeInThePanelsSheetIsInWindowPoints() {
+        #expect(SqueezeRouter.windowPoint(CGPoint(x: 100, y: 40), offsetBy: CGPoint(x: 10, y: 500)) == CGPoint(x: 110, y: 540))
+        #expect(SqueezeRouter.windowPoint(nil, offsetBy: CGPoint(x: 10, y: 500)) == nil)
+
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        #expect(router.sheetOrigin == .zero)
+        bench.app.chromeFrames["panel sheet"] = CGRect(x: 0, y: 500, width: 800, height: 400)
+        #expect(router.sheetOrigin == CGPoint(x: 0, y: 500))
+        // Over a field near the sheet's top: over the sheet in the window, so a field's.
+        scrubber.hovered = ScrubbedField(10).target("W", at: .zero, range: 0...100)
+        router.began(at: SqueezeRouter.windowPoint(CGPoint(x: 100, y: 40), offsetBy: router.sheetOrigin), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+}
+
+/// A selected screen's field, "Describe a change…": what it sends, through the pencil's
+/// call, and how each screen's change is getting on, which the field shows in place of
+/// the words typed.
+@Suite("What a screen's field sends and shows", .serialized)
+@MainActor
+struct ScreenEditorTests {
+    /// A second screen, Profile, to the right of Login.
+    private func addProfile(to bench: Bench) -> DesignScreen.ID {
+        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
+        bench.app.store.updateScreen(profile.id) { $0.name = "Profile" }
+        return profile.id
+    }
+
+    @Test func aChangeShowsItsStepThenItsReplyThenClears() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let screen = bench.screen
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .milliseconds(100), problem: .milliseconds(100))
+        #expect(editor.isBusy(for: screen))
+        guard case .working = editor.progress(for: screen) else {
+            Issue.record("a change just sent is on its way")
+            return
+        }
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        #expect(bench.runner.targets == [.screenEdit(screen)])
+        call.showStep("Restyling…")
+        #expect(editor.progress(for: screen) == .working("Restyling…"))
+        #expect(editor.line(for: screen) == .working("Restyling…"))
+        bench.runner.outcomes = [VoiceOutcome(lines: ["Restyled the screen."])]
+        bench.runner.holds = false
+        #expect(await until { editor.progress(for: screen) == .done("Restyled the screen.") })
+        #expect(editor.line(for: screen) == .reply("Restyled the screen."))
+        #expect(!editor.isBusy(for: screen))
+        #expect(await until { editor.progress(for: screen) == .over })
+        #expect(editor.line(for: screen) == nil)
+        bench.end()
+    }
+
+    @Test func aBlankChangeSendsNothing() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        #expect(await !editor.send("  ", to: bench.screen))
+        #expect(await !editor.send("\n", to: bench.screen))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.call == nil)
+        #expect(editor.progress(for: bench.screen) == .over)
+    }
+
+    @Test func aSecondChangeToTheSameScreenWaitsForTheFirst() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(await !editor.send("make it light", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.count == 1 && bench.pencil.call?.queuedCount == 0)
+        // Once the first is done, its reply showing, the next goes.
+        bench.runner.holds = false
+        #expect(await until { !editor.isBusy(for: bench.screen) })
+        #expect(await editor.send("make it light", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark", "make it light"] })
+        bench.end()
+    }
+
+    /// A change still being sent, waiting on the call to get ready, keeps its screen busy:
+    /// a second one isn't sent behind it.
+    @Test func aChangeStillBeingSentKeepsItsScreenBusy() async {
+        let runner = SlowWarmingRunner()
+        let bench = Bench(runner: runner)
+        let editor = ScreenEditor(model: bench.app)
+        let first = Task { await editor.send("make it dark", to: bench.screen) }
+        #expect(await until { editor.isBusy(for: bench.screen) })
+        #expect(editor.progress(for: bench.screen) == .working(nil))
+        // No step of its own yet: the field says it is under way all the same.
+        #expect(editor.line(for: bench.screen) == .working(ScreenEditor.noStepYet))
+        #expect(await !editor.send("make it light", to: bench.screen))
+        runner.holdsWarmUp = false
+        #expect(await first.value)
+        #expect(await eventually { runner.commands == ["make it dark"] })
+        bench.end()
+    }
+
+    @Test func changesToTwoScreensAreFollowedApart() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(editor.progress(for: second) == .over)
+        #expect(editor.isBusy(for: bench.screen) && !editor.isBusy(for: second))
+        // The second screen's change waits its turn behind the first's, with no step yet.
+        #expect(await editor.send("make it light", to: second))
+        #expect(editor.isBusy(for: second))
+        #expect(editor.line(for: second) == .working(ScreenEditor.noStepYet))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.pencil.call?.showStep("Restyling…")
+        #expect(editor.progress(for: bench.screen) == .working("Restyling…"))
+        #expect(editor.progress(for: second) == .working(nil))
+        bench.runner.holds = false
+        #expect(await eventually { bench.runner.targets == [.screenEdit(bench.screen), .screenEdit(second)] })
+        bench.end()
+    }
+
+    @Test func theFieldSaysWhyWhenNoModelCanBeAsked() async {
+        let bench = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let editor = ScreenEditor(model: bench.app)
+        #expect(editor.whyUnavailable() == "Turn on Apple Intelligence.")
+        #expect(await !editor.send("make it dark", to: bench.screen))
+        #expect(bench.pencil.call == nil && bench.runner.commands.isEmpty)
+        #expect(editor.progress(for: bench.screen) == .over)
+        let ready = Bench()
+        #expect(ScreenEditor(model: ready.app).whyUnavailable() == nil)
+    }
+
+    /// A screen that has gone, or a design that has closed, takes no change.
+    @Test func aGoneScreenOrAClosedDesignTakesNoChange() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.app.store.deleteScreen(second)
+        #expect(await !editor.send("make it dark", to: second))
+        bench.app.close()
+        #expect(await !editor.send("make it dark", to: bench.screen))
+        #expect(bench.pencil.call == nil && bench.runner.commands.isEmpty)
+    }
+
+    /// Words heard for another listen take the call's caption while a change runs: the
+    /// field still shows the step its change is on (carried from Task 5).
+    @Test func aChangesStepStaysWhileWordsAreHeard() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.pencil.call?.showStep("Restyling…")
+        #expect(await bench.toggle())
+        #expect(await bench.hear("make the title"))
+        #expect(editor.progress(for: bench.screen) == .working("Restyling…"))
+        #expect(editor.line(for: bench.screen) == .working("Restyling…"))
+        bench.pencil.tapBubble()
+        bench.end()
+    }
+
+    /// The next change starting the moment one is over takes the call's caption at once:
+    /// each field still shows its own change's reply (carried from Task 5).
+    @Test func eachChangeKeepsItsOwnReply() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        bench.runner.holds = true
+        #expect(await editor.send("make it dark", to: bench.screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .seconds(1), problem: .seconds(1))
+        #expect(await editor.send("make it light", to: second))
+        bench.runner.outcomes = [VoiceOutcome(lines: ["Restyled Login."]), VoiceOutcome(problem: "No connection.")]
+        bench.runner.holds = false
+        #expect(await until { editor.progress(for: second) == .problem("No connection.") })
+        #expect(editor.line(for: second) == .problem("No connection."))
+        #expect(editor.progress(for: bench.screen) == .done("Restyled Login."))
+        #expect(await until { editor.progress(for: bench.screen) == .over && editor.progress(for: second) == .over })
+        bench.end()
+    }
+
+    /// Numbers start again with each call: a change is followed on the call it was sent
+    /// on, never by its number on the next, and is over once that call ends (carried from
+    /// Task 5).
+    @Test func aChangeIsFollowedOnTheCallItWasSentOn() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        let second = addProfile(to: bench)
+        #expect(await editor.send("make it dark", to: bench.screen))
+        let call = try #require(bench.pencil.call)
+        call.captionTimes = (done: .seconds(30), problem: .seconds(30))
+        #expect(await until { editor.progress(for: bench.screen) == .done("Done") })
+        call.end()
+        #expect(editor.progress(for: bench.screen) == .over)
+        // The next call numbers its first command as the last one's was numbered.
+        bench.runner.holds = true
+        #expect(await editor.send("make it light", to: second))
+        #expect(bench.pencil.call !== call)
+        #expect(editor.isBusy(for: second))
+        #expect(editor.progress(for: bench.screen) == .over)
+        bench.end()
+    }
+
+    /// A send whose field went away, cancelling the task it was sent from, still waits
+    /// its turn behind a command spoken a moment earlier whose words are still settling
+    /// (carried from Task 8).
+    @Test func aSendCancelledByItsFieldStillWaitsItsTurn() async {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        #expect(await bench.hold())
+        #expect(bench.pencil.call?.settling.isEmpty == false)
+        let typed = Task { await editor.send("make it red", to: bench.screen) }
+        try? await Task.sleep(for: .milliseconds(50))
+        typed.cancel()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.runner.commands.isEmpty && bench.pencil.call?.queuedCount == 0)
+        bench.routes[0].send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it red"] })
+        #expect(await typed.value)
+        bench.end()
+    }
+
+    /// Words typed in a screen's field are kept by the design's editor, screen by screen,
+    /// not by the field: the field goes whenever its screen stops being selected or the bar
+    /// hides, and they are there when it comes back (final review I1, Task 10's minor).
+    @Test func aDraftOutlivesItsField() {
+        let bench = Bench()
+        let editor = bench.app.screenEditor
+        let profile = addProfile(to: bench)
+        #expect(editor.draft(for: bench.screen).text.isEmpty)
+        editor.setDraft("make the title", for: bench.screen)
+        // Login's field goes, and Profile's is typed in.
+        bench.app.selection = .screen(profile)
+        editor.setDraft("add a photo", for: profile)
+        // Login's comes back.
+        bench.app.selection = .screen(bench.screen)
+        #expect(editor.draft(for: bench.screen).text == "make the title")
+        #expect(editor.draft(for: profile).text == "add a photo")
+        editor.setDraft("", for: profile)
+        #expect(editor.draft(for: profile) == ScreenEditor.Draft())
+    }
+
+    /// A draft sent clears as it goes, and comes back if it couldn't be sent, unless more
+    /// has been typed since; blank, it is cleared and nothing is sent.
+    @Test func aDraftIsSentFromTheEditor() async {
+        let unavailable = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let refused = unavailable.app.screenEditor
+        refused.setDraft("make it dark ", for: unavailable.screen)
+        let sending = refused.sendDraft(for: unavailable.screen)
+        #expect(refused.draft(for: unavailable.screen).text.isEmpty && refused.draft(for: unavailable.screen).isSending)
+        #expect(await sending?.value == false)
+        #expect(refused.draft(for: unavailable.screen) == ScreenEditor.Draft(text: "make it dark "))
+
+        let bench = Bench()
+        let editor = bench.app.screenEditor
+        editor.setDraft("make it dark", for: bench.screen)
+        let sent = editor.sendDraft(for: bench.screen)
+        #expect(await sent?.value == true)
+        #expect(editor.draft(for: bench.screen) == ScreenEditor.Draft())
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        editor.setDraft("  ", for: bench.screen)
+        #expect(editor.sendDraft(for: bench.screen) == nil)
+        #expect(editor.draft(for: bench.screen) == ScreenEditor.Draft())
+        bench.end()
+    }
+
+    /// The design's field model, made once.
+    @Test func theDesignHasOneScreenEditor() {
+        let bench = Bench()
+        #expect(bench.app.screenEditor === bench.app.screenEditor)
+    }
+}
+
+/// What is typed in a screen's field, as it is sent.
+@MainActor
+struct ScreenEditFieldTests {
+    /// Sent, the field clears; a change that couldn't be sent puts its words back, rather
+    /// than leaving the field blank and the words lost.
+    @Test func aChangeThatCouldNotBeSentIsPutBack() async throws {
+        let bench = Bench(readiness: .unavailable("Turn on Apple Intelligence."))
+        let editor = ScreenEditor(model: bench.app)
+        var draft = ScreenEditor.Draft()
+        draft.text = "make it dark "
+        let taken = draft.takeForSending()
+        let words = try #require(taken)
+        #expect(words == "make it dark")
+        #expect(draft.text.isEmpty && draft.isSending)
+        draft.sendEnded(await editor.send(words, to: bench.screen))
+        #expect(draft.text == "make it dark " && !draft.isSending)
+    }
+
+    @Test func aChangeSentLeavesTheFieldClear() async throws {
+        let bench = Bench()
+        let editor = ScreenEditor(model: bench.app)
+        var draft = ScreenEditor.Draft()
+        draft.text = "make it dark"
+        let taken = draft.takeForSending()
+        let words = try #require(taken)
+        draft.sendEnded(await editor.send(words, to: bench.screen))
+        #expect(draft.text.isEmpty && !draft.isSending)
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.end()
+    }
+
+    /// Blank words aren't sent, and leave nothing in the field.
+    @Test func blankWordsAreNotSent() {
+        var draft = ScreenEditor.Draft()
+        draft.text = "  \n"
+        let taken = draft.takeForSending()
+        #expect(taken == nil)
+        #expect(draft.text.isEmpty && !draft.isSending)
+    }
+
+    /// Words typed while a change was being sent aren't replaced by its words.
+    @Test func wordsTypedSinceStay() {
+        var draft = ScreenEditor.Draft()
+        draft.text = "make it dark"
+        let taken = draft.takeForSending()
+        #expect(taken == "make it dark")
+        draft.text = "make it light"
+        draft.sendEnded(false)
+        #expect(draft.text == "make it light")
     }
 }

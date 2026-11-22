@@ -7,7 +7,8 @@ struct StylePanel: View {
     var isSheet = false
     /// The room there is for the floating panel, which is otherwise as tall as its settings.
     var maxHeight: CGFloat = 620
-    @State private var scrubber = Scrubber()
+    /// The window's one scrubber: its squeezes come through the window's squeeze router.
+    private var scrubber: Scrubber { model.scrubber }
 
     var body: some View {
         let scrolling = ScrollView {
@@ -26,29 +27,23 @@ struct StylePanel: View {
             .padding(.bottom, 12)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .scrollDisabled(scrubber.target != nil)
+        // Not for the zoom's ruler, which another finger may hold.
+        .scrollDisabled(scrubber.target?.owner == .panel)
         .foregroundStyle(.primary)
 
         // Fields and the ruler share one coordinate space, the panel's.
         let settings = scrolling
             .overlay { ScrubberOverlay() }
-            .background { PencilBridge(scrubber: scrubber) }
             .coordinateSpace(.named(Scrubber.space))
-            .onPencilSqueeze { phase in
-                // A squeeze that sends what the pencil is listening for isn't one for the
-                // ruler, even when the pen has drifted over a field.
-                if case .active = phase, model.pencilVoice.ownsSqueeze, scrubber.target == nil { return }
-                scrubber.squeeze(phase)
-            }
+            // Where that space is in the window, for a step's tick to be felt at its field.
+            .reportsPanelOrigin(to: scrubber)
             .environment(scrubber)
-            .onAppear {
-                // A scrub undoes as one step, however long it takes.
-                scrubber.onBegin = { [model] in model.beginScrubbing() }
-                scrubber.onEnd = { [model] in model.endScrubbing() }
+            // A ruler left up by the pencil goes with the panel, and so does a field's hover;
+            // the zoom's ruler stays. A new selection ends them in the model.
+            .onDisappear {
+                scrubber.end(.panel)
+                scrubber.forgetHovered(.panel)
             }
-            // A ruler left up by the pencil goes with the panel or the selection it was for.
-            .onDisappear { scrubber.end() }
-            .onChange(of: model.selection) { scrubber.end() }
 
         if isSheet {
             settings
@@ -673,7 +668,7 @@ private struct MagicPenTab: View {
             Toggle("Squeeze to Talk", isOn: Binding(get: { model.squeezesToTalk }, set: { model.setSqueezesToTalk($0) }))
             Text(model.squeezesToTalk
                 ? "Squeeze Apple Pencil Pro over the canvas to speak a command."
-                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say.")
+                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say. Over a number field or the zoom control it still scrubs, unless those settings turn squeezing off or give it a shortcut.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -895,7 +890,7 @@ private struct NumberField: View {
         // Tapped, it is typed into; held, it scrubs.
         .onTapGesture { if !isTyping { isTyping = true } }
         .gesture(
-            LongPressGesture(minimumDuration: 0.35)
+            LongPressGesture(minimumDuration: PencilVoice.holdThreshold / .seconds(1))
                 .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
                 .updating($isHeld) { value, isHeld, _ in
                     if case .second(true, _) = value { isHeld = true }
@@ -906,8 +901,9 @@ private struct NumberField: View {
                 },
             isEnabled: !isTyping
         )
-        // However the hold ends, lifted or cancelled, scrubbing ends with it.
-        .onChange(of: isHeld) { _, held in if !held { scrubber.end() } }
+        // However the hold ends, lifted or cancelled, scrubbing ends with it: the panel's,
+        // not a zoom ruler another finger may hold.
+        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(.panel) } }
     }
 
     private static let format = TypedNumber.format

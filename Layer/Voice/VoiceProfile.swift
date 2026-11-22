@@ -62,7 +62,7 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             Profile {
                 Instructions(VoiceRules.full)
                 CanvasBrief(detail: .full)
-                VoiceTools.taking(turns, VoiceTools.all(actor, canEndCall: canEndCall))
+                offered(VoiceTools.all(actor, canEndCall: canEndCall))
             }
             .model(testModel)
             .historyTransform { Self.trimmed($0, keepingCommands: 6) }
@@ -72,7 +72,7 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             Profile {
                 Instructions(VoiceRules.full)
                 CanvasBrief(detail: .full)
-                VoiceTools.taking(turns, VoiceTools.all(actor, canEndCall: canEndCall))
+                offered(VoiceTools.all(actor, canEndCall: canEndCall))
             }
             .model(HostedLanguageModel(provider: provider, model: model))
             .historyTransform { Self.trimmed($0, keepingCommands: 6) }
@@ -84,9 +84,9 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
                 Instructions(VoiceRules.compact)
                 CanvasBrief(detail: .compact)
                 if picture.hasScreens {
-                    VoiceTools.taking(turns, VoiceTools.all(actor, canEndCall: canEndCall))
+                    offered(VoiceTools.all(actor, canEndCall: canEndCall))
                 } else {
-                    VoiceTools.taking(turns, VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall))
+                    offered(VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall))
                 }
             }
             .historyTransform { Self.trimmed($0, keepingCommands: 2) }
@@ -97,6 +97,12 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             .samplingMode(.greedy)
             .reporting(to: hooks, turns: turns)
         }
+    }
+
+    /// `tools` as the model is handed them, each taking its turn. A change for one screen
+    /// makes no other, so it isn't handed the tool that would: it is refused anyway.
+    private func offered(_ tools: [any Tool]) -> [any Tool] {
+        VoiceTools.taking(turns, picture.scope == nil ? tools : tools.filter { !($0 is CreateScreenTool) })
     }
 
     /// The conversation as it is sent to a model: the instructions, and the last `count`
