@@ -315,36 +315,24 @@ final class DesignStore {
         }
     }
 
-    /// The elements an element shares its screen, or the open canvas, with, itself
-    /// included, back to front.
-    private func siblings(of ref: ElementRef) -> [DesignElement.ID] {
-        switch ref.host {
-        case .screen(let id): screen(id)?.elements.map(\.id) ?? []
-        case .canvas: floating.map(\.id)
-        }
+    /// The things an element is arranged among, itself included, back to front: what it
+    /// shares its screen, or the open canvas, with, as the design's own list holds them. A
+    /// drawing is arranged among nothing, and nothing is arranged past one: unlocked ink is
+    /// drawn above every element, so a drawing keeps its place in the list (F7).
+    func siblings(of ref: ElementRef) -> [DesignElement.ID] {
+        guard let (element, _) = resolve(ref), element.kind != .drawing else { return [] }
+        return content.elements.compactMap { $0.parent == element.parent && $0.kind != .drawing ? $0.id : nil }
     }
 
-    /// Moves an element up or down among those it shares its screen, or the open canvas, with.
+    /// Moves an element up or down among those it shares its screen, or the open canvas,
+    /// with: see `arrange(_ selection:_:)`. Siri's Change Element Order comes this way.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
-        var order = siblings(of: ref)
-        guard let index = order.firstIndex(of: ref.element) else { return }
-        let target = switch arrangement {
-        case .front: order.count - 1
-        case .forward: min(index + 1, order.count - 1)
-        case .backward: max(index - 1, 0)
-        case .back: 0
-        }
-        guard target != index else { return }
-        order.insert(order.remove(at: index), at: target)
-        let parent: DesignScreen.ID? = if case .screen(let id) = ref.host { id } else { nil }
-        change { $0.reorder(parent, to: order) }
+        arrange(.element(ref), arrangement)
     }
 
     /// Whether an element can go further up, or further down, among its neighbours.
     func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
-        let ids = siblings(of: ref)
-        guard let index = ids.firstIndex(of: ref.element) else { return false }
-        return arrangement == .front || arrangement == .forward ? index < ids.count - 1 : index > 0
+        canArrange(.element(ref), arrangement)
     }
 
     /// Lines an element on a screen up with an edge or the middle of that screen.

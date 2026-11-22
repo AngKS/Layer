@@ -85,15 +85,8 @@ struct SelectionActions: View {
                     ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
                         .keyboardShortcut("l", modifiers: .command)
                 }
-                if case .element(let ref) = model.selection {
-                    ForEach([DesignStore.Arrangement.forward, .backward], id: \.self) { arrangement in
-                        ToolButton(symbol: arrangement.symbol, label: arrangement.name) {
-                            withAnimation(.smooth(duration: 0.25)) { model.arrangeSelection(arrangement) }
-                        }
-                        .keyboardShortcut(arrangement == .forward ? "]" : "[", modifiers: .command)
-                        .disabled(!model.store.canArrange(ref, arrangement))
-                        .opacity(model.store.canArrange(ref, arrangement) ? 1 : 0.35)
-                    }
+                if case .element = model.selection {
+                    arrangeMenu
                 }
                 ToolButton(symbol: "trash", label: "Delete selection") {
                     withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
@@ -159,10 +152,44 @@ struct SelectionActions: View {
         .keyboardShortcut("d", modifiers: .command)
         ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
             .keyboardShortcut("l", modifiers: .command)
+        arrangeMenu
         ToolButton(symbol: "trash", label: "Delete selection") {
             withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
         }
         .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    /// Bring to Front, Bring Forward, Send Backward and Send to Back, for one thing or
+    /// several, each with its Keynote and Pages shortcut. A command that would change
+    /// nothing is off.
+    private var arrangeMenu: some View {
+        ZStack {
+            // The shortcuts. On a closed menu's items they don't fire on iPadOS (tried in
+            // the simulator), so they are on buttons of their own behind it, hidden and
+            // taking no room. Made see-through instead, accessibility still found them.
+            // They are never off: one switched on by the change before was at times still
+            // off for the next key press, and arranging changes nothing when there is
+            // nothing to do.
+            ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+                Button(arrangement.name) { arrange(arrangement) }
+                    .keyboardShortcut(arrangement.shortcut)
+            }
+            .hidden()
+            .frame(width: 0, height: 0)
+            Menu {
+                ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+                    Button(arrangement.name, systemImage: arrangement.symbol) { arrange(arrangement) }
+                        .disabled(!model.canArrangeSelection(arrangement))
+                }
+            } label: {
+                ToolIcon(symbol: "square.3.layers.3d")
+            }
+            .accessibilityLabel("Arrange")
+        }
+    }
+
+    private func arrange(_ arrangement: DesignStore.Arrangement) {
+        withAnimation(.smooth(duration: 0.25)) { model.arrangeSelection(arrangement) }
     }
 
     private func convert() {
@@ -225,6 +252,19 @@ private struct TextEditor: View {
         .onDisappear {
             if let edit { model.store.endEdit(edit) }
             edit = nil
+        }
+    }
+}
+
+private extension DesignStore.Arrangement {
+    /// The Keynote and Pages shortcuts: ⇧⌘] Bring to Front, ⌘] Bring Forward, ⌘[ Send
+    /// Backward and ⇧⌘[ Send to Back.
+    var shortcut: KeyboardShortcut {
+        switch self {
+        case .front: KeyboardShortcut("]", modifiers: [.command, .shift])
+        case .forward: KeyboardShortcut("]", modifiers: .command)
+        case .backward: KeyboardShortcut("[", modifiers: .command)
+        case .back: KeyboardShortcut("[", modifiers: [.command, .shift])
         }
     }
 }

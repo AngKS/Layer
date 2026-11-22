@@ -1449,9 +1449,17 @@ final class AppModel {
         self.selection = copies
     }
 
+    /// Brings what is selected to the front or forward, or sends it backward or to the
+    /// back: one thing, or several as one block among their siblings. See
+    /// `DesignStore.arrange(_ selection:_:)`.
     func arrangeSelection(_ arrangement: DesignStore.Arrangement) {
-        guard case .element(let ref) = selection else { return }
-        store.arrange(ref, arrangement)
+        guard let selection else { return }
+        store.arrange(selection, arrangement)
+    }
+
+    /// Whether arranging what is selected would change the order of anything.
+    func canArrangeSelection(_ arrangement: DesignStore.Arrangement) -> Bool {
+        selection.map { store.canArrange($0, arrangement) } ?? false
     }
 
     /// Lines up what is selected: one element with its screen, several things with each other.

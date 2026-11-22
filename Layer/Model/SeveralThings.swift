@@ -108,15 +108,15 @@ extension DesignStore {
     /// the area they cover together. A locked thing stays where it is and the others line
     /// up with it all the same.
     func align(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) {
-        arrange(selection) { ElementLayout.aligned($0, alignment) }
+        lineUp(selection) { ElementLayout.aligned($0, alignment) }
     }
 
     /// Spaces three or more things evenly, across or down, between the two furthest apart.
     func distribute(_ selection: CanvasSelection, _ distribution: ElementLayout.Distribution) {
-        arrange(selection) { ElementLayout.distributed($0, distribution) }
+        lineUp(selection) { ElementLayout.distributed($0, distribution) }
     }
 
-    private func arrange(_ selection: CanvasSelection, _ rule: ([CGRect]) -> [CGRect]) {
+    private func lineUp(_ selection: CanvasSelection, _ rule: ([CGRect]) -> [CGRect]) {
         let placed = things(in: selection).compactMap { thing in canvasFrame(of: thing).map { (thing, $0) } }
         guard placed.count > 1 else { return }
         let arranged = rule(placed.map(\.1))

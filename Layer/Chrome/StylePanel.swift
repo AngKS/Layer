@@ -86,10 +86,7 @@ private struct ElementSettings: View {
                 IconButton(element.isLocked ? "Unlock" : "Lock", symbol: element.isLocked ? "lock.fill" : "lock", isOn: element.isLocked) {
                     model.toggleLockOfSelection()
                 }
-                IconButton(DesignStore.Arrangement.forward.name, symbol: DesignStore.Arrangement.forward.symbol) { model.arrangeSelection(.forward) }
-                    .disabled(!model.store.canArrange(ref, .forward))
-                IconButton(DesignStore.Arrangement.backward.name, symbol: DesignStore.Arrangement.backward.symbol) { model.arrangeSelection(.backward) }
-                    .disabled(!model.store.canArrange(ref, .backward))
+                ArrangeButtons()
             }
         }
 
@@ -273,6 +270,7 @@ private struct SeveralSettings: View {
                 IconButton(isLocked ? "Unlock" : "Lock", symbol: isLocked ? "lock.fill" : "lock", isOn: isLocked) {
                     model.toggleLockOfSelection()
                 }
+                ArrangeButtons()
             }
         }
 
@@ -884,6 +882,20 @@ struct TypedNumber: View {
         }
         .onChange(of: isEditing) { _, focused in if !focused { onEnd() } }
         .accessibilityLabel(label)
+    }
+}
+
+/// Bring to Front, Bring Forward, Send Backward and Send to Back, for whatever is selected:
+/// the popover's Arrange menu, laid out in the actions row. One that would change nothing
+/// is off.
+private struct ArrangeButtons: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+            IconButton(arrangement.name, symbol: arrangement.symbol) { model.arrangeSelection(arrangement) }
+                .disabled(!model.canArrangeSelection(arrangement))
+        }
     }
 }
 
