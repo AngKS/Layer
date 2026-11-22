@@ -62,6 +62,7 @@ final class PencilVoice {
     /// Whether the squeeze under way, or the next one, is the pencil's to send with: a
     /// toggle is listening, or a squeeze has just sent one and hasn't been let go of. The
     /// format panel's scrubber leaves such a squeeze alone, whichever of them hears it first.
+    /// With Squeeze to Talk off, neither can be so: see `squeezeToTalkTurnedOff()`.
     var ownsSqueeze: Bool {
         if endIsIgnored { return true }
         if case .listening(_, toggled: true, _) = mode { return true }
@@ -82,8 +83,9 @@ final class PencilVoice {
         return call.levels
     }
 
-    /// Whether squeezing is turned off in Settings, which Layer respects.
-    @ObservationIgnored var squeezeIsOff: @MainActor () -> Bool = { UIPencilInteraction.preferredSqueezeAction == .ignore }
+    /// Whether the system's Apple Pencil settings keep the squeeze from Layer, which it
+    /// respects: see `systemKeepsSqueeze(_:)`.
+    @ObservationIgnored var squeezeIsOff: @MainActor () -> Bool = { PencilVoice.systemKeepsSqueeze(UIPencilInteraction.preferredSqueezeAction) }
     /// Whether a phone call is up in any window. Only one thing hears at a time, so the
     /// pencil doesn't listen then. A test says.
     @ObservationIgnored var phoneCallIsUp: @MainActor () -> Bool
@@ -125,6 +127,9 @@ final class PencilVoice {
     @ObservationIgnored private var askedToListen = false
     /// Set once the design has closed: the call ends as soon as it has nothing to finish.
     @ObservationIgnored private var designHasClosed = false
+    /// Set when Squeeze to Talk went off, which ends the call in the same way. The next
+    /// call, once it is back on, is a new one.
+    @ObservationIgnored private var squeezeWentOff = false
     /// Set when a squeeze sent a toggle: letting go of that squeeze does nothing more.
     @ObservationIgnored private var endIsIgnored = false
     @ObservationIgnored private var silenceTimer: Task<Void, Never>?
@@ -168,6 +173,12 @@ final class PencilVoice {
         VoiceAgent(model: model, canEndCall: false)
     }
 
+    /// Whether the squeeze chosen in the system's settings isn't Layer's to take: squeezing
+    /// is turned off, or runs a shortcut, which the system does without asking the app.
+    static func systemKeepsSqueeze(_ action: UIPencilPreferredAction) -> Bool {
+        action == .ignore || action == .runSystemShortcut
+    }
+
     #if DEBUG
     /// Puts the simulator's scripted squeeze into the instance the canvas already shows,
     /// which keeps to the one it first read. Reaches the next call, not one already up.
@@ -188,8 +199,9 @@ final class PencilVoice {
     func hovered() {
         // A phone call hears everything while it is up, in this window or another: the
         // pencil's own isn't needed. In Draw the squeeze is PencilKit's, so the pen hovering
-        // there isn't on its way to one.
-        guard call == nil, let model, model.tool != .draw, model.voice == nil, !phoneCallIsUp() else { return }
+        // there isn't on its way to one, nor anywhere when squeezing doesn't talk.
+        guard call == nil, let model, model.tool != .draw, model.squeezesToTalk, !squeezeIsOff(),
+              model.voice == nil, !phoneCallIsUp() else { return }
         if let lastReadinessCheck, clock() - lastReadinessCheck < Self.readinessRetry { return }
         guard case .ready = readiness() else {
             lastReadinessCheck = clock()
@@ -201,6 +213,11 @@ final class PencilVoice {
 
     /// A squeeze began, with the pen hovering at `viewPoint`, or out of range when nil.
     func squeezeBegan(at viewPoint: CGPoint?, azimuth: Angle?) {
+        // With Squeeze to Talk off the squeeze is the system's: it starts and sends nothing.
+        guard model?.squeezesToTalk != false else {
+            VoiceLog.log.info("pencil: squeeze ignored (squeeze to talk off)")
+            return
+        }
         // Only starting needs the pen in range: a toggle is sent wherever the pen has drifted.
         if case .listening(_, toggled: true, _) = mode {
             endIsIgnored = true
@@ -256,6 +273,19 @@ final class PencilVoice {
     /// will never be heard to end, so whatever it was listening to is let go of, unsent.
     /// A command already sent is left to finish.
     func drawTurnedOn() {
+        letGoOfSqueeze()
+    }
+
+    /// Squeeze to Talk was turned off, which takes the squeeze away as Draw does: whatever
+    /// was being listened to is let go of, unsent. The call isn't needed until it is back
+    /// on, so it ends, once a command already sent has finished.
+    func squeezeToTalkTurnedOff() {
+        letGoOfSqueeze()
+        squeezeWentOff = true
+        endIfIdle()
+    }
+
+    private func letGoOfSqueeze() {
         endIsIgnored = false
         if case .listening = mode {
             stopHearing()
@@ -300,7 +330,7 @@ final class PencilVoice {
     }
 
     private func endIfIdle() {
-        guard designHasClosed, let call, !call.isHearing, call.queuedCount == 0, call.phase != .working else { return }
+        guard designHasClosed || squeezeWentOff, let call, !call.isHearing, call.queuedCount == 0, call.phase != .working else { return }
         call.end()
     }
 
@@ -308,6 +338,8 @@ final class PencilVoice {
 
     @discardableResult
     private func startCall() -> VoiceCall? {
+        // Back on: the call is wanted again, should it still be finishing a command.
+        squeezeWentOff = false
         if let call { return call }
         guard let model else { return nil }
         let runner = makeRunner(model)

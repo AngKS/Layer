@@ -24,7 +24,7 @@ struct AppSettingsTests {
     /// What a design remembers between launches, and what else the app keeps there.
     private static let keys = [
         "fingerDraws", "fingerDrawsChosen", "convertsAutomatically", "untitledFileName",
-        "defaultModelChoice", "assetLibrary.recents", "spotlightIndexedScreens",
+        "defaultModelChoice", "assetLibrary.recents", "spotlightIndexedScreens", "squeezesToTalk",
     ]
 
     @Test func theTestsKeepSettingsApartFromTheApps() {
