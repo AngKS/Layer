@@ -142,6 +142,10 @@ final class AppModel {
                 scrubber.forgetHovered(.panel)
                 isEditingText = false
                 pencilVoiceIfMade?.selectionChanged()
+                // What the pointer hovered was picked as the selection stood: after a double-tap
+                // into a group, the outline of the outer group is stale. A row of the Layers list
+                // ends its own hover (it is also gone when its group closes).
+                if !isHoveringList, hovered != nil { hovered = nil }
                 // The format panel's changes so far are a step, apart from the next selection's.
                 endAdjustmentNow()
                 // Several things turn about a pivot fixed as they are selected, and forgotten
@@ -1400,9 +1404,10 @@ final class AppModel {
     /// - A selected thing is taken out.
     /// - A thing on a selected screen, or in a selected group, takes the screen's or the
     ///   group's place: the same as going one level in.
-    /// - Anything else is added. A screen added folds in its elements that were selected, and
-    ///   a group the things selected inside it, at any depth (F5), so that nothing selected
-    ///   holds a group and its own member.
+    /// - Anything else is added. A group added folds in the things selected inside it, at any
+    ///   depth (F5), so that nothing selected holds a group and its own member. A screen added
+    ///   folds in its selected elements too, but not here: `CanvasSelection(_:)` leaves out
+    ///   an element whose screen is in the selection.
     private func selection(afterTapOn thing: CanvasSelection, from current: CanvasSelection?) -> CanvasSelection? {
         guard let current else { return thing }
         if current.contains(thing) { return current.removing(thing) }

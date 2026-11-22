@@ -389,6 +389,7 @@ private struct LayerHeadingRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .onHover { hoverLayer(target, $0, in: model) }
+        .onDisappear { hoverLayer(target, false, in: model) }
         .disabled(target == nil)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -491,6 +492,7 @@ private struct LayerRow: View, Equatable {
         .opacity(isDimmed ? 0.5 : 1)
         .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
         .onHover { hoverLayer(.element(ref), $0, in: model) }
+        .onDisappear { hoverLayer(.element(ref), false, in: model) }
     }
 }
 
@@ -570,6 +572,7 @@ private struct GroupLayerRow: View, Equatable {
         .opacity(isDimmed ? 0.5 : 1)
         .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
         .onHover { hoverLayer(.element(ref), $0, in: model) }
+        .onDisappear { hoverLayer(.element(ref), false, in: model) }
     }
 }
 

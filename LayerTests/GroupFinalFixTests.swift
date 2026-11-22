@@ -109,4 +109,31 @@ struct GroupFinalFixTests {
         #expect(rowValue(isGroup: false, isHidden: true, isDimmed: true, isLocked: true, isLockedByGroup: true) == "Hidden, Locked")
         #expect(rowValue(isGroup: false, isHidden: false, isDimmed: false, isLocked: false, isLockedByGroup: false) == "")
     }
+
+    // MARK: Hover
+
+    /// After a double-tap goes into a group the outline of the outer group, which the pointer
+    /// last hovered, is stale: it is let go, and found again as the pointer moves.
+    @Test func aChangeOfSelectionLetsGoOfTheCanvasHover() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.hovered = .element(g)
+        board.model.selection = .element(g)
+        #expect(board.model.hovered == nil)
+
+        board.model.hovered = .element(g)
+        board.model.selection = .element(board.b)
+        #expect(board.model.hovered == nil)
+    }
+
+    /// A hover that comes from a row of the Layers list is the list's: the row says when it ends.
+    @Test func aChangeOfSelectionLeavesTheListsHoverAlone() {
+        let board = OrderBoard()
+        board.model.isHoveringList = true
+        board.model.hovered = .element(board.b)
+
+        board.model.selection = .element(board.c)
+
+        #expect(board.model.hovered == .element(board.b))
+    }
 }
