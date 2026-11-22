@@ -7,9 +7,21 @@ struct PhoneScreenView: View {
     let screen: DesignScreen
     var showsName = true
 
+    private func semanticElements(in screen: DesignScreen) -> [DesignElement] {
+        guard !screen.semanticNodes.isEmpty else { return screen.elements }
+        return screen.elements.map { element in
+            var result = element
+            if let frame = screen.resolvedFrames[element.id] {
+                result.frame = frame
+            }
+            return result
+        }
+    }
+
     var body: some View {
         let device = screen.device
         let size = device.size
+        let displayElements = semanticElements(in: screen)
         ZStack(alignment: .topLeading) {
             // One soft shadow and a hairline edge. Shadows are redrawn on every frame of a
             // zoom, and a wide one is the costliest thing on the canvas.
@@ -28,7 +40,7 @@ struct PhoneScreenView: View {
                 statusBar(for: device)
             }
 
-            ForEach(screen.elements.filter { !$0.isHidden }) { element in
+            ForEach(displayElements.filter { !$0.isHidden }) { element in
                 ElementView(element: element)
                     .frame(width: element.frame.width, height: element.frame.height)
                     .offset(x: element.frame.minX, y: element.frame.minY)

@@ -154,6 +154,7 @@ struct DesignContent: Equatable, Sendable {
         screen.elements = before
         body(&screen)
         screen.id = id
+        screen.refreshResolvedFrames()
         frames[index] = screen.withoutElements
         if screen.elements != before { setChildren(of: id, to: screen.elements) }
     }

@@ -284,6 +284,11 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var deviceID: String?
     /// What is on the screen. Later elements sit on top.
     var elements: [DesignElement] = []
+    /// Canonical semantic hierarchy. Legacy flat elements remain the rendering source
+    /// until migrated; user-authored frames and stable IDs stay synchronized here.
+    var semanticNodes: [LayerNode] = []
+    /// Layout cache recomputed by `DesignStore`, never by SwiftUI view body evaluation.
+    var resolvedFrames: [UUID: CGRect] = [:]
     /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
     /// still be edited.
     var isLocked: Bool?
@@ -315,7 +320,7 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
 
 extension DesignScreen {
     enum CodingKeys: String, CodingKey {
-        case id, name, origin, scale, deviceID, elements, isLocked
+        case id, name, origin, scale, deviceID, elements, semanticNodes, resolvedFrames, isLocked
     }
 
     /// Reads a screen, with the elements it held when designs were saved screen by screen.
@@ -328,6 +333,8 @@ extension DesignScreen {
         deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
         elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
+        semanticNodes = try container.decodeIfPresent([LayerNode].self, forKey: .semanticNodes) ?? []
+        resolvedFrames = try container.decodeIfPresent([UUID: CGRect].self, forKey: .resolvedFrames) ?? [:]
     }
 
     /// A screen is saved without its elements, which are saved in the design's one list.
@@ -339,6 +346,29 @@ extension DesignScreen {
         try container.encode(scale, forKey: .scale)
         try container.encodeIfPresent(deviceID, forKey: .deviceID)
         try container.encodeIfPresent(isLocked, forKey: .isLocked)
+        try container.encode(semanticNodes, forKey: .semanticNodes)
+        try container.encode(resolvedFrames, forKey: .resolvedFrames)
+    }
+}
+
+extension DesignScreen {
+    /// Resolves semantic layout in a store mutation, so rendering only reads snapshots.
+    mutating func refreshResolvedFrames() {
+        guard !semanticNodes.isEmpty else {
+            resolvedFrames = [:]
+            return
+        }
+        let (resolved, _) = LayerLayoutEngine.resolve(
+            semanticNodes,
+            in: CGRect(origin: .zero, size: size)
+        )
+        var cache: [UUID: CGRect] = [:]
+        func collect(_ node: LayerNode) {
+            if let frame = node.resolvedFrame { cache[node.id] = frame }
+            for child in node.children { collect(child) }
+        }
+        for node in resolved { collect(node) }
+        resolvedFrames = cache
     }
 }
 

@@ -13,6 +13,10 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # Kah Shin Ang's team. iCloud and TestFlight both need one.
     DEVELOPMENT_TEAM: 2A24G6YRY3
+packages:
+  A2UI:
+    url: https://github.com/a2ui-project/a2ui
+    exact: "0.11.0"
 targets:
   Layer:
     type: application
@@ -84,6 +88,10 @@ targets:
           - iCloud.kahshin.Layer
     dependencies:
       - target: LayerThumbnails
+      - package: A2UI
+        product: A2UISwiftCore
+      - package: A2UI
+        product: BasicCatalog
   # Draws each design's picture in Files and in Layer's own document browser.
   LayerThumbnails:
     type: app-extension
