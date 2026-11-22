@@ -1024,7 +1024,5 @@ enum CanvasWork {
     /// Turn sessions formed from the design: one for each read of a selection's shape that
     /// had none held.
     static var turnSessionsFormed = 0
-    /// Walks over a group's leaves, made to see whether anything in the group shows.
-    static var leafWalks = 0
 }
 #endif

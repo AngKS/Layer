@@ -88,3 +88,74 @@ extension PerformanceFixTests {
         #expect(asString == Data("x".utf8), "as a String shares it")
     }
 }
+
+// MARK: What can be touched (finding 3)
+
+extension PerformanceFixTests {
+    /// What `targetElements` was before: a group is a target when something in it shows, found
+    /// by walking its leaves, each looked up on its own.
+    private func referenceTargets(_ store: DesignStore, entered: Set<DesignElement.ID>) -> [DesignStore.ElementRef.Host: [DesignElement.ID]] {
+        let content = store.content
+        var found: [DesignStore.ElementRef.Host: [DesignElement.ID]] = [:]
+        for element in content.elements {
+            guard !element.isHidden, element.isPickedByItsFrame else { continue }
+            if element.kind == .group, !content.leaves(of: element.id).contains(where: { !content.isHiddenWithItsGroups($0.id) }) { continue }
+            if element.group != nil, !DesignContent.groups(above: element, find: content.element(_:)).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) { continue }
+            guard element.kind != .group || !entered.contains(element.id) else { continue }
+            found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element.id)
+        }
+        return found
+    }
+
+    @Test func workingOutWhatCanBeTouchedWalksNoGroupsLeaves() {
+        let board = OrderBoard()
+        let inner = board.group(board.b, board.c)
+        board.group(inner, board.d)
+        board.group(board.note1, board.note2)
+        board.group(board.a, board.e)
+
+        let walks = GroupWork.leafWalks
+        let found = board.store.targetElements(entered: [])
+        #expect(GroupWork.leafWalks - walks == 0, "leaves walked \(GroupWork.leafWalks - walks) times for 4 groups")
+        #expect(found.values.joined().count > 0)
+    }
+
+    @Test func whatCanBeTouchedIsAsItWasForGroupsHiddenAndGoneInto() {
+        let board = OrderBoard()
+        let inner = board.group(board.b, board.c, named: "inner")
+        let outer = board.group(inner, board.d, named: "outer")
+        let notes = board.group(board.note1, board.note2, named: "notes")
+        let empty = board.group(board.a, board.e, named: "empty")
+
+        func same(_ label: String, entered: Set<DesignElement.ID> = []) {
+            let now = board.store.targetElements(entered: entered).mapValues { $0.map(\.id) }
+            let was = referenceTargets(board.store, entered: entered)
+            #expect(now == was, "\(label)")
+        }
+        same("nothing hidden")
+        same("outer gone into", entered: [outer.element])
+        same("outer and inner gone into", entered: [outer.element, inner.element])
+        board.store.update(board.b) { $0.isHidden = true }
+        same("one of two members hidden", entered: [])
+        board.store.update(board.c) { $0.isHidden = true }
+        same("inner has nothing showing", entered: [])
+        same("inner has nothing showing, outer gone into", entered: [outer.element])
+        board.store.update(board.d) { $0.isHidden = true }
+        same("outer has nothing showing")
+        board.store.update(notes) { $0.isHidden = true }
+        same("a hidden group")
+        board.store.update(notes) { $0.isHidden = false }
+        board.store.update(board.note1) { $0.isHidden = true }
+        board.store.update(board.note2) { $0.isHidden = true }
+        same("members of notes hidden")
+        board.store.update(empty) { $0.isHidden = true }
+        board.store.update(board.a) { $0.isHidden = false }
+        same("a hidden group over a shown member", entered: [empty.element])
+        // Per host as well.
+        for host in [DesignStore.ElementRef.Host.screen(board.screen), .canvas] {
+            let per = board.store.targets(on: host, entered: [outer.element]).map(\.element)
+            let all = board.store.targetElements(entered: [outer.element])[host]?.map(\.id) ?? []
+            #expect(Set(per) == Set(all))
+        }
+    }
+}

@@ -28,7 +28,10 @@ extension DesignContent {
 
     /// The things in a group at any depth that aren't groups themselves, back to front.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
-        contents(of: group).filter { $0.kind != .group }
+        #if DEBUG
+        GroupWork.leafWalked()
+        #endif
+        return contents(of: group).filter { $0.kind != .group }
     }
 
     /// Everything in a group at any depth, the groups inside it included, back to front.
@@ -373,7 +376,8 @@ extension DesignStore {
     /// draws it above them (C3, L10): hit order is draw order. This is the one place that
     /// order lives, and what is built from the targets, and hover, follow it.
     func targets(on host: ElementRef.Host, entered: Set<DesignElement.ID>) -> [ElementRef] {
-        var found = children(on: host).filter { isTarget($0, entered: entered) }
+        let showing = groupsWithSomethingShowing()
+        var found = children(on: host).filter { isTarget($0, entered: entered, showing: showing) }
         if host == .canvas { found = Self.drawnOrder(found) }
         return found.map { ElementRef(host: host, element: $0.id) }
     }
@@ -395,7 +399,8 @@ extension DesignStore {
             CanvasWork.targetPasses += 1
             #endif
             var found: [ElementRef.Host: [DesignElement]] = [:]
-            for element in content.elements where isTarget(element, entered: entered) {
+            let showing = groupsWithSomethingShowing()
+            for element in content.elements where isTarget(element, entered: entered, showing: showing) {
                 found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
             }
             if let floating = found[.canvas] { found[.canvas] = Self.drawnOrder(floating) }
@@ -403,10 +408,35 @@ extension DesignStore {
         }
     }
 
-    private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>) -> Bool {
+    /// The groups that have something showing in them, at any depth: a member that isn't a
+    /// group, hidden neither by itself nor by a group above it. One pass over the list, the
+    /// groups above each member that shows marked as it goes, where asking each group for its
+    /// leaves went over the list for every group.
+    private func groupsWithSomethingShowing() -> Set<DesignElement.ID> {
+        var byID: [DesignElement.ID: DesignElement] = [:]
+        var hasGroups = false
+        for element in content.elements {
+            if byID[element.id] == nil { byID[element.id] = element }
+            if element.kind == .group { hasGroups = true }
+        }
+        guard hasGroups else { return [] }
+        var showing: Set<DesignElement.ID> = []
+        for leaf in content.elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
+            guard !DesignContent.groups(above: leaf, find: { byID[$0] }).contains(where: \.isHidden) else { continue }
+            // Up the chain of groups it says it is in; what is above one already marked is too.
+            var seen: Set<DesignElement.ID> = [leaf.id]
+            var next = leaf.group
+            while let id = next, seen.insert(id).inserted, showing.insert(id).inserted {
+                next = byID[id]?.group
+            }
+        }
+        return showing
+    }
+
+    private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>, showing: Set<DesignElement.ID>) -> Bool {
         guard !element.isHidden, element.isPickedByItsFrame else { return false }
         // A group with nothing showing in it has nothing to touch.
-        if element.kind == .group, !content.leaves(of: element.id).contains(where: { !content.isHiddenWithItsGroups($0.id) }) { return false }
+        if element.kind == .group, !showing.contains(element.id) { return false }
         if element.group != nil {
             guard groups(above: element).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) else { return false }
         }
@@ -718,3 +748,17 @@ extension DesignStore {
         children(on: .canvas).filter { $0.kind == .drawing }.reversed().map { ElementRef(host: .canvas, element: $0.id) }
     }
 }
+
+#if DEBUG
+/// How much of the design the groups' own questions walk: for the tests that hold working out
+/// what can be touched to a pass over the list. Counted on the main thread alone, where the
+/// store works it out. The count only grows: a test measures the difference it makes.
+enum GroupWork {
+    nonisolated(unsafe) private(set) static var leafWalks = 0
+
+    static func leafWalked() {
+        guard Thread.isMainThread else { return }
+        leafWalks += 1
+    }
+}
+#endif
