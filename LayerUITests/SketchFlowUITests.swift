@@ -356,7 +356,12 @@ final class SketchFlowUITests: XCTestCase {
         // Typed text is added the same way, and restyled from the format panel.
         control("Text").tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5), "new text should be selected")
+        // New text opens its text popover. The first tap outside only dismisses it; the next, on
+        // empty canvas, clears. Tapped on again, the text is selected (a tap on a selected thing
+        // would take it out).
         point(CGPoint(x: 800, y: 600)).tap()
+        point(CGPoint(x: 800, y: 600)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
         point(center).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5))
         let weight = app.buttons.matching(labelBeginning("Weight")).firstMatch
@@ -993,7 +998,7 @@ final class SketchFlowUITests: XCTestCase {
         // A member, gone into with a double-tap, is locked by its group, and its panel says so.
         point(centre).doubleTap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "NOT (value BEGINSWITH 'Group') AND value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "a double-tap should go into the group")
-        if panelControl("Unlock", timeout: 1) == nil { control("Format").tap() }
+        showFormatPanel(with: "Unlock")
         XCTAssertNotNil(panelControl("Unlock"), "a member of a locked group should show it is locked")
         XCTAssertNil(panelControl("Lock", timeout: 1))
         attach("group-format-member-locked")
@@ -1003,9 +1008,10 @@ final class SketchFlowUITests: XCTestCase {
         // The group selected again, its W scales it in proportion.
         point(empty).tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "a tap on a member should pick its group")
-        if panelControl("Ungroup", timeout: 1) == nil { control("Format selection").tap() }
+        showFormatPanel(with: "Ungroup")
         setNumber("W", to: "\(Int(size.width) * 2)")
         for _ in 0..<20 where abs(selectionSize.height - size.height * 2) > 2 { usleep(150_000) }
         XCTAssertEqual(selectionSize.width, size.width * 2, accuracy: 2, "W should double the group's width")
@@ -1017,13 +1023,15 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy should be selected")
         panelControl("Delete")?.tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy's members should have gone with it")
 
         // Deleted, the group leaves nothing behind: a tap there finds the screen.
-        if panelControl("Delete", timeout: 1) == nil { control("Format selection").tap() }
+        showFormatPanel(with: "Delete")
         panelControl("Delete")?.tap()
         XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        XCTAssertTrue(waitForFormatPanelToClose(), "the Format panel should go with the selection")
         point(centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
     }
@@ -1087,6 +1095,145 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(layerOrder(["Symbol", "Group"]), "a quick swipe shouldn't reorder rows")
     }
 
+    /// A tap adds to the selection rather than replacing it, a tap on one already selected takes
+    /// it out, and a tap on empty canvas clears the lot.
+    func testTapsAddToTheSelectionAndEmptySpaceClearsIt() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let first = CGPoint(x: centre.x - 220, y: centre.y - 200)
+        let second = centre
+        let third = CGPoint(x: centre.x + 220, y: centre.y + 150)
+
+        // Text, then two notes, each put in a place of its own. Each lands selected, so empty
+        // canvas is tapped, and the thing picked again, before it is moved.
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5))
+        stroke(centre, first)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, third)
+        clearSelection()
+
+        // Nothing is selected, and a tap on each adds it.
+        for place in [first, second, third] { point(place).tap() }
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '3 items'", timeout: 5), "a tap on each thing should add it to the selection")
+        attach("taps-added-three")
+
+        // A tap on one already in takes it out.
+        point(third).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on a selected thing should take it out")
+
+        // Empty canvas clears.
+        point(CGPoint(x: 120, y: window.midY)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
+    }
+
+    /// Two notes grouped from the selection popover, gone into with a double-tap and let go
+    /// of with Ungroup.
+    func testGroupingFromThePopoverAndGoingInWithADoubleTap() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+
+        // Tap each, then Group.
+        point(centre).tap()
+        point(other).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group'", timeout: 5), "Group should select the new group")
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Group"), "the Layers panel should list the group")
+        attach("grouped-notes")
+        control("Layers").tap()
+
+        // A double-tap goes in to the note under it. Nothing is selected first, so the first
+        // tap picks the group and the second goes one level in. (XCUITest's doubleTap() reaches
+        // the canvas as a single tap on an unselected group, so two quick presses stand in.)
+        clearSelection()
+        point(centre).press(forDuration: 0.02)
+        point(centre).press(forDuration: 0.02)
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5), "a double-tap should select the note in the group, not \(String(describing: selectionElement.value))")
+
+        // A tap on a note picks the group again, and Ungroup lets the notes go.
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group'", timeout: 5))
+        control("Ungroup").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "Ungroup should leave the two notes selected")
+    }
+
+    /// Send to Back from the Arrange menu puts the thing behind the one it overlapped, and the
+    /// Layers panel, which lists the front first, shows the selected note move down a row.
+    func testArrangeMenuSendsToBack() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+
+        // Two notes, one on the other: the second, added last, is in front and selected.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        // The note's popover, for typing, may take the tap that would open the panel.
+        for _ in 0..<3 where layerRow("Sticky Note") == nil {
+            control("Layers").tap()
+            _ = app.buttons["Sticky Note"].waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Sticky Note", "Sticky Note"]) }, "both notes should be listed")
+        XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == true, "the note added last should be in front, and selected")
+        attach("arrange-before")
+
+        for _ in 0..<3 where !app.buttons["Send to Back"].exists {
+            control("Arrange").tap()
+            _ = app.buttons["Send to Back"].waitForExistence(timeout: 2)
+        }
+        let back = app.buttons["Send to Back"]
+        XCTAssertTrue(back.exists, "the Arrange menu should offer Send to Back")
+        back.tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Sticky Note", index: 1)?.isSelected == true }, "the note, sent to the back, should be listed below the other")
+        XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == false)
+        attach("arrange-after")
+    }
+
+    /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
+    private func clearSelection() {
+        let empty = CGPoint(x: 120, y: app.windows.firstMatch.frame.midY)
+        for _ in 0..<4 where selectionElement.exists {
+            point(empty).tap()
+            usleep(500_000)
+        }
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "empty canvas should clear the selection")
+    }
+
     /// A row of the Layers panel, which floats at the window's left, by its label; nil when
     /// there is none. The first of several of one name, topmost first, unless `index` says.
     private func layerRow(_ label: String, index: Int = 0) -> XCUIElement? {
@@ -1139,6 +1286,30 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(component.waitForExistence(timeout: 5))
         component.tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "the new button should be selected")
+    }
+
+    /// Waits for the Format panel, which goes with the selection, to finish going: its
+    /// controls stay in the accessibility tree while it slides out, and a test that took them
+    /// for an open panel would find them gone when it came to use them.
+    private func waitForFormatPanelToClose(timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if panelControl("Duplicate", timeout: 0.1) == nil { return true }
+            usleep(100_000)
+        }
+        return false
+    }
+
+    /// Opens the Format panel, which closes whenever nothing is selected, unless a control of
+    /// it is there already. Pressed on the bar's own Format button, which stays where it is:
+    /// the selection popover's, which glides into place under a new selection, can miss a tap.
+    private func showFormatPanel(with label: String) {
+        for _ in 0..<3 {
+            if panelControl(label, timeout: 1) != nil { return }
+            control("Format").tap()
+            if panelControl(label, timeout: 3) != nil { return }
+        }
+        XCTFail("the Format panel should open with \(label)")
     }
 
     /// A control in the Format panel, which floats at the canvas's right, by its label: the

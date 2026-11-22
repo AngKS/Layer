@@ -2197,6 +2197,25 @@ struct GroupAsOneThingTests {
         #expect(board.undo.undoActionName == "Format")
     }
 
+    /// Typed digit by digit, as the field applies each one: deleting "353" to nothing, then
+    /// "706". The group goes down to what it can hold and stays selected, and the last number
+    /// typed is what it comes to.
+    @Test func aGroupsWidthFieldTypedDigitByDigitEndsAtTheNumberTyped() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(g)
+        let box = try #require(board.frame(of: g))
+
+        for width: CGFloat in [box.width / 10, 3, 7, 70, 706] {
+            board.model.setGroupBox(g, width: width)
+            #expect(board.model.selection == .element(g), "the group stays selected after \(width)")
+            #expect(board.store.element(g.element) != nil)
+        }
+
+        let frame = try #require(board.frame(of: g))
+        #expect(abs(frame.width - 706) < 1, "the group should be 706 wide, not \(frame.width)")
+    }
+
     /// L8: the H field does too. Given to `resizeGroup` as it is, it would scale nothing,
     /// since a group is scaled by the ratio of its widths.
     @Test func aGroupsHeightFieldResizesInProportion() throws {

@@ -1166,8 +1166,13 @@ xcodebuild test -project Layer.xcodeproj -scheme Layer -destination "platform=iO
   - that all four arrange commands exist;
   - that the Layers panel shows groups and drags rows.
 - [ ] **Step 4:** Run all unit tests. Commit: `git add -A LayerUITests README.md && git commit -m "Groups: UI tests and README"`
-- [ ] **Step 5: Device checklist** on the user's iPad. Do this only with the user's go-ahead, and when no other session is using the device. Install from main after merging, as the user prefers.
-  - [ ] Tap-to-add feels right with a finger, and near misses keep the selection.
-  - [ ] A double-tap into a group doesn't feel delayed, and single taps aren't slowed.
-  - [ ] Dragging rows in the Layers panel: the hold time, scrolling, and dropping into a closed group.
-  - [ ] Group, turn, resize and move with real fingers. Twist a group mid-drag over another screen; it lands whole (C4).
+- [ ] **Step 5: Device checklist** on the user's iPad. Do this only with the user's go-ahead, and when no other session is using the device. Install from main after merging, as the user prefers. Each line is an action, then what should happen, riskiest first.
+  - [ ] **Twist a group mid-drag over another screen.** Drag a group onto a second screen and twist two fingers while dragging, then lift. It lands whole, at that screen's scale, with every member (C4); lifting mid-twist doesn't leave it half-turned.
+  - [ ] **Double-tap a member of a group.** Quickly, with a finger, on a note in an unselected group, then on one in a selected group. The first goes in to the note under the finger and the second takes nothing out; single taps aren't slowed; the 350 ms window feels right; a double-tap straddling a member's edge reads as two taps; chained quick taps in a group nested three or more deep go one level per tap; the popover doesn't appear under the second tap and eat it.
+  - [ ] **Drag Layers panel rows.** Press and hold a row, drag it. The hold time feels right and not slow; a quick swipe scrolls the panel instead; dragging near the panel's top or bottom edge auto-scrolls; dropping on a closed group's row puts it inside, at the top; dropping above a group's row takes it out; VoiceOver's row actions work.
+  - [ ] **Tap to add with a finger.** Tap three things in turn, tap one again, tap empty canvas. Each tap adds, the second takes it out, empty canvas clears; a tap that only just misses a selected thing's edge keeps the selection; a Pencil lasso tap and a pointer click add too.
+  - [ ] **Resize a group with a corner.** Drag a corner in and out. It scales in proportion, shrinks no smaller than what is in it, and feels smooth; parts with a fixed size hold theirs.
+  - [ ] **Scrub a group's W and H in the Format panel; type W, H and Rotation for a turned group.** The group follows in proportion without its aspect drifting; typed edits to a turned group land where typed.
+  - [ ] **Group, turn, move.** With real fingers, group two things, turn the group by the knob and by a twist, and move it. All members go together.
+  - [ ] **Keyboard shortcuts after opening a design.** With a keyboard attached, press ⌘D as the first key press after opening a design, then ⌘], ⌘[, ⇧⌘], ⇧⌘[ and ⌥⌘G. The first press isn't lost; each fires although the Arrange menu is closed.
+  - [ ] **Arrange from the menu.** Open the Arrange menu above a selection and send something to the back. The menu lists front at the top and back at the bottom, even when it opens upwards; Layers shows the new order.
