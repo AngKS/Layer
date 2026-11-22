@@ -390,7 +390,12 @@ final class SketchFlowUITests: XCTestCase {
         // Typed text is added the same way, and restyled from the format panel.
         control("Text").tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5), "new text should be selected")
+        // New text opens its text popover. The first tap outside only dismisses it; the next, on
+        // empty canvas, clears. Tapped on again, the text is selected (a tap on a selected thing
+        // would take it out).
         point(CGPoint(x: 800, y: 600)).tap()
+        point(CGPoint(x: 800, y: 600)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
         point(center).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == \'200 × 24\'", timeout: 5))
         let weight = app.buttons.matching(labelBeginning("Weight")).firstMatch
@@ -514,9 +519,12 @@ final class SketchFlowUITests: XCTestCase {
         stroke(left, CGPoint(x: button.centre.x + 10, y: button.centre.y))
         control("Draw").tap()
 
-        // On the ink, a tap picks the drawing; on the button clear of it, the button.
+        // On the ink, a tap picks the drawing; on the button clear of it, the button. A tap
+        // adds to what is selected, so empty canvas lets go of the drawing between them.
         point(CGPoint(x: button.centre.x - 40, y: button.centre.y)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on ink over the button should pick the drawing")
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
         point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button away from the ink should pick the button")
 
@@ -548,9 +556,40 @@ final class SketchFlowUITests: XCTestCase {
 
         point(CGPoint(x: centre.x - 120, y: centre.y - 80)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on the ink should pick the drawing")
+        // The tap reaches the button inside the box, and adds it to the drawing.
         point(CGPoint(x: centre.x + 80, y: centre.y)).tap()
-        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button inside the drawing's box should pick the button")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the button inside the drawing's box should pick the button")
         attach("tap-inside-a-drawings-box")
+    }
+
+    /// A screen selected with other things is dragged by its whole area, but a tap there
+    /// reaches what lies under it: an element on it takes the screen's place, and its empty
+    /// area lets go of everything. The area used to take the screen out of the selection.
+    func testATapOnAScreenSelectedWithOtherThingsReachesWhatIsOnIt() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        // A drawing off the screen, to select with it.
+        control("Draw").tap()
+        choosePaletteTool("Pen")
+        stroke(CGPoint(x: 120, y: 420), CGPoint(x: 240, y: 470))
+        control("Draw").tap()
+        point(CGPoint(x: 180, y: 445)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on the ink should pick the drawing")
+        let name = app.staticTexts["Screen 1"]
+        name.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the screen's name should add the screen")
+        let withTheScreen = selectionSize
+
+        // On the screen's button: the button takes the screen's place beside the drawing.
+        point(button.centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the button should replace the screen with it")
+        XCTAssertLessThan(selectionSize.height, withTheScreen.height - 100, "the drawing and the button should cover less than the drawing and the screen")
+
+        // Added again, the screen folds the button in. A tap on its empty area lets go of all.
+        name.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the screen's name should add it again")
+        point(CGPoint(x: button.centre.x, y: button.centre.y - 150)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on the screen's empty area should let go of everything")
+        attach("tap-on-a-screen-among-several")
     }
 
     /// In Draw the palette goes while text is typed, and comes back as the keyboard goes
@@ -909,9 +948,19 @@ final class SketchFlowUITests: XCTestCase {
         setRotation(to: "90")
 
         // Turned a quarter, the button stands on its end: where its right end was is now the
-        // screen's own, and the centre is still the button's.
-        point(CGPoint(x: button.centre.x + 100, y: button.centre.y)).tap()
-        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "where the button's end was (100 points out from its centre) should now select its screen")
+        // screen's own, and the centre is still the button's. A tap on the screen's empty
+        // area first lets go of the button, and then selects the screen.
+        let end = point(CGPoint(x: button.centre.x + 100, y: button.centre.y))
+        end.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "where the button's end was (100 points out from its centre) should hit no button, and let go of it")
+        end.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "tapped again, the spot should select its screen")
+        // The selected screen's own empty area lets go of it, as the canvas does.
+        end.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on the selected screen's empty area should let go of it")
+        end.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5))
+        // A thing on a selected screen takes the screen's place.
         point(button.centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the centre should still select the button")
         attach("rotation-turned-button")
@@ -944,6 +993,442 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(showsInk(near: CGPoint(x: 430, y: 310)), "turned a quarter, the stroke should rise above its centre")
         XCTAssertFalse(showsInk(near: CGPoint(x: 540, y: 420)), "and no longer reach its old end")
         attach("rotation-turned-drawing")
+    }
+
+    // MARK: Groups
+
+    /// A group's Format panel is its own: the settings of what is in it, rather than one
+    /// element's, its lock, and its W, which scales it in proportion. A member of a locked
+    /// group, gone into with a double-tap, shows the lock that holds it, and Unlock there
+    /// unlocks the group. Copied and deleted from the panel, a group goes with its members.
+    func testAGroupHasAFormatPanelOfItsOwn() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let lower = CGPoint(x: centre.x, y: centre.y + 120)
+        let empty = emptyCanvasPoint
+
+        // Two buttons, one above the other, selected together and grouped.
+        addButtonFromTheLibrary()
+        stroke(centre, lower)
+        addButtonFromTheLibrary()
+        point(lower).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the first button should add it")
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "Group should select the new group")
+        let size = selectionSize
+
+        // Its panel has its members' settings, not one element's, and its lock.
+        control("Format selection").tap()
+        XCTAssertNotNil(panelControl("Fill colour"), "the group's panel should have its members' fill")
+        XCTAssertNotNil(panelControl("Ungroup"))
+        panelControl("Lock")?.tap()
+        XCTAssertNotNil(panelControl("Unlock"), "locked from the panel, the panel should offer to unlock it")
+        attach("group-format-locked")
+
+        // A member, gone into with a double-tap, is locked by its group, and its panel says so.
+        point(centre).doubleTap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "NOT (value BEGINSWITH 'Group') AND value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "a double-tap should go into the group")
+        showFormatPanel(with: "Unlock")
+        XCTAssertNotNil(panelControl("Unlock"), "a member of a locked group should show it is locked")
+        XCTAssertNil(panelControl("Lock", timeout: 1))
+        attach("group-format-member-locked")
+        panelControl("Unlock")?.tap()
+        XCTAssertNotNil(panelControl("Lock"), "Unlock on the member should unlock the group that held it")
+
+        // The group selected again, its W scales it in proportion.
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        _ = waitForFormatPanelToClose(timeout: 2)
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "a tap on a member should pick its group")
+        showFormatPanel(with: "Ungroup", afterDeselecting: true)
+        // Typed in, W changes nothing until Return: not at the first digit deleted, when the
+        // group would shrink to its smallest.
+        control("W").tap()
+        let typing = app.textFields["W"]
+        XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the W field should let it be typed in")
+        typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "\(Int(size.width) * 2)")
+        usleep(500_000)
+        XCTAssertEqual(selectionSize.width, size.width, accuracy: 1, "the group shouldn't change as W is typed")
+        XCTAssertEqual(selectionSize.height, size.height, accuracy: 1)
+        typing.typeText("\n")
+        for _ in 0..<20 where abs(selectionSize.height - size.height * 2) > 2 { usleep(150_000) }
+        XCTAssertEqual(selectionSize.width, size.width * 2, accuracy: 2, "W should double the group's width")
+        XCTAssertEqual(selectionSize.height, size.height * 2, accuracy: 2, "and its height with it")
+        attach("group-format-doubled")
+
+        // Copied, then the copy deleted: it goes with its members, leaving the group under them.
+        panelControl("Duplicate")?.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy should be selected")
+        panelControl("Delete")?.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        _ = waitForFormatPanelToClose(timeout: 2)
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy's members should have gone with it")
+
+        // Deleted, the group leaves nothing behind: a tap there finds the screen.
+        showFormatPanel(with: "Delete", afterDeselecting: true)
+        panelControl("Delete")?.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        _ = waitForFormatPanelToClose(timeout: 2)
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
+    }
+
+    /// A number typed into a Format field and not confirmed is applied when a tap on empty
+    /// canvas closes the panel, which doesn't blur the field: it is removed with it.
+    func testATypedFormatNumberIsAppliedWhenTheCanvasIsTapped() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        let wider = Int(button.size.width) + 40
+        control("W").tap()
+        let typing = app.textFields["W"]
+        XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the W field should let it be typed in")
+        typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "\(wider)")
+
+        // Above the keyboard, which covers the lower half of the window.
+        let window = app.windows.firstMatch.frame
+        point(CGPoint(x: 120, y: window.height * 0.3)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
+        // The panel goes with the selection: a soft check, it can linger as it slides out.
+        if !waitForFormatPanelToClose(timeout: 5) { XCTContext.runActivity(named: "the Format panel was still open 5 s after a deselect") { _ in } }
+
+        point(button.centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5))
+        XCTAssertEqual(selectionSize.width, Double(wider), accuracy: 2, "the typed width should have been applied")
+    }
+
+    /// Rows in the Layers panel drag to reorder, into an open group, out of it and onto a closed
+    /// group's row, each by a long press then a drag; a quick swipe still scrolls.
+    func testLayersPanelRowsDragIntoAndOutOfGroups() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let lower = CGPoint(x: centre.x, y: centre.y + 120)
+
+        // Two buttons grouped, and a heart symbol in front of the group.
+        addButtonFromTheLibrary()
+        stroke(centre, lower)
+        addButtonFromTheLibrary()
+        point(lower).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5))
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("heart fill")
+        let heart = app.buttons["heart.fill"]
+        XCTAssertTrue(heart.waitForExistence(timeout: 5))
+        heart.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Symbol"), "the symbol should be listed")
+        XCTAssertNotNil(layerRow("Group"), "the group should be listed")
+        attach("layers-drag-start")
+
+        // Panel top to bottom: Symbol, Group (closed). Dropped on the closed group's row, the
+        // symbol goes inside it.
+        XCTAssertTrue(layerOrder(["Symbol", "Group"]), "the symbol should start above the group")
+        dragRow("Symbol", onto: "Group")
+        // The symbol is selected, so the group it is in opens on it.
+        let chevron = app.buttons.matching(NSPredicate(format: "label == 'Contents' AND value == 'Collapsed' AND enabled == true")).firstMatch
+        if chevron.waitForExistence(timeout: 2) { chevron.tap() }
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Group", "Symbol", "Button", "Button"]) }, "a row dropped on a closed group's row should go inside, at the top; it landed at the top of the group")
+        attach("layers-drag-into-group")
+
+        // Inside the group, dragged down below the buttons: still in the group, now at the back.
+        dragRow("Symbol", onto: "Button", index: 1, dy: 18)
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Group", "Button", "Button", "Symbol"]) }, "a row dropped below the last one in a group should go to its back")
+        attach("layers-drag-within-group")
+
+        // Out of the group: dropped above the group's own row.
+        dragRow("Symbol", onto: "Group", dy: -14)
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Symbol", "Group"]) && self.layerRow("Button") == nil }, "a row dropped above a group's row should leave the group, which closes with nothing selected in it")
+        attach("layers-drag-out-of-group")
+
+        // A quick swipe doesn't drag a row: nothing moves.
+        let row = layerRow("Group")!
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: -2)))
+        XCTAssertTrue(layerOrder(["Symbol", "Group"]), "a quick swipe shouldn't reorder rows")
+    }
+
+    /// A tap adds to the selection rather than replacing it, a tap on one already selected takes
+    /// it out, and a tap on empty canvas clears the lot.
+    func testTapsAddToTheSelectionAndEmptySpaceClearsIt() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let first = CGPoint(x: centre.x - 220, y: centre.y - 200)
+        let second = centre
+        let third = CGPoint(x: centre.x + 220, y: centre.y + 150)
+
+        // Text, then two notes, each put in a place of its own. Each lands selected, so empty
+        // canvas is tapped, and the thing picked again, before it is moved.
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5))
+        stroke(centre, first)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, third)
+        clearSelection()
+
+        // Nothing is selected, and a tap on each adds it.
+        for place in [first, second, third] { point(place).tap() }
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '3 items'", timeout: 5), "a tap on each thing should add it to the selection")
+        attach("taps-added-three")
+
+        // A tap on one already in takes it out.
+        point(third).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on a selected thing should take it out")
+
+        // Empty canvas clears.
+        point(emptyCanvasPoint).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
+    }
+
+    /// Two notes grouped from the selection popover, gone into with a double-tap and let go
+    /// of with Ungroup.
+    func testGroupingFromThePopoverAndGoingInWithADoubleTap() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+
+        // Tap each, then Group.
+        point(centre).tap()
+        point(other).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group'", timeout: 5), "Group should select the new group")
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Group"), "the Layers panel should list the group")
+        attach("grouped-notes")
+        control("Layers").tap()
+
+        // A double-tap goes in to the note under it. Nothing is selected first, so the first
+        // tap picks the group and the second goes one level in. (XCUITest's doubleTap() reaches
+        // the canvas as a single tap on an unselected group, so two quick presses stand in.)
+        clearSelection()
+        point(centre).press(forDuration: 0.02)
+        point(centre).press(forDuration: 0.02)
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5), "a double-tap should select the note in the group, not \(String(describing: selectionElement.value))")
+
+        // A tap on a note picks the group again, and Ungroup lets the notes go.
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group'", timeout: 5))
+        control("Ungroup").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "Ungroup should leave the two notes selected")
+    }
+
+    /// Send to Back from the Arrange menu puts the thing behind the one it overlapped, and the
+    /// Layers panel, which lists the front first, shows the selected note move down a row.
+    func testArrangeMenuSendsToBack() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+
+        // Two notes, one on the other: the second, added last, is in front and selected.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        // The note's popover, for typing, may take the tap that would open the panel.
+        // Tapped again only when the panel still isn't there after a good wait: a slow open
+        // tapped again would close.
+        for _ in 0..<3 where layerRow("Sticky Note") == nil {
+            control("Layers").tap()
+            _ = app.buttons["Sticky Note"].waitForExistence(timeout: 6)
+        }
+        XCTAssertTrue(waitForLayers { self.layerOrder(["Sticky Note", "Sticky Note"]) }, "both notes should be listed")
+        XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == true, "the note added last should be in front, and selected")
+        attach("arrange-before")
+
+        for _ in 0..<3 where !app.buttons["Send to Back"].exists {
+            control("Arrange").tap()
+            _ = app.buttons["Send to Back"].waitForExistence(timeout: 6)
+        }
+        let back = app.buttons["Send to Back"]
+        XCTAssertTrue(back.exists, "the Arrange menu should offer Send to Back")
+        back.tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Sticky Note", index: 1)?.isSelected == true }, "the note, sent to the back, should be listed below the other")
+        XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == false)
+        attach("arrange-after")
+    }
+
+    /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
+    private func clearSelection() {
+        let empty = emptyCanvasPoint
+        for _ in 0..<4 where selectionElement.exists {
+            point(empty).tap()
+            usleep(500_000)
+        }
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "empty canvas should clear the selection")
+    }
+
+    /// A row of the Layers panel, which floats at the window's left, by its label; nil when
+    /// there is none. The first of several of one name, topmost first, unless `index` says.
+    private func layerRow(_ label: String, index: Int = 0) -> XCUIElement? {
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+            .filter { $0.exists && $0.frame.minX < 340 && $0.frame.width > 80 }
+            .sorted { $0.frame.minY < $1.frame.minY }
+        return index < rows.count ? rows[index] : nil
+    }
+
+    /// Whether the panel's rows, top to bottom, begin with these.
+    private func layerOrder(_ labels: [String]) -> Bool {
+        var last: CGFloat = -1
+        var seen: [String: Int] = [:]
+        for label in labels {
+            let n = seen[label, default: 0]
+            seen[label] = n + 1
+            guard let row = layerRow(label, index: n), row.frame.minY > last else { return false }
+            last = row.frame.minY
+        }
+        return true
+    }
+
+    private func waitForLayers(_ condition: () -> Bool) -> Bool {
+        for _ in 0..<20 {
+            if condition() { return true }
+            usleep(250_000)
+        }
+        return false
+    }
+
+    /// Long-presses a row and drags it onto another, `dy` points below the middle of that one.
+    private func dragRow(_ label: String, onto target: String, index: Int = 0, dy: CGFloat = 0) {
+        guard let from = layerRow(label), let to = layerRow(target, index: index) else { return XCTFail("rows \(label), \(target) should be listed") }
+        from.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+            .press(forDuration: 0.8, thenDragTo: to.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).withOffset(CGVector(dx: 0, dy: dy)))
+        usleep(800_000)
+        attach("layers-after-dragging-\(label)")
+    }
+
+    /// Adds a button from the library, which lands selected in the middle of the view.
+    private func addButtonFromTheLibrary() {
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "the library should open")
+        let component = app.buttons["Button"].firstMatch
+        if !component.exists {
+            search.tap()
+            search.typeText("button")
+        }
+        XCTAssertTrue(component.waitForExistence(timeout: 5))
+        component.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "the new button should be selected")
+    }
+
+    /// The Format panel's container, which is in the accessibility tree while it is open or
+    /// sliding out.
+    private var formatPanel: XCUIElement { app.descendants(matching: .any)["Format panel"] }
+
+    /// Whether the Format panel is out, as wide as it is when open: one sliding away, or
+    /// caught as a sliver at the window's edge, isn't.
+    private var isFormatPanelOpen: Bool {
+        formatPanel.exists && formatPanel.frame.width > 200
+    }
+
+    /// Waits for the Format panel, which goes with the selection, to finish going.
+    private func waitForFormatPanelToClose(timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !isFormatPanelOpen { return true }
+            usleep(100_000)
+        }
+        return false
+    }
+
+    /// Opens the Format panel with a control of the label given. The panel closes whenever
+    /// nothing is selected, so after that (`afterDeselecting`) it is shut however it looks:
+    /// seen sliding out, or caught as a sliver at the window's edge, its controls are still
+    /// there for seconds at times. Otherwise it is open or opening, and the button, which
+    /// toggles, is pressed only when it still isn't there after a good wait. Pressed on the
+    /// bar's own Format button, which stays where it is: the selection popover's glides into
+    /// place under a new selection, and can miss a tap.
+    private func showFormatPanel(with label: String, afterDeselecting: Bool = false) {
+        if afterDeselecting {
+            // The old panel's controls can linger as it slides out: wait for it to go, so that
+            // what is found below belongs to the panel opened now.
+            _ = waitForFormatPanelToClose(timeout: 5)
+            control("Format").tap()
+        } else if !isFormatPanelOpen {
+            control("Format").tap()
+        }
+        for _ in 0..<2 {
+            if panelControl(label, timeout: 6) != nil { return }
+            if !isFormatPanelOpen { control("Format").tap() }
+        }
+        XCTFail("the Format panel should open with \(label)")
+    }
+
+    /// A canvas point with nothing on it, left of where the notes and buttons are put.
+    private var emptyCanvasPoint: CGPoint {
+        CGPoint(x: 120, y: app.windows.firstMatch.frame.midY)
+    }
+
+    /// A control in the Format panel, which floats at the canvas's right, by its label: the
+    /// popover over the selection can have one of the same name. Nil when the panel has none.
+    private func panelControl(_ label: String, timeout: TimeInterval = 5) -> XCUIElement? {
+        let edge = app.windows.firstMatch.frame.maxX - 340
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let matches = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+            if let found = matches.first(where: { $0.exists && $0.isHittable && $0.frame.minX > edge }) { return found }
+            usleep(200_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// Types a number into one of the Format panel's fields.
+    private func setNumber(_ label: String, to value: String) {
+        // A key can be dropped when the simulator is busy, so a wrong number is typed again.
+        for _ in 0..<3 {
+            let field = control(label)
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            let typing = app.textFields[label]
+            XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the \(label) field should let it be typed in")
+            typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + value + "\n")
+            if wait(for: control(label), toHave: "value == '\(value)'", timeout: 4) { return }
+        }
+        XCTFail("the field should read \(value), not \(String(describing: control(label).value))")
     }
 
     /// Adds a button from the library, which lands selected in the middle of the screen, and

@@ -8,6 +8,10 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
     case shape
     /// Ink kept as it was drawn: a sketch, a figure, an arrow, a handwritten note.
     case drawing
+    /// Several things kept together as one. It is never drawn, written or described itself:
+    /// its members are, and they point at it with their `group`. Its frame is the box round
+    /// them, which the design keeps current; see `DesignContent.keepGroupsSound()`.
+    case group
 
     // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
 
@@ -101,6 +105,10 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     var isLocked = false
     /// A hidden element isn't drawn, can't be touched on the canvas, and is left out of the code.
     var isHidden = false
+    /// The group it belongs to: a `.group` element on the same screen, or also on the open
+    /// canvas. Nil when it is in none. Its lock and hide hold for it too; see
+    /// `DesignContent.isLockedWithItsGroups(_:)`.
+    var group: DesignElement.ID? = nil
     /// For toggles, checkboxes and radio buttons: whether it is drawn on. For shapes:
     /// whether it is filled with its colour, rather than outlined in it.
     var isOn = true
@@ -120,7 +128,7 @@ struct DesignElement: Identifiable, Equatable, Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, kind, parent, scale, frame, rotation, text, tint, symbol, shape, imageID
         case fontSize, fontWeight, textColor, cornerRadius, opacity, textAlignment, borderColor, borderWidth, hasShadow
-        case name, isLocked, isHidden, isOn, value, buttonLook
+        case name, isLocked, isHidden, group, isOn, value, buttonLook
     }
 
     var displayName: String {
@@ -142,8 +150,8 @@ extension DesignElement {
             back(\.id); back(\.kind); back(\.parent); back(\.scale); back(\.frame); back(\.rotation); back(\.text)
             back(\.tint); back(\.symbol); back(\.shape); back(\.imageID); back(\.fontSize); back(\.fontWeight)
             back(\.textColor); back(\.cornerRadius); back(\.opacity); back(\.textAlignment); back(\.borderColor)
-            back(\.borderWidth); back(\.hasShadow); back(\.name); back(\.isLocked); back(\.isHidden); back(\.isOn)
-            back(\.value); back(\.buttonLook); back(\.ink)
+            back(\.borderWidth); back(\.hasShadow); back(\.name); back(\.isLocked); back(\.isHidden); back(\.group)
+            back(\.isOn); back(\.value); back(\.buttonLook); back(\.ink)
             return result
         }
         return reverted(after) == before ? reverted(current) : before
@@ -178,6 +186,7 @@ extension DesignElement {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        group = try container.decodeIfPresent(UUID.self, forKey: .group)
         isOn = try container.decodeIfPresent(Bool.self, forKey: .isOn) ?? true
         value = try container.decodeIfPresent(Double.self, forKey: .value)
         buttonLook = try container.decodeIfPresent(ButtonLook.self, forKey: .buttonLook)

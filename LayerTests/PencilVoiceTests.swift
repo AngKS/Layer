@@ -249,6 +249,26 @@ struct PencilVoiceTests {
         bench.end()
     }
 
+    /// F6: a squeeze over a member of a selected group keeps the group, as one over part of
+    /// several things keeps them all; and what voice is told is selected is what is in it.
+    @Test func aSqueezeOnAMemberOfASelectedGroupKeepsTheGroup() async throws {
+        let bench = Bench()
+        // Taken first: grouping can change where they are in the list.
+        let (title, button) = (bench.title, bench.button)
+        let both = try #require(CanvasSelection([title, button]))
+        let g = try #require(bench.app.store.group(both))
+        bench.app.selection = .element(g)
+
+        #expect(await bench.hold())
+        #expect(bench.app.selection == .element(g), "the group stays selected, not the button")
+
+        let picture = CanvasPicture.capture(from: bench.app, handles: VoiceHandles())
+        let selected = picture.screens.flatMap(\.elements).filter(\.isSelected)
+        #expect(Set(selected.map(\.kind)) == ["title", "button"])
+        #expect(selected.count == 2)
+        bench.end()
+    }
+
     @Test func aSqueezeOverCanvasPlacesTheNewScreenThere() async throws {
         let bench = Bench()
         bench.app.selection = bench.button

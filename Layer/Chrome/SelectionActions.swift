@@ -63,6 +63,12 @@ struct SelectionActions: View {
             } else if model.selection?.isSeveral == true {
                 severalActions
             } else {
+                if model.selectedElement?.element.kind == .group {
+                    ToolButton(symbol: "rectangle.3.group.dashed", label: "Ungroup") {
+                        withAnimation(.smooth(duration: 0.25)) { model.ungroupSelection() }
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .option, .shift])
+                }
                 if let selected = model.selectedElement, selected.element.kind.hasText {
                     ToolButton(symbol: "character.cursor.ibeam", label: "Edit text", isActive: model.isEditingText) {
                         model.isEditingText = true
@@ -93,15 +99,8 @@ struct SelectionActions: View {
                     ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
                         .keyboardShortcut("l", modifiers: .command)
                 }
-                if case .element(let ref) = model.selection {
-                    ForEach([DesignStore.Arrangement.forward, .backward], id: \.self) { arrangement in
-                        ToolButton(symbol: arrangement.symbol, label: arrangement.name) {
-                            withAnimation(.smooth(duration: 0.25)) { model.arrangeSelection(arrangement) }
-                        }
-                        .keyboardShortcut(arrangement == .forward ? "]" : "[", modifiers: .command)
-                        .disabled(!model.store.canArrange(ref, arrangement))
-                        .opacity(model.store.canArrange(ref, arrangement) ? 1 : 0.35)
-                    }
+                if case .element = model.selection {
+                    arrangeMenu
                 }
                 ToolButton(symbol: "trash", label: "Delete selection") {
                     withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
@@ -141,6 +140,7 @@ struct SelectionActions: View {
     /// For several things at once: their settings, lining them up with one another, and
     /// what any selection can have done to it.
     @ViewBuilder private var severalActions: some View {
+        groupButton
         ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
             withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
         }
@@ -160,6 +160,8 @@ struct SelectionActions: View {
         } label: {
             ToolIcon(symbol: "align.horizontal.left")
         }
+        // In the order written, even when the menu opens upwards.
+        .menuOrder(.fixed)
         .accessibilityLabel("Align")
         ToolButton(symbol: "plus.square.on.square", label: "Duplicate") {
             withAnimation(.smooth(duration: 0.25)) { model.duplicateSelection() }
@@ -167,10 +169,68 @@ struct SelectionActions: View {
         .keyboardShortcut("d", modifiers: .command)
         ToolButton(symbol: "lock", label: "Lock") { model.setSelectionLocked(true) }
             .keyboardShortcut("l", modifiers: .command)
+        arrangeMenu
         ToolButton(symbol: "trash", label: "Delete selection") {
             withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
         }
         .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    /// Group, ⌥⌘G: off, and saying why, when what is selected can't be grouped.
+    private var groupButton: some View {
+        let canGroup = model.canGroupSelection
+        return ZStack {
+            // The shortcut is on a button of its own behind it, hidden and never off, as the
+            // arrange shortcuts are: one switched on by the change before was at times still
+            // off for the next key press. Group does nothing when there is nothing to group.
+            Button("Group") { group() }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .hidden()
+                .frame(width: 0, height: 0)
+            ToolButton(symbol: "rectangle.3.group", label: "Group") { group() }
+                .disabled(!canGroup)
+                .opacity(canGroup ? 1 : 0.35)
+                .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
+        }
+    }
+
+    private func group() {
+        withAnimation(.smooth(duration: 0.25)) { model.groupSelection() }
+    }
+
+    /// Bring to Front, Bring Forward, Send Backward and Send to Back, for one thing or
+    /// several, each with its Keynote and Pages shortcut. A command that would change
+    /// nothing is off.
+    private var arrangeMenu: some View {
+        ZStack {
+            // The shortcuts. On a closed menu's items they don't fire on iPadOS (tried in
+            // the simulator), so they are on buttons of their own behind it, hidden and
+            // taking no room. Made see-through instead, accessibility still found them.
+            // They are never off: one switched on by the change before was at times still
+            // off for the next key press, and arranging changes nothing when there is
+            // nothing to do.
+            ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+                Button(arrangement.name) { arrange(arrangement) }
+                    .keyboardShortcut(arrangement.shortcut)
+            }
+            .hidden()
+            .frame(width: 0, height: 0)
+            Menu {
+                ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+                    Button(arrangement.name, systemImage: arrangement.symbol) { arrange(arrangement) }
+                        .disabled(!model.canArrangeSelection(arrangement))
+                }
+            } label: {
+                ToolIcon(symbol: "square.3.layers.3d")
+            }
+            // Front at the top and back at the bottom, even when the menu opens upwards.
+            .menuOrder(.fixed)
+            .accessibilityLabel("Arrange")
+        }
+    }
+
+    private func arrange(_ arrangement: DesignStore.Arrangement) {
+        withAnimation(.smooth(duration: 0.25)) { model.arrangeSelection(arrangement) }
     }
 
     private func convert() {
@@ -245,6 +305,19 @@ private struct TextEditor: View {
         .onDisappear {
             if let edit { model.store.endEdit(edit) }
             edit = nil
+        }
+    }
+}
+
+private extension DesignStore.Arrangement {
+    /// The Keynote and Pages shortcuts: ⇧⌘] Bring to Front, ⌘] Bring Forward, ⌘[ Send
+    /// Backward and ⇧⌘[ Send to Back.
+    var shortcut: KeyboardShortcut {
+        switch self {
+        case .front: KeyboardShortcut("]", modifiers: [.command, .shift])
+        case .forward: KeyboardShortcut("]", modifiers: .command)
+        case .backward: KeyboardShortcut("[", modifiers: .command)
+        case .back: KeyboardShortcut("[", modifiers: [.command, .shift])
         }
     }
 }

@@ -26,6 +26,7 @@ final class DesignStore {
         didSet {
             guard content != oldValue else { return }
             views = nil
+            targets = nil
             changeCount += 1
             // A change made through `change(_:)` is told once it has been recorded: see there.
             if !isChanging { onChange?(content) }
@@ -74,6 +75,27 @@ final class DesignStore {
         )
         views = made
         return made
+    }
+
+    /// What can be touched on each host, for the groups that had been gone into when it was
+    /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
+    /// for it on every move of the pen.
+    @ObservationIgnored private var targets: (entered: Set<DesignElement.ID>, found: [ElementRef.Host: [DesignElement]])?
+
+    /// What `make` works out about what can be touched while the groups in `entered` have been
+    /// gone into: kept until the content changes, or other groups are gone into.
+    func keptTargets(entered: Set<DesignElement.ID>, _ make: () -> [ElementRef.Host: [DesignElement]]) -> [ElementRef.Host: [DesignElement]] {
+        // Read first, so that whatever draws from it is redrawn when the content changes.
+        _ = content
+        if let targets, targets.entered == entered { return targets.found }
+        let found = make()
+        targets = (entered, found)
+        return found
+    }
+
+    /// Where an element is in the design's own list.
+    func indexInList(of id: DesignElement.ID) -> Int? {
+        current.index[id]
     }
 
     /// Each screen with what is on it.
@@ -203,9 +225,10 @@ final class DesignStore {
         return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
-    /// Deletes several elements as one undo step.
+    /// Deletes several elements as one undo step. A group goes with everything in it, at any
+    /// depth, whatever their own locks: a group is one thing.
     func delete(_ refs: [ElementRef]) {
-        let ids = Set(refs.map(\.element))
+        let ids = withWhatIsInThem(Set(refs.map(\.element)))
         change { $0.remove(ids) }
         // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
         // deleted soon after it was made. See SketchReadingLog.
@@ -245,27 +268,75 @@ final class DesignStore {
         )
     }
 
+    /// Deletes an element, or a group with everything in it, as one undo step.
     func delete(_ ref: ElementRef) {
         guard resolve(ref) != nil else { return }
-        change { $0.remove([ref.element]) }
+        let ids = withWhatIsInThem([ref.element])
+        change { $0.remove(ids) }
         // See the matching note on delete(_ refs:).
-        Task { await SketchReadingLog.shared.noteDeleted(ref.element) }
+        for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
     }
 
-    /// A copy of an element beside the original, a little down and to the right, on top.
+    /// Some elements, and everything in any group among them, at any depth.
+    private func withWhatIsInThem(_ ids: Set<DesignElement.ID>) -> Set<DesignElement.ID> {
+        var all = ids
+        for id in ids where groupItem(id) != nil { all.formUnion(content.contents(of: id).map(\.id)) }
+        return all
+    }
+
+    /// A copy of an element beside the original, a little down and to the right, as one
+    /// change. It goes on top of what is on its host; or, when the original is in a group,
+    /// just in front of it, in the same group: on top, it would pull the whole group to the
+    /// front with it, as the group is gathered where its frontmost member is.
+    ///
+    /// A group is copied whole, with everything in it, in the same change: copied over
+    /// several, the copies would be put right in between and come apart (see
+    /// `DesignContent.keepGroupsSound()`). Each copy is new, and each thing copied points at
+    /// the copy of its group. The copies keep their order, and everything in the group moves
+    /// as far across the canvas as the group does, 16 of its points: on the open canvas a
+    /// member drawn at another scale moves as many of its own as that takes. The copy itself
+    /// is unlocked, as a copy is; what is in it keeps its own lock and hide.
     @discardableResult
     func duplicate(_ ref: ElementRef) -> ElementRef? {
-        guard let (element, _) = resolve(ref) else { return nil }
-        // A drawing's copy is made of strokes of its own.
-        var copy = element.withStrokesOfItsOwn()
-        copy.id = UUID()
-        copy.isLocked = false
-        copy.frame = element.frame.offsetBy(dx: 16, dy: 16)
-        add(copy, to: element.parent, scale: element.scale)
-        return ElementRef(host: ref.host, element: copy.id)
+        guard let (element, placement) = resolve(ref) else { return nil }
+        let originals = element.kind == .group ? content.contents(of: element.id) + [element] : [element]
+        var ids: [DesignElement.ID: DesignElement.ID] = [:]
+        for original in originals { ids[original.id] = UUID() }
+        let shift = 16 * placement.scale
+        let copies = originals.map { original in
+            // A drawing's copy is made of strokes of its own.
+            var copy = original.withStrokesOfItsOwn()
+            copy.id = ids[original.id] ?? UUID()
+            let own: CGFloat
+            if original.id == element.id {
+                copy.isLocked = false
+                own = placement.scale
+            } else {
+                copy.group = original.group.flatMap { ids[$0] }
+                own = self.placement(of: original)?.scale ?? placement.scale
+            }
+            copy.frame = original.frame.offsetBy(dx: shift / own, dy: shift / own)
+            return copy
+        }
+        let parent = element.parent
+        apply { content in
+            for copy in copies { content.add(copy, to: parent, scale: copy.scale) }
+            guard element.group != nil else { return }
+            // Just in front of the original: in front of its item, for a group, which is in
+            // front of everything in it.
+            let copied = Set(copies.map(\.id))
+            var order = content.children(of: parent).map(\.id).filter { !copied.contains($0) }
+            guard let place = order.firstIndex(of: element.id) else { return }
+            order.insert(contentsOf: copies.map(\.id), at: place + 1)
+            content.reorder(parent, to: order)
+        }
+        guard let copy = ids[element.id] else { return nil }
+        return ElementRef(host: ref.host, element: copy)
     }
 
-    /// A copy of a screen and everything on it, to its right.
+    /// A copy of a screen and everything on it, to its right, as one change. Its groups are
+    /// copied too, with the rest: each copy is new and points at the copy of its group, and
+    /// everything keeps its own lock and hide, as the list holds them.
     @discardableResult
     func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen? {
         guard let screen = screen(id) else { return nil }
@@ -274,14 +345,19 @@ final class DesignStore {
         copy.name = Self.copyName(for: screen.name, among: screens.map(\.name))
         copy.isLocked = nil
         copy.origin.x = screen.canvasFrame.maxX + 60
-        copy.elements = screen.elements.map { element in
-            var element = element
-            element.id = UUID()
+        let originals = content.children(of: id)
+        var ids: [DesignElement.ID: DesignElement.ID] = [:]
+        for original in originals { ids[original.id] = UUID() }
+        copy.elements = originals.map { original in
+            var element = original
+            element.id = ids[original.id] ?? UUID()
             element.parent = copy.id
+            element.group = original.group.flatMap { ids[$0] }
             return element
         }
-        change { $0.addScreen(copy) }
-        return copy
+        let made = copy
+        change { $0.addScreen(made) }
+        return self.screen(made.id) ?? made
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
@@ -315,41 +391,30 @@ final class DesignStore {
         }
     }
 
-    /// The elements an element shares its screen, or the open canvas, with, itself
-    /// included, back to front.
-    private func siblings(of ref: ElementRef) -> [DesignElement.ID] {
-        switch ref.host {
-        case .screen(let id): screen(id)?.elements.map(\.id) ?? []
-        case .canvas: floating.map(\.id)
-        }
-    }
-
-    /// Moves an element up or down among those it shares its screen, or the open canvas, with.
+    /// Moves an element up or down among its siblings: see `arrange(_ selection:_:)`, and
+    /// `SiblingLists` for what its siblings are. Siri's Change Element Order comes this way.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
-        var order = siblings(of: ref)
-        guard let index = order.firstIndex(of: ref.element) else { return }
-        let target = switch arrangement {
-        case .front: order.count - 1
-        case .forward: min(index + 1, order.count - 1)
-        case .backward: max(index - 1, 0)
-        case .back: 0
-        }
-        guard target != index else { return }
-        order.insert(order.remove(at: index), at: target)
-        let parent: DesignScreen.ID? = if case .screen(let id) = ref.host { id } else { nil }
-        change { $0.reorder(parent, to: order) }
+        arrange(.element(ref), arrangement)
     }
 
     /// Whether an element can go further up, or further down, among its neighbours.
     func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
-        let ids = siblings(of: ref)
-        guard let index = ids.firstIndex(of: ref.element) else { return false }
-        return arrangement == .front || arrangement == .forward ? index < ids.count - 1 : index > 0
+        canArrange(.element(ref), arrangement)
     }
 
-    /// Lines an element on a screen up with an edge or the middle of that screen.
+    /// Lines an element on a screen up with an edge or the middle of that screen. A group
+    /// lines up as one block: its box is lined up, and everything in it moves as far.
     func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
         guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
+        if let item = resolve(ref)?.element, item.kind == .group {
+            guard let box = canvasShape(of: .element(ref))?.bounds else { return }
+            let shape = item.shapeBounds
+            let aligned = ElementLayout.aligned(shape, alignment, in: screen.size)
+            // `position` takes canvas points.
+            let scale = screen.placement.scale
+            position([.element(ref): CGPoint(x: box.minX + (aligned.minX - shape.minX) * scale, y: box.minY + (aligned.minY - shape.minY) * scale)])
+            return
+        }
         // A turned element lines up by the box round its shape; its frame moves with it.
         update(ref) {
             let box = $0.shapeBounds
@@ -451,10 +516,12 @@ final class DesignStore {
 
     /// Gives an element to whatever it now lies on: the screen under its centre, or the
     /// open canvas when there is none. It keeps its size in points and its position on
-    /// the canvas. Returns where the element now lives.
+    /// the canvas. A group lands whole, everything in it with it: see `rehostGroup(_:)`.
+    /// Returns where the element now lives.
     @discardableResult
     func rehost(_ ref: ElementRef) -> ElementRef {
         guard let (element, placement) = resolve(ref) else { return ref }
+        if element.kind == .group { return rehostGroup(ref) }
         let frame = placement.canvasRect(for: element.frame)
         let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
@@ -865,7 +932,9 @@ final class DesignStore {
         let before = content
         let count = changeCount
         isChanging = true
-        body(&content)
+        // The change and the groups put right after it, in one access to the content, so that
+        // the whole design is compared once (C6). A design without groups costs one scan.
+        Self.applying(body, to: &content)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -885,6 +954,14 @@ final class DesignStore {
         // canvas following an eraser, is a change of its own, recorded in its own step: told
         // before, it went into this step as well (review I-1).
         onChange?(content)
+    }
+
+    /// Makes a change, then puts right whatever it left unsound about the design's groups:
+    /// see `DesignContent.keepGroupsSound()`. Anything that builds or moves a group whole
+    /// therefore does it in one change.
+    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent) {
+        body(&content)
+        if content.hasGroups { content.keepGroupsSound() }
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
@@ -1156,6 +1233,9 @@ final class DesignStore {
         // since: it goes onto the open canvas where it was, rather than on no screen, drawn
         // nowhere and saved so (review C-1).
         result.rehostElementsOnMissingScreens(from: current)
+        // Taken back among changes made since, a step can leave a group unsound: put right
+        // here, so that the reverse step holds it too.
+        if result.hasGroups { result.keepGroupsSound() }
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand

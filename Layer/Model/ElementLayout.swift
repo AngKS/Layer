@@ -209,6 +209,31 @@ enum ElementLayout {
         return CGRect(x: centre.x - sized.width / 2, y: centre.y - sized.height / 2, width: sized.width, height: sized.height)
     }
 
+    /// Resizing a group by a corner, as `resizedTurned` does an element, but in proportion:
+    /// the drag, turned back into the frame's own axes, would scale its width and its height
+    /// each by some factor, and both are scaled by the one that changes more, growing or
+    /// shrinking alike, with no side under 8 points. The corner across from the one dragged
+    /// stays where it was on the canvas. Its members scale with it alike, so that one turned
+    /// in it is never sheared.
+    static func resizedProportionally(_ frame: CGRect, degrees: Double, from corner: Corner, by translation: CGSize) -> CGRect {
+        guard frame.width > 0, frame.height > 0 else { return frame }
+        let along = Rotation.rotate(CGPoint(x: translation.width, y: translation.height), about: .zero, by: -degrees)
+        // How much longer each side gets, as the corner dragged moves away from the one across.
+        let wider = corner == .topLeft || corner == .bottomLeft ? -along.x : along.x
+        let taller = corner == .topLeft || corner == .topRight ? -along.y : along.y
+        let across = (frame.width + wider) / frame.width, down = (frame.height + taller) / frame.height
+        // Taking the larger, a drag inwards across lagged the finger until it came in down too.
+        let scale = max(abs(across - 1) >= abs(down - 1) ? across : down, 8 / min(frame.width, frame.height))
+        // Not resized at all, it stays exactly as it is.
+        guard scale != 1 else { return frame }
+        let size = CGSize(width: frame.width * scale, height: frame.height * scale)
+        let fixed = TurnedRect(rect: frame, degrees: degrees).corner(corner.opposite)
+        let resized = TurnedRect(rect: CGRect(origin: .zero, size: size), degrees: degrees)
+        let reach = resized.corner(corner.opposite)
+        let centre = CGPoint(x: fixed.x - (reach.x - resized.centre.x), y: fixed.y - (reach.y - resized.centre.y))
+        return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
+    }
+
     // MARK: Snapping
 
     /// Lines up a frame being dragged with what is around it, as smart guides do: its

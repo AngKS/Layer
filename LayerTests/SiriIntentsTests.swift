@@ -688,6 +688,88 @@ struct DesignActionTests {
         #expect(model.store.screen(third.id) != nil)
     }
 
+    /// F6: a selected group is no single element to Siri, as several things aren't. Taken as
+    /// one, Siri would move the group item alone, and every member would be ungrouped. A
+    /// member selected inside the group is the one, as an element is.
+    @Test func aSelectedGroupIsNoSingleElementForSiri() throws {
+        let model = model()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        var button = DesignStore.newElement(.button)
+        button.frame.origin.y = 200
+        let refs = model.store.setElements([DesignStore.newElement(.title), button], on: screen.id, replacing: false)
+        let both = try #require(CanvasSelection(refs.map(CanvasSelection.element)))
+        let g = try #require(model.store.group(both))
+        // What Siri is offered, as the design's snapshot lists it: the title, then the button.
+        let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.content, modified: nil).elements
+        #expect(entities.compactMap(\.ref) == refs)
+        func isNotFound(_ error: LayerIntentError?) -> Bool {
+            error.map { if case .elementNotFound = $0 { true } else { false } } == true
+        }
+
+        model.selection = .element(g)
+        #expect(DesignActions.selectedElement(in: model) == nil)
+        #expect(isNotFound(#expect(throws: LayerIntentError.self) { try DesignActions.selected(in: model) }))
+        #expect(DesignActions.suggested(entities, in: model).map(\.id) == entities.map(\.id), "nothing is put first")
+
+        model.selection = .element(refs[1])
+        #expect(DesignActions.selectedElement(in: model)?.ref == refs[1])
+        #expect(try DesignActions.selected(in: model).ref == refs[1])
+        #expect(DesignActions.suggested(entities, in: model).first?.ref == refs[1], "the button is put first")
+    }
+
+    /// Carried from Task 3: Siri's Lock or Unlock Element acts on the lock that holds a thing.
+    /// Unlocking a member locked by its groups unlocks those groups too, as the popover and
+    /// the panel do (ruling D); locking a member locks only it.
+    @Test func siriUnlocksAMemberWithTheGroupsThatLockIt() throws {
+        let board = OrderBoard()
+        let i = board.group(board.c, board.e, named: "I") { $0.isLocked = true }
+        let g = board.group(board.a, i, named: "G") { $0.isLocked = true }
+        #expect(board.store.isLocked(.element(board.c)))
+        let locked = board.store.content
+
+        try SetElementLockedIntent.setLocked(false, board.c, in: board.model, undoManager: nil)
+
+        #expect(!board.store.isLocked(.element(board.c)))
+        #expect(board.store.element(i.element)?.isLocked == false && board.store.element(g.element)?.isLocked == false)
+        board.undo.undo()
+        #expect(board.store.content == locked, "one step")
+
+        let unlocked = OrderBoard()
+        let inner = unlocked.group(unlocked.c, unlocked.e, named: "I")
+        let outer = unlocked.group(unlocked.a, inner, named: "G")
+        try SetElementLockedIntent.setLocked(true, unlocked.c, in: unlocked.model, undoManager: nil)
+        #expect(unlocked.store.element(unlocked.c.element)?.isLocked == true)
+        #expect(unlocked.store.element(inner.element)?.isLocked == false && unlocked.store.element(outer.element)?.isLocked == false)
+        #expect(!unlocked.store.isLocked(.element(unlocked.e)))
+    }
+
+    /// Siri doesn't move, align or delete a member of a locked group, as a finger can't,
+    /// though the member's own lock isn't set (F4).
+    @Test func siriLeavesAMemberOfALockedGroupWhereItIs() throws {
+        let board = OrderBoard()
+        board.group(board.b, board.d) { $0.isLocked = true }
+        let before = board.store.content
+        func isLocked(_ error: LayerIntentError?) -> Bool {
+            error.map { if case .locked = $0 { true } else { false } } == true
+        }
+
+        // What Move, Move to Screen, Align and Delete ask before they act.
+        #expect(isLocked(#expect(throws: LayerIntentError.self) { try DesignActions.requireUnlocked(board.b, in: board.model) }))
+        #expect(isLocked(#expect(throws: LayerIntentError.self) {
+            try MoveElementIntent.move(board.b, in: board.model, x: 0, y: 0, width: nil, height: nil, undoManager: nil)
+        }))
+        #expect(isLocked(#expect(throws: LayerIntentError.self) {
+            try DeleteElementIntent.delete(board.d, in: board.model, undoManager: nil)
+        }))
+        #expect(board.store.content == before)
+
+        // What isn't locked is moved and deleted.
+        try MoveElementIntent.move(board.a, in: board.model, x: 10, y: nil, width: nil, height: nil, undoManager: nil)
+        #expect(board.store.element(board.a.element)?.frame.minX == 10)
+        try DeleteElementIntent.delete(board.c, in: board.model, undoManager: nil)
+        #expect(board.store.element(board.c.element) == nil)
+    }
+
     @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
         let model = model()
         let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))

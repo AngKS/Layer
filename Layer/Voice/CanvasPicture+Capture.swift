@@ -9,8 +9,9 @@ extension CanvasPicture {
     @MainActor
     static func capture(from model: AppModel, handles: VoiceHandles) -> CanvasPicture {
         let visible = model.canvasSize == .zero ? CGRect.null : model.viewport.visibleRect(in: model.canvasSize)
-        // With several things selected, "these" are all of them.
-        let selectedElements = Set(model.selectedElements.map(\.element.id))
+        // With several things selected, "these" are all of them; a group selected is what is
+        // in it, as voice knows nothing of groups (F6).
+        let selectedElements = Set(model.selectedLeaves.map(\.element.id))
         let selectedScreens = Set(model.selectedThings.compactMap { thing -> DesignScreen.ID? in
             if case .screen(let id) = thing { id } else { nil }
         })

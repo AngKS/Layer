@@ -470,9 +470,9 @@ struct SeveralThingsOnTheCanvasTests {
         board.model.pick(.element(board.title))
         #expect(board.model.selection == both)
 
-        // A tap after that is a tap.
+        // A tap after that is a tap: on a selected thing, it takes it out.
         board.model.pick(.element(board.title))
-        #expect(board.model.selection == .element(board.title))
+        #expect(board.model.selection == .element(board.body))
     }
 
     @Test func aFingerRestingOnTheScreenAddsElementsWithoutSelectingTheScreen() throws {
@@ -486,22 +486,24 @@ struct SeveralThingsOnTheCanvasTests {
         #expect(board.model.selection == CanvasSelection([.element(board.title), .element(board.button)]))
     }
 
-    @Test func aTapWithNoFingerRestingSelectsOnlyWhatIsTapped() {
+    @Test func aTapWithNoFingerRestingAddsWhatIsTapped() {
         let board = Board()
         board.model.selection = CanvasSelection([.element(board.title), .element(board.body)])
         board.model.pick(.element(board.note))
-        #expect(board.model.selection == .element(board.note))
-        board.model.pick(nil)
-        #expect(board.model.selection == nil)
+        #expect(board.model.selection == .several([.element(board.title), .element(board.body), .element(board.note)]))
     }
 
+    /// A finger on a panel over the canvas holds nothing on the canvas, even where the panel
+    /// lies over something: here the note, which a finger resting on the canvas would hold.
     @Test func aFingerRestingOnAPanelIsNotRestingOnTheCanvas() {
         let board = Board()
         board.model.selection = .element(board.title)
-        board.model.chromeFrames["format"] = CGRect(x: 900, y: 80, width: 300, height: 600)
-        board.model.restingFingers = { [CGPoint(x: 1000, y: 300)] }
+        board.model.chromeFrames["format"] = CGRect(x: 480, y: 80, width: 200, height: 200)
+        // The board's view shows the canvas unscrolled: canvas and view points agree.
+        let note = board.canvasFrame(board.note)
+        board.model.restingFingers = { [CGPoint(x: note.midX, y: note.midY)] }
         board.model.pick(.element(board.body))
-        #expect(board.model.selection == .element(board.body))
+        #expect(board.model.selection == CanvasSelection([.element(board.title), .element(board.body)]))
     }
 
     @Test func aSettingChangedForSeveralElementsChangesEachThatHasIt() throws {
@@ -593,6 +595,157 @@ struct SeveralThingsOnTheCanvasTests {
         board.model.lassoDrawn(loop(round: area).map(board.model.viewport.viewPoint(for:)))
         board.model.sweepEnded()
         #expect(board.model.selection == .element(board.note))
+    }
+}
+
+/// A finger tap on a thing adds it to the selection, or takes it out if it is selected. Only
+/// a tap on empty space clears the selection, and a tap that only just misses something
+/// selected does nothing.
+@MainActor
+struct TapToAddTests {
+    @Test func tapsAddOneAfterAnother() {
+        let board = Board()
+        board.model.pick(.element(board.title))
+        #expect(board.model.selection == .element(board.title))
+        board.model.pick(.element(board.body))
+        board.model.pick(.element(board.note))
+        #expect(board.model.selection == .several([.element(board.title), .element(board.body), .element(board.note)]))
+    }
+
+    @Test func tappingASelectedThingTakesItOut() {
+        let board = Board()
+        board.model.pick(.element(board.title))
+        board.model.pick(.element(board.body))
+        board.model.pick(.element(board.note))
+        board.model.pick(.element(board.body))
+        #expect(board.model.selection == .several([.element(board.title), .element(board.note)]))
+        board.model.pick(.element(board.title))
+        #expect(board.model.selection == .element(board.note))
+    }
+
+    @Test func onlyEmptyCanvasClears() {
+        let board = Board()
+        board.model.selection = CanvasSelection([.element(board.title), .element(board.body)])
+        board.model.pick(nil)
+        #expect(board.model.selection == nil)
+    }
+
+    /// The point is on the screen, clear of every element and of the screen's own edge by
+    /// far more than a near miss.
+    @Test func aScreensEmptyAreaClearsASelectionAndOtherwiseSelectsTheScreen() throws {
+        let board = Board()
+        let clock = TapClock(board.model)
+        let screen = try #require(board.store.screen(board.screen))
+        let point = screen.canvasPoint(for: CGPoint(x: 200, y: 500))
+        board.model.selection = CanvasSelection([.element(board.title), .element(board.body)])
+
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == nil)
+        clock.wait(1000)
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        // Inside the selected screen, but away from the band along its outline.
+        clock.wait(1000)
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == nil)
+    }
+
+    /// A quick second tap on a screen's empty area, after the first selected the screen, is a
+    /// double-tap, which never takes a thing out: the screen stays selected.
+    @Test func aQuickSecondTapOnAScreenATapPickedKeepsIt() throws {
+        let board = Board()
+        let clock = TapClock(board.model)
+        let point = try #require(board.store.screen(board.screen)).canvasPoint(for: CGPoint(x: 200, y: 500))
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        clock.wait(100)
+        board.model.canvasTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        // In Select, the selected screen's own area takes the tap, to the same end.
+        board.model.tool = .select
+        clock.wait(1000)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == nil)
+        clock.wait(100)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        clock.wait(100)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == .screen(board.screen))
+        // Later, it is a tap of its own, which lets go of the screen.
+        clock.wait(500)
+        board.model.selectionAreaTapped(at: point)
+        #expect(board.model.selection == nil)
+    }
+
+    @Test func aNearMissKeepsTheSelection() {
+        let board = Board()
+        let both = CanvasSelection([.element(board.title), .element(board.body)])
+        board.model.selection = both
+        // 4 points above the title, on the screen.
+        let title = board.canvasFrame(board.title)
+        board.model.canvasTapped(at: CGPoint(x: title.midX, y: title.minY - 4))
+        #expect(board.model.selection == both)
+    }
+
+    /// A finger resting on empty canvas, clear of the screen and the note, holds nothing: a
+    /// tap meanwhile is the same as a tap with no finger resting.
+    @Test func aTapWithAFingerRestingFollowsTheTapRule() {
+        let board = Board()
+        board.model.restingFingers = { [CGPoint(x: 1100, y: 700)] }
+
+        board.model.selection = .screen(board.screen)
+        board.model.pick(.element(board.button))
+        #expect(board.model.selection == .element(board.button))
+
+        board.model.selection = CanvasSelection([.element(board.title), .element(board.body)])
+        board.model.pick(nil)
+        #expect(board.model.selection == nil)
+    }
+
+    @Test func aThingOnASelectedScreenReplacesIt() {
+        let board = Board()
+        board.model.selection = .screen(board.screen)
+        board.model.pick(.element(board.button))
+        #expect(board.model.selection == .element(board.button))
+    }
+
+    @Test func addingAScreenFoldsItsSelectedElementsIn() {
+        let board = Board()
+        board.model.selection = CanvasSelection([.element(board.title), .element(board.note)])
+        board.model.pick(.screen(board.screen))
+        #expect(board.model.selection == .several([.screen(board.screen), .element(board.note)]))
+    }
+
+    @Test func aTapOnAScreensNameAddsIt() throws {
+        let board = Board()
+        board.model.selection = .element(board.note)
+        let name = try #require(board.store.screen(board.screen)).labelFrame
+        board.model.canvasTapped(at: CGPoint(x: name.midX, y: name.midY))
+        #expect(board.model.selection == .several([.screen(board.screen), .element(board.note)]))
+    }
+
+    /// Lifting, a finger that rested on a screen's empty area reaches it as a tap, which
+    /// isn't one: it neither clears what the taps built nor picks anything.
+    @Test func liftingAFingerThatRestedOnAScreensEmptyAreaKeepsTheSelection() throws {
+        // Resting on the screen while the note, off it, is tapped: the screen is held.
+        let board = Board()
+        let resting = try #require(board.store.screen(board.screen)).canvasPoint(for: CGPoint(x: 200, y: 500))
+        board.model.restingFingers = { [resting] }
+        board.model.pick(.element(board.note))
+        let both = CanvasSelection([.screen(board.screen), .element(board.note)])
+        #expect(board.model.selection == both)
+        board.model.restingFingers = { [] }
+        board.model.canvasTapped(at: resting)
+        #expect(board.model.selection == both)
+
+        // Resting there while the title, on it, is tapped: nothing is held.
+        let other = Board()
+        other.model.restingFingers = { [resting] }
+        other.model.pick(.element(other.title))
+        other.model.restingFingers = { [] }
+        other.model.canvasTapped(at: resting)
+        #expect(other.model.selection == .element(other.title))
     }
 }
 

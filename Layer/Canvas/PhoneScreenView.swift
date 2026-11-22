@@ -285,6 +285,11 @@ struct ElementView: View {
             // it. Locked, it is off that canvas, out of the eraser's reach, and drawn here.
             if element.isLocked { InkPicture(ink: element.ink) }
 
+        case .group:
+            // A group draws nothing of its own: its members are drawn. A screen's elements
+            // leave group items out, so one never reaches here.
+            EmptyView()
+
         case .toggle:
             // Drawn rather than a live `Toggle`, so that it scales with its frame.
             Capsule()

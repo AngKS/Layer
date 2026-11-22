@@ -142,6 +142,10 @@ final class AppModel {
                 scrubber.forgetHovered(.panel)
                 isEditingText = false
                 pencilVoiceIfMade?.selectionChanged()
+                // What the pointer hovered was picked as the selection stood: after a double-tap
+                // into a group, the outline of the outer group is stale. A row of the Layers list
+                // ends its own hover (it is also gone when its group closes).
+                if !isHoveringList, hovered != nil { hovered = nil }
                 // The format panel's changes so far are a step, apart from the next selection's.
                 endAdjustmentNow()
                 // Several things turn about a pivot fixed as they are selected, and forgotten
@@ -1171,20 +1175,25 @@ final class AppModel {
         }
     }
 
-    /// A tap that landed on the canvas itself rather than on an element: it picks the
-    /// drawing or screen there, or clears the selection.
+    /// Every element selected, with each group among them standing for what is in it, at any
+    /// depth, that isn't a group itself: what the Format panel styles, and what voice is told
+    /// is selected, neither of which knows of groups (F6). From the back to the front.
+    var selectedLeaves: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
+        var seen: Set<DesignElement.ID> = []
+        return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
+            guard selected.element.kind == .group else { return [selected] }
+            return store.content.leaves(of: selected.element.id).compactMap { leaf in
+                let ref = DesignStore.ElementRef(host: selected.ref.host, element: leaf.id)
+                return store.resolve(ref).map { (ref, $0.element, $0.placement) }
+            }
+        }.filter { seen.insert($0.ref.element).inserted }
+    }
+
+    /// A tap that landed on the canvas itself rather than on an element's target: it picks
+    /// the drawing, element or screen's name there, or, on a screen's empty area or empty
+    /// canvas, clears the selection; see `pointTapped(at:picksAnyElement:)`.
     func canvasTapped(at viewPoint: CGPoint) {
-        let point = viewport.canvasPoint(for: viewPoint)
-        // With the palette up, a finger tap reaches here for elements too: their own
-        // handles stay out of the Pencil's way while it draws. A drawing has no handle
-        // of its own until it is selected, so a tap on its ink always reaches here.
-        if case .element(let ref)? = hoverTarget(at: viewPoint), tool == .draw || store.resolve(ref)?.element.kind == .drawing {
-            pick(.element(ref))
-        } else if let screen = store.screen(at: point) {
-            pick(.screen(screen.id))
-        } else {
-            pick(nil)
-        }
+        pointTapped(at: viewPoint, picksAnyElement: false)
     }
 
     /// A tap in the area that drags the selected element, at a point in the view: a selected
@@ -1197,15 +1206,89 @@ final class AppModel {
             guard !fingerDraws else { return }
             canvasTapped(at: viewPoint)
         } else {
-            pick(hoverTarget(at: viewPoint))
+            pointTapped(at: viewPoint, picksAnyElement: true)
         }
     }
 
-    /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
-    /// is drawn over every element and screen, so where a drawing's ink lies over the target
-    /// the tap picks the drawing, as hover and a tap with the palette up do.
+    /// The one rule for a tap at a point in the view that no element's target took.
+    /// - Ink, or an element there, is picked: any element when `picksAnyElement`, and
+    ///   otherwise a drawing, or any element with the palette up.
+    /// - A screen's name strip, while names are shown, picks the screen, which adds it.
+    /// - A screen's empty area clears the selection, or selects the screen when nothing is.
+    ///   Tapped again quickly, after a tap selected the screen, it keeps the screen: that is
+    ///   a double-tap, which never takes a thing out.
+    /// - Empty canvas clears the selection.
+    ///
+    /// A tap that would clear but only just missed something selected does nothing.
+    private func pointTapped(at viewPoint: CGPoint, picksAnyElement: Bool) {
+        let point = viewport.canvasPoint(for: viewPoint)
+        let target = hoverTarget(at: viewPoint)
+        // With the palette up, a finger tap reaches the canvas for elements too: their own
+        // handles stay out of the Pencil's way while it draws. A drawing has no handle
+        // of its own until it is selected, so a tap on its ink always reaches here.
+        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.resolve(ref)?.element.kind == .drawing {
+            pick(target)
+        } else if case .screen(let id)? = target, let screen = store.screen(id), !screen.canvasFrame.contains(point) {
+            // `hoverTarget` gives the screen for its name strip as well as for itself.
+            pick(.screen(id))
+        } else if selection == nil, let screen = store.screen(at: point) {
+            pick(.screen(screen.id))
+        } else if let screen = store.screen(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen.id)) {
+            // The finger that rested on the screen's empty area, lifting. What it rested
+            // on was the screen, but the tap would reach `pick` as a clearing, which its
+            // guard wouldn't know for the lift.
+            rested = nil
+        } else if let screen = store.screen(at: point), isSecondTap(on: .screen(screen.id)) {
+            // A double-tap on the screen's empty area, whose first tap selected the screen:
+            // a double-tap never takes a thing out.
+            pick(.screen(screen.id))
+        } else if !isNearMiss(viewPoint) {
+            pick(nil)
+        }
+    }
+
+    /// How far from a selected thing's outline, on either side, a tap that hits nothing
+    /// only just missed it, in the view's points: on the glass, whatever the zoom.
+    private static let nearMiss: CGFloat = 8
+
+    /// Whether a point in the view is within `nearMiss` of the outline of something
+    /// selected: a band along the edge, not the shape grown, so a tap well inside a selected
+    /// screen's empty area isn't one. Selected drawings don't count: a tap inside a drawing's
+    /// box reaches what lies under it (audit C12), and its ink is already picked with room
+    /// to spare.
+    private func isNearMiss(_ viewPoint: CGPoint) -> Bool {
+        selectedThings.contains { thing in
+            if case .element(let ref) = thing, store.resolve(ref)?.element.kind == .drawing { return false }
+            guard let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) else { return false }
+            return Self.distance(from: viewPoint, toEdgeOf: shape) <= Self.nearMiss
+        }
+    }
+
+    /// How far a point is from the edge of a turned box, from inside or out.
+    private static func distance(from point: CGPoint, toEdgeOf shape: TurnedRect) -> CGFloat {
+        // In the box's own unturned axes.
+        let back = Rotation.rotate(point, about: shape.centre, by: -shape.degrees)
+        let rect = shape.rect
+        let outsideX = max(rect.minX - back.x, 0, back.x - rect.maxX)
+        let outsideY = max(rect.minY - back.y, 0, back.y - rect.maxY)
+        if outsideX > 0 || outsideY > 0 { return hypot(outsideX, outsideY) }
+        return min(back.x - rect.minX, rect.maxX - back.x, back.y - rect.minY, rect.maxY - back.y)
+    }
+
+    /// A tap on the target of an element, a group or a screen's name, or on something among
+    /// several selected, at a point in the view. Ink is drawn over every element and screen,
+    /// so where a drawing's ink lies over the target the tap picks the drawing, as hover and
+    /// a tap with the palette up do. On a group's target it is on the thing in the group
+    /// under it, or on the group itself in a gap between them: both taps of a double-tap find
+    /// the same one, and `pick` works out what it picks.
     func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
-        pick(inkTarget(at: viewPoint).map { .element($0) } ?? thing)
+        if let drawing = inkTarget(at: viewPoint) {
+            pick(.element(drawing))
+        } else if case .element(let ref) = thing, store.groupItem(ref.element) != nil {
+            pick(.element(store.leaf(at: viewport.canvasPoint(for: viewPoint), in: ref.element) ?? ref))
+        } else {
+            pick(thing)
+        }
     }
 
     /// The drawing whose ink is at a point in the view. It lies over everything else and
@@ -1223,32 +1306,175 @@ final class AppModel {
     /// isn't taken for a tap; and when it lifted, once that is known.
     @ObservationIgnored private var rested: (on: CanvasSelection?, lifted: ContinuousClock.Instant?)?
 
-    /// A tap picked something, or nothing when it landed on empty canvas. On its own it
-    /// selects just that. With another finger resting on the canvas, as in Freeform, it
-    /// adds the thing to what is selected, or lets go of it if it was: the thing the
-    /// resting finger is on is selected with it.
+    /// The time now, which tells a double-tap's second tap from a tap of its own. A test
+    /// sets a clock of its own.
+    @ObservationIgnored var now: () -> ContinuousClock.Instant = { .now }
+    /// How soon a second tap on the same thing makes a double-tap. It stands in for the
+    /// system double-tap interval the spec names: iPadOS gives no public value for it to
+    /// read (L4).
+    static let doubleTapInterval: Duration = .milliseconds(350)
+    /// The last tap that picked a thing: what it was on (a thing in a group, or a group's
+    /// gap, before `pickTarget`), when, and the selection before and after it. A second tap
+    /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
+    @ObservationIgnored private var lastTap: (thing: CanvasSelection, at: ContinuousClock.Instant, before: CanvasSelection?, after: CanvasSelection?)?
+
+    /// Every group that holds something selected, at any depth: those that have been gone
+    /// into. A tap picks what is inside them, one level at a time, and their members have
+    /// targets of their own in place of theirs.
+    var enteredGroups: Set<DesignElement.ID> {
+        enteredGroups(in: selection)
+    }
+
+    private func enteredGroups(in selection: CanvasSelection?) -> Set<DesignElement.ID> {
+        var entered: Set<DesignElement.ID> = []
+        for case .element(let ref) in selection?.things ?? [] {
+            entered.formUnion(store.groups(holding: ref).map(\.element))
+        }
+        return entered
+    }
+
+    /// What a tap on a thing picks as things are selected now: for something in a group,
+    /// its outermost group that hasn't been gone into, or itself once all of them have; for
+    /// anything else, itself. A tap, a drag and hover all go by it.
+    func pickTarget(_ thing: CanvasSelection) -> CanvasSelection {
+        guard case .element(let ref) = thing else { return thing }
+        return .element(store.pickTarget(for: ref, entered: enteredGroups))
+    }
+
+    /// A tap picked something, or nothing when it landed on empty space, which clears the
+    /// selection. What it picks is worked out by `pickTarget(_:)`: a thing in a group picks
+    /// its outermost group first. That is added to what is selected, or taken out if it was:
+    /// see `selection(afterTapOn:from:)`. With another finger resting on the canvas, as in
+    /// Freeform, what a tap where the resting finger is would pick is selected with it.
+    ///
+    /// The first tap acts at once. A second on the same thing, soon after, is a double-tap,
+    /// which goes one level in: see `selection(afterDoubleTapOn:from:)`. Each quick tap after
+    /// that goes one level further in again.
     func pick(_ thing: CanvasSelection?) {
-        let resting = restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
-        guard let finger = resting.first else {
-            if let rested {
-                self.rested = nil
-                // Lifting the finger that rested reaches whatever it was on as a tap.
-                let isLifting = rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
-                if isLifting, rested.on == thing { return }
-            }
-            selection = thing
+        let finger = restingOnCanvas.first
+        var held: CanvasSelection?
+        if let finger {
+            held = hoverTarget(at: finger).map(pickTarget(_:))
+            // A finger resting on a screen while its elements are tapped is only holding the
+            // selection open: the screen isn't picked along with what is on it.
+            if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
+            rested = (held, nil)
+        } else {
+            // Told by what a tap there picks, as what the finger held was.
+            let isLift = isLiftOfRestedFinger(on: thing.map(pickTarget(_:)))
+            rested = nil
+            if isLift { return }
+        }
+        guard let thing else {
+            lastTap = nil
+            selectByTap(nil)
             return
         }
-        var held = hoverTarget(at: finger)
-        // A finger resting on a screen while its elements are tapped is only holding the
-        // selection open: the screen isn't picked along with what is on it.
-        if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
-        rested = (held, nil)
-        guard let thing, thing != held else { return }
-        var things = selection?.things ?? []
-        // Resting on something that isn't selected starts again from it.
-        if let held, !things.contains(held) { things = [held] }
-        selection = CanvasSelection(things.symmetricDifference([thing]))
+        let time = now()
+        if isSecondTap(on: thing), let last = lastTap {
+            let made = selection(afterDoubleTapOn: thing, from: last.before)
+            // Read against what it made, a quick tap after it goes one level further in.
+            lastTap = (thing, time, made, made)
+            selectByTap(made)
+            return
+        }
+        let target = pickTarget(thing)
+        var seeded = selection
+        if finger != nil {
+            guard target != held else { return }
+            // Resting on something that isn't selected starts again from it.
+            if let held, seeded?.things.contains(held) != true { seeded = held }
+        }
+        let made = selection(afterTapOn: target, from: seeded)
+        // What the tap started from, the thing a resting finger holds included.
+        lastTap = (thing, time, seeded, made)
+        selectByTap(made)
+    }
+
+    /// Whether a tap on a thing is the second of a double-tap: the last tap was on the same
+    /// thing, not long before, and the selection is as it left it.
+    private func isSecondTap(on thing: CanvasSelection) -> Bool {
+        guard let lastTap, lastTap.thing == thing, lastTap.after == selection else { return false }
+        return now() - lastTap.at < Self.doubleTapInterval
+    }
+
+    /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it
+    /// lands.
+    /// - With nothing selected, the thing is selected.
+    /// - A selected thing is taken out.
+    /// - A thing on a selected screen, or in a selected group, takes the screen's or the
+    ///   group's place: the same as going one level in.
+    /// - Anything else is added. A group added folds in the things selected inside it, at any
+    ///   depth (F5), so that nothing selected holds a group and its own member. A screen added
+    ///   folds in its selected elements too, but not here: `CanvasSelection(_:)` leaves out
+    ///   an element whose screen is in the selection.
+    private func selection(afterTapOn thing: CanvasSelection, from current: CanvasSelection?) -> CanvasSelection? {
+        guard let current else { return thing }
+        if current.contains(thing) { return current.removing(thing) }
+        var things = current.things
+        if case .element(let ref) = thing {
+            var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
+            if case .screen(let id) = ref.host { holders.append(.screen(id)) }
+            things.subtract(holders.filter(current.contains))
+            if store.groupItem(ref.element) != nil {
+                let inside = Set(store.content.contents(of: ref.element).map(\.id))
+                things = things.filter { thing in
+                    if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
+                }
+            }
+        }
+        return CanvasSelection(things.union([thing]))
+    }
+
+    /// A row in the Layers panel was tapped: the thing is added to the selection, taken out, or
+    /// replaces the screen or group that holds it, by the one rule for a tap, on exactly that
+    /// thing (no outermost group, no double-tap). The palette is put away.
+    func pickInList(_ thing: CanvasSelection) {
+        tool = .select
+        selection = selection(afterTapOn: thing, from: selection)
+    }
+
+    /// What a double-tap on a thing makes of the selection as it was before its first tap:
+    /// one level in from what that first tap picked from there, and never less than that
+    /// selection.
+    /// - A thing on a selected screen takes the screen's place with what a tap picks on it:
+    ///   its outermost group, or itself.
+    /// - Otherwise the double-tap picks one level in from what a tap would have: the group
+    ///   just inside it on the way to the thing, or the thing itself. A selected group
+    ///   holding that takes its place; otherwise it is added.
+    /// - What is selected already stays selected: a double-tap never takes a thing out.
+    private func selection(afterDoubleTapOn thing: CanvasSelection, from before: CanvasSelection?) -> CanvasSelection? {
+        var target = thing
+        if case .element(let leaf) = thing {
+            let first = store.pickTarget(for: leaf, entered: enteredGroups(in: before))
+            let isOnSelectedScreen = if case .screen(let id) = leaf.host { before?.contains(.screen(id)) == true } else { false }
+            target = .element(isOnSelectedScreen ? first : store.nextLevel(in: first, towards: leaf))
+        }
+        if before?.contains(target) == true { return before }
+        return selection(afterTapOn: target, from: before)
+    }
+
+    /// A tap changed the selection this many times: each change plays a selection tick.
+    private(set) var tapSelectionChanges = 0
+
+    /// Selects what a tap made of the selection, with a tick if it changed.
+    private func selectByTap(_ new: CanvasSelection?) {
+        guard new != selection else { return }
+        selection = new
+        tapSelectionChanges += 1
+    }
+
+    /// Where fingers are resting on the canvas itself, in the view's points: not on a panel
+    /// or popover over it.
+    private var restingOnCanvas: [CGPoint] {
+        restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
+    }
+
+    /// Whether a tap on a thing, or on nothing, made with no finger resting, is only the
+    /// finger that rested lifting: lifting, it reaches whatever it was on as a tap.
+    private func isLiftOfRestedFinger(on thing: CanvasSelection?) -> Bool {
+        guard let rested, rested.on == thing else { return false }
+        return rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
     }
 
     /// The last finger resting on the canvas has lifted.
@@ -1303,6 +1529,25 @@ final class AppModel {
     /// colour, for instance, to each that has a fill.
     func changeSelectedElements(where applies: (DesignElement) -> Bool = { _ in true }, _ body: (inout DesignElement) -> Void) {
         store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
+    }
+
+    /// The elements selected that aren't locked, by themselves or by a group above them:
+    /// what corners, opacity and angle change for several things (F4).
+    var unlockedSelectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
+        selectedElements.filter { !store.isLocked(.element($0.ref)) }
+    }
+
+    /// Changes those of `refs` that `applies` to, in the Format panel's own edit (see
+    /// `adjusting`): the elements a field was showing, even if it is set once the selection
+    /// has moved on. With `unlockedOnly`, only those that aren't locked, by themselves or by
+    /// a group above them (F4).
+    func changeElements(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        adjusting {
+            store.update(refs.filter { ref in
+                guard let found = store.resolve(ref) else { return false }
+                return (!unlockedOnly || !store.isLocked(.element(ref))) && applies(found.element)
+            }, body)
+        }
     }
 
     /// Gives every element selected to whatever it now lies on, after a drag. Several
@@ -1366,27 +1611,52 @@ final class AppModel {
 
     /// The topmost element or screen at a point in the view, for hover, and for a tap or a
     /// resting finger that reaches the model. Only what is drawn there: a hidden element is
-    /// looked through, as is a screen's name strip while names aren't shown.
+    /// looked through, as is a screen's name strip while names aren't shown. Each screen's
+    /// things, and the open canvas's, are looked at as their targets lie
+    /// (`DesignStore.targets(on:entered:)`): a group that hasn't been gone into is hit
+    /// anywhere in its box, giving the thing in it there, or the group itself in a gap
+    /// between them; `pickTarget(_:)` makes either what a tap picks.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing.
+    /// change a drawing; and through a group's gaps, so that voice sees elements, not groups.
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         // A hidden drawing's ink isn't on the canvas.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        for floating in store.floating.reversed() where !floating.element.isHidden && floating.element.isPickedByItsFrame && TurnedRect(rect: floating.canvasFrame, degrees: floating.element.resolvedRotation).contains(point) {
-            if skippingDrawings, floating.element.kind == .drawing { continue }
-            return .element(.init(host: .canvas, element: floating.id))
+        let targets = store.targetElements(entered: enteredGroups)
+        if let hit = topmost(at: point, among: targets[.canvas] ?? [], on: .canvas, placement: nil, skippingDrawings: skippingDrawings) {
+            return .element(hit)
         }
         let showsNames = store.canvas.showsFrameNames
         for screen in store.screens.reversed() {
-            for element in screen.elements.reversed() where !element.isHidden && TurnedRect(rect: screen.placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) {
-                return .element(.init(host: .screen(screen.id), element: element.id))
+            if let hit = topmost(at: point, among: targets[.screen(screen.id)] ?? [], on: .screen(screen.id), placement: screen.placement, skippingDrawings: skippingDrawings) {
+                return .element(hit)
             }
             if screen.canvasFrame.contains(point) || (showsNames && screen.labelFrame.contains(point)) {
                 return .screen(screen.id)
             }
+        }
+        return nil
+    }
+
+    /// The topmost of one host's targets, given back to front, that holds a canvas point: see
+    /// `hoverTarget(at:skippingDrawings:)`. `placement` is the screen's; on the open canvas,
+    /// where each thing has its own, it is nil.
+    private func topmost(
+        at point: CGPoint, among targets: [DesignElement], on host: DesignStore.ElementRef.Host,
+        placement: Placement?, skippingDrawings: Bool
+    ) -> DesignStore.ElementRef? {
+        for element in targets.reversed() {
+            let placement = placement ?? Placement(origin: .zero, scale: element.scale ?? 1)
+            guard TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) else { continue }
+            if element.kind == .group {
+                if let leaf = store.leaf(at: point, in: element.id) { return leaf }
+                if skippingDrawings { continue }
+            } else if skippingDrawings, element.kind == .drawing {
+                continue
+            }
+            return .init(host: host, element: element.id)
         }
         return nil
     }
@@ -1402,9 +1672,16 @@ final class AppModel {
         selection.map(store.isLocked) ?? false
     }
 
+    /// Locks or unlocks what is selected. Unlocking unlocks the locked groups above it too, in
+    /// the same step: a thing locked only by its group would otherwise stay locked, and the
+    /// button would do nothing (conflict D). A Layers row's toggle changes only its own flag.
     func setSelectionLocked(_ locked: Bool) {
         guard let selection else { return }
-        store.setLocked(locked, selection)
+        if locked {
+            store.setLocked(true, selection)
+        } else {
+            store.unlock(selection)
+        }
     }
 
     var canDuplicateSelection: Bool { selection != nil }
@@ -1418,9 +1695,46 @@ final class AppModel {
         self.selection = copies
     }
 
+    /// Brings what is selected to the front or forward, or sends it backward or to the
+    /// back: one thing, or several as one block among their siblings. See
+    /// `DesignStore.arrange(_ selection:_:)`.
     func arrangeSelection(_ arrangement: DesignStore.Arrangement) {
-        guard case .element(let ref) = selection else { return }
-        store.arrange(ref, arrangement)
+        guard let selection else { return }
+        store.arrange(selection, arrangement)
+    }
+
+    /// Whether arranging what is selected would change the order of anything.
+    func canArrangeSelection(_ arrangement: DesignStore.Arrangement) -> Bool {
+        selection.map { store.canArrange($0, arrangement) } ?? false
+    }
+
+    /// Puts what is selected in a new group and selects the group: see `DesignStore.group(_:)`.
+    func groupSelection() {
+        guard let selection, let group = store.group(selection) else { return }
+        self.selection = .element(group)
+    }
+
+    /// Whether Group would make a group of what is selected (L7).
+    var canGroupSelection: Bool {
+        selection.map(store.canGroup) ?? false
+    }
+
+    /// Whether the elements selected are on more than one screen, or on a screen and the open
+    /// canvas: why Group is off, when it is.
+    var groupSelectionSpansHosts: Bool {
+        Set(selectedElements.map(\.ref.host)).count > 1
+    }
+
+    /// Takes the selected group apart and selects its members: see `DesignStore.ungroup(_:)`.
+    func ungroupSelection() {
+        guard canUngroupSelection, case .element(let ref) = selection, let members = store.ungroup(ref) else { return }
+        selection = members
+    }
+
+    /// Whether one group is selected, and it isn't locked.
+    var canUngroupSelection: Bool {
+        guard let selected = selectedElement else { return false }
+        return selected.element.kind == .group && !store.isLocked(.element(selected.ref))
     }
 
     /// Lines up what is selected: one element with its screen, several things with each other.
@@ -1447,14 +1761,29 @@ final class AppModel {
         setSelectionLocked(!isSelectionLocked)
     }
 
-    /// Hides or shows an element. Hiding one lets go of it, since it can't be touched.
+    /// Hides or shows an element, or a group with everything in it, by its own flag. Hiding
+    /// one lets go of it, and of anything selected in a group hidden, since none of it can be
+    /// touched.
     func toggleHidden(_ ref: DesignStore.ElementRef) {
         store.update(ref) { $0.isHidden.toggle() }
-        if store.resolve(ref)?.element.isHidden == true { deselect(.element(ref)) }
+        guard let element = store.resolve(ref)?.element, element.isHidden, let selection else { return }
+        let inside = element.kind == .group ? Set(store.content.contents(of: element.id).map(\.id)) : []
+        let kept = selection.things.filter { thing in
+            guard case .element(let selected) = thing else { return true }
+            return selected.element != element.id && !inside.contains(selected.element)
+        }
+        if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
+    /// Locks an element, or unlocks it, which also unlocks the locked groups above it, so that
+    /// a thing locked only by its group, which offers Unlock, is unlocked and never locked.
     func toggleLock(_ ref: DesignStore.ElementRef) {
-        store.update(ref) { $0.isLocked.toggle() }
+        guard let element = store.resolve(ref)?.element else { return }
+        if store.isLockedWithItsGroups(element) {
+            store.unlock(.element(ref))
+        } else {
+            store.update(ref) { $0.isLocked = true }
+        }
     }
 
     /// Where what is selected is, in the view's own points: for a turned element, the box
@@ -1479,13 +1808,13 @@ final class AppModel {
     // MARK: Turning
 
     /// Whether what is selected can be turned: something is, no screen is among it, and
-    /// at least one element of it isn't locked.
+    /// at least one element of it isn't locked, by itself or by a group above it (F4).
     var canTurnSelection: Bool {
         var hasUnlocked = false
         for thing in selectedThings {
             // Screens never turn.
             guard case .element(let ref) = thing else { return false }
-            if store.resolve(ref)?.element.isLocked == false { hasUnlocked = true }
+            if store.resolve(ref) != nil, !store.isLocked(thing) { hasUnlocked = true }
         }
         return hasUnlocked
     }
@@ -1512,18 +1841,25 @@ final class AppModel {
     /// That session as it was when the drag moving them began, if it held then.
     @ObservationIgnored private var moveStart: TurnSession?
 
-    /// The one element selected, unless it is locked: what a turn turns.
+    /// The one element selected, unless it is locked, by itself or by a group above it, or is
+    /// a group, which turns as several things do: what a turn turns.
     private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
-        guard let selected = selectedElement, !selected.element.isLocked else { return nil }
+        guard let selected = selectedElement, selected.element.kind != .group, !store.isLocked(.element(selected.ref)) else { return nil }
         return (selected.ref, selected.element)
     }
 
-    /// What turns several things selected: the session kept from their last turn or move,
-    /// while it is for what is selected and each of them is as it left them; otherwise one
-    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
-    /// are selected, or when a screen is among them.
+    /// Whether what is selected is one group, which turns as one rigid piece of several
+    /// things: its members, and the groups in it, go round its middle with it.
+    private var selectsOneGroup: Bool {
+        selectedElement?.element.kind == .group
+    }
+
+    /// What turns several things selected, or one group: the session kept from their last
+    /// turn or move, while it is for what is selected and each of them is as it left them;
+    /// otherwise one formed from where they are now. Reading it keeps nothing. Nil unless
+    /// several things or a group are selected, or when a screen is among them.
     private var severalTurn: TurnSession? {
-        guard let selection, selection.isSeveral else { return nil }
+        guard let selection, selection.isSeveral || selectsOneGroup else { return nil }
         if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
         return TurnSession.form(for: selection, in: store)
     }
@@ -1665,12 +2001,13 @@ final class AppModel {
     }
 
     /// Stands what is selected upright again, in one step. Several things go back exactly
-    /// to where they were, and to the angles they had, when they were selected.
+    /// to where they were, and to the angles they had, when they were selected. A group is
+    /// turned about its middle until it is upright, everything in it going round with it.
     func resetSelectionTurn() {
         if let turnable = turnableElement {
             store.update(turnable.ref) { $0.setRotation(0) }
         } else if canTurnSelection, var session = severalTurn {
-            turn(&session, to: 0)
+            turn(&session, to: selectsOneGroup ? Rotation.normalized(-session.outline.degrees) : 0)
         }
     }
 
@@ -1680,21 +2017,98 @@ final class AppModel {
     /// set to 0 does: an action that did nothing would read as broken.
     func resetSelectionRotation() {
         if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
-            changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(0) }
+            turnEach(unlockedSelectedElements.map(\.ref), to: 0)
         } else {
             resetSelectionTurn()
         }
     }
 
+    /// The Format panel's Rotation for several things: each of `refs` that isn't locked, by
+    /// itself or by a group above it, turned to `degrees` on its own pivot, in the panel's own
+    /// edit. A group among them turns as one piece about its middle.
+    func setAngle(of refs: [DesignStore.ElementRef], to degrees: Double) {
+        adjusting { turnEach(refs.filter { !store.isLocked(.element($0)) }, to: degrees) }
+    }
+
+    /// The Format panel's Rotation for a group: turns it as one piece about its middle,
+    /// everything in it going round with it, to `degrees`, in the panel's own edit. Only while
+    /// it is still the one thing selected, as a turn goes by the selection: a field set once
+    /// the selection has moved on changes nothing (M5).
+    func setGroupRotation(_ ref: DesignStore.ElementRef, to degrees: Double) {
+        guard selection == .element(ref), let group = store.resolve(ref)?.element, group.kind == .group else { return }
+        adjusting { rotateSelection(by: degrees - group.resolvedRotation) }
+    }
+
+    /// The Format panel's X, Y, W and H for a group, the one way its fields change it (D3), in
+    /// the panel's own edit. The values are in its host's points, as the panel shows them: the
+    /// box's X and Y, and its width and height, in its own axes when it is turned.
+    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the
+    ///   change is in the host's points, and `position` takes canvas points.
+    /// - W or H scales everything in it in proportion, both sides by the side typed, from its
+    ///   top-left: a group is scaled by the ratio of its widths, so an H given alone would
+    ///   scale nothing (L8).
+    ///
+    /// Nothing happens to a group that is locked, by itself or by a group above it.
+    func setGroupBox(_ ref: DesignStore.ElementRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+        adjusting {
+            if x != nil || y != nil, let (item, placement) = store.resolve(ref), item.kind == .group,
+               let box = store.canvasShape(of: .element(ref))?.bounds {
+                let across = ((x ?? item.frame.minX) - item.frame.minX) * placement.scale
+                let down = ((y ?? item.frame.minY) - item.frame.minY) * placement.scale
+                store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
+            }
+            if width != nil || height != nil, let item = store.resolve(ref)?.element, item.kind == .group,
+               item.frame.width > 0, item.frame.height > 0 {
+                // The side typed exactly; given both, the width, as the ratio is the widths'.
+                let box = item.frame
+                let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
+                    ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
+                store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
+            }
+        }
+    }
+
+    /// Turns each of `refs` to `degrees`, in one step: an element on its own pivot, and a
+    /// group as one piece about the middle of its box, as a group selected alone turns, unless
+    /// it is locked, by itself or by a group above it.
+    private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
+        var angles: [DesignElement.ID: Double] = [:]
+        var frames: [DesignElement.ID: CGRect] = [:]
+        for ref in refs {
+            guard let element = store.resolve(ref)?.element else { continue }
+            guard element.kind == .group else {
+                angles[ref.element] = degrees
+                continue
+            }
+            guard let session = TurnSession.form(for: .element(ref), in: store) else { continue }
+            for (part, place) in session.placed(turnedBy: degrees - element.resolvedRotation) {
+                angles[part.element] = place.rotation ?? 0
+                if part.element != element.id { frames[part.element] = place.frame }
+            }
+        }
+        guard !angles.isEmpty else { return }
+        store.apply { content in
+            for (id, angle) in angles {
+                content.update(id) {
+                    // A group's box is fitted round what is in it.
+                    if $0.kind != .group, let frame = frames[id] { $0.frame = frame }
+                    $0.setRotation(angle)
+                }
+            }
+        }
+    }
+
     /// Puts several things where their session turned `degrees` places them, as one change,
-    /// and keeps the session.
+    /// and keeps the session. A group's angle is written in the same change as its members'
+    /// places, so that its box, fitted round them at the end of it, goes round as one with
+    /// them: a group selected alone has the outline's angle.
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
         let placed = session.placed(turnedBy: degrees)
         store.apply { content in
             for (ref, place) in placed {
                 content.update(ref.element) {
-                    $0.frame = place.frame
+                    if $0.kind != .group { $0.frame = place.frame }
                     $0.rotation = place.rotation
                 }
             }
@@ -1704,19 +2118,21 @@ final class AppModel {
     }
 
     /// How far what is selected is turned, for the readout beside the knob: one element's
-    /// angle, or how far several things have turned since they were selected.
+    /// angle, a group's among them, or how far several things have turned since they were
+    /// selected.
     var selectionTurn: Double? {
         if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
         return selectedElement?.element.resolvedRotation
     }
 
     /// The shape of what is selected, in canvas points, turned as it is. For several
-    /// things, the outline they turn within (`TurnSession.shape`), or, with a screen
-    /// among them, the upright box round them all.
+    /// things, or a group, the outline they turn within (`TurnSession.shape`), which goes
+    /// round rigidly with them; with a screen among several, the upright box round them all.
     var selectionShape: TurnedRect? {
         guard let selection else { return nil }
-        guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        guard selection.isSeveral || selectsOneGroup else { return store.canvasShape(of: selection) }
         if let session = severalTurn { return session.shape }
+        guard selection.isSeveral else { return store.canvasShape(of: selection) }
         return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
     }
 

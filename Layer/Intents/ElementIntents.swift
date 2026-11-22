@@ -312,10 +312,18 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        try Self.move(ref, in: model, x: x, y: y, width: width, height: height, undoManager: undoManager)
+        return .result(dialog: "Moved the \(found.kind.layerName.lowercased()).")
+    }
+
+    /// Moves or resizes an element as the action asks, unless it is locked.
+    @MainActor
+    static func move(_ ref: DesignStore.ElementRef, in model: AppModel, x: Double?, y: Double?, width: Double?, height: Double?, undoManager: UndoManager?) throws {
+        guard let found = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
+        try DesignActions.requireUnlocked(ref, in: model)
         // Loose elements are given in canvas points and kept in points of their own.
-        let scale: CGFloat = ref.host == .canvas ? (model.store.resolve(ref)?.placement.scale ?? 1) : 1
-        DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(found.kind.layerName)") {
+        let scale: CGFloat = ref.host == .canvas ? found.placement.scale : 1
+        DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(found.element.kind.layerName)") {
             model.store.update(ref) { element in
                 if let x { element.frame.origin.x = CGFloat(x) / scale }
                 if let y { element.frame.origin.y = CGFloat(y) / scale }
@@ -323,7 +331,6 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
                 if let height { element.frame.size.height = CGFloat(height) / scale }
             }
         }
-        return .result(dialog: "Moved the \(found.kind.layerName.lowercased()).")
     }
 }
 
@@ -360,7 +367,7 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ElementEntity> & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        try DesignActions.requireUnlocked(ref, in: model)
         var targetID: DesignScreen.ID?
         if let screen {
             guard let id = screen.screenID, model.store.screen(id) != nil else { throw LayerIntentError.screenNotFound }
@@ -410,8 +417,8 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        let (model, ref, _) = try await DesignActions.elementOrSelected(element)
+        try DesignActions.requireUnlocked(ref, in: model)
         guard case .screen = ref.host else { throw LayerIntentError.screenNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: "Align") {
             model.store.align(ref, alignment.alignment)
@@ -423,7 +430,7 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
 struct ArrangeElementIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Change Element Order"
     static let description = IntentDescription(
-        "Moves an element in front of or behind the elements it overlaps.",
+        "Brings an element to the front, or forward past the next element, or sends it backward past the next element, or to the back, among the elements on its screen or on the open canvas. An element in a group moves among the others in its group, and stays in it. Drawings stay on top.",
         categoryName: "Elements"
     )
     static let supportedModes: IntentModes = .foreground
@@ -441,10 +448,24 @@ struct ArrangeElementIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let (model, ref, _) = try await DesignActions.elementOrSelected(element)
-        DesignActions.edit(model, undoManager: undoManager, actionName: order.arrangement.name) {
-            model.store.arrange(ref, order.arrangement)
-        }
+        try Self.arrange(ref, in: model, order.arrangement, undoManager: undoManager)
         return .result()
+    }
+
+    /// Arranges an element as one undo step, among the others in its group when it is in
+    /// one. A drawing stays on top, a locked element stays where it is, and one that can go
+    /// no further that way stays too, and Siri says why rather than doing nothing.
+    @MainActor
+    static func arrange(_ ref: DesignStore.ElementRef, in model: AppModel, _ arrangement: DesignStore.Arrangement, undoManager: UndoManager?) throws {
+        guard let (element, _) = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
+        guard element.kind != .drawing else { throw LayerIntentError.drawingsStayOnTop }
+        guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
+        guard model.store.canArrange(ref, arrangement) else {
+            throw LayerIntentError.cantGoFurther(withinGroup: element.group != nil)
+        }
+        DesignActions.edit(model, undoManager: undoManager, actionName: arrangement.name) {
+            model.store.arrange(ref, arrangement)
+        }
     }
 }
 
@@ -487,13 +508,22 @@ struct DeleteElementIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        // Asked before the confirmation: a locked element isn't offered for deleting.
+        try DesignActions.requireUnlocked(ref, in: model)
         let name = DesignDescriber.describe(found)
         try await requestConfirmation(dialog: "Delete the \(name)?")
+        try Self.delete(ref, in: model, undoManager: undoManager)
+        return .result(dialog: "Deleted the \(name).")
+    }
+
+    /// Deletes an element, unless it is locked, as one step.
+    @MainActor
+    static func delete(_ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
+        try DesignActions.requireUnlocked(ref, in: model)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Delete") {
             model.store.delete(ref)
         }
-        return .result(dialog: "Deleted the \(name).")
     }
 }
 
@@ -518,18 +548,31 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let (model, ref, _) = try await DesignActions.elementOrSelected(element)
+        try Self.setHidden(hidden, ref, in: model, undoManager: undoManager)
+        return .result()
+    }
+
+    /// Hides an element, or shows it as one undo step.
+    @MainActor
+    static func setHidden(_ hidden: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: hidden ? "Hide" : "Show") {
-            model.store.update(ref) { $0.isHidden = hidden }
+            // Shown, it has to be showing: the hidden groups above it are shown too, as unlocking
+            // unlocks the groups above (ruling D), or a member hidden only by its group stays hidden.
+            let groups = hidden ? [] : model.store.content.ancestors(of: ref.element).filter { model.store.element($0)?.isHidden == true }
+            model.store.apply { content in
+                content.update(ref.element) { $0.isHidden = hidden }
+                for id in groups { content.update(id) { $0.isHidden = false } }
+            }
         }
         if hidden { model.deselect(.element(ref)) }
-        return .result()
     }
 }
 
 struct SetElementLockedIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Lock or Unlock Element"
     static let description = IntentDescription(
-        "Locks an element so it can't be moved, resized or deleted by accident, or unlocks it.",
+        "Locks an element so it can't be moved, resized or deleted by accident, or unlocks it. Unlocking an element in a locked group unlocks the group too.",
         categoryName: "Elements"
     )
     static let supportedModes: IntentModes = .foreground
@@ -547,10 +590,24 @@ struct SetElementLockedIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let (model, ref, _) = try await DesignActions.elementOrSelected(element)
-        DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock" : "Unlock") {
-            model.store.update(ref) { $0.isLocked = locked }
-        }
+        try Self.setLocked(locked, ref, in: model, undoManager: undoManager)
         return .result()
+    }
+
+    /// Locks an element, or unlocks it as one undo step. Unlocking acts on the lock that
+    /// holds it: the locked groups above it are unlocked too, as the popover and the Format
+    /// panel do, or a member locked only by its group would stay locked (ruling D). Locking
+    /// locks only the element.
+    @MainActor
+    static func setLocked(_ locked: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
+        DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock" : "Unlock") {
+            if locked {
+                model.store.setLocked(true, .element(ref))
+            } else {
+                model.store.unlock(.element(ref))
+            }
+        }
     }
 }
 

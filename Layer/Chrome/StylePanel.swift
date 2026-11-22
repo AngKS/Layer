@@ -13,7 +13,10 @@ struct StylePanel: View {
     var body: some View {
         let scrolling = ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let selected = model.selectedElement {
+                if let selected = model.selectedElement, selected.element.kind == .group {
+                    // A group has settings of its own, never one element's.
+                    GroupSettings(ref: selected.ref, group: selected.element)
+                } else if let selected = model.selectedElement {
                     ElementSettings(ref: selected.ref, element: selected.element)
                 } else if let screen = model.selectedScreen {
                     FrameSettings(screen: screen)
@@ -78,13 +81,11 @@ private struct ElementSettings: View {
         PanelSection {
             HStack(spacing: 6) {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
-                IconButton(element.isLocked ? "Unlock" : "Lock", symbol: element.isLocked ? "lock.fill" : "lock", isOn: element.isLocked) {
-                    model.toggleLockOfSelection()
+                LockButton()
+                // A drawing stays on top: there is no order to change.
+                if element.kind != .drawing {
+                    ArrangeButtons()
                 }
-                IconButton(DesignStore.Arrangement.forward.name, symbol: DesignStore.Arrangement.forward.symbol) { model.arrangeSelection(.forward) }
-                    .disabled(!model.store.canArrange(ref, .forward))
-                IconButton(DesignStore.Arrangement.backward.name, symbol: DesignStore.Arrangement.backward.symbol) { model.arrangeSelection(.backward) }
-                    .disabled(!model.store.canArrange(ref, .backward))
             }
         }
 
@@ -119,7 +120,8 @@ private struct ElementSettings: View {
                 }
             }
         }
-        .disabled(element.isLocked)
+        // Locked by itself or by a group above it, it stays as it is.
+        .disabled(model.isSelectionLocked)
 
         PanelSection {
             if element.hasFill {
@@ -202,6 +204,68 @@ private struct ElementSettings: View {
     }
 }
 
+/// One group selected: its name; what can be done to it as one thing; its box, whose X, Y,
+/// W and H move everything in it, or scale it in proportion (`AppModel.setGroupBox`); its
+/// angle, which turns it as one piece about its middle; and the settings of what is in it,
+/// each set on every member that has it, as for several things.
+private struct GroupSettings: View {
+    @Environment(AppModel.self) private var model
+    let ref: DesignStore.ElementRef
+    let group: DesignElement
+
+    var body: some View {
+        let isLocked = model.isSelectionLocked
+        PanelHeader(
+            symbol: group.kind.symbol,
+            name: Binding(get: { group.name ?? "" }, set: { name in
+                model.adjusting { model.store.update(ref) { $0.name = name.isEmpty ? nil : name } }
+            }),
+            placeholder: group.kind.layerName,
+            onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
+        )
+
+        // The popover's actions for a group.
+        PanelSection {
+            HStack(spacing: 6) {
+                IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
+                LockButton()
+                ArrangeButtons()
+                IconButton("Ungroup", symbol: "rectangle.3.group.dashed") { model.ungroupSelection() }
+                    .disabled(!model.canUngroupSelection)
+            }
+        }
+
+        // Its box, in its host's points, as an element's frame is shown.
+        PanelSection {
+            HStack(spacing: 8) {
+                NumberField("X", value: Binding(get: { group.frame.minX }, set: { x in model.setGroupBox(ref, x: x) }))
+                NumberField("Y", value: Binding(get: { group.frame.minY }, set: { y in model.setGroupBox(ref, y: y) }))
+            }
+            HStack(spacing: 8) {
+                NumberField("W", value: Binding(get: { group.frame.width }, set: { width in model.setGroupBox(ref, width: width) }), range: 1...4000)
+                NumberField("H", value: Binding(get: { group.frame.height }, set: { height in model.setGroupBox(ref, height: height) }), range: 1...4000)
+            }
+            if case .screen = ref.host {
+                // Lined up with its screen as one block.
+                HStack(spacing: 6) {
+                    ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
+                        IconButton(alignment.name, symbol: alignment.symbol) { model.store.align(ref, alignment) }
+                    }
+                }
+            }
+        }
+        .disabled(isLocked)
+
+        LeafStyleSections(leaves: model.selectedLeaves.map { ($0.ref, $0.element) }, showsAngle: true) {
+            NumberField("°", label: "Rotation", value: Binding(
+                get: { CGFloat(Rotation.shown(group.resolvedRotation)) },
+                set: { degrees in model.setGroupRotation(ref, to: Double(degrees)) }
+            ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
+            .disabled(isLocked)
+        }
+    }
+}
+
 private struct FrameSettings: View {
     @Environment(AppModel.self) private var model
     let screen: DesignScreen
@@ -245,17 +309,13 @@ private struct FrameSettings: View {
 
 /// Several things selected at once: lining them up with one another, and the settings
 /// their elements have in common, each of which is set for every element that has it. A
-/// setting shows what the first of those elements has.
+/// setting shows what the first of those elements has. A group among them is styled through
+/// what is in it, and turned as one piece.
 private struct SeveralSettings: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let things = model.selectedThings
-        let selected = model.selectedElements
-        let elements = selected.map(\.element)
-        // What the settings change: these elements, even if a field typed in sets its value
-        // after the selection has moved on.
-        let refs = selected.map(\.ref)
         let isLocked = model.isSelectionLocked
 
         PanelHeader(symbol: "square.on.square.dashed", title: "\(things.count) Items") {
@@ -265,9 +325,12 @@ private struct SeveralSettings: View {
         PanelSection {
             HStack(spacing: 6) {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
-                IconButton(isLocked ? "Unlock" : "Lock", symbol: isLocked ? "lock.fill" : "lock", isOn: isLocked) {
-                    model.toggleLockOfSelection()
-                }
+                LockButton()
+                ArrangeButtons()
+                let canGroup = model.canGroupSelection
+                IconButton("Group", symbol: "rectangle.3.group") { model.groupSelection() }
+                    .disabled(!canGroup)
+                    .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
             }
         }
 
@@ -286,35 +349,70 @@ private struct SeveralSettings: View {
         }
         .disabled(isLocked)
 
-        // Corners, opacity and angle are for what isn't locked, as they are for one element:
-        // the value shown is an unlocked element's, and only unlocked ones change.
-        let unlocked = elements.filter { !$0.isLocked }
+        // Each thing is turned to the angle shown (the first unlocked one's) on its own pivot,
+        // a group as one piece about its middle; a screen among them leaves nothing to turn.
+        // What the field turns: these, even if it is set once the selection has moved on.
+        let refs = model.selectedElements.map(\.ref)
+        let first = model.unlockedSelectedElements.first?.element
+        let turnable = model.canTurnSelection && first != nil
+        LeafStyleSections(leaves: model.selectedLeaves.map { ($0.ref, $0.element) }, showsAngle: turnable) {
+            if turnable, let first {
+                NumberField("°", label: "Rotation", value: Binding(
+                    get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
+                    set: { degrees in model.setAngle(of: refs, to: Double(degrees)) }
+                ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
+            }
+        }
+    }
+}
+
+/// The settings the elements a panel is for have in common, each set on every one of
+/// `leaves` that has it, and showing what the first of those has: corners and opacity, with
+/// `angle` beside them; fill, border and shadow; and text. A group stands for what is in it:
+/// `leaves` are `AppModel.selectedLeaves`, so that a group, alone or among several things,
+/// is styled through its members.
+private struct LeafStyleSections<Angle: View>: View {
+    @Environment(AppModel.self) private var model
+    /// What the settings change: these, even if a field typed in sets its value once the
+    /// selection has moved on (M5).
+    let leaves: [(ref: DesignStore.ElementRef, element: DesignElement)]
+    /// Whether `angle` has a field to show.
+    let showsAngle: Bool
+    let angle: Angle
+
+    init(leaves: [(ref: DesignStore.ElementRef, element: DesignElement)], showsAngle: Bool, @ViewBuilder angle: () -> Angle) {
+        self.leaves = leaves
+        self.showsAngle = showsAngle
+        self.angle = angle()
+    }
+
+    var body: some View {
+        let elements = leaves.map(\.element)
+        let refs = leaves.map(\.ref)
+        // Corners and opacity are for what isn't locked, by itself or by a group above it, as
+        // they are for one element: the value shown is an unlocked one's, and only unlocked
+        // ones change.
+        let unlocked = leaves.filter { !model.store.isLocked(.element($0.ref)) }.map(\.element)
         let rounded = unlocked.first(where: \.hasCornerRadius)
         let faded = unlocked.first { $0.kind.spec.hasEffects }
         let effects = elements.first { $0.kind.spec.hasEffects }
-        let turnable = model.canTurnSelection
-        if rounded != nil || faded != nil || turnable {
+        if rounded != nil || faded != nil || showsAngle {
             PanelSection {
                 HStack(spacing: 8) {
                     if let rounded {
                         NumberField("R", label: "Corner radius", value: Binding(
                             get: { rounded.resolvedCornerRadius },
-                            set: { radius in change(refs, where: { $0.hasCornerRadius && !$0.isLocked }) { $0.cornerRadius = radius } }
+                            set: { radius in change(refs, unlockedOnly: true, where: \.hasCornerRadius) { $0.cornerRadius = radius } }
                         ), range: 0...999)
                     }
                     if let faded {
                         NumberField("%", label: "Opacity", value: Binding(
                             get: { (faded.resolvedOpacity * 100).rounded() },
-                            set: { percent in change(refs, where: { $0.kind.spec.hasEffects && !$0.isLocked }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                            set: { percent in change(refs, unlockedOnly: true, where: { $0.kind.spec.hasEffects }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
                     }
-                    // Each element is turned to the angle shown (the first unlocked one's), on
-                    // its own pivot; a screen among them leaves nothing to turn.
-                    if turnable, let first = unlocked.first {
-                        NumberField("°", label: "Rotation", value: Binding(
-                            get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
-                            set: { degrees in change(refs, where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
-                        ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
+                    if showsAngle {
+                        angle
                     }
                 }
             }
@@ -389,9 +487,8 @@ private struct SeveralSettings: View {
 
     /// Makes a change to each of the elements the settings are for that a setting applies to.
     /// A run of quick changes, a colour being dragged for instance, undoes as one step.
-    private func change(_ refs: [DesignStore.ElementRef], where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        let store = model.store
-        model.adjusting { store.update(refs.filter { store.resolve($0).map { applies($0.element) } ?? false }, body) }
+    private func change(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        model.changeElements(refs, unlockedOnly: unlockedOnly, where: applies, body)
     }
 }
 
@@ -836,12 +933,14 @@ struct TypedNumber: View {
     let onEnd: () -> Void
     /// The value typed into: the binding as typing began, kept for as long as it goes on.
     @State private var target: Binding<CGFloat>
-    /// The number as typed, which the field shows. The binding kept may read the value it
-    /// had as typing began, as the panel's do.
-    @State private var typed: Double
+    /// What is typed so far. Nothing is set until typing ends, on Return or as the field
+    /// loses focus: set on each key, the element changed under the field at every digit (a
+    /// group shrank to its smallest at the first one deleted), and the panel was rebuilt as
+    /// it was typed into.
+    @State private var draft: NumberDraft
     @FocusState private var isEditing: Bool
 
-    static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+    static let format = NumberDraft.format
 
     init(label: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, wraps: Bool, onEnd: @escaping () -> Void) {
         self.label = label
@@ -851,35 +950,97 @@ struct TypedNumber: View {
         // Only as the field appears: later bindings, made for whatever is selected then, are
         // passed in but not taken.
         _target = State(initialValue: value)
-        _typed = State(initialValue: Double(value.wrappedValue))
+        _draft = State(initialValue: NumberDraft(value.wrappedValue))
+    }
+
+    /// Sets what is typed on the value the field began with, the first time typing ends.
+    private func commit() {
+        if let value = draft.finish(in: range, wraps: wraps) { target.wrappedValue = value }
     }
 
     var body: some View {
-        TextField(
-            label,
-            value: Binding(get: { typed }, set: { number in
-                // "NaN", or a number too big to hold, isn't one: a frame that isn't finite
-                // can't be saved, and scrubbing it traps.
-                guard number.isFinite else { return }
-                let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
-                // Only a number newly typed. SwiftUI sets each change twice, and once more as
-                // typing ends; set again then, the number typed earlier undid whatever changed
-                // the element meanwhile: an Align, Undo, a drag, the knob, voice.
-                guard Double(value) != typed else { return }
-                typed = Double(value)
-                target.wrappedValue = value
-            }),
-            format: Self.format
-        )
-        .keyboardType(.numbersAndPunctuation)
-        .focused($isEditing)
-        // Focus taken as the field appears is dropped; a moment later it holds.
-        .task {
-            try? await Task.sleep(for: .milliseconds(50))
-            isEditing = true
+        TextField(label, text: $draft.text)
+            .keyboardType(.numbersAndPunctuation)
+            .focused($isEditing)
+            .onSubmit { isEditing = false }
+            // Focus taken as the field appears is dropped; a moment later it holds.
+            .task {
+                try? await Task.sleep(for: .milliseconds(50))
+                isEditing = true
+            }
+            .onChange(of: isEditing) { _, focused in
+                guard !focused else { return }
+                commit()
+                onEnd()
+            }
+            // A tap on the canvas doesn't blur the field: it is removed, with the panel or the
+            // settings it is in, and what was typed is set as it goes.
+            .onDisappear(perform: commit)
+            .accessibilityLabel(label)
+    }
+}
+
+/// The number typed into a field, as text, until typing ends. What is typed commits once:
+/// text that isn't a number, or is too big to hold, commits nothing, and a number the same as
+/// the one the field began with commits nothing either, so that Return and then losing focus
+/// are one change.
+@MainActor
+struct NumberDraft: Equatable {
+    var text: String
+    /// The number the field began with.
+    let start: CGFloat
+    /// Typing has ended and what was typed has been taken.
+    private var isFinished = false
+
+    static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
+
+    init(_ value: CGFloat) {
+        start = value
+        text = Double(value).formatted(Self.format)
+    }
+
+    /// `committed(in:wraps:)` the first time typing ends, nil after: Return or a blur, and then
+    /// the field going, are one change.
+    mutating func finish(in range: ClosedRange<CGFloat>, wraps: Bool) -> CGFloat? {
+        guard !isFinished else { return nil }
+        isFinished = true
+        return committed(in: range, wraps: wraps)
+    }
+
+    /// The value the text comes to, within `range` (or turned round it, if `wraps`), when it
+    /// differs from the one the field began with; nil to leave the value as it was.
+    func committed(in range: ClosedRange<CGFloat>, wraps: Bool) -> CGFloat? {
+        guard let number = try? Self.format.parseStrategy.parse(text.trimmingCharacters(in: .whitespaces)), number.isFinite else { return nil }
+        let value = Scrubber.typed(CGFloat(number), in: range, wraps: wraps)
+        return Double(value) == Double(start) ? nil : value
+    }
+}
+
+/// Lock, or Unlock while what is selected is locked, by itself or by a group above it: as the
+/// popover shows it, and as the button acts. Unlocking a thing locked by its group unlocks the
+/// locked groups above it too (ruling D), so that the button never does nothing.
+private struct LockButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let isLocked = model.isSelectionLocked
+        IconButton(isLocked ? "Unlock" : "Lock", symbol: isLocked ? "lock.fill" : "lock", isOn: isLocked) {
+            model.toggleLockOfSelection()
         }
-        .onChange(of: isEditing) { _, focused in if !focused { onEnd() } }
-        .accessibilityLabel(label)
+    }
+}
+
+/// Bring to Front, Bring Forward, Send Backward and Send to Back, for whatever is selected:
+/// the popover's Arrange menu, laid out in the actions row. One that would change nothing
+/// is off.
+private struct ArrangeButtons: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ForEach(DesignStore.Arrangement.allCases, id: \.self) { arrangement in
+            IconButton(arrangement.name, symbol: arrangement.symbol) { model.arrangeSelection(arrangement) }
+                .disabled(!model.canArrangeSelection(arrangement))
+        }
     }
 }
 

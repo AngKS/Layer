@@ -26,7 +26,8 @@ struct CanvasScreen: View {
                     }
                     ForEach(model.store.floating) { floating in
                         FloatingElementView(floating: floating)
-                            .zIndex(2)
+                            // A locked drawing is above the other things, as it is touched.
+                            .zIndex(floating.element.kind == .drawing ? 3 : 2)
                             .transition(.blurReplace)
                     }
                 }
@@ -73,7 +74,8 @@ struct CanvasScreen: View {
             var target: CanvasSelection?
             if case .active(let point) = phase, model.tool == .select, point.y > model.topBarBottom,
                !model.chromeFrames.values.contains(where: { $0.contains(point) }) {
-                target = model.hoverTarget(at: point)
+                // What a tap there would pick: a grouped thing's outermost group, say.
+                target = model.hoverTarget(at: point).map { model.pickTarget($0) }
             }
             if model.hovered != target { model.hovered = target }
         }
@@ -123,6 +125,8 @@ struct CanvasScreen: View {
                         Spacer(minLength: 0)
                         if model.isInspectorOpen {
                             StylePanel(maxHeight: panelRoom)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("Format panel")
                                 .reportsChromeFrame(AppModel.formatChrome, to: model)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }

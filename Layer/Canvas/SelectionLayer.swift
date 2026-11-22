@@ -27,6 +27,10 @@ struct SelectionLayer: View {
             SelectionSummary()
             if let screen = model.selectedScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame))
+                    // A tap reaches what it would without the area: the screen's empty area,
+                    // which lets go of it as the canvas does, or, with the palette up, an
+                    // element on it.
+                    .onTapGesture(coordinateSpace: .named(Self.space)) { model.selectionAreaTapped(at: $0) }
                     .canvasDrag(drags, model: model, isEnabled: screen.isLocked != true) { drags.moveScreen(screen, model: model, owner: $0) }
             }
             // Every element's target, laid out once in canvas points and moved as one by
@@ -41,28 +45,41 @@ struct SelectionLayer: View {
             // With the palette up, the selected element is moved by its own area. So is a
             // selected drawing at any time: it has no target of its own among the elements'.
             // A tap in the area reaches what lies under it, as it would without the area: a
-            // drawing's box can hold other things (audit C12).
+            // drawing's box can hold other things (audit C12). A group's area moves it as what
+            // is selected moves, everything in it with it.
             if let selected = model.selectedElement, model.tool == .draw || !selected.element.isPickedByItsFrame {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
-                dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
+                let area = dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
                     .onTapGesture(coordinateSpace: .named(Self.space)) { model.selectionAreaTapped(at: $0) }
-                    .canvasDrag(drags, model: model, isEnabled: !selected.element.isLocked) { owner in
+                // Locked by itself or by a group above it, it isn't moved (F4).
+                let isLocked = store.isLocked(.element(selected.ref))
+                if selected.element.kind == .group {
+                    area.canvasDrag(drags, model: model, isEnabled: !isLocked) { drags.moveSelection(model: model, owner: $0) }
+                } else {
+                    area.canvasDrag(drags, model: model, isEnabled: !isLocked) { owner in
                         drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model, owner: owner) {
                             drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)
                         }
                     }
+                }
             }
 
             // Several things at once: each is outlined on its turned shape, any of them
-            // drags them all, and a tap on one picks it out. They have no handles: together
-            // they aren't resized, but they turn as one by the knob.
+            // drags them all, and a tap on one takes it out. A screen's area lies over what
+            // is on it, so a tap there reaches that, or the screen's empty area, instead. A
+            // tap on a selected group finds what is under it, as on the group's own target:
+            // ink, then the thing in it there, so a double-tap goes into it.
+            // They have no handles: together they aren't resized, but they turn as one by
+            // the knob.
             if case .several = model.selection {
                 let things = model.selectedThings
                 let isLocked = model.isSelectionLocked
                 ForEach(things, id: \.self) { thing in
                     if let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) {
                         dragArea(shape.rect, degrees: shape.degrees)
-                            .onTapGesture { model.pick(thing) }
+                            .onTapGesture(coordinateSpace: .named(Self.space)) { point in
+                                if case .screen = thing { model.selectionAreaTapped(at: point) } else { model.targetTapped(thing, at: point) }
+                            }
                             .canvasDrag(drags, model: model, isEnabled: !isLocked) { drags.moveSelection(model: model, owner: $0) }
                     }
                 }
@@ -88,15 +105,19 @@ struct SelectionLayer: View {
                 // The element's turned box: its outline, handles and badge go round with it.
                 let shape = viewport.viewShape(for: TurnedRect(rect: selected.placement.canvasRect(for: selected.element.frame), degrees: selected.element.resolvedRotation))
                 // Not while it turns: the gaps jitter as it goes round, and their labels would
-                // cover the angle beside the knob.
-                if model.isAdjusting, !model.isTurning, store.canvas.showsMeasurements, case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
+                // cover the angle beside the knob. Nor for a group, whose box holds things the
+                // gaps would be measured to.
+                if model.isAdjusting, !model.isTurning, selected.element.kind != .group, store.canvas.showsMeasurements,
+                   case .screen(let id) = selected.ref.host, let screen = store.screen(id) {
                     SpacingOverlay(guides: .measure(selected.element, in: screen), screen: screen, viewport: viewport)
                 }
                 if model.isAdjusting {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
                 outline(shape.rect, degrees: shape.degrees, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
-                if selected.element.isLocked {
+                // Locked by itself or by a group above it: a member of a locked group, selected
+                // by a double-tap or a Layers row, isn't resized either (F4).
+                if store.isLocked(.element(selected.ref)) {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
@@ -117,6 +138,8 @@ struct SelectionLayer: View {
         .coordinateSpace(.named(Self.space))
         // A tick as a turn snaps to the 45s; none as it leaves.
         .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
+        // A tick for each thing a tap adds to the selection or takes out of it.
+        .sensoryFeedback(.selection, trigger: model.tapSelectionChanges)
         // The model ends a drag left live: see `CanvasDrags.endAny`.
         .onAppear { model.drags = drags }
     }
@@ -158,7 +181,8 @@ struct SelectionLayer: View {
     }
 
     /// A corner handle just outside the element's turned box, in the view. Dragged, the
-    /// element is resized in its own axes, and the corner across from it stays put.
+    /// element is resized in its own axes, and the corner across from it stays put. A group
+    /// is resized in proportion, everything in it scaled alike (see `DesignStore.resizeGroup`).
     private func handle(
         _ corner: ElementLayout.Corner,
         on shape: TurnedRect,
@@ -176,9 +200,7 @@ struct SelectionLayer: View {
             .position(point)
             .canvasDrag(drags, model: model) { owner in
                 drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model, owner: owner) {
-                    { origin, translation in
-                        (ElementLayout.resizedTurned(origin, degrees: element.resolvedRotation, from: corner, by: translation, kind: element.kind), [])
-                    }
+                    CanvasDrags.resizeRule(for: element.kind, degrees: element.resolvedRotation, corner: corner)
                 }
             }
     }
@@ -225,11 +247,17 @@ private struct SelectionSummary: View {
             return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
         }
         if let selected = model.selectedElement {
-            if selected.element.kind == .drawing {
+            let size = "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
+            switch selected.element.kind {
+            case .drawing:
                 let strokes = selected.element.strokeCount
                 return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
+            case .group:
+                // Told apart from an element, by VoiceOver and the UI tests.
+                return "Group · \(size)"
+            default:
+                return size
             }
-            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
         }
         if let screen = model.selectedScreen {
             return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
@@ -287,6 +315,8 @@ final class CanvasDrags {
     /// How the dragged element moves, worked out as its drag begins rather than whenever
     /// the targets are drawn.
     @ObservationIgnored private var rule: Rule?
+    /// A group a handle resizes, as the drag began: every frame resizes it from there.
+    @ObservationIgnored private var groupPose: DesignStore.GroupPose?
 
     var isDragging: Bool { session != nil }
 
@@ -436,11 +466,24 @@ final class CanvasDrags {
         elementOrigin = nil
         screenOrigin = nil
         groupOrigins = nil
+        groupPose = nil
         rule = nil
         if !guides.isEmpty { guides = [] }
         // A turn still under way is still adjusting the selection: the twist that ended
         // this drag, or the knob held while another finger let go.
         if !model.isTurning { model.isAdjusting = false }
+    }
+
+    /// How a corner handle resizes something of a kind, turned `degrees`: an element in its own
+    /// axes, keeping its shape where its kind has one; a group in proportion, so that what is in
+    /// it scales alike (see `DesignStore.resizeGroup`). The corner across stays put.
+    static func resizeRule(for kind: ElementKind, degrees: Double, corner: ElementLayout.Corner) -> Rule {
+        { origin, translation in
+            let frame = kind == .group
+                ? ElementLayout.resizedProportionally(origin, degrees: degrees, from: corner, by: translation)
+                : ElementLayout.resizedTurned(origin, degrees: degrees, from: corner, by: translation, kind: kind)
+            return (frame, [])
+        }
     }
 
     /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
@@ -506,11 +549,22 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, moving: [.element(ref)], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
+            // Locked, by itself or by a group above it, it is neither moved nor resized (F4):
+            // the drag is left alone until its finger lifts. The handles and targets of a
+            // locked thing are hidden or off, but a member's lock can come from its group.
+            guard !model.store.isLocked(.element(ref)) else {
+                session = nil
+                leaveAlone(owner, startingAt: start)
+                return
+            }
             beginEdit(model: model, named: findsNewHome ? String(localized: "Move") : String(localized: "Resize"))
             dragged = [.element(ref)]
             self.findsNewHome = findsNewHome
             model.selection = .element(ref)
-            elementOrigin = frame
+            // A group's frame is the box round what is in it: they are resized, from where they
+            // were as the drag began, and the box is fitted round them.
+            groupPose = model.store.groupPose(of: ref)
+            elementOrigin = groupPose?.box ?? frame
             rule = makeRule()
             model.isAdjusting = true
         }
@@ -521,7 +575,13 @@ final class CanvasDrags {
         if guides != snappedTo { guides = snappedTo }
         // Set only when it differs: each setting tells whatever draws the guides to draw again.
         if guidePlacement != placement { guidePlacement = placement }
-        model.store.act(for: edit) { model.store.update(ref) { $0.frame = frame } }
+        model.store.act(for: edit) {
+            if let groupPose {
+                model.store.resizeGroup(ref, to: frame, from: groupPose)
+            } else {
+                model.store.update(ref) { $0.frame = frame }
+            }
+        }
     }
 
     func dropElement(_ ref: DesignStore.ElementRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
@@ -552,12 +612,17 @@ final class CanvasDrags {
     }
 
     /// Moves what a drag on an element's target moves: the element, or the drawing whose ink
-    /// lay over it where the drag began. `start` is in the view's points.
+    /// lay over it where the drag began. A group's target moves the group, as a tap there
+    /// picks it, with whatever else is selected along with it. `start` is in the view's points.
     func moveOnTarget(
         _ ref: DesignStore.ElementRef, element: DesignElement, placement: Placement, on screen: DesignScreen?,
         by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel
     ) {
         guard let drawing = ink(under: start, for: owner, model: model) else {
+            if element.kind == .group {
+                moveGroup(by: translation, startingAt: start, owner: owner, model: model, selecting: .element(ref))
+                return
+            }
             moveElement(ref, from: element.frame, placement: placement, by: translation, startingAt: start, owner: owner, model: model) {
                 self.moveRule(for: element, placement: placement, on: screen, model: model)
             }
@@ -572,7 +637,11 @@ final class CanvasDrags {
     func dropOnTarget(_ ref: DesignStore.ElementRef, startingAt start: CGPoint, owner: Owner, model: AppModel) {
         let drawing = owner.ink.flatMap { $0.start == start ? $0.drawing : nil }
         owner.ink = nil
-        dropElement(drawing ?? ref, findsNewHome: true, owner: owner, model: model)
+        if drawing == nil, model.store.groupItem(ref.element) != nil {
+            dropGroup(owner: owner, model: model)
+        } else {
+            dropElement(drawing ?? ref, findsNewHome: true, owner: owner, model: model)
+        }
     }
 
     /// The drawing with ink where a drag on a target began, looked up once for each drag: as
@@ -599,11 +668,24 @@ final class CanvasDrags {
             }
     }
 
-    func moveGroup(by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
-        let turn = begins(owner, at: start, moving: model.selection?.things ?? [], model: model)
+    /// `selecting`: what the drag is on, when it isn't on what is selected, such as a group's
+    /// target. Unless it is among what is selected, it is selected alone as the drag begins,
+    /// as an element is by a drag on it.
+    func moveGroup(by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel, selecting thing: CanvasSelection? = nil) {
+        let selects = thing.flatMap { model.selection?.contains($0) == true ? nil : $0 }
+        let turn = begins(owner, at: start, moving: selects?.things ?? model.selection?.things ?? [], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
+            if let selects {
+                // Locked, by itself or by a group above it, it isn't moved (F4).
+                guard !model.store.isLocked(selects) else {
+                    session = nil
+                    leaveAlone(owner, startingAt: start)
+                    return
+                }
+            }
             beginEdit(model: model)
+            if let selects { model.selection = selects }
             model.selectionWillMove()
             var origins: [CanvasSelection: CGRect] = [:]
             for thing in model.selectedThings where !model.store.isLocked(thing) {
@@ -741,12 +823,16 @@ private struct CanvasDragModifier<G: Gesture>: ViewModifier {
 /// given where it lies and compared by that alone: a change to the design builds only the
 /// targets of what it moved, where every target, with its tap and its drag, was built again
 /// for every change, each frame of a drag among them (audit C6).
+///
+/// A group that hasn't been gone into (`AppModel.enteredGroups`) is one target, its box,
+/// and what is in it has none; selecting something in it swaps its target for theirs.
 private struct ElementTargets: View {
     @Environment(AppModel.self) private var model
     let drags: CanvasDrags
 
     var body: some View {
         let store = model.store
+        let targets = store.targetElements(entered: model.enteredGroups)
         // A finger's worth of target at the zoom the canvas comes to rest at: following the
         // zoom itself, every target was built again on every frame of a pinch (audit C8).
         let minimum = 30 / max(model.settledScale, 0.01)
@@ -756,25 +842,27 @@ private struct ElementTargets: View {
                     ScreenNameTarget(id: screen.id, frame: screen.labelFrame, isLocked: screen.isLocked == true, minimum: minimum, model: model, drags: drags)
                         .equatable()
                 }
-                ForEach(screen.elements.filter { !$0.isHidden }) { element in
-                    ElementTarget(
-                        ref: .init(host: .screen(screen.id), element: element.id), frame: screen.placement.canvasRect(for: element.frame),
-                        degrees: element.resolvedRotation, isLocked: element.isLocked, minimum: minimum, model: model, drags: drags
-                    )
-                    .equatable()
+                ForEach(targets[.screen(screen.id)] ?? []) { element in
+                    target(for: element, on: .screen(screen.id), placement: screen.placement, minimum: minimum)
                 }
             }
             // A drawing on the ink canvas has no target here: a tap on its ink picks it, and
             // a drag across it is free to pan the canvas.
-            ForEach(store.floating.filter { !$0.element.isHidden && $0.element.isPickedByItsFrame }) { floating in
-                ElementTarget(
-                    ref: .init(host: .canvas, element: floating.id), frame: floating.placement.canvasRect(for: floating.element.frame),
-                    degrees: floating.element.resolvedRotation, isLocked: floating.element.isLocked, minimum: minimum, model: model, drags: drags
-                )
-                .equatable()
+            ForEach(targets[.canvas] ?? []) { element in
+                target(for: element, on: .canvas, placement: Placement(origin: .zero, scale: element.scale ?? 1), minimum: minimum)
             }
         }
         .frame(width: Viewport.canvasSize.width, height: Viewport.canvasSize.height, alignment: .topLeading)
+    }
+
+    /// A thing's target, or a group's: its box. Locked by itself or by a group above it, it
+    /// doesn't drag; a group's members' own locks don't stop the group.
+    private func target(for element: DesignElement, on host: DesignStore.ElementRef.Host, placement: Placement, minimum: CGFloat) -> some View {
+        ElementTarget(
+            ref: .init(host: host, element: element.id), frame: placement.canvasRect(for: element.frame),
+            degrees: element.resolvedRotation, isLocked: model.store.isLockedWithItsGroups(element), minimum: minimum, model: model, drags: drags
+        )
+        .equatable()
     }
 }
 
@@ -931,5 +1019,7 @@ enum CanvasWork {
     static var targetsBuilt = 0
     /// Drag owners made: one each time a view carrying a drag is made.
     static var ownersMade = 0
+    /// Passes over the design's list to work out what can be touched on the canvas.
+    static var targetPasses = 0
 }
 #endif
