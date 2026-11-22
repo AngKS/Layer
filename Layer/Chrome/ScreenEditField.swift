@@ -13,6 +13,7 @@ import SwiftUI
 /// Without a model that can be asked, it is disabled and says why.
 struct ScreenEditField: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     let screen: DesignScreen.ID
 
     @State private var draft = Draft()
@@ -56,6 +57,14 @@ struct ScreenEditField: View {
         // the bar leaves less (see `SelectionActions`).
         .frame(minWidth: Self.narrowest, maxWidth: model.isCompactWidth ? 150 : 240)
         .frame(height: 44)
+        // A field of its own in every state, as the format panel's are, and opaque: through
+        // the bar's glass, or a translucent fill, what is under it showed, such as a phone
+        // frame's Dynamic Island just after the placeholder, which read as a send button.
+        .background {
+            Capsule()
+                .fill(Color(uiColor: .secondarySystemBackground))
+                .padding(.vertical, 4)
+        }
         .onGeometryChange(for: CGPoint.self, of: { proxy in
             let frame = proxy.frame(in: .global)
             return CGPoint(x: frame.midX, y: frame.midY)
@@ -73,14 +82,19 @@ struct ScreenEditField: View {
         }
         .onDisappear(perform: endHold)
         // A key added or a model chosen in Settings may have changed whether one can be asked.
-        .onReceive(NotificationCenter.default.publisher(for: ModelPreferences.changed)) { _ in
-            whyUnavailable = model.screenEditor.whyUnavailable()
-            if whyUnavailable == nil {
-                model.pencilVoice.prepare()
-            } else {
-                // Kept, for when one can be asked again.
-                isTyping = false
-            }
+        .onReceive(NotificationCenter.default.publisher(for: ModelPreferences.changed)) { _ in askAgain() }
+        // So may Apple Intelligence, turned on in the system's Settings and come back from.
+        .onChange(of: scenePhase) { _, phase in if phase == .active { askAgain() } }
+    }
+
+    /// Asks again whether a model can be asked, and gets the call ready if one can now.
+    private func askAgain() {
+        whyUnavailable = model.screenEditor.whyUnavailable()
+        if whyUnavailable == nil {
+            model.pencilVoice.prepare()
+        } else {
+            // Kept, for when one can be asked again.
+            isTyping = false
         }
     }
 
@@ -136,29 +150,44 @@ struct ScreenEditField: View {
         switch shown {
         case .idle: (text, style) = (Self.placeholder, .placeholder)
         // A reply has no tick: what the model said may be that it did nothing.
-        case .draft(let words), .working(let words), .reply(let words): (text, style) = (words, .primary)
+        case .draft(let words): (text, style) = (words, .typed)
+        case .working(let words), .reply(let words): (text, style) = (words, .primary)
         case .problem(let words), .unavailable(let words): (text, style) = (words, .secondary)
         }
         return Self.text(text, style: style)
+            // Highlighted under the pointer, as the bar's buttons are.
+            .contentShape(.hoverEffect, .capsule)
+            .hoverEffect(.highlight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Self.label)
             // The placeholder is the label already.
             .accessibilityValue(shown == .idle ? "" : text)
             .accessibilityAddTraits(typable ? .isButton : [])
             .accessibilityAction { if typable { startTyping() } }
-            .accessibilityAction(named: "Speak a change", speakForVoiceOver)
+            // Only while it would do something: listen, or send what is being listened to.
+            .accessibilityActions {
+                if canHold(shown) || model.pencilVoice.isListening {
+                    Button("Speak a change", action: speakForVoiceOver)
+                }
+            }
     }
 
     private enum Style {
         case primary, secondary, placeholder
+        /// Words typed and not sent.
+        case typed
     }
 
+    /// A line of the field. The placeholder and words typed keep to one line, as they are
+    /// while typed, so that nothing moves as typing begins: the placeholder shrinks to fit a
+    /// narrow field, and words are cut short. Anything else may take two lines.
     private static func text(_ text: String, style: Style) -> some View {
         Text(text)
             .font(.system(size: 15))
-            .foregroundStyle(style == .primary ? Color.primary : style == .secondary ? Color.secondary : Color(uiColor: .placeholderText))
-            .lineLimit(2)
-            .minimumScaleFactor(0.8)
+            .foregroundStyle(style == .secondary ? Color.secondary : style == .placeholder ? Color(uiColor: .placeholderText) : Color.primary)
+            .lineLimit(style == .placeholder || style == .typed ? 1 : 2)
+            .truncationMode(.tail)
+            .minimumScaleFactor(style == .placeholder ? 0.7 : style == .typed ? 1 : 0.8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .contentShape(.rect)
@@ -168,7 +197,9 @@ struct ScreenEditField: View {
 
     private var typing: some View {
         HStack(spacing: 0) {
-            TextField(Self.placeholder, text: $draft.text)
+            // Untitled: the placeholder under it is the idle line's, so it doesn't move or
+            // change size as typing begins.
+            TextField("", text: $draft.text)
                 .font(.system(size: 15))
                 .textFieldStyle(.plain)
                 .submitLabel(.send)
@@ -185,6 +216,13 @@ struct ScreenEditField: View {
                 .onChange(of: isFocused) { _, focused in if !focused { isTyping = false } }
             if !draft.isBlank {
                 ToolButton(symbol: "arrow.up.circle.fill", label: "Send change", action: send)
+            }
+        }
+        .background(alignment: .leading) {
+            if draft.text.isEmpty {
+                Self.text(Self.placeholder, style: .placeholder)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
     }

@@ -202,9 +202,11 @@ final class VoiceModeUITests: XCTestCase {
 
     // MARK: A screen's field
 
-    /// The field's demo: what the model does with the change, typed or said. No
-    /// apostrophes: one in a launch argument swallows the arguments after it.
-    private let screenEdit = "make the button green and say Continue => styleElement element=E2 look=green && setText element=E2 text=Continue"
+    /// The field's demo: what the model does with the change, typed or said. The rewording
+    /// comes first and the restyle last, so that the reply is the restyle's and only an undo
+    /// of the whole change takes the words back. No apostrophes: one in a launch argument
+    /// swallows the arguments after it.
+    private let screenEdit = "make the button green and say Continue => setText element=E2 text=Continue && styleElement element=E2 look=green"
 
     /// A change typed into a selected screen's field is made by the real agent and its
     /// tools, the field says what was done, and one undo takes the whole change back.
@@ -218,9 +220,9 @@ final class VoiceModeUITests: XCTestCase {
         shoot("screen-edit-typing")
         app.typeText("make the button green and say Continue\n")
         XCTAssertTrue(app.staticTexts["Continue"].waitForExistence(timeout: 15), "the button on the canvas should say Continue")
-        XCTAssertTrue(wait(for: control("Describe a change"), toHave: "value CONTAINS %@", "Reworded", timeout: 10), "the field should say what was done")
+        XCTAssertTrue(wait(for: control("Describe a change"), toHave: "value CONTAINS %@", "Restyled", timeout: 10), "the field should say what was done last")
         shoot("screen-edit-reply")
-        // One undo takes the whole change back: both its tools' changes.
+        // One undo takes the whole change back: the restyle and, before it, the rewording.
         XCTAssertTrue(control("Undo").waitForExistence(timeout: 5), "a typed change should be undoable")
         control("Undo").tap()
         XCTAssertTrue(app.staticTexts["Sign in"].waitForExistence(timeout: 5), "undo should put the button's words back")
@@ -234,6 +236,7 @@ final class VoiceModeUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 20), "a selected screen's bar should have the field")
         field.press(forDuration: 5)
         XCTAssertTrue(app.staticTexts["Continue"].waitForExistence(timeout: 15), "the change said while holding should be made")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "holding the field should speak, not start typing")
         shoot("screen-edit-held")
         // Left as found, for the tests that open this design next.
         if control("Undo").waitForExistence(timeout: 5) { control("Undo").tap() }
