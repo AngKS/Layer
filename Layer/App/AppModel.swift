@@ -730,6 +730,13 @@ final class AppModel {
         squeezesToTalk = settings.object(forKey: AppModel.squeezesToTalkKey) == nil || settings.bool(forKey: AppModel.squeezesToTalkKey)
     }
 
+    /// Turns Squeeze to Talk on or off from the board's Magic Pen tab. It is the app's
+    /// setting, the one in Settings too, so every open design follows it.
+    func setSqueezesToTalk(_ on: Bool) {
+        settings.set(on, forKey: AppModel.squeezesToTalkKey)
+        squeezesToTalk = on
+    }
+
     /// Whether the canvas has a squeeze action, for the pencil to talk with. Not with
     /// Squeeze to Talk off, nor in Draw, where the squeeze is PencilKit's.
     var canvasHearsSqueezes: Bool { squeezesToTalk && tool != .draw }

@@ -176,14 +176,20 @@ final class VoiceModeUITests: XCTestCase {
     }
 
     /// The simulator's scripted squeeze (`PencilDemo`) over the open canvas: the pencil's
-    /// bubble opens with Squeeze to Talk on, as it is until turned off, and nothing does
-    /// with it off.
+    /// bubble opens with Squeeze to Talk on, as it is until turned off. Turned off in the
+    /// board's Magic Pen tab, the listen stops; and launched with it off, nothing opens.
     func testSqueezeToTalkOffLeavesTheSqueezeAlone() {
-        let squeeze = "600,450,-,toggle => make it blue => Made it blue"
+        // Held, which keeps listening for up to a minute: a toggle gives up after 20 s of quiet.
+        let squeeze = "600,450,-,hold => make it blue => Made it blue"
         let bubble = app.descendants(matching: .any).matching(identifier: "pencil bubble").firstMatch
         openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerPencilDemo", squeeze, "-LayerVoiceDemoFreeze", "listening"])
         XCTAssertTrue(bubble.waitForExistence(timeout: 20), "a squeeze should open the bubble while Squeeze to Talk is on")
         shoot("squeeze-to-talk-on")
+        setSqueezeToTalk(false)
+        XCTAssertTrue(wait(forGone: bubble), "turning Squeeze to Talk off should stop the listen")
+        shoot("squeeze-to-talk-turned-off")
+        // Back on, as the app is left: the tab's toggle is the app's setting, kept between launches.
+        setSqueezeToTalk(true)
         app.terminate()
 
         openNewDesign(arguments: [
@@ -235,6 +241,23 @@ final class VoiceModeUITests: XCTestCase {
         let item = app.buttons[name].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), "the tools menu should offer \(name)")
         item.tap()
+    }
+
+    /// Turns Squeeze to Talk on or off in the board's Magic Pen tab, and closes the menu.
+    private func setSqueezeToTalk(_ isOn: Bool) {
+        control("Board title").tap()
+        let tab = app.segmentedControls.buttons["Magic Pen"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "the board menu should have a Magic Pen tab")
+        tab.tap()
+        let toggle = app.switches["Squeeze to Talk"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the Magic Pen tab should have Squeeze to Talk")
+        if ((toggle.value as? String) == "1") != isOn {
+            let knob = toggle.switches.firstMatch
+            (knob.exists ? knob : toggle).tap()
+        }
+        XCTAssertTrue(wait(for: toggle, toHave: "value == %@", isOn ? "1" : "0", timeout: 5), "Squeeze to Talk should be \(isOn ? "on" : "off")")
+        app.otherElements["PopoverDismissRegion"].firstMatch.tap()
+        XCTAssertTrue(wait(forGone: app.segmentedControls.firstMatch), "the board menu should close")
     }
 
     private func openNewDesign(arguments: [String]) {

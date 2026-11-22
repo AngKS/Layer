@@ -572,6 +572,14 @@ private struct MagicPenTab: View {
         PanelSection {
             Toggle("Convert After a Pause", isOn: $model.convertsAutomatically)
             Toggle("Draw with Finger", isOn: Binding(get: { model.fingerDraws }, set: { model.setFingerDraws($0) }))
+            // The app's setting, the same as in Settings, rather than this design's.
+            Toggle("Squeeze to Talk", isOn: Binding(get: { model.squeezesToTalk }, set: { model.setSqueezesToTalk($0) }))
+            Text(model.squeezesToTalk
+                ? "Squeeze Apple Pencil Pro over the canvas to speak a command."
+                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("New Screens")
                 Spacer(minLength: 8)

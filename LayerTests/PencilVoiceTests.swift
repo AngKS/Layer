@@ -1034,6 +1034,25 @@ struct PencilVoiceTests {
         }
     }
 
+    /// The board's Magic Pen tab and Settings › Voice are one setting, the app's: the tab
+    /// writes where Settings reads, and every open design follows either.
+    @Test func theMagicPenTabAndSettingsShareSqueezeToTalk() {
+        withOwnSettings { settings in
+            let design = AppModel(document: LayerDocument(), settings: settings)
+            let other = AppModel(document: LayerDocument(), settings: settings)
+            design.setSqueezesToTalk(false)
+            #expect(!design.squeezesToTalk)
+            #expect(settings.object(forKey: AppModel.squeezesToTalkKey) as? Bool == false)
+            // Another window reads it again once the setting changes.
+            other.readSqueezesToTalk()
+            #expect(!other.squeezesToTalk)
+            // Settings turning it back on reaches the design whose tab turned it off.
+            settings.set(true, forKey: AppModel.squeezesToTalkKey)
+            design.readSqueezesToTalk()
+            #expect(design.squeezesToTalk)
+        }
+    }
+
     /// On, the canvas has the squeeze in Select, and PencilKit has it in Draw, as before.
     @Test func withSqueezeToTalkOnTheCanvasHasTheSqueezeOutsideDraw() {
         let bench = Bench()
