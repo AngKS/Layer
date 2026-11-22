@@ -1336,6 +1336,25 @@ final class AppModel {
         store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
     }
 
+    /// The elements selected that aren't locked, by themselves or by a group above them:
+    /// what corners, opacity and angle change for several things (F4).
+    var unlockedSelectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
+        selectedElements.filter { !store.isLocked(.element($0.ref)) }
+    }
+
+    /// Changes those of `refs` that `applies` to, in the Format panel's own edit (see
+    /// `adjusting`): the elements a field was showing, even if it is set once the selection
+    /// has moved on. With `unlockedOnly`, only those that aren't locked, by themselves or by
+    /// a group above them (F4).
+    func changeElements(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        adjusting {
+            store.update(refs.filter { ref in
+                guard let found = store.resolve(ref) else { return false }
+                return (!unlockedOnly || !store.isLocked(.element(ref))) && applies(found.element)
+            }, body)
+        }
+    }
+
     /// Gives every element selected to whatever it now lies on, after a drag. Several
     /// things being turned go on turning about the same pivot: an element given to another
     /// host is still the same thing, though the selection now names it differently.
@@ -1727,7 +1746,7 @@ final class AppModel {
     /// set to 0 does: an action that did nothing would read as broken.
     func resetSelectionRotation() {
         if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
-            changeSelectedElements(where: { !$0.isLocked }) { $0.setRotation(0) }
+            store.update(unlockedSelectedElements.map(\.ref)) { $0.setRotation(0) }
         } else {
             resetSelectionTurn()
         }

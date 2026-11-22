@@ -194,6 +194,31 @@ struct VoiceToolsTests {
         #expect(bench.box.failures.isEmpty)
     }
 
+    /// What a command is given shows a member locked or hidden as its group is. Written
+    /// back whole, a restyle made the group's lock or hide the member's own.
+    @Test func restylingAMemberOfAHiddenOrLockedGroupKeepsItsOwnFlags() throws {
+        let bench = bench()
+        let button = try #require(bench.handles.element("E2"))
+        let image = try #require(bench.handles.element("E3"))
+        var item = DesignStore.newElement(.group)
+        item.isHidden = true
+        let group = item
+        bench.app.store.apply { content in
+            content.add(group, to: bench.screen)
+            content.update(button) { $0.group = group.id }
+            content.update(image) { $0.group = group.id }
+        }
+
+        _ = bench.box.styleElement(element: "E2", look: "bold")
+        #expect(bench.app.store.element(button)?.fontWeight == .bold)
+        #expect(bench.app.store.element(button)?.isHidden == false)
+
+        bench.app.store.apply { $0.update(group.id) { $0.isHidden = false; $0.isLocked = true } }
+        _ = bench.box.styleElement(element: "E3", look: "radius 12")
+        #expect(bench.app.store.element(image)?.cornerRadius == 12)
+        #expect(bench.app.store.element(image)?.isLocked == false)
+    }
+
     /// A model can write "nan" where a number goes. A frame with that in it can't be laid out.
     @Test func aSizeThatIsNotANumberIsRefused() throws {
         let bench = bench()

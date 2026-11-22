@@ -54,7 +54,8 @@ struct TurnSession: Equatable {
             guard let (element, placement) = store.resolve(ref) else { continue }
             baseline[ref] = Member(
                 pose: Pose(frame: element.frame, rotation: element.rotation), placement: placement,
-                isLocked: element.isLocked, isDrawing: element.kind == .drawing
+                // Locked by itself or by a group above it, it stays where it is (F4).
+                isLocked: store.isLocked(thing), isDrawing: element.kind == .drawing
             )
             shapes.append(TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation))
         }
@@ -91,7 +92,7 @@ struct TurnSession: Equatable {
     func matches(_ store: DesignStore) -> Bool {
         baseline.allSatisfy { ref, member in
             guard let found = store.resolve(ref), found.placement == member.placement, let pose = expected[ref] else { return false }
-            return found.element.frame == pose.frame && found.element.rotation == pose.rotation && found.element.isLocked == member.isLocked
+            return found.element.frame == pose.frame && found.element.rotation == pose.rotation && store.isLocked(.element(ref)) == member.isLocked
         }
     }
 

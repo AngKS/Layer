@@ -294,7 +294,7 @@ private struct SeveralSettings: View {
 
         // Corners, opacity and angle are for what isn't locked, as they are for one element:
         // the value shown is an unlocked element's, and only unlocked ones change.
-        let unlocked = elements.filter { !$0.isLocked }
+        let unlocked = model.unlockedSelectedElements.map(\.element)
         let rounded = unlocked.first(where: \.hasCornerRadius)
         let faded = unlocked.first { $0.kind.spec.hasEffects }
         let effects = elements.first { $0.kind.spec.hasEffects }
@@ -305,13 +305,13 @@ private struct SeveralSettings: View {
                     if let rounded {
                         NumberField("R", label: "Corner radius", value: Binding(
                             get: { rounded.resolvedCornerRadius },
-                            set: { radius in change(refs, where: { $0.hasCornerRadius && !$0.isLocked }) { $0.cornerRadius = radius } }
+                            set: { radius in change(refs, unlockedOnly: true, where: \.hasCornerRadius) { $0.cornerRadius = radius } }
                         ), range: 0...999)
                     }
                     if let faded {
                         NumberField("%", label: "Opacity", value: Binding(
                             get: { (faded.resolvedOpacity * 100).rounded() },
-                            set: { percent in change(refs, where: { $0.kind.spec.hasEffects && !$0.isLocked }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                            set: { percent in change(refs, unlockedOnly: true, where: { $0.kind.spec.hasEffects }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
                     }
                     // Each element is turned to the angle shown (the first unlocked one's), on
@@ -319,7 +319,7 @@ private struct SeveralSettings: View {
                     if turnable, let first = unlocked.first {
                         NumberField("°", label: "Rotation", value: Binding(
                             get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
-                            set: { degrees in change(refs, where: { !$0.isLocked }) { $0.setRotation(Double(degrees)) } }
+                            set: { degrees in change(refs, unlockedOnly: true, where: { _ in true }) { $0.setRotation(Double(degrees)) } }
                         ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
                     }
                 }
@@ -395,9 +395,8 @@ private struct SeveralSettings: View {
 
     /// Makes a change to each of the elements the settings are for that a setting applies to.
     /// A run of quick changes, a colour being dragged for instance, undoes as one step.
-    private func change(_ refs: [DesignStore.ElementRef], where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        let store = model.store
-        model.adjusting { store.update(refs.filter { store.resolve($0).map { applies($0.element) } ?? false }, body) }
+    private func change(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
+        model.changeElements(refs, unlockedOnly: unlockedOnly, where: applies, body)
     }
 }
 

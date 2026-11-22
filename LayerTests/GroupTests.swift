@@ -265,6 +265,57 @@ struct GroupModelTests {
         #expect(b?.isLocked == true)
     }
 
+    /// Rule 3 with nesting: the member of a group of one takes that group's place in the
+    /// group above it, rather than leaving it.
+    @Test func aGroupOfOneInsideAGroupHandsItsMemberUp() throws {
+        let board = OrderBoard()
+        let inner = board.group(board.c, board.e, named: "I")
+        let outer = board.group(board.a, inner)
+        #expect(board.store.content.ancestors(of: board.c.element) == [inner.element, outer.element])
+
+        board.store.delete(board.e)
+
+        #expect(board.store.element(inner.element) == nil)
+        #expect(board.store.element(board.c.element)?.group == outer.element)
+        #expect(board.store.content.members(of: outer.element).map { $0.name ?? "" } == ["A", "C"])
+        let a = try #require(board.store.canvasFrame(of: .element(board.a)))
+        let c = try #require(board.store.canvasFrame(of: .element(board.c)))
+        #expect(board.store.canvasFrame(of: .element(outer)) == a.union(c))
+    }
+
+    /// An undo takes back its step's own changes and leaves those made since: taken back
+    /// among them, a step can leave a group unsound, and is put right as it is undone.
+    @Test func undoingAStepAmongOthersLeavesNoGroupOfOne() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        // A drag begins, and moves A.
+        let drag = board.store.beginEdit()
+        board.store.act(for: drag) { board.store.update(board.a) { $0.frame.origin.x += 5 } }
+        // Meanwhile D is deleted, as a step of its own, which dissolves G.
+        board.store.asOwnStep { board.store.delete(board.d) }
+        #expect(board.store.element(g.element) == nil)
+        // The drag's edit goes on, and takes B away.
+        board.store.act(for: drag) { board.store.delete(board.b) }
+        board.store.endEdit(drag)
+
+        // Undoing the deletion brings D and G back, but G's other member has gone since.
+        board.undo.undo()
+
+        #expect(board.store.element(board.d.element) != nil)
+        #expect(board.store.element(board.d.element)?.group == nil)
+        #expect(board.store.element(g.element) == nil)
+        #expect(board.screenOrder == ["A", "C", "D", "E"])
+    }
+
+    @Test func oneScreenIsShownAsTheScreensAre() {
+        let board = OrderBoard()
+        board.group(board.b, board.d) { $0.isHidden = true }
+        let content = board.store.content
+
+        #expect(content.screen(board.screen) == content.screens.first)
+        #expect(content.screen(board.screen)?.elements.contains { $0.kind == .group } == false)
+    }
+
     // MARK: Files
 
     /// Review Focus 4.
@@ -496,5 +547,47 @@ struct GroupModelTests {
         #expect(board.store.element(board.b.element)?.frame == before.frame)
         #expect(!drags.isDragging)
         #expect(!board.model.isAdjusting)
+    }
+
+    /// Several things turned together leave alone a member locked by its group.
+    @Test func turningSeveralLeavesAMemberOfALockedGroupWhereItIs() throws {
+        let board = OrderBoard()
+        board.group(board.b, board.d) { $0.isLocked = true }
+        board.model.selection = board.selection(board.a, board.b)
+        let before = try #require(board.store.element(board.b.element))
+
+        board.model.rotateSelection(by: 30)
+
+        #expect(board.store.element(board.a.element)?.rotation == 30)
+        #expect(board.store.element(board.b.element)?.frame == before.frame)
+        #expect(board.store.element(board.b.element)?.rotation == before.rotation)
+    }
+
+    /// VoiceOver's Reset rotation on several things stands up only those that aren't locked.
+    @Test func resettingSeveralLeavesAMemberOfALockedGroupTurned() {
+        let board = OrderBoard()
+        board.store.update(board.a) { $0.setRotation(20) }
+        board.store.update(board.b) { $0.setRotation(20) }
+        board.group(board.b, board.d) { $0.isLocked = true }
+        board.model.selection = board.selection(board.a, board.b)
+
+        board.model.resetSelectionRotation()
+
+        #expect(board.store.element(board.a.element)?.rotation == nil)
+        #expect(board.store.element(board.b.element)?.rotation == 20)
+    }
+
+    /// The Format panel's corners, opacity and angle for several things change only those that
+    /// aren't locked, and show an unlocked one's value.
+    @Test func theFormatPanelLeavesAMemberOfALockedGroupAlone() {
+        let board = OrderBoard()
+        board.group(board.b, board.d) { $0.isLocked = true }
+        board.model.selection = board.selection(board.a, board.b)
+
+        #expect(board.model.unlockedSelectedElements.map(\.element.id) == [board.a.element])
+        board.model.changeElements([board.a, board.b], unlockedOnly: true, where: { _ in true }) { $0.opacity = 0.5 }
+
+        #expect(board.store.element(board.a.element)?.opacity == 0.5)
+        #expect(board.store.element(board.b.element)?.opacity == nil)
     }
 }

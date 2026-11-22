@@ -128,10 +128,12 @@ struct DesignContent: Equatable, Sendable {
         return items.filter { !ids.contains($0.id) }
     }
 
-    /// One screen with what is on it.
+    /// One screen with what is on it, as `screens` shows it: group items left out, and each
+    /// member locked or hidden as it is with its groups. `children(of:)` has the list as it is.
     func screen(_ id: DesignScreen.ID) -> DesignScreen? {
         guard var screen = frames.first(where: { $0.id == id }) else { return nil }
-        screen.elements = children(of: id)
+        let groups = groupItemsByID
+        screen.elements = children(of: id).filter { $0.kind != .group }.map { Self.shown($0, groups: groups) }
         return screen
     }
 

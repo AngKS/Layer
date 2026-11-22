@@ -688,6 +688,33 @@ struct DesignActionTests {
         #expect(model.store.screen(third.id) != nil)
     }
 
+    /// Siri doesn't move, align or delete a member of a locked group, as a finger can't,
+    /// though the member's own lock isn't set (F4).
+    @Test func siriLeavesAMemberOfALockedGroupWhereItIs() throws {
+        let board = OrderBoard()
+        board.group(board.b, board.d) { $0.isLocked = true }
+        let before = board.store.content
+        func isLocked(_ error: LayerIntentError?) -> Bool {
+            error.map { if case .locked = $0 { true } else { false } } == true
+        }
+
+        // What Move, Move to Screen, Align and Delete ask before they act.
+        #expect(isLocked(#expect(throws: LayerIntentError.self) { try DesignActions.requireUnlocked(board.b, in: board.model) }))
+        #expect(isLocked(#expect(throws: LayerIntentError.self) {
+            try MoveElementIntent.move(board.b, in: board.model, x: 0, y: 0, width: nil, height: nil, undoManager: nil)
+        }))
+        #expect(isLocked(#expect(throws: LayerIntentError.self) {
+            try DeleteElementIntent.delete(board.d, in: board.model, undoManager: nil)
+        }))
+        #expect(board.store.content == before)
+
+        // What isn't locked is moved and deleted.
+        try MoveElementIntent.move(board.a, in: board.model, x: 10, y: nil, width: nil, height: nil, undoManager: nil)
+        #expect(board.store.element(board.a.element)?.frame.minX == 10)
+        try DeleteElementIntent.delete(board.c, in: board.model, undoManager: nil)
+        #expect(board.store.element(board.c.element) == nil)
+    }
+
     @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
         let model = model()
         let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))

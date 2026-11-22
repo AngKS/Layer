@@ -544,12 +544,16 @@ final class VoiceToolbox: VoiceActing {
             switch find(element: element) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
+                // Tried on a copy first, to tell whether the look was understood.
                 var restyled = found.element
                 guard Self.apply(look: look, to: &restyled) else {
                     return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
                 }
                 DesignActions.reveal(.element(found.ref), in: model)
-                model.store.update(found.ref) { $0 = restyled }
+                // Applied to the element as it is kept: the copy is as the views show it, locked
+                // or hidden as its groups are, and written back whole it made their lock or hide
+                // its own.
+                model.store.update(found.ref) { _ = Self.apply(look: look, to: &$0) }
                 return done("Restyled \(Self.describe(found.element)).")
             }
         }

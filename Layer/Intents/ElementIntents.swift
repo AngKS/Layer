@@ -312,10 +312,18 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        try Self.move(ref, in: model, x: x, y: y, width: width, height: height, undoManager: undoManager)
+        return .result(dialog: "Moved the \(found.kind.layerName.lowercased()).")
+    }
+
+    /// Moves or resizes an element as the action asks, unless it is locked.
+    @MainActor
+    static func move(_ ref: DesignStore.ElementRef, in model: AppModel, x: Double?, y: Double?, width: Double?, height: Double?, undoManager: UndoManager?) throws {
+        guard let found = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
+        try DesignActions.requireUnlocked(ref, in: model)
         // Loose elements are given in canvas points and kept in points of their own.
-        let scale: CGFloat = ref.host == .canvas ? (model.store.resolve(ref)?.placement.scale ?? 1) : 1
-        DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(found.kind.layerName)") {
+        let scale: CGFloat = ref.host == .canvas ? found.placement.scale : 1
+        DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(found.element.kind.layerName)") {
             model.store.update(ref) { element in
                 if let x { element.frame.origin.x = CGFloat(x) / scale }
                 if let y { element.frame.origin.y = CGFloat(y) / scale }
@@ -323,7 +331,6 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
                 if let height { element.frame.size.height = CGFloat(height) / scale }
             }
         }
-        return .result(dialog: "Moved the \(found.kind.layerName.lowercased()).")
     }
 }
 
@@ -360,7 +367,7 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ElementEntity> & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        try DesignActions.requireUnlocked(ref, in: model)
         var targetID: DesignScreen.ID?
         if let screen {
             guard let id = screen.screenID, model.store.screen(id) != nil else { throw LayerIntentError.screenNotFound }
@@ -410,8 +417,8 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        let (model, ref, _) = try await DesignActions.elementOrSelected(element)
+        try DesignActions.requireUnlocked(ref, in: model)
         guard case .screen = ref.host else { throw LayerIntentError.screenNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: "Align") {
             model.store.align(ref, alignment.alignment)
@@ -497,13 +504,22 @@ struct DeleteElementIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, ref, found) = try await DesignActions.elementOrSelected(element)
-        guard !found.isLocked else { throw LayerIntentError.locked }
+        // Asked before the confirmation: a locked element isn't offered for deleting.
+        try DesignActions.requireUnlocked(ref, in: model)
         let name = DesignDescriber.describe(found)
         try await requestConfirmation(dialog: "Delete the \(name)?")
+        try Self.delete(ref, in: model, undoManager: undoManager)
+        return .result(dialog: "Deleted the \(name).")
+    }
+
+    /// Deletes an element, unless it is locked, as one step.
+    @MainActor
+    static func delete(_ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
+        try DesignActions.requireUnlocked(ref, in: model)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Delete") {
             model.store.delete(ref)
         }
-        return .result(dialog: "Deleted the \(name).")
     }
 }
 

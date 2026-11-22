@@ -106,6 +106,12 @@ enum DesignActions {
         return (model, ref, found.element)
     }
 
+    /// Throws `locked` when an element is locked, by itself or by a group above it: Siri
+    /// doesn't move, align or delete it, as a finger can't (F4).
+    static func requireUnlocked(_ ref: DesignStore.ElementRef, in model: AppModel) throws {
+        guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
+    }
+
     /// The element named, or else the selected one.
     static func elementOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
         if let entity { return try await element(entity) }
