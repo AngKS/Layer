@@ -8,6 +8,10 @@ import UIKit
 @MainActor @Observable
 final class Scrubber {
     /// A field that can be scrubbed: where it is, and how to read and change its value.
+    /// Who the ruler is for: the Format panel's fields (a scrub is an edit), or the zoom
+    /// control (it isn't).
+    enum Owner: Hashable { case panel, zoom }
+
     struct Target {
         var label: String
         var unit: String
@@ -24,6 +28,20 @@ final class Scrubber {
         var wraps = false
         /// Only every this-many units is a mark on the ruler, and felt as a tick.
         var ticksEvery = 1
+        var owner: Owner = .panel
+        /// The ruler's words for a value; nil gives the value and the unit.
+        var text: ((CGFloat) -> String)? = nil
+        /// The units that get a longer mark; nil means every `ticksEvery` (above 1), else every 10.
+        var majorMarks: Set<Int>? = nil
+
+        func shown(_ value: CGFloat) -> String {
+            text?(value) ?? "\(Int(value)) \(unit)"
+        }
+
+        func isMajor(_ unit: Int) -> Bool {
+            if let majorMarks { return majorMarks.contains(unit) }
+            return unit.isMultiple(of: ticksEvery > 1 ? ticksEvery : 10)
+        }
     }
 
     /// The coordinate space field frames and the ruler share: the panel's.
@@ -34,11 +52,17 @@ final class Scrubber {
     nonisolated static let degreesPerStep = 10.0
 
     /// The field being scrubbed.
-    private(set) var target: Target?
+    private(set) var target: Target? {
+        didSet { updateWantsSqueeze() }
+    }
     private(set) var value: CGFloat = 0
 
     /// The field the pencil is hovering over, which a squeeze scrubs.
-    @ObservationIgnored var hovered: Target?
+    @ObservationIgnored var hovered: Target? {
+        didSet { updateWantsSqueeze() }
+    }
+    /// Whether a squeeze would be the scrubber's: a field is hovered or a ruler is up.
+    private(set) var wantsSqueeze = false
     @ObservationIgnored var onBegin: () -> Void = {}
     @ObservationIgnored var onEnd: () -> Void = {}
     /// A step was taken, at this point in `Scrubber.space`.
@@ -59,7 +83,7 @@ final class Scrubber {
         lastRoll = nil
         rolled = .zero
         self.target = target
-        onBegin()
+        if target.owner == .panel { onBegin() }
     }
 
     /// Moves the value `steps` units from where it was when scrubbing began.
@@ -76,9 +100,27 @@ final class Scrubber {
     }
 
     func end() {
-        guard target != nil else { return }
+        guard let ended = target else { return }
         target = nil
-        onEnd()
+        if ended.owner == .panel { onEnd() }
+    }
+
+    /// Ends the ruler only if it is this owner's.
+    func end(_ owner: Owner) {
+        guard target?.owner == owner else { return }
+        end()
+    }
+
+    /// Forgets the hovered field only if it is this owner's.
+    func forgetHovered(_ owner: Owner) {
+        guard hovered?.owner == owner else { return }
+        hovered = nil
+    }
+
+    /// Written only when it changes: the pen hovers many times a second.
+    private func updateWantsSqueeze() {
+        let wants = hovered != nil || target != nil
+        if wants != wantsSqueeze { wantsSqueeze = wants }
     }
 
     /// A finger holds a field to scrub it. A ruler the pencil left up on another field is put
@@ -105,16 +147,26 @@ final class Scrubber {
         case .active(let value):
             guard !isSqueezing else { return }
             isSqueezing = true
-            if target != nil {
-                end()
-            } else if let hovered {
-                begin(hovered)
-                // Turning counts from where the barrel is now.
-                lastRoll = value.hoverPose?.roll
-            }
+            squeezeBegan(roll: value.hoverPose?.roll)
         case .ended, .failed:
             isSqueezing = false
         }
+    }
+
+    /// A squeeze with a ruler up keeps the value and puts it away; with a field hovered it
+    /// brings that field's ruler up, turning counted from `roll`. Returns whether the
+    /// scrubber took the squeeze. It doesn't filter repeats: the caller does.
+    @discardableResult
+    func squeezeBegan(roll: Angle?) -> Bool {
+        if target != nil {
+            end()
+            return true
+        }
+        guard let hovered else { return false }
+        begin(hovered)
+        // Turning counts from where the barrel is now.
+        lastRoll = roll
+        return true
     }
 
     /// The pencil hovering anywhere in the window: coming into range, moving, or leaving it.
@@ -184,15 +236,15 @@ final class Scrubber {
 /// per unit, longer every ten (or at the field's own marks), with the value above the needle.
 struct ScrubberRuler: View {
     let value: CGFloat
-    let unit: String
+    let text: String
     /// How far apart the ticks are.
     var spacing = Scrubber.pointsPerStep
-    /// A longer tick comes this often.
-    var majorEvery = 10
+    /// Whether a unit gets a longer tick.
+    var isMajor: (Int) -> Bool
 
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(Int(value)) \(unit)")
+            Text(text)
                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 .contentTransition(.numericText(value: value))
             Canvas { context, size in
@@ -201,7 +253,7 @@ struct ScrubberRuler: View {
                 let first = Int(value.rounded()) - reach
                 for unit in first...(first + reach * 2) {
                     let x = middle + (CGFloat(unit) - value) * spacing
-                    let isMajor = unit.isMultiple(of: majorEvery)
+                    let isMajor = isMajor(unit)
                     let height: CGFloat = isMajor ? 14 : 7
                     // Ticks fade towards the ends of the ruler.
                     let fade = 1 - min(abs(x - middle) / middle, 1)
@@ -227,10 +279,10 @@ struct ScrubberOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            if let target = scrubber.target {
+            if let target = scrubber.target, target.owner == .panel {
                 ScrubberRuler(
-                    value: scrubber.value, unit: target.unit,
-                    spacing: target.pointsPerStep, majorEvery: target.ticksEvery > 1 ? target.ticksEvery : 10
+                    value: scrubber.value, text: target.shown(scrubber.value),
+                    spacing: target.pointsPerStep, isMajor: target.isMajor
                 )
                     .frame(width: proxy.size.width - 24)
                     .position(x: proxy.size.width / 2, y: max(target.frame.minY - 30, 30))

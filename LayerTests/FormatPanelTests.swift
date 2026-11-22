@@ -263,7 +263,7 @@ extension HostedWindowSuites {
 
 /// A field's value, and every value set on it.
 @MainActor
-private final class ScrubbedField {
+final class ScrubbedField {
     var value: CGFloat
     var sets: [CGFloat] = []
     init(_ value: CGFloat) { self.value = value }
@@ -364,6 +364,100 @@ struct ScrubbingAFieldTests {
         scrubber.fingerDragged(opacityTarget, by: 5 * Scrubber.pointsPerStep)
         #expect(opacity.value == 55)
         #expect(begins == 2)
+    }
+
+    /// A zoom scrub is no edit: only a panel field's scrub opens and closes one.
+    @Test func aZoomScrubIsNoEdit() {
+        let scrubber = Scrubber()
+        var begins = 0
+        var ends = 0
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+        let zoom = ScrubbedField(0)
+        let frame = CGRect(x: 0, y: 0, width: 80, height: 32)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { zoom.value }, set: { zoom.value = $0 }, owner: .zoom
+        ))
+        scrubber.scrub(to: 2)
+        scrubber.end()
+        #expect(begins == 0 && ends == 0)
+        #expect(zoom.value == 2)
+
+        let panel = ScrubbedField(0)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { panel.value }, set: { panel.value = $0 }
+        ))
+        scrubber.scrub(to: 2)
+        scrubber.end()
+        #expect(begins == 1 && ends == 1)
+        #expect(panel.value == 2)
+    }
+
+    @Test func endingOneOwnersRulerLeavesTheOthers() {
+        let scrubber = Scrubber()
+        let zoom = ScrubbedField(0)
+        let frame = CGRect(x: 0, y: 0, width: 80, height: 32)
+        scrubber.begin(Scrubber.Target(
+            label: "Zoom", unit: "%", frame: frame, range: 0...14,
+            get: { zoom.value }, set: { zoom.value = $0 }, owner: .zoom
+        ))
+        scrubber.end(.panel)
+        #expect(scrubber.target?.owner == .zoom)
+        scrubber.end(.zoom)
+        #expect(scrubber.target == nil)
+
+        scrubber.hovered = ScrubbedField(0).target("Rotation", at: frame)
+        scrubber.forgetHovered(.zoom)
+        #expect(scrubber.hovered != nil)
+        scrubber.forgetHovered(.panel)
+        #expect(scrubber.hovered == nil)
+    }
+
+    @Test func aSqueezeKeepsTheValueOrBringsUpTheHoveredRuler() {
+        let scrubber = Scrubber()
+        #expect(scrubber.squeezeBegan(roll: .degrees(30)) == false)
+        let rotation = ScrubbedField(10)
+        scrubber.hovered = rotation.target("Rotation", at: .zero)
+        #expect(scrubber.squeezeBegan(roll: .degrees(30)) == true)
+        #expect(scrubber.target?.label == "Rotation")
+        scrubber.rolled(to: .degrees(35))
+        #expect(rotation.value == 15)
+        #expect(scrubber.squeezeBegan(roll: nil) == true)
+        #expect(scrubber.target == nil)
+        #expect(rotation.value == 15)
+    }
+
+    @Test func theScrubberSaysWhenASqueezeWouldBeItsOwn() {
+        let scrubber = Scrubber()
+        let rotation = ScrubbedField(10)
+        let target = rotation.target("Rotation", at: .zero)
+        #expect(scrubber.wantsSqueeze == false)
+        scrubber.hovered = target
+        #expect(scrubber.wantsSqueeze == true)
+        scrubber.hovered = nil
+        #expect(scrubber.wantsSqueeze == false)
+        scrubber.begin(target)
+        #expect(scrubber.wantsSqueeze == true)
+        scrubber.end()
+        #expect(scrubber.wantsSqueeze == false)
+    }
+
+    @Test func aRulerShowsItsOwnWordsAndMarks() {
+        let frame = CGRect.zero
+        func make(_ build: (inout Scrubber.Target) -> Void = { _ in }) -> Scrubber.Target {
+            var target = Scrubber.Target(label: "X", unit: "W", frame: frame, range: 0...100, get: { 0 }, set: { _ in })
+            build(&target)
+            return target
+        }
+        #expect(make().shown(12) == "12 W")
+        #expect(make { $0.text = { "\(Int($0))%" } }.shown(8) == "8%")
+        #expect(make().isMajor(10) && !make().isMajor(5))
+        let fifteens = make { $0.ticksEvery = 15 }
+        #expect(fifteens.isMajor(30) && !fifteens.isMajor(10))
+        let marks = make { $0.majorMarks = [3, 8] }
+        #expect(marks.isMajor(8) && !marks.isMajor(10))
     }
 }
 
