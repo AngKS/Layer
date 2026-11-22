@@ -430,7 +430,7 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
 struct ArrangeElementIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Change Element Order"
     static let description = IntentDescription(
-        "Brings an element to the front, or forward past the next element, or sends it backward past the next element, or to the back, among the elements on its screen or on the open canvas. Drawings stay on top.",
+        "Brings an element to the front, or forward past the next element, or sends it backward past the next element, or to the back, among the elements on its screen or on the open canvas. An element in a group moves among the others in its group, and stays in it. Drawings stay on top.",
         categoryName: "Elements"
     )
     static let supportedModes: IntentModes = .foreground
@@ -452,13 +452,17 @@ struct ArrangeElementIntent: AppIntent, UndoableIntent {
         return .result()
     }
 
-    /// Arranges an element as one undo step. A drawing stays on top and a locked element
-    /// stays where it is, and Siri says so rather than doing nothing.
+    /// Arranges an element as one undo step, among the others in its group when it is in
+    /// one. A drawing stays on top, a locked element stays where it is, and one that can go
+    /// no further that way stays too, and Siri says why rather than doing nothing.
     @MainActor
     static func arrange(_ ref: DesignStore.ElementRef, in model: AppModel, _ arrangement: DesignStore.Arrangement, undoManager: UndoManager?) throws {
         guard let (element, _) = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
         guard element.kind != .drawing else { throw LayerIntentError.drawingsStayOnTop }
         guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
+        guard model.store.canArrange(ref, arrangement) else {
+            throw LayerIntentError.cantGoFurther(withinGroup: element.group != nil)
+        }
         DesignActions.edit(model, undoManager: undoManager, actionName: arrangement.name) {
             model.store.arrange(ref, arrangement)
         }

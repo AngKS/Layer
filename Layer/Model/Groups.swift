@@ -309,8 +309,8 @@ extension DesignStore {
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
     /// things and drawings are left out of it; the rest are to be two or more, on one screen
-    /// or all on the open canvas, and in one group (or none), with no screen among what is
-    /// selected. Nil, and nothing changes, when they aren't.
+    /// or all on the open canvas, and in one group (or none) without being all of that group,
+    /// with no screen among what is selected. Nil, and nothing changes, when they aren't.
     ///
     /// The group is made in the group its members are in, and is built whole in one change:
     /// an item added on its own, with no members, would be taken away at the end of that
@@ -344,6 +344,10 @@ extension DesignStore {
         guard members.count > 1, let first = members.first,
               members.allSatisfy({ $0.ref.host == first.ref.host && $0.element.group == first.element.group })
         else { return nil }
+        // Every member of the group they are in would make that group again under a new id:
+        // left with one member, the old group would dissolve into the new, and its name and
+        // angle with it. A locked member, left out, keeps the rest from being all of it.
+        if let shared = first.element.group, content.members(of: shared).count == members.count { return nil }
         return members
     }
 

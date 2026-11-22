@@ -4,7 +4,7 @@ import Foundation
 /// a time or several at once.
 ///
 /// Order only means something among siblings: the things that share a screen, or the open
-/// canvas, and a group, or no group (see `LayerTree`). A group is one of its siblings, and
+/// canvas, and a group, or no group (see `SiblingLists`). A group is one of its siblings, and
 /// stands among them for its whole block: itself and everything in it. Drawings are in no
 /// sibling set. Unlocked ink is drawn above every element, so a drawing keeps the place it
 /// has in the list whatever is arranged around it, and nothing steps past it or moves it (F7).
@@ -67,13 +67,13 @@ extension DesignStore {
         var orders: [DesignScreen.ID?: [DesignElement.ID]] = [:]
         for (parent, moved) in moving {
             let things = content.children(of: parent)
-            var tree = LayerTree(things)
+            var siblings = SiblingLists(things)
             // Each sibling set its things are in moves on its own: the screen's top level and
             // the inside of a group, say, both in this one step.
-            for (list, ids) in Dictionary(grouping: moved, by: tree.list(of:)) {
-                tree.lists[list] = Self.order(moving: Set(ids), among: tree.lists[list] ?? [], arrangement)
+            for (list, ids) in Dictionary(grouping: moved, by: siblings.list(of:)) {
+                siblings.lists[list] = Self.order(moving: Set(ids), among: siblings.lists[list] ?? [], arrangement)
             }
-            let order = tree.order
+            let order = siblings.order
             if order != things.compactMap({ $0.kind == .drawing ? nil : $0.id }) { orders[parent] = order }
         }
         return orders
@@ -111,13 +111,13 @@ extension DesignStore {
 /// block, the group's own list then the item, which is how the design keeps them once its
 /// groups are sound: each group's members gathered into one run, the item just in front.
 /// Drawings are in no list (F7).
-struct LayerTree {
+struct SiblingLists {
     /// Each list's things, back to front: the top level's under nil, a group's under its id.
     var lists: [DesignElement.ID?: [DesignElement.ID]] = [:]
     private var groups: Set<DesignElement.ID> = []
     private var listOf: [DesignElement.ID: DesignElement.ID?] = [:]
 
-    /// The tree of things that share a host, given back to front. A thing whose group isn't
+    /// The lists of things that share a host, given back to front. A thing whose group isn't
     /// among them, which only a design not yet put right has, is taken as at the top level.
     init(_ things: [DesignElement]) {
         let things = things.filter { $0.kind != .drawing }
@@ -134,7 +134,7 @@ struct LayerTree {
         listOf[id] ?? nil
     }
 
-    /// Everything in the tree, back to front: each list in its order, with each group's
+    /// Everything in the lists, back to front: each list in its order, with each group's
     /// block in its place in its list.
     var order: [DesignElement.ID] {
         var written: Set<DesignElement.ID> = []

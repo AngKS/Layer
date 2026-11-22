@@ -724,6 +724,29 @@ struct GroupCommandTests {
         #expect(!grouped.model.groupSelectionSpansHosts)
     }
 
+    /// Every member of a group, grouped, would make the same group again under a new id: the
+    /// old one, left with one member, would dissolve into it, and its name and angle with it.
+    @Test func everyMemberOfAGroupIsNotGroupedAgain() throws {
+        let board = OrderBoard()
+        board.group(board.b, board.c, board.d) { $0.setRotation(20) }
+        let before = board.store.content
+        let all = board.selection(board.b, board.c, board.d)
+
+        #expect(!board.store.canGroup(all))
+        #expect(board.store.group(all) == nil)
+        #expect(board.store.content == before)
+
+        // A locked member is left out, so the rest are not the whole group: they make a group
+        // inside it.
+        let locked = OrderBoard()
+        let g = locked.group(locked.b, locked.c, locked.d)
+        locked.store.setLocked(true, .element(locked.c))
+        let inner = try #require(locked.store.group(locked.selection(locked.b, locked.c, locked.d)))
+        #expect(locked.store.element(inner.element)?.group == g.element)
+        #expect(locked.members(of: inner) == ["B", "D"])
+        #expect(locked.store.content.members(of: g.element).map(\.id) == [locked.c.element, inner.element])
+    }
+
     /// Review Focus 1: the things grouped weren't next to each other.
     @Test func undoingAGroupPutsTheOrderBack() throws {
         let board = OrderBoard()
@@ -903,6 +926,29 @@ struct GroupCommandTests {
 
         board.store.arrange(board.e, .backward)
         #expect(board.screenOrder == ["A", "C", "E", "B", "D", "G"])
+    }
+
+    /// Siri's Change Element Order arranges a member among the others in its group, and says
+    /// so when it can go no further there, rather than doing nothing.
+    @Test func siriArrangesAMemberWithinItsGroupAndSaysWhenItCantGoFurther() throws {
+        let board = OrderBoard()
+        board.group(board.b, board.d)
+
+        try ArrangeElementIntent.arrange(board.b, in: board.model, .front, undoManager: nil)
+        #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
+
+        let inGroup = #expect(throws: LayerIntentError.self) {
+            try ArrangeElementIntent.arrange(board.b, in: board.model, .forward, undoManager: nil)
+        }
+        #expect(inGroup.map { if case .cantGoFurther(withinGroup: true) = $0 { true } else { false } } == true)
+        #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
+
+        // Not in a group, it is told the same, without the group.
+        let alone = #expect(throws: LayerIntentError.self) {
+            try ArrangeElementIntent.arrange(board.e, in: board.model, .front, undoManager: nil)
+        }
+        #expect(alone.map { if case .cantGoFurther(withinGroup: false) = $0 { true } else { false } } == true)
+        #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
     }
 
     @Test func arrangingInsideAGroupStaysInside() {

@@ -21,6 +21,9 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case cantGoOnScreens
     case drawingsAreDrawn
     case drawingsStayOnTop
+    /// Arranging it would change nothing: it is already at the front, or the back, of what it
+    /// is arranged among, which for a member of a group is the others in its group.
+    case cantGoFurther(withinGroup: Bool)
     case invalidImage
 
     var localizedStringResource: LocalizedStringResource {
@@ -41,6 +44,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .cantGoOnScreens: "Sticky notes and drawings stay on the open canvas; they can't go on a screen."
         case .drawingsAreDrawn: "A drawing is made by drawing it. Draw strokes on the canvas instead of adding an element."
         case .drawingsStayOnTop: "Drawings stay on top of everything else, so they can't be brought forward or sent back."
+        case .cantGoFurther(withinGroup: true): "That element can't go any further that way within its group. To move it past things outside the group, ungroup it first, or arrange the group."
+        case .cantGoFurther(withinGroup: false): "That element can't go any further that way."
         case .invalidImage: "Layer couldn't read that file as a picture."
         }
     }

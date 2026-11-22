@@ -60,7 +60,7 @@ struct SelectionActions: View {
                 severalActions
             } else {
                 if model.selectedElement?.element.kind == .group {
-                    ToolButton(symbol: "rectangle.3.group.fill", label: "Ungroup") {
+                    ToolButton(symbol: "rectangle.3.group.dashed", label: "Ungroup") {
                         withAnimation(.smooth(duration: 0.25)) { model.ungroupSelection() }
                     }
                     .keyboardShortcut("g", modifiers: [.command, .option, .shift])

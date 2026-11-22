@@ -91,7 +91,7 @@ private struct ElementSettings: View {
                     ArrangeButtons()
                 }
                 if element.kind == .group {
-                    IconButton("Ungroup", symbol: "rectangle.3.group.fill") { model.ungroupSelection() }
+                    IconButton("Ungroup", symbol: "rectangle.3.group.dashed") { model.ungroupSelection() }
                         .disabled(!model.canUngroupSelection)
                 }
             }

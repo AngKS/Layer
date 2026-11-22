@@ -316,7 +316,7 @@ final class DesignStore {
     }
 
     /// Moves an element up or down among its siblings: see `arrange(_ selection:_:)`, and
-    /// `LayerTree` for what its siblings are. Siri's Change Element Order comes this way.
+    /// `SiblingLists` for what its siblings are. Siri's Change Element Order comes this way.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
         arrange(.element(ref), arrangement)
     }
