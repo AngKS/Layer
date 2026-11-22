@@ -26,10 +26,28 @@ enum VoiceFixture {
     /// The login design with an undo history of its own, starting empty.
     static func undoableLogin() -> (app: AppModel, screen: DesignScreen.ID) {
         let fixture = login()
+        giveUndo(to: fixture.app)
+        return fixture
+    }
+
+    /// The undoable login design with a second iPhone screen to its right, named Profile,
+    /// holding one title. A call knows them as S1 Login (E1 title, E2 button, E3 image)
+    /// and S2 Profile (E4 title). The undo history starts empty, Profile and all.
+    static func loginAndProfile() -> (app: AppModel, login: DesignScreen.ID, profile: DesignScreen.ID) {
+        let (app, screen) = Self.login()
+        let profile = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
+        app.store.updateScreen(profile.id) { $0.name = "Profile" }
+        _ = app.store.setElements([
+            DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
+        ], on: profile.id, replacing: true)
+        giveUndo(to: app)
+        return (app, screen, profile.id)
+    }
+
+    private static func giveUndo(to app: AppModel) {
         let undo = UndoManager()
         undo.groupsByEvent = false
-        fixture.app.store.undoManager = undo
-        return fixture
+        app.store.undoManager = undo
     }
 }
 

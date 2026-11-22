@@ -30,6 +30,12 @@ final class VoiceToolbox: VoiceActing {
     /// pencil pointed at empty canvas. Nil puts it where screens always go.
     var newScreenAnchor: CGPoint?
 
+    /// The screen the command under way is for, when it can change nothing else: a change
+    /// asked of one screen. Another screen, an element not on this one (loose ones too) and
+    /// a new screen are refused, and a tool given no screen means this one, whatever is
+    /// selected. Nil lets a command go anywhere.
+    var scope: DesignScreen.ID?
+
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
     private func forCommand<T>(_ body: () -> T) -> T {
@@ -44,6 +50,7 @@ final class VoiceToolbox: VoiceActing {
         endsCall = false
         lastFailed = false
         newScreenAnchor = nil
+        scope = nil
     }
 
     // MARK: Screens
@@ -259,7 +266,8 @@ final class VoiceToolbox: VoiceActing {
                 // "Screen S2" and “S2” already say it is a screen.
                 let isCalledAScreen = before.lowercased().hasSuffix("screen ") || (isQuoted && before.dropLast().lowercased().hasSuffix("screen "))
                 words = isCalledAScreen ? "“\(screen.name)”" : "the screen “\(screen.name)”"
-            } else if case .success(let found) = find(element: handle) {
+            } else if case .success(let found) = locate(element: handle) {
+                // Off the screen a change is for, it is still said as what it is.
                 words = Self.describe(found.element)
             }
             guard var words else {
@@ -283,6 +291,8 @@ final class VoiceToolbox: VoiceActing {
 
     func createScreen(name: String?, description: String, device: String?) async throws -> String {
         guard let model else { throw CancellationError() }
+        // A change for one screen makes no other.
+        if let scoped = outsideTheScope { return failed(scoped.line) }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isClosed else { return failed(AppModel.closedProblem) }
@@ -461,6 +471,13 @@ final class VoiceToolbox: VoiceActing {
                 }
             }
             return find(screen: tidy)
+        }
+        // A change for one screen is for that one, whatever is selected.
+        if let scope {
+            guard let screen = model.store.screen(scope) else {
+                return .failure(Refusal(line: "There is no \(handles.handle(forScreen: scope))."))
+            }
+            return .success(screen)
         }
         if let selected = model.selectedScreen { return .success(selected) }
         let holding = Set(model.selectedElements.compactMap { found -> DesignScreen.ID? in
@@ -723,17 +740,22 @@ final class VoiceToolbox: VoiceActing {
         }
         // "Down a bit" has nothing to show: it is the view that moves.
         if Self.pan(named: target) != nil { return pan(direction: target) }
-        if case .success(let screen) = find(screen: target) {
-            DesignActions.reveal(.screen(screen.id), in: model)
-            return done("Showing “\(screen.name)”.")
+        // A screen's handle is answered as a screen's: one that names nothing is reported
+        // as the screen it would be, and a screen a change isn't for is refused.
+        if VoiceHandles.tidied(target)?.hasPrefix("S") == true {
+            switch find(screen: target) {
+            case .success(let screen):
+                DesignActions.reveal(.screen(screen.id), in: model)
+                return done("Showing “\(screen.name)”.")
+            case .failure(let refusal):
+                return failed(refusal.line)
+            }
         }
         switch find(element: target) {
         case .success(let found):
             DesignActions.reveal(.element(found.ref), in: model)
             return done("Showing \(Self.describe(found.element)).")
         case .failure(let refusal):
-            // A screen's handle that names nothing is reported as the screen it would be.
-            if VoiceHandles.tidied(target)?.hasPrefix("S") == true { return failed("There is no \(VoiceHandles.tidied(target) ?? target).") }
             return failed(refusal.line)
         }
     }
@@ -834,6 +856,19 @@ final class VoiceToolbox: VoiceActing {
 
     private var gone: String { failed("The design has closed.") }
 
+    /// The screen a change is for, as a refusal names it: `S1 “Login”`. Nil without one.
+    private var scopeNamed: String? {
+        guard let scope else { return nil }
+        let handle = handles.handle(forScreen: scope)
+        guard let name = model?.store.screen(scope)?.name else { return handle }
+        return "\(handle) “\(name)”"
+    }
+
+    /// Why a change for one screen can't touch another, or make one; nil without a scope.
+    private var outsideTheScope: Refusal? {
+        scopeNamed.map { Refusal(line: "Only \($0) can be changed here.") }
+    }
+
     private func find(screen handle: String) -> Result<DesignScreen, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as S1."))
@@ -842,10 +877,21 @@ final class VoiceToolbox: VoiceActing {
         guard let id = handles.screen(tidy), let screen = model?.store.screen(id) else {
             return .failure(Refusal(line: "There is no \(tidy)."))
         }
+        if let scope, id != scope, let scoped = outsideTheScope { return .failure(scoped) }
         return .success(screen)
     }
 
+    /// An element a tool may change: one on the screen a change is for, when there is one.
     private func find(element handle: String) -> Result<FoundElement, Refusal> {
+        let found = locate(element: handle)
+        guard let scope, case .success(let one) = found, one.ref.host != .screen(scope), let screen = scopeNamed else {
+            return found
+        }
+        return .failure(Refusal(line: "\(handles.handle(forElement: one.element.id)) isn't on \(screen), the screen this change is for."))
+    }
+
+    /// An element wherever it is, on any screen or loose on the canvas.
+    private func locate(element handle: String) -> Result<FoundElement, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as E2."))
         }
@@ -865,9 +911,10 @@ final class VoiceToolbox: VoiceActing {
         return .failure(Refusal(line: "There is no \(tidy)."))
     }
 
-    /// The screen a new element goes on when none is named: the selected one, the one
-    /// holding the selection, or the newest.
+    /// The screen a new element goes on when none is named: the one a change is for, the
+    /// selected one, the one holding the selection, or the newest.
     private func currentScreen(in model: AppModel) -> DesignScreen? {
+        if let scope { return model.store.screen(scope) }
         if let screen = model.selectedScreen { return screen }
         if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
             return screen

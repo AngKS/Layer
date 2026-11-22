@@ -44,6 +44,10 @@ struct CanvasPicture: Sendable, Equatable {
     var screens: [Screen] = []
     /// Elements on the open canvas, outside every screen.
     var loose: [Element] = []
+    /// The handle of the screen a change is for, when the change can touch nothing else:
+    /// that screen is told in full and every other by its one line, however much room the
+    /// model has, and nothing loose is told at all. Nil for a command that can go anywhere.
+    var scope: String?
 
     static let empty = CanvasPicture()
 
@@ -56,16 +60,20 @@ struct CanvasPicture: Sendable, Equatable {
         var lines: [String] = []
         if hasScreens {
             lines.append("Screens in order (S1 is the first, the last is the newest):")
-            let focus = detail == .compact ? focusedScreen : nil
+            // Every screen is told in full, unless the change is for one or the model is
+            // short of room: then only that one, or the one most likely meant.
+            let tellsAll = scope == nil && detail == .full
+            let focus = scope ?? (detail == .compact ? focusedScreen : nil)
             for screen in screens {
-                let isBrief = detail == .compact && screen.handle != focus
+                let isBrief = !tellsAll && screen.handle != focus
                 lines.append(Self.line(for: screen, isBrief: isBrief))
                 if !isBrief { lines += screen.elements.map { "  " + Self.line(for: $0) } }
             }
         } else {
             lines.append("The canvas has no screens yet.")
         }
-        if !loose.isEmpty {
+        // A change for one screen can't touch what is loose, so it isn't told of it.
+        if !loose.isEmpty, scope == nil {
             lines.append("Loose on the canvas:")
             lines += loose.map { "  " + Self.line(for: $0) }
         }
@@ -90,13 +98,23 @@ struct CanvasPicture: Sendable, Equatable {
     var selectionInWords: String? {
         var things: [String] = []
         for screen in screens {
-            if screen.isSelected { things.append("\(screen.handle), the screen \"\(screen.name)\"") }
+            if screen.isSelected { things.append(Self.words(for: screen)) }
             for element in screen.elements where element.isSelected {
                 things.append(Self.words(for: element) + " on \(screen.handle)")
             }
         }
         things += loose.filter(\.isSelected).map(Self.words(for:))
         return things.isEmpty ? nil : things.joined(separator: "; ")
+    }
+
+    /// A screen in words a model can't mistake, such as `S1, the screen "Login"`; nil for a
+    /// handle that names none of these.
+    func screenInWords(_ handle: String) -> String? {
+        screens.first { $0.handle == handle }.map(Self.words(for:))
+    }
+
+    private static func words(for screen: Screen) -> String {
+        "\(screen.handle), the screen \"\(screen.name)\""
     }
 
     private static func words(for element: Element) -> String {
