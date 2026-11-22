@@ -61,6 +61,10 @@ enum VoiceDemo {
             await PencilDemo.run(script, on: model)
             return
         }
+        if let script = defaults.string(forKey: "LayerScreenEditDemo") {
+            await ScreenEditDemo.run(script, on: model)
+            return
+        }
         guard let script = defaults.string(forKey: "LayerVoiceDemo") else { return }
         let freeze = defaults.string(forKey: "LayerVoiceDemoFreeze")
         prepareCanvas(of: model)
@@ -214,6 +218,68 @@ enum PencilDemo {
             try? await Task.sleep(for: .milliseconds(200))
         }
         pencil.squeezeEnded()
+    }
+}
+
+/// Plays a change to a selected screen, typed into its field or held and said, without a
+/// microphone or a real model, so that the field can be watched and photographed in the
+/// simulator.
+///
+/// Launch with `-LayerVoiceDemoDesign login -LayerScreenEditDemo "<typed or said> => <what comes of it>"`.
+/// The login screen is selected, which brings up its field. Words typed there that match the
+/// script's are carried out as the script says, written as for `-LayerVoiceDemo`. Held, the
+/// field hears the script's words, and sends them when let go of. The reply stays until
+/// another change replaces it. `-LayerScreenEditDemoUnavailable "<reason>"` has no model
+/// that can be asked, for that reason. `-LayerVoiceDemoFreeze working` holds a change whose
+/// result is plain words at its step.
+@MainActor
+enum ScreenEditDemo {
+    static func run(_ script: String, on model: AppModel) async {
+        let lines = VoiceDemo.lines(from: script)
+        guard !lines.isEmpty else {
+            VoiceLog.log.error("screen edit demo: couldn't read the script")
+            return
+        }
+        let unavailable = UserDefaults.standard.string(forKey: "LayerScreenEditDemoUnavailable")
+        let freeze = UserDefaults.standard.string(forKey: "LayerVoiceDemoFreeze")
+        VoiceDemo.prepareCanvas(of: model)
+
+        // The canvas already shows this instance and keeps to it, so the script goes into it.
+        let pencil = model.pencilVoice
+        pencil.script(
+            route: { DemoRoute(lines: lines, freeze: nil, endsWhenTold: true, isBusy: { false }) },
+            runner: { model in
+                VoiceDemo.runner(for: lines, freeze: freeze, model: model) { [weak model] step in model?.pencilVoice.call?.showStep(step) }
+            }
+        )
+        if let unavailable {
+            pencil.readiness = { .unavailable(unavailable) }
+        } else {
+            pencil.readiness = { .ready }
+        }
+        // A screen is selected outside Draw.
+        model.tool = .select
+
+        // The canvas laid out at its final size, and fitted to what is on it: a fit made
+        // while the design was still opening leaves the screen out of view.
+        for _ in 0..<100 where model.canvasSize == .zero || model.topBarBottom == 0 {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        try? await Task.sleep(for: .seconds(1))
+        if !model.store.screens.isEmpty { model.ink?.zoomToFit() }
+        try? await Task.sleep(for: .milliseconds(500))
+
+        // Only now, with the pencil scripted: the field appearing starts the pencil's call.
+        guard let screen = model.store.screens.first else {
+            VoiceLog.log.error("screen edit demo: no screen to select; launch with -LayerVoiceDemoDesign login")
+            return
+        }
+        model.selection = .screen(screen.id)
+        // None comes when no model can be asked.
+        for _ in 0..<100 where pencil.call == nil {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        pencil.call?.captionTimes = (done: .seconds(3600), problem: .seconds(3600))
     }
 }
 

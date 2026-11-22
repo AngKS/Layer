@@ -738,6 +738,14 @@ final class DesignStore {
         return step === lastStep
     }
 
+    /// The one screen that all `edit`'s step changed is, or is on: the screen itself, and
+    /// elements on it before and after. Nil when it changed nothing, or anything else: the
+    /// board, another screen, or an element on the open canvas, or moved on or off it; or
+    /// when it made that screen or took it away.
+    func onlyScreen(changedBy edit: Edit) -> DesignScreen.ID? {
+        edit.step?.onlyScreen
+    }
+
     /// Tells the system the document has changes to save, without a step in the history.
     /// The system marks a document as changed when its undo manager is about to close a
     /// group, so a change made without an undo step (a name the app settles on, the file's
@@ -762,13 +770,17 @@ final class DesignStore {
     /// command does is made for it (`actingForCommand`) and undoes as the one step the
     /// command was. A change by hand made meanwhile, ink drawn or a drag, is a step of its
     /// own, which neither undoing the command nor a spoken correction of it takes back (V1).
+    ///
+    /// `name` names the step, for the Edit menu and the undo HUD, when it is begun here. A
+    /// command begun inside another's step is part of that one, and leaves its name alone.
     @discardableResult
-    func beginHeldEdit() -> Edit {
+    func beginHeldEdit(named name: String? = nil) -> Edit {
         if let heldEdit {
             heldEdit.nested += 1
             return heldEdit
         }
         let edit = beginEdit(by: .app)
+        if let name { self.name(edit, name) }
         heldEdit = edit
         return edit
     }
@@ -948,6 +960,36 @@ final class DesignStore {
         var touched: Touched {
             runs.reduce(into: Touched()) { $0.formUnion(Touched(from: $1.before, to: $1.after)) }
         }
+
+        /// The one screen all its changes were to or on: see `DesignStore.onlyScreen(changedBy:)`.
+        var onlyScreen: DesignScreen.ID? {
+            var screens: Set<DesignScreen.ID> = []
+            for run in runs {
+                let touched = Touched(from: run.before, to: run.after)
+                guard !touched.board else { return nil }
+                screens.formUnion(touched.screens)
+                // Where each element it changed was, and is: a screen, or the open canvas.
+                func hosts(in content: DesignContent) -> [DesignElement.ID: DesignScreen.ID?] {
+                    Dictionary(content.elements.map { ($0.id, $0.parent) }, uniquingKeysWith: { first, _ in first })
+                }
+                let was = hosts(in: run.before), now = hosts(in: run.after)
+                for id in touched.elements {
+                    for host in [was[id], now[id]] {
+                        // Not there on that side: added, or taken away.
+                        guard let host else { continue }
+                        guard let screen = host else { return nil }
+                        screens.insert(screen)
+                    }
+                }
+            }
+            // A screen the step made or took away isn't one a correction for it may undo:
+            // that would take the screen away, or bring it back, again.
+            guard screens.count == 1, let screen = screens.first,
+                  runs.first?.before.screenFrames.contains(where: { $0.id == screen }) == true,
+                  runs.last?.after.screenFrames.contains(where: { $0.id == screen }) == true
+            else { return nil }
+            return screen
+        }
     }
 
     /// What a change touched: the elements it added, took away or altered, the screens it
@@ -1062,6 +1104,10 @@ final class DesignStore {
     /// What Undo and Redo call a spoken command's step.
     static let commandStepName = String(localized: "Voice Command")
 
+    /// What Undo and Redo call the step of a change asked of one screen, typed or held to
+    /// speak: a command's step named for what it is.
+    static let screenEditStepName = String(localized: "Change Screen")
+
     private func register(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
@@ -1088,13 +1134,14 @@ final class DesignStore {
             withExtendedLifetime(step) {}
             self?.takeBack(step)
         }
-        // A spoken command's step is named for the Edit menu and the undo HUD (V8). Named
-        // here, inside its own group: after the command, with the document's history
-        // grouping by event, no group is open and naming one throws.
-        if step.isCommand {
-            undoManager.setActionName(Self.commandStepName)
-        } else if let name = step.name {
+        // A spoken command's step is named for the Edit menu and the undo HUD (V8), unless
+        // it has a name of its own, as a change for one screen has. Named here, inside its
+        // own group: after the command, with the document's history grouping by event, no
+        // group is open and naming one throws.
+        if let name = step.name {
             undoManager.setActionName(name)
+        } else if step.isCommand {
+            undoManager.setActionName(Self.commandStepName)
         }
         undoManager.endUndoGrouping()
     }

@@ -30,6 +30,28 @@ final class VoiceToolbox: VoiceActing {
     /// pencil pointed at empty canvas. Nil puts it where screens always go.
     var newScreenAnchor: CGPoint?
 
+    /// The screen the command under way is for, when it can change nothing else: a change
+    /// asked of one screen. Another screen, an element not on this one (loose ones too) and
+    /// a new screen are refused, and a tool given no screen means this one, whatever is
+    /// selected. Nil lets a command go anywhere.
+    var scope: DesignScreen.ID?
+
+    /// What a correction ("No, …") may do with the undo and redo tools in the command under
+    /// way. A correction for one screen undoes only that screen's last change, which its
+    /// agent undoes itself before the model is asked (`VoiceAgent`); the model can't tell
+    /// whose the step on top is.
+    enum CorrectionUndo {
+        /// Undo or redo a command's step, as in a command that can go anywhere.
+        case allowed
+        /// Nothing more: the screen's last change has been undone already. The model is
+        /// told so, which is no failure: what it asked for is done.
+        case alreadyDone
+        /// Nothing: the step on top may be another screen's.
+        case refused
+    }
+
+    var correctionUndo = CorrectionUndo.allowed
+
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
     private func forCommand<T>(_ body: () -> T) -> T {
@@ -44,6 +66,8 @@ final class VoiceToolbox: VoiceActing {
         endsCall = false
         lastFailed = false
         newScreenAnchor = nil
+        scope = nil
+        correctionUndo = .allowed
     }
 
     // MARK: Screens
@@ -120,7 +144,7 @@ final class VoiceToolbox: VoiceActing {
             case .leftOf: CGPoint(x: by.minX - gap - frame.width, y: by.minY)
             case .rightOf: CGPoint(x: by.maxX + gap, y: by.minY)
             }
-            DesignActions.reveal(.element(moving.ref), in: model)
+            reveal(.element(moving.ref), in: model)
             store.position([.element(moving.ref): origin])
             return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
         }
@@ -206,10 +230,10 @@ final class VoiceToolbox: VoiceActing {
                 origins[.element(ref)] = isColumn ? CGPoint(x: left, y: next) : CGPoint(x: next, y: top)
                 next += (isColumn ? frame.height : frame.width) + gap
             }
-            DesignActions.reveal(.element(placed[0].ref), in: model)
+            reveal(.element(placed[0].ref), in: model)
             store.position(origins)
             // All of them stay selected, so that "them" goes on meaning them.
-            model.selection = .several(Set(placed.map { .element($0.ref) }))
+            select(.several(Set(placed.map { .element($0.ref) })), in: model)
             return done("Stacked \(placed.count) elements in a \(isColumn ? "column" : "row").")
         }
     }
@@ -259,7 +283,8 @@ final class VoiceToolbox: VoiceActing {
                 // "Screen S2" and “S2” already say it is a screen.
                 let isCalledAScreen = before.lowercased().hasSuffix("screen ") || (isQuoted && before.dropLast().lowercased().hasSuffix("screen "))
                 words = isCalledAScreen ? "“\(screen.name)”" : "the screen “\(screen.name)”"
-            } else if case .success(let found) = find(element: handle) {
+            } else if case .success(let found) = locate(element: handle) {
+                // Off the screen a change is for, it is still said as what it is.
                 words = Self.describe(found.element)
             }
             guard var words else {
@@ -283,6 +308,8 @@ final class VoiceToolbox: VoiceActing {
 
     func createScreen(name: String?, description: String, device: String?) async throws -> String {
         guard let model else { throw CancellationError() }
+        // A change for one screen makes no other.
+        if let scoped = outsideTheScope { return failed(scoped.line) }
         let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { return failed("Say what the screen is for.") }
         guard !model.isClosed else { return failed(AppModel.closedProblem) }
@@ -331,7 +358,7 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 model.store.updateScreen(found.id) { $0.name = name }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 return done("Renamed \(handles.handle(forScreen: found.id)) to “\(name)”.")
             }
         }
@@ -368,7 +395,7 @@ final class VoiceToolbox: VoiceActing {
                 let frames = ScreenTidy.frames(for: found.elements, on: found.device)
                 let handle = handles.handle(forScreen: found.id)
                 guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
                 return done("Tidied the layout of \(handle).")
             }
@@ -395,7 +422,7 @@ final class VoiceToolbox: VoiceActing {
                     screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
                     Self.apply(frames, to: &screen)
                 }
-                DesignActions.reveal(.screen(found.id), in: model)
+                reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
         }
@@ -462,6 +489,8 @@ final class VoiceToolbox: VoiceActing {
             }
             return find(screen: tidy)
         }
+        // A change for one screen is for that one, whatever is selected.
+        if let scoped = scopedScreen(in: model) { return scoped }
         if let selected = model.selectedScreen { return .success(selected) }
         let holding = Set(model.selectedElements.compactMap { found -> DesignScreen.ID? in
             if case .screen(let id) = found.ref.host { id } else { nil }
@@ -491,10 +520,11 @@ final class VoiceToolbox: VoiceActing {
                 case .failure(let refusal): return failed(refusal.line)
                 case .success(let found): host = found
                 }
-            } else if let current = currentScreen(in: model) {
-                host = current
             } else {
-                return failed("There is no screen to add to yet.")
+                switch currentScreen(in: model) {
+                case .failure(let refusal): return failed(refusal.line)
+                case .success(let current): host = current
+                }
             }
             guard let kind = ScreenBlueprint.kind(named: kind), kind.belongsOnScreens else {
                 return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
@@ -505,7 +535,7 @@ final class VoiceToolbox: VoiceActing {
             if let look { Self.apply(look: look, to: &element) }
             element.frame = DesignActions.frameForNewElement(element, on: host)
             let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
-            DesignActions.reveal(.element(ref), in: model)
+            reveal(.element(ref), in: model)
             let handle = handles.handle(forElement: element.id)
             let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
             // "Add an image below the title": put by the other one as it is added.
@@ -531,7 +561,7 @@ final class VoiceToolbox: VoiceActing {
                 guard found.element.kind.hasText else {
                     return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0.text = text }
                 return done("Reworded the \(found.element.kind.layerName.lowercased()) to “\(text)”.")
             }
@@ -548,7 +578,7 @@ final class VoiceToolbox: VoiceActing {
                 guard Self.apply(look: look, to: &restyled) else {
                     return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0 = restyled }
                 return done("Restyled \(Self.describe(found.element)).")
             }
@@ -585,7 +615,7 @@ final class VoiceToolbox: VoiceActing {
                     }
                     values.append(value / scale)
                 }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { element in
                     if let x = values[0] { element.frame.origin.x = x }
                     if let y = values[1] { element.frame.origin.y = y }
@@ -615,7 +645,7 @@ final class VoiceToolbox: VoiceActing {
                     return failed("I didn't understand the angle “\(written)”.")
                 }
                 let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.update(found.ref) { $0.setRotation(target) }
                 return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
             }
@@ -646,7 +676,7 @@ final class VoiceToolbox: VoiceActing {
                 }
                 guard found.screen != nil else { return failed("\(handles.handle(forElement: found.element.id)) isn't on a screen to line up with.") }
                 guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
-                DesignActions.reveal(.element(found.ref), in: model)
+                reveal(.element(found.ref), in: model)
                 model.store.align(found.ref, edge)
                 return done("Aligned \(Self.describe(found.element)) to the \(name).")
             }
@@ -672,9 +702,9 @@ final class VoiceToolbox: VoiceActing {
         guard found.count > 1 else { return alignElement(element: named[0], alignment: alignment) }
         guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
         let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
-        DesignActions.reveal(.element(found[0].ref), in: model)
+        reveal(.element(found[0].ref), in: model)
         model.store.align(together, edge)
-        model.selection = together
+        select(together, in: model)
         let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
         return done("Lined up \(found.count) elements by their \(by).")
     }
@@ -686,7 +716,7 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 guard let copy = model.store.duplicate(found.ref) else { return failed("That couldn't be duplicated.") }
-                DesignActions.reveal(.element(copy), in: model)
+                reveal(.element(copy), in: model)
                 return done("Duplicated \(Self.describe(found.element)) as \(handles.handle(forElement: copy.element)).")
             }
         }
@@ -723,17 +753,24 @@ final class VoiceToolbox: VoiceActing {
         }
         // "Down a bit" has nothing to show: it is the view that moves.
         if Self.pan(named: target) != nil { return pan(direction: target) }
-        if case .success(let screen) = find(screen: target) {
-            DesignActions.reveal(.screen(screen.id), in: model)
-            return done("Showing “\(screen.name)”.")
+        // A screen's handle is answered as a screen's: one that names nothing is reported
+        // as the screen it would be, and a screen a change isn't for is refused.
+        if VoiceHandles.tidied(target)?.hasPrefix("S") == true {
+            switch find(screen: target) {
+            case .success(let screen):
+                DesignActions.reveal(.screen(screen.id), in: model, selecting: scope == nil)
+                return done("Showing “\(screen.name)”.")
+            case .failure(let refusal):
+                return failed(refusal.line)
+            }
         }
         switch find(element: target) {
         case .success(let found):
-            DesignActions.reveal(.element(found.ref), in: model)
+            // Asked for, the view moves even in a change for one screen; the screen stays
+            // selected.
+            DesignActions.reveal(.element(found.ref), in: model, selecting: scope == nil)
             return done("Showing \(Self.describe(found.element)).")
         case .failure(let refusal):
-            // A screen's handle that names nothing is reported as the screen it would be.
-            if VoiceHandles.tidied(target)?.hasPrefix("S") == true { return failed("There is no \(VoiceHandles.tidied(target) ?? target).") }
             return failed(refusal.line)
         }
     }
@@ -798,9 +835,11 @@ final class VoiceToolbox: VoiceActing {
         // a model asked to correct a command undid the person's own change instead (I-2).
         // Nor does a correction redo a change made by hand.
         let isCorrection = spokenCommand.flatMap(VoiceAgent.correction(in:)) != nil
+        if isCorrection, correctionUndo == .alreadyDone { return noted(Self.undoneAlready) }
         guard !isCorrection || (isUndo ? model.store.lastStepIsCommand : model.store.nextRedoIsCommand) else {
             return failed(Self.changedByHand)
         }
+        guard !isCorrection || correctionUndo == .allowed else { return failed(Self.notThisScreens) }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
     }
@@ -808,10 +847,20 @@ final class VoiceToolbox: VoiceActing {
     /// Why a correction won't undo or redo the change at hand.
     static let changedByHand = "That change was made by hand, not by voice, so a correction leaves it. The Undo and Redo buttons work on it."
 
+    /// What the model is told of an undo or redo asked for in a correction for one screen
+    /// whose last change has been undone already.
+    static let undoneAlready = "The last change made for this screen has been undone already, so nothing more is undone."
+
+    /// Why a correction for one screen won't undo the change at hand: one made otherwise.
+    static let notThisScreens = "A correction for one screen undoes only the last change made for it, so this one stays. The Undo button works on it."
+
     /// A correction with nothing of the last command's to undo: the command changed
     /// nothing, or something has been changed by hand since, which isn't undone in its place.
-    func refuseCorrection() -> String {
-        failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
+    /// `notThisScreens` when it is for one screen, and the last command's step is on top but
+    /// wasn't a change to that screen.
+    func refuseCorrection(notThisScreens: Bool = false) -> String {
+        if notThisScreens { return failed(Self.notThisScreens) }
+        return failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
     }
 
     func endCall() -> String {
@@ -834,6 +883,47 @@ final class VoiceToolbox: VoiceActing {
 
     private var gone: String { failed("The design has closed.") }
 
+    /// Selects what a tool changed and brings it into view, so that "it" means that one
+    /// next. A change for one screen leaves both alone: the screen stays selected, with
+    /// the field the change was typed in, and the view stays where the person put it.
+    private func reveal(_ target: CanvasSelection, in model: AppModel) {
+        guard scope == nil else { return }
+        DesignActions.reveal(target, in: model)
+    }
+
+    /// Selects several things a tool changed together; not in a change for one screen.
+    private func select(_ together: CanvasSelection, in model: AppModel) {
+        guard scope == nil else { return }
+        model.selection = together
+    }
+
+    /// Why nothing can be done in a change for one screen once that screen has gone.
+    static let screenGone = "That screen has gone, so nothing can be changed here."
+
+    /// The screen a tool means when none is named in a change for one screen: that one,
+    /// or a refusal once it has gone, so that nothing is done to another in its place.
+    /// Nil when a command can go anywhere.
+    private func scopedScreen(in model: AppModel) -> Result<DesignScreen, Refusal>? {
+        guard let scope else { return nil }
+        guard let screen = model.store.screen(scope) else {
+            return .failure(Refusal(line: Self.screenGone))
+        }
+        return .success(screen)
+    }
+
+    /// The screen a change is for, as a refusal names it: `S1 “Login”`. Nil without one.
+    private var scopeNamed: String? {
+        guard let scope else { return nil }
+        let handle = handles.handle(forScreen: scope)
+        guard let name = model?.store.screen(scope)?.name else { return handle }
+        return "\(handle) “\(name)”"
+    }
+
+    /// Why a change for one screen can't touch another, or make one; nil without a scope.
+    private var outsideTheScope: Refusal? {
+        scopeNamed.map { Refusal(line: "Only \($0) can be changed here.") }
+    }
+
     private func find(screen handle: String) -> Result<DesignScreen, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as S1."))
@@ -842,10 +932,21 @@ final class VoiceToolbox: VoiceActing {
         guard let id = handles.screen(tidy), let screen = model?.store.screen(id) else {
             return .failure(Refusal(line: "There is no \(tidy)."))
         }
+        if let scope, id != scope, let scoped = outsideTheScope { return .failure(scoped) }
         return .success(screen)
     }
 
+    /// An element a tool may change: one on the screen a change is for, when there is one.
     private func find(element handle: String) -> Result<FoundElement, Refusal> {
+        let found = locate(element: handle)
+        guard let scope, case .success(let one) = found, one.ref.host != .screen(scope), let screen = scopeNamed else {
+            return found
+        }
+        return .failure(Refusal(line: "\(handles.handle(forElement: one.element.id)) isn't on \(screen), the screen this change is for."))
+    }
+
+    /// An element wherever it is, on any screen or loose on the canvas.
+    private func locate(element handle: String) -> Result<FoundElement, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as E2."))
         }
@@ -865,14 +966,16 @@ final class VoiceToolbox: VoiceActing {
         return .failure(Refusal(line: "There is no \(tidy)."))
     }
 
-    /// The screen a new element goes on when none is named: the selected one, the one
-    /// holding the selection, or the newest.
-    private func currentScreen(in model: AppModel) -> DesignScreen? {
-        if let screen = model.selectedScreen { return screen }
+    /// The screen a new element goes on when none is named: the one a change is for, the
+    /// selected one, the one holding the selection, or the newest.
+    private func currentScreen(in model: AppModel) -> Result<DesignScreen, Refusal> {
+        if let scoped = scopedScreen(in: model) { return scoped }
+        if let screen = model.selectedScreen { return .success(screen) }
         if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
-            return screen
+            return .success(screen)
         }
-        return model.store.screens.last
+        guard let newest = model.store.screens.last else { return .failure(Refusal(line: "There is no screen to add to yet.")) }
+        return .success(newest)
     }
 
     // MARK: Results
@@ -882,6 +985,13 @@ final class VoiceToolbox: VoiceActing {
         // The model is told the handle of what was made, to go on with. The pill isn't.
         lines.append(line.replacing(#/ It is the [ES]\d+ now in the canvas list\./#, with: "").replacing(#/ as [ES]\d+/#, with: ""))
         lastFailed = false
+        return line
+    }
+
+    /// A line for the model about something that needn't be done: neither done, nor a
+    /// failure that would be the person's to hear.
+    private func noted(_ line: String) -> String {
+        VoiceLog.log.info("tool: noted. \(line, privacy: .private)")
         return line
     }
 

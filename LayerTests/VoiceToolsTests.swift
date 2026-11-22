@@ -156,6 +156,35 @@ struct CanvasPictureTests {
         #expect(picture.text(.compact) == "The canvas has no screens yet.")
         #expect(CanvasPicture.empty.text(.full) == "The canvas has no screens yet.")
     }
+
+    /// A change for one screen can touch nothing else. The model is told that screen in full
+    /// and nothing loose, however much room it has; every other screen gets its one line,
+    /// so that "like Profile" still means something.
+    @Test func aChangeForOneScreenIsToldThatScreenAndTheOthersByName() throws {
+        let (app, _, _) = VoiceFixture.loginAndProfile()
+        _ = app.store.addFloating(.stickyNote, from: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        var picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
+        #expect(picture.text(.full).contains("Loose on the canvas"))
+
+        picture.scope = "S1"
+        let text = picture.text(.full)
+        #expect(text.contains(#"E2 button "Sign in""#))
+        #expect(text.split(separator: "\n").contains { $0.hasPrefix(#"S2 "Profile" 393x852"#) && $0.hasSuffix(", 1 element") })
+        #expect(!text.contains("Your profile"))
+        #expect(!text.contains("Loose on the canvas"))
+        #expect(picture.text(.compact) == text)
+        // And told, last, that nothing else can be changed or made.
+        #expect(text.hasSuffix("\n" + CanvasPicture.alone("S1")))
+        picture.scope = nil
+        #expect(!picture.text(.full).contains("alone"))
+    }
+
+    @Test func aScreenIsNamedInWordsByItsHandle() {
+        let (app, _, _) = VoiceFixture.loginAndProfile()
+        let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
+        #expect(picture.screenInWords("S2") == #"S2, the screen "Profile""#)
+        #expect(picture.screenInWords("S9") == nil)
+    }
 }
 
 @Suite("What a spoken command can do")
@@ -778,6 +807,119 @@ struct VoiceToolsTests {
         #expect(box.setText(element: "E1", text: "Hello") == "There is no E1.")
         #expect(box.addElement(screen: nil, kind: "button", text: nil, look: nil) == "There is no screen to add to yet.")
         #expect(app.store.content.screens.isEmpty)
+    }
+
+    /// A change typed for one screen can touch nothing outside it: not another screen, not
+    /// an element on one or loose on the canvas, and no new screen.
+    @Test func aChangeForOneScreenTouchesNothingElse() async throws {
+        let (app, login, profile) = VoiceFixture.loginAndProfile()
+        let note = app.store.addFloating(.stickyNote, from: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        box.scope = login
+        func element(_ handle: String) throws -> DesignElement {
+            let id = try #require(handles.element(handle))
+            return try #require(app.store.screens.flatMap(\.elements).first { $0.id == id })
+        }
+        let scopeLine = "Only S1 “Login” can be changed here."
+
+        _ = box.styleElement(element: "E2", look: "green")
+        #expect(try element("E2").tint == ColourWords.parse("green"))
+        #expect(!box.lastFailed)
+
+        let profileTint = try element("E4").tint
+        #expect(box.styleElement(element: "E4", look: "red").contains("isn't on S1"))
+        #expect(try element("E4").tint == profileTint)
+        #expect(box.lastFailed)
+        // Nor what is loose on the canvas, E5.
+        #expect(handles.element("E5") == note.element)
+        #expect(box.setText(element: "E5", text: "Hello").contains("isn't on S1"))
+        #expect(app.store.floating.first?.element.text != "Hello")
+
+        #expect(box.renameScreen(screen: "S2", name: "Settings") == scopeLine)
+        #expect(box.deleteScreen(screen: "S2", named: nil) == scopeLine)
+        #expect(app.store.screen(profile)?.name == "Profile")
+
+        #expect(try await box.createScreen(name: nil, description: "a settings screen", device: nil) == scopeLine)
+        #expect(app.store.screens.count == 2)
+
+        // Whatever is selected, a new element goes on the screen the change is for.
+        app.selection = .screen(profile)
+        _ = box.addElement(screen: nil, kind: "button", text: "Next", look: nil, relation: nil, target: nil)
+        #expect(app.store.screen(login)?.elements.contains { $0.text == "Next" } == true)
+        #expect(app.store.screen(profile)?.elements.contains { $0.text == "Next" } == false)
+        // And so does a screen tool given no screen.
+        app.selection = .screen(profile)
+        #expect(box.tidyScreen(screen: nil) == "Tidied the layout of S1.")
+
+        #expect(box.show(target: "S2") == scopeLine)
+        #expect(box.lastFailed)
+
+        box.reset()
+        #expect(box.scope == nil)
+    }
+
+    /// The field a change is typed in is there while its screen is selected, so a change
+    /// for one screen leaves the screen selected, and the view where the person put it.
+    /// Asked to show something, it still moves the view, and only the view.
+    @Test func aChangeForOneScreenLeavesTheScreenSelectedAndTheViewWhereItIs() throws {
+        let (app, login, _) = VoiceFixture.loginAndProfile()
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let canvas = InkCanvas.Coordinator(model: app)
+        canvas.documentCanvas.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        app.ink = canvas
+        let box = VoiceToolbox(model: app, handles: handles)
+        app.selection = .screen(login)
+        box.scope = login
+        let viewport = app.viewport
+
+        let tools: [() -> String] = [
+            { box.styleElement(element: "E2", look: "green") },
+            { box.stackElements(elements: "E1, E2", direction: "column") },
+            { box.alignElement(element: "E1, E3", alignment: "left") },
+            { box.addElement(screen: nil, kind: "button", text: "Next", look: nil, relation: "below", target: "E1") },
+            { box.duplicateElement(element: "E3") },
+            { box.renameScreen(screen: "S1", name: "Sign in") },
+            { box.tidyScreen(screen: nil) },
+        ]
+        for tool in tools {
+            let line = tool()
+            #expect(!box.lastFailed, "\(line)")
+            #expect(app.selection == .screen(login), "\(line)")
+            #expect(!canvas.isGliding, "\(line)")
+        }
+        #expect(box.failures.isEmpty)
+        #expect(app.viewport == viewport)
+
+        _ = box.show(target: "E2")
+        #expect(app.selection == .screen(login))
+        #expect(canvas.isGliding)
+
+        // Without a scope, what a tool changed is selected, as before.
+        box.reset()
+        let button = try #require(handles.element("E2"))
+        _ = box.styleElement(element: "E2", look: "red")
+        #expect(app.selection == .element(.init(host: .screen(login), element: button)))
+    }
+
+    /// The screen a change is for is taken away while the change is under way: what it
+    /// would have done isn't done somewhere else instead.
+    @Test func aChangeForAScreenThatHasGoneChangesNothing() {
+        let (app, login, profile) = VoiceFixture.loginAndProfile()
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        box.scope = login
+        app.store.deleteScreen(login)
+        let before = app.store.content
+        let gone = "That screen has gone, so nothing can be changed here."
+        #expect(box.addElement(screen: nil, kind: "button", text: "Next", look: nil) == gone)
+        #expect(box.tidyScreen(screen: nil) == gone)
+        #expect(box.changeScreenDevice(screen: nil, device: "iPad") == gone)
+        #expect(app.store.content == before)
+        #expect(app.store.screen(profile)?.elements.count == 1)
     }
 
     // MARK: After close, and where new screens go

@@ -121,7 +121,7 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
         ))
 
         let command = (prompts.last ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let steps = configuration.script[command] ?? []
+        let steps = configuration.script[command] ?? configuration.script[Self.withoutHints(command)] ?? []
         guard stepsTaken < steps.count else {
             await channel.send(.response(action: .appendText(configuration.closing, tokenCount: 1)))
             return
@@ -141,6 +141,22 @@ struct ScriptedModelExecutor: LanguageModelExecutor {
                 action: .appendArguments(step.arguments, tokenCount: 1)
             )))
         }
+    }
+
+    /// A prompt with the hints put before its command taken off: each `(…)` at the start,
+    /// and the space after it. A script keyed by the command alone still finds its steps
+    /// when the agent puts a hint before it, such as which screen a change is for.
+    static func withoutHints(_ prompt: String) -> String {
+        var rest = Substring(prompt)
+        while rest.first == "(" {
+            var depth = 0
+            guard let close = rest.indices.first(where: { index in
+                if rest[index] == "(" { depth += 1 } else if rest[index] == ")" { depth -= 1 }
+                return depth == 0
+            }) else { break }
+            rest = rest[rest.index(after: close)...].drop { $0 == " " }
+        }
+        return String(rest)
     }
 }
 #endif

@@ -116,6 +116,14 @@ final class VoiceAgent: VoiceCommandRunner {
     /// it stays on top for as long as the mark hasn't moved, and only then does a
     /// correction undo it. A drag by hand since, or another call's command, moves it.
     private var lastCommandStep: Int?
+    /// The screen the last command was for, or else the one screen it changed, with
+    /// `lastCommandStep`: a correction for one screen undoes only a change to that screen.
+    private var lastCommandScope: DesignScreen.ID?
+
+    /// The screen the command under way is for, when it can change nothing else: a change
+    /// asked of one screen. Every look at the canvas while it runs says so. Nil for any
+    /// other command, and between commands, a warm-up's look included.
+    private var scopedScreen: DesignScreen.ID?
 
     /// How many commands a session takes before the next starts a fresh one. The model is
     /// sent only the last two anyway (`VoiceProfile`), but the session keeps every word,
@@ -166,8 +174,21 @@ final class VoiceAgent: VoiceCommandRunner {
         "(The person is pointing at \(pointed). \"This\", \"it\", \"that\" and a change that names nothing mean what is pointed at, and nothing else.)"
     }
 
+    /// What the model is told with a change asked of one screen, typed or held to speak.
+    static func screenEditHint(_ screen: String) -> String {
+        "(The person is changing \(screen) and what is on it, and nothing else. \"This\", \"it\" and a change that names nothing mean that screen or what is on it.)"
+    }
+
+    /// What the model is told with a correction for one screen when the last command's step
+    /// is on top but wasn't a change to that screen. Its undo tool refuses anyway.
+    static let notThisScreensHint = "(The last change was not undone: it wasn't made for this screen, and that must not be undone.)"
+
     func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
         guard let model, !model.isClosed else { return VoiceOutcome(problem: AppModel.closedProblem) }
+        // A change for a screen that has gone since it was asked has nothing it may change.
+        if case .screenEdit(let id) = target, model.store.screen(id) == nil {
+            return VoiceOutcome(problem: VoiceToolbox.screenGone)
+        }
         toolbox.reset()
         // Where the pencil pointed goes with this command and no other: a new screen goes
         // there, and the model is told so.
@@ -175,6 +196,11 @@ final class VoiceAgent: VoiceCommandRunner {
         if case .canvas(let point) = target {
             hint = Self.canvasHint
             toolbox.newScreenAnchor = point
+        }
+        // A change for one screen can touch nothing else, and is told that screen in full.
+        if case .screenEdit(let id) = target {
+            toolbox.scope = id
+            scopedScreen = id
         }
         if session == nil { commandsInSession = 0 }
         commandsInSession += 1
@@ -187,9 +213,14 @@ final class VoiceAgent: VoiceCommandRunner {
         if case .thing = target, let pointed = session.properties.canvasPicture.selectionInWords {
             hint = Self.thingHint(pointed)
         }
+        let picture = session.properties.canvasPicture
+        if let handle = picture.scope, let screen = picture.screenInWords(handle) {
+            hint = Self.screenEditHint(screen)
+        }
 
-        // Everything the command changes is one step to undo, whatever becomes of it.
-        let edit = model.store.beginHeldEdit()
+        // Everything the command changes is one step to undo, whatever becomes of it. A
+        // change for one screen's step is named for what it is.
+        let edit = model.store.beginHeldEdit(named: scopedScreen == nil ? nil : DesignStore.screenEditStepName)
         let outcome = await carryOut(command, hint: hint, in: session, on: model)
         model.store.endHeldEdit()
         // A correction may undo the command's step only while that is the last step. What
@@ -199,6 +230,11 @@ final class VoiceAgent: VoiceCommandRunner {
         // ran was undone as if it were the command's. A correction's own undo isn't a
         // change of the command's to correct again: it is no step of the command's.
         lastCommandStep = model.store.isLastStep(edit) ? model.store.historyMark : nil
+        // Squeezed over Login, "make it dark" changed Login alone: "No, lighter" typed in
+        // Login's field may correct it.
+        lastCommandScope = scopedScreen ?? model.store.onlyScreen(changedBy: edit)
+        // Over before anything else looks at the canvas, the warm-up below included.
+        scopedScreen = nil
         if commandsInSession >= commandsPerSession {
             // Made ready now, so that the next command doesn't wait on a cold session.
             VoiceLog.log.info("agent: a fresh session after \(self.commandsInSession) commands")
@@ -215,10 +251,18 @@ final class VoiceAgent: VoiceCommandRunner {
         // Left to the model, it did what was meant and left the mistake.
         var prompt = command
         if let correction = Self.correction(in: command) {
-            if let step = lastCommandStep, model.store.historyMark == step {
+            let isOnTop = lastCommandStep == model.store.historyMark
+            // A correction for one screen corrects only a change to that screen: "No, …"
+            // typed for Login never takes back a change just spoken to Profile.
+            let isThisScreens = scopedScreen == nil || lastCommandScope == scopedScreen
+            // Another screen is the reason only while the change is there to be undone.
+            let isAnotherScreens = isOnTop && !isThisScreens
+            if isOnTop, isThisScreens {
                 VoiceLog.log.info("agent: a correction, so the last change is undone first")
                 _ = toolbox.undo()
                 lastCommandStep = nil
+                // For one screen, that is all a correction undoes.
+                if scopedScreen != nil { toolbox.correctionUndo = .alreadyDone }
                 if correction == .undoOnly {
                     outcome.lines = toolbox.lines
                     return outcome
@@ -229,12 +273,15 @@ final class VoiceAgent: VoiceCommandRunner {
                 // Nothing of the command's to undo. Asked, the model undid the person's own
                 // change in its place (review I-2), so it isn't asked.
                 VoiceLog.log.info("agent: a correction with nothing of the last command's to undo")
-                _ = toolbox.refuseCorrection()
+                _ = toolbox.refuseCorrection(notThisScreens: isAnotherScreens)
                 outcome.lines = toolbox.lines
                 outcome.problem = toolbox.failures.last
                 return outcome
             } else {
-                prompt = Self.notUndoneHint + " " + command
+                prompt = (isAnotherScreens ? Self.notThisScreensHint : Self.notUndoneHint) + " " + command
+                // The model's own undo would take back whatever is on top, which may be
+                // another screen's change.
+                if scopedScreen != nil { toolbox.correctionUndo = .refused }
             }
         }
         if let hint {
@@ -299,7 +346,9 @@ final class VoiceAgent: VoiceCommandRunner {
     /// Takes the canvas as it is now for the model's next look at it.
     private func lookAtTheCanvas() {
         guard let model, let session else { return }
-        session.properties.canvasPicture = CanvasPicture.capture(from: model, handles: handles)
+        var picture = CanvasPicture.capture(from: model, handles: handles)
+        picture.scope = scopedScreen.map(handles.handle(forScreen:))
+        session.properties.canvasPicture = picture
     }
 
     private static func isCancellation(_ error: any Error) -> Bool {

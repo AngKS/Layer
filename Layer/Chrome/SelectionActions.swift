@@ -20,6 +20,10 @@ struct SelectionActions: View {
             bar
                 .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
                 .reportsChromeFrame("selection actions", to: model)
+                // Offered no more than the room between its margins: a screen's field gives
+                // way in a narrow window, so that the bar stays in it. A bar that can't give
+                // way is centred where it always was.
+                .frame(maxWidth: room)
                 .position(position(above: rect))
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 .animation(.smooth(duration: 0.25), value: keyboardTop)
@@ -71,6 +75,10 @@ struct SelectionActions: View {
                     ToolButton(symbol: "apple.image.playground", label: "Make a new picture in Image Playground") {
                         model.remakeImageWithPlayground(selected.ref)
                     }
+                }
+                // A screen takes a change described in words, typed or held and said.
+                if case .screen(let id) = model.selection {
+                    ScreenEditField(screen: id).id(id)
                 }
                 ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
                     withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
@@ -171,6 +179,21 @@ struct SelectionActions: View {
         prompt = ""
     }
 
+    /// Where the bar may reach, across the view: its margins, and clear of the panels beside
+    /// the canvas, when they are open there rather than as sheets.
+    private var sides: (left: CGFloat, right: CGFloat) {
+        let besideCanvas = !model.isCompactSizeClass
+        let left: CGFloat = besideCanvas && model.isLayersOpen ? 20 + 300 + 12 : 12
+        let right: CGFloat = model.canvasSize.width - (besideCanvas && model.isInspectorOpen ? 20 + 300 + 12 : 12)
+        return (left, right)
+    }
+
+    /// How wide the bar can be between `sides`, once the view has a size.
+    private var room: CGFloat? {
+        let (left, right) = sides
+        return model.canvasSize.width > 0 ? max(0, right - left) : nil
+    }
+
     /// Centred over the selection and clear of its handles, kept inside the view, below the
     /// bar across the top and out from under open panels.
     private func position(above rect: CGRect) -> CGPoint {
@@ -183,10 +206,7 @@ struct SelectionActions: View {
             y = rect.maxY + gap + size.height / 2
             if y + size.height / 2 > view.height - 100 { y = max(rect.minY, top) + gap + size.height / 2 }
         }
-        // Clear of the panels beside the canvas, when they are open there rather than as sheets.
-        let besideCanvas = !model.isCompactSizeClass
-        let left: CGFloat = besideCanvas && model.isLayersOpen ? 20 + 300 + 12 : 12
-        let right: CGFloat = view.width - (besideCanvas && model.isInspectorOpen ? 20 + 300 + 12 : 12)
+        let (left, right) = sides
         // Above the keyboard while one is up, so that what is typed can be seen.
         if let keyboardTop, y + size.height / 2 > keyboardTop - 12 {
             y = max(keyboardTop - 12 - size.height / 2, top + size.height / 2)

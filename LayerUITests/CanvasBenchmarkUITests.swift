@@ -49,9 +49,10 @@ final class CanvasBenchmarkUITests: XCTestCase {
             drag(CGPoint(x: 160, y: 420), CGPoint(x: 420, y: 560))
             drag(CGPoint(x: 420, y: 560), CGPoint(x: 160, y: 420))
         }
-        // Zooms in and out.
-        for step in ["Zoom in", "Zoom in", "Zoom out", "Zoom out"] {
-            control(step).tap()
+        // Zooms in and out, by the zoom's menu.
+        for level in ["200%", "100%", "50%", "100%"] {
+            control("Zoom").tap()
+            app.buttons[level].tap()
             usleep(400_000)
         }
         // A frame dragged by its name and back.
