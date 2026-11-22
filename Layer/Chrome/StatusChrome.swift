@@ -63,7 +63,7 @@ struct ZoomControl: View {
         // A pencil hovering here is what a squeeze would scrub.
         .onContinuousHover(coordinateSpace: .local) { phase in
             switch phase {
-            case .active: scrubber.hovered = target
+            case .active: ZoomStops.hover(scrubber, frame: frame) { target }
             case .ended: scrubber.forgetHovered(.zoom)
             }
         }

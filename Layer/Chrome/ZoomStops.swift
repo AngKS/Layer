@@ -58,6 +58,24 @@ enum ZoomStops {
         step(from: isGliding ? (requested ?? scale) : scale, by: stops)
     }
 
+    /// The pencil is over the zoom control: it is the field a squeeze would scrub. `target`
+    /// makes the field.
+    /// Nothing is made or written while it is already the hovered field, where it is: the pencil
+    /// moves over it many times a second.
+    @MainActor
+    static func hover(_ scrubber: Scrubber, frame: CGRect, target: () -> Scrubber.Target) {
+        if let hovered = scrubber.hovered, hovered.owner == .zoom, hovered.frame == frame { return }
+        scrubber.hovered = target()
+    }
+
+    /// The indices of the stops that are the menu's levels, which get the longer marks.
+    private nonisolated static let majorMarks: Set<Int> = {
+        #if DEBUG
+        ZoomWork.majorSetsBuilt += 1
+        #endif
+        return Set(menuLevels.compactMap { percents.firstIndex(of: $0) })
+    }()
+
     /// The zoom's ruler: indices into the stops, shown as percents, with the menu's levels
     /// as the longer marks.
     @MainActor
@@ -66,7 +84,9 @@ enum ZoomStops {
         current: @escaping @MainActor () -> CGFloat,
         zoom: @escaping @MainActor (CGFloat) -> Void
     ) -> Scrubber.Target {
-        let majors = Set(menuLevels.compactMap { percents.firstIndex(of: $0) })
+        #if DEBUG
+        ZoomWork.targetsMade += 1
+        #endif
         return Scrubber.Target(
             label: "Zoom",
             unit: "%",
@@ -79,7 +99,16 @@ enum ZoomStops {
             ticksEvery: 1,
             owner: .zoom,
             text: { percents[min(max(Int($0), 0), percents.count - 1)].description + "%" },
-            majorMarks: majors
+            majorMarks: majorMarks
         )
     }
 }
+
+#if DEBUG
+/// How much the zoom control's hover makes: for the test that holds a pencil moving over it
+/// to making nothing. The count only grows: a test measures the difference it makes.
+enum ZoomWork {
+    nonisolated(unsafe) static var targetsMade = 0
+    nonisolated(unsafe) static var majorSetsBuilt = 0
+}
+#endif

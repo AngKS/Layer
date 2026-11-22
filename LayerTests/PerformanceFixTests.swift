@@ -196,3 +196,34 @@ extension HostedWindowSuites {
         }
     }
 }
+
+// MARK: The zoom ruler's pieces (finding 8)
+
+extension PerformanceFixTests {
+    @Test func aPencilMovingOverTheZoomControlMakesItsRulerOnce() {
+        let scrubber = Scrubber()
+        let frame = CGRect(x: 500, y: 760, width: 100, height: 44)
+        let made = ZoomWork.targetsMade
+        let sets = ZoomWork.majorSetsBuilt
+        for _ in 0..<100 {
+            ZoomStops.hover(scrubber, frame: frame) { ZoomStops.target(frame: frame, current: { 1 }, zoom: { _ in }) }
+        }
+        #expect(ZoomWork.targetsMade - made == 1, "rulers made \(ZoomWork.targetsMade - made) for 100 moves")
+        #expect(scrubber.hovered?.owner == .zoom && scrubber.hovered?.frame == frame)
+
+        // Moved, the control is found where it now is; and a hover on a panel field's is let go of.
+        let moved = frame.offsetBy(dx: 20, dy: 0)
+        ZoomStops.hover(scrubber, frame: moved) { ZoomStops.target(frame: moved, current: { 1 }, zoom: { _ in }) }
+        #expect(scrubber.hovered?.frame == moved)
+        let field = ScrubbedField(0)
+        scrubber.hovered = field.target("Rotation", at: moved)
+        ZoomStops.hover(scrubber, frame: moved) { ZoomStops.target(frame: moved, current: { 1 }, zoom: { _ in }) }
+        #expect(scrubber.hovered?.owner == .zoom)
+
+        // Each ruler made shares the set of marks.
+        let before = ZoomWork.majorSetsBuilt
+        for _ in 0..<50 { _ = ZoomStops.target(frame: frame, current: { 1 }, zoom: { _ in }) }
+        #expect(ZoomWork.majorSetsBuilt - before == 0, "mark sets built \(ZoomWork.majorSetsBuilt - before) for 50 rulers")
+        _ = sets
+    }
+}
