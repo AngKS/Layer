@@ -141,6 +141,7 @@ final class AppModel {
                 scrubber.end(.panel)
                 scrubber.forgetHovered(.panel)
                 isEditingText = false
+                pencilVoiceIfMade?.selectionChanged()
                 // The format panel's changes so far are a step, apart from the next selection's.
                 endAdjustmentNow()
                 // Several things turn about a pivot fixed as they are selected, and forgotten

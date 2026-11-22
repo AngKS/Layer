@@ -1499,6 +1499,7 @@ struct PencilVoiceTests {
     /// Talk goes off while it runs: the field shows that reply.
     @Test func aTypedChangeKeepsItsCallUntilItsReplyHasShown() async {
         let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
         bench.pencil.prepare()
         #expect(await eventually { bench.pencil.call?.phase == .listening })
         bench.pencil.call?.captionTimes = (.seconds(1), .seconds(1))
@@ -1580,6 +1581,80 @@ struct PencilVoiceTests {
         squeezeOff.end()
     }
 
+    /// A call a screen's field started, as it was first tapped to type or held, ends once
+    /// idle when its screen is deselected: speech and the model aren't kept ready for
+    /// nothing. One the pen started by hovering, with Squeeze to Talk on, or has used since,
+    /// is Squeeze to Talk's, and stays as it always has (final review M3).
+    @Test func aCallTheFieldStartedEndsWhenItsScreenIsDeselected() async {
+        let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.prepare()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        bench.app.selection = nil
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A change still running keeps it until its reply has shown.
+        bench.app.selection = .screen(bench.screen)
+        bench.runner.holds = true
+        #expect(await bench.pencil.submit("make it dark", about: .screenEdit(bench.screen)) != nil)
+        bench.pencil.call?.captionTimes = (.milliseconds(200), .milliseconds(200))
+        #expect(await eventually { bench.runner.commands == ["make it dark"] })
+        bench.app.selection = nil
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call?.caption?.kind == .done })
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A hold whose field went away: the call ends, and the bubble still says why.
+        bench.app.selection = .screen(bench.screen)
+        bench.pencil.holdBegan(about: bench.screen, at: CGPoint(x: 500, y: 300))
+        #expect(await eventually { bench.state == .listening })
+        bench.app.selection = nil
+        bench.pencil.holdLost()
+        #expect(await eventually { bench.pencil.call == nil })
+        #expect(bench.state == .problem(PencilVoice.holdLost))
+        bench.end()
+
+        // Started by the pen hovering: Squeeze to Talk's.
+        let hovered = Bench()
+        hovered.pencil.hovered()
+        #expect(await eventually { hovered.pencil.call?.phase == .listening })
+        hovered.app.selection = .screen(hovered.screen)
+        hovered.pencil.prepare()
+        hovered.app.selection = nil
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(hovered.pencil.call != nil)
+        hovered.end()
+
+        // Started by the field, then used by the pen, whose squeeze moves the selection off
+        // the screen: Squeeze to Talk's from then on.
+        let used = Bench()
+        used.app.selection = .screen(used.screen)
+        used.pencil.prepare()
+        #expect(await eventually { used.pencil.call?.phase == .listening })
+        let call = used.pencil.call
+        #expect(await used.toggle())
+        #expect(used.app.selection == used.button && used.pencil.call === call)
+        used.pencil.tapBubble()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(used.pencil.call === call)
+        used.end()
+    }
+
+    /// The pen hovers many times a second: with a call up, the system's squeeze setting isn't
+    /// read for each (final review M2).
+    @Test func hoveringWithACallUpDoesNotReadTheSystemsSqueezeSetting() async {
+        let bench = Bench()
+        bench.pencil.hovered()
+        #expect(await eventually { bench.pencil.call?.phase == .listening })
+        var reads = 0
+        bench.pencil.squeezeIsOff = { reads += 1; return false }
+        for _ in 0..<5 { bench.pencil.hovered() }
+        #expect(reads == 0)
+        bench.end()
+    }
+
     /// Whether the pencil is listening, for VoiceOver's "Speak a change", whose second use sends.
     @Test func isListeningFollowsAHeldListen() async {
         let bench = Bench()
@@ -1597,6 +1672,7 @@ struct PencilVoiceTests {
     /// once the reply has gone too.
     @Test func aFieldsReplyKeepsTheCallThoughTheCaptionHasMovedOn() async throws {
         let bench = Bench()
+        bench.app.selection = .screen(bench.screen)
         bench.pencil.prepare()
         #expect(await eventually { bench.pencil.call?.phase == .listening })
         let call = try #require(bench.pencil.call)

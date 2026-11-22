@@ -75,8 +75,6 @@ struct ScreenEditField: View {
         .onChange(of: isHeld) { _, held in held ? beginHold() : endHold() }
         .disabled(shown.isUnavailable)
         .onAppear {
-            // The call gets ready, so that the first change doesn't wait on it.
-            model.pencilVoice.prepare()
             whyUnavailable = model.screenEditor.whyUnavailable()
         }
         .onDisappear(perform: loseHold)
@@ -89,12 +87,8 @@ struct ScreenEditField: View {
     /// Asks again whether a model can be asked, and gets the call ready if one can now.
     private func askAgain() {
         whyUnavailable = model.screenEditor.whyUnavailable()
-        if whyUnavailable == nil {
-            model.pencilVoice.prepare()
-        } else {
-            // Kept, for when one can be asked again.
-            isTyping = false
-        }
+        // Kept, for when one can be asked again.
+        if whyUnavailable != nil { isTyping = false }
     }
 
     // MARK: What it shows
@@ -242,6 +236,8 @@ struct ScreenEditField: View {
     }
 
     private func startTyping() {
+        // The first use: the call gets ready, so that the change typed doesn't wait on it.
+        model.pencilVoice.prepare()
         isTyping = true
     }
 
