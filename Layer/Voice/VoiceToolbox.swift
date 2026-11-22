@@ -36,6 +36,13 @@ final class VoiceToolbox: VoiceActing {
     /// selected. Nil lets a command go anywhere.
     var scope: DesignScreen.ID?
 
+    /// Whether a correction ("No, …") may undo or redo a command's step with the undo and
+    /// redo tools. Not in a change for one screen once its agent has decided: such a
+    /// correction undoes only that screen's last change, which the agent undoes itself
+    /// before the model is asked (`VoiceAgent`). The step on top may be a change to another
+    /// screen, and the model can't tell.
+    var correctionMayUndo = true
+
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
     private func forCommand<T>(_ body: () -> T) -> T {
@@ -51,6 +58,7 @@ final class VoiceToolbox: VoiceActing {
         lastFailed = false
         newScreenAnchor = nil
         scope = nil
+        correctionMayUndo = true
     }
 
     // MARK: Screens
@@ -821,6 +829,7 @@ final class VoiceToolbox: VoiceActing {
         guard !isCorrection || (isUndo ? model.store.lastStepIsCommand : model.store.nextRedoIsCommand) else {
             return failed(Self.changedByHand)
         }
+        guard !isCorrection || correctionMayUndo else { return failed(Self.notThisScreens) }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
     }
@@ -828,10 +837,15 @@ final class VoiceToolbox: VoiceActing {
     /// Why a correction won't undo or redo the change at hand.
     static let changedByHand = "That change was made by hand, not by voice, so a correction leaves it. The Undo and Redo buttons work on it."
 
+    /// Why a correction for one screen won't undo the change at hand: one made otherwise.
+    static let notThisScreens = "A correction for one screen undoes only the last change made for it, so this one stays. The Undo button works on it."
+
     /// A correction with nothing of the last command's to undo: the command changed
     /// nothing, or something has been changed by hand since, which isn't undone in its place.
-    func refuseCorrection() -> String {
-        failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
+    /// `notThisScreens` when it is for one screen and the last command wasn't for that one.
+    func refuseCorrection(notThisScreens: Bool = false) -> String {
+        if notThisScreens { return failed(Self.notThisScreens) }
+        return failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
     }
 
     func endCall() -> String {
@@ -868,13 +882,16 @@ final class VoiceToolbox: VoiceActing {
         model.selection = together
     }
 
+    /// Why nothing can be done in a change for one screen once that screen has gone.
+    static let screenGone = "That screen has gone, so nothing can be changed here."
+
     /// The screen a tool means when none is named in a change for one screen: that one,
     /// or a refusal once it has gone, so that nothing is done to another in its place.
     /// Nil when a command can go anywhere.
     private func scopedScreen(in model: AppModel) -> Result<DesignScreen, Refusal>? {
         guard let scope else { return nil }
         guard let screen = model.store.screen(scope) else {
-            return .failure(Refusal(line: "That screen has gone, so nothing can be changed here."))
+            return .failure(Refusal(line: Self.screenGone))
         }
         return .success(screen)
     }

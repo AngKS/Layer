@@ -487,6 +487,7 @@ final class PencilVoice {
         switch target {
         case .thing(let thing): model.selection = thing
         case .canvas: model.selection = nil
+        case .screenEdit(let id): model.selection = .screen(id)
         }
     }
 
@@ -498,6 +499,9 @@ final class PencilVoice {
         switch target {
         case .thing(let thing)?: model.selection = thing
         case .canvas?: model.selection = nil
+        // The screen a change is for stays selected while it runs, with the field it was
+        // typed in.
+        case .screenEdit(let id)?: model.selection = .screen(id)
         case nil: break
         }
     }

@@ -964,6 +964,179 @@ struct VoiceAgentTests {
         _ = await bench.agent.run("three")
         #expect(bench.recorder.requests.last?.prompts == ["three"])
     }
+
+    // MARK: A change for one screen
+
+    private struct ScreenBench {
+        let app: AppModel
+        let login: DesignScreen.ID
+        let profile: DesignScreen.ID
+        let agent: VoiceAgent
+        let recorder: ScriptRecorder
+
+        @MainActor var title: DesignElement? { app.store.screen(login)?.elements.first { $0.kind == .title } }
+        @MainActor var button: DesignElement? { app.store.screen(login)?.elements.first { $0.kind == .button } }
+        @MainActor var profileTitle: DesignElement? { app.store.screen(profile)?.elements.first { $0.kind == .title } }
+        @MainActor var undo: UndoManager? { app.store.undoManager }
+    }
+
+    /// Login (S1: E1 title, E2 button, E3 image) and Profile (S2: E4 title), and an agent
+    /// whose model does what `script` says for each command.
+    private func screenBench(_ script: [String: [Step]]) -> ScreenBench {
+        let (app, login, profile) = VoiceFixture.loginAndProfile()
+        let recorder = ScriptRecorder()
+        let agent = VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: script, closing: "Done.", recorder: recorder))
+        return ScreenBench(app: app, login: login, profile: profile, agent: agent, recorder: recorder)
+    }
+
+    private static let greenAndContinue = [
+        Step(tool: "styleElement", arguments: #"{"element":"E2","look":"green"}"#),
+        Step(tool: "setText", arguments: #"{"element":"E2","text":"Continue"}"#),
+    ]
+
+    /// A change typed about Login is told Login in full, Profile by its name alone, and in
+    /// so many words which screen it is for.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeIsToldItsScreenInFullAndTheRestByName() async throws {
+        let bench = screenBench([:])
+        _ = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
+        let told = try #require(bench.recorder.requests.first)
+        #expect(told.instructions.contains(#"E2 button "Sign in""#))
+        #expect(!told.instructions.contains("Your profile"))
+        let prompt = try #require(bench.recorder.requests.last?.prompts.last)
+        #expect(prompt.hasPrefix(#"(The person is changing S1, the screen "Login""#))
+        #expect(prompt.hasSuffix(" make the title red"))
+    }
+
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeCantReachAnotherScreen() async throws {
+        let bench = screenBench(["make the profile title red": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"red"}"#)]])
+        let outcome = await bench.agent.run("make the profile title red", about: .screenEdit(bench.login))
+        #expect(outcome.problem?.contains("isn't on S1") == true)
+        #expect(bench.profileTitle?.tint == Theme.accent)
+    }
+
+    /// However many tools it takes, a change for one screen is one step, named for what it
+    /// is in the Edit menu and the undo HUD.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeIsOneUndoStepNamedChangeScreen() async throws {
+        // Both ways a history can group: the tests' own, and the document's, by event.
+        for groupsByEvent in [false, true] {
+            let bench = screenBench(["make the button green and say continue": Self.greenAndContinue])
+            let undo = try #require(bench.undo)
+            undo.groupsByEvent = groupsByEvent
+            let before = bench.app.store.content
+            _ = await bench.agent.run("make the button green and say continue", about: .screenEdit(bench.login))
+            #expect(bench.button?.tint == ColourWords.parse("green"))
+            #expect(bench.button?.text == "Continue")
+            #expect(undo.undoActionName == "Change Screen")
+            undo.undo()
+            #expect(bench.app.store.content == before)
+            #expect(undo.redoActionName == "Change Screen")
+        }
+    }
+
+    /// A change typed while a finger drags the button is a step of its own, and the drag
+    /// goes on as its own step, still open (Review Focus 5).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeLeavesADragByHandItsOwnStep() async throws {
+        let bench = screenBench(["make the button green and say continue": Self.greenAndContinue])
+        let start = try #require(bench.button)
+        let ref = DesignStore.ElementRef(host: .screen(bench.login), element: start.id)
+        let drag = bench.app.store.beginEdit()
+        bench.app.store.act(for: drag) { bench.app.store.update(ref) { $0.frame.origin.x += 10 } }
+
+        _ = await bench.agent.run("make the button green and say continue", about: .screenEdit(bench.login))
+
+        #expect(bench.button?.text == "Continue")
+        #expect(drag.isOpen)
+        #expect(bench.app.store.isEditing(by: .hand))
+        bench.app.store.endEdit(drag)
+        let undo = try #require(bench.undo)
+        undo.undo()
+        #expect(bench.button?.text == "Sign in")
+        #expect(bench.button?.tint == Theme.accent)
+        #expect(bench.button?.frame.origin.x == start.frame.origin.x + 10)
+        undo.undo()
+        #expect(bench.button?.frame.origin.x == start.frame.origin.x)
+    }
+
+    /// A hint put before a command doesn't hide the command's script from the test model.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandIsFoundInTheScriptBehindItsHint() async throws {
+        let bench = bench(["make it blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)]])
+        let button = try #require(bench.button)
+        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), element: button.id))
+        bench.app.selection = selection
+        _ = await bench.agent.run("make it blue", about: .thing(selection))
+        #expect(bench.button?.tint == ColourWords.parse("blue"))
+    }
+
+    /// "No, …" typed for Login never takes back a change to Profile, however recent: a
+    /// correction for one screen corrects only a change made for that screen. Nor may the
+    /// model's own undo take it back in its place (review of Task 6).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionForOneScreenLeavesAnotherScreensChange() async throws {
+        let bench = screenBench([
+            "make the profile title red": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"red"}"#)],
+            "make the profile title green": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"green"}"#)],
+            "no, make it blue": [Step(tool: "undo", arguments: "{}"), Step(tool: "styleElement", arguments: #"{"element":"E1","look":"blue"}"#)],
+            "make the title red": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"red"}"#)],
+        ])
+        // Saying what was meant: the model is told the change to Profile wasn't undone, and
+        // its undo is refused.
+        _ = await bench.agent.run("make the profile title red")
+        #expect(bench.profileTitle?.tint == ColourWords.parse("red"))
+        _ = await bench.agent.run("No, make it blue", about: .screenEdit(bench.login))
+        #expect(bench.profileTitle?.tint == ColourWords.parse("red"))
+        #expect(bench.title?.tint == ColourWords.parse("blue"))
+        #expect(bench.recorder.requests.last?.prompts.last?.contains(VoiceAgent.notThisScreensHint) == true)
+
+        // Said alone: nothing is undone, and the model isn't asked.
+        _ = await bench.agent.run("make the profile title green")
+        #expect(bench.profileTitle?.tint == ColourWords.parse("green"))
+        let asked = bench.recorder.requests.count
+        let alone = await bench.agent.run("No, that's wrong.", about: .screenEdit(bench.login))
+        #expect(bench.profileTitle?.tint == ColourWords.parse("green"))
+        #expect(alone.problem != nil)
+        #expect(bench.recorder.requests.count == asked)
+
+        // A change made for Login is Login's to correct.
+        _ = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
+        #expect(bench.title?.tint == ColourWords.parse("red"))
+        _ = await bench.agent.run("No, that's wrong.", about: .screenEdit(bench.login))
+        #expect(bench.title?.tint == ColourWords.parse("blue"))
+        #expect(bench.profileTitle?.tint == ColourWords.parse("green"))
+    }
+
+    /// A change for one screen makes no other, so its model isn't handed the tool that would.
+    /// The next command, which can go anywhere, is handed it, and told the whole canvas.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeIsntHandedTheToolThatMakesScreens() async throws {
+        let bench = screenBench([:])
+        _ = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
+        let scoped = try #require(bench.recorder.requests.last)
+        #expect(!scoped.tools.contains("createScreen"))
+        #expect(scoped.tools.contains("styleElement"))
+
+        _ = await bench.agent.run("a settings screen")
+        let anywhere = try #require(bench.recorder.requests.last)
+        #expect(anywhere.tools.contains("createScreen"))
+        #expect(anywhere.instructions.contains("Your profile"))
+        #expect(anywhere.prompts.last == "a settings screen")
+    }
+
+    /// A change typed for a screen that has gone since is told so, and the model isn't asked.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aChangeForAScreenThatHasGoneAsksNothing() async throws {
+        let bench = screenBench(["make the title red": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"red"}"#)]])
+        bench.app.store.deleteScreen(bench.login)
+        let before = bench.app.store.content
+        let outcome = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
+        #expect(outcome.problem == VoiceToolbox.screenGone)
+        #expect(bench.recorder.requests.isEmpty)
+        #expect(bench.app.store.content == before)
+    }
 }
 
 /// A tool that always throws.

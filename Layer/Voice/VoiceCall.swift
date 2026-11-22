@@ -6,6 +6,9 @@ import Observation
 enum VoiceTarget: Equatable, Sendable {
     case thing(CanvasSelection)
     case canvas(CGPoint)
+    /// A change typed, or held to speak, about one screen and everything on it. It can
+    /// change nothing else.
+    case screenEdit(DesignScreen.ID)
 }
 
 /// Where the phone call that is up, in whichever window, is kept. Only one listens the

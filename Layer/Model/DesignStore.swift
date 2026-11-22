@@ -1062,6 +1062,10 @@ final class DesignStore {
     /// What Undo and Redo call a spoken command's step.
     static let commandStepName = String(localized: "Voice Command")
 
+    /// What Undo and Redo call the step of a change asked of one screen, typed or held to
+    /// speak: a command's step named for what it is.
+    static let screenEditStepName = String(localized: "Change Screen")
+
     private func register(_ step: HistoryStep) {
         guard let undoManager else { return }
         historyMark += 1
@@ -1088,13 +1092,14 @@ final class DesignStore {
             withExtendedLifetime(step) {}
             self?.takeBack(step)
         }
-        // A spoken command's step is named for the Edit menu and the undo HUD (V8). Named
-        // here, inside its own group: after the command, with the document's history
-        // grouping by event, no group is open and naming one throws.
-        if step.isCommand {
-            undoManager.setActionName(Self.commandStepName)
-        } else if let name = step.name {
+        // A spoken command's step is named for the Edit menu and the undo HUD (V8), unless
+        // it has a name of its own, as a change for one screen has. Named here, inside its
+        // own group: after the command, with the document's history grouping by event, no
+        // group is open and naming one throws.
+        if let name = step.name {
             undoManager.setActionName(name)
+        } else if step.isCommand {
+            undoManager.setActionName(Self.commandStepName)
         }
         undoManager.endUndoGrouping()
     }
