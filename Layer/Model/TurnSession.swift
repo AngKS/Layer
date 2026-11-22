@@ -152,7 +152,11 @@ struct TurnSession: Equatable {
     /// host (see `DesignStore.rehost(_:)`), as `selection` now has them: a group there, with
     /// everything in it, where it landed. Each one's start keeps its middle where it was on
     /// the canvas, in its new host's points, so that the turn goes on about the same pivot.
-    /// Nil when `selection` isn't the same elements.
+    /// What is in a group lands as the group does, scaled about the middle of its box to the
+    /// new host's scale (`DesignStore.rehostGroup(_:)`): its start is scaled likewise about
+    /// where that middle was before the turn so far, so that turned by as much it is where it
+    /// landed, and a twist that cut the drag short goes on without a jump. Nil when
+    /// `selection` isn't the same elements.
     @MainActor
     func rehosted(as selection: CanvasSelection, in store: DesignStore) -> TurnSession? {
         var refs: [DesignElement.ID: DesignStore.ElementRef] = [:]
@@ -165,6 +169,14 @@ struct TurnSession: Equatable {
             }
         }
         guard Set(refs.keys) == Set(baseline.keys.map(\.element)) else { return nil }
+        // The middle of each group selected as it was before it landed, as the session last
+        // left it, taken back through the turn so far: what its start is scaled about.
+        var middles: [DesignElement.ID: CGPoint] = [:]
+        for (old, member) in baseline where member.isGroup && member.owner == old.element {
+            guard let box = expected[old]?.frame else { continue }
+            let middle = member.placement.canvasPoint(for: CGPoint(x: box.midX, y: box.midY))
+            middles[old.element] = Rotation.normalized(turned) == 0 ? middle : Rotation.rotate(middle, about: pivot, by: -turned)
+        }
         var moved: [DesignStore.ElementRef: Member] = [:]
         for (old, member) in baseline {
             guard let ref = refs[old.element], let placement = store.resolve(ref)?.placement else { return nil }
@@ -173,7 +185,11 @@ struct TurnSession: Equatable {
                 continue
             }
             let frame = member.pose.frame
-            let middle = placement.localPoint(for: member.placement.canvasPoint(for: CGPoint(x: frame.midX, y: frame.midY)))
+            var onCanvas = member.placement.canvasPoint(for: CGPoint(x: frame.midX, y: frame.midY))
+            if let groupMiddle = middles[member.owner] {
+                onCanvas = DesignStore.landedMiddle(of: onCanvas, about: groupMiddle, from: member.placement, to: placement)
+            }
+            let middle = placement.localPoint(for: onCanvas)
             var origin = CGPoint(x: middle.x - frame.width / 2, y: middle.y - frame.height / 2)
             if !member.isDrawing, !member.isGroup { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
             moved[ref] = Member(

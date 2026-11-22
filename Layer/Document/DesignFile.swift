@@ -807,7 +807,8 @@ enum PackagePart: Equatable, Sendable {
 /// element that is shared with the design as it was, which undo keeps, copies the list.
 /// Counted on the main thread alone, where the store makes its changes, so that a design read
 /// elsewhere meanwhile doesn't add to a test's count. The count only grows: a test measures
-/// the difference it makes.
+/// the difference it makes. Bulk rewrites, through the `screens` and `floating` setters or
+/// `setChildren`, aren't counted.
 enum ListWork {
     nonisolated(unsafe) private(set) static var elementsWritten = 0
 

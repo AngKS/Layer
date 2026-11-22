@@ -414,20 +414,25 @@ extension DesignStore {
         var box: CGRect
         /// The frame of each thing in it, at any depth, that isn't a group.
         var leaves: [DesignElement.ID: CGRect]
-        /// The angle of the group and of each group inside it.
-        var angles: [DesignElement.ID: Double]
+        /// Those of them whose kind keeps its height when it is resized, a divider: only their
+        /// width is scaled.
+        var keepingHeight: Set<DesignElement.ID>
+        /// The least the group can be scaled by: any less, and something in it would be smaller
+        /// than its kind can be. Never more than 1: one that already is stops it shrinking.
+        var smallestScale: CGFloat
     }
 
     /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group.
     func groupPose(of ref: ElementRef) -> GroupPose? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        var pose = GroupPose(box: item.frame, leaves: [:], angles: [item.id: item.resolvedRotation])
-        for element in content.contents(of: item.id) {
-            if element.kind == .group {
-                pose.angles[element.id] = element.resolvedRotation
-            } else {
-                pose.leaves[element.id] = element.frame
-            }
+        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
+        for element in content.contents(of: item.id) where element.kind != .group {
+            pose.leaves[element.id] = element.frame
+            let spec = element.kind.spec
+            if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
+            var smallest = element.frame.width > 0 ? spec.minimumSize.width / element.frame.width : 1
+            if !spec.hasFixedHeight, element.frame.height > 0 { smallest = max(smallest, spec.minimumSize.height / element.frame.height) }
+            pose.smallestScale = max(pose.smallestScale, min(smallest, 1))
         }
         return pose
     }
@@ -435,22 +440,35 @@ extension DesignStore {
     /// Resizes a group to `frame`, in its own points, as one change: from `start`, the group as
     /// a handle drag on it began, or from where it is now. With s the new box's width over the
     /// start's, the middle of each thing in it, at any depth, goes where it was in the start box,
-    /// read along the box's own axes, in the new one; and each one's frame is s times as large.
-    /// Their angles, and their text's size, stay as they are, so that a turned member is never
-    /// sheared. A frame in proportion with the box, as the handles and the fields give, scales
-    /// everything alike; the box is then fitted round them again (`keepGroupsSound()`). Nothing
-    /// happens to a group that is locked, by itself or by a group above it.
+    /// read along the box's own axes, in the new one; and each one's frame is s times as large,
+    /// apart from the height of a kind that keeps its height, a divider. Their angles, and their
+    /// text's size, stay as they are, so that a turned member is never sheared. A frame in
+    /// proportion with the box, as the handles and the fields give, scales everything alike; the
+    /// box is then fitted round them again (`keepGroupsSound()`). Made smaller than something in
+    /// it can be, it is scaled only as far as that can go, about the same point. Nothing happens
+    /// to a group that is locked, by itself or by a group above it.
     func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
         guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
+        var frame = frame
+        var scale = frame.width / pose.box.width
+        if scale < pose.smallestScale {
+            // The point the frame asked for is scaled about stays where it is: the corner across
+            // from a handle, or the top-left for the fields.
+            let from = CGPoint(x: pose.box.midX, y: pose.box.midY), to = CGPoint(x: frame.midX, y: frame.midY)
+            let fixed = CGPoint(x: (to.x - scale * from.x) / (1 - scale), y: (to.y - scale * from.y) / (1 - scale))
+            scale = pose.smallestScale
+            let size = CGSize(width: pose.box.width * scale, height: pose.box.height * scale)
+            let centre = CGPoint(x: fixed.x + (from.x - fixed.x) * scale, y: fixed.y + (from.y - fixed.y) * scale)
+            frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
+        }
         var frames: [DesignElement.ID: CGRect] = [:]
         if frame == pose.box {
             // Back where it began: exactly as it was, with no arithmetic to round.
             frames = pose.leaves
         } else {
             let degrees = item.resolvedRotation
-            let scale = frame.width / pose.box.width
             let across = CGSize(width: frame.width / pose.box.width, height: frame.height / pose.box.height)
             /// Where a point in the start box goes in the new one, both in the points of `own`.
             func moved(_ point: CGPoint, in own: Placement) -> CGPoint {
@@ -464,13 +482,12 @@ extension DesignStore {
             for (id, start) in pose.leaves {
                 guard let leaf = element(id), let own = self.placement(of: leaf) else { continue }
                 let centre = moved(CGPoint(x: start.midX, y: start.midY), in: own)
-                let size = CGSize(width: start.width * scale, height: start.height * scale)
+                let size = CGSize(width: start.width * scale, height: pose.keepingHeight.contains(id) ? start.height : start.height * scale)
                 frames[id] = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
             }
         }
         apply { content in
             for (id, frame) in frames { content.update(id) { $0.frame = frame } }
-            for (id, degrees) in pose.angles { content.update(id) { $0.setRotation(degrees) } }
         }
     }
 
@@ -478,15 +495,19 @@ extension DesignStore {
     /// screen there, or the open canvas when there is none. Everything in it, at any depth,
     /// goes there in one change, back to front, so that it lands whole and stacked as it was,
     /// on top of what is there; built over several, the groups would be put right in between
-    /// and come apart. Each thing keeps its middle where it is on the canvas and its size in
-    /// points, as an element landing on its own does. A group holding something that doesn't
-    /// go on screens, a sticky note, stays where it is instead of landing on a screen.
+    /// and come apart. It lands as one element does, keeping its middle where it is on the
+    /// canvas and its size in points: each thing in it keeps its size in its own points, and
+    /// its distance from the box's middle in them, so that on a screen drawn at another scale
+    /// the group arrives whole, scaled about its middle, rather than with its members spaced
+    /// as they were on the canvas, overlapping or apart. A group holding something that
+    /// doesn't go on screens, a sticky note, stays where it is instead of landing on a screen.
     /// Returns where the group now lives.
     @discardableResult
     func rehostGroup(_ ref: ElementRef) -> ElementRef {
         guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
-        let box = placement.canvasRect(for: item.frame)
-        let target = screen(at: CGPoint(x: box.midX, y: box.midY))
+        // Worked out as a turn under way works it out (`TurnSession.rehosted`), to the last bit.
+        let middle = placement.canvasPoint(for: CGPoint(x: item.frame.midX, y: item.frame.midY))
+        let target = screen(at: middle)
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
         guard host != ref.host else { return ref }
         let inside = content.contents(of: item.id)
@@ -497,8 +518,8 @@ extension DesignStore {
             guard let own = self.placement(of: element) else { return ref }
             // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
             let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)
-            let onCanvas = own.canvasRect(for: element.frame)
-            let centre = landing.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
+            let onCanvas = own.canvasPoint(for: CGPoint(x: element.frame.midX, y: element.frame.midY))
+            let centre = landing.localPoint(for: Self.landedMiddle(of: onCanvas, about: middle, from: own, to: landing))
             var origin = CGPoint(x: centre.x - element.frame.width / 2, y: centre.y - element.frame.height / 2)
             // A group's box is fitted round its members once they have landed.
             if element.kind != .group, element.kind != .drawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
@@ -509,6 +530,15 @@ extension DesignStore {
         }
         let landed = ElementRef(host: host, element: item.id)
         return resolve(landed) != nil ? landed : ref
+    }
+
+    /// Where the middle of something in a group lands on the canvas, given at `point`, as the
+    /// group lands with its box's middle at `middle`: as far from it in the points of
+    /// `landing`, the placement it lands in, as it was in those of `own`, where it was.
+    nonisolated static func landedMiddle(of point: CGPoint, about middle: CGPoint, from own: Placement, to landing: Placement) -> CGPoint {
+        guard own.scale > 0, landing.scale != own.scale else { return point }
+        let ratio = landing.scale / own.scale
+        return CGPoint(x: middle.x + (point.x - middle.x) * ratio, y: middle.y + (point.y - middle.y) * ratio)
     }
 
     // MARK: Group and Ungroup

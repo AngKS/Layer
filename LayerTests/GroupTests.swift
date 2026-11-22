@@ -1409,6 +1409,15 @@ extension OrderBoard {
     }
 }
 
+extension OrderBoard {
+    /// How far each of a group's members' middles is from the middle of the group's box, in
+    /// their own points (all on one host, at one scale).
+    fileprivate func offsets(in group: DesignStore.ElementRef, of members: [DesignStore.ElementRef]) -> [CGPoint] {
+        guard let box = store.element(group.element)?.frame else { return [] }
+        return members.compactMap { store.element($0.element)?.frame }.map { CGPoint(x: $0.midX - box.midX, y: $0.midY - box.midY) }
+    }
+}
+
 private func isNear(_ a: CGPoint?, _ b: CGPoint, within slack: CGFloat) -> Bool {
     guard let a else { return false }
     return abs(a.x - b.x) <= slack && abs(a.y - b.y) <= slack
@@ -1630,6 +1639,82 @@ struct GroupGeometryTests {
         #expect(board.store.content == before)
     }
 
+    /// Review fix 1: a group landing where things are drawn at another scale lands as one
+    /// element does, keeping its size in points, scaled about its middle: each member as far
+    /// from the box's middle in its own points as before. Kept apart on the canvas instead,
+    /// two buttons 10 points apart on the half-size screen overlapped on a full-size one.
+    @Test func aGroupLandingWhereThingsAreDrawnAtAnotherScaleArrivesWhole() throws {
+        let board = OrderBoard()
+        let big = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1)).id
+        let pair = board.store.setElements([
+            OrderBoard.element(.button, named: "P", CGRect(x: 40, y: 760, width: 100, height: 40)),
+            OrderBoard.element(.button, named: "Q", CGRect(x: 150, y: 760, width: 100, height: 40)),
+        ], on: board.screen, replacing: false)
+        let g = board.group(pair[0], pair[1])
+        let offsets = board.offsets(in: g, of: pair)
+        let box = try #require(board.store.canvasFrame(of: .element(g)))
+        let middle = CGPoint(x: box.midX + 900, y: box.midY)
+
+        // Half-size screen to the full-size one.
+        board.store.position([.element(g): CGPoint(x: box.minX + 900, y: box.minY)])
+        let landed = board.store.rehost(g)
+        #expect(landed == DesignStore.ElementRef(host: .screen(big), element: g.element))
+        for (now, was) in zip(board.offsets(in: landed, of: pair), offsets) { #expect(isNear(now, was, within: 0.5)) }
+        let (p, q) = (try #require(board.frame(of: pair[0])), try #require(board.frame(of: pair[1])))
+        #expect(q.minX - p.maxX == 10, "still 10 of their own points apart")
+        #expect(p.size == CGSize(width: 100, height: 40))
+        let now = try #require(board.store.canvasFrame(of: .element(landed)))
+        #expect(isNear(CGPoint(x: now.midX, y: now.midY), middle, within: 0.5), "its middle stays where it was dropped")
+
+        // The open canvas, drawn at full size, to the half-size screen.
+        let loose = [
+            board.store.addFloating(OrderBoard.element(.button, named: "R", CGRect(x: 500, y: 600, width: 100, height: 40)), scale: 1),
+            board.store.addFloating(OrderBoard.element(.button, named: "S", CGRect(x: 610, y: 600, width: 100, height: 40)), scale: 1),
+        ]
+        let h = board.group(loose[0], loose[1], named: "H")
+        let looseOffsets = board.offsets(in: h, of: loose)
+        let looseBox = try #require(board.store.canvasFrame(of: .element(h)))
+        board.store.position([.element(h): CGPoint(x: looseBox.minX - 405, y: looseBox.minY - 320)])
+        let onScreen = board.store.rehost(h)
+        #expect(onScreen == DesignStore.ElementRef(host: .screen(board.screen), element: h.element))
+        for (now, was) in zip(board.offsets(in: onScreen, of: loose), looseOffsets) { #expect(isNear(now, was, within: 0.5)) }
+        #expect(board.frame(of: loose[0])?.size == CGSize(width: 100, height: 40))
+    }
+
+    /// Review fix 1, for a turn under way: a twist cutting short a drag onto a screen of another
+    /// scale goes on from where the group landed, without a jump.
+    @Test func aTwistCuttingShortADragOntoAnotherScaleGoesOnWithoutAJump() throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let big = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1)).id
+        let g = board.group(board.b, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let offsets = board.offsets(in: g, of: [board.b, board.d])
+
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.b)
+        board.dragTarget(g, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
+        #expect(board.model.beginTwist())
+        let landed = DesignStore.ElementRef(host: .screen(big), element: g.element)
+        #expect(board.model.selection == .element(landed))
+        for (now, was) in zip(board.offsets(in: landed, of: [board.b, board.d]), offsets) { #expect(isNear(now, was, within: 0.5)) }
+        let frames = try [board.b, board.d].map { try #require(board.frame(of: $0)) }
+        let box = try #require(board.store.canvasShape(of: .element(landed)))
+        let centres = try [board.b, board.d].map { try #require(board.canvasCentre(of: $0)) }
+
+        board.model.twist(by: 0)
+        #expect(try [board.b, board.d].map { try #require(board.frame(of: $0)) } == frames, "held where it landed, nothing moves")
+        board.model.twist(by: 30)
+        for (ref, centre) in zip([board.b, board.d], centres) {
+            #expect(board.store.element(ref.element)?.rotation == 30)
+            #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.75))
+        }
+        board.model.endTwist()
+        drags.cancel(owner, model: board.model)
+    }
+
     /// A member moved on its own to another screen leaves its group (the pass's rule 1).
     @Test func aMemberDraggedAloneToAnotherScreenLeavesTheGroup() throws {
         let board = OrderBoard()
@@ -1738,7 +1823,100 @@ struct GroupGeometryTests {
         #expect(board.store.content == locked)
     }
 
+    /// Review fix 5: one group's outline is its turn's, which goes round rigidly with it, not
+    /// the box fitted round its members, on whole points of their own, after each step.
+    @Test func aSelectedGroupsOutlineGoesRoundRigidly() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(g)
+        let before = try #require(board.model.selectionShape)
+
+        board.model.rotateSelection(by: 30)
+
+        let after = try #require(board.model.selectionShape)
+        #expect(after.rect == before.rect && after.degrees == 30)
+        #expect(board.store.canvasShape(of: .element(g)) != after, "the box fitted round the turned members is not quite the outline")
+    }
+
+    /// Review fix 6: turned in many steps, one after another, and back to where it started, a
+    /// group with a turned member and a turned group in it is exactly where it was.
+    @Test func manyTurnsOfAGroupAddUpWithoutDrift() {
+        let board = OrderBoard()
+        let button = board.store.addFloating(OrderBoard.element(.button, named: "button", CGRect(x: 480, y: 560, width: 320, height: 60)), scale: 1)
+        board.store.update(button) { $0.setRotation(20) }
+        let inner = board.group(board.note1, board.note2, named: "I") { $0.setRotation(10) }
+        let g = board.group(button, inner)
+        board.model.selection = .element(g)
+        let before = board.store.content
+
+        for (index, angle) in [17.0, 29, 101, -147].enumerated() {
+            #expect(board.model.beginTurn())
+            board.model.turnSelection(by: angle, snaps: false)
+            board.model.endTurn()
+            if index == 1 {
+                #expect(board.store.element(g.element)?.rotation == 46)
+                #expect(board.store.element(inner.element)?.rotation == 56)
+                #expect(board.store.element(button.element)?.rotation == 66)
+            }
+        }
+        #expect(board.store.content == before)
+    }
+
     // MARK: Resizing
+
+    /// Review fix 5: a group's handles resize it in proportion; an element's, in its own axes.
+    @Test func aGroupsHandlesResizeItInProportion() {
+        let frame = CGRect(x: 10, y: 20, width: 300, height: 400)
+        let drag = CGSize(width: 60, height: -20)
+        let group = CanvasDrags.resizeRule(for: .group, degrees: 30, corner: .bottomRight)(frame, drag).0
+        let button = CanvasDrags.resizeRule(for: .button, degrees: 30, corner: .bottomRight)(frame, drag).0
+        #expect(group == ElementLayout.resizedProportionally(frame, degrees: 30, from: .bottomRight, by: drag))
+        #expect(button == ElementLayout.resizedTurned(frame, degrees: 30, from: .bottomRight, by: drag, kind: .button))
+        #expect(group != button)
+    }
+
+    /// Review fix 2: dragged in, a corner shrinks the box as readily as dragged out it grows it.
+    /// By the larger factor, a drag in across alone left it as it was.
+    @Test func aCornerShrinksAsReadilyAsItGrows() {
+        let box = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let shrunk = ElementLayout.resizedProportionally(box, degrees: 0, from: .bottomRight, by: CGSize(width: -30, height: 0))
+        #expect(close(shrunk, CGRect(x: 0, y: 0, width: 270, height: 360), within: 0.001))
+        let grown = ElementLayout.resizedProportionally(box, degrees: 0, from: .bottomRight, by: CGSize(width: 30, height: 0))
+        #expect(close(grown, CGRect(x: 0, y: 0, width: 330, height: 440), within: 0.001))
+        // In across and a little out down: the bigger change wins.
+        let mixed = ElementLayout.resizedProportionally(box, degrees: 0, from: .bottomRight, by: CGSize(width: -30, height: 10))
+        #expect(close(mixed, CGRect(x: 0, y: 0, width: 270, height: 360), within: 0.001))
+        // From the top-left, the bottom-right stays.
+        let fromTop = ElementLayout.resizedProportionally(box, degrees: 0, from: .topLeft, by: CGSize(width: 30, height: 0))
+        #expect(close(fromTop, CGRect(x: 30, y: 40, width: 270, height: 360), within: 0.001))
+    }
+
+    /// Review fix 3: shrunk, a group goes no smaller than lets each thing in it keep its kind's
+    /// smallest size; and a divider, whose height is fixed, keeps its height.
+    @Test func aGroupShrinksNoFurtherThanWhatIsInItCanGo() throws {
+        let board = OrderBoard()
+        let line = board.store.setElements([OrderBoard.element(.divider, named: "line", CGRect(x: 40, y: 300, width: 200, height: 1))], on: board.screen, replacing: false)[0]
+        let g = board.group(board.b, line)
+        let box = try #require(board.frame(of: g))
+        #expect(box == CGRect(x: 40, y: 190, width: 300, height: 111))
+
+        // Asked for a twentieth, its top-left kept: a button can't be under 16 points high, so
+        // B, 100 high, stops it at 0.16.
+        board.store.resizeGroup(g, to: CGRect(x: box.minX, y: box.minY, width: box.width / 20, height: box.height / 20))
+
+        let b = try #require(board.frame(of: board.b))
+        #expect(close(b, CGRect(x: 40, y: 190, width: 48, height: 16), within: 0.001))
+        let divider = try #require(board.frame(of: line))
+        #expect(divider.height == 1)
+        #expect(abs(divider.width - 32) < 0.001)
+        #expect(abs(divider.midY - (190 + 110.5 * 0.16)) < 0.001)
+
+        // Grown again, the divider still keeps its height while the button scales.
+        let small = try #require(board.frame(of: g))
+        board.store.resizeGroup(g, to: CGRect(x: small.minX, y: small.minY, width: small.width * 2, height: small.height * 2))
+        #expect(board.frame(of: line)?.height == 1)
+        #expect(board.frame(of: board.b).map { abs($0.height - 32) < 0.001 } == true)
+    }
 
     @Test func resizingAGroupScalesItsMembersInProportion() throws {
         let board = OrderBoard()

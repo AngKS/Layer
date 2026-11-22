@@ -240,8 +240,10 @@ extension HostedWindowSuites {
             defer { window.isHidden = true }
             let drags = try #require(board.model.drags)
 
+            // Measured again, up to three times, while something outside has SwiftUI building
+            // every view, or SwiftUI folds two frames into one update.
             var built = Int.max
-            for _ in 0..<3 where built > 70 {
+            for _ in 0..<3 where !(60...70).contains(built) {
                 try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
                 let start = CanvasWork.targetsBuilt
                 let owner = CanvasDrags.Owner()
@@ -255,7 +257,7 @@ extension HostedWindowSuites {
                 built = CanvasWork.targetsBuilt - start
             }
             // The group's own target, once for each of 60 frames.
-            #expect(built >= 60 && built <= 70, "targets built during a 60-frame drag of a group: \(built)")
+            #expect((60...70).contains(built), "targets built during a 60-frame drag of a group: \(built)")
         }
 
         /// A pinch changes the zoom on every frame. The targets' smallest size follows the zoom

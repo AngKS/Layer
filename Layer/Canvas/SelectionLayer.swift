@@ -200,13 +200,7 @@ struct SelectionLayer: View {
             .position(point)
             .canvasDrag(drags, model: model) { owner in
                 drags.adjust(ref, from: element.frame, placement: placement, findsNewHome: false, model: model, owner: owner) {
-                    let degrees = element.resolvedRotation, kind = element.kind
-                    return { origin, translation in
-                        let frame = kind == .group
-                            ? ElementLayout.resizedProportionally(origin, degrees: degrees, from: corner, by: translation)
-                            : ElementLayout.resizedTurned(origin, degrees: degrees, from: corner, by: translation, kind: kind)
-                        return (frame, [])
-                    }
+                    CanvasDrags.resizeRule(for: element.kind, degrees: element.resolvedRotation, corner: corner)
                 }
             }
     }
@@ -478,6 +472,18 @@ final class CanvasDrags {
         // A turn still under way is still adjusting the selection: the twist that ended
         // this drag, or the knob held while another finger let go.
         if !model.isTurning { model.isAdjusting = false }
+    }
+
+    /// How a corner handle resizes something of a kind, turned `degrees`: an element in its own
+    /// axes, keeping its shape where its kind has one; a group in proportion, so that what is in
+    /// it scales alike (see `DesignStore.resizeGroup`). The corner across stays put.
+    static func resizeRule(for kind: ElementKind, degrees: Double, corner: ElementLayout.Corner) -> Rule {
+        { origin, translation in
+            let frame = kind == .group
+                ? ElementLayout.resizedProportionally(origin, degrees: degrees, from: corner, by: translation)
+                : ElementLayout.resizedTurned(origin, degrees: degrees, from: corner, by: translation, kind: kind)
+            return (frame, [])
+        }
     }
 
     /// Where a dragged element goes: onto the grid's marks, or lined up with its screen and
