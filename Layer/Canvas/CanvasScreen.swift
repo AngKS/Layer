@@ -123,7 +123,7 @@ struct CanvasScreen: View {
                         Spacer(minLength: 0)
                         if model.isInspectorOpen {
                             StylePanel(maxHeight: panelRoom)
-                                .reportsChromeFrame("format", to: model)
+                                .reportsChromeFrame(AppModel.formatChrome, to: model)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
@@ -189,7 +189,7 @@ struct CanvasScreen: View {
     /// Whether a panel is showing as a sheet, which it only does in a compact window.
     private func sheet(_ isOpen: ReferenceWritableKeyPath<AppModel, Bool>) -> Binding<Bool> {
         Binding(
-            get: { model.isCompactSizeClass && model[keyPath: isOpen] },
+            get: { model.panelIsASheet && model[keyPath: isOpen] },
             set: { model[keyPath: isOpen] = $0 }
         )
     }
@@ -269,9 +269,14 @@ private struct PanelSheet<Content: View>: View {
 
     var body: some View {
         content
-            // The sheet is chrome too: a pencil over it isn't over the canvas beneath. In
-            // window points, which a sheet's own global space may not be.
-            .background { WindowFrameReporter(name: "panel sheet", model: model) }
+            .background {
+                // The sheet is chrome too: a pencil over it isn't over the canvas beneath. In
+                // window points, which a sheet's own global space may not be.
+                WindowFrameReporter(name: AppModel.panelSheetChrome, model: model)
+                // The squeeze, on the very view the frame is of: its points start where that
+                // frame does.
+                SheetSqueeze(model: model)
+            }
             .environment(model)
             .environment(model.images)
             .preferredColorScheme(.light)
@@ -348,32 +353,55 @@ private struct WindowSqueeze: View {
 
     var body: some View {
         let router = model.squeezeRouter
-        // Draw, Squeeze to Talk and whether a ruler would take a squeeze, all observed.
-        let hears = router.hearsSqueezes
+        // Draw, Squeeze to Talk, whether a ruler would take a squeeze, a squeeze under way
+        // and a panel's sheet, all observed.
+        let isOn = router.windowHandlerIsOn
         ZStack {
             PencilBridge(scrubber: model.scrubber)
             // Not `Color.clear`, which gets no squeezes on the iPad.
             Color.black.opacity(0.001)
-                .modifier(Squeezable(router: router, isOn: hears))
+                .modifier(Squeezable(router: router, isOn: isOn))
         }
-        .onChange(of: hears, initial: true) { _, hears in
-            VoiceLog.log.info("pencil: the window's squeeze handler is \(hears ? "on" : "off", privacy: .public)")
-            // Draw on, Squeeze to Talk off, or the last hover or ruler gone, mid-squeeze:
-            // that squeeze's end will never arrive.
-            if !hears { router.failed() }
+        .onChange(of: isOn, initial: true) { _, isOn in
+            VoiceLog.log.info("pencil: the window's squeeze handler is \(isOn ? "on" : "off", privacy: .public)")
+            // Draw on, Squeeze to Talk off with nothing to scrub, or a panel's sheet up: the
+            // squeeze under way, if any, won't be heard to end here.
+            if !isOn { router.failed() }
         }
-        // Nor does it once the canvas has gone.
+        // Nor once the canvas has gone.
         .onDisappear { router.failed() }
     }
 }
 
-/// Gives `router` Apple Pencil Pro's squeezes while `isOn`. While off, the action is not
-/// there at all: an action that is there, even one that ignores the squeeze, stops
-/// PencilKit's palette coming up at the tip in Draw (seen on the iPad), and the system's own
-/// squeeze action elsewhere.
+/// A panel's sheet's squeeze handler. While a panel is a sheet, it has the squeezes rather
+/// than the window's under it: the system doesn't promise squeezes to a view under a sheet,
+/// and only one handler is there at a time. Its points are the sheet's, put in the window's.
+private struct SheetSqueeze: View {
+    let model: AppModel
+
+    var body: some View {
+        let router = model.squeezeRouter
+        let isOn = router.sheetHandlerIsOn
+        // Not `Color.clear`, which gets no squeezes on the iPad.
+        Color.black.opacity(0.001)
+            .modifier(Squeezable(router: router, isOn: isOn, offset: { router.sheetOrigin }))
+            .onChange(of: isOn) { _, isOn in
+                VoiceLog.log.info("pencil: the panel sheet's squeeze handler is \(isOn ? "on" : "off", privacy: .public)")
+                if !isOn { router.failed() }
+            }
+            .onDisappear { if isOn { router.failed() } }
+    }
+}
+
+/// Gives `router` Apple Pencil Pro's squeezes while `isOn`: the only place a squeeze action
+/// is set. While off, the action is not there at all: an action that is there, even one that
+/// ignores the squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the
+/// iPad), and the system's own squeeze action elsewhere.
 private struct Squeezable: ViewModifier {
     let router: SqueezeRouter
     let isOn: Bool
+    /// Where the view is in the window, which its points are counted from.
+    var offset: () -> CGPoint = { .zero }
 
     func body(content: Content) -> some View {
         if isOn {
@@ -381,7 +409,8 @@ private struct Squeezable: ViewModifier {
                 switch phase {
                 case .active(let value):
                     // It comes every 10–20 ms while the squeeze lasts: the router acts on the first.
-                    router.began(at: value.hoverPose?.location, azimuth: value.hoverPose?.azimuth, roll: value.hoverPose?.roll)
+                    let pose = value.hoverPose
+                    router.began(at: SqueezeRouter.windowPoint(pose?.location, offsetBy: offset()), azimuth: pose?.azimuth, roll: pose?.roll)
                 case .ended:
                     router.ended()
                 case .failed:

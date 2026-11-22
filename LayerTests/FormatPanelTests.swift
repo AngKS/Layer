@@ -561,3 +561,31 @@ struct PanelChangesBesideADragTests {
         #expect(frame(button) == buttonBefore)
     }
 }
+
+extension HostedWindowSuites {
+    /// Where the Format panel's space starts in the window, measured by UIKit: in a sheet,
+    /// SwiftUI's global space is the sheet's, not the window's.
+    @MainActor
+    @Suite("The panel's place in the window")
+    struct PanelOriginTests {
+        @Test func thePanelsOriginIsMeasuredInTheWindow() async throws {
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+            defer { window.isHidden = true }
+            let scrubber = Scrubber()
+            let sheet = UIView(frame: CGRect(x: 0, y: 420, width: 1000, height: 380))
+            let panel = UIView(frame: CGRect(x: 16, y: 14, width: 300, height: 300))
+            let reporter = PanelOriginReporter.ReportingView(frame: panel.bounds)
+            reporter.scrubber = scrubber
+            window.addSubview(sheet)
+            sheet.addSubview(panel)
+            panel.addSubview(reporter)
+            window.layoutIfNeeded()
+            #expect(scrubber.panelOrigin == CGPoint(x: 16, y: 434))
+            // The sheet pulled up: told again as it is laid out.
+            sheet.frame = CGRect(x: 0, y: 100, width: 1000, height: 700)
+            reporter.setNeedsLayout()
+            window.layoutIfNeeded()
+            #expect(scrubber.panelOrigin == CGPoint(x: 16, y: 114))
+        }
+    }
+}

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftUI
 import Testing
 import UIKit
@@ -1268,8 +1269,11 @@ struct SqueezeRouterTests {
         let router = bench.app.squeezeRouter
         let scrubber = bench.app.scrubber
         scrubber.hovered = field(on: bench)
-        for _ in 0..<3 { router.began(at: overField, azimuth: nil, roll: .degrees(0)) }
-        #expect(scrubber.target?.label == "W")
+        for _ in 0..<4 {
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            // Not put away by the second, nor brought up again by the third.
+            #expect(scrubber.target?.label == "W")
+        }
         router.ended()
         scrubber.end()
         bench.end()
@@ -1303,6 +1307,9 @@ struct SqueezeRouterTests {
         #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: true, rulerWantsSqueeze: false))
         #expect(!SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: false))
         #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: true))
+        // A squeeze under way keeps it until it ends, except in Draw.
+        #expect(SqueezeRouter.wantsHandler(drawIsOn: false, talks: false, rulerWantsSqueeze: false, squeezeUnderWay: true))
+        #expect(!SqueezeRouter.wantsHandler(drawIsOn: true, talks: false, rulerWantsSqueeze: false, squeezeUnderWay: true))
     }
 
     /// Review focus 2: a field's hover left behind when its panel went isn't taken for a
@@ -1343,6 +1350,221 @@ struct SqueezeRouterTests {
         bench.app.tool = .draw
         #expect(scrubber.target == nil)
         #expect(router.taker == nil)
+        bench.end()
+    }
+
+    /// Step 1 is push-to-talk's only with no ruler up: with a finger's ruler up while a toggle
+    /// listens, the squeeze keeps the ruler's value and the toggle goes on listening.
+    @Test func aRulerUpTakesTheSqueezeThoughAToggleListens() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        bench.now += .milliseconds(200)
+        router.ended()
+        #expect(await eventually { bench.state == .listening })
+        scrubber.begin(field(on: bench))
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(router.taker == .ruler)
+        #expect(scrubber.target == nil)
+        #expect(bench.routes[0].finishCount == 0 && bench.state == .listening)
+        router.ended()
+        bench.end()
+    }
+
+    /// The handler stays until the squeeze under way ends: with Squeeze to Talk off, the
+    /// squeeze that puts a ruler away with the pen off its field would otherwise take the
+    /// handler with it, and the same squeeze, brought back as the pen crossed another field,
+    /// would bring that field's ruler up.
+    @Test func theHandlerStaysForTheWholeSqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.squeezesToTalk = false
+        let width = field(on: bench)
+        scrubber.hovered = width
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        router.ended()
+        // The pen leaves the field: the ruler keeps the handler.
+        scrubber.hovered = nil
+        #expect(router.hearsSqueezes)
+
+        // The squeeze that keeps the value, over the canvas: the ruler goes, the handler stays.
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil)
+        #expect(router.hearsSqueezes)
+        // Still squeezed, the pen crosses a field: that squeeze brings no ruler up.
+        scrubber.hovered = width
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        scrubber.hovered = nil
+        #expect(router.hearsSqueezes)
+        // Only its end lets the handler go, and a view reading it hears so.
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = router.hearsSqueezes } onChange: { changed.withLock { $0 = true } }
+        router.ended()
+        #expect(!router.hearsSqueezes)
+        #expect(changed.withLock { $0 })
+        bench.end()
+    }
+
+    /// A field's hover goes with the selection it was for: the pen still over the panel
+    /// doesn't scrub the element that was selected before.
+    @Test func aNewSelectionForgetsTheFieldThePenWasOver() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.app.selection = bench.button
+        let width = ScrubbedField(10)
+        bench.app.chromeFrames["format"] = CGRect(x: 0, y: 0, width: 300, height: 600)
+        scrubber.hovered = width.target("W", at: .zero, range: 0...100)
+        bench.app.selection = bench.title
+        #expect(scrubber.hovered == nil)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil && width.sets.isEmpty)
+        router.ended()
+        // A panel ruler up as the selection changes goes too.
+        scrubber.begin(width.target("W", at: .zero, range: 0...100))
+        bench.app.selection = bench.button
+        #expect(scrubber.target == nil)
+        bench.end()
+    }
+
+    /// A Format field's hover is a field's only while the pen is over the Format panel, not
+    /// over other chrome; the zoom's hover is the zoom's over the controls.
+    @Test func aFieldsHoverIsAFieldsOnlyOverTheFormatPanel() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        let controls = CGRect(x: 20, y: 700, width: 200, height: 50)
+        bench.app.chromeFrames["view controls"] = controls
+        scrubber.hovered = field(on: bench)
+        router.began(at: CGPoint(x: controls.midX, y: controls.midY), azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        router.ended()
+
+        // In a narrow window the panel is a sheet, reported as "panel sheet".
+        bench.app.chromeFrames["format"] = nil
+        bench.app.chromeFrames["panel sheet"] = CGRect(x: 0, y: 400, width: 800, height: 400)
+        scrubber.hovered = ScrubbedField(10).target("W", at: .zero, range: 0...100)
+        router.began(at: CGPoint(x: 100, y: 500), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+
+        // The zoom's hover, over the controls, brings up the zoom's ruler.
+        scrubber.hovered = ZoomStops.target(frame: controls, current: { 1 }, zoom: { _ in })
+        router.began(at: CGPoint(x: controls.midX, y: controls.midY), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.owner == .zoom)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// The system's Apple Pencil setting comes first for the rulers too: with squeezing
+    /// turned off there, or running a shortcut, a squeeze neither brings a ruler up nor puts
+    /// one away.
+    @Test func theSystemsSqueezeSettingKeepsTheRulersAwayToo() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        bench.pencil.squeezeIsOff = { true }
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .nobody)
+        router.ended()
+        scrubber.begin(field(on: bench))
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target != nil)
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// A squeeze whose end was lost (the handler torn down, the gesture's end never
+    /// delivered) doesn't leave every later squeeze ignored: once its `.active` has stopped
+    /// coming for as long as a squeeze can listen, the next squeeze is a new one.
+    @Test func aSqueezeWhoseEndWasLostIsOverOnceItsStartsStop() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.clock = { [unowned bench] in bench.now }
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        // Its end never comes. A moment later, it is still the same squeeze.
+        bench.now += .seconds(1)
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        // After that long, a squeeze is a new one: this one keeps the value.
+        bench.now += SqueezeRouter.longestSqueeze
+        router.began(at: overField, azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target == nil)
+        #expect(router.taker == .ruler)
+        router.ended()
+        bench.end()
+    }
+
+    /// A squeeze held on, whose `.active` keeps coming, is never taken for a new one.
+    @Test func aSqueezeHeldOnIsOneSqueezeHoweverLong() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        router.clock = { [unowned bench] in bench.now }
+        let scrubber = bench.app.scrubber
+        scrubber.hovered = field(on: bench)
+        for _ in 0..<200 {
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            bench.now += .milliseconds(500)
+        }
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
+        bench.end()
+    }
+
+    /// In a narrow window the Format panel is a sheet, and the sheet's handler has the
+    /// squeeze rather than the window's: exactly one is there at a time.
+    @Test func inANarrowWindowThePanelsSheetHasTheSqueeze() {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        bench.app.isInspectorOpen = true
+        #expect(!bench.app.panelIsASheet)
+        #expect(router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        bench.app.isCompactSizeClass = true
+        #expect(bench.app.panelIsASheet)
+        #expect(!router.windowHandlerIsOn && router.sheetHandlerIsOn)
+        bench.app.isInspectorOpen = false
+        bench.app.isLayersOpen = true
+        #expect(bench.app.panelIsASheet && router.sheetHandlerIsOn)
+        bench.app.isLayersOpen = false
+        #expect(!bench.app.panelIsASheet)
+        #expect(router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        // With nothing to take a squeeze, neither is there.
+        bench.app.isInspectorOpen = true
+        bench.app.squeezesToTalk = false
+        #expect(!router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        bench.end()
+    }
+
+    /// The sheet's squeeze comes in the sheet's own points: it is put in the window's by the
+    /// sheet's place in the window before it is routed.
+    @Test func aSqueezeInThePanelsSheetIsInWindowPoints() {
+        #expect(SqueezeRouter.windowPoint(CGPoint(x: 100, y: 40), offsetBy: CGPoint(x: 10, y: 500)) == CGPoint(x: 110, y: 540))
+        #expect(SqueezeRouter.windowPoint(nil, offsetBy: CGPoint(x: 10, y: 500)) == nil)
+
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        #expect(router.sheetOrigin == .zero)
+        bench.app.chromeFrames["panel sheet"] = CGRect(x: 0, y: 500, width: 800, height: 400)
+        #expect(router.sheetOrigin == CGPoint(x: 0, y: 500))
+        // Over a field near the sheet's top: over the sheet in the window, so a field's.
+        scrubber.hovered = ScrubbedField(10).target("W", at: .zero, range: 0...100)
+        router.began(at: SqueezeRouter.windowPoint(CGPoint(x: 100, y: 40), offsetBy: router.sheetOrigin), azimuth: nil, roll: .degrees(0))
+        #expect(scrubber.target?.label == "W")
+        router.ended()
+        scrubber.end()
         bench.end()
     }
 }

@@ -33,15 +33,14 @@ struct StylePanel: View {
             .overlay { ScrubberOverlay() }
             .coordinateSpace(.named(Scrubber.space))
             // Where that space is in the window, for a step's tick to be felt at its field.
-            .onGeometryChange(for: CGPoint.self, of: { $0.frame(in: .global).origin }) { scrubber.panelOrigin = $0 }
+            .reportsPanelOrigin(to: scrubber)
             .environment(scrubber)
-            // A ruler left up by the pencil goes with the panel or the selection it was for,
-            // and so does a field's hover; the zoom's ruler stays.
+            // A ruler left up by the pencil goes with the panel, and so does a field's hover;
+            // the zoom's ruler stays. A new selection ends them in the model.
             .onDisappear {
                 scrubber.end(.panel)
                 scrubber.forgetHovered(.panel)
             }
-            .onChange(of: model.selection) { scrubber.end(.panel) }
 
         if isSheet {
             settings
@@ -572,7 +571,7 @@ private struct MagicPenTab: View {
             Toggle("Squeeze to Talk", isOn: Binding(get: { model.squeezesToTalk }, set: { model.setSqueezesToTalk($0) }))
             Text(model.squeezesToTalk
                 ? "Squeeze Apple Pencil Pro over the canvas to speak a command."
-                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say, except over a number field or the zoom control, where it still scrubs.")
+                : "Squeezing Apple Pencil Pro does what Apple Pencil settings say. Over a number field or the zoom control it still scrubs, unless those settings turn squeezing off or give it a shortcut.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

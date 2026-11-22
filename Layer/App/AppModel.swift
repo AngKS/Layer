@@ -136,6 +136,10 @@ final class AppModel {
     var selection: CanvasSelection? {
         didSet {
             if selection != oldValue {
+                // A Format field's ruler, and the field the pen was over, were for what was
+                // selected: a squeeze with the pen still over the panel mustn't scrub it.
+                scrubber.end(.panel)
+                scrubber.forgetHovered(.panel)
                 isEditingText = false
                 // The format panel's changes so far are a step, apart from the next selection's.
                 endAdjustmentNow()
@@ -350,6 +354,21 @@ final class AppModel {
         viewPoint.y < topBarBottom
             || chromeFrames.contains { $0.key != PencilVoiceBubble.chromeName && $0.value.contains(viewPoint) }
     }
+
+    /// The name the Format panel's frame is reported under while it floats beside the canvas.
+    nonisolated static let formatChrome = "format"
+    /// The name a panel's sheet's frame is reported under, in window points.
+    nonisolated static let panelSheetChrome = "panel sheet"
+
+    /// Whether a point in the view is over the Format panel, beside the canvas or in its
+    /// sheet: where a field's hover is a field's.
+    func isOverFormatPanel(_ viewPoint: CGPoint) -> Bool {
+        [Self.formatChrome, Self.panelSheetChrome].contains { chromeFrames[$0]?.contains(viewPoint) == true }
+    }
+
+    /// Whether a panel is showing as a sheet, which it does only in a compact window. The
+    /// sheet then has the squeeze, rather than the canvas under it.
+    var panelIsASheet: Bool { isCompactSizeClass && (isInspectorOpen || isLayersOpen) }
 
     /// The ruler that scrubs a Format field or the zoom, one for the window: one ruler is up
     /// at a time, and a squeeze has only the one to keep or bring up.
@@ -741,8 +760,9 @@ final class AppModel {
     /// Whether squeezing Apple Pencil Pro talks to the design: Squeeze to Talk, in
     /// Settings and the board's Magic Pen tab, on until turned off there. Off, the squeeze
     /// is the system's, as in any other app, except over a Format field or the zoom control,
-    /// where it still scrubs (see `SqueezeRouter`), and whatever the pencil is listening to
-    /// is let go of, unsent. Either place sets it for every open design at once.
+    /// where it still scrubs unless the system's own setting turns squeezing off or gives it
+    /// a shortcut (see `SqueezeRouter`), and whatever the pencil is listening to is let go
+    /// of, unsent. Either place sets it for every open design at once.
     var squeezesToTalk: Bool {
         didSet {
             guard squeezesToTalk != oldValue else { return }
@@ -1800,7 +1820,7 @@ final class AppModel {
     }
 
     /// True while a number field is being scrubbed.
-    @ObservationIgnored private var isScrubbing = false
+    @ObservationIgnored private(set) var isScrubbing = false
 
     /// Starts scrubbing a field. Everything until `endScrubbing()` undoes as one step,
     /// together with a run of changes in the format panel just before it.

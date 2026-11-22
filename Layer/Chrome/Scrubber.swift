@@ -68,7 +68,8 @@ final class Scrubber {
     /// A step was taken, at this point in the window.
     @ObservationIgnored var onStep: (CGPoint) -> Void = { _ in }
     /// Where `Scrubber.space`'s origin is in the window: the Format panel's top left, which
-    /// the panel keeps current. A panel field's tick is felt there plus its frame's middle.
+    /// the panel keeps current (`reportsPanelOrigin(to:)`). A panel field's tick is felt there
+    /// plus its frame's middle.
     @ObservationIgnored var panelOrigin: CGPoint = .zero
 
     @ObservationIgnored private var start: CGFloat = 0
@@ -281,6 +282,70 @@ struct ScrubberOverlay: View {
         }
         .animation(.snappy(duration: 0.18), value: scrubber.target != nil)
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: Where the panel is
+
+extension View {
+    /// Keeps `scrubber.panelOrigin` at where this view's top left is in the window, for a
+    /// step's tick to be felt at its field. Measured by UIKit: in a sheet, SwiftUI's global
+    /// space is the sheet's, not the window's.
+    func reportsPanelOrigin(to scrubber: Scrubber) -> some View {
+        modifier(PanelOriginReporting(scrubber: scrubber))
+    }
+}
+
+private struct PanelOriginReporting: ViewModifier {
+    let scrubber: Scrubber
+    /// Where SwiftUI has the view: it changes as the view moves, which has UIKit measure again.
+    @State private var moved = CGPoint.zero
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGPoint.self, of: { $0.frame(in: .global).origin }) { moved = $0 }
+            .background { PanelOriginReporter(scrubber: scrubber, moved: moved) }
+    }
+}
+
+/// Tells the scrubber where it is in its window, as `WindowFrameReporter` tells the model.
+struct PanelOriginReporter: UIViewRepresentable {
+    let scrubber: Scrubber
+    /// Not read: a new value has the view measure again.
+    var moved = CGPoint.zero
+
+    func makeUIView(context: Context) -> ReportingView {
+        let view = ReportingView()
+        view.isUserInteractionEnabled = false
+        view.scrubber = scrubber
+        return view
+    }
+
+    func updateUIView(_ view: ReportingView, context: Context) {
+        view.scrubber = scrubber
+        view.report()
+        // And again once laid out where it now is.
+        view.setNeedsLayout()
+    }
+
+    final class ReportingView: UIView {
+        weak var scrubber: Scrubber?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            report()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+        }
+
+        func report() {
+            guard let window, let scrubber else { return }
+            let origin = convert(bounds.origin, to: window)
+            if scrubber.panelOrigin != origin { scrubber.panelOrigin = origin }
+        }
     }
 }
 

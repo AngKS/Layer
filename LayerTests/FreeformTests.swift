@@ -527,8 +527,12 @@ struct ScrubbingTests {
             get: { model.store.resolve(ref)?.element.frame.width ?? 0 },
             set: { width in model.adjusting { model.store.update(ref) { $0.frame.size.width = width } } }
         ))
+        // The model wired its scrubber: a field's scrub is the model's, from begin to end.
+        #expect(model.isScrubbing)
         model.scrubber.scrub(to: 3)
         model.scrubber.end()
+        #expect(!model.isScrubbing)
+        #expect(!model.store.isEditing)
         #expect(model.store.resolve(ref)?.element.frame.width == start + 3)
         undo.undo()
         #expect(model.store.resolve(ref)?.element.frame.width == start)
