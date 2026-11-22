@@ -115,6 +115,7 @@ private struct LayersList: View {
                             plainRow(drawing, ref: ref, depth: 0, isDimmed: drawing.isHidden, isLockedByGroup: false, isSelected: selection?.contains(target) == true, isHovered: hovered == target)
                         }
                     }
+                    if !drawings.isEmpty && !floating.isEmpty { LayerSubheading(name: "Elements") }
                     ForEach(floating) { line in
                         row(line, selection: selection, hovered: hovered)
                     }
