@@ -153,14 +153,14 @@ final class DesignStore {
         guard let screen = screen(screenID) else { return nil }
         var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
         adjust(&element)
-        let added = add(element, to: screenID)
-        if let added, var updatedScreen = self.screen(screenID) {
-            let existing = updatedScreen.semanticNodes
-            let node = LayerNode.fromLegacy(added, screen: updatedScreen, provenance: "pencil")
-            let inferred = SketchSpatialInference.infer(from: existing + [node])
-            change { content in
-                content.updateScreen(screenID) { $0.semanticNodes = inferred }
-            }
+        var added: DesignElement?
+        change { content in
+            added = content.add(element, to: screenID)
+            guard var updatedScreen = content.screen(screenID) else { return }
+            guard let addedElement = added else { return }
+            let node = LayerNode.fromLegacy(addedElement, screen: updatedScreen, provenance: "pencil")
+            let inferred = SketchSpatialInference.infer(from: updatedScreen.semanticNodes + [node])
+            content.updateScreen(screenID) { $0.semanticNodes = inferred }
         }
         return added
     }
@@ -214,7 +214,16 @@ final class DesignStore {
     /// Deletes several elements as one undo step.
     func delete(_ refs: [ElementRef]) {
         let ids = Set(refs.map(\.element))
-        change { $0.remove(ids) }
+        change { content in
+            content.remove(ids)
+            for ref in refs {
+                if case .screen(let screenID) = ref.host {
+                    content.updateScreen(screenID) { screen in
+                        screen.semanticNodes = LayerNode.removing(screen.semanticNodes, ids: ids)
+                    }
+                }
+            }
+        }
         // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
         // deleted soon after it was made. See SketchReadingLog.
         for id in ids { Task { await SketchReadingLog.shared.noteDeleted(id) } }
@@ -255,7 +264,14 @@ final class DesignStore {
 
     func delete(_ ref: ElementRef) {
         guard resolve(ref) != nil else { return }
-        change { $0.remove([ref.element]) }
+        change { content in
+            content.remove([ref.element])
+            if case .screen(let screenID) = ref.host {
+                content.updateScreen(screenID) { screen in
+                    screen.semanticNodes = LayerNode.removing(screen.semanticNodes, ids: [ref.element])
+                }
+            }
+        }
         // See the matching note on delete(_ refs:).
         Task { await SketchReadingLog.shared.noteDeleted(ref.element) }
     }
@@ -393,7 +409,43 @@ final class DesignStore {
         guard screen(screenID) != nil else { return [] }
         change { content in
             if replacing {
-                content.setChildren(of: screenID, to: elements)
+                let old = content.children(of: screenID)
+                var used = Set<DesignElement.ID>()
+                var reconciledElements = elements.enumerated().map { index, incoming -> DesignElement in
+                    let match = old.first { !used.contains($0.id) && $0.kind == incoming.kind && $0.text == incoming.text }
+                        ?? old.first { !used.contains($0.id) && $0.kind == incoming.kind }
+                        ?? old.enumerated().first(where: { !used.contains($0.element.id) && $0.offset == index })?.element
+                    guard var result = match else { return incoming }
+                    used.insert(result.id)
+                    if result.isLocked || result.kind == .drawing || result.kind == .shape {
+                        return result
+                    }
+                    result.text = incoming.text
+                    result.tint = incoming.tint
+                    result.symbol = incoming.symbol
+                    result.imageID = incoming.imageID
+                    result.kind = incoming.kind
+                    result.frame = incoming.frame
+                    result.fontSize = incoming.fontSize
+                    result.fontWeight = incoming.fontWeight
+                    result.textColor = incoming.textColor
+                    result.cornerRadius = incoming.cornerRadius
+                    result.opacity = incoming.opacity
+                    result.textAlignment = incoming.textAlignment
+                    result.borderColor = incoming.borderColor
+                    result.borderWidth = incoming.borderWidth
+                    result.hasShadow = incoming.hasShadow
+                    result.isOn = incoming.isOn
+                    result.value = incoming.value
+                    result.buttonLook = incoming.buttonLook
+                    return result
+                }
+                // Authoritative user edits/locked elements survive late streamed replacement.
+                let protected = old.filter { $0.isLocked || $0.kind == .drawing || $0.kind == .shape }
+                for element in protected where !reconciledElements.contains(where: { $0.id == element.id }) {
+                    reconciledElements.append(element)
+                }
+                content.setChildren(of: screenID, to: reconciledElements)
                 if var screen = content.screen(screenID) {
                     let generated = elements.map { LayerNode.fromLegacy($0, screen: screen, provenance: "generated") }
                     let reconciled = LayerNode.reconcile(existing: screen.semanticNodes, generated: generated)
@@ -461,7 +513,22 @@ final class DesignStore {
             update(ref) { $0.frame = frame }
             return ref
         }
-        change { $0.move(element.id, to: target?.id, scale: newPlacement.scale, frame: frame) }
+        change { content in
+            content.move(element.id, to: target?.id, scale: newPlacement.scale, frame: frame)
+            if case .screen(let oldScreenID) = ref.host {
+                content.updateScreen(oldScreenID) { screen in
+                    screen.semanticNodes = screen.semanticNodes.filter { root in
+                        !root.children.contains(where: { $0.id == element.id }) && root.id != element.id
+                    }
+                }
+            }
+            if let target, let moved = content.element(element.id) {
+                content.updateScreen(target.id) { screen in
+                    let node = LayerNode.fromLegacy(moved, screen: screen, provenance: "manual")
+                    screen.semanticNodes.append(node)
+                }
+            }
+        }
         return ElementRef(host: host, element: element.id)
     }
 
@@ -569,7 +636,25 @@ final class DesignStore {
 
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {
         guard resolve(ref) != nil else { return }
-        change { $0.update(ref.element, body) }
+        change { content in
+            content.update(ref.element, body)
+            if case .screen(let screenID) = ref.host,
+               let element = content.element(ref.element),
+               var screen = content.screen(screenID) {
+                let legacy = LayerNode.fromLegacy(element, screen: screen, provenance: "manual")
+                screen.semanticNodes = LayerNode.updating(screen.semanticNodes, id: element.id) { node in
+                    node.props = legacy.props
+                    node.style = legacy.style
+                    node.layout = legacy.layout
+                    node.resolvedFrame = element.frame
+                    node.isLocked = element.isLocked
+                    node.isUserEdited = true
+                }
+                content.updateScreen(screenID) { $0.semanticNodes = screen.semanticNodes }
+            } else if ref.host == .canvas {
+                // Floating elements remain detached/freeform; they have no semantic screen container.
+            }
+        }
     }
 
     func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {

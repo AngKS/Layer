@@ -16,7 +16,7 @@ settings:
 packages:
   A2UI:
     url: https://github.com/a2ui-project/a2ui
-    from: "0.11.0"
+    exact: "0.11.0"
 targets:
   Layer:
     type: application

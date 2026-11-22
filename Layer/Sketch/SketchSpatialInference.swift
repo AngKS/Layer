@@ -8,9 +8,10 @@ enum SketchSpatialInference {
         guard meaningful.count >= 2 else { return nodes }
 
         let horizontalPairs = pairs(in: meaningful) { a, b in
-            verticalOverlap(a, b) >= 0.5 &&
-            abs((a.resolvedFrame?.midY ?? 0) - (b.resolvedFrame?.midY ?? 0)) < 20 &&
-            abs((a.resolvedFrame?.midX ?? 0) - (b.resolvedFrame?.midX ?? 0)) < 240
+            verticalOverlap(a, b) >= 0.75 &&
+            abs((a.resolvedFrame?.midY ?? 0) - (b.resolvedFrame?.midY ?? 0)) < 12 &&
+            abs((a.resolvedFrame?.midX ?? 0) - (b.resolvedFrame?.midX ?? 0)) < 180 &&
+            horizontalGap(a, b).flatMap { $0 >= 8 && $0 <= 48 } == true
         }
         if horizontalPairs.count == 1,
            let pair = horizontalPairs.first,
@@ -30,9 +31,16 @@ enum SketchSpatialInference {
 
         let gridCells = meaningful.filter { $0.resolvedFrame != nil }
         if gridCells.count >= 4 {
-            let xs = Set(gridCells.compactMap { $0.resolvedFrame.map { Int($0.midX.rounded()) } })
-            let ys = Set(gridCells.compactMap { $0.resolvedFrame.map { Int($0.midY.rounded()) } })
-            if xs.count >= 2, ys.count >= 2 {
+            let xs = clusters(gridCells.compactMap { $0.resolvedFrame?.midX }, tolerance: 16)
+            let ys = clusters(gridCells.compactMap { $0.resolvedFrame?.midY }, tolerance: 16)
+            let repeatedX = xs.count >= 2 && xs.allSatisfy { cluster in
+                gridCells.filter { node in
+                    guard let x = node.resolvedFrame?.midX else { return false }
+                    return cluster.contains(where: { abs($0 - x) < 16 })
+                }.count >= 2
+            }
+            let repeatedY = ys.count >= 2
+            if repeatedX, repeatedY {
                 let union = gridCells.compactMap(\.resolvedFrame).dropFirst().reduce(gridCells.compactMap(\.resolvedFrame).first ?? .zero) { $0.union($1) }
                 let grid = LayerNode(
                     kind: .grid,
@@ -65,6 +73,25 @@ enum SketchSpatialInference {
         guard let ar = a.resolvedFrame, let br = b.resolvedFrame else { return 0 }
         let overlap = min(ar.maxY, br.maxY) - max(ar.minY, br.minY)
         return overlap / max(1, min(ar.height, br.height))
+    }
+
+    private static func horizontalGap(_ a: LayerNode, _ b: LayerNode) -> CGFloat? {
+        guard let ar = a.resolvedFrame, let br = b.resolvedFrame else { return nil }
+        return abs(ar.minX - br.maxX) < abs(ar.maxX - br.minX)
+            ? abs(ar.minX - br.maxX)
+            : abs(ar.maxX - br.minX)
+    }
+
+    private static func clusters(_ values: [CGFloat], tolerance: CGFloat) -> [[CGFloat]] {
+        var groups: [[CGFloat]] = []
+        for value in values.sorted() {
+            if let index = groups.firstIndex(where: { abs((($0.first ?? 0) + ($0.last ?? 0)) / 2 - value) < tolerance }) {
+                groups[index].append(value)
+            } else {
+                groups.append([value])
+            }
+        }
+        return groups
     }
 
     private static func replace(_ ids: Set<UUID>, with container: LayerNode, in nodes: [LayerNode]) -> [LayerNode] {

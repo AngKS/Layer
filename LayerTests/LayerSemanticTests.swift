@@ -22,6 +22,21 @@ struct LayerSemanticTests {
         #expect(reconciled[0].isLocked)
     }
 
+    @Test func reconciliationKeepsAnUserEditedNodeByStableIdentity() {
+        let external = "continue"
+        let original = LayerNode(
+            kind: .button,
+            externalID: external,
+            props: .init(text: "My label"),
+            isUserEdited: true
+        )
+        let generated = LayerNode(kind: .button, externalID: external, props: .init(text: "Continue"))
+
+        let reconciled = LayerNode.reconcile(existing: [original], generated: [generated])
+
+        #expect(reconciled == [original])
+    }
+
     @Test func layoutResolvesNestedGridAndPreservesAsymmetricFreeformFrame() {
         let asymmetric = CGRect(x: 31, y: 170, width: 137, height: 44)
         let freeform = LayerNode(
@@ -46,6 +61,33 @@ struct LayerSemanticTests {
         #expect(validation.clippingCount == 0)
         #expect(resolved[0].resolvedFrame == asymmetric)
         #expect(resolved[1].children.count == 4)
+    }
+
+    @Test func layoutKeepsTwoTopLevelGroupsAndNestedContentNonoverlapping() {
+        let card = LayerNode(
+            kind: .card,
+            children: [
+                .init(kind: .title, props: .init(text: "Account")),
+                .init(kind: .textField, props: .init(placeholder: "Name")),
+            ],
+            layout: .init(kind: .column, width: .init(sizing: .fill), height: .init(sizing: .intrinsic), padding: 16, spacing: 12)
+        )
+        let actions = LayerNode(
+            kind: .row,
+            children: [
+                .init(kind: .button, props: .init(text: "Cancel")),
+                .init(kind: .button, props: .init(text: "Save")),
+            ],
+            layout: .init(kind: .row, width: .init(sizing: .fill), height: .init(sizing: .fixed, value: 44), spacing: 12)
+        )
+
+        let (resolved, validation) = LayerLayoutEngine.resolve([card, actions], in: CGRect(x: 0, y: 0, width: 393, height: 852))
+
+        #expect(validation.clippingCount == 0)
+        let first = try! #require(resolved[0].resolvedFrame)
+        let second = try! #require(resolved[1].resolvedFrame)
+        #expect(!first.intersects(second))
+        #expect(resolved[0].children.count == 2)
     }
 
     @Test func spatialInferenceCreatesRowAndKeepsAsymmetricPositionsOutsideTheRow() {
@@ -81,13 +123,16 @@ struct LayerSemanticTests {
 
     @Test func a2UIImportMapsSupportedNodesAndReportsUnsupportedComponents() {
         let json = """
-        {"components":[
-          {"component":"Column","children":[
-            {"component":"Text","text":"Hello"},
-            {"component":"Button","text":"Continue"}
-          ]},
-          {"component":"AgentOnlyAction","text":"ignored"}
-        ]}
+        {"createSurface":{
+          "surfaceId":"main",
+          "catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+          "components":[
+            {"id":"root","component":"Column","children":["title","continue"]},
+            {"id":"title","component":"Text","text":"Hello"},
+            {"id":"continue","component":"Button","text":"Continue"},
+            {"id":"unsupported","component":"Unknown","text":"ignored"}
+          ]
+        }}
         """.data(using: .utf8)!
 
         let result = A2UIBoundary.importJSON(json)
@@ -95,7 +140,24 @@ struct LayerSemanticTests {
         #expect(result.roots.count == 1)
         #expect(result.roots[0].kind == .column)
         #expect(result.roots[0].children.map(\.kind) == [.text, .button])
-        #expect(result.diagnostics.contains { $0.message.contains("AgentOnlyAction") })
+        #expect(result.diagnostics.contains { $0.message.contains("Unknown") })
+    }
+
+    @Test func a2UIImportReportsCycleAndUnresolvedReferences() {
+        let json = """
+        {"updateComponents":{
+          "surfaceId":"main",
+          "components":[
+            {"id":"root","component":"Column","children":["missing","root"]}
+          ]
+        }}
+        """.data(using: .utf8)!
+
+        let result = A2UIBoundary.importJSON(json)
+
+        #expect(result.roots.count == 1)
+        #expect(result.diagnostics.contains { $0.message.contains("Unresolved") })
+        #expect(result.diagnostics.contains { $0.message.contains("cycle") })
     }
 
     @Test func swiftUIExportUsesRecursiveStacksGridAndOverlay() {
@@ -127,5 +189,25 @@ struct LayerSemanticTests {
         #expect(code.contains("LazyVGrid"))
         #expect(code.contains("ZStack"))
         #expect(code.contains("Button(\"One\")"))
+    }
+}
+
+@Suite("Sketch semantic undo")
+@MainActor
+struct SketchSemanticUndoTests {
+    @Test func addElementAndGroupingShareOneUndoStep() {
+        let store = DesignStore()
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        store.undoManager = undo
+        let screen = store.addScreen(from: CGRect(x: 400, y: 125, width: 270, height: 584))
+        let sketch = CGRect(x: 480, y: 200, width: 120, height: 44)
+
+        _ = store.addElement(.button, from: sketch, to: screen.id)
+
+        #expect(store.screen(screen.id)?.semanticNodes.count == 1)
+        undo.undo()
+        #expect(store.screen(screen.id)?.elements.isEmpty == true)
+        #expect(store.screen(screen.id)?.semanticNodes.isEmpty == true)
     }
 }

@@ -32,6 +32,13 @@ is not required. Existing ink and picture package files remain separate and
 unchanged. Legacy `DesignElement` data is still used by the live canvas during
 this vertical slice.
 
+`PhoneScreenView` now resolves `semanticNodes` and uses their resolved leaf
+frames when present, while `DesignElement` remains the editable interaction
+payload and stable-ID synchronization source. Move, resize, text/style edits,
+delete, host changes, and generation reconcile both representations in the
+same store transaction. This vertical slice does not claim that every legacy
+editing path has already migrated to a fully recursive SwiftUI canvas renderer.
+
 ## Verification
 
 Run with Xcode 27.2 or later:

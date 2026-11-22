@@ -73,6 +73,8 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
     var role: String?
     var accessibilityLabel: String?
     var name: String?
+    /// Stable protocol-level ID for boundary imports (for example an A2UI component ID).
+    var externalID: String?
     var children: [LayerNode]
     var props: Props
     var style: Style
@@ -80,6 +82,7 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
     var sketchIntent: SketchIntent?
     var resolvedFrame: CGRect?
     var isLocked = false
+    var isUserEdited = false
     var zIndex: Int
 
     init(
@@ -88,6 +91,7 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
         role: String? = nil,
         accessibilityLabel: String? = nil,
         name: String? = nil,
+        externalID: String? = nil,
         children: [LayerNode] = [],
         props: Props = Props(),
         style: Style = Style(),
@@ -95,6 +99,7 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
         sketchIntent: SketchIntent? = nil,
         resolvedFrame: CGRect? = nil,
         isLocked: Bool = false,
+        isUserEdited: Bool = false,
         zIndex: Int = 0
     ) {
         self.id = id
@@ -102,6 +107,7 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
         self.role = role
         self.accessibilityLabel = accessibilityLabel
         self.name = name
+        self.externalID = externalID
         self.children = children
         self.props = props
         self.style = style
@@ -109,6 +115,7 @@ struct LayerNode: Identifiable, Equatable, Codable, Sendable {
         self.sketchIntent = sketchIntent
         self.resolvedFrame = resolvedFrame
         self.isLocked = isLocked
+        self.isUserEdited = isUserEdited
         self.zIndex = zIndex
     }
 
@@ -183,25 +190,58 @@ extension LayerNode {
     /// Stable-ID reconcile for streamed/whole-screen generation. Existing nodes keep IDs;
     /// user-edited nodes are left untouched by late updates.
     static func reconcile(existing: [LayerNode], generated: [LayerNode]) -> [LayerNode] {
-        var reusable: [String: [LayerNode]] = [:]
+        var reusableByExternal: [String: LayerNode] = [:]
+        var reusableByKey: [String: [LayerNode]] = [:]
+        var reusableByKind: [String: [LayerNode]] = [:]
         for node in existing {
-            reusable[reconcileKey(node), default: []].append(node)
+            if let externalID = node.externalID { reusableByExternal[externalID] = node }
+            reusableByKey[reconcileKey(node), default: []].append(node)
+            reusableByKind[node.kind.rawValue, default: []].append(node)
         }
         var used = Set<UUID>()
-        return generated.map { newNode in
-            let key = reconcileKey(newNode)
-            if let match = reusable[key]?.first(where: { !used.contains($0.id) }) {
-                used.insert(match.id)
-                var merged = newNode
-                merged.id = match.id
-                if match.isLocked { merged.isLocked = true }
-                return merged
-            }
-            return newNode
+        return generated.enumerated().map { index, newNode in
+            let keyMatch = reusableByKey[reconcileKey(newNode)]?.first(where: { !used.contains($0.id) })
+            let candidates = reusableByKind[newNode.kind.rawValue]?.filter { !used.contains($0.id) } ?? []
+            let positionalMatch = index < candidates.count ? candidates[index] : candidates.first
+            let match = newNode.externalID.flatMap { reusableByExternal[$0] }
+                ?? keyMatch
+                ?? positionalMatch
+            guard let match else { return newNode }
+            used.insert(match.id)
+            if match.isLocked || match.isUserEdited { return match }
+            var merged = newNode
+            merged.id = match.id
+            merged.externalID = match.externalID ?? newNode.externalID
+            merged.isLocked = match.isLocked
+            merged.isUserEdited = match.isUserEdited
+            return merged
         }
     }
 
     private static func reconcileKey(_ node: LayerNode) -> String {
         "\(node.kind.rawValue)|\(node.name ?? "")|\(node.props.text ?? node.props.symbolName ?? "")"
+    }
+
+    static func updating(_ nodes: [LayerNode], id: UUID, transform: (inout LayerNode) -> Void) -> [LayerNode] {
+        nodes.map { node in
+            var result = node
+            if result.id == id {
+                transform(&result)
+            } else if !result.children.isEmpty {
+                result.children = updating(result.children, id: id, transform: transform)
+            }
+            return result
+        }
+    }
+
+    static func removing(_ nodes: [LayerNode], ids: Set<UUID>) -> [LayerNode] {
+        nodes.compactMap { node in
+            guard !ids.contains(node.id) else { return nil }
+            var result = node
+            if !result.children.isEmpty {
+                result.children = removing(result.children, ids: ids)
+            }
+            return result
+        }
     }
 }
