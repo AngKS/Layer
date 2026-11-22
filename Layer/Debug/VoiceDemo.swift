@@ -126,7 +126,7 @@ enum VoiceDemo {
 /// `done` or `problem`. A hold left listening still stops after `PencilVoice.maximumHold`,
 /// a minute; a toggle stays. The words heard show, as the setting's default does;
 /// `-LayerPencilDemoWords NO` hides them. `-LayerVoiceDemoDark` and `-LayerVoiceDemoDesign`
-/// work as for `-LayerVoiceDemo`. `-pencilVoice.squeezeToTalk NO` turns Squeeze to Talk
+/// work as for `-LayerVoiceDemo`. `-squeezesToTalk NO` turns Squeeze to Talk
 /// off, and the squeeze opens nothing.
 @MainActor
 enum PencilDemo {

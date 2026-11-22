@@ -108,7 +108,8 @@ struct ModelSettingsView: View {
                 }
 
                 Section {
-                    Toggle("Squeeze to Talk", isOn: $squeezesToTalk)
+                    // The app's setting, which every open design follows at once.
+                    Toggle("Squeeze to Talk", isOn: Binding(get: { squeezesToTalk }, set: { AppModel.setSqueezesToTalk($0) }))
                     // The bubble is only there while the pencil listens.
                     if squeezesToTalk {
                         Toggle("Show Words in the Pencil Bubble", isOn: $showsWords)

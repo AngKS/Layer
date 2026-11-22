@@ -194,7 +194,7 @@ final class VoiceModeUITests: XCTestCase {
 
         openNewDesign(arguments: [
             "-convertsAutomatically", "NO", "-LayerPencilDemo", squeeze, "-LayerVoiceDemoFreeze", "listening",
-            "-pencilVoice.squeezeToTalk", "NO",
+            "-squeezesToTalk", "NO",
         ])
         XCTAssertFalse(bubble.waitForExistence(timeout: 12), "with Squeeze to Talk off a squeeze should open nothing")
         shoot("squeeze-to-talk-off")

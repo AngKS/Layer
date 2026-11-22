@@ -38,8 +38,9 @@ private struct DesignEditor: View {
     /// is renamed, for instance), and throw all but the first away.
     @State private var made = MadeOnce()
     @Environment(\.scenePhase) private var scenePhase
-    /// Squeeze to Talk, watched so that Settings turning it off reaches a design already
-    /// open. The design reads the setting itself, as it does when it opens.
+    /// Squeeze to Talk, watched in case it is changed some way that doesn't tell the open
+    /// designs itself, as Settings and the Magic Pen tab do. The design reads the setting
+    /// itself, as it does when it opens.
     @AppStorage(AppModel.squeezesToTalkKey, store: AppSettings.defaults) private var squeezesToTalk = true
 
     private let document: LayerDocument

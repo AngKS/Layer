@@ -32,17 +32,37 @@ enum SystemSymbol {
         if exists(plain) { return plain }
         // "arrowDown" is "arrow.down", and "GitHub" is "git.hub", joined again below.
         let parts = spelled(splittingWords(trimmed)).split(separator: ".").map(String.init)
-        // Words left over at the end, as in "heart.outline" or "arrow.left.icon", are dropped.
-        for count in stride(from: parts.count, to: 0, by: -1) {
+        // Words left over at the end, as in "person.circle.outline", are dropped, down to
+        // two: a first word alone is often a symbol meaning something else, as "keyboard"
+        // is in "keyboard_arrow_down".
+        for count in stride(from: parts.count, through: 2, by: -1) {
             let shorter = parts.prefix(count).joined(separator: ".")
             if exists(shorter) { return shorter }
         }
-        // The whole name as one word, as brands are written, and then each word in it.
-        for word in [parts.joined()] + parts {
+        // Written apart, as "magnifying glass" or "paper plane".
+        let joined = parts.joined()
+        if exists(joined) { return joined }
+        // An arrow points the way the name says.
+        if parts.contains("arrow"), let way = parts.lazy.compactMap({ ways[$0] }).first, exists("arrow.\(way)") {
+            return "arrow.\(way)"
+        }
+        // The whole name as one word, as brands are written, then each word from the last,
+        // which usually says what the icon is ("email_icon" aside), and "arrow" last of all.
+        let arrow = parts.contains("arrow") ? ["arrow"] : []
+        for word in [joined] + parts.reversed().filter({ $0 != "arrow" }) + arrow {
             if let symbol = words[word] { return symbol }
         }
+        // Failing all that, a word that is a symbol itself: "camera" in "camera_outline".
+        if let word = parts.first(where: exists) { return word }
         return placeholder
     }
+
+    /// Which way an arrow points, from the words names use for it.
+    private static let ways = [
+        "up": "up", "upward": "up", "down": "down", "downward": "down",
+        "left": "left", "back": "left", "backward": "left", "previous": "left", "prev": "left",
+        "right": "right", "forward": "right", "next": "right",
+    ]
 
     private static func exists(_ name: String) -> Bool {
         !name.isEmpty && UIImage(systemName: name) != nil
@@ -77,11 +97,11 @@ enum SystemSymbol {
             ("gearshape", ["settings", "setting", "gear", "cog", "preferences", "config"]),
             ("person.crop.circle", ["profile", "user", "account", "avatar", "person"]),
             ("house", ["home"]),
-            ("chevron.left", ["back", "previous", "prev"]),
-            ("chevron.right", ["next", "forward", "chevron", "disclosure"]),
+            ("chevron.left", ["back", "backward", "previous", "prev", "left"]),
+            ("chevron.right", ["next", "forward", "right", "chevron", "disclosure"]),
             ("arrow.right", ["arrow"]),
-            ("chevron.down", ["down", "dropdown", "expand"]),
-            ("chevron.up", ["up", "collapse"]),
+            ("chevron.down", ["down", "downward", "dropdown", "expand"]),
+            ("chevron.up", ["up", "upward", "collapse"]),
             ("line.3.horizontal", ["menu", "hamburger", "burger", "nav"]),
             ("xmark", ["close", "dismiss", "cancel", "exit", "x"]),
             ("plus", ["add", "plus", "new", "create"]),

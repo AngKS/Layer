@@ -62,9 +62,8 @@ final class PencilVoice {
     /// Whether the squeeze under way, or the next one, is the pencil's to send with: a
     /// toggle is listening, or a squeeze has just sent one and hasn't been let go of. The
     /// format panel's scrubber leaves such a squeeze alone, whichever of them hears it first.
-    /// With Squeeze to Talk off, no squeeze is.
+    /// With Squeeze to Talk off, neither can be so: see `squeezeToTalkTurnedOff()`.
     var ownsSqueeze: Bool {
-        guard model?.squeezesToTalk != false else { return false }
         if endIsIgnored { return true }
         if case .listening(_, toggled: true, _) = mode { return true }
         return false
@@ -128,6 +127,9 @@ final class PencilVoice {
     @ObservationIgnored private var askedToListen = false
     /// Set once the design has closed: the call ends as soon as it has nothing to finish.
     @ObservationIgnored private var designHasClosed = false
+    /// Set when Squeeze to Talk went off, which ends the call in the same way. The next
+    /// call, once it is back on, is a new one.
+    @ObservationIgnored private var squeezeWentOff = false
     /// Set when a squeeze sent a toggle: letting go of that squeeze does nothing more.
     @ObservationIgnored private var endIsIgnored = false
     @ObservationIgnored private var silenceTimer: Task<Void, Never>?
@@ -274,11 +276,13 @@ final class PencilVoice {
         letGoOfSqueeze()
     }
 
-    /// Squeeze to Talk was turned off in Settings, which takes the squeeze away as Draw
-    /// does: whatever was being listened to is let go of, unsent, and a command already
-    /// sent is left to finish.
+    /// Squeeze to Talk was turned off, which takes the squeeze away as Draw does: whatever
+    /// was being listened to is let go of, unsent. The call isn't needed until it is back
+    /// on, so it ends, once a command already sent has finished.
     func squeezeToTalkTurnedOff() {
         letGoOfSqueeze()
+        squeezeWentOff = true
+        endIfIdle()
     }
 
     private func letGoOfSqueeze() {
@@ -326,7 +330,7 @@ final class PencilVoice {
     }
 
     private func endIfIdle() {
-        guard designHasClosed, let call, !call.isHearing, call.queuedCount == 0, call.phase != .working else { return }
+        guard designHasClosed || squeezeWentOff, let call, !call.isHearing, call.queuedCount == 0, call.phase != .working else { return }
         call.end()
     }
 
@@ -334,6 +338,8 @@ final class PencilVoice {
 
     @discardableResult
     private func startCall() -> VoiceCall? {
+        // Back on: the call is wanted again, should it still be finishing a command.
+        squeezeWentOff = false
         if let call { return call }
         guard let model else { return nil }
         let runner = makeRunner(model)

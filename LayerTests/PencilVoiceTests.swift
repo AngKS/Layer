@@ -1034,22 +1034,26 @@ struct PencilVoiceTests {
         }
     }
 
-    /// The board's Magic Pen tab and Settings › Voice are one setting, the app's: the tab
-    /// writes where Settings reads, and every open design follows either.
+    /// The board's Magic Pen tab and Settings › Voice are one setting, the app's: either
+    /// writes where both read, and every open design follows at once, unasked.
     @Test func theMagicPenTabAndSettingsShareSqueezeToTalk() {
+        // Watched by key, and a dot in a key is a key path to whatever watches it.
+        #expect(!AppModel.squeezesToTalkKey.contains("."))
         withOwnSettings { settings in
             let design = AppModel(document: LayerDocument(), settings: settings)
             let other = AppModel(document: LayerDocument(), settings: settings)
+            let elsewhere = AppModel(document: LayerDocument())
+            design.openDesigns = { [design, other, elsewhere] }
+            // From the tab: this design, the other window's, and the setting itself.
             design.setSqueezesToTalk(false)
-            #expect(!design.squeezesToTalk)
+            #expect(!design.squeezesToTalk && !other.squeezesToTalk)
             #expect(settings.object(forKey: AppModel.squeezesToTalkKey) as? Bool == false)
-            // Another window reads it again once the setting changes.
-            other.readSqueezesToTalk()
-            #expect(!other.squeezesToTalk)
-            // Settings turning it back on reaches the design whose tab turned it off.
-            settings.set(true, forKey: AppModel.squeezesToTalkKey)
-            design.readSqueezesToTalk()
-            #expect(design.squeezesToTalk)
+            // A design whose settings are kept elsewhere, as in a test, keeps its own.
+            #expect(elsewhere.squeezesToTalk)
+            // From Settings: both again.
+            AppModel.setSqueezesToTalk(true, in: settings, designs: [design, other])
+            #expect(design.squeezesToTalk && other.squeezesToTalk)
+            #expect(settings.object(forKey: AppModel.squeezesToTalkKey) as? Bool == true)
         }
     }
 
@@ -1111,6 +1115,36 @@ struct PencilVoiceTests {
         #expect(bench.routes[1].finishCount == 0)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.runner.commands.isEmpty && bench.pencil.bubble == nil)
+        bench.end()
+    }
+
+    /// Turned off, the pencil's call goes too, once it has nothing left to finish: the
+    /// next squeeze, with it back on, starts another.
+    @Test func turningSqueezeToTalkOffEndsThePencilsCall() async throws {
+        let bench = Bench()
+        bench.pencil.hovered()
+        #expect(await eventually { bench.runner.warmUps == 1 })
+        #expect(bench.pencil.call != nil)
+        bench.app.squeezesToTalk = false
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // A command still running when it goes off is left to finish, and then the call ends.
+        bench.app.squeezesToTalk = true
+        bench.runner.holds = true
+        #expect(await bench.hold())
+        // The new call's route: each call gets one ready as it starts.
+        try #require(bench.routes.last).send(.command("make it blue"))
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        bench.app.squeezesToTalk = false
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.call != nil)
+        bench.runner.holds = false
+        #expect(await eventually { bench.pencil.call == nil })
+
+        // Back on, a squeeze starts a call of its own.
+        bench.app.squeezesToTalk = true
+        bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
+        #expect(await eventually { bench.state == .listening && bench.pencil.call != nil })
         bench.end()
     }
 
