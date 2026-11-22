@@ -159,3 +159,40 @@ extension PerformanceFixTests {
         }
     }
 }
+
+// MARK: The window's hover recogniser (finding 9)
+
+extension HostedWindowSuites {
+    @MainActor
+    @Suite("The pencil bridge's window recogniser", .serialized)
+    struct PencilBridgeWorkTests {
+        @Test func theWindowCarriesTheHoverRecogniserOnlyWhileARulerCanUseIt() async throws {
+            let scrubber = Scrubber()
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+            let baseline = window.gestureRecognizers?.filter { $0 is UIHoverGestureRecognizer }.count ?? 0
+            window.rootViewController = UIHostingController(rootView: PencilBridge(scrubber: scrubber))
+            window.isHidden = false
+            defer { window.isHidden = true }
+            func hovers() -> Int { (window.gestureRecognizers?.filter { $0 is UIHoverGestureRecognizer }.count ?? 0) - baseline }
+            func settle() async throws { try await Task.sleep(for: .milliseconds(150)) }
+            try await settle()
+            #expect(hovers() == 0, "idle, the window has \(hovers()) hover recognisers of the bridge's")
+
+            let field = ScrubbedField(0)
+            scrubber.begin(field.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32)))
+            try await settle()
+            #expect(hovers() == 1, "with a ruler up there is one")
+
+            scrubber.end()
+            try await settle()
+            #expect(hovers() == 0, "and none once it is put away")
+
+            scrubber.hovered = field.target("Rotation", at: CGRect(x: 0, y: 0, width: 80, height: 32))
+            try await settle()
+            #expect(hovers() == 1, "the pencil over a field, which a squeeze would scrub, has it ready")
+            scrubber.hovered = nil
+            try await settle()
+            #expect(hovers() == 0)
+        }
+    }
+}

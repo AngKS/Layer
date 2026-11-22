@@ -392,6 +392,7 @@ struct PencilBridge: UIViewRepresentable {
         // recogniser is on the window, which this doesn't stop.
         view.isUserInteractionEnabled = false
         view.scrubber = scrubber
+        view.wantsHover = scrubber.wantsSqueeze
         // A step's point is in the window.
         scrubber.onStep = { [weak view] point in
             guard let view else { return }
@@ -400,24 +401,44 @@ struct PencilBridge: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: BridgeView, context: Context) {}
+    func updateUIView(_ view: BridgeView, context: Context) {
+        // Read here, so that this runs again when a ruler comes up or goes, or the pencil
+        // comes to a field or leaves it.
+        view.wantsHover = scrubber.wantsSqueeze
+    }
 
     final class BridgeView: UIView {
         weak var scrubber: Scrubber?
         private(set) var feedback: UICanvasFeedbackGenerator?
         private var hover: UIHoverGestureRecognizer?
+        /// Whether a ruler is up or could be: the window follows the pencil's roll only then,
+        /// and carries no recogniser of its own the rest of the time.
+        var wantsHover = false {
+            didSet { if wantsHover != oldValue { followsHover() } }
+        }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
             if let hover { hover.view?.removeGestureRecognizer(hover) }
             hover = nil
-            guard let window else { return }
+            guard window != nil else { return }
             feedback = UICanvasFeedbackGenerator(view: self)
-            // On the window, so the roll is followed even where the pencil leaves the panel.
-            let recognizer = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
-            recognizer.cancelsTouchesInView = false
-            window.addGestureRecognizer(recognizer)
-            hover = recognizer
+            followsHover()
+        }
+
+        /// Puts the recogniser on the window, or takes it away, to suit `wantsHover`.
+        private func followsHover() {
+            guard let window else { return }
+            if !wantsHover {
+                if let hover { window.removeGestureRecognizer(hover) }
+                hover = nil
+            } else if hover == nil {
+                // On the window, so the roll is followed even where the pencil leaves the panel.
+                let recognizer = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
+                recognizer.cancelsTouchesInView = false
+                window.addGestureRecognizer(recognizer)
+                hover = recognizer
+            }
         }
 
         @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {
