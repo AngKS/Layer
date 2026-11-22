@@ -20,6 +20,7 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case invalidStrokes(String)
     case cantGoOnScreens
     case drawingsAreDrawn
+    case drawingsStayOnTop
     case invalidImage
 
     var localizedStringResource: LocalizedStringResource {
@@ -39,6 +40,7 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .invalidStrokes(let reason): "Layer couldn't read those strokes. \(reason)"
         case .cantGoOnScreens: "Sticky notes and drawings stay on the open canvas; they can't go on a screen."
         case .drawingsAreDrawn: "A drawing is made by drawing it. Draw strokes on the canvas instead of adding an element."
+        case .drawingsStayOnTop: "Drawings stay on top of everything else, so they can't be brought forward or sent back."
         case .invalidImage: "Layer couldn't read that file as a picture."
         }
     }

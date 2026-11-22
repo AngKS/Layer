@@ -48,6 +48,13 @@ struct OrderBoard {
         model.store.undoManager = undo
     }
 
+    /// Adds a sticky note to the open canvas, in front of everything there, so that a
+    /// test can have a drawing between notes. One step to undo, as a note added by hand is.
+    @discardableResult
+    func addNote(named name: String, at origin: CGPoint) -> DesignStore.ElementRef {
+        store.addFloating(Self.element(.stickyNote, named: name, CGRect(origin: origin, size: CGSize(width: 140, height: 130))), scale: 1)
+    }
+
     /// One element, or several, as a selection.
     func selection(_ refs: DesignStore.ElementRef...) -> CanvasSelection {
         CanvasSelection(refs.map(CanvasSelection.element))!
@@ -192,5 +199,86 @@ struct LayerOrderTests {
         // A screen in the selection is left as it is, and only what is on it moves.
         let withScreen = CanvasSelection([.screen(board.screen), .element(board.note2)])!
         #expect(!board.store.canArrange(withScreen, .front))
+    }
+
+    @Test func aDrawingBetweenNotesKeepsItsSlot() {
+        let board = OrderBoard()
+        let note3 = board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        #expect(board.canvasOrder == ["note 1", "note 2", "drawing", "note 3"])
+
+        // Note 1 goes in front of the other notes; the drawing stays third in the list.
+        // Arranged with the drawing among them, or written back with the drawings after
+        // the rest, it would end up elsewhere.
+        board.store.arrange(board.selection(board.note1), .front)
+        #expect(board.canvasOrder == ["note 2", "note 3", "drawing", "note 1"])
+
+        // A drawing selected with a note is left where it is, and the note moves.
+        let mixed = board.selection(board.drawing, note3)
+        #expect(board.store.canArrange(mixed, .back))
+        board.store.arrange(mixed, .back)
+        #expect(board.canvasOrder == ["note 3", "note 2", "drawing", "note 1"])
+        #expect(!board.store.canArrange(mixed, .back))
+    }
+
+    @Test func theRawOrderKeepsEachDrawingInItsSlot() throws {
+        var content = DesignContent()
+        let first = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 40, y: 40))]))
+        let second = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: 100, y: 0), to: CGPoint(x: 140, y: 40))]))
+        let a = OrderBoard.element(.stickyNote, named: "a", CGRect(x: 0, y: 100, width: 140, height: 130))
+        let b = OrderBoard.element(.stickyNote, named: "b", CGRect(x: 200, y: 100, width: 140, height: 130))
+        let onScreen = OrderBoard.element(.button, named: "s", CGRect(x: 20, y: 20, width: 100, height: 40))
+        let screen = DesignScreen(name: "Screen 1", origin: CGPoint(x: 1000, y: 0), scale: 1, elements: [onScreen])
+        content.add(first, to: nil, scale: 1)
+        content.add(a, to: nil, scale: 1)
+        content.addScreen(screen)
+        content.add(second, to: nil, scale: 1)
+        content.add(b, to: nil, scale: 1)
+
+        // The open canvas's whole order, the drawings where they are and the notes swapped;
+        // what is on the screen, though between them in the list, is no part of it.
+        #expect(content.rawOrder(on: nil, withDrawingsKept: [b.id, a.id]) == [first.id, b.id, second.id, a.id])
+        #expect(content.rawOrder(on: screen.id, withDrawingsKept: [onScreen.id]) == [onScreen.id])
+    }
+
+    @Test func lockedThingsStayWhereTheyAre() {
+        let board = OrderBoard()
+        board.store.setLocked(true, .element(board.b))
+
+        for arrangement in DesignStore.Arrangement.allCases {
+            #expect(!board.store.canArrange(board.selection(board.b), arrangement))
+            #expect(!board.store.canArrange(board.b, arrangement))
+            #expect(!board.store.canArrange(board.selection(board.b, board.drawing), arrangement))
+        }
+        // Selected with something that isn't locked, it stays and the other moves.
+        board.store.arrange(board.selection(board.b, board.d), .back)
+        #expect(board.screenOrder == ["D", "A", "B", "C", "E"])
+
+        // The commands for the selection agree.
+        board.model.selection = board.selection(board.b)
+        #expect(!board.model.canArrangeSelection(.front))
+        board.model.arrangeSelection(.front)
+        #expect(board.screenOrder == ["D", "A", "B", "C", "E"])
+    }
+
+    @Test func siriSaysWhyADrawingOrALockedThingKeepsItsPlace() throws {
+        let board = OrderBoard()
+
+        let drawing = #expect(throws: LayerIntentError.self) {
+            try ArrangeElementIntent.arrange(board.drawing, in: board.model, .back, undoManager: nil)
+        }
+        #expect(drawing.map { if case .drawingsStayOnTop = $0 { true } else { false } } == true)
+        #expect(board.canvasOrder == ["note 1", "note 2", "drawing"])
+
+        board.store.setLocked(true, .element(board.c))
+        let locked = #expect(throws: LayerIntentError.self) {
+            try ArrangeElementIntent.arrange(board.c, in: board.model, .front, undoManager: nil)
+        }
+        #expect(locked.map { if case .locked = $0 { true } else { false } } == true)
+
+        // Anything else is arranged, as one step of the design's own.
+        try ArrangeElementIntent.arrange(board.a, in: board.model, .front, undoManager: nil)
+        #expect(board.screenOrder == ["B", "C", "D", "E", "A"])
+        board.undo.undo()
+        #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
     }
 }

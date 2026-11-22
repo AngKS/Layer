@@ -29,8 +29,8 @@ extension DesignStore {
     /// Moves what is selected up or down among its siblings: the things it shares its screen,
     /// or the open canvas, with. Things on different screens each move among their own.
     /// Several things that are siblings move as one block, keeping their own order and
-    /// closing the gaps between them. A screen in the selection is left as it is, and so is
-    /// a drawing. One step to undo, however many screens it reorders.
+    /// closing the gaps between them. A screen in the selection is left as it is, and so are
+    /// a drawing and anything locked. One step to undo, however many screens it reorders.
     func arrange(_ selection: CanvasSelection, _ arrangement: Arrangement) {
         let orders = arranged(selection, arrangement)
         guard !orders.isEmpty else { return }
@@ -50,10 +50,15 @@ extension DesignStore {
     /// canvas, nil) whose order arranging the selection changes.
     private func arranged(_ selection: CanvasSelection, _ arrangement: Arrangement) -> [DesignScreen.ID?: [DesignElement.ID]] {
         // What moves, by the sibling set it moves in: what is on one screen, or on the
-        // open canvas. A drawing is in none, and a screen is not arranged.
+        // open canvas. A drawing is in none, a screen is not arranged, and a locked thing
+        // stays where it is, whichever way it is asked: the popover, the Format panel, a
+        // shortcut or Siri. The lock is checked on what is selected, not on what goes with
+        // it. Task 4: a selected group moves as its whole block, and every member goes with
+        // it, whether locked on its own or only by a group inside it, as when the group is
+        // moved.
         var moving: [DesignScreen.ID?: (member: ElementRef, ids: Set<DesignElement.ID>)] = [:]
         for case .element(let ref) in selection.things {
-            guard let (element, _) = resolve(ref), element.kind != .drawing else { continue }
+            guard let (element, _) = resolve(ref), element.kind != .drawing, !isLocked(.element(ref)) else { continue }
             moving[element.parent, default: (ref, [])].ids.insert(element.id)
         }
         var orders: [DesignScreen.ID?: [DesignElement.ID]] = [:]

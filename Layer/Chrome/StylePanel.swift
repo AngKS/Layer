@@ -86,7 +86,10 @@ private struct ElementSettings: View {
                 IconButton(element.isLocked ? "Unlock" : "Lock", symbol: element.isLocked ? "lock.fill" : "lock", isOn: element.isLocked) {
                     model.toggleLockOfSelection()
                 }
-                ArrangeButtons()
+                // A drawing stays on top: there is no order to change.
+                if element.kind != .drawing {
+                    ArrangeButtons()
+                }
             }
         }
 

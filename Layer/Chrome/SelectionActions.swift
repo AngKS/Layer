@@ -145,6 +145,8 @@ struct SelectionActions: View {
         } label: {
             ToolIcon(symbol: "align.horizontal.left")
         }
+        // In the order written, even when the menu opens upwards.
+        .menuOrder(.fixed)
         .accessibilityLabel("Align")
         ToolButton(symbol: "plus.square.on.square", label: "Duplicate") {
             withAnimation(.smooth(duration: 0.25)) { model.duplicateSelection() }
@@ -184,6 +186,8 @@ struct SelectionActions: View {
             } label: {
                 ToolIcon(symbol: "square.3.layers.3d")
             }
+            // Front at the top and back at the bottom, even when the menu opens upwards.
+            .menuOrder(.fixed)
             .accessibilityLabel("Arrange")
         }
     }
