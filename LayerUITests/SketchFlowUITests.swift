@@ -1079,6 +1079,26 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
     }
 
+    /// A number typed into a Format field and not confirmed is applied when a tap on empty
+    /// canvas closes the panel, which doesn't blur the field: it is removed with it.
+    func testATypedFormatNumberIsAppliedWhenTheCanvasIsTapped() {
+        let button = addAButtonAndOpenTheFormatPanel()
+        let wider = Int(button.size.width) + 40
+        control("W").tap()
+        let typing = app.textFields["W"]
+        XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the W field should let it be typed in")
+        typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "\(wider)")
+
+        point(emptyCanvasPoint).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        // The panel goes with the selection: a soft check, it can linger as it slides out.
+        if !waitForFormatPanelToClose(timeout: 5) { XCTContext.runActivity(named: "the Format panel was still open 5 s after a deselect") { _ in } }
+
+        point(button.centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5))
+        XCTAssertEqual(selectionSize.width, Double(wider), accuracy: 2, "the typed width should have been applied")
+    }
+
     /// Rows in the Layers panel drag to reorder, into an open group, out of it and onto a closed
     /// group's row, each by a long press then a drag; a quick swipe still scrolls.
     func testLayersPanelRowsDragIntoAndOutOfGroups() {
@@ -1117,7 +1137,7 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(layerOrder(["Symbol", "Group"]), "the symbol should start above the group")
         dragRow("Symbol", onto: "Group")
         // The symbol is selected, so the group it is in opens on it.
-        let chevron = app.buttons["Show contents"].firstMatch
+        let chevron = app.buttons.matching(NSPredicate(format: "label == 'Contents' AND value == 'Collapsed' AND enabled == true")).firstMatch
         if chevron.waitForExistence(timeout: 2) { chevron.tap() }
         XCTAssertTrue(waitForLayers { self.layerOrder(["Group", "Symbol", "Button", "Button"]) }, "a row dropped on a closed group's row should go inside, at the top; it landed at the top of the group")
         attach("layers-drag-into-group")
@@ -1361,7 +1381,14 @@ final class SketchFlowUITests: XCTestCase {
     /// bar's own Format button, which stays where it is: the selection popover's glides into
     /// place under a new selection, and can miss a tap.
     private func showFormatPanel(with label: String, afterDeselecting: Bool = false) {
-        if afterDeselecting || !isFormatPanelOpen { control("Format").tap() }
+        if afterDeselecting {
+            // The old panel's controls can linger as it slides out: wait for it to go, so that
+            // what is found below belongs to the panel opened now.
+            _ = waitForFormatPanelToClose(timeout: 5)
+            control("Format").tap()
+        } else if !isFormatPanelOpen {
+            control("Format").tap()
+        }
         for _ in 0..<2 {
             if panelControl(label, timeout: 6) != nil { return }
             if !isFormatPanelOpen { control("Format").tap() }

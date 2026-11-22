@@ -650,6 +650,21 @@ struct NumberDraftTests {
         #expect(draft.committed(in: wide, wraps: false) == nil)
     }
 
+    /// The field can be removed rather than blurred (a tap on empty canvas closes the panel,
+    /// another kind of thing swaps the settings), so it commits as it disappears; and when it
+    /// blurred first, the disappearing doesn't commit again.
+    @Test func whatIsTypedCommitsOnceHoweverTypingEnds() {
+        var removed = NumberDraft(353)
+        removed.text = "706"
+        #expect(removed.finish(in: wide, wraps: false) == 706, "removed without a blur")
+        #expect(removed.finish(in: wide, wraps: false) == nil)
+
+        var blurredThenRemoved = NumberDraft(353)
+        blurredThenRemoved.text = "706"
+        #expect(blurredThenRemoved.finish(in: wide, wraps: false) == 706)
+        #expect(blurredThenRemoved.finish(in: wide, wraps: false) == nil, "one change, not two")
+    }
+
     @Test func theSameNumberCommitsNothing() {
         var draft = NumberDraft(353)
         draft.text = "353"

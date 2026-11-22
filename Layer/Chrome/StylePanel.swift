@@ -953,6 +953,11 @@ struct TypedNumber: View {
         _draft = State(initialValue: NumberDraft(value.wrappedValue))
     }
 
+    /// Sets what is typed on the value the field began with, the first time typing ends.
+    private func commit() {
+        if let value = draft.finish(in: range, wraps: wraps) { target.wrappedValue = value }
+    }
+
     var body: some View {
         TextField(label, text: $draft.text)
             .keyboardType(.numbersAndPunctuation)
@@ -965,9 +970,12 @@ struct TypedNumber: View {
             }
             .onChange(of: isEditing) { _, focused in
                 guard !focused else { return }
-                if let value = draft.committed(in: range, wraps: wraps) { target.wrappedValue = value }
+                commit()
                 onEnd()
             }
+            // A tap on the canvas doesn't blur the field: it is removed, with the panel or the
+            // settings it is in, and what was typed is set as it goes.
+            .onDisappear(perform: commit)
             .accessibilityLabel(label)
     }
 }
@@ -981,12 +989,22 @@ struct NumberDraft: Equatable {
     var text: String
     /// The number the field began with.
     let start: CGFloat
+    /// Typing has ended and what was typed has been taken.
+    private var isFinished = false
 
     static let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1))
 
     init(_ value: CGFloat) {
         start = value
         text = Double(value).formatted(Self.format)
+    }
+
+    /// `committed(in:wraps:)` the first time typing ends, nil after: Return or a blur, and then
+    /// the field going, are one change.
+    mutating func finish(in range: ClosedRange<CGFloat>, wraps: Bool) -> CGFloat? {
+        guard !isFinished else { return nil }
+        isFinished = true
+        return committed(in: range, wraps: wraps)
     }
 
     /// The value the text comes to, within `range` (or turned round it, if `wraps`), when it
