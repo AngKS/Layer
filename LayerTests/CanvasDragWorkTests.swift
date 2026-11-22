@@ -40,6 +40,21 @@ private struct BusyBoard {
         model.tool = .select
     }
 
+    /// Lines 5, 6 and 7 put in a group, as Group does.
+    func groupThreeLines() -> DesignStore.ElementRef? {
+        store.group(CanvasSelection(lines[5...7].map { CanvasSelection.element($0) })!)
+    }
+
+    /// One frame of a finger dragging a group's target `dx` across the glass since it landed.
+    func drag(_ drags: CanvasDrags, group: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
+        guard let (element, placement) = store.resolve(group) else { return }
+        drags.moveOnTarget(group, element: element, placement: placement, on: store.screen(screen), by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model)
+    }
+
+    /// Out 30 points across the glass and back again, a point a frame: 60 frames, each of
+    /// which moves what is dragged.
+    static let outAndBack = Array(1...30) + Array((0...29).reversed())
+
     /// One frame of a finger dragging `ref` `dx` across the glass since it landed.
     func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
         guard let (element, placement) = store.resolve(ref) else { return }
@@ -101,6 +116,33 @@ struct CanvasDragWorkTests {
             #expect(strokes(startingPast: area.minX + CGFloat(frame) * 3 - 6) == 10, "frame \(frame): its ink is where it has been dragged to")
         }
         drags.dropElement(ref, findsNewHome: true, owner: owner, model: board.model)
+    }
+
+    /// With groups on the board every change puts them right as well, and a frame of a drag
+    /// writes only what it moves: a group's members and its box, or one element. Nothing that
+    /// stays as it was is written, so nothing is copied for it (C6, M6).
+    @Test func aDragFrameWritesOnlyWhatItMoves() throws {
+        let board = BusyBoard()
+        let g = try #require(board.groupThreeLines())
+        let drags = CanvasDrags()
+        board.model.drags = drags
+
+        let owner = CanvasDrags.Owner()
+        let start = ListWork.elementsWritten
+        for dx in BusyBoard.outAndBack { board.drag(drags, group: g, by: CGFloat(dx), owner: owner) }
+        let groupWrites = ListWork.elementsWritten - start
+        drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
+        // Three lines and the group's box, on each of 60 frames.
+        #expect(groupWrites == 60 * 4, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
+        #expect(!board.store.isEditing)
+
+        // A line outside the group, dragged beside it: only the line is written.
+        let other = CanvasDrags.Owner()
+        let before = ListWork.elementsWritten
+        for dx in BusyBoard.outAndBack { board.drag(drags, board.lines[20], by: CGFloat(dx), owner: other) }
+        let lineWrites = ListWork.elementsWritten - before
+        drags.dropElement(board.lines[20], findsNewHome: true, owner: other, model: board.model)
+        #expect(lineWrites == 60, "elements written during a 60-frame drag of one line: \(lineWrites)")
     }
 
     /// Changes made by something else while a drag is under way, a spoken command say, are
@@ -187,6 +229,33 @@ extension HostedWindowSuites {
             // Every target on every frame then: 40 lines, 60 times (2,441 measured); now only the
             // line dragged, once a frame (60).
             #expect(built <= 70, "targets built during a 60-frame drag: \(built)")
+        }
+
+        /// Review Focus 6: a group dragged builds its own target, once a frame, and no other.
+        /// Its members have none of their own until it is gone into, and nothing else moves.
+        @Test func aGroupDragBuildsOnlyItsOwnTarget() async throws {
+            let board = BusyBoard()
+            let g = try #require(board.groupThreeLines())
+            let (window, view) = try await show(board)
+            defer { window.isHidden = true }
+            let drags = try #require(board.model.drags)
+
+            var built = Int.max
+            for _ in 0..<3 where built > 70 {
+                try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
+                let start = CanvasWork.targetsBuilt
+                let owner = CanvasDrags.Owner()
+                for dx in BusyBoard.outAndBack {
+                    board.drag(drags, group: g, by: CGFloat(dx), owner: owner)
+                    view.layoutIfNeeded()
+                    try await Task.sleep(for: .milliseconds(4))
+                }
+                drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
+                try await settle(view)
+                built = CanvasWork.targetsBuilt - start
+            }
+            // The group's own target, once for each of 60 frames.
+            #expect(built >= 60 && built <= 70, "targets built during a 60-frame drag of a group: \(built)")
         }
 
         /// A pinch changes the zoom on every frame. The targets' smallest size follows the zoom

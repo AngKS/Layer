@@ -28,6 +28,11 @@ extension DesignContent {
 
     /// The things in a group at any depth that aren't groups themselves, back to front.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
+        contents(of: group).filter { $0.kind != .group }
+    }
+
+    /// Everything in a group at any depth, the groups inside it included, back to front.
+    func contents(of group: DesignElement.ID) -> [DesignElement] {
         var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
         for element in elements {
             if let parentGroup = element.group { inside[parentGroup, default: []].append(element.id) }
@@ -38,7 +43,7 @@ extension DesignContent {
             guard next != group, found.insert(next).inserted else { continue }
             waiting += inside[next] ?? []
         }
-        return elements.filter { found.contains($0.id) && $0.kind != .group }
+        return found.isEmpty ? [] : elements.filter { found.contains($0.id) }
     }
 
     /// The groups an element is in, the nearest first.
@@ -391,6 +396,119 @@ extension DesignStore {
         }
         // A group gone into is stood for by what is in it.
         return element.kind != .group || !entered.contains(element.id)
+    }
+
+    // MARK: Moving, landing and resizing a group
+
+    /// What turns an element's frame into canvas points, where it is: its screen's placement,
+    /// or on the open canvas its own scale. Nil when its screen is gone.
+    func placement(of element: DesignElement) -> Placement? {
+        guard let parent = element.parent else { return Placement(origin: .zero, scale: element.scale ?? 1) }
+        return screen(parent)?.placement
+    }
+
+    /// A group as a handle drag on it began: what each frame of the drag resizes it from, so
+    /// that the frames don't compound and drift.
+    struct GroupPose: Equatable, Sendable {
+        /// Its box: the group item's frame, in its own points.
+        var box: CGRect
+        /// The frame of each thing in it, at any depth, that isn't a group.
+        var leaves: [DesignElement.ID: CGRect]
+        /// The angle of the group and of each group inside it.
+        var angles: [DesignElement.ID: Double]
+    }
+
+    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group.
+    func groupPose(of ref: ElementRef) -> GroupPose? {
+        guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
+        var pose = GroupPose(box: item.frame, leaves: [:], angles: [item.id: item.resolvedRotation])
+        for element in content.contents(of: item.id) {
+            if element.kind == .group {
+                pose.angles[element.id] = element.resolvedRotation
+            } else {
+                pose.leaves[element.id] = element.frame
+            }
+        }
+        return pose
+    }
+
+    /// Resizes a group to `frame`, in its own points, as one change: from `start`, the group as
+    /// a handle drag on it began, or from where it is now. With s the new box's width over the
+    /// start's, the middle of each thing in it, at any depth, goes where it was in the start box,
+    /// read along the box's own axes, in the new one; and each one's frame is s times as large.
+    /// Their angles, and their text's size, stay as they are, so that a turned member is never
+    /// sheared. A frame in proportion with the box, as the handles and the fields give, scales
+    /// everything alike; the box is then fitted round them again (`keepGroupsSound()`). Nothing
+    /// happens to a group that is locked, by itself or by a group above it.
+    func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
+        guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
+              let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
+        else { return }
+        var frames: [DesignElement.ID: CGRect] = [:]
+        if frame == pose.box {
+            // Back where it began: exactly as it was, with no arithmetic to round.
+            frames = pose.leaves
+        } else {
+            let degrees = item.resolvedRotation
+            let scale = frame.width / pose.box.width
+            let across = CGSize(width: frame.width / pose.box.width, height: frame.height / pose.box.height)
+            /// Where a point in the start box goes in the new one, both in the points of `own`.
+            func moved(_ point: CGPoint, in own: Placement) -> CGPoint {
+                let from = own == placement ? pose.box : own.localRect(for: placement.canvasRect(for: pose.box))
+                let to = own == placement ? frame : own.localRect(for: placement.canvasRect(for: frame))
+                let upright = Rotation.normalized(degrees) == 0
+                let along = upright ? point : Rotation.rotate(point, about: CGPoint(x: from.midX, y: from.midY), by: -degrees)
+                let placed = CGPoint(x: to.minX + (along.x - from.minX) * across.width, y: to.minY + (along.y - from.minY) * across.height)
+                return upright ? placed : Rotation.rotate(placed, about: CGPoint(x: to.midX, y: to.midY), by: degrees)
+            }
+            for (id, start) in pose.leaves {
+                guard let leaf = element(id), let own = self.placement(of: leaf) else { continue }
+                let centre = moved(CGPoint(x: start.midX, y: start.midY), in: own)
+                let size = CGSize(width: start.width * scale, height: start.height * scale)
+                frames[id] = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
+            }
+        }
+        apply { content in
+            for (id, frame) in frames { content.update(id) { $0.frame = frame } }
+            for (id, degrees) in pose.angles { content.update(id) { $0.setRotation(degrees) } }
+        }
+    }
+
+    /// Gives a group to whatever the middle of its box now lies on, as after a drag: the
+    /// screen there, or the open canvas when there is none. Everything in it, at any depth,
+    /// goes there in one change, back to front, so that it lands whole and stacked as it was,
+    /// on top of what is there; built over several, the groups would be put right in between
+    /// and come apart. Each thing keeps its middle where it is on the canvas and its size in
+    /// points, as an element landing on its own does. A group holding something that doesn't
+    /// go on screens, a sticky note, stays where it is instead of landing on a screen.
+    /// Returns where the group now lives.
+    @discardableResult
+    func rehostGroup(_ ref: ElementRef) -> ElementRef {
+        guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
+        let box = placement.canvasRect(for: item.frame)
+        let target = screen(at: CGPoint(x: box.midX, y: box.midY))
+        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
+        guard host != ref.host else { return ref }
+        let inside = content.contents(of: item.id)
+        if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
+        let moving = Set(inside.map(\.id) + [item.id])
+        var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
+        for element in content.elements where moving.contains(element.id) {
+            guard let own = self.placement(of: element) else { return ref }
+            // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
+            let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)
+            let onCanvas = own.canvasRect(for: element.frame)
+            let centre = landing.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
+            var origin = CGPoint(x: centre.x - element.frame.width / 2, y: centre.y - element.frame.height / 2)
+            // A group's box is fitted round its members once they have landed.
+            if element.kind != .group, element.kind != .drawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
+            moves.append((element.id, landing.scale, CGRect(origin: origin, size: element.frame.size)))
+        }
+        apply { content in
+            for move in moves { content.move(move.id, to: target?.id, scale: move.scale, frame: move.frame) }
+        }
+        let landed = ElementRef(host: host, element: item.id)
+        return resolve(landed) != nil ? landed : ref
     }
 
     // MARK: Group and Ungroup

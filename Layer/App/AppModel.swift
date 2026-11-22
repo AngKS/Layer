@@ -1736,19 +1736,25 @@ final class AppModel {
     /// That session as it was when the drag moving them began, if it held then.
     @ObservationIgnored private var moveStart: TurnSession?
 
-    /// The one element selected, unless it is locked, by itself or by a group above it: what
-    /// a turn turns.
+    /// The one element selected, unless it is locked, by itself or by a group above it, or is
+    /// a group, which turns as several things do: what a turn turns.
     private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
-        guard let selected = selectedElement, !store.isLocked(.element(selected.ref)) else { return nil }
+        guard let selected = selectedElement, selected.element.kind != .group, !store.isLocked(.element(selected.ref)) else { return nil }
         return (selected.ref, selected.element)
     }
 
-    /// What turns several things selected: the session kept from their last turn or move,
-    /// while it is for what is selected and each of them is as it left them; otherwise one
-    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
-    /// are selected, or when a screen is among them.
+    /// Whether what is selected is one group, which turns as one rigid piece of several
+    /// things: its members, and the groups in it, go round its middle with it.
+    private var selectsOneGroup: Bool {
+        selectedElement?.element.kind == .group
+    }
+
+    /// What turns several things selected, or one group: the session kept from their last
+    /// turn or move, while it is for what is selected and each of them is as it left them;
+    /// otherwise one formed from where they are now. Reading it keeps nothing. Nil unless
+    /// several things or a group are selected, or when a screen is among them.
     private var severalTurn: TurnSession? {
-        guard let selection, selection.isSeveral else { return nil }
+        guard let selection, selection.isSeveral || selectsOneGroup else { return nil }
         if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
         return TurnSession.form(for: selection, in: store)
     }
@@ -1890,12 +1896,13 @@ final class AppModel {
     }
 
     /// Stands what is selected upright again, in one step. Several things go back exactly
-    /// to where they were, and to the angles they had, when they were selected.
+    /// to where they were, and to the angles they had, when they were selected. A group is
+    /// turned about its middle until it is upright, everything in it going round with it.
     func resetSelectionTurn() {
         if let turnable = turnableElement {
             store.update(turnable.ref) { $0.setRotation(0) }
         } else if canTurnSelection, var session = severalTurn {
-            turn(&session, to: 0)
+            turn(&session, to: selectsOneGroup ? Rotation.normalized(-session.outline.degrees) : 0)
         }
     }
 
@@ -1912,14 +1919,16 @@ final class AppModel {
     }
 
     /// Puts several things where their session turned `degrees` places them, as one change,
-    /// and keeps the session.
+    /// and keeps the session. A group's angle is written in the same change as its members'
+    /// places, so that its box, fitted round them at the end of it, goes round as one with
+    /// them: a group selected alone has the outline's angle.
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
         let placed = session.placed(turnedBy: degrees)
         store.apply { content in
             for (ref, place) in placed {
                 content.update(ref.element) {
-                    $0.frame = place.frame
+                    if $0.kind != .group { $0.frame = place.frame }
                     $0.rotation = place.rotation
                 }
             }
@@ -1929,19 +1938,21 @@ final class AppModel {
     }
 
     /// How far what is selected is turned, for the readout beside the knob: one element's
-    /// angle, or how far several things have turned since they were selected.
+    /// angle, a group's among them, or how far several things have turned since they were
+    /// selected.
     var selectionTurn: Double? {
         if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
         return selectedElement?.element.resolvedRotation
     }
 
     /// The shape of what is selected, in canvas points, turned as it is. For several
-    /// things, the outline they turn within (`TurnSession.shape`), or, with a screen
-    /// among them, the upright box round them all.
+    /// things, or a group, the outline they turn within (`TurnSession.shape`), which goes
+    /// round rigidly with them; with a screen among several, the upright box round them all.
     var selectionShape: TurnedRect? {
         guard let selection else { return nil }
-        guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        guard selection.isSeveral || selectsOneGroup else { return store.canvasShape(of: selection) }
         if let session = severalTurn { return session.shape }
+        guard selection.isSeveral else { return store.canvasShape(of: selection) }
         return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
     }
 

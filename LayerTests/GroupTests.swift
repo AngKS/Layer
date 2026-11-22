@@ -1378,3 +1378,444 @@ struct SelectingGroupsTests {
         #expect(board.model.selection == board.selection(g, board.a))
     }
 }
+
+extension OrderBoard {
+    /// A second phone screen at half size, right of the open canvas's notes: (900, 50) to
+    /// (1096.5, 476) on the canvas. Added after the first, it is drawn over the canvas there.
+    fileprivate func addSecondScreen() -> DesignScreen.ID {
+        store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 0.5)).id
+    }
+
+    /// An element's own frame, wherever it lives.
+    fileprivate func frame(of ref: DesignStore.ElementRef) -> CGRect? {
+        store.element(ref.element)?.frame
+    }
+
+    /// The middle of an element's own frame on the canvas, wherever it now lives.
+    fileprivate func canvasCentre(of ref: DesignStore.ElementRef) -> CGPoint? {
+        guard let element = store.element(ref.element) else { return nil }
+        let here = DesignStore.ElementRef(host: element.parent.map { .screen($0) } ?? .canvas, element: ref.element)
+        guard let (_, placement) = store.resolve(here) else { return nil }
+        let rect = placement.canvasRect(for: element.frame)
+        return CGPoint(x: rect.midX, y: rect.midY)
+    }
+
+    /// One frame of a finger dragging a group's target `translation` across the glass since
+    /// it landed at `start`, as `ElementTarget`'s drag makes it.
+    fileprivate func dragTarget(_ ref: DesignStore.ElementRef, by translation: CGSize, from start: CGPoint, owner: CanvasDrags.Owner, drags: CanvasDrags) {
+        guard let (element, placement) = store.resolve(ref) else { return }
+        let screen: DesignScreen? = if case .screen(let id) = ref.host { store.screen(id) } else { nil }
+        drags.moveOnTarget(ref, element: element, placement: placement, on: screen, by: translation, startingAt: start, owner: owner, model: model)
+    }
+}
+
+private func isNear(_ a: CGPoint?, _ b: CGPoint, within slack: CGFloat) -> Bool {
+    guard let a else { return false }
+    return abs(a.x - b.x) <= slack && abs(a.y - b.y) <= slack
+}
+
+/// A group moved, turned and resized as one piece: its members go with it, those locked on
+/// their own included, and a locked group stays; dropped on another screen it lands there
+/// whole, however its drag ends; turned, its members go round its middle and nested groups
+/// turn with it; resized, its members scale in proportion from the corner across, with no
+/// shear and no drift.
+@MainActor
+@Suite("Group geometry")
+struct GroupGeometryTests {
+    // MARK: Moving
+
+    @Test func movingAGroupMovesItsMembers() throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let g = board.group(board.b, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let (a, b, d) = (try #require(board.frame(of: board.a)), try #require(board.frame(of: board.b)), try #require(board.frame(of: board.d)))
+
+        // What the group is lined up with as it is dragged leaves out what it holds, which
+        // moves with it: dragged a little, it would stick to where it was.
+        let others = board.store.canvasFrames(besides: [.element(g)])
+        #expect(!others.contains(try #require(board.store.canvasFrame(of: .element(board.b)))))
+        #expect(!others.contains(try #require(board.store.canvasFrame(of: .element(board.d)))))
+        #expect(others.contains(try #require(board.store.canvasFrame(of: .element(board.a)))))
+
+        // A finger on the group's target, 20 points across the glass: 20 on the canvas, 40
+        // of the half-size screen's own.
+        let before = board.store.content
+        let mark = board.store.historyMark
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.b)
+        for dx in [5.0, 12.0, 20.0] {
+            board.dragTarget(g, by: CGSize(width: dx, height: 0), from: start, owner: owner, drags: drags)
+        }
+        drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
+
+        #expect(board.frame(of: board.b) == b.offsetBy(dx: 40, dy: 0))
+        #expect(board.frame(of: board.d) == d.offsetBy(dx: 40, dy: 0))
+        #expect(board.frame(of: board.a) == a)
+        #expect(board.model.selection == .element(g))
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.store.historyMark == mark + 1, "the drag is one step")
+        #expect(board.undo.undoActionName == "Move")
+        board.undo.undo()
+        #expect(board.store.content == before)
+
+        // Selected, it is dragged by what drags the selection: 10 down the glass.
+        board.model.selection = .element(g)
+        let again = board.store.historyMark
+        let other = CanvasDrags.Owner()
+        drags.moveGroup(by: CGSize(width: 0, height: 4), startingAt: start, owner: other, model: board.model)
+        drags.moveGroup(by: CGSize(width: 0, height: 10), startingAt: start, owner: other, model: board.model)
+        drags.dropGroup(owner: other, model: board.model)
+        #expect(board.frame(of: board.b) == b.offsetBy(dx: 0, dy: 20))
+        #expect(board.frame(of: board.d) == d.offsetBy(dx: 0, dy: 20))
+        #expect(board.store.historyMark == again + 1)
+    }
+
+    /// D3: half of it moves, so that it fails while only the group item's frame is written,
+    /// which the pass then fits round members that didn't move.
+    @Test func aLockedGroupDoesntMoveAndNeitherDoItsMembers() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let box = try #require(board.store.canvasFrame(of: .element(g)))
+        let (b, d) = (try #require(board.frame(of: board.b)), try #require(board.frame(of: board.d)))
+
+        board.store.position([.element(g): CGPoint(x: box.minX + 20, y: box.minY)])
+        #expect(board.frame(of: board.b) == b.offsetBy(dx: 40, dy: 0))
+        #expect(board.frame(of: board.d) == d.offsetBy(dx: 40, dy: 0))
+        #expect(board.store.canvasFrame(of: .element(g)) == box.offsetBy(dx: 20, dy: 0))
+
+        board.store.setLocked(true, .element(g))
+        let locked = board.store.content
+        board.store.position([.element(g): CGPoint(x: box.minX + 60, y: box.minY)])
+        board.store.position([.element(board.b): CGPoint(x: box.minX - 40, y: box.minY)])
+        #expect(board.store.content == locked)
+    }
+
+    @Test func aMemberLockedOnItsOwnMovesWithItsGroup() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.store.update(board.b) { $0.isLocked = true }
+        let box = try #require(board.store.canvasFrame(of: .element(g)))
+        let (b, d) = (try #require(board.frame(of: board.b)), try #require(board.frame(of: board.d)))
+
+        board.store.position([.element(g): CGPoint(x: box.minX + 20, y: box.minY - 10)])
+
+        #expect(board.frame(of: board.b) == b.offsetBy(dx: 40, dy: -20))
+        #expect(board.frame(of: board.d) == d.offsetBy(dx: 40, dy: -20))
+        #expect(board.store.element(board.b.element)?.isLocked == true)
+    }
+
+    @Test func droppingAGroupOnAnotherScreenMovesItWhole() throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let second = board.addSecondScreen()
+        let g = board.group(board.b, board.c, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let members = [board.b, board.c, board.d]
+        let centres = try members.map { try #require(board.canvasCentre(of: $0)) }
+        let before = board.store.content
+        let mark = board.store.historyMark
+
+        // Its middle, at (195, 245), dragged 800 points across: over the second screen.
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.c)
+        board.dragTarget(g, by: CGSize(width: 400, height: 0), from: start, owner: owner, drags: drags)
+        board.dragTarget(g, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
+        drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
+
+        let moved = DesignStore.ElementRef(host: .screen(second), element: g.element)
+        #expect(board.model.selection == .element(moved))
+        #expect(board.order(on: .screen(second)) == ["B", "C", "D", "G"])
+        #expect(board.screenOrder == ["A", "E"])
+        for (ref, centre) in zip(members, centres) {
+            #expect(board.store.element(ref.element)?.parent == second)
+            #expect(board.store.element(ref.element)?.group == g.element)
+            // Each keeps its place on the canvas, to half a point of the screen's own.
+            #expect(isNear(board.canvasCentre(of: ref), CGPoint(x: centre.x + 800, y: centre.y), within: 0.25))
+        }
+        #expect(board.store.historyMark == mark + 1, "the drag and its landing are one step")
+        board.undo.undo()
+        #expect(board.store.content == before)
+
+        // Sticky notes don't go on screens: a group of them dropped on one stays on the open
+        // canvas, where it was dropped.
+        let notes = board.group(board.note1, board.note2, named: "N")
+        let note1 = try #require(board.canvasCentre(of: board.note1))
+        let other = CanvasDrags.Owner()
+        let onNote = board.middle(of: board.note1)
+        board.dragTarget(notes, by: CGSize(width: -500, height: 0), from: onNote, owner: other, drags: drags)
+        drags.dropOnTarget(notes, startingAt: onNote, owner: other, model: board.model)
+        #expect(board.model.selection == .element(notes))
+        for ref in [board.note1, board.note2, notes] {
+            #expect(board.store.element(ref.element)?.parent == nil)
+        }
+        #expect(board.store.element(board.note1.element)?.group == notes.element)
+        #expect(isNear(board.canvasCentre(of: board.note1), CGPoint(x: note1.x - 500, y: note1.y), within: 0.001))
+    }
+
+    /// How a drag can end without its finger lifting (see `CanvasDrags`).
+    enum CutShort: CaseIterable {
+        case swiftUICancels, toolChanges, twistTakesOver, pencilLands
+    }
+
+    /// C4: a drag cut short lands what it moved as a drop would, in the drag's own step. A
+    /// group lands whole, in its order. A twist that takes over goes on turning it there, in
+    /// the same step.
+    @Test(arguments: CutShort.allCases)
+    func aGroupDragCutShortLandsWhole(by cut: CutShort) throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let second = board.addSecondScreen()
+        let g = board.group(board.b, board.c, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let landed = DesignStore.ElementRef(host: .screen(second), element: g.element)
+        let before = board.store.content
+        let mark = board.store.historyMark
+
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.c)
+        if cut == .pencilLands {
+            // With the palette up, a selected group is dragged by its area.
+            board.model.tool = .draw
+            board.model.selection = .element(g)
+            drags.moveGroup(by: CGSize(width: 400, height: 0), startingAt: start, owner: owner, model: board.model)
+            drags.moveGroup(by: CGSize(width: 800, height: 0), startingAt: start, owner: owner, model: board.model)
+        } else {
+            board.dragTarget(g, by: CGSize(width: 400, height: 0), from: start, owner: owner, drags: drags)
+            board.dragTarget(g, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
+        }
+        let box = try #require(board.store.canvasShape(of: .element(g)))
+        let centres = try [board.b, board.c, board.d].map { try #require(board.canvasCentre(of: $0)) }
+
+        switch cut {
+        case .swiftUICancels:
+            drags.cancel(owner, model: board.model)
+            #expect(board.model.selection == .element(landed))
+        case .toolChanges:
+            board.model.tool = .draw
+        case .twistTakesOver:
+            #expect(board.model.beginTwist())
+            #expect(board.model.selection == .element(landed), "it lands on the second screen as the twist begins")
+            board.model.twist(by: 30)
+            board.model.endTwist()
+            // What SwiftUI still reports of the drag lands nothing.
+            board.dragTarget(landed, by: CGSize(width: 820, height: 0), from: start, owner: owner, drags: drags)
+            drags.dropOnTarget(landed, startingAt: start, owner: owner, model: board.model)
+            #expect(board.store.element(g.element)?.rotation == 30)
+            for (ref, centre) in zip([board.b, board.c, board.d], centres) {
+                #expect(board.store.element(ref.element)?.rotation == 30)
+                #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
+            }
+            #expect(board.undo.undoActionName == "Move and Rotate")
+        case .pencilLands:
+            let selected = try #require(board.model.selectionViewRect)
+            board.model.pencilTouched(at: CGPoint(x: selected.midX, y: selected.midY))
+            #expect(board.model.selection == nil)
+            drags.cancel(owner, model: board.model)
+            #expect(board.model.selection == nil, "let go of, it isn't selected again")
+        }
+
+        #expect(!drags.isDragging && !board.store.isEditing && !board.model.isAdjusting)
+        #expect(board.order(on: .screen(second)) == ["B", "C", "D", "G"])
+        #expect(board.members(of: landed) == ["B", "C", "D"])
+        #expect(board.screenOrder == ["A", "E"])
+        #expect(board.store.historyMark == mark + 1, "the drag and its landing are one step")
+        board.undo.undo()
+        #expect(board.store.content == before)
+    }
+
+    /// A member moved on its own to another screen leaves its group (the pass's rule 1).
+    @Test func aMemberDraggedAloneToAnotherScreenLeavesTheGroup() throws {
+        let board = OrderBoard()
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        board.model.tool = .select
+        let second = board.addSecondScreen()
+        let g = board.group(board.b, board.c, board.d)
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        // Gone into, the group's members have targets of their own.
+        board.model.selection = .element(board.b)
+        let owner = CanvasDrags.Owner()
+        let start = board.middle(of: board.b)
+        board.dragTarget(board.b, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
+        drags.dropOnTarget(board.b, startingAt: start, owner: owner, model: board.model)
+
+        #expect(board.model.selection == .element(DesignStore.ElementRef(host: .screen(second), element: board.b.element)))
+        #expect(board.store.element(board.b.element)?.parent == second)
+        #expect(board.store.element(board.b.element)?.group == nil)
+        #expect(board.members(of: g) == ["C", "D"])
+        #expect(board.screenOrder == ["A", "C", "D", "G", "E"])
+    }
+
+    // MARK: Turning
+
+    @Test func turningAGroupTurnsItsMembersAboutItsMiddleAndKeepsItsAngle() throws {
+        let board = OrderBoard()
+        // A long button on the open canvas below the notes, and the notes in a group of their
+        // own, already turned a little, all in one group.
+        let button = board.store.addFloating(OrderBoard.element(.button, named: "button", CGRect(x: 480, y: 560, width: 320, height: 60)), scale: 1)
+        let inner = board.group(board.note1, board.note2, named: "I") { $0.setRotation(10) }
+        let g = board.group(button, inner)
+        board.model.selection = .element(g)
+        let before = board.store.content
+        let box = try #require(board.store.canvasShape(of: .element(g)))
+        #expect(box.degrees == 0)
+        let members = [button, board.note1, board.note2]
+        let centres = try members.map { try #require(board.canvasCentre(of: $0)) }
+        // The outline is the group's own box.
+        let outline = try #require(board.model.selectionShape)
+        #expect(outline.degrees == 0 && close(outline.rect, box.rect, within: 0.000_1))
+
+        #expect(board.model.canTurnSelection)
+        #expect(board.model.beginTurn())
+        board.model.turnSelection(by: 30, snaps: false)
+        board.model.endTurn()
+
+        #expect(board.store.element(g.element)?.rotation == 30)
+        #expect(board.store.element(inner.element)?.rotation == 40)
+        for (ref, centre) in zip(members, centres) {
+            #expect(board.store.element(ref.element)?.rotation == 30)
+            #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
+        }
+        // The outline and the knob went round rigidly, and the group's box is at its angle.
+        #expect(board.model.selectionShape?.degrees == 30)
+        #expect(board.store.canvasShape(of: .element(g))?.degrees == 30)
+        #expect(board.model.selectionTurn == 30)
+        #expect(board.undo.undoActionName == "Rotate")
+
+        board.model.beginTurn()
+        board.model.turnSelection(by: -30, snaps: false)
+        board.model.endTurn()
+        #expect(board.store.content == before)
+
+        // Reset stands it upright: turned to 50 from 20, it goes back to 0.
+        board.model.rotateSelection(by: 20)
+        board.model.selection = nil
+        board.model.selection = .element(g)
+        board.model.rotateSelection(by: 30)
+        #expect(board.store.element(g.element)?.rotation == 50)
+        board.model.resetSelectionTurn()
+        #expect(board.store.element(g.element)?.rotation == nil)
+        #expect(board.store.element(inner.element)?.rotation == 10)
+        #expect(board.store.element(button.element)?.rotation == nil)
+    }
+
+    /// Carried from Task 3: the session reads the lock a group gives, and a turning group
+    /// still turns its own members locked on their own.
+    @Test func aMemberLockedOnItsOwnTurnsWithItsGroup() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.store.update(board.b) { $0.isLocked = true }
+        board.model.selection = .element(g)
+        let box = try #require(board.store.canvasShape(of: .element(g)))
+        let centres = try [board.b, board.d].map { try #require(board.canvasCentre(of: $0)) }
+        #expect(board.model.canTurnSelection)
+
+        board.model.rotateSelection(by: 30)
+
+        #expect(board.store.element(g.element)?.rotation == 30)
+        for (ref, centre) in zip([board.b, board.d], centres) {
+            #expect(board.store.element(ref.element)?.rotation == 30)
+            #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
+        }
+
+        // Selected on its own, B is locked, and doesn't turn.
+        board.model.selection = .element(board.b)
+        #expect(!board.model.canTurnSelection)
+        // A locked group doesn't turn, and nor does anything in it.
+        board.store.setLocked(true, .element(g))
+        board.model.selection = .element(g)
+        let locked = board.store.content
+        #expect(!board.model.canTurnSelection)
+        board.model.rotateSelection(by: 30)
+        board.model.resetSelectionTurn()
+        #expect(board.store.content == locked)
+    }
+
+    // MARK: Resizing
+
+    @Test func resizingAGroupScalesItsMembersInProportion() throws {
+        let board = OrderBoard()
+        var text = OrderBoard.element(.text, named: "T", CGRect(x: 40, y: 300, width: 200, height: 30))
+        text.fontSize = 17
+        let t = board.store.setElements([text], on: board.screen, replacing: false)[0]
+        let g = board.group(board.b, t, board.d)
+        let members = [board.b, t, board.d]
+        let box = try #require(board.frame(of: g))
+        #expect(box == CGRect(x: 40, y: 190, width: 300, height: 400))
+        let frames = try members.map { try #require(board.frame(of: $0)) }
+
+        // Doubled from its bottom-right corner: the top-left stays put.
+        let doubled = ElementLayout.resizedProportionally(box, degrees: 0, from: .bottomRight, by: CGSize(width: 300, height: 200))
+        #expect(doubled == CGRect(x: 40, y: 190, width: 600, height: 800))
+        board.store.resizeGroup(g, to: doubled)
+
+        for (ref, was) in zip(members, frames) {
+            #expect(board.frame(of: ref) == CGRect(x: 40 + (was.minX - 40) * 2, y: 190 + (was.minY - 190) * 2, width: was.width * 2, height: was.height * 2))
+        }
+        #expect(board.frame(of: g) == doubled)
+        #expect(board.store.element(t.element)?.fontSize == 17)
+
+        // A handle dragged out and back again, 30 frames: each frame is worked out from the
+        // group as it was when the drag began, so it lands exactly where it began.
+        let doubledFrames = try members.map { try #require(board.frame(of: $0)) }
+        let (item, placement) = try #require(board.store.resolve(g))
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+        let reach = Array(1...15) + Array((0...14).reversed())
+        for (index, step) in reach.enumerated() {
+            let translation = CGSize(width: CGFloat(step) * 4, height: CGFloat(step) * 3)
+            drags.moveElement(g, from: item.frame, placement: placement, by: translation, startingAt: CGPoint(x: 1, y: 1), findsNewHome: false, owner: owner, model: board.model) {
+                { origin, translation in
+                    (ElementLayout.resizedProportionally(origin, degrees: item.resolvedRotation, from: .bottomRight, by: translation), [])
+                }
+            }
+            if index == 14 {
+                // Out at its furthest: 60 across the glass, 120 of the screen's own, so a fifth
+                // as large again, from the top-left.
+                #expect(board.frame(of: g).map { close($0, CGRect(x: 40, y: 190, width: 720, height: 960), within: 0.001) } == true)
+                #expect(board.frame(of: board.b).map { abs($0.width - 720) < 0.001 && abs($0.height - 240) < 0.001 } == true)
+                #expect(board.undo.undoActionName == "Resize")
+            }
+        }
+        drags.dropElement(g, findsNewHome: false, owner: owner, model: board.model)
+        #expect(try members.map { try #require(board.frame(of: $0)) } == doubledFrames)
+        #expect(board.frame(of: g) == doubled)
+        #expect(!board.store.isEditing)
+    }
+
+    @Test func aTurnedGroupResizesWithoutShear() throws {
+        let board = OrderBoard()
+        board.store.update(board.b) { $0.setRotation(10) }
+        let g = board.group(board.b, board.d) { $0.setRotation(30) }
+        let (item, placement) = try #require(board.store.resolve(g))
+        let fixed = TurnedRect(rect: placement.canvasRect(for: item.frame), degrees: 30).corner(.topLeft)
+        let (b, d) = (try #require(board.frame(of: board.b)), try #require(board.frame(of: board.d)))
+
+        let frame = ElementLayout.resizedProportionally(item.frame, degrees: 30, from: .bottomRight, by: CGSize(width: 60, height: 20))
+        let s = frame.width / item.frame.width
+        #expect(s > 1)
+        #expect(abs(frame.height / item.frame.height - s) < 0.000_001)
+        board.store.resizeGroup(g, to: frame)
+
+        #expect(board.store.element(board.b.element)?.rotation == 10)
+        #expect(board.store.element(board.d.element)?.rotation == nil)
+        #expect(board.store.element(g.element)?.rotation == 30)
+        for (ref, was) in [(board.b, b), (board.d, d)] {
+            let now = try #require(board.frame(of: ref))
+            #expect(abs(now.width - was.width * s) < 0.000_1 && abs(now.height - was.height * s) < 0.000_1)
+        }
+        // Fitted round them again, the box is the one asked for: in proportion, with its
+        // top-left corner where it was on the canvas.
+        let now = try #require(board.store.canvasShape(of: .element(g)))
+        #expect(close(now.rect, placement.canvasRect(for: frame), within: 0.001))
+        #expect(isNear(now.corner(.topLeft), fixed, within: 0.001))
+    }
+}

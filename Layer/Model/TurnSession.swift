@@ -12,6 +12,10 @@ import Foundation
 /// A session holds only while each of its elements is as its last turn or move left it
 /// (`matches(_:)`). Anything else that changes one, such as undo or the format panel, ends
 /// it, and the next turn forms a new session from where things are then.
+///
+/// A group selected turns as one rigid piece: everything in it, at any depth, goes round with
+/// it, and it and each group inside it turn by as much, so that their boxes go round too. One
+/// group alone turns about the middle of its own box, from its own angle.
 struct TurnSession: Equatable {
     /// An element's frame, in its host's points, and its angle as it keeps it.
     struct Pose: Equatable {
@@ -19,15 +23,21 @@ struct TurnSession: Equatable {
         var rotation: Double?
     }
 
-    /// An element of the selection as it was when the session formed.
+    /// An element of the selection, or in a group selected, as it was when the session formed.
     struct Member: Equatable {
         var pose: Pose
         /// What turns its frame into canvas points.
         let placement: Placement
-        /// A locked element stays put, though it counts towards the outline.
+        /// Whether it stays put, though it counts towards the outline: when the thing selected
+        /// that it is, or is in, is locked, by itself or by a group above it. A member of a
+        /// group selected goes with the group whatever its own lock (spec, Lock and hide).
         let isLocked: Bool
+        /// The thing selected that it is, or is in: whose lock `isLocked` is.
+        let owner: DesignElement.ID
         /// A drawing goes exactly where it is put; anything else lands on whole points.
         let isDrawing: Bool
+        /// A group item: only its angle is its own, its box being fitted round its members.
+        let isGroup: Bool
     }
 
     let selection: CanvasSelection
@@ -44,7 +54,8 @@ struct TurnSession: Equatable {
     private(set) var expected: [DesignStore.ElementRef: Pose]
 
     /// A session for what is selected as it is now. Nil when a screen is among it, since
-    /// screens never turn, or when no element is.
+    /// screens never turn, or when no element is. A group selected counts towards the outline
+    /// by its box, and its members, and the groups inside it, turn with it.
     @MainActor
     static func form(for selection: CanvasSelection, in store: DesignStore) -> TurnSession? {
         var baseline: [DesignStore.ElementRef: Member] = [:]
@@ -52,22 +63,31 @@ struct TurnSession: Equatable {
         for thing in store.things(in: selection) {
             guard case .element(let ref) = thing else { return nil }
             guard let (element, placement) = store.resolve(ref) else { continue }
-            baseline[ref] = Member(
-                pose: Pose(frame: element.frame, rotation: element.rotation), placement: placement,
-                // Locked by itself or by a group above it, it stays where it is (F4).
-                isLocked: store.isLocked(thing), isDrawing: element.kind == .drawing
-            )
             shapes.append(TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation))
+            // Locked by itself or by a group above it, it stays where it is (F4), and so does
+            // everything in it. Unlocked, a group turns all of it, whatever their own locks.
+            let isLocked = store.isLocked(thing)
+            let turning = element.kind == .group ? [element] + store.content.contents(of: element.id) : [element]
+            for part in turning {
+                let partRef = DesignStore.ElementRef(host: ref.host, element: part.id)
+                guard let partPlacement = part.id == element.id ? placement : store.resolve(partRef)?.placement else { continue }
+                baseline[partRef] = Member(
+                    pose: Pose(frame: part.frame, rotation: part.rotation), placement: partPlacement,
+                    isLocked: isLocked, owner: element.id, isDrawing: part.kind == .drawing, isGroup: part.kind == .group
+                )
+            }
         }
+        // One group alone, or things all at one angle, turn from that angle.
         let angles = Set(shapes.map(\.degrees))
         let shared = angles.count == 1 ? angles.first! : 0
         guard let outline = TurnedRect.enclosing(shapes, at: shared) else { return nil }
         return TurnSession(selection: selection, pivot: outline.centre, outline: outline, baseline: baseline, expected: baseline.mapValues(\.pose))
     }
 
-    /// Where each element that isn't locked goes, turned `degrees` from where the session
-    /// formed: its middle goes round the pivot and it turns as much on its own. Turned by
-    /// nothing, or by whole turns, each goes back exactly to where it was.
+    /// Where each element that doesn't stay put goes, turned `degrees` from where the session
+    /// formed: its middle goes round the pivot and it turns as much on its own. A group item
+    /// turns as much, and its box goes where its members do. Turned by nothing, or by whole
+    /// turns, each goes back exactly to where it was.
     func placed(turnedBy degrees: Double) -> [DesignStore.ElementRef: (frame: CGRect, rotation: Double?)] {
         var placed: [DesignStore.ElementRef: (frame: CGRect, rotation: Double?)] = [:]
         for (ref, member) in baseline where !member.isLocked {
@@ -79,20 +99,25 @@ struct TurnSession: Equatable {
             let middle = member.placement.canvasPoint(for: CGPoint(x: frame.midX, y: frame.midY))
             let centre = member.placement.localPoint(for: Rotation.rotate(middle, about: pivot, by: degrees))
             var origin = CGPoint(x: centre.x - frame.width / 2, y: centre.y - frame.height / 2)
-            if !member.isDrawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
+            if !member.isDrawing, !member.isGroup { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
             placed[ref] = (CGRect(origin: origin, size: frame.size), Rotation.kept((member.pose.rotation ?? 0) + degrees))
         }
         return placed
     }
 
     /// Whether every element is still as the last turn or move left it, on the same host,
-    /// and locked or not as it was when the session formed. Locking or unlocking one
-    /// changes what turns, so the next turn forms a new session from where things are.
+    /// and stays put or not as when the session formed: by the lock of the thing selected
+    /// that it is, or is in. Locking or unlocking that changes what turns, so the next turn
+    /// forms a new session from where things are.
     @MainActor
     func matches(_ store: DesignStore) -> Bool {
-        baseline.allSatisfy { ref, member in
+        var locks: [DesignElement.ID: Bool] = [:]
+        return baseline.allSatisfy { ref, member in
             guard let found = store.resolve(ref), found.placement == member.placement, let pose = expected[ref] else { return false }
-            return found.element.frame == pose.frame && found.element.rotation == pose.rotation && store.isLocked(.element(ref)) == member.isLocked
+            guard found.element.frame == pose.frame, found.element.rotation == pose.rotation else { return false }
+            let isLocked = locks[member.owner] ?? store.element(member.owner).map(store.isLockedWithItsGroups) ?? false
+            locks[member.owner] = isLocked
+            return isLocked == member.isLocked
         }
     }
 
@@ -117,21 +142,29 @@ struct TurnSession: Equatable {
             var moved = member
             let scale = member.placement.scale
             var origin = CGPoint(x: member.pose.frame.minX + canvasDelta.width / scale, y: member.pose.frame.minY + canvasDelta.height / scale)
-            if !member.isDrawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
+            if !member.isDrawing, !member.isGroup { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
             moved.pose.frame.origin = origin
             baseline[ref] = moved
         }
     }
 
     /// The same session for the same elements after a drop gave some of them to another
-    /// host (see `DesignStore.rehost(_:)`), as `selection` now has them. Each one's start
-    /// keeps its middle where it was on the canvas, in its new host's points, so that the
-    /// turn goes on about the same pivot. Nil when `selection` isn't the same elements.
+    /// host (see `DesignStore.rehost(_:)`), as `selection` now has them: a group there, with
+    /// everything in it, where it landed. Each one's start keeps its middle where it was on
+    /// the canvas, in its new host's points, so that the turn goes on about the same pivot.
+    /// Nil when `selection` isn't the same elements.
     @MainActor
     func rehosted(as selection: CanvasSelection, in store: DesignStore) -> TurnSession? {
         var refs: [DesignElement.ID: DesignStore.ElementRef] = [:]
-        for case .element(let ref) in selection.things { refs[ref.element] = ref }
-        guard refs.count == selection.things.count, Set(refs.keys) == Set(baseline.keys.map(\.element)) else { return nil }
+        for thing in selection.things {
+            guard case .element(let ref) = thing else { return nil }
+            refs[ref.element] = ref
+            guard store.groupItem(ref.element) != nil else { continue }
+            for part in store.content.contents(of: ref.element) {
+                refs[part.id] = DesignStore.ElementRef(host: ref.host, element: part.id)
+            }
+        }
+        guard Set(refs.keys) == Set(baseline.keys.map(\.element)) else { return nil }
         var moved: [DesignStore.ElementRef: Member] = [:]
         for (old, member) in baseline {
             guard let ref = refs[old.element], let placement = store.resolve(ref)?.placement else { return nil }
@@ -142,10 +175,10 @@ struct TurnSession: Equatable {
             let frame = member.pose.frame
             let middle = placement.localPoint(for: member.placement.canvasPoint(for: CGPoint(x: frame.midX, y: frame.midY)))
             var origin = CGPoint(x: middle.x - frame.width / 2, y: middle.y - frame.height / 2)
-            if !member.isDrawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
+            if !member.isDrawing, !member.isGroup { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
             moved[ref] = Member(
                 pose: Pose(frame: CGRect(origin: origin, size: frame.size), rotation: member.pose.rotation),
-                placement: placement, isLocked: member.isLocked, isDrawing: member.isDrawing
+                placement: placement, isLocked: member.isLocked, owner: member.owner, isDrawing: member.isDrawing, isGroup: member.isGroup
             )
         }
         var session = TurnSession(selection: selection, pivot: pivot, outline: outline, turned: turned, baseline: moved, expected: [:])

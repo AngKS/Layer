@@ -155,6 +155,9 @@ struct DesignContent: Equatable, Sendable {
     mutating func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
         let placed = element.placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
         elements.append(placed)
+        #if DEBUG
+        ListWork.wrote()
+        #endif
         return placed
     }
 
@@ -172,9 +175,16 @@ struct DesignContent: Equatable, Sendable {
         // written, it is copied, only for the whole design to be compared and found the same.
         guard element != before else { return }
         elements[index] = element
+        #if DEBUG
+        ListWork.wrote()
+        #endif
     }
 
     mutating func remove(_ ids: Set<DesignElement.ID>) {
+        #if DEBUG
+        let count = elements.count
+        defer { ListWork.wrote(count - elements.count) }
+        #endif
         elements.removeAll { ids.contains($0.id) }
     }
 
@@ -185,6 +195,9 @@ struct DesignContent: Equatable, Sendable {
         var element = elements.remove(at: index).placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
         element.frame = frame
         elements.append(element)
+        #if DEBUG
+        ListWork.wrote()
+        #endif
     }
 
     /// Puts the elements on one screen, or on the open canvas, in a new order, back to
@@ -195,8 +208,14 @@ struct DesignContent: Equatable, Sendable {
         let siblings = Dictionary(slots.map { (elements[$0].id, elements[$0]) }, uniquingKeysWith: { first, _ in first })
         // Two with one identifier, which only a damaged file has, can't be told apart: they stay as they are.
         guard siblings.count == slots.count, order.count == slots.count, Set(order) == Set(siblings.keys) else { return }
-        for (slot, id) in zip(slots, order) {
-            if let element = siblings[id] { elements[slot] = element }
+        // Only the slots whose element changes are written.
+        for (slot, id) in zip(slots, order) where elements[slot].id != id {
+            if let element = siblings[id] {
+                elements[slot] = element
+                #if DEBUG
+                ListWork.wrote()
+                #endif
+            }
         }
     }
 
@@ -781,3 +800,20 @@ enum PackagePart: Equatable, Sendable {
         return wrapper
     }
 }
+
+#if DEBUG
+/// How much of the design's list its changes write: for the tests that hold a change, and
+/// the groups put right after it, to writing only what it changes (audit C6, M6). Writing an
+/// element that is shared with the design as it was, which undo keeps, copies the list.
+/// Counted on the main thread alone, where the store makes its changes, so that a design read
+/// elsewhere meanwhile doesn't add to a test's count. The count only grows: a test measures
+/// the difference it makes.
+enum ListWork {
+    nonisolated(unsafe) private(set) static var elementsWritten = 0
+
+    static func wrote(_ count: Int = 1) {
+        guard count > 0, Thread.isMainThread else { return }
+        elementsWritten += count
+    }
+}
+#endif

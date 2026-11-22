@@ -60,17 +60,25 @@ extension DesignStore {
     }
 
     /// The frames of everything showing on the canvas apart from some things, and apart
-    /// from what is on any screen among them: what those things can be lined up with as
-    /// they are dragged.
+    /// from what is on any screen among them or in any group among them: what those things
+    /// can be lined up with as they are dragged. A dragged group's members move with it, and
+    /// lined up with where they were, it would stick there.
     func canvasFrames(besides things: Set<CanvasSelection>) -> [CGRect] {
+        var moving: Set<DesignElement.ID> = []
+        for case .element(let ref) in things where groupItem(ref.element) != nil {
+            moving.formUnion(content.leaves(of: ref.element).map(\.id))
+        }
+        func isLeftOut(_ id: DesignElement.ID, on host: ElementRef.Host) -> Bool {
+            moving.contains(id) || things.contains(.element(ElementRef(host: host, element: id)))
+        }
         var frames: [CGRect] = []
         for screen in screens where !things.contains(.screen(screen.id)) {
             frames.append(screen.canvasFrame)
-            for element in screen.elements where !element.isHidden && !things.contains(.element(ElementRef(host: .screen(screen.id), element: element.id))) {
+            for element in screen.elements where !element.isHidden && !isLeftOut(element.id, on: .screen(screen.id)) {
                 frames.append(screen.placement.canvasRect(for: element.shapeBounds))
             }
         }
-        for floating in floating where !floating.element.isHidden && !things.contains(.element(ElementRef(host: .canvas, element: floating.id))) {
+        for floating in floating where !floating.element.isHidden && !isLeftOut(floating.id, on: .canvas) {
             frames.append(floating.placement.canvasRect(for: floating.element.shapeBounds))
         }
         return frames
@@ -81,17 +89,28 @@ extension DesignStore {
     /// Elements and screens land on whole points of their own, so that those that started
     /// on whole points keep their places relative to each other; a drawing, whose ink lies
     /// where it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
+    ///
+    /// A group moves everything in it by the same distance across the canvas, in the same
+    /// change, those locked on their own included: a group is one thing. Its box is fitted
+    /// round them where they land (`keepGroupsSound()`).
     func position(_ origins: [CanvasSelection: CGPoint]) {
         // Worked out first: the design can't be read while it is being changed.
         var elements: [DesignElement.ID: CGPoint] = [:]
+        // What moves with a group: put after the rest, it wins over the same thing given alone.
+        var grouped: [DesignElement.ID: CGPoint] = [:]
         var screens: [DesignScreen.ID: CGPoint] = [:]
         for (thing, origin) in origins where !isLocked(thing) {
             switch thing {
             case .element(let ref):
                 guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
-                let target = placement.localPoint(for: origin), current = placement.localPoint(for: box.origin)
-                let local = CGPoint(x: element.frame.minX + target.x - current.x, y: element.frame.minY + target.y - current.y)
-                elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
+                guard element.kind == .group else {
+                    elements[ref.element] = Self.origin(of: element, movedBy: box.origin, to: origin, in: placement)
+                    continue
+                }
+                for leaf in content.leaves(of: element.id) {
+                    guard let own = self.placement(of: leaf) else { continue }
+                    grouped[leaf.id] = Self.origin(of: leaf, movedBy: box.origin, to: origin, in: own)
+                }
             case .screen(let id):
                 guard screen(id) != nil else { continue }
                 screens[id] = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
@@ -99,11 +118,20 @@ extension DesignStore {
                 continue
             }
         }
+        elements.merge(grouped) { _, withItsGroup in withItsGroup }
         guard !elements.isEmpty || !screens.isEmpty else { return }
         apply { content in
             for (id, origin) in elements { content.update(id) { $0.frame.origin = origin } }
             for (id, origin) in screens { content.updateScreen(id) { $0.origin = origin } }
         }
+    }
+
+    /// Where an element's frame goes, in its own points, when a box on the canvas with it is
+    /// moved from `from` to `to`: by the same distance, on whole points unless it is a drawing.
+    private static func origin(of element: DesignElement, movedBy from: CGPoint, to: CGPoint, in placement: Placement) -> CGPoint {
+        let target = placement.localPoint(for: to), current = placement.localPoint(for: from)
+        let local = CGPoint(x: element.frame.minX + target.x - current.x, y: element.frame.minY + target.y - current.y)
+        return element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
     }
 
     /// Lines several things up with one another: by an edge, or through the middle, of
@@ -200,7 +228,10 @@ extension DesignStore {
     }
 
     /// Gives each element selected to whatever it now lies on, as after a drag: see
-    /// `rehost(_:)`. Returns the selection as it now stands.
+    /// `rehost(_:)`. A group lands whole, in a change of its own (`rehostGroup(_:)`); each
+    /// lands in the design's order, back to front, on top of what is on its new host, so that
+    /// those landing together are stacked there as they were. Returns the selection as it now
+    /// stands.
     func rehost(_ selection: CanvasSelection) -> CanvasSelection? {
         var rehomed: [CanvasSelection] = []
         asOneStep {

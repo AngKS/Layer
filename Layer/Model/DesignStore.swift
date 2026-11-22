@@ -452,10 +452,12 @@ final class DesignStore {
 
     /// Gives an element to whatever it now lies on: the screen under its centre, or the
     /// open canvas when there is none. It keeps its size in points and its position on
-    /// the canvas. Returns where the element now lives.
+    /// the canvas. A group lands whole, everything in it with it: see `rehostGroup(_:)`.
+    /// Returns where the element now lives.
     @discardableResult
     func rehost(_ ref: ElementRef) -> ElementRef {
         guard let (element, placement) = resolve(ref) else { return ref }
+        if element.kind == .group { return rehostGroup(ref) }
         let frame = placement.canvasRect(for: element.frame)
         let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
