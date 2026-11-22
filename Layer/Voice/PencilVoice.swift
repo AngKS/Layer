@@ -461,25 +461,31 @@ final class PencilVoice {
 
     /// What the pen is over. Drawings are looked through, since voice can't change one.
     /// Part of what is selected means all of it, a drawing in it included: the drawing is
-    /// looked at before it is looked through.
+    /// looked at before it is looked through. What is selected has parts when it is several
+    /// things, or a group, whose members are what the pen finds (F6).
     private func target(at viewPoint: CGPoint, in model: AppModel) -> VoiceTarget {
-        if let selection = model.selection, selection.isSeveral,
-           let top = model.hoverTarget(at: viewPoint), Self.isPart(top, of: selection) {
-            return .thing(selection)
+        let whole = model.selection.flatMap { $0.isSeveral || model.selectedElement?.element.kind == .group ? $0 : nil }
+        let leaves = whole == nil ? [] : Set(model.selectedLeaves.map(\.ref.element))
+        if let whole, let top = model.hoverTarget(at: viewPoint), Self.isPart(top, of: whole, leaves: leaves) {
+            return .thing(whole)
         }
         guard let hit = model.hoverTarget(at: viewPoint, skippingDrawings: true) else {
             return .canvas(model.viewport.canvasPoint(for: viewPoint))
         }
-        if let selection = model.selection, selection.isSeveral, Self.isPart(hit, of: selection) {
-            return .thing(selection)
+        if let whole, Self.isPart(hit, of: whole, leaves: leaves) {
+            return .thing(whole)
         }
         return .thing(hit)
     }
 
-    private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection) -> Bool {
+    /// Whether what the pen is over is part of what is selected: one of the things selected,
+    /// one of `leaves`, what is in the groups selected, or something on a screen selected.
+    private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection, leaves: Set<DesignElement.ID>) -> Bool {
         if selection.contains(hit) { return true }
+        guard case .element(let ref) = hit else { return false }
+        if leaves.contains(ref.element) { return true }
         // An element on a screen that is selected is part of it too.
-        if case .element(let ref) = hit, case .screen(let id) = ref.host, selection.contains(.screen(id)) { return true }
+        if case .screen(let id) = ref.host, selection.contains(.screen(id)) { return true }
         return false
     }
 

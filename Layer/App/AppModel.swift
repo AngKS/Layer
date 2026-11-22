@@ -1114,6 +1114,20 @@ final class AppModel {
         }
     }
 
+    /// Every element selected, with each group among them standing for what is in it, at any
+    /// depth, that isn't a group itself: what the Format panel styles, and what voice is told
+    /// is selected, neither of which knows of groups (F6). From the back to the front.
+    var selectedLeaves: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
+        var seen: Set<DesignElement.ID> = []
+        return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
+            guard selected.element.kind == .group else { return [selected] }
+            return store.content.leaves(of: selected.element.id).compactMap { leaf in
+                let ref = DesignStore.ElementRef(host: selected.ref.host, element: leaf.id)
+                return store.resolve(ref).map { (ref, $0.element, $0.placement) }
+            }
+        }.filter { seen.insert($0.ref.element).inserted }
+    }
+
     /// A tap that landed on the canvas itself rather than on an element's target: it picks
     /// the drawing, element or screen's name there, or, on a screen's empty area or empty
     /// canvas, clears the selection; see `pointTapped(at:picksAnyElement:)`.
@@ -1671,10 +1685,18 @@ final class AppModel {
         setSelectionLocked(!isSelectionLocked)
     }
 
-    /// Hides or shows an element. Hiding one lets go of it, since it can't be touched.
+    /// Hides or shows an element, or a group with everything in it, by its own flag. Hiding
+    /// one lets go of it, and of anything selected in a group hidden, since none of it can be
+    /// touched.
     func toggleHidden(_ ref: DesignStore.ElementRef) {
         store.update(ref) { $0.isHidden.toggle() }
-        if store.resolve(ref)?.element.isHidden == true { deselect(.element(ref)) }
+        guard let element = store.resolve(ref)?.element, element.isHidden, let selection else { return }
+        let inside = element.kind == .group ? Set(store.content.contents(of: element.id).map(\.id)) : []
+        let kept = selection.things.filter { thing in
+            guard case .element(let selected) = thing else { return true }
+            return selected.element != element.id && !inside.contains(selected.element)
+        }
+        if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
     func toggleLock(_ ref: DesignStore.ElementRef) {
@@ -1912,9 +1934,84 @@ final class AppModel {
     /// set to 0 does: an action that did nothing would read as broken.
     func resetSelectionRotation() {
         if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
-            store.update(unlockedSelectedElements.map(\.ref)) { $0.setRotation(0) }
+            turnEach(unlockedSelectedElements.map(\.ref), to: 0)
         } else {
             resetSelectionTurn()
+        }
+    }
+
+    /// The Format panel's Rotation for several things: each of `refs` that isn't locked, by
+    /// itself or by a group above it, turned to `degrees` on its own pivot, in the panel's own
+    /// edit. A group among them turns as one piece about its middle.
+    func setAngle(of refs: [DesignStore.ElementRef], to degrees: Double) {
+        adjusting { turnEach(refs.filter { !store.isLocked(.element($0)) }, to: degrees) }
+    }
+
+    /// The Format panel's Rotation for a group: turns it as one piece about its middle,
+    /// everything in it going round with it, to `degrees`, in the panel's own edit. Only while
+    /// it is still the one thing selected, as a turn goes by the selection: a field set once
+    /// the selection has moved on changes nothing (M5).
+    func setGroupRotation(_ ref: DesignStore.ElementRef, to degrees: Double) {
+        guard selection == .element(ref), let group = store.resolve(ref)?.element, group.kind == .group else { return }
+        adjusting { rotateSelection(by: degrees - group.resolvedRotation) }
+    }
+
+    /// The Format panel's X, Y, W and H for a group, the one way its fields change it (D3), in
+    /// the panel's own edit. The values are in its host's points, as the panel shows them: the
+    /// box's X and Y, and its width and height, in its own axes when it is turned.
+    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the
+    ///   change is in the host's points, and `position` takes canvas points.
+    /// - W or H scales everything in it in proportion, both sides by the side typed, from its
+    ///   top-left: a group is scaled by the ratio of its widths, so an H given alone would
+    ///   scale nothing (L8).
+    ///
+    /// Nothing happens to a group that is locked, by itself or by a group above it.
+    func setGroupBox(_ ref: DesignStore.ElementRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+        adjusting {
+            if x != nil || y != nil, let (item, placement) = store.resolve(ref), item.kind == .group,
+               let box = store.canvasShape(of: .element(ref))?.bounds {
+                let across = ((x ?? item.frame.minX) - item.frame.minX) * placement.scale
+                let down = ((y ?? item.frame.minY) - item.frame.minY) * placement.scale
+                store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
+            }
+            if width != nil || height != nil, let item = store.resolve(ref)?.element, item.kind == .group,
+               item.frame.width > 0, item.frame.height > 0 {
+                // The side typed exactly; given both, the width, as the ratio is the widths'.
+                let box = item.frame
+                let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
+                    ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
+                store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
+            }
+        }
+    }
+
+    /// Turns each of `refs` to `degrees`, in one step: an element on its own pivot, and a
+    /// group as one piece about the middle of its box, as a group selected alone turns, unless
+    /// it is locked, by itself or by a group above it.
+    private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
+        var angles: [DesignElement.ID: Double] = [:]
+        var frames: [DesignElement.ID: CGRect] = [:]
+        for ref in refs {
+            guard let element = store.resolve(ref)?.element else { continue }
+            guard element.kind == .group else {
+                angles[ref.element] = degrees
+                continue
+            }
+            guard let session = TurnSession.form(for: .element(ref), in: store) else { continue }
+            for (part, place) in session.placed(turnedBy: degrees - element.resolvedRotation) {
+                angles[part.element] = place.rotation ?? 0
+                if part.element != element.id { frames[part.element] = place.frame }
+            }
+        }
+        guard !angles.isEmpty else { return }
+        store.apply { content in
+            for (id, angle) in angles {
+                content.update(id) {
+                    // A group's box is fitted round what is in it.
+                    if $0.kind != .group, let frame = frames[id] { $0.frame = frame }
+                    $0.setRotation(angle)
+                }
+            }
         }
     }
 

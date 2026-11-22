@@ -956,6 +956,121 @@ final class SketchFlowUITests: XCTestCase {
         attach("rotation-turned-drawing")
     }
 
+    // MARK: Groups
+
+    /// A group's Format panel is its own: the settings of what is in it, rather than one
+    /// element's, its lock, and its W, which scales it in proportion. A member of a locked
+    /// group, gone into with a double-tap, shows the lock that holds it, and Unlock there
+    /// unlocks the group. Copied and deleted from the panel, a group goes with its members.
+    func testAGroupHasAFormatPanelOfItsOwn() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let lower = CGPoint(x: centre.x, y: centre.y + 120)
+        let empty = CGPoint(x: 120, y: window.midY)
+
+        // Two buttons, one above the other, selected together and grouped.
+        addButtonFromTheLibrary()
+        stroke(centre, lower)
+        addButtonFromTheLibrary()
+        point(lower).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the first button should add it")
+        control("Group").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "Group should select the new group")
+        let size = selectionSize
+
+        // Its panel has its members' settings, not one element's, and its lock.
+        control("Format selection").tap()
+        XCTAssertNotNil(panelControl("Fill colour"), "the group's panel should have its members' fill")
+        XCTAssertNotNil(panelControl("Ungroup"))
+        panelControl("Lock")?.tap()
+        XCTAssertNotNil(panelControl("Unlock"), "locked from the panel, the panel should offer to unlock it")
+        attach("group-format-locked")
+
+        // A member, gone into with a double-tap, is locked by its group, and its panel says so.
+        point(centre).doubleTap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "NOT (value BEGINSWITH 'Group') AND value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "a double-tap should go into the group")
+        if panelControl("Unlock", timeout: 1) == nil { control("Format").tap() }
+        XCTAssertNotNil(panelControl("Unlock"), "a member of a locked group should show it is locked")
+        XCTAssertNil(panelControl("Lock", timeout: 1))
+        attach("group-format-member-locked")
+        panelControl("Unlock")?.tap()
+        XCTAssertNotNil(panelControl("Lock"), "Unlock on the member should unlock the group that held it")
+
+        // The group selected again, its W scales it in proportion.
+        point(empty).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "a tap on a member should pick its group")
+        if panelControl("Ungroup", timeout: 1) == nil { control("Format selection").tap() }
+        setNumber("W", to: "\(Int(size.width) * 2)")
+        for _ in 0..<20 where abs(selectionSize.height - size.height * 2) > 2 { usleep(150_000) }
+        XCTAssertEqual(selectionSize.width, size.width * 2, accuracy: 2, "W should double the group's width")
+        XCTAssertEqual(selectionSize.height, size.height * 2, accuracy: 2, "and its height with it")
+        attach("group-format-doubled")
+
+        // Copied, then the copy deleted: it goes with its members, leaving the group under them.
+        panelControl("Duplicate")?.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy should be selected")
+        panelControl("Delete")?.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group · '", timeout: 5), "the copy's members should have gone with it")
+
+        // Deleted, the group leaves nothing behind: a tap there finds the screen.
+        if panelControl("Delete", timeout: 1) == nil { control("Format selection").tap() }
+        panelControl("Delete")?.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "the group's members should have gone with it")
+    }
+
+    /// Adds a button from the library, which lands selected in the middle of the view.
+    private func addButtonFromTheLibrary() {
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "the library should open")
+        let component = app.buttons["Button"].firstMatch
+        if !component.exists {
+            search.tap()
+            search.typeText("button")
+        }
+        XCTAssertTrue(component.waitForExistence(timeout: 5))
+        component.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value MATCHES '[0-9]+ × [0-9]+'", timeout: 5), "the new button should be selected")
+    }
+
+    /// A control in the Format panel, which floats at the canvas's right, by its label: the
+    /// popover over the selection can have one of the same name. Nil when the panel has none.
+    private func panelControl(_ label: String, timeout: TimeInterval = 5) -> XCUIElement? {
+        let edge = app.windows.firstMatch.frame.maxX - 340
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let matches = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+            if let found = matches.first(where: { $0.exists && $0.isHittable && $0.frame.minX > edge }) { return found }
+            usleep(200_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// Types a number into one of the Format panel's fields.
+    private func setNumber(_ label: String, to value: String) {
+        // A key can be dropped when the simulator is busy, so a wrong number is typed again.
+        for _ in 0..<3 {
+            let field = control(label)
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            let typing = app.textFields[label]
+            XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the \(label) field should let it be typed in")
+            typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + value + "\n")
+            if wait(for: control(label), toHave: "value == '\(value)'", timeout: 4) { return }
+        }
+        XCTFail("the field should read \(value), not \(String(describing: control(label).value))")
+    }
+
     /// Adds a button from the library, which lands selected in the middle of the screen, and
     /// opens the format panel. Gives where the button is and what the canvas says of it.
     private func addAButtonAndOpenTheFormatPanel() -> (centre: CGPoint, size: CGSize, value: String) {

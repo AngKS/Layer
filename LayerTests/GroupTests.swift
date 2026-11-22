@@ -1997,3 +1997,336 @@ struct GroupGeometryTests {
         #expect(isNear(now.corner(.topLeft), fixed, within: 0.001))
     }
 }
+
+/// A group as one thing: copied whole with everything in it, deleted with everything in it,
+/// hidden and locked by its own flags, and formatted from a panel of its own, whose box
+/// moves and resizes everything in it in proportion and whose angle turns it as one piece.
+@MainActor
+@Suite("A group as one thing")
+struct GroupAsOneThingTests {
+    // MARK: Duplicate
+
+    /// Carried from Task 4 (M5): Duplicate on a selected group copies it whole, as one step,
+    /// and selects the copy. A member locked on its own is copied as it is.
+    @Test func duplicatingANestedGroupCopiesItWhole() throws {
+        let board = OrderBoard()
+        board.store.update(board.e) { $0.isLocked = true }
+        let i = board.group(board.c, board.e, named: "I")
+        let g = board.group(board.a, i, named: "G")
+        #expect(board.screenOrder == ["B", "D", "A", "C", "E", "I", "G"])
+        let before = board.store.content
+        board.model.selection = .element(g)
+
+        board.model.duplicateSelection()
+
+        // The copied block is on top of the screen, in its own order.
+        #expect(board.screenOrder == ["B", "D", "A", "C", "E", "I", "G", "A", "C", "E", "I", "G"])
+        let copies = Array(board.store.content.children(of: board.screen).suffix(5))
+        let originals = Set(before.elements.map(\.id))
+        #expect(copies.allSatisfy { !originals.contains($0.id) }, "every copy is new")
+        let copy = Dictionary(copies.map { ($0.name ?? "", $0) }, uniquingKeysWith: { first, _ in first })
+        let copiedG = try #require(copy["G"]?.id)
+        let copiedI = try #require(copy["I"]?.id)
+        #expect(board.model.selection == .element(.init(host: g.host, element: copiedG)), "the copy is selected")
+        #expect(copy["G"]?.group == nil)
+        #expect(copy["A"]?.group == copiedG && copy["I"]?.group == copiedG)
+        #expect(copy["C"]?.group == copiedI && copy["E"]?.group == copiedI)
+        #expect(copy["E"]?.isLocked == true, "a member locked on its own is copied as it is")
+        for name in ["A", "C", "E"] {
+            let original = try #require(before.children(of: board.screen).first { $0.name == name })
+            #expect(copy[name]?.frame == original.frame.offsetBy(dx: 16, dy: 16), "\(name) is copied 16 points down and to the right")
+        }
+        // The original is as it was.
+        for element in before.elements {
+            #expect(board.store.element(element.id) == element)
+        }
+
+        board.undo.undo()
+        #expect(board.store.content == before, "one step")
+    }
+
+    /// Carried from Task 3 (M3): a member's copy goes just in front of it, in its group, in
+    /// one step. Put on top of the screen, it pulled the whole group to the front with it.
+    /// A group in a group is copied just in front of itself the same way.
+    @Test func duplicatingAMemberPutsTheCopyJustInFrontOfItInItsGroup() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+        let before = board.store.content
+        board.model.selection = .element(board.b)
+
+        board.model.duplicateSelection()
+
+        #expect(board.screenOrder == ["A", "C", "B", "B", "D", "G", "E"])
+        guard case .element(let copy)? = board.model.selection else {
+            Issue.record("the copy should be selected")
+            return
+        }
+        #expect(copy != board.b)
+        #expect(board.store.element(copy.element)?.group == g.element)
+        #expect(board.frame(of: copy) == before.element(board.b.element)?.frame.offsetBy(dx: 16, dy: 16))
+        board.undo.undo()
+        #expect(board.store.content == before, "one step")
+
+        let nested = OrderBoard()
+        let i = nested.group(nested.c, nested.e, named: "I")
+        let outer = nested.group(nested.a, i, named: "G")
+        nested.model.selection = .element(i)
+        nested.model.duplicateSelection()
+        #expect(nested.screenOrder == ["B", "D", "A", "C", "E", "I", "C", "E", "I", "G"])
+        guard case .element(let copiedI)? = nested.model.selection else {
+            Issue.record("the copy should be selected")
+            return
+        }
+        #expect(nested.store.element(copiedI.element)?.group == outer.element)
+        #expect(nested.store.content.members(of: copiedI.element).map { $0.name ?? "" } == ["C", "E"])
+    }
+
+    /// Carried from Task 3: a screen's copy has copies of its groups, with new ids, their
+    /// members pointing at them and nested as they were, each with its own lock and hide, in
+    /// one step. They came out ungrouped, with the groups' lock and hide set on the members.
+    @Test func duplicatingAScreenCopiesItsGroups() throws {
+        let board = OrderBoard()
+        let i = board.group(board.c, board.e, named: "I") { $0.isHidden = true }
+        board.group(board.a, i, named: "G") { $0.isLocked = true }
+        let before = board.store.content
+        board.model.selection = .screen(board.screen)
+
+        board.model.duplicateSelection()
+
+        guard case .screen(let copyID)? = board.model.selection else {
+            Issue.record("the copy should be selected")
+            return
+        }
+        #expect(copyID != board.screen)
+        let copied = board.store.content.children(of: copyID)
+        #expect(copied.map { $0.name ?? "" } == board.screenOrder)
+        let originals = Set(before.elements.map(\.id))
+        #expect(copied.allSatisfy { !originals.contains($0.id) }, "every copy is new")
+        let copy = Dictionary(copied.map { ($0.name ?? "", $0) }, uniquingKeysWith: { first, _ in first })
+        #expect(copy["G"]?.kind == .group && copy["I"]?.kind == .group)
+        #expect(copy["G"]?.group == nil && copy["B"]?.group == nil)
+        #expect(copy["A"]?.group == copy["G"]?.id && copy["I"]?.group == copy["G"]?.id)
+        #expect(copy["C"]?.group == copy["I"]?.id && copy["E"]?.group == copy["I"]?.id)
+        #expect(copy["G"]?.isLocked == true && copy["I"]?.isHidden == true, "the groups keep their own lock and hide")
+        #expect(copy["A"]?.isLocked == false && copy["C"]?.isHidden == false, "and the members theirs")
+        #expect(board.store.content.children(of: board.screen) == before.children(of: board.screen))
+
+        board.undo.undo()
+        #expect(board.store.content == before, "one step")
+    }
+
+    // MARK: Delete
+
+    /// Carried from Task 4 (M5): Delete on a selected group deletes it and everything in it,
+    /// a member locked on its own too, in one step. A locked group stays.
+    @Test func deletingAGroupDeletesItsMembersEvenLockedOnes() {
+        let board = OrderBoard()
+        board.store.update(board.e) { $0.isLocked = true }
+        let i = board.group(board.c, board.e, named: "I")
+        let g = board.group(board.a, i, named: "G")
+        let before = board.store.content
+        board.model.selection = .element(g)
+
+        board.model.deleteSelection()
+
+        #expect(board.screenOrder == ["B", "D"])
+        #expect(board.model.selection == nil)
+        board.undo.undo()
+        #expect(board.store.content == before, "one step")
+
+        // Locked, by itself or by a group above it, a group isn't deleted.
+        board.store.update(g) { $0.isLocked = true }
+        let locked = board.store.content
+        board.model.selection = .element(g)
+        board.model.deleteSelection()
+        board.store.delete(.element(g))
+        board.model.selection = .element(i)
+        board.model.deleteSelection()
+        #expect(board.store.content == locked)
+
+        // Several things with a group among them: it goes with everything in it.
+        board.store.update(g) { $0.isLocked = false }
+        board.model.selection = board.selection(board.b, g)
+        board.model.deleteSelection()
+        #expect(board.screenOrder == ["D"])
+    }
+
+    // MARK: Hide
+
+    /// A hidden group's members aren't drawn, keeping their own flags; and hiding it lets go
+    /// of it and of anything selected inside it.
+    @Test func hidingAGroupHidesItsMembersOnTheBoard() {
+        let board = OrderBoard()
+        let i = board.group(board.c, board.e, named: "I")
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(board.b)
+
+        board.model.toggleHidden(g)
+
+        #expect(board.store.element(g.element)?.isHidden == true, "the group's own flag")
+        #expect(board.store.screens[0].elements.filter(\.isHidden).map { $0.name ?? "" } == ["B", "D"])
+        #expect(board.store.element(board.b.element)?.isHidden == false && board.store.element(board.d.element)?.isHidden == false)
+        #expect(board.model.selection == nil, "the member selected is let go of")
+
+        // Among several things, only what is in the group hidden is let go of.
+        board.model.toggleHidden(g)
+        board.model.selection = board.selection(board.a, board.c)
+        board.model.toggleHidden(i)
+        #expect(board.model.selection == .element(board.a))
+        // Shown again, nothing is selected again.
+        board.model.toggleHidden(i)
+        #expect(board.model.selection == .element(board.a))
+    }
+
+    // MARK: The Format panel
+
+    /// D3: the W field resizes a group in proportion, from its top-left, through the one entry
+    /// point the panel's fields call, in the panel's own step.
+    @Test func aGroupsWidthFieldResizesInProportion() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let box = try #require(board.frame(of: g))
+        #expect(box == CGRect(x: 40, y: 190, width: 300, height: 400))
+
+        board.model.setGroupBox(g, width: box.width * 2)
+
+        #expect(board.frame(of: g) == CGRect(x: 40, y: 190, width: 600, height: 800))
+        #expect(board.frame(of: board.b) == CGRect(x: 40, y: 190, width: 600, height: 200))
+        #expect(board.frame(of: board.d) == CGRect(x: 40, y: 790, width: 600, height: 200))
+        #expect(board.undo.undoActionName == "Format")
+    }
+
+    /// L8: the H field does too. Given to `resizeGroup` as it is, it would scale nothing,
+    /// since a group is scaled by the ratio of its widths.
+    @Test func aGroupsHeightFieldResizesInProportion() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let box = try #require(board.frame(of: g))
+
+        board.model.setGroupBox(g, height: box.height * 2)
+
+        #expect(board.frame(of: g) == CGRect(x: 40, y: 190, width: 600, height: 800))
+        #expect(board.frame(of: board.b) == CGRect(x: 40, y: 190, width: 600, height: 200))
+        #expect(board.frame(of: board.d) == CGRect(x: 40, y: 790, width: 600, height: 200))
+    }
+
+    /// L8: the X and Y fields are in the screen's points, as the panel shows them: 10 more is
+    /// 10 of the half-scale screen's points, 5 on the canvas. Taken as canvas points it would
+    /// move everything 20.
+    @Test func aGroupsXFieldMovesItInTheScreensPoints() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let box = try #require(board.frame(of: g))
+        let canvas = try #require(board.store.canvasShape(of: .element(g))?.rect)
+
+        board.model.setGroupBox(g, x: box.minX + 10)
+
+        #expect(board.frame(of: board.b)?.minX == 50)
+        #expect(board.frame(of: board.d)?.minX == 50)
+        #expect(board.frame(of: g) == box.offsetBy(dx: 10, dy: 0))
+        #expect(board.store.canvasShape(of: .element(g))?.rect == canvas.offsetBy(dx: 5, dy: 0))
+
+        board.model.setGroupBox(g, y: box.minY - 20)
+        #expect(board.frame(of: board.b)?.minY == 170)
+        #expect(board.frame(of: board.d)?.minY == 470)
+        #expect(board.undo.undoActionName == "Format")
+    }
+
+    /// A locked group's fields change nothing.
+    @Test func aLockedGroupsFieldsChangeNothing() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d) { $0.isLocked = true }
+        board.model.selection = .element(g)
+        let before = board.store.content
+
+        board.model.setGroupBox(g, x: 0, y: 0)
+        board.model.setGroupBox(g, width: 30)
+        board.model.setGroupRotation(g, to: 45)
+
+        #expect(board.store.content == before)
+    }
+
+    /// Carried from Task 6: the Rotation field turns a group as one piece about its middle,
+    /// to the angle typed, in the panel's own step; set on the item alone, the members stayed
+    /// as they were.
+    @Test func aGroupsRotationFieldTurnsItAsOnePiece() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(g)
+        let middle = try #require(board.store.canvasShape(of: .element(g))?.centre)
+        let starts = try [board.b, board.d].map { try #require(board.canvasCentre(of: $0)) }
+
+        board.model.setGroupRotation(g, to: 90)
+
+        #expect(board.store.element(g.element)?.rotation == 90)
+        #expect(board.store.element(board.b.element)?.rotation == 90)
+        #expect(board.store.element(board.d.element)?.rotation == 90)
+        for (ref, start) in zip([board.b, board.d], starts) {
+            #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(start, about: middle, by: 90), within: 0.5))
+        }
+        #expect(board.undo.undoActionName == "Format")
+
+        // Typed again, it turns to the angle typed, not by it.
+        board.model.setGroupRotation(g, to: 45)
+        #expect(board.store.element(g.element)?.rotation == 45)
+        #expect(board.store.element(board.b.element)?.rotation == 45)
+    }
+
+    /// Carried from Task 6: Align lines a group up with its screen as one block: everything
+    /// in it moves by as much as its box. Set on the item alone, its box was fitted back.
+    @Test func aGroupAlignsWithItsScreenAsOneBlock() throws {
+        let board = OrderBoard()
+        board.store.update(board.d) { $0.frame.origin.x = 80 }
+        let g = board.group(board.b, board.d)
+        let offsets = board.offsets(in: g, of: [board.b, board.d])
+        let width = try #require(board.store.screen(board.screen)?.size.width)
+
+        board.store.align(g, .right)
+
+        #expect(board.frame(of: g)?.maxX == width)
+        #expect(board.offsets(in: g, of: [board.b, board.d]) == offsets)
+        board.store.align(g, .top)
+        #expect(board.frame(of: g)?.minY == 0)
+        #expect(board.frame(of: board.b)?.minY == 0)
+    }
+
+    /// The panel's style settings for a group, and for several things with a group among
+    /// them, are set on what is in the groups, at any depth.
+    @Test func aGroupIsStyledThroughItsMembers() {
+        let board = OrderBoard()
+        let i = board.group(board.c, board.e, named: "I")
+        let g = board.group(board.b, i)
+        board.model.selection = .element(g)
+        #expect(board.model.selectedLeaves.map(\.ref) == [board.b, board.c, board.e])
+
+        board.model.selection = board.selection(board.a, g)
+        #expect(board.model.selectedLeaves.map(\.ref) == [board.a, board.b, board.c, board.e])
+        let red = RGBColor(hex: 0xFF0000)
+        board.model.changeElements(board.model.selectedLeaves.map(\.ref), where: \.hasFill) { $0.tint = red }
+        for ref in [board.a, board.b, board.c, board.e] {
+            #expect(board.store.element(ref.element)?.tint == red)
+        }
+        #expect(board.store.element(board.d.element)?.tint != red)
+        #expect(board.undo.undoActionName == "Format")
+    }
+
+    /// Several things' Rotation field turns each on its own pivot, and a group among them as
+    /// one piece about its middle, everything in it going round with it.
+    @Test func severalThingsTurnAGroupAmongThemAsOnePiece() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = board.selection(board.a, g)
+        let middle = try #require(board.store.canvasShape(of: .element(g))?.centre)
+        let (a, b) = (try #require(board.canvasCentre(of: board.a)), try #require(board.canvasCentre(of: board.b)))
+
+        board.model.setAngle(of: [board.a, g], to: 90)
+
+        #expect(board.store.element(board.a.element)?.rotation == 90)
+        #expect(isNear(board.canvasCentre(of: board.a), a, within: 0.5), "A turns on its own pivot")
+        #expect(board.store.element(g.element)?.rotation == 90)
+        #expect(board.store.element(board.b.element)?.rotation == 90)
+        #expect(isNear(board.canvasCentre(of: board.b), Rotation.rotate(b, about: middle, by: 90), within: 0.5), "B goes round G's middle")
+        #expect(board.undo.undoActionName == "Format")
+    }
+}

@@ -112,12 +112,38 @@ enum DesignActions {
         guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
     }
 
-    /// The element named, or else the selected one.
+    /// The element named, or else the selected one: see `selected(in:)`.
     static func elementOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
         if let entity { return try await element(entity) }
-        let model = try await model(for: nil as String?)
-        guard let selected = model.selectedElement else { throw LayerIntentError.elementNotFound }
+        return try selected(in: try await model(for: nil as String?))
+    }
+
+    /// The one element selected in a design, as Siri sees it: see `selectedElement(in:)`.
+    /// Throws `elementNotFound` when there is none, as when several things are selected, or
+    /// a group.
+    static func selected(in model: AppModel) throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
+        guard let selected = selectedElement(in: model) else { throw LayerIntentError.elementNotFound }
         return (model, selected.ref, selected.element)
+    }
+
+    /// The one element selected, unless it is a group: Siri, which knows nothing of groups,
+    /// sees what is in one, never the group item itself (F6). Taken as one element, a group
+    /// would be moved or changed alone, and its members ungrouped. A member selected inside a
+    /// group is an element like any other.
+    static func selectedElement(in model: AppModel) -> (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
+        guard let selected = model.selectedElement, selected.element.kind != .group else { return nil }
+        return selected
+    }
+
+    /// The elements of a design as Siri offers them: the one selected first (see
+    /// `selectedElement(in:)`), then the rest as `elements` has them.
+    static func suggested(_ elements: [ElementEntity], in model: AppModel) -> [ElementEntity] {
+        guard let selected = selectedElement(in: model), let index = elements.firstIndex(where: { $0.ref?.element == selected.ref.element }) else {
+            return elements
+        }
+        var elements = elements
+        elements.insert(elements.remove(at: index), at: 0)
+        return elements
     }
 
     static func entity(for ref: DesignStore.ElementRef, in model: AppModel) -> ElementEntity? {
@@ -343,16 +369,12 @@ struct ElementQuery: EntityStringQuery {
         return found
     }
 
-    /// The selected element first, then the rest of the design at the front.
+    /// The selected element first, then the rest of the design at the front. A selected group
+    /// isn't one element, and puts nothing first (F6).
     func suggestedEntities() async throws -> [ElementEntity] {
         await MainActor.run {
             guard let model = OpenDesigns.shared.current, let snapshot = DesignActions.snapshot(of: model) else { return [] }
-            var elements = snapshot.elements
-            if let selected = model.selectedElement, let entity = DesignActions.entity(for: selected.ref, in: model) {
-                elements.removeAll { $0.id == entity.id }
-                elements.insert(entity, at: 0)
-            }
-            return elements
+            return DesignActions.suggested(snapshot.elements, in: model)
         }
     }
 

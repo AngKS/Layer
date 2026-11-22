@@ -559,7 +559,7 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
 struct SetElementLockedIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Lock or Unlock Element"
     static let description = IntentDescription(
-        "Locks an element so it can't be moved, resized or deleted by accident, or unlocks it.",
+        "Locks an element so it can't be moved, resized or deleted by accident, or unlocks it. Unlocking an element in a locked group unlocks the group too.",
         categoryName: "Elements"
     )
     static let supportedModes: IntentModes = .foreground
@@ -577,10 +577,24 @@ struct SetElementLockedIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let (model, ref, _) = try await DesignActions.elementOrSelected(element)
-        DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock" : "Unlock") {
-            model.store.update(ref) { $0.isLocked = locked }
-        }
+        try Self.setLocked(locked, ref, in: model, undoManager: undoManager)
         return .result()
+    }
+
+    /// Locks an element, or unlocks it as one undo step. Unlocking acts on the lock that
+    /// holds it: the locked groups above it are unlocked too, as the popover and the Format
+    /// panel do, or a member locked only by its group would stay locked (ruling D). Locking
+    /// locks only the element.
+    @MainActor
+    static func setLocked(_ locked: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+        guard model.store.resolve(ref) != nil else { throw LayerIntentError.elementNotFound }
+        DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock" : "Unlock") {
+            if locked {
+                model.store.setLocked(true, .element(ref))
+            } else {
+                model.store.unlock(.element(ref))
+            }
+        }
     }
 }
 

@@ -189,7 +189,8 @@ extension DesignStore {
     }
 
     /// Copies everything selected: each element a little down and to the right of its
-    /// original, and the screens together to the right of them all. Returns the copies.
+    /// original, a group whole with everything in it, and the screens together to the right
+    /// of them all, as one step. Returns the copies.
     @discardableResult
     func duplicate(_ selection: CanvasSelection) -> CanvasSelection? {
         let originals = things(in: selection)
@@ -216,7 +217,8 @@ extension DesignStore {
         return CanvasSelection(copies)
     }
 
-    /// Deletes everything selected that isn't locked.
+    /// Deletes everything selected that isn't locked, by itself or by a group above it, as
+    /// one step. A group goes with everything in it, those locked on their own too.
     func delete(_ selection: CanvasSelection) {
         let things = things(in: selection).filter { !isLocked($0) }
         asOneStep {
