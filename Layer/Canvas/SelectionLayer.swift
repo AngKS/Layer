@@ -1024,5 +1024,7 @@ enum CanvasWork {
     /// Turn sessions formed from the design: one for each read of a selection's shape that
     /// had none held.
     static var turnSessionsFormed = 0
+    /// Tasks started to tell the sketch reading log of elements deleted.
+    static var readingLogTasks = 0
 }
 #endif

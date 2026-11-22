@@ -227,3 +227,41 @@ extension PerformanceFixTests {
         _ = sets
     }
 }
+
+// MARK: Deleting (finding 15)
+
+extension PerformanceFixTests {
+    @Test func deletingAGroupStartsOneTaskForTheReadingLog() {
+        let board = OrderBoard()
+        let members = [board.a, board.b, board.c, board.d]
+        let g = board.group(members[0], members[1], members[2], members[3], named: "four")
+
+        let before = CanvasWork.readingLogTasks
+        board.store.delete(g)
+        #expect(CanvasWork.readingLogTasks - before == 1, "tasks started \(CanvasWork.readingLogTasks - before) for 5 elements")
+        #expect(board.store.element(g.element) == nil && board.store.element(board.c.element) == nil)
+
+        let again = CanvasWork.readingLogTasks
+        board.store.delete([board.note1, board.note2])
+        #expect(CanvasWork.readingLogTasks - again == 1)
+        board.store.delete(board.e)
+        #expect(CanvasWork.readingLogTasks - again == 2)
+    }
+
+    @Test func theLogMarksEveryDeletedReadingFromOneNote() async {
+        let log = SketchReadingLog(fileURL: nil)
+        var elements: [UUID] = []
+        for _ in 0..<3 {
+            let entry = await log.record(
+                placementKind: "button", existingKinds: [], existingFrames: [], screenSize: nil,
+                strokes: [], candidates: ["button"], scores: [1], chosen: "button", escalated: false, decidedBy: "test"
+            )
+            let element = UUID()
+            await log.link(element: element, toEntry: entry)
+            elements.append(element)
+        }
+        await log.noteDeleted(Set(elements.prefix(2)))
+        let entries = await log.allEntries()
+        #expect(entries.map { $0.correctedAfter != nil } == [true, true, false])
+    }
+}

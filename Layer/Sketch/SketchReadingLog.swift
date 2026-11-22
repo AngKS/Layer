@@ -105,6 +105,11 @@ actor SketchReadingLog {
         rewrite()
     }
 
+    /// `noteDeleted(_:)` for each of several elements deleted together.
+    func noteDeleted(_ elementIDs: some Sequence<UUID>) {
+        for elementID in elementIDs { noteDeleted(elementID) }
+    }
+
     /// Call when the element a reading became is changed into another kind, which says
     /// what the reading should have been. A no-op for elements that were never a reading.
     func noteCorrected(_ elementID: UUID, to kind: String) {
