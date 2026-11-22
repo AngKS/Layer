@@ -1089,8 +1089,10 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(typing.waitForExistence(timeout: 5), "tapping the W field should let it be typed in")
         typing.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "\(wider)")
 
-        point(emptyCanvasPoint).tap()
-        XCTAssertTrue(waitForDisappearance(of: selectionElement))
+        // Above the keyboard, which covers the lower half of the window.
+        let window = app.windows.firstMatch.frame
+        point(CGPoint(x: 120, y: window.height * 0.3)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "a tap on empty canvas should clear the selection")
         // The panel goes with the selection: a soft check, it can linger as it slides out.
         if !waitForFormatPanelToClose(timeout: 5) { XCTContext.runActivity(named: "the Format panel was still open 5 s after a deselect") { _ in } }
 
