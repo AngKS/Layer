@@ -38,6 +38,8 @@ payload and stable-ID synchronization source. Move, resize, text/style edits,
 delete, host changes, and generation reconcile both representations in the
 same store transaction. This vertical slice does not claim that every legacy
 editing path has already migrated to a fully recursive SwiftUI canvas renderer.
+Resolved leaf frames are cached by `DesignStore`/`DesignContent`; SwiftUI view
+bodies read only these snapshots and do not resolve the full semantic tree.
 
 ## Verification
 

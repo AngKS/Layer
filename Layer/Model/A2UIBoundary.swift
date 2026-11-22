@@ -16,18 +16,27 @@ enum A2UIBoundary {
 
     static func importJSON(_ data: Data) -> ImportResult {
         var diagnostics: [Diagnostic] = []
+        guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ImportResult(roots: [], diagnostics: [Diagnostic(message: "Invalid JSON")])
+        }
+        guard envelope["version"] as? String == "1.0" else {
+            return ImportResult(
+                roots: [],
+                diagnostics: [Diagnostic(message: "Strict A2UI import requires the top-level version \"1.0\"")]
+            )
+        }
 
         // Invoke the official decoder before applying the Layer-specific graph mapping.
         // MessageParser validates the A2UI envelope shape; it is never given an action handler.
         do {
             _ = try MessageParser().decode(jsonData: data)
         } catch {
-            diagnostics.append(Diagnostic(message: "Official A2UI envelope validation failed: \(error.localizedDescription)"))
+            return ImportResult(
+                roots: [],
+                diagnostics: [Diagnostic(message: "Official A2UI envelope validation failed: \(error.localizedDescription)")]
+            )
         }
 
-        guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return ImportResult(roots: [], diagnostics: diagnostics + [Diagnostic(message: "Invalid JSON")])
-        }
         let messageKeys = ["createSurface", "updateComponents", "updateDataModel", "deleteSurface", "callRendererFunction", "agentFunctionResponse"]
         let present = messageKeys.filter { envelope[$0] != nil }
         guard present.count == 1, let payload = envelope[present[0]] as? [String: Any] else {

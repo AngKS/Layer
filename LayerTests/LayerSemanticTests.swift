@@ -4,6 +4,7 @@ import Testing
 @testable import Layer
 
 @Suite("Semantic UI")
+@MainActor
 struct LayerSemanticTests {
     @Test func reconciliationPreservesStableIDsWithoutErasingUserNames() {
         let original = LayerNode(
@@ -123,7 +124,7 @@ struct LayerSemanticTests {
 
     @Test func a2UIImportMapsSupportedNodesAndReportsUnsupportedComponents() {
         let json = """
-        {"createSurface":{
+        {"version":"1.0","createSurface":{
           "surfaceId":"main",
           "catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
           "components":[
@@ -145,7 +146,7 @@ struct LayerSemanticTests {
 
     @Test func a2UIImportReportsCycleAndUnresolvedReferences() {
         let json = """
-        {"updateComponents":{
+        {"version":"1.0","updateComponents":{
           "surfaceId":"main",
           "components":[
             {"id":"root","component":"Column","children":["missing","root"]}
@@ -158,6 +159,25 @@ struct LayerSemanticTests {
         #expect(result.roots.count == 1)
         #expect(result.diagnostics.contains { $0.message.contains("Unresolved") })
         #expect(result.diagnostics.contains { $0.message.contains("cycle") })
+    }
+
+    @Test func a2UIImportRejectsMissingVersionAndMalformedEnvelope() {
+        let missingVersion = """
+        {"createSurface":{"surfaceId":"main","components":[
+          {"id":"root","component":"Text","text":"Hello"}
+        ]}}
+        """.data(using: .utf8)!
+        let malformed = """
+        {"version":"1.0","createSurface":{"surfaceId":"","components":"not-an-array"}}
+        """.data(using: .utf8)!
+
+        let missing = A2UIBoundary.importJSON(missingVersion)
+        let invalid = A2UIBoundary.importJSON(malformed)
+
+        #expect(missing.roots.isEmpty)
+        #expect(missing.diagnostics.contains { $0.message.contains("version") })
+        #expect(invalid.roots.isEmpty)
+        #expect(!invalid.diagnostics.isEmpty)
     }
 
     @Test func swiftUIExportUsesRecursiveStacksGridAndOverlay() {
@@ -189,6 +209,27 @@ struct LayerSemanticTests {
         #expect(code.contains("LazyVGrid"))
         #expect(code.contains("ZStack"))
         #expect(code.contains("Button(\"One\")"))
+    }
+    @Test func importedSemanticLeavesBecomeEditableCanvasElements() {
+        let store = DesignStore()
+        let screen = store.addScreen(from: CGRect(x: 400, y: 125, width: 270, height: 584))
+        let roots = [
+            LayerNode(
+                kind: .column,
+                children: [
+                    .init(kind: .text, props: .init(text: "Imported")),
+                    .init(kind: .button, props: .init(text: "Continue")),
+                ],
+                layout: .init(kind: .column, width: .init(sizing: .fill), height: .init(sizing: .intrinsic), spacing: 12)
+            )
+        ]
+
+        let refs = store.importSemanticNodes(roots, on: screen.id)
+
+        #expect(refs.count == 2)
+        #expect(store.screen(screen.id)?.elements.count == 2)
+        #expect(store.screen(screen.id)?.resolvedFrames.isEmpty == false)
+        #expect(store.screen(screen.id)?.elements.allSatisfy { !$0.frame.isEmpty } == true)
     }
 }
 

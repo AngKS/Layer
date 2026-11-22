@@ -9,16 +9,9 @@ struct PhoneScreenView: View {
 
     private func semanticElements(in screen: DesignScreen) -> [DesignElement] {
         guard !screen.semanticNodes.isEmpty else { return screen.elements }
-        let (resolved, _) = LayerLayoutEngine.resolve(screen.semanticNodes, in: CGRect(origin: .zero, size: screen.size))
-        var leaves: [UUID: CGRect] = [:]
-        func collect(_ node: LayerNode) {
-            if let frame = node.resolvedFrame { leaves[node.id] = frame }
-            for child in node.children { collect(child) }
-        }
-        resolved.forEach(collect)
         return screen.elements.map { element in
             var result = element
-            if let frame = leaves[element.id] {
+            if let frame = screen.resolvedFrames[element.id] {
                 result.frame = frame
             }
             return result

@@ -402,6 +402,77 @@ final class DesignStore {
         change { $0 = previous }
     }
 
+    /// Imports a canonical semantic tree and creates matching editable legacy leaf
+    /// payloads for the live canvas. Container nodes remain semantic-only.
+    @discardableResult
+    func importSemanticNodes(_ roots: [LayerNode], on screenID: DesignScreen.ID) -> [ElementRef] {
+        guard let screen = screen(screenID) else { return [] }
+        var refs: [ElementRef] = []
+        change { content in
+            var reconciledRoots = roots
+            if let existing = content.screen(screenID) {
+                reconciledRoots = LayerNode.reconcile(existing: existing.semanticNodes, generated: roots)
+            }
+            content.updateScreen(screenID) { screen in
+                screen.semanticNodes = reconciledRoots
+            }
+            var current = content.screen(screenID) ?? screen
+            current.semanticNodes = reconciledRoots
+            current.refreshResolvedFrames()
+            content.updateScreen(screenID) { screen in
+                screen.resolvedFrames = current.resolvedFrames
+            }
+
+            var leaves: [DesignElement] = []
+            func collect(_ node: LayerNode) {
+                guard !node.isContainer else {
+                    for child in node.children { collect(child) }
+                    return
+                }
+                guard let kind = Self.legacyKind(for: node.kind) else { return }
+                let frame = current.resolvedFrames[node.id] ?? node.resolvedFrame ?? CGRect(origin: .zero, size: CGSize(width: 44, height: 44))
+                var element = DesignElement(
+                    kind: kind,
+                    frame: frame,
+                    text: node.props.text ?? node.props.placeholder ?? kind.placeholder,
+                    tint: node.style.tint ?? kind.spec.tint
+                )
+                element.id = node.id
+                element.symbol = node.props.symbolName
+                element.textAlignment = node.kind == .title ? .leading : nil
+                element.textColor = node.style.textColor
+                element.fontSize = node.style.fontSize
+                element.cornerRadius = node.style.cornerRadius
+                element.opacity = node.style.opacity
+                element.borderWidth = node.style.borderWidth
+                element.name = node.name
+                leaves.append(element)
+            }
+            for root in reconciledRoots { collect(root) }
+            content.setChildren(of: screenID, to: leaves)
+            for element in leaves {
+                refs.append(ElementRef(host: .screen(screenID), element: element.id))
+            }
+        }
+        return refs
+    }
+
+    private static func legacyKind(for kind: LayerNode.Kind) -> ElementKind? {
+        switch kind {
+        case .text, .body: return .text
+        case .title: return .title
+        case .button: return .button
+        case .textField: return .textField
+        case .image: return .image
+        case .icon: return .symbol
+        case .divider: return .divider
+        case .shape: return .shape
+        case .drawing: return .drawing
+        case .freeform: return .shape
+        case .row, .column, .card, .grid, .overlay: return nil
+        }
+    }
+
     /// Adds ready-made elements to a screen as one change, replacing what is there when
     /// `replacing` is set. Returns where they now live.
     @discardableResult
