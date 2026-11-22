@@ -480,9 +480,12 @@ final class SketchFlowUITests: XCTestCase {
         stroke(left, CGPoint(x: button.centre.x + 10, y: button.centre.y))
         control("Draw").tap()
 
-        // On the ink, a tap picks the drawing; on the button clear of it, the button.
+        // On the ink, a tap picks the drawing; on the button clear of it, the button. A tap
+        // adds to what is selected, so empty canvas lets go of the drawing between them.
         point(CGPoint(x: button.centre.x - 40, y: button.centre.y)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on ink over the button should pick the drawing")
+        point(CGPoint(x: 150, y: 650)).tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement))
         point(CGPoint(x: button.centre.x + 80, y: button.centre.y)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button away from the ink should pick the button")
 
@@ -514,8 +517,9 @@ final class SketchFlowUITests: XCTestCase {
 
         point(CGPoint(x: centre.x - 120, y: centre.y - 80)).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Drawing · 1 stroke'", timeout: 5), "a tap on the ink should pick the drawing")
+        // The tap reaches the button inside the box, and adds it to the drawing.
         point(CGPoint(x: centre.x + 80, y: centre.y)).tap()
-        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "a tap on the button inside the drawing's box should pick the button")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on the button inside the drawing's box should pick the button")
         attach("tap-inside-a-drawings-box")
     }
 
@@ -875,9 +879,14 @@ final class SketchFlowUITests: XCTestCase {
         setRotation(to: "90")
 
         // Turned a quarter, the button stands on its end: where its right end was is now the
-        // screen's own, and the centre is still the button's.
-        point(CGPoint(x: button.centre.x + 100, y: button.centre.y)).tap()
-        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "where the button's end was (100 points out from its centre) should now select its screen")
+        // screen's own, and the centre is still the button's. A tap on the screen's empty
+        // area first lets go of the button, and then selects the screen.
+        let end = point(CGPoint(x: button.centre.x + 100, y: button.centre.y))
+        end.tap()
+        XCTAssertTrue(waitForDisappearance(of: selectionElement), "where the button's end was (100 points out from its centre) should hit no button, and let go of it")
+        end.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1'", timeout: 5), "tapped again, the spot should select its screen")
+        // A thing on a selected screen takes the screen's place.
         point(button.centre).tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '\(button.value)'", timeout: 5), "the centre should still select the button")
         attach("rotation-turned-button")

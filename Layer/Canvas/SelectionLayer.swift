@@ -117,6 +117,8 @@ struct SelectionLayer: View {
         .coordinateSpace(.named(Self.space))
         // A tick as a turn snaps to the 45s; none as it leaves.
         .sensoryFeedback(.alignment, trigger: model.snappedTurn) { _, snapped in snapped != nil }
+        // A tick for each thing a tap adds to the selection or takes out of it.
+        .sensoryFeedback(.selection, trigger: model.tapSelectionChanges)
         // The model ends a drag left live: see `CanvasDrags.endAny`.
         .onAppear { model.drags = drags }
     }

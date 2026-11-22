@@ -1114,20 +1114,11 @@ final class AppModel {
         }
     }
 
-    /// A tap that landed on the canvas itself rather than on an element: it picks the
-    /// drawing or screen there, or clears the selection.
+    /// A tap that landed on the canvas itself rather than on an element's target: it picks
+    /// the drawing, element or screen's name there, or, on a screen's empty area or empty
+    /// canvas, clears the selection; see `pointTapped(at:picksAnyElement:)`.
     func canvasTapped(at viewPoint: CGPoint) {
-        let point = viewport.canvasPoint(for: viewPoint)
-        // With the palette up, a finger tap reaches here for elements too: their own
-        // handles stay out of the Pencil's way while it draws. A drawing has no handle
-        // of its own until it is selected, so a tap on its ink always reaches here.
-        if case .element(let ref)? = hoverTarget(at: viewPoint), tool == .draw || store.resolve(ref)?.element.kind == .drawing {
-            pick(.element(ref))
-        } else if let screen = store.screen(at: point) {
-            pick(.screen(screen.id))
-        } else {
-            pick(nil)
-        }
+        pointTapped(at: viewPoint, picksAnyElement: false)
     }
 
     /// A tap in the area that drags the selected element, at a point in the view: a selected
@@ -1140,8 +1131,62 @@ final class AppModel {
             guard !fingerDraws else { return }
             canvasTapped(at: viewPoint)
         } else {
-            pick(hoverTarget(at: viewPoint))
+            pointTapped(at: viewPoint, picksAnyElement: true)
         }
+    }
+
+    /// The one rule for a tap at a point in the view that no element's target took.
+    /// - Ink, or an element there, is picked: any element when `picksAnyElement`, and
+    ///   otherwise a drawing, or any element with the palette up.
+    /// - A screen's name strip, while names are shown, picks the screen, which adds it.
+    /// - A screen's empty area clears the selection, or selects the screen when nothing is.
+    /// - Empty canvas clears the selection.
+    ///
+    /// A tap that would clear but only just missed something selected does nothing.
+    private func pointTapped(at viewPoint: CGPoint, picksAnyElement: Bool) {
+        let point = viewport.canvasPoint(for: viewPoint)
+        let target = hoverTarget(at: viewPoint)
+        // With the palette up, a finger tap reaches the canvas for elements too: their own
+        // handles stay out of the Pencil's way while it draws. A drawing has no handle
+        // of its own until it is selected, so a tap on its ink always reaches here.
+        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.resolve(ref)?.element.kind == .drawing {
+            pick(target)
+        } else if case .screen(let id)? = target, let screen = store.screen(id), !screen.canvasFrame.contains(point) {
+            // `hoverTarget` gives the screen for its name strip as well as for itself.
+            pick(.screen(id))
+        } else if selection == nil, let screen = store.screen(at: point) {
+            pick(.screen(screen.id))
+        } else if !isNearMiss(viewPoint) {
+            pick(nil)
+        }
+    }
+
+    /// How far from a selected thing's outline, on either side, a tap that hits nothing
+    /// only just missed it, in the view's points: on the glass, whatever the zoom.
+    private static let nearMiss: CGFloat = 8
+
+    /// Whether a point in the view is within `nearMiss` of the outline of something
+    /// selected: a band along the edge, not the shape grown, so a tap well inside a selected
+    /// screen's empty area isn't one. Selected drawings don't count: a tap inside a drawing's
+    /// box reaches what lies under it (audit C12), and its ink is already picked with room
+    /// to spare.
+    private func isNearMiss(_ viewPoint: CGPoint) -> Bool {
+        selectedThings.contains { thing in
+            if case .element(let ref) = thing, store.resolve(ref)?.element.kind == .drawing { return false }
+            guard let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) else { return false }
+            return Self.distance(from: viewPoint, toEdgeOf: shape) <= Self.nearMiss
+        }
+    }
+
+    /// How far a point is from the edge of a turned box, from inside or out.
+    private static func distance(from point: CGPoint, toEdgeOf shape: TurnedRect) -> CGFloat {
+        // In the box's own unturned axes.
+        let back = Rotation.rotate(point, about: shape.centre, by: -shape.degrees)
+        let rect = shape.rect
+        let outsideX = max(rect.minX - back.x, 0, back.x - rect.maxX)
+        let outsideY = max(rect.minY - back.y, 0, back.y - rect.maxY)
+        if outsideX > 0 || outsideY > 0 { return hypot(outsideX, outsideY) }
+        return min(back.x - rect.minX, rect.maxX - back.x, back.y - rect.minY, rect.maxY - back.y)
     }
 
     /// A tap on the target of an element, or of a screen's name, at a point in the view. Ink
@@ -1166,10 +1211,10 @@ final class AppModel {
     /// isn't taken for a tap; and when it lifted, once that is known.
     @ObservationIgnored private var rested: (on: CanvasSelection?, lifted: ContinuousClock.Instant?)?
 
-    /// A tap picked something, or nothing when it landed on empty canvas. On its own it
-    /// selects just that. With another finger resting on the canvas, as in Freeform, it
-    /// adds the thing to what is selected, or lets go of it if it was: the thing the
-    /// resting finger is on is selected with it.
+    /// A tap picked something, or nothing when it landed on empty space, which clears the
+    /// selection. A thing is added to what is selected, or taken out if it was: see
+    /// `selection(afterTapOn:from:)`. With another finger resting on the canvas, as in
+    /// Freeform, the thing the resting finger is on is selected with it.
     func pick(_ thing: CanvasSelection?) {
         let resting = restingFingers().filter { finger in !chromeFrames.values.contains { $0.contains(finger) } }
         guard let finger = resting.first else {
@@ -1179,7 +1224,7 @@ final class AppModel {
                 let isLifting = rested.lifted.map { ContinuousClock.now - $0 < .milliseconds(400) } ?? true
                 if isLifting, rested.on == thing { return }
             }
-            selection = thing
+            selectByTap(thing.flatMap { selection(afterTapOn: $0, from: selection) })
             return
         }
         var held = hoverTarget(at: finger)
@@ -1187,11 +1232,40 @@ final class AppModel {
         // selection open: the screen isn't picked along with what is on it.
         if case .screen(let id) = held, case .element(let ref) = thing, ref.host == .screen(id) { held = nil }
         rested = (held, nil)
-        guard let thing, thing != held else { return }
-        var things = selection?.things ?? []
+        guard let thing else {
+            selectByTap(nil)
+            return
+        }
+        guard thing != held else { return }
+        var seeded = selection
         // Resting on something that isn't selected starts again from it.
-        if let held, !things.contains(held) { things = [held] }
-        selection = CanvasSelection(things.symmetricDifference([thing]))
+        if let held, seeded?.things.contains(held) != true { seeded = held }
+        selectByTap(selection(afterTapOn: thing, from: seeded))
+    }
+
+    /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it
+    /// lands.
+    /// - With nothing selected, the thing is selected.
+    /// - A selected thing is taken out.
+    /// - A thing on a selected screen takes the screen's place: the same as going one level in.
+    /// - Anything else is added. A screen added folds in its elements that were selected.
+    private func selection(afterTapOn thing: CanvasSelection, from current: CanvasSelection?) -> CanvasSelection? {
+        guard let current else { return thing }
+        if current.contains(thing) { return current.removing(thing) }
+        if case .element(let ref) = thing, case .screen(let id) = ref.host, current.contains(.screen(id)) {
+            return CanvasSelection(current.things.subtracting([.screen(id)]).union([thing]))
+        }
+        return CanvasSelection(current.things.union([thing]))
+    }
+
+    /// A tap changed the selection this many times: each change plays a selection tick.
+    private(set) var tapSelectionChanges = 0
+
+    /// Selects what a tap made of the selection, with a tick if it changed.
+    private func selectByTap(_ new: CanvasSelection?) {
+        guard new != selection else { return }
+        selection = new
+        tapSelectionChanges += 1
     }
 
     /// The last finger resting on the canvas has lifted.
