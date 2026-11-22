@@ -284,6 +284,9 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     var deviceID: String?
     /// What is on the screen. Later elements sit on top.
     var elements: [DesignElement] = []
+    /// Canonical semantic hierarchy. Legacy flat elements remain the rendering source
+    /// until migrated; user-authored frames and stable IDs stay synchronized here.
+    var semanticNodes: [LayerNode] = []
     /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
     /// still be edited.
     var isLocked: Bool?
@@ -315,7 +318,7 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
 
 extension DesignScreen {
     enum CodingKeys: String, CodingKey {
-        case id, name, origin, scale, deviceID, elements, isLocked
+        case id, name, origin, scale, deviceID, elements, semanticNodes, isLocked
     }
 
     /// Reads a screen, with the elements it held when designs were saved screen by screen.
@@ -328,6 +331,7 @@ extension DesignScreen {
         deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
         isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
         elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
+        semanticNodes = try container.decodeIfPresent([LayerNode].self, forKey: .semanticNodes) ?? []
     }
 
     /// A screen is saved without its elements, which are saved in the design's one list.
@@ -339,6 +343,7 @@ extension DesignScreen {
         try container.encode(scale, forKey: .scale)
         try container.encodeIfPresent(deviceID, forKey: .deviceID)
         try container.encodeIfPresent(isLocked, forKey: .isLocked)
+        try container.encode(semanticNodes, forKey: .semanticNodes)
     }
 }
 

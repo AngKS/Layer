@@ -153,7 +153,16 @@ final class DesignStore {
         guard let screen = screen(screenID) else { return nil }
         var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
         adjust(&element)
-        return add(element, to: screenID)
+        let added = add(element, to: screenID)
+        if let added, var updatedScreen = self.screen(screenID) {
+            let existing = updatedScreen.semanticNodes
+            let node = LayerNode.fromLegacy(added, screen: updatedScreen, provenance: "pencil")
+            let inferred = SketchSpatialInference.infer(from: existing + [node])
+            change { content in
+                content.updateScreen(screenID) { $0.semanticNodes = inferred }
+            }
+        }
+        return added
     }
 
     /// The element a sketch drawn on a screen stands for, laid out among `others` there.
@@ -385,8 +394,18 @@ final class DesignStore {
         change { content in
             if replacing {
                 content.setChildren(of: screenID, to: elements)
+                if var screen = content.screen(screenID) {
+                    let generated = elements.map { LayerNode.fromLegacy($0, screen: screen, provenance: "generated") }
+                    let reconciled = LayerNode.reconcile(existing: screen.semanticNodes, generated: generated)
+                    content.updateScreen(screenID) { $0.semanticNodes = reconciled }
+                }
             } else {
                 for element in elements { content.add(element, to: screenID) }
+                if var screen = content.screen(screenID) {
+                    let existing = screen.semanticNodes
+                    let additions = elements.map { LayerNode.fromLegacy($0, screen: screen, provenance: "generated") }
+                    content.updateScreen(screenID) { $0.semanticNodes = existing + additions }
+                }
             }
         }
         return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }

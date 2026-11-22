@@ -17,6 +17,23 @@ enum SwiftUICodeGenerator {
     static func code(for screen: DesignScreen, settings: CodeSettings = CodeSettings()) -> String {
         var elements = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
 
+        if !screen.semanticNodes.isEmpty {
+            var root: [String]
+            switch settings.layout {
+            case .stack:
+                root = semanticStack(screen.semanticNodes)
+            case .absolute:
+                root = absolute(elements)
+            }
+            var lines = ["import SwiftUI", "", "struct \(screen.typeName): View {", "    var body: some View {"]
+            lines += root.map { "        " + $0 }
+            lines += ["    }", "}"]
+            if settings.includesPreview {
+                lines += ["", "#Preview {", "    \(screen.typeName)()", "}"]
+            }
+            return lines.joined(separator: "\n")
+        }
+
         // The topmost title becomes the navigation title rather than a view of its own.
         var navigationTitle: String?
         if settings.usesNavigationTitle, let index = elements.firstIndex(where: { $0.kind == .title }) {
@@ -38,6 +55,69 @@ enum SwiftUICodeGenerator {
             lines += ["", "#Preview {", "    \(screen.typeName)()", "}"]
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func semanticStack(_ nodes: [LayerNode]) -> [String] {
+        guard !nodes.isEmpty else { return ["Color.clear"] }
+        var lines = ["VStack(alignment: .leading, spacing: 12) {"]
+        for node in nodes.sorted(by: { $0.zIndex < $1.zIndex }) {
+            lines += indented(semanticView(node))
+        }
+        lines.append("}")
+        lines.append(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)")
+        lines.append(".padding(20)")
+        return lines
+    }
+
+    private static func semanticView(_ node: LayerNode) -> [String] {
+        let text = node.props.text ?? ""
+        switch node.kind {
+        case .title:
+            return ["Text(\(literal(text)))", "    .font(.title)", "    .foregroundStyle(.primary)", "    .frame(maxWidth: .infinity, alignment: .leading)"]
+        case .text, .body:
+            return ["Text(\(literal(text)))", "    .font(.body)", "    .foregroundStyle(.primary)", "    .frame(maxWidth: .infinity, alignment: .leading)"]
+        case .button:
+            return ["Button(\(literal(text.isEmpty ? "Button" : text))) { }", "    .buttonStyle(.borderedProminent)", "    .frame(minHeight: 44)"]
+        case .textField:
+            return ["TextField(\(literal(node.props.placeholder ?? text)), text: .constant(\(literal(text))))", "    .textFieldStyle(.roundedBorder)", "    .frame(minHeight: 44)"]
+        case .image:
+            return ["Image(systemName: \"photo\")", "    .resizable()", "    .scaledToFit()", "    .frame(minHeight: 160)"]
+        case .icon:
+            return ["Image(systemName: \(literal(node.props.symbolName ?? "questionmark")))", "    .foregroundStyle(.tint)", "    .frame(width: 44, height: 44)"]
+        case .divider:
+            return ["Divider()"]
+        case .row:
+            var lines = ["HStack(alignment: .center, spacing: \(number(node.layout.spacing))) {"]
+            lines += indented(node.children.flatMap(semanticView))
+            lines.append("}")
+            return lines
+        case .column, .card:
+            var lines = ["VStack(alignment: .leading, spacing: \(number(node.layout.spacing))) {"]
+            lines += indented(node.children.flatMap(semanticView))
+            lines.append("}")
+            if node.kind == .card {
+                lines += ["    .padding(\(number(node.layout.padding > 0 ? node.layout.padding : 16)))", "    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))"]
+            }
+            return lines
+        case .grid:
+            let columns = max(1, node.layout.columns)
+            var lines = ["LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: \(number(node.layout.spacing))), count: \(columns)), spacing: \(number(node.layout.spacing))) {"]
+            lines += indented(node.children.flatMap(semanticView))
+            lines.append("}")
+            return lines
+        case .overlay:
+            var lines = ["ZStack {"]
+            lines += indented(node.children.flatMap(semanticView))
+            lines.append("}")
+            return lines
+        case .shape:
+            return ["RoundedRectangle(cornerRadius: \(number(node.style.cornerRadius ?? 8)))", "    .strokeBorder(.primary)", "    .frame(width: \(number(node.resolvedFrame?.width ?? 44)), height: \(number(node.resolvedFrame?.height ?? 44)))"]
+        case .drawing, .freeform:
+            if let frame = node.resolvedFrame {
+                return ["Color.clear", "    .frame(width: \(number(frame.width)), height: \(number(frame.height)))"]
+            }
+            return ["Color.clear"]
+        }
     }
 
     /// Every screen of a design, as files named after them.
