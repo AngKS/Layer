@@ -1180,6 +1180,33 @@ struct VoiceAgentTests {
             store.setTitle("Board")
         } == nil)
         #expect(screen {} == nil)
+        // A screen made or taken away: undoing the step would make or take it away again.
+        #expect(screen { _ = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 5200, y: 4000), scale: 0.6)) } == nil)
+        #expect(screen { store.deleteScreen(profile) } == nil)
+    }
+
+    /// A screen spoken into being, then "No, make it darker" typed in its field: a change to
+    /// that screen, not an undo of the step that made it, which would take the screen away
+    /// and leave the change nothing to work on.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionInANewScreensFieldLeavesTheScreen() async throws {
+        let bench = screenBench(["a settings screen": [Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#)]])
+        bench.app.screenStream = { description, _, _ in
+            AsyncThrowingStream { feed in
+                feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                feed.finish()
+            }
+        }
+        _ = await bench.agent.run("a settings screen")
+        let settings = try #require(bench.app.store.screens.last)
+        #expect(settings.name == "Settings")
+
+        _ = await bench.agent.run("No, make it darker", about: .screenEdit(settings.id))
+
+        #expect(bench.app.store.screen(settings.id) != nil)
+        let prompt = try #require(bench.recorder.requests.last?.prompts.last)
+        #expect(!prompt.contains("(The last change has been undone.)"))
+        #expect(prompt.hasSuffix(" No, make it darker"))
     }
 
     /// The command's step undone, the model's own undo of it again is no failure: the

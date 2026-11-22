@@ -740,7 +740,8 @@ final class DesignStore {
 
     /// The one screen that all `edit`'s step changed is, or is on: the screen itself, and
     /// elements on it before and after. Nil when it changed nothing, or anything else: the
-    /// board, another screen, or an element on the open canvas, or moved on or off it.
+    /// board, another screen, or an element on the open canvas, or moved on or off it; or
+    /// when it made that screen or took it away.
     func onlyScreen(changedBy edit: Edit) -> DesignScreen.ID? {
         edit.step?.onlyScreen
     }
@@ -981,7 +982,13 @@ final class DesignStore {
                     }
                 }
             }
-            return screens.count == 1 ? screens.first : nil
+            // A screen the step made or took away isn't one a correction for it may undo:
+            // that would take the screen away, or bring it back, again.
+            guard screens.count == 1, let screen = screens.first,
+                  runs.first?.before.screenFrames.contains(where: { $0.id == screen }) == true,
+                  runs.last?.after.screenFrames.contains(where: { $0.id == screen }) == true
+            else { return nil }
+            return screen
         }
     }
 
