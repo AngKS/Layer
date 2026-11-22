@@ -80,10 +80,11 @@ struct CanvasScreen: View {
         // Apple Pencil Pro's squeeze listens for a command about what the pen is over. Every
         // visible view's squeeze action is called, so this one goes on a layer of its own
         // behind the canvas: that way it can be left out in Draw, where the squeeze must stay
-        // PencilKit's, without the canvas itself being made anew each time Draw turns on.
+        // PencilKit's, and with Squeeze to Talk off, where it is the system's, without the
+        // canvas itself being made anew each time.
         .background {
             // Not `Color.clear`, which SwiftUI may count as nothing there to squeeze.
-            Color.black.opacity(0.001).modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.tool != .draw))
+            Color.black.opacity(0.001).modifier(SqueezeToSpeak(pencil: model.pencilVoice, isOn: model.canvasHearsSqueezes))
         }
         // Things dragged out of the library land where they are dropped: on a screen when
         // dropped over one, on the open canvas otherwise.
@@ -345,7 +346,8 @@ private struct BottomCorner: ViewModifier {
 
 /// Feeds Apple Pencil Pro's squeezes to the pencil's push-to-talk while `isOn`. While off
 /// the action is not there at all: an action that is there, even one that ignores the
-/// squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the iPad).
+/// squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the iPad), and
+/// the system's own squeeze action elsewhere.
 private struct SqueezeToSpeak: ViewModifier {
     let pencil: PencilVoice
     let isOn: Bool
@@ -362,7 +364,8 @@ private struct SqueezeToSpeak: ViewModifier {
                 content
             }
         }
-        // Draw coming on mid-squeeze means its end never arrives here.
+        // Draw coming on, or Squeeze to Talk going off, mid-squeeze means its end never
+        // arrives here.
         .onChange(of: isOn) { isSqueezing = false }
         // Nor does it once the canvas has gone.
         .onDisappear {

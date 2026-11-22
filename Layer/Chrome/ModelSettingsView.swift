@@ -89,6 +89,9 @@ struct ModelSettingsView: View {
 
     @State private var providers = HostedProvider.allCases.map { ProviderSettings($0) }
     @State private var defaultChoice = ModelPreferences.defaultChoice
+    /// Whether squeezing Apple Pencil Pro over the canvas listens for a command. Off, the
+    /// squeeze does what the system's Apple Pencil settings say, as in any other app.
+    @AppStorage(AppModel.squeezesToTalkKey, store: AppSettings.defaults) private var squeezesToTalk = true
     /// Whether the pencil's bubble shows the words it hears, under the sound of them.
     /// Off, it is the model's icon and the waveform alone.
     @AppStorage("pencilVoice.showsWords") private var showsWords = true
@@ -105,11 +108,15 @@ struct ModelSettingsView: View {
                 }
 
                 Section {
-                    Toggle("Show Words in the Pencil Bubble", isOn: $showsWords)
+                    Toggle("Squeeze to Talk", isOn: $squeezesToTalk)
+                    // The bubble is only there while the pencil listens.
+                    if squeezesToTalk {
+                        Toggle("Show Words in the Pencil Bubble", isOn: $showsWords)
+                    }
                 } header: {
                     Text("Voice")
                 } footer: {
-                    Text("Squeeze Apple Pencil Pro over the canvas to speak a command. The bubble at the tip shows the model listening; turn this on to see the words it hears too.")
+                    Text(voiceFooter)
                 }
 
                 if HostedLanguageModel.isSupported {
@@ -136,6 +143,15 @@ struct ModelSettingsView: View {
         .task {
             for settings in providers where settings.isConfigured { settings.fetchModels() }
         }
+    }
+
+    private var voiceFooter: String {
+        squeezesToTalk
+            ? "Squeeze Apple Pencil Pro over the canvas to speak a command about what the pen is over. "
+                + "The bubble at the tip shows the model listening, and the words it hears if you like. "
+                + "If the squeeze is turned off or runs a shortcut in Apple Pencil settings, that comes first."
+            : "Squeezing Apple Pencil Pro does what you chose for it in Apple Pencil settings, as in any other app. "
+                + "Turn this on to speak a command by squeezing over the canvas."
     }
 
     private var defaultFooter: String {

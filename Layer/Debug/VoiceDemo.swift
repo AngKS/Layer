@@ -126,7 +126,8 @@ enum VoiceDemo {
 /// `done` or `problem`. A hold left listening still stops after `PencilVoice.maximumHold`,
 /// a minute; a toggle stays. The words heard show, as the setting's default does;
 /// `-LayerPencilDemoWords NO` hides them. `-LayerVoiceDemoDark` and `-LayerVoiceDemoDesign`
-/// work as for `-LayerVoiceDemo`.
+/// work as for `-LayerVoiceDemo`. `-pencilVoice.squeezeToTalk NO` turns Squeeze to Talk
+/// off, and the squeeze opens nothing.
 @MainActor
 enum PencilDemo {
     struct Squeeze: Equatable {
@@ -193,7 +194,7 @@ enum PencilDemo {
 
         pencil.squeezeBegan(at: squeeze.point, azimuth: squeeze.azimuth.map { .degrees($0) })
         if pencil.bubble == nil {
-            VoiceLog.log.error("pencil demo: the squeeze opened nothing, over the bar or the chrome?")
+            VoiceLog.log.error("pencil demo: the squeeze opened nothing, over the bar or the chrome, or with Squeeze to Talk off?")
             return
         }
         if squeeze.toggles {

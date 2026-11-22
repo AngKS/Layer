@@ -175,6 +175,25 @@ final class VoiceModeUITests: XCTestCase {
         shoot("narrow-dark-idle")
     }
 
+    /// The simulator's scripted squeeze (`PencilDemo`) over the open canvas: the pencil's
+    /// bubble opens with Squeeze to Talk on, as it is until turned off, and nothing does
+    /// with it off.
+    func testSqueezeToTalkOffLeavesTheSqueezeAlone() {
+        let squeeze = "600,450,-,toggle => make it blue => Made it blue"
+        let bubble = app.descendants(matching: .any).matching(identifier: "pencil bubble").firstMatch
+        openNewDesign(arguments: ["-convertsAutomatically", "NO", "-LayerPencilDemo", squeeze, "-LayerVoiceDemoFreeze", "listening"])
+        XCTAssertTrue(bubble.waitForExistence(timeout: 20), "a squeeze should open the bubble while Squeeze to Talk is on")
+        shoot("squeeze-to-talk-on")
+        app.terminate()
+
+        openNewDesign(arguments: [
+            "-convertsAutomatically", "NO", "-LayerPencilDemo", squeeze, "-LayerVoiceDemoFreeze", "listening",
+            "-pencilVoice.squeezeToTalk", "NO",
+        ])
+        XCTAssertFalse(bubble.waitForExistence(timeout: 12), "with Squeeze to Talk off a squeeze should open nothing")
+        shoot("squeeze-to-talk-off")
+    }
+
     // MARK: Helpers
 
     private var caption: XCUIElement {
