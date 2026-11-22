@@ -33,10 +33,12 @@ extension DesignStore {
         }
     }
 
-    /// Whether something is locked in place. Several things are, when every one of them is.
+    /// Whether something is locked in place. An element is when it, or a group above it, is
+    /// locked: nothing in a locked group moves, turns or is resized on its own (F4). Several
+    /// things are, when every one of them is.
     func isLocked(_ selection: CanvasSelection) -> Bool {
         switch selection {
-        case .element(let ref): resolve(ref)?.element.isLocked == true
+        case .element(let ref): resolve(ref).map { isLockedWithItsGroups($0.element) } == true
         case .screen(let id): screen(id)?.isLocked == true
         case .several(let things): things.allSatisfy(isLocked)
         }

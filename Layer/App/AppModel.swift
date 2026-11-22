@@ -1433,9 +1433,16 @@ final class AppModel {
         selection.map(store.isLocked) ?? false
     }
 
+    /// Locks or unlocks what is selected. Unlocking unlocks the locked groups above it too, in
+    /// the same step: a thing locked only by its group would otherwise stay locked, and the
+    /// button would do nothing (conflict D). A Layers row's toggle changes only its own flag.
     func setSelectionLocked(_ locked: Bool) {
         guard let selection else { return }
-        store.setLocked(locked, selection)
+        if locked {
+            store.setLocked(true, selection)
+        } else {
+            store.unlock(selection)
+        }
     }
 
     var canDuplicateSelection: Bool { selection != nil }
@@ -1518,13 +1525,13 @@ final class AppModel {
     // MARK: Turning
 
     /// Whether what is selected can be turned: something is, no screen is among it, and
-    /// at least one element of it isn't locked.
+    /// at least one element of it isn't locked, by itself or by a group above it (F4).
     var canTurnSelection: Bool {
         var hasUnlocked = false
         for thing in selectedThings {
             // Screens never turn.
             guard case .element(let ref) = thing else { return false }
-            if store.resolve(ref)?.element.isLocked == false { hasUnlocked = true }
+            if store.resolve(ref) != nil, !store.isLocked(thing) { hasUnlocked = true }
         }
         return hasUnlocked
     }
@@ -1551,9 +1558,10 @@ final class AppModel {
     /// That session as it was when the drag moving them began, if it held then.
     @ObservationIgnored private var moveStart: TurnSession?
 
-    /// The one element selected, unless it is locked: what a turn turns.
+    /// The one element selected, unless it is locked, by itself or by a group above it: what
+    /// a turn turns.
     private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
-        guard let selected = selectedElement, !selected.element.isLocked else { return nil }
+        guard let selected = selectedElement, !store.isLocked(.element(selected.ref)) else { return nil }
         return (selected.ref, selected.element)
     }
 

@@ -50,7 +50,8 @@ struct SelectionLayer: View {
                 let screen: DesignScreen? = if case .screen(let id) = selected.ref.host { store.screen(id) } else { nil }
                 dragArea(viewport.viewRect(for: selected.placement.canvasRect(for: selected.element.frame)), degrees: selected.element.resolvedRotation)
                     .onTapGesture(coordinateSpace: .named(Self.space)) { model.selectionAreaTapped(at: $0) }
-                    .canvasDrag(drags, model: model, isEnabled: !selected.element.isLocked) { owner in
+                    // Locked by itself or by a group above it, it isn't moved (F4).
+                    .canvasDrag(drags, model: model, isEnabled: !store.isLocked(.element(selected.ref))) { owner in
                         drags.adjust(selected.ref, from: selected.element.frame, placement: selected.placement, findsNewHome: true, model: model, owner: owner) {
                             drags.moveRule(for: selected.element, placement: selected.placement, on: screen, model: model)
                         }
@@ -104,7 +105,9 @@ struct SelectionLayer: View {
                     SnapGuidesOverlay(guides: drags.guides, placement: drags.guidePlacement, viewport: viewport)
                 }
                 outline(shape.rect, degrees: shape.degrees, radius: selected.element.resolvedCornerRadius * selected.placement.scale * viewport.scale)
-                if selected.element.isLocked {
+                // Locked by itself or by a group above it: a member of a locked group, selected
+                // by a double-tap or a Layers row, isn't resized either (F4).
+                if store.isLocked(.element(selected.ref)) {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
@@ -516,6 +519,14 @@ final class CanvasDrags {
         let turn = begins(owner, at: start, moving: [.element(ref)], model: model)
         guard turn != .ignored else { return }
         if turn == .new {
+            // Locked, by itself or by a group above it, it is neither moved nor resized (F4):
+            // the drag is left alone until its finger lifts. The handles and targets of a
+            // locked thing are hidden or off, but a member's lock can come from its group.
+            guard !model.store.isLocked(.element(ref)) else {
+                session = nil
+                leaveAlone(owner, startingAt: start)
+                return
+            }
             beginEdit(model: model, named: findsNewHome ? String(localized: "Move") : String(localized: "Resize"))
             dragged = [.element(ref)]
             self.findsNewHome = findsNewHome

@@ -258,6 +258,19 @@ struct LayerOrderTests {
         #expect(!board.model.canArrangeSelection(.front))
         board.model.arrangeSelection(.front)
         #expect(board.screenOrder == ["D", "A", "B", "C", "E"])
+
+        // A member of a locked group is locked by it, though its own flag isn't set.
+        let grouped = OrderBoard()
+        grouped.group(grouped.b, grouped.d) { $0.isLocked = true }
+        #expect(grouped.store.element(grouped.b.element)?.isLocked == false)
+        for arrangement in DesignStore.Arrangement.allCases {
+            #expect(!grouped.store.canArrange(grouped.selection(grouped.b), arrangement))
+            #expect(!grouped.store.canArrange(grouped.b, arrangement))
+        }
+        grouped.model.selection = grouped.selection(grouped.b)
+        #expect(!grouped.model.canArrangeSelection(.front))
+        grouped.model.arrangeSelection(.front)
+        #expect(grouped.screenOrder == ["A", "C", "B", "D", "G", "E"])
     }
 
     @Test func siriSaysWhyADrawingOrALockedThingKeepsItsPlace() throws {

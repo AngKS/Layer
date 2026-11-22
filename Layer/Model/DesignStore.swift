@@ -841,7 +841,9 @@ final class DesignStore {
         let before = content
         let count = changeCount
         isChanging = true
-        body(&content)
+        // The change and the groups put right after it, in one access to the content, so that
+        // the whole design is compared once (C6). A design without groups costs one scan.
+        Self.applying(body, to: &content)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -861,6 +863,14 @@ final class DesignStore {
         // canvas following an eraser, is a change of its own, recorded in its own step: told
         // before, it went into this step as well (review I-1).
         onChange?(content)
+    }
+
+    /// Makes a change, then puts right whatever it left unsound about the design's groups:
+    /// see `DesignContent.keepGroupsSound()`. Anything that builds or moves a group whole
+    /// therefore does it in one change.
+    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent) {
+        body(&content)
+        if content.hasGroups { content.keepGroupsSound() }
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
@@ -1097,6 +1107,9 @@ final class DesignStore {
         // since: it goes onto the open canvas where it was, rather than on no screen, drawn
         // nowhere and saved so (review C-1).
         result.rehostElementsOnMissingScreens(from: current)
+        // Taken back among changes made since, a step can leave a group unsound: put right
+        // here, so that the reverse step holds it too.
+        if result.hasGroups { result.keepGroupsSound() }
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand

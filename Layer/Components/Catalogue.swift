@@ -24,6 +24,7 @@ extension ElementKind {
         case .progress: Catalogue.progress
         case .drawing: Catalogue.drawing
         case .shape: Catalogue.shape
+        case .group: Catalogue.group
         }
     }
 }
@@ -218,6 +219,19 @@ enum Catalogue {
         cornerRadius: .points(16),
         traits: [.fill, .onState],
         onName: "Filled"
+    )
+
+    /// Several things kept together. Never sketched, written or asked for: it is made by
+    /// grouping. Its size is the box round its members, worked out as they change; where it
+    /// can go is decided by them. It shows no words, has no fill and no code of its own.
+    static let group = ComponentSpec(
+        name: "Group", symbol: "rectangle.3.group", promptName: "group",
+        writtenNames: [],
+        isAskedForOnScreens: false,
+        size: .fixed(.zero),
+        minimumSize: CGSize(width: 8, height: 8),
+        hasEffects: false,
+        traits: []
     )
 
     static let progress = ComponentSpec(

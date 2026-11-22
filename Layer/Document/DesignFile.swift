@@ -62,13 +62,16 @@ struct DesignContent: Equatable, Sendable {
 
     // MARK: Views of the list
 
-    /// Each screen with what is on it.
+    /// Each screen with what is on it. Group items are left out, and each member is locked or
+    /// hidden as it is with its groups: what reads this draws, exports and describes the
+    /// members as they are, unaware of groups. See `Groups.swift`.
     var screens: [DesignScreen] {
         get {
             guard !frames.isEmpty else { return [] }
+            let groups = groupItemsByID
             var onScreen: [DesignScreen.ID: [DesignElement]] = [:]
-            for element in elements {
-                if let parent = element.parent { onScreen[parent, default: []].append(element) }
+            for element in elements where element.kind != .group {
+                if let parent = element.parent { onScreen[parent, default: []].append(Self.shown(element, groups: groups)) }
             }
             return frames.map { frame in
                 var screen = frame
@@ -77,16 +80,52 @@ struct DesignContent: Equatable, Sendable {
             }
         }
         set {
+            let groups = groupItemsByID
+            let stored = storedForWritingBack(groups)
             let loose = elements.filter { $0.parent == nil }
+            let kept = groupItems(besides: newValue.flatMap(\.elements))
             frames = newValue.map(\.withoutElements)
-            elements = newValue.flatMap { screen in screen.elements.map { $0.placed(on: screen.id, scale: nil) } } + loose
+            // The group items each screen had go back on it, after what it now holds: the
+            // groups are put in front of their members, or taken away, by `keepGroupsSound()`.
+            elements = newValue.flatMap { screen in
+                screen.elements.map { Self.written($0, over: stored[$0.id], groups: groups).placed(on: screen.id, scale: nil) }
+                    + kept.filter { $0.parent == screen.id }
+            } + loose
         }
     }
 
-    /// The elements on the open canvas, outside every screen.
+    /// The elements on the open canvas, outside every screen. Group items are left out, and
+    /// each member is locked or hidden as it is with its groups, as in `screens`.
     var floating: [FloatingElement] {
-        get { elements.filter { $0.parent == nil }.map { FloatingElement(element: $0, scale: $0.scale ?? 1) } }
-        set { elements = elements.filter { $0.parent != nil } + newValue.map { $0.element.placed(on: nil, scale: $0.scale) } }
+        get {
+            let groups = groupItemsByID
+            return elements.filter { $0.parent == nil && $0.kind != .group }.map { FloatingElement(element: Self.shown($0, groups: groups), scale: $0.scale ?? 1) }
+        }
+        set {
+            let groups = groupItemsByID
+            let stored = storedForWritingBack(groups)
+            let kept = groupItems(besides: newValue.map(\.element)).filter { $0.parent == nil }
+            elements = elements.filter { $0.parent != nil }
+                + newValue.map { Self.written($0.element, over: stored[$0.id], groups: groups).placed(on: nil, scale: $0.scale) }
+                + kept
+        }
+    }
+
+    /// Each element as it is kept, by identifier, when there are groups whose lock and hide a
+    /// view showed on their members; otherwise nothing, as there is nothing to tell apart.
+    private func storedForWritingBack(_ groups: [DesignElement.ID: DesignElement]) -> [DesignElement.ID: DesignElement] {
+        guard !groups.isEmpty else { return [:] }
+        var stored: [DesignElement.ID: DesignElement] = [:]
+        for element in elements where stored[element.id] == nil { stored[element.id] = element }
+        return stored
+    }
+
+    /// The group items the design has, apart from any among `given`.
+    private func groupItems(besides given: [DesignElement]) -> [DesignElement] {
+        let items = elements.filter { $0.kind == .group }
+        guard !items.isEmpty else { return [] }
+        let ids = Set(given.map(\.id))
+        return items.filter { !ids.contains($0.id) }
     }
 
     /// One screen with what is on it.
@@ -159,10 +198,13 @@ struct DesignContent: Equatable, Sendable {
         }
     }
 
-    /// Replaces what is on a screen.
+    /// Replaces what is on a screen. Its group items that `children` doesn't hold stay on it,
+    /// after the rest; those it holds aren't written twice (F8). The groups are then put in
+    /// front of their members, or taken away, by `keepGroupsSound()`.
     mutating func setChildren(of screen: DesignScreen.ID, to children: [DesignElement]) {
+        let kept = groupItems(besides: children).filter { $0.parent == screen }
         elements.removeAll { $0.parent == screen }
-        elements += children.map { $0.placed(on: screen, scale: nil) }
+        elements += children.map { $0.placed(on: screen, scale: nil) } + kept
     }
 
     /// Adds a screen, with whatever it holds.
@@ -415,6 +457,9 @@ extension DesignContent: Codable {
             self.screens = screens
             floating = try container.decodeIfPresent([FloatingElement].self, forKey: .floating) ?? []
         }
+        // A design edited elsewhere, or saved by a build that doesn't know groups, opens with
+        // its groups sound: a member of a group that has gone opens ungrouped (Review Focus 4).
+        if hasGroups { keepGroupsSound() }
     }
 
     func encode(to encoder: any Encoder) throws {

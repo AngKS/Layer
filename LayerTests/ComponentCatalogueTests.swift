@@ -122,7 +122,9 @@ private func describe(_ kind: ElementKind) throws -> [String] {
 @MainActor
 private func describeEveryKind() throws -> String {
     var lines: [String] = []
-    for kind in ElementKind.allCases {
+    // A group item has no members of its own here, so the design's views leave it out and
+    // it has no layout data to describe. Its entry is checked on its own.
+    for kind in ElementKind.placeable {
         lines += try describe(kind)
         lines.append("")
     }
@@ -159,10 +161,30 @@ struct ComponentCatalogueTests {
     }
 
     @Test func theKindsOfferedToShortcutsAreTheKindsThereAre() {
-        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.allCases.map(\.rawValue)))
-        for kind in ElementKind.allCases {
+        // Every kind that can be placed: a group is made by grouping, not offered as a kind.
+        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.placeable.map(\.rawValue)))
+        for kind in ElementKind.placeable {
             #expect(ElementKindChoice(kind).element == kind)
             #expect(ElementKindChoice.caseDisplayRepresentations[ElementKindChoice(kind)] != nil)
         }
+    }
+
+    /// F9: a group is made by grouping. No word names it, nothing written or sketched
+    /// becomes one, and it shows no words of its own.
+    @Test func aGroupIsAKindNothingIsSketchedAsOrWrittenAs() {
+        #expect(ElementKind.placeable == ElementKind.allCases.filter { $0 != .group })
+        #expect(ScreenBlueprint.kindWords.first { $0.kind == .group }?.words == [])
+        #expect(ScreenBlueprint.kind(named: "group") != .group)
+        #expect(ScreenBlueprint.kind(named: "Group") != .group)
+        #expect(!ScreenPrompt.kindNames.contains { ScreenBlueprint.kind(named: $0) == .group })
+        #expect(!ScreenPrompt.kindNames.contains("group"))
+        let observation = SketchObservation(bounds: CGRect(x: 0, y: 0, width: 10, height: 10), form: .scribble, strokeCount: 1)
+        let onScreen = SketchRequest(observation: observation, placement: .onScreen(local: CGRect(x: 0, y: 0, width: 10, height: 10), existing: []), strokes: [], prompt: "")
+        #expect(!onScreen.askedCandidates.contains(.element(.group)))
+        #expect(ElementKind.group.rawValue == "group")
+        #expect(ElementKind.group.layerName == "Group")
+        #expect(ElementKind.group.symbol == "rectangle.3.group")
+        #expect(SketchPrompt.name(for: .element(.group)) == "group")
+        #expect(!ElementKind.group.hasText)
     }
 }
