@@ -28,6 +28,18 @@ struct ZoomStopsTests {
         #expect(ZoomStops.nearestIndex(to: 5) == 14)
     }
 
+    /// While a glide is under way the zoom hasn't reached the stop asked for: the next
+    /// adjustment steps from that stop, not from where the glide has got to (final review M5).
+    @Test func voiceOverStepsFromTheLastRequestedStopWhileGliding() {
+        // At 100%, one swipe asked for 125%; the glide is at 105%.
+        #expect(ZoomStops.step(from: 1.05, requested: 1.25, isGliding: true, by: 1) == 1.5)
+        #expect(ZoomStops.step(from: 1.05, requested: 1.25, isGliding: true, by: -1) == 1)
+        // Once it has settled, or nothing was asked for, it steps from the zoom as it is.
+        #expect(ZoomStops.step(from: 1.25, requested: 1.25, isGliding: false, by: 1) == 1.5)
+        #expect(ZoomStops.step(from: 1.05, requested: nil, isGliding: true, by: 1) == 1.25)
+        #expect(ZoomStops.step(from: 1.05, requested: 1.25, isGliding: false, by: 1) == 1.25)
+    }
+
     @Test func voiceOverStepsToTheNextStopAboveOrBelow() {
         #expect(ZoomStops.step(from: 0.9, by: 1) == 1)
         #expect(ZoomStops.step(from: 0.9, by: -1) == 0.75)

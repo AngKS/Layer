@@ -18,6 +18,8 @@ struct ZoomControl: View {
     /// Whether the touch under way was held long enough to scrub. Its lift then isn't a tap,
     /// though the button takes it for one.
     @State private var wasHeld = false
+    /// The stop VoiceOver's adjust last glided to, for the next while that glide is under way.
+    @State private var requestedStop: CGFloat?
     @GestureState private var isHeld = false
 
     var body: some View {
@@ -48,7 +50,14 @@ struct ZoomControl: View {
         .accessibilityValue(model.isCanvasLocked ? "\(percent) percent, canvas locked" : "\(percent) percent")
         // VoiceOver: swiping up or down goes to the next stop; activating still opens the menu.
         .accessibilityAdjustableAction { direction in
-            model.ink?.zoom(to: ZoomStops.step(from: model.zoomScale, by: direction == .increment ? 1 : -1))
+            let stop = ZoomStops.step(from: model.zoomScale, requested: requestedStop, isGliding: model.ink?.isGliding ?? false, by: direction == .increment ? 1 : -1)
+            requestedStop = stop
+            model.ink?.zoom(to: stop)
+        }
+        // A hold that ended off the control leaves `wasHeld` set, which would swallow this.
+        .accessibilityAction(.default) {
+            wasHeld = false
+            showsMenu = true
         }
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { frame = $0 }
         // A pencil hovering here is what a squeeze would scrub.
@@ -80,11 +89,11 @@ struct ZoomControl: View {
         )
         // However the hold ends, lifted or cancelled, scrubbing ends with it: the zoom's, not
         // a Format field's ruler.
-        .onChange(of: isHeld) { _, held in if !held { scrubber.end(.zoom) } }
+        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(.zoom) } }
         // The controls go during a call: a ruler left up, or a hover, would be the zoom's
         // with no zoom control to show it.
         .onDisappear {
-            scrubber.end(.zoom)
+            scrubber.fingerLifted(.zoom)
             scrubber.forgetHovered(.zoom)
         }
         .buttonStyle(ZoomButton(isHeld: isHeld))

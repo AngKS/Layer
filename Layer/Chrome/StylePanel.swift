@@ -806,7 +806,7 @@ private struct NumberField: View {
         )
         // However the hold ends, lifted or cancelled, scrubbing ends with it: the panel's,
         // not a zoom ruler another finger may hold.
-        .onChange(of: isHeld) { _, held in if !held { scrubber.end(.panel) } }
+        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(.panel) } }
     }
 
     private static let format = TypedNumber.format

@@ -74,6 +74,9 @@ final class Scrubber {
 
     @ObservationIgnored private var start: CGFloat = 0
     @ObservationIgnored private var steps = 0
+    /// Where a finger's drag is counted from: its translation when the ruler it is scrubbing
+    /// (re)began. Nil with no finger down.
+    @ObservationIgnored private var dragBase: CGFloat?
     @ObservationIgnored private var lastRoll: Angle?
     @ObservationIgnored private var rolled = Angle.zero
 
@@ -144,9 +147,28 @@ final class Scrubber {
 
     /// A finger holding a field has dragged this far sideways since it was held: the field
     /// is scrubbed a step for every `pointsPerStep`.
+    ///
+    /// A ruler that comes back under a finger still dragging (put away by a squeeze, or Draw
+    /// coming on) begins from the value it was left at, and counts the drag from there: not
+    /// the whole drag a second time.
     func fingerDragged(_ field: Target, by width: CGFloat) {
+        let wasRunning = target != nil
         hold(field)
-        scrub(to: Self.steps(forDrag: width, pointsPerStep: field.pointsPerStep))
+        // A new touch counts from its own start; the same touch, on a ruler that began again,
+        // from where it began again.
+        if dragBase == nil {
+            dragBase = 0
+        } else if !wasRunning {
+            dragBase = width
+        }
+        scrub(to: Self.steps(forDrag: width - (dragBase ?? 0), pointsPerStep: field.pointsPerStep))
+    }
+
+    /// The finger holding a field let go, or the field went: its ruler, if it is this owner's,
+    /// is put away, and the next touch counts from its own start.
+    func fingerLifted(_ owner: Owner) {
+        dragBase = nil
+        end(owner)
     }
 
     // MARK: Apple Pencil

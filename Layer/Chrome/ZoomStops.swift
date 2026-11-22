@@ -51,6 +51,13 @@ enum ZoomStops {
         return self.scale(at: target)
     }
 
+    /// As `step(from:by:)`, for VoiceOver's adjust: while a glide is under way the zoom hasn't
+    /// reached the stop last asked for, so a second adjustment steps from that stop, not from
+    /// where the glide has got to.
+    nonisolated static func step(from scale: CGFloat, requested: CGFloat?, isGliding: Bool, by stops: Int) -> CGFloat {
+        step(from: isGliding ? (requested ?? scale) : scale, by: stops)
+    }
+
     /// The zoom's ruler: indices into the stops, shown as percents, with the menu's levels
     /// as the longer marks.
     @MainActor

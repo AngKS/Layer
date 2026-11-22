@@ -366,6 +366,30 @@ struct ScrubbingAFieldTests {
         #expect(begins == 2)
     }
 
+    /// A ruler put away under a finger that goes on dragging (a squeeze that keeps it, Draw
+    /// coming on) comes back from the value it was left at, counting the drag from there:
+    /// not the whole drag over again (final review M6).
+    @Test func aRulerRestartedUnderADraggingFingerCountsFromWhereItRestarted() {
+        let scrubber = Scrubber()
+        let opacity = ScrubbedField(50)
+        let target = opacity.target("Opacity", at: CGRect(x: 90, y: 0, width: 80, height: 32), range: 5...100)
+        scrubber.fingerDragged(target, by: 3 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 53)
+
+        scrubber.end()
+        // The finger is still down, and has dragged a little further.
+        scrubber.fingerDragged(target, by: 4 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 53, "the restarted ruler hasn't moved yet")
+        scrubber.fingerDragged(target, by: 6 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 55)
+
+        // A new touch counts from its own start.
+        scrubber.fingerLifted(.panel)
+        #expect(scrubber.target == nil)
+        scrubber.fingerDragged(target, by: 2 * Scrubber.pointsPerStep)
+        #expect(opacity.value == 57)
+    }
+
     /// A zoom scrub is no edit: only a panel field's scrub opens and closes one.
     @Test func aZoomScrubIsNoEdit() {
         let scrubber = Scrubber()
