@@ -1488,6 +1488,35 @@ final class AppModel {
         selection.map { store.canArrange($0, arrangement) } ?? false
     }
 
+    /// Puts what is selected in a new group and selects the group: see `DesignStore.group(_:)`.
+    func groupSelection() {
+        guard let selection, let group = store.group(selection) else { return }
+        self.selection = .element(group)
+    }
+
+    /// Whether Group would make a group of what is selected (L7).
+    var canGroupSelection: Bool {
+        selection.map(store.canGroup) ?? false
+    }
+
+    /// Whether the elements selected are on more than one screen, or on a screen and the open
+    /// canvas: why Group is off, when it is.
+    var groupSelectionSpansHosts: Bool {
+        Set(selectedElements.map(\.ref.host)).count > 1
+    }
+
+    /// Takes the selected group apart and selects its members: see `DesignStore.ungroup(_:)`.
+    func ungroupSelection() {
+        guard canUngroupSelection, case .element(let ref) = selection, let members = store.ungroup(ref) else { return }
+        selection = members
+    }
+
+    /// Whether one group is selected, and it isn't locked.
+    var canUngroupSelection: Bool {
+        guard let selected = selectedElement else { return false }
+        return selected.element.kind == .group && !store.isLocked(.element(selected.ref))
+    }
+
     /// Lines up what is selected: one element with its screen, several things with each other.
     func alignSelection(_ alignment: ElementLayout.Alignment) {
         guard let selection, !isSelectionLocked else { return }

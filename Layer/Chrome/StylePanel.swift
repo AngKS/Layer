@@ -90,6 +90,10 @@ private struct ElementSettings: View {
                 if element.kind != .drawing {
                     ArrangeButtons()
                 }
+                if element.kind == .group {
+                    IconButton("Ungroup", symbol: "rectangle.3.group.fill") { model.ungroupSelection() }
+                        .disabled(!model.canUngroupSelection)
+                }
             }
         }
 
@@ -274,6 +278,10 @@ private struct SeveralSettings: View {
                     model.toggleLockOfSelection()
                 }
                 ArrangeButtons()
+                let canGroup = model.canGroupSelection
+                IconButton("Group", symbol: "rectangle.3.group") { model.groupSelection() }
+                    .disabled(!canGroup)
+                    .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
             }
         }
 

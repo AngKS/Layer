@@ -59,6 +59,12 @@ struct SelectionActions: View {
             } else if model.selection?.isSeveral == true {
                 severalActions
             } else {
+                if model.selectedElement?.element.kind == .group {
+                    ToolButton(symbol: "rectangle.3.group.fill", label: "Ungroup") {
+                        withAnimation(.smooth(duration: 0.25)) { model.ungroupSelection() }
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .option, .shift])
+                }
                 if let selected = model.selectedElement, selected.element.kind.hasText {
                     ToolButton(symbol: "character.cursor.ibeam", label: "Edit text", isActive: model.isEditingText) {
                         model.isEditingText = true
@@ -126,6 +132,7 @@ struct SelectionActions: View {
     /// For several things at once: their settings, lining them up with one another, and
     /// what any selection can have done to it.
     @ViewBuilder private var severalActions: some View {
+        groupButton
         ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
             withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
         }
@@ -159,6 +166,28 @@ struct SelectionActions: View {
             withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
         }
         .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    /// Group, ⌥⌘G: off, and saying why, when what is selected can't be grouped.
+    private var groupButton: some View {
+        let canGroup = model.canGroupSelection
+        return ZStack {
+            // The shortcut is on a button of its own behind it, hidden and never off, as the
+            // arrange shortcuts are: one switched on by the change before was at times still
+            // off for the next key press. Group does nothing when there is nothing to group.
+            Button("Group") { group() }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .hidden()
+                .frame(width: 0, height: 0)
+            ToolButton(symbol: "rectangle.3.group", label: "Group") { group() }
+                .disabled(!canGroup)
+                .opacity(canGroup ? 1 : 0.35)
+                .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
+        }
+    }
+
+    private func group() {
+        withAnimation(.smooth(duration: 0.25)) { model.groupSelection() }
     }
 
     /// Bring to Front, Bring Forward, Send Backward and Send to Back, for one thing or

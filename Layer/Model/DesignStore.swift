@@ -315,17 +315,8 @@ final class DesignStore {
         }
     }
 
-    /// The things an element is arranged among, itself included, back to front: what it
-    /// shares its screen, or the open canvas, with, as the design's own list holds them. A
-    /// drawing is arranged among nothing, and nothing is arranged past one: unlocked ink is
-    /// drawn above every element, so a drawing keeps its place in the list (F7).
-    func siblings(of ref: ElementRef) -> [DesignElement.ID] {
-        guard let (element, _) = resolve(ref), element.kind != .drawing else { return [] }
-        return content.elements.compactMap { $0.parent == element.parent && $0.kind != .drawing ? $0.id : nil }
-    }
-
-    /// Moves an element up or down among those it shares its screen, or the open canvas,
-    /// with: see `arrange(_ selection:_:)`. Siri's Change Element Order comes this way.
+    /// Moves an element up or down among its siblings: see `arrange(_ selection:_:)`, and
+    /// `LayerTree` for what its siblings are. Siri's Change Element Order comes this way.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
         arrange(.element(ref), arrangement)
     }

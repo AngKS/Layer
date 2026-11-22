@@ -4,9 +4,10 @@ import Foundation
 /// a time or several at once.
 ///
 /// Order only means something among siblings: the things that share a screen, or the open
-/// canvas. Drawings are in no sibling set. Unlocked ink is drawn above every element, so a
-/// drawing keeps the place it has in the list whatever is arranged around it, and nothing
-/// steps past it or moves it (F7).
+/// canvas, and a group, or no group (see `LayerTree`). A group is one of its siblings, and
+/// stands among them for its whole block: itself and everything in it. Drawings are in no
+/// sibling set. Unlocked ink is drawn above every element, so a drawing keeps the place it
+/// has in the list whatever is arranged around it, and nothing steps past it or moves it (F7).
 extension DesignContent {
     /// The whole order of what is on a screen, or on the open canvas when `parent` is nil,
     /// back to front, with every drawing there in the slot it holds now and the other slots
@@ -27,10 +28,12 @@ extension DesignContent {
 
 extension DesignStore {
     /// Moves what is selected up or down among its siblings: the things it shares its screen,
-    /// or the open canvas, with. Things on different screens each move among their own.
-    /// Several things that are siblings move as one block, keeping their own order and
-    /// closing the gaps between them. A screen in the selection is left as it is, and so are
-    /// a drawing and anything locked. One step to undo, however many screens it reorders.
+    /// or the open canvas, and its group with. A group moves as its whole block, and steps
+    /// past a sibling group whole. Things on different screens each move among their own, and
+    /// so do things in different groups. Several things that are siblings move as one block,
+    /// keeping their own order and closing the gaps between them. A screen in the selection is
+    /// left as it is, and so are a drawing and anything locked. One step to undo, however many
+    /// screens it reorders.
     func arrange(_ selection: CanvasSelection, _ arrangement: Arrangement) {
         let orders = arranged(selection, arrangement)
         guard !orders.isEmpty else { return }
@@ -49,23 +52,29 @@ extension DesignStore {
     /// The new order, back to front and drawings left out, of each screen (or the open
     /// canvas, nil) whose order arranging the selection changes.
     private func arranged(_ selection: CanvasSelection, _ arrangement: Arrangement) -> [DesignScreen.ID?: [DesignElement.ID]] {
-        // What moves, by the sibling set it moves in: what is on one screen, or on the
-        // open canvas. A drawing is in none, a screen is not arranged, and a locked thing
-        // stays where it is, whichever way it is asked: the popover, the Format panel, a
-        // shortcut or Siri. The lock is checked on what is selected, not on what goes with
-        // it. Task 4: a selected group moves as its whole block, and every member goes with
-        // it, whether locked on its own or only by a group inside it, as when the group is
-        // moved.
-        var moving: [DesignScreen.ID?: (member: ElementRef, ids: Set<DesignElement.ID>)] = [:]
+        // What moves, by the screen it is on, or the open canvas. A drawing is in no sibling
+        // set, a screen is not arranged, and a locked thing stays where it is, whichever way
+        // it is asked: the popover, the Format panel, a shortcut or Siri. Locked means by
+        // itself or by a group above it, so a member of a locked group, gone into, stays too.
+        // The lock is checked on what is selected, not on what goes with it: a selected group
+        // moves as its whole block, and every member goes with it, whether locked on its own
+        // or only by a group inside it, as when the group is moved.
+        var moving: [DesignScreen.ID?: Set<DesignElement.ID>] = [:]
         for case .element(let ref) in selection.things {
             guard let (element, _) = resolve(ref), element.kind != .drawing, !isLocked(.element(ref)) else { continue }
-            moving[element.parent, default: (ref, [])].ids.insert(element.id)
+            moving[element.parent, default: []].insert(element.id)
         }
         var orders: [DesignScreen.ID?: [DesignElement.ID]] = [:]
         for (parent, moved) in moving {
-            let now = siblings(of: moved.member)
-            let order = Self.order(moving: moved.ids, among: now, arrangement)
-            if order != now { orders[parent] = order }
+            let things = content.children(of: parent)
+            var tree = LayerTree(things)
+            // Each sibling set its things are in moves on its own: the screen's top level and
+            // the inside of a group, say, both in this one step.
+            for (list, ids) in Dictionary(grouping: moved, by: tree.list(of:)) {
+                tree.lists[list] = Self.order(moving: Set(ids), among: tree.lists[list] ?? [], arrangement)
+            }
+            let order = tree.order
+            if order != things.compactMap({ $0.kind == .drawing ? nil : $0.id }) { orders[parent] = order }
         }
         return orders
     }
@@ -94,5 +103,46 @@ extension DesignStore {
         }
         rest.insert(contentsOf: block, at: place)
         return rest
+    }
+}
+
+/// What is on one screen, or on the open canvas, as layers: the things at its top level, and
+/// those in each group, each list back to front. In a list a group stands for its whole
+/// block, the group's own list then the item, which is how the design keeps them once its
+/// groups are sound: each group's members gathered into one run, the item just in front.
+/// Drawings are in no list (F7).
+struct LayerTree {
+    /// Each list's things, back to front: the top level's under nil, a group's under its id.
+    var lists: [DesignElement.ID?: [DesignElement.ID]] = [:]
+    private var groups: Set<DesignElement.ID> = []
+    private var listOf: [DesignElement.ID: DesignElement.ID?] = [:]
+
+    /// The tree of things that share a host, given back to front. A thing whose group isn't
+    /// among them, which only a design not yet put right has, is taken as at the top level.
+    init(_ things: [DesignElement]) {
+        let things = things.filter { $0.kind != .drawing }
+        for thing in things where thing.kind == .group { groups.insert(thing.id) }
+        for thing in things where listOf[thing.id] == nil {
+            let list = thing.group.flatMap { groups.contains($0) ? $0 : nil }
+            listOf[thing.id] = list
+            lists[list, default: []].append(thing.id)
+        }
+    }
+
+    /// The list a thing is in: its group, or nil for the top level.
+    func list(of id: DesignElement.ID) -> DesignElement.ID? {
+        listOf[id] ?? nil
+    }
+
+    /// Everything in the tree, back to front: each list in its order, with each group's
+    /// block in its place in its list.
+    var order: [DesignElement.ID] {
+        var written: Set<DesignElement.ID> = []
+        func block(_ id: DesignElement.ID) -> [DesignElement.ID] {
+            guard written.insert(id).inserted else { return [] }
+            guard groups.contains(id) else { return [id] }
+            return (lists[id] ?? []).flatMap(block) + [id]
+        }
+        return (lists[nil] ?? []).flatMap(block)
     }
 }

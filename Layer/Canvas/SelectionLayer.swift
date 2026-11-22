@@ -238,11 +238,17 @@ private struct SelectionSummary: View {
             return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
         }
         if let selected = model.selectedElement {
-            if selected.element.kind == .drawing {
+            let size = "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
+            switch selected.element.kind {
+            case .drawing:
                 let strokes = selected.element.strokeCount
                 return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
+            case .group:
+                // Told apart from an element, by VoiceOver and the UI tests.
+                return "Group · \(size)"
+            default:
+                return size
             }
-            return "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
         }
         if let screen = model.selectedScreen {
             return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"

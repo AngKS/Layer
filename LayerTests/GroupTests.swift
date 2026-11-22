@@ -591,3 +591,337 @@ struct GroupModelTests {
         #expect(board.store.element(board.b.element)?.opacity == nil)
     }
 }
+
+extension OrderBoard {
+    /// The names of what is on the board's screen, back to front, with group items called
+    /// as given: Group leaves a new group unnamed, shown as its kind until it is renamed.
+    fileprivate func screenOrder(calling groups: [DesignStore.ElementRef: String]) -> [String] {
+        let called = Dictionary(groups.map { ($0.key.element, $0.value) }, uniquingKeysWith: { first, _ in first })
+        return store.content.children(of: screen).map { called[$0.id] ?? $0.name ?? "" }
+    }
+
+    /// A group's members, by name, back to front.
+    fileprivate func members(of group: DesignStore.ElementRef) -> [String] {
+        store.content.members(of: group.element).map { $0.name ?? "" }
+    }
+}
+
+/// Group and Ungroup: a group built whole, as one step, where its frontmost member was, from
+/// the things that can join it; taken apart again with its members kept where they are; and
+/// arranged as one block among its siblings, with what is inside it arranged inside it.
+@MainActor
+@Suite("Group commands")
+struct GroupCommandTests {
+    // MARK: Group
+
+    @Test func groupingScatteredThingsGathersThemWhereTheFrontmostWas() throws {
+        let board = OrderBoard()
+        let b = try #require(board.store.canvasFrame(of: .element(board.b)))
+        let d = try #require(board.store.canvasFrame(of: .element(board.d)))
+        board.model.selection = board.selection(board.b, board.d)
+        #expect(board.model.canGroupSelection)
+
+        board.model.groupSelection()
+
+        let g = try #require(board.model.selectedElement)
+        #expect(board.model.selection == .element(g.ref))
+        #expect(g.element.kind == .group)
+        #expect(g.ref.host == .screen(board.screen))
+        #expect(g.element.group == nil)
+        // Named as its kind until it is renamed.
+        #expect(g.element.name == nil)
+        #expect(board.screenOrder(calling: [g.ref: "G"]) == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.members(of: g.ref) == ["B", "D"])
+        #expect(board.store.canvasFrame(of: .element(g.ref)) == b.union(d))
+        // The members stay where they are, and nothing else moves.
+        #expect(board.store.canvasFrame(of: .element(board.b)) == b)
+        #expect(board.store.canvasFrame(of: .element(board.d)) == d)
+        #expect(board.canvasOrder == ["note 1", "note 2", "drawing"])
+    }
+
+    /// On the open canvas each thing has a scale of its own: the group takes its frontmost
+    /// member's, and its box holds them all on the canvas (L5).
+    @Test func aGroupOnTheOpenCanvasTakesItsFrontmostMembersScale() throws {
+        let board = OrderBoard()
+        let big = board.store.addFloating(OrderBoard.element(.stickyNote, named: "big note", CGRect(x: 400, y: 300, width: 140, height: 130)), scale: 2)
+        let small = try #require(board.store.canvasFrame(of: .element(board.note1)))
+        let large = try #require(board.store.canvasFrame(of: .element(big)))
+
+        let g = try #require(board.store.group(board.selection(board.note1, big)))
+
+        #expect(g.host == .canvas)
+        #expect(board.store.element(g.element)?.scale == 2)
+        #expect(board.store.canvasFrame(of: .element(g)) == small.union(large))
+        #expect(board.store.content.members(of: g.element).map(\.id) == [board.note1.element, big.element])
+    }
+
+    @Test func lockedThingsAndDrawingsAreLeftOut() throws {
+        let board = OrderBoard()
+        board.store.setLocked(true, .element(board.b))
+
+        let g = try #require(board.store.group(board.selection(board.b, board.c, board.d)))
+
+        #expect(board.members(of: g) == ["C", "D"])
+        #expect(board.store.element(board.b.element)?.group == nil)
+        #expect(board.screenOrder(calling: [g: "G"]) == ["A", "B", "C", "D", "G", "E"])
+
+        // With the locked one left out, one is left: Group is off and does nothing.
+        let refused = OrderBoard()
+        refused.store.setLocked(true, .element(refused.b))
+        let before = refused.store.content
+        refused.model.selection = refused.selection(refused.b, refused.c)
+        #expect(!refused.store.canGroup(refused.selection(refused.b, refused.c)))
+        #expect(!refused.model.canGroupSelection)
+        #expect(refused.store.group(refused.selection(refused.b, refused.c)) == nil)
+        refused.model.groupSelection()
+        #expect(refused.store.content == before)
+        #expect(refused.model.selection == refused.selection(refused.b, refused.c))
+
+        // A drawing is left out likewise.
+        let drawn = OrderBoard()
+        let notes = try #require(drawn.store.group(drawn.selection(drawn.note1, drawn.note2, drawn.drawing)))
+        #expect(drawn.store.content.members(of: notes.element).map(\.id) == [drawn.note1.element, drawn.note2.element])
+        #expect(drawn.store.element(drawn.drawing.element)?.group == nil)
+        #expect(!drawn.store.canGroup(drawn.selection(drawn.note2, drawn.drawing)))
+
+        // So is what a locked group locks: entered, its members can't be grouped.
+        let locked = OrderBoard()
+        locked.group(locked.b, locked.c, locked.d) { $0.isLocked = true }
+        #expect(!locked.store.canGroup(locked.selection(locked.b, locked.c)))
+    }
+
+    @Test func thingsOnTwoScreensOrAScreenCantBeGrouped() {
+        let board = OrderBoard()
+        #expect(board.store.canGroup(board.selection(board.a, board.b)))
+        #expect(!board.store.canGroup(board.selection(board.a)))
+
+        // A thing on the screen and a note on the open canvas.
+        board.model.selection = board.selection(board.a, board.note1)
+        #expect(!board.store.canGroup(board.selection(board.a, board.note1)))
+        #expect(!board.model.canGroupSelection)
+        #expect(board.model.groupSelectionSpansHosts)
+        let before = board.store.content
+        board.model.groupSelection()
+        #expect(board.store.content == before)
+        #expect(board.model.selection == board.selection(board.a, board.note1))
+
+        // Things on two screens.
+        let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 1000, y: 50), scale: 0.5))
+        let f = board.store.setElements([OrderBoard.element(.button, named: "F", CGRect(x: 40, y: 40, width: 300, height: 100))], on: other.id, replacing: true)[0]
+        board.model.selection = board.selection(board.a, f)
+        #expect(!board.model.canGroupSelection)
+        #expect(board.model.groupSelectionSpansHosts)
+
+        // A screen, with something on it or with things on the open canvas.
+        #expect(!board.store.canGroup(CanvasSelection([.screen(board.screen), .element(board.a)])!))
+        #expect(!board.store.canGroup(CanvasSelection([.screen(board.screen), .element(board.note1), .element(board.note2)])!))
+
+        // Things on one screen sharing no group.
+        let grouped = OrderBoard()
+        grouped.group(grouped.b, grouped.d)
+        grouped.model.selection = grouped.selection(grouped.a, grouped.b)
+        #expect(!grouped.model.canGroupSelection)
+        #expect(!grouped.model.groupSelectionSpansHosts)
+    }
+
+    /// Review Focus 1: the things grouped weren't next to each other.
+    @Test func undoingAGroupPutsTheOrderBack() throws {
+        let board = OrderBoard()
+        let before = board.store.content
+        #expect(!board.undo.canUndo)
+        board.model.selection = board.selection(board.b, board.d)
+
+        board.model.groupSelection()
+
+        let g = try #require(board.model.selectedElement?.ref)
+        #expect(board.screenOrder(calling: [g: "G"]) == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.undo.canUndo)
+        // A one-off, as Delete is: plain Undo.
+        #expect(board.undo.undoActionName == "")
+
+        board.undo.undo()
+
+        #expect(!board.undo.canUndo)
+        #expect(board.store.content == before)
+        #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
+        #expect(board.store.groupItems(on: .screen(board.screen)).isEmpty)
+        #expect(board.store.element(board.b.element)?.group == nil)
+        #expect(board.store.element(board.d.element)?.group == nil)
+
+        board.undo.redo()
+        #expect(board.screenOrder(calling: [g: "G"]) == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.members(of: g) == ["B", "D"])
+    }
+
+    // MARK: Ungroup
+
+    @Test func ungroupingKeepsPlacesAndPassesLockAndHideDown() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d) { $0.isHidden = true }
+        let b = try #require(board.store.element(board.b.element))
+        let d = try #require(board.store.element(board.d.element))
+        #expect(!b.isHidden)
+        board.model.selection = .element(g)
+        #expect(board.model.canUngroupSelection)
+
+        board.model.ungroupSelection()
+
+        #expect(board.store.element(g.element) == nil)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "E"])
+        #expect(board.model.selection == board.selection(board.b, board.d))
+        for (ref, was) in [(board.b, b), (board.d, d)] {
+            let now = try #require(board.store.element(ref.element))
+            #expect(now.group == nil)
+            #expect(now.isHidden)
+            #expect(!now.isLocked)
+            #expect(now.frame == was.frame)
+        }
+        #expect(board.store.element(board.a.element)?.isHidden == false)
+
+        // Only a group is ungrouped.
+        board.model.selection = .element(board.a)
+        #expect(!board.model.canUngroupSelection)
+        #expect(board.store.ungroup(board.a) == nil)
+
+        // A locked group isn't taken apart from the selection's commands; Ungroup itself
+        // passes its lock down.
+        let locked = OrderBoard()
+        let l = locked.group(locked.b, locked.d) { $0.isLocked = true }
+        locked.model.selection = .element(l)
+        #expect(!locked.model.canUngroupSelection)
+        locked.model.ungroupSelection()
+        #expect(locked.store.element(l.element) != nil)
+        #expect(locked.store.ungroup(l) == locked.selection(locked.b, locked.d))
+        #expect(locked.store.element(locked.b.element)?.isLocked == true)
+        #expect(locked.store.element(locked.d.element)?.isLocked == true)
+    }
+
+    /// Review Focus 1: one undo brings the group back with its members, their own flags and
+    /// the order as they were.
+    @Test func undoingAnUngroupPutsTheGroupBack() throws {
+        let board = OrderBoard()
+        let start = board.store.content
+        let g = board.group(board.b, board.d) { $0.isHidden = true }
+        let grouped = board.store.content
+        board.model.selection = .element(g)
+
+        board.model.ungroupSelection()
+        #expect(board.screenOrder == ["A", "C", "B", "D", "E"])
+        #expect(board.undo.undoActionName == "")
+
+        board.undo.undo()
+
+        #expect(board.store.content == grouped)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+        #expect(board.members(of: g) == ["B", "D"])
+        #expect(board.store.element(board.b.element)?.isHidden == false)
+        // The step before is the group's own making.
+        board.undo.undo()
+        #expect(board.store.content == start)
+    }
+
+    @Test func aGroupInsideAGroup() throws {
+        let board = OrderBoard()
+        let g1 = try #require(board.store.group(board.selection(board.b, board.c)))
+        let g2 = try #require(board.store.group(board.selection(g1, board.d)))
+        let called = [g1: "G1", g2: "G2"]
+
+        #expect(board.store.content.ancestors(of: board.b.element) == [g1.element, g2.element])
+        #expect(board.screenOrder(calling: called) == ["A", "B", "C", "G1", "D", "G2", "E"])
+
+        #expect(board.store.ungroup(g2) == board.selection(g1, board.d))
+
+        #expect(board.store.content.ancestors(of: board.b.element) == [g1.element])
+        #expect(board.store.element(g1.element)?.group == nil)
+        #expect(board.members(of: g1) == ["B", "C"])
+        #expect(board.screenOrder(calling: called) == ["A", "B", "C", "G1", "D", "E"])
+
+        // A group made of things in a group is made in that group, and ungrouped, its
+        // members go back to it.
+        let nested = OrderBoard()
+        let outer = nested.group(nested.b, nested.c, nested.d)
+        let inner = try #require(nested.store.group(nested.selection(nested.b, nested.c)))
+        #expect(nested.store.element(inner.element)?.group == outer.element)
+        #expect(nested.store.content.ancestors(of: nested.b.element) == [inner.element, outer.element])
+        #expect(nested.screenOrder(calling: [inner: "I"]) == ["A", "B", "C", "I", "D", "G", "E"])
+        nested.store.ungroup(inner)
+        #expect(nested.store.content.ancestors(of: nested.b.element) == [outer.element])
+        #expect(nested.members(of: outer) == ["B", "C", "D"])
+    }
+
+    // MARK: Arranging
+
+    @Test func aGroupArrangesAsOneBlock() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        // A member locked on its own goes with its group.
+        board.store.setLocked(true, .element(board.b))
+
+        board.store.arrange(.element(g), .back)
+        #expect(board.screenOrder == ["B", "D", "G", "A", "C", "E"])
+
+        board.store.arrange(.element(g), .forward)
+        #expect(board.screenOrder == ["A", "B", "D", "G", "C", "E"])
+
+        // From the selection's commands too.
+        board.model.selection = .element(g)
+        #expect(board.model.canArrangeSelection(.front))
+        board.model.arrangeSelection(.front)
+        #expect(board.screenOrder == ["A", "C", "E", "B", "D", "G"])
+        #expect(!board.model.canArrangeSelection(.forward))
+
+        // So does what a locked group inside it locks.
+        let nested = OrderBoard()
+        let inner = nested.group(nested.b, nested.c, named: "I") { $0.isLocked = true }
+        let outer = nested.group(inner, nested.d)
+        nested.store.arrange(.element(outer), .back)
+        #expect(nested.screenOrder == ["B", "C", "I", "D", "G", "A", "E"])
+
+        // On the open canvas the drawing keeps its slot, though it is between members.
+        let canvas = OrderBoard()
+        let note3 = canvas.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        let notes = canvas.group(canvas.note1, note3)
+        #expect(canvas.canvasOrder == ["note 2", "note 1", "drawing", "note 3", "G"])
+        canvas.store.arrange(.element(notes), .back)
+        #expect(canvas.canvasOrder == ["note 1", "note 3", "drawing", "G", "note 2"])
+    }
+
+    /// A thing next to a group steps past the whole group: stepped past a member alone, it
+    /// was gathered back behind the group at the end of the change, and the command did
+    /// nothing though it was on.
+    @Test func aThingNextToAGroupStepsPastAllOfIt() {
+        let board = OrderBoard()
+        board.group(board.b, board.d)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+
+        #expect(board.store.canArrange(board.c, .forward))
+        board.store.arrange(board.c, .forward)
+        #expect(board.screenOrder == ["A", "B", "D", "G", "C", "E"])
+
+        board.store.arrange(board.c, .backward)
+        #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
+
+        board.store.arrange(board.e, .backward)
+        #expect(board.screenOrder == ["A", "C", "E", "B", "D", "G"])
+    }
+
+    @Test func arrangingInsideAGroupStaysInside() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        // D is in front of everything in G, though E is in front of it on the screen.
+        #expect(!board.store.canArrange(board.d, .front))
+        #expect(!board.store.canArrange(board.d, .forward))
+        #expect(!board.store.canArrange(board.b, .back))
+
+        board.store.arrange(board.b, .front)
+
+        #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
+        #expect(board.members(of: g) == ["D", "B"])
+
+        // A thing inside and a thing outside each move in their own list, in one step.
+        board.store.arrange(board.selection(board.a, board.d), .front)
+        #expect(board.screenOrder == ["C", "B", "D", "G", "E", "A"])
+        board.undo.undo()
+        #expect(board.screenOrder == ["A", "C", "D", "B", "G", "E"])
+    }
+}
