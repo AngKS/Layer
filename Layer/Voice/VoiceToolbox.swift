@@ -36,12 +36,21 @@ final class VoiceToolbox: VoiceActing {
     /// selected. Nil lets a command go anywhere.
     var scope: DesignScreen.ID?
 
-    /// Whether a correction ("No, …") may undo or redo a command's step with the undo and
-    /// redo tools. Not in a change for one screen once its agent has decided: such a
-    /// correction undoes only that screen's last change, which the agent undoes itself
-    /// before the model is asked (`VoiceAgent`). The step on top may be a change to another
-    /// screen, and the model can't tell.
-    var correctionMayUndo = true
+    /// What a correction ("No, …") may do with the undo and redo tools in the command under
+    /// way. A correction for one screen undoes only that screen's last change, which its
+    /// agent undoes itself before the model is asked (`VoiceAgent`); the model can't tell
+    /// whose the step on top is.
+    enum CorrectionUndo {
+        /// Undo or redo a command's step, as in a command that can go anywhere.
+        case allowed
+        /// Nothing more: the screen's last change has been undone already. The model is
+        /// told so, which is no failure: what it asked for is done.
+        case alreadyDone
+        /// Nothing: the step on top may be another screen's.
+        case refused
+    }
+
+    var correctionUndo = CorrectionUndo.allowed
 
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
@@ -58,7 +67,7 @@ final class VoiceToolbox: VoiceActing {
         lastFailed = false
         newScreenAnchor = nil
         scope = nil
-        correctionMayUndo = true
+        correctionUndo = .allowed
     }
 
     // MARK: Screens
@@ -826,10 +835,11 @@ final class VoiceToolbox: VoiceActing {
         // a model asked to correct a command undid the person's own change instead (I-2).
         // Nor does a correction redo a change made by hand.
         let isCorrection = spokenCommand.flatMap(VoiceAgent.correction(in:)) != nil
+        if isCorrection, correctionUndo == .alreadyDone { return noted(Self.undoneAlready) }
         guard !isCorrection || (isUndo ? model.store.lastStepIsCommand : model.store.nextRedoIsCommand) else {
             return failed(Self.changedByHand)
         }
-        guard !isCorrection || correctionMayUndo else { return failed(Self.notThisScreens) }
+        guard !isCorrection || correctionUndo == .allowed else { return failed(Self.notThisScreens) }
         if isUndo { history.undo() } else { history.redo() }
         return done(isUndo ? "Undid the last change." : "Redid the last change.")
     }
@@ -837,12 +847,17 @@ final class VoiceToolbox: VoiceActing {
     /// Why a correction won't undo or redo the change at hand.
     static let changedByHand = "That change was made by hand, not by voice, so a correction leaves it. The Undo and Redo buttons work on it."
 
+    /// What the model is told of an undo or redo asked for in a correction for one screen
+    /// whose last change has been undone already.
+    static let undoneAlready = "The last change made for this screen has been undone already, so nothing more is undone."
+
     /// Why a correction for one screen won't undo the change at hand: one made otherwise.
     static let notThisScreens = "A correction for one screen undoes only the last change made for it, so this one stays. The Undo button works on it."
 
     /// A correction with nothing of the last command's to undo: the command changed
     /// nothing, or something has been changed by hand since, which isn't undone in its place.
-    /// `notThisScreens` when it is for one screen and the last command wasn't for that one.
+    /// `notThisScreens` when it is for one screen, and the last command's step is on top but
+    /// wasn't a change to that screen.
     func refuseCorrection(notThisScreens: Bool = false) -> String {
         if notThisScreens { return failed(Self.notThisScreens) }
         return failed("There's nothing of the last command's to undo: it changed nothing, or something has been changed by hand since.")
@@ -970,6 +985,13 @@ final class VoiceToolbox: VoiceActing {
         // The model is told the handle of what was made, to go on with. The pill isn't.
         lines.append(line.replacing(#/ It is the [ES]\d+ now in the canvas list\./#, with: "").replacing(#/ as [ES]\d+/#, with: ""))
         lastFailed = false
+        return line
+    }
+
+    /// A line for the model about something that needn't be done: neither done, nor a
+    /// failure that would be the person's to hear.
+    private func noted(_ line: String) -> String {
+        VoiceLog.log.info("tool: noted. \(line, privacy: .private)")
         return line
     }
 

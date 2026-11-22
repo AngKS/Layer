@@ -738,6 +738,13 @@ final class DesignStore {
         return step === lastStep
     }
 
+    /// The one screen that all `edit`'s step changed is, or is on: the screen itself, and
+    /// elements on it before and after. Nil when it changed nothing, or anything else: the
+    /// board, another screen, or an element on the open canvas, or moved on or off it.
+    func onlyScreen(changedBy edit: Edit) -> DesignScreen.ID? {
+        edit.step?.onlyScreen
+    }
+
     /// Tells the system the document has changes to save, without a step in the history.
     /// The system marks a document as changed when its undo manager is about to close a
     /// group, so a change made without an undo step (a name the app settles on, the file's
@@ -762,13 +769,17 @@ final class DesignStore {
     /// command does is made for it (`actingForCommand`) and undoes as the one step the
     /// command was. A change by hand made meanwhile, ink drawn or a drag, is a step of its
     /// own, which neither undoing the command nor a spoken correction of it takes back (V1).
+    ///
+    /// `name` names the step, for the Edit menu and the undo HUD, when it is begun here. A
+    /// command begun inside another's step is part of that one, and leaves its name alone.
     @discardableResult
-    func beginHeldEdit() -> Edit {
+    func beginHeldEdit(named name: String? = nil) -> Edit {
         if let heldEdit {
             heldEdit.nested += 1
             return heldEdit
         }
         let edit = beginEdit(by: .app)
+        if let name { self.name(edit, name) }
         heldEdit = edit
         return edit
     }
@@ -947,6 +958,30 @@ final class DesignStore {
         /// What its changes touched.
         var touched: Touched {
             runs.reduce(into: Touched()) { $0.formUnion(Touched(from: $1.before, to: $1.after)) }
+        }
+
+        /// The one screen all its changes were to or on: see `DesignStore.onlyScreen(changedBy:)`.
+        var onlyScreen: DesignScreen.ID? {
+            var screens: Set<DesignScreen.ID> = []
+            for run in runs {
+                let touched = Touched(from: run.before, to: run.after)
+                guard !touched.board else { return nil }
+                screens.formUnion(touched.screens)
+                // Where each element it changed was, and is: a screen, or the open canvas.
+                func hosts(in content: DesignContent) -> [DesignElement.ID: DesignScreen.ID?] {
+                    Dictionary(content.elements.map { ($0.id, $0.parent) }, uniquingKeysWith: { first, _ in first })
+                }
+                let was = hosts(in: run.before), now = hosts(in: run.after)
+                for id in touched.elements {
+                    for host in [was[id], now[id]] {
+                        // Not there on that side: added, or taken away.
+                        guard let host else { continue }
+                        guard let screen = host else { return nil }
+                        screens.insert(screen)
+                    }
+                }
+            }
+            return screens.count == 1 ? screens.first : nil
         }
     }
 

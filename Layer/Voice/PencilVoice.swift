@@ -499,9 +499,9 @@ final class PencilVoice {
         switch target {
         case .thing(let thing)?: model.selection = thing
         case .canvas?: model.selection = nil
-        // The screen a change is for stays selected while it runs, with the field it was
-        // typed in.
-        case .screenEdit(let id)?: model.selection = .screen(id)
+        // The screen a change is for, with the field it was typed in; not one that has
+        // gone since, which leaves the selection as it is.
+        case .screenEdit(let id)?: if model.store.screen(id) != nil { model.selection = .screen(id) }
         case nil: break
         }
     }

@@ -1185,6 +1185,23 @@ struct PencilVoiceTests {
         try? await Task.sleep(for: .milliseconds(50))
         #expect(bench.pencil.bubble == nil && bench.pencil.call == nil && bench.routes.isEmpty)
     }
+
+    /// A change for one screen selects that screen as it starts, so that it runs with its
+    /// field. A screen that has gone by then isn't selected: the selection stays as it is.
+    @Test func aChangeForAScreenThatHasGoneSelectsNothing() async {
+        let bench = Bench()
+        #expect(await bench.toggle())
+        bench.pencil.call?.captionTimes = (.milliseconds(100), .milliseconds(100))
+        #expect(bench.app.selection == bench.button)
+        #expect(bench.pencil.call?.submit("make it blue", about: .screenEdit(UUID())) != nil)
+        #expect(await eventually { bench.runner.commands == ["make it blue"] })
+        #expect(bench.app.selection == bench.button)
+        // A screen that is there is selected.
+        #expect(bench.pencil.call?.submit("make it green", about: .screenEdit(bench.screen)) != nil)
+        #expect(await eventually { bench.runner.commands == ["make it blue", "make it green"] })
+        #expect(bench.app.selection == .screen(bench.screen))
+        bench.end()
+    }
 }
 
 /// The window's one squeeze handler, which decides once per squeeze who has it: a ruler

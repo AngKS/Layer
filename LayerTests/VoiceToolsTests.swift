@@ -173,6 +173,10 @@ struct CanvasPictureTests {
         #expect(!text.contains("Your profile"))
         #expect(!text.contains("Loose on the canvas"))
         #expect(picture.text(.compact) == text)
+        // And told, last, that nothing else can be changed or made.
+        #expect(text.hasSuffix("\n" + CanvasPicture.alone("S1")))
+        picture.scope = nil
+        #expect(!picture.text(.full).contains("alone"))
     }
 
     @Test func aScreenIsNamedInWordsByItsHandle() {

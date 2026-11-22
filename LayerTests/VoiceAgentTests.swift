@@ -1109,21 +1109,129 @@ struct VoiceAgentTests {
         #expect(bench.profileTitle?.tint == ColourWords.parse("green"))
     }
 
-    /// A change for one screen makes no other, so its model isn't handed the tool that would.
-    /// The next command, which can go anywhere, is handed it, and told the whole canvas.
+    /// A change for one screen makes no other, so its model isn't handed the tool that would,
+    /// and the canvas it is told says so: the rules, the same for every command, still tell
+    /// it to make screens. The next command, which can go anywhere, is handed the tool, and
+    /// told the whole canvas with no such line.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aScreenChangeIsntHandedTheToolThatMakesScreens() async throws {
         let bench = screenBench([:])
+        let alone = "This change is for S1 alone: no new screen can be made and nothing elsewhere can change; if one is asked for, call no tool and say it can't be done here."
         _ = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
         let scoped = try #require(bench.recorder.requests.last)
         #expect(!scoped.tools.contains("createScreen"))
         #expect(scoped.tools.contains("styleElement"))
+        #expect(scoped.instructions.contains(alone))
 
         _ = await bench.agent.run("a settings screen")
         let anywhere = try #require(bench.recorder.requests.last)
         #expect(anywhere.tools.contains("createScreen"))
         #expect(anywhere.instructions.contains("Your profile"))
+        #expect(!anywhere.instructions.contains("alone: no new screen"))
         #expect(anywhere.prompts.last == "a settings screen")
+    }
+
+    /// Squeezed over Login, "make it dark" is spoken, and changes Login alone; "No, lighter"
+    /// typed in Login's field then corrects it. A spoken change to Profile is still left.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionForOneScreenUndoesASpokenChangeToThatScreenAlone() async throws {
+        let bench = screenBench([
+            "make the title red": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"red"}"#)],
+            "make the profile title red": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"red"}"#)],
+        ])
+        _ = await bench.agent.run("make the title red")
+        #expect(bench.title?.tint == ColourWords.parse("red"))
+        let undone = await bench.agent.run("No.", about: .screenEdit(bench.login))
+        #expect(bench.title?.tint == Theme.accent)
+        #expect(undone.problem == nil)
+
+        _ = await bench.agent.run("make the profile title red")
+        let refused = await bench.agent.run("No.", about: .screenEdit(bench.login))
+        #expect(bench.profileTitle?.tint == ColourWords.parse("red"))
+        #expect(refused.problem == VoiceToolbox.notThisScreens)
+    }
+
+    /// The one screen a step changed, which a correction for that screen may take back: the
+    /// screen itself, or what is on it, and nothing else.
+    @Test func theOneScreenAStepChanged() throws {
+        let (app, login, profile) = VoiceFixture.loginAndProfile()
+        let store = app.store
+        let title = DesignStore.ElementRef(host: .screen(login), element: try #require(store.screen(login)?.elements.first?.id))
+        let profileTitle = DesignStore.ElementRef(host: .screen(profile), element: try #require(store.screen(profile)?.elements.first?.id))
+        func screen(changedBy body: () -> Void) -> DesignScreen.ID? {
+            let edit = store.beginEdit(by: .app)
+            store.act(for: edit, body)
+            store.endEdit(edit)
+            return store.onlyScreen(changedBy: edit)
+        }
+        #expect(screen { store.update(title) { $0.frame.origin.x += 5 } } == login)
+        #expect(screen { store.updateScreen(profile) { $0.name = "Me" } } == profile)
+        #expect(screen {
+            store.update(title) { $0.frame.origin.x += 5 }
+            store.update(profileTitle) { $0.frame.origin.x += 5 }
+        } == nil)
+        // Login and something on the open canvas, or Login and the board's name.
+        #expect(screen {
+            store.update(title) { $0.frame.origin.x += 5 }
+            _ = store.addFloating(.stickyNote, from: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        } == nil)
+        #expect(screen {
+            store.update(title) { $0.frame.origin.x += 5 }
+            store.setTitle("Board")
+        } == nil)
+        #expect(screen {} == nil)
+    }
+
+    /// The command's step undone, the model's own undo of it again is no failure: the
+    /// command did what was meant, and says so, not that something couldn't be done.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aSecondUndoInACorrectionForOneScreenIsNoFailure() async throws {
+        let bench = screenBench([
+            "make the title red": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"red"}"#)],
+            "no, make it blue": [Step(tool: "styleElement", arguments: #"{"element":"E1","look":"blue"}"#), Step(tool: "undo", arguments: "{}")],
+        ])
+        _ = await bench.agent.run("make the title red", about: .screenEdit(bench.login))
+        let outcome = await bench.agent.run("No, make it blue", about: .screenEdit(bench.login))
+        #expect(bench.title?.tint == ColourWords.parse("blue"))
+        #expect(outcome.problem == nil)
+    }
+
+    /// The reason a correction for one screen gives is about another screen only when the
+    /// last command's step is still on top and was for another screen. A change by hand
+    /// since is the reason it always was.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCorrectionForOneScreenGivesTheScreenAsItsReasonOnlyWhenItIs() async throws {
+        let bench = screenBench([
+            "make the profile title red": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"red"}"#)],
+            "make the profile title green": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"green"}"#)],
+        ])
+        let image = DesignStore.ElementRef(host: .screen(bench.login), element: try #require(bench.app.store.screen(bench.login)?.elements[2].id))
+        _ = await bench.agent.run("make the profile title red")
+        bench.app.store.update(image) { $0.frame.origin.x = 60 }
+        _ = await bench.agent.run("No, make it blue", about: .screenEdit(bench.login))
+        let prompt = try #require(bench.recorder.requests.last?.prompts.last)
+        #expect(prompt.contains(VoiceAgent.notUndoneHint))
+        #expect(!prompt.contains(VoiceAgent.notThisScreensHint))
+
+        _ = await bench.agent.run("make the profile title green")
+        bench.app.store.update(image) { $0.frame.origin.x = 80 }
+        let refused = await bench.agent.run("No.", about: .screenEdit(bench.login))
+        #expect(refused.problem != nil)
+        #expect(refused.problem != VoiceToolbox.notThisScreens)
+        #expect(bench.profileTitle?.tint == ColourWords.parse("green"))
+    }
+
+    /// A change for one screen that runs inside another command's step, as a command can,
+    /// leaves that step's name alone: only a step it begins is named Change Screen.
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aScreenChangeNamesOnlyAStepItBegan() async throws {
+        let bench = screenBench(["make the button green and say continue": Self.greenAndContinue])
+        let undo = try #require(bench.undo)
+        bench.app.store.beginHeldEdit()
+        _ = await bench.agent.run("make the button green and say continue", about: .screenEdit(bench.login))
+        bench.app.store.endHeldEdit()
+        #expect(bench.button?.text == "Continue")
+        #expect(undo.undoActionName == "Voice Command")
     }
 
     /// A change typed for a screen that has gone since is told so, and the model isn't asked.

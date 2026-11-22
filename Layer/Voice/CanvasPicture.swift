@@ -77,7 +77,15 @@ struct CanvasPicture: Sendable, Equatable {
             lines.append("Loose on the canvas:")
             lines += loose.map { "  " + Self.line(for: $0) }
         }
+        if let scope { lines.append(Self.alone(scope)) }
         return lines.joined(separator: "\n")
+    }
+
+    /// The last line told of a change for one screen. The rules, the same for every command
+    /// so that a model can keep them read, tell it to make a screen when one is asked for:
+    /// here it can't, and isn't handed the tool to.
+    static func alone(_ handle: String) -> String {
+        "This change is for \(handle) alone: no new screen can be made and nothing elsewhere can change; if one is asked for, call no tool and say it can't be done here."
     }
 
     /// The screen the person is most likely talking about: the one selected or holding the
