@@ -1343,19 +1343,33 @@ final class AppModel {
     /// - A selected thing is taken out.
     /// - A thing on a selected screen, or in a selected group, takes the screen's or the
     ///   group's place: the same as going one level in.
-    /// - Anything else is added. A screen added folds in its elements that were selected.
+    /// - Anything else is added. A screen added folds in its elements that were selected, and
+    ///   a group the things selected inside it, at any depth (F5), so that nothing selected
+    ///   holds a group and its own member.
     private func selection(afterTapOn thing: CanvasSelection, from current: CanvasSelection?) -> CanvasSelection? {
         guard let current else { return thing }
         if current.contains(thing) { return current.removing(thing) }
+        var things = current.things
         if case .element(let ref) = thing {
             var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
             if case .screen(let id) = ref.host { holders.append(.screen(id)) }
-            let selected = holders.filter(current.contains)
-            if !selected.isEmpty {
-                return CanvasSelection(current.things.subtracting(selected).union([thing]))
+            things.subtract(holders.filter(current.contains))
+            if store.groupItem(ref.element) != nil {
+                let inside = Set(store.content.contents(of: ref.element).map(\.id))
+                things = things.filter { thing in
+                    if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
+                }
             }
         }
-        return CanvasSelection(current.things.union([thing]))
+        return CanvasSelection(things.union([thing]))
+    }
+
+    /// A row in the Layers panel was tapped: the thing is added to the selection, taken out, or
+    /// replaces the screen or group that holds it, by the one rule for a tap, on exactly that
+    /// thing (no outermost group, no double-tap). The palette is put away.
+    func pickInList(_ thing: CanvasSelection) {
+        tool = .select
+        selection = selection(afterTapOn: thing, from: selection)
     }
 
     /// What a double-tap on a thing makes of the selection as it was before its first tap:
@@ -1699,8 +1713,15 @@ final class AppModel {
         if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
+    /// Locks an element, or unlocks it, which also unlocks the locked groups above it, so that
+    /// a thing locked only by its group, which offers Unlock, is unlocked and never locked.
     func toggleLock(_ ref: DesignStore.ElementRef) {
-        store.update(ref) { $0.isLocked.toggle() }
+        guard let element = store.resolve(ref)?.element else { return }
+        if store.isLockedWithItsGroups(element) {
+            store.unlock(.element(ref))
+        } else {
+            store.update(ref) { $0.isLocked = true }
+        }
     }
 
     /// Where what is selected is, in the view's own points: for a turned element, the box

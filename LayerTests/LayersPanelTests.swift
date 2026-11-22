@@ -117,6 +117,41 @@ extension HostedWindowSuites {
             #expect(codeAfterIt == 1, "code generated once the drag settled: \(codeAfterIt)")
         }
 
+        /// A member of an open group dragged for 60 frames builds no row: the rows are given
+        /// what they show, and a group's frame, which follows its member's, is not among it
+        /// (Review Focus 6).
+        @Test func aDragOfAGroupedThingBuildsNoRows() async throws {
+            let (model, lines) = board()
+            var item = DesignStore.newElement(.group)
+            item.name = "Group"
+            let made = item
+            let g = DesignStore.ElementRef(host: lines[0].host, element: made.id)
+            model.store.apply { content in
+                content.add(made, to: lines[0].host.parent)
+                for line in lines[2...4] { content.update(line.element) { $0.group = made.id } }
+            }
+            model.selection = .element(lines[3])
+            #expect(model.enteredGroups.contains(g.element), "the group is open while a member is selected")
+            LayersPanelWork.reset()
+            let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))
+            let host = UIHostingController(rootView: LayersPanel(isSheet: true).environment(model))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            for _ in 0..<20 where LayersPanelWork.rows == 0 { try await settle(host.view) }
+            #expect(LayersPanelWork.rows >= 30)
+
+            var rowsInADrag = Int.max
+            for _ in 0..<3 where rowsInADrag > 0 {
+                _ = try await waitForRowsToSettle(nudging: lines[15], in: model, view: host.view)
+                LayersPanelWork.reset()
+                try await drag(lines[3], in: model, view: host.view)
+                try await settle(host.view)
+                rowsInADrag = LayersPanelWork.rows
+            }
+            #expect(rowsInADrag == 0, "rows built during a 60-frame drag of a grouped thing: \(rowsInADrag)")
+        }
+
         /// The code's view is named as the design's files name it, so a screen named like an
         /// earlier one declares "Login2". Renaming the earlier one frees the name: the code
         /// shown is made again for it, though the screen shown hasn't changed (merge with the

@@ -244,6 +244,8 @@ enum BoardSnapshot {
             }
             ForEach(model.store.floating) { floating in
                 FloatingElementView(floating: floating)
+                    // Floating drawings last, as the canvas draws them.
+                    .zIndex(floating.element.kind == .drawing ? 1 : 0)
             }
         }
         .offset(x: -area.minX, y: -area.minY)

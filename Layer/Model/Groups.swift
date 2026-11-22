@@ -368,8 +368,21 @@ extension DesignStore {
     ///
     /// What is hidden, by itself or with a group above it, has none. Nor has a drawing that
     /// isn't locked: its ink is picked, not its frame.
+    ///
+    /// On the open canvas a locked drawing comes after the other floating things, as the canvas
+    /// draws it above them (C3, L10): hit order is draw order. This is the one place that
+    /// order lives, and what is built from the targets, and hover, follow it.
     func targets(on host: ElementRef.Host, entered: Set<DesignElement.ID>) -> [ElementRef] {
-        children(on: host).filter { isTarget($0, entered: entered) }.map { ElementRef(host: host, element: $0.id) }
+        var found = children(on: host).filter { isTarget($0, entered: entered) }
+        if host == .canvas { found = Self.drawnOrder(found) }
+        return found.map { ElementRef(host: host, element: $0.id) }
+    }
+
+    /// Floating things as the canvas draws them, back to front: a drawing, which can only be
+    /// touched while it is locked, above everything else on the open canvas.
+    private static func drawnOrder(_ things: [DesignElement]) -> [DesignElement] {
+        guard things.contains(where: { $0.kind == .drawing }) else { return things }
+        return things.filter { $0.kind != .drawing } + things.filter { $0.kind == .drawing }
     }
 
     /// `targets(on:entered:)` for every screen and the open canvas at once, as the elements
@@ -385,6 +398,7 @@ extension DesignStore {
             for element in content.elements where isTarget(element, entered: entered) {
                 found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
             }
+            if let floating = found[.canvas] { found[.canvas] = Self.drawnOrder(floating) }
             return found
         }
     }
@@ -642,5 +656,55 @@ extension DesignStore.ElementRef.Host {
     /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
     var parent: DesignScreen.ID? {
         if case .screen(let id) = self { id } else { nil }
+    }
+}
+
+// MARK: The Layers tree
+
+/// One row of the Layers panel's tree: a thing and what is in it, with the lock and hide it
+/// has through the groups above it. Never given to a row itself: a frame changes on every
+/// frame of a drag.
+struct LayerNode: Identifiable {
+    var element: DesignElement
+    var ref: DesignStore.ElementRef
+    /// What is in it, topmost first: empty for anything but a group.
+    var children: [LayerNode]
+    /// Hidden by its own flag or a group above it.
+    var isHiddenWithItsGroups: Bool
+    /// Locked by its own flag or a group above it.
+    var isLockedWithItsGroups = false
+
+    var id: DesignElement.ID { element.id }
+}
+
+extension DesignStore {
+    /// What is on a screen, or on the open canvas, as the Layers panel shows it: the things at
+    /// the top level, topmost first, each group's members under it, topmost first, and no
+    /// drawings (see `drawings`). Built from `SiblingLists`, which holds the rule for which
+    /// list a thing is in. Each node has its own flags for the toggles, and the effective
+    /// ones, worked down from the top once, not looked up for each row.
+    func layerTree(on host: ElementRef.Host) -> [LayerNode] {
+        let things = children(on: host)
+        let lists = SiblingLists(things).lists
+        let byID = Dictionary(things.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen: Set<DesignElement.ID> = []
+        func nodes(in list: DesignElement.ID?, hidden: Bool, locked: Bool) -> [LayerNode] {
+            (lists[list] ?? []).reversed().compactMap { id in
+                guard let element = byID[id], seen.insert(id).inserted else { return nil }
+                let isHidden = hidden || element.isHidden
+                let isLocked = locked || element.isLocked
+                return LayerNode(
+                    element: element, ref: ElementRef(host: host, element: id),
+                    children: element.kind == .group ? nodes(in: id, hidden: isHidden, locked: isLocked) : [],
+                    isHiddenWithItsGroups: isHidden, isLockedWithItsGroups: isLocked
+                )
+            }
+        }
+        return nodes(in: nil, hidden: false, locked: false)
+    }
+
+    /// The drawings on the open canvas, topmost first: listed in a section of their own.
+    var drawings: [ElementRef] {
+        children(on: .canvas).filter { $0.kind == .drawing }.reversed().map { ElementRef(host: .canvas, element: $0.id) }
     }
 }

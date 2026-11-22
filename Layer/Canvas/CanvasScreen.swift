@@ -26,7 +26,8 @@ struct CanvasScreen: View {
                     }
                     ForEach(model.store.floating) { floating in
                         FloatingElementView(floating: floating)
-                            .zIndex(2)
+                            // A locked drawing is above the other things, as it is touched.
+                            .zIndex(floating.element.kind == .drawing ? 3 : 2)
                             .transition(.blurReplace)
                     }
                 }

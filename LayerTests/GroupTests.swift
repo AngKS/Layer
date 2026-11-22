@@ -2330,3 +2330,128 @@ struct GroupAsOneThingTests {
         #expect(board.undo.undoActionName == "Format")
     }
 }
+
+/// The Layers panel as a tree: groups with their members under them, drawings apart.
+@MainActor
+@Suite("The layers tree")
+struct LayerTreeTests {
+    private func names(_ nodes: [LayerNode]) -> [String] {
+        nodes.map { $0.element.name ?? "" }
+    }
+
+    @Test func theTreeListsTopmostFirstWithMembersUnderTheirGroup() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let outer = board.group(board.a, g, named: "H")
+        let tree = board.store.layerTree(on: .screen(board.screen))
+        #expect(names(tree) == ["E", "H", "C"])
+        let h = try #require(tree.first { $0.ref == outer })
+        #expect(names(h.children) == ["G", "A"])
+        let node = try #require(h.children.first { $0.ref == g })
+        #expect(names(node.children) == ["D", "B"])
+        #expect(board.store.layerTree(on: .canvas).map(\.element.name) == ["note 2", "note 1"])
+    }
+
+    @Test func rowsKnowWhatIsHiddenAndLockedAboveThem() throws {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.store.update(g) { $0.isLocked = true; $0.isHidden = true }
+        let tree = board.store.layerTree(on: .screen(board.screen))
+        let node = try #require(tree.first { $0.ref == g })
+        #expect(node.isHiddenWithItsGroups && node.isLockedWithItsGroups)
+        for child in node.children {
+            #expect(child.isHiddenWithItsGroups && child.isLockedWithItsGroups)
+            #expect(!child.element.isHidden && !child.element.isLocked, "its own flags are its own")
+        }
+        let other = try #require(tree.first { $0.element.name == "E" })
+        #expect(!other.isHiddenWithItsGroups && !other.isLockedWithItsGroups)
+    }
+
+    @Test func drawingsAreNotInTheTree() {
+        let board = OrderBoard()
+        let tree = board.store.layerTree(on: .canvas)
+        #expect(!tree.contains { $0.ref == board.drawing })
+        #expect(board.store.drawings == [board.drawing])
+        board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        #expect(board.store.drawings == [board.drawing])
+    }
+
+    @Test func aRowTapAddsOrTakesOutExactlyThatThing() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+
+        board.model.selection = .element(g)
+        board.model.pickInList(.element(board.b))
+        #expect(board.model.selection == .element(board.b), "the group is B's container, so B replaces it")
+
+        board.model.selection = .element(board.a)
+        board.model.pickInList(.element(board.b))
+        #expect(board.model.selection == board.selection(board.a, board.b))
+
+        board.model.pickInList(.element(board.b))
+        #expect(board.model.selection == .element(board.a), "a selected thing is taken out")
+
+        board.model.selection = .element(board.b)
+        board.model.pickInList(.element(g))
+        #expect(board.model.selection == .element(g), "adding the group folds B into it")
+        #expect(board.model.tool == .select)
+    }
+
+    @Test func addingAGroupFoldsInWhatIsSelectedAtAnyDepth() {
+        let board = OrderBoard()
+        let i = board.group(board.c, board.e, named: "I")
+        let g = board.group(board.a, i, named: "G")
+        board.model.selection = board.selection(board.c, board.b)
+        board.model.pickInList(.element(g))
+        #expect(board.model.selection == board.selection(board.b, g))
+    }
+
+    @Test func aGroupAddedFromThePanelIsNeverDuplicatedWithItsMember() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = .element(board.b)
+        board.model.pickInList(.element(g))
+        board.model.duplicateSelection()
+        #expect(board.screenOrder.filter { $0 == "B" }.count == 2, "B is copied once, with its group")
+        #expect(board.screenOrder.filter { $0 == "D" }.count == 2)
+        #expect(board.screenOrder.filter { $0 == "G" }.count == 2)
+    }
+
+    @Test func aCanvasTapOnAGroupFoldsItsSelectedMembersToo() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.model.selection = board.selection(board.a, board.b)
+        // A tap in the gap between the group's members is on the group itself.
+        board.model.pick(.element(g))
+        #expect(board.model.selection == board.selection(board.a, g), "the tap picks the group, and B goes into it")
+    }
+
+    @Test func unlockingAMemberLockedOnlyByItsGroupUnlocksTheGroup() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        board.store.update(g) { $0.isLocked = true }
+        #expect(board.store.isLockedWithItsGroups(board.store.element(board.b.element)!))
+        board.model.toggleLock(board.b)
+        #expect(board.store.element(g.element)?.isLocked == false)
+        #expect(board.store.element(board.b.element)?.isLocked == false, "never locks the member it was asked to unlock")
+        board.model.toggleLock(board.b)
+        #expect(board.store.element(board.b.element)?.isLocked == true)
+    }
+
+    @Test func aLockedDrawingIsTouchedAboveTheNoteItIsDrawnAbove() throws {
+        let board = OrderBoard()
+        board.store.update(board.drawing) { $0.isLocked = true }
+        let note = board.addNote(named: "note 3", at: CGPoint(x: 540, y: 380))
+        let ink = try #require(board.store.element(board.drawing.element))
+        let point = CGPoint(x: ink.frame.midX, y: ink.frame.midY)
+        #expect(board.store.element(note.element)?.frame.contains(point) == true, "they overlap there")
+
+        #expect(board.model.hoverTarget(at: point) == .element(board.drawing))
+        let targets = board.store.targets(on: .canvas, entered: [])
+        let drawingIndex = try #require(targets.firstIndex(of: board.drawing))
+        let noteIndex = try #require(targets.firstIndex(of: note))
+        #expect(drawingIndex > noteIndex, "the targets lie as the canvas draws")
+        let elements = try #require(board.store.targetElements(entered: [])[.canvas])
+        #expect(elements.last?.id == board.drawing.element)
+    }
+}
