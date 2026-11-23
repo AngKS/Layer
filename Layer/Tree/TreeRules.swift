@@ -173,15 +173,21 @@ enum TreeRules {
         node.kind == .group && node.resolvedLayout == .free && node.children.count == 1 && node.unreadChildren.isEmpty
     }
 
-    /// A free group of one's child in the group's place: where it was on screen, locked or
-    /// hidden if either was, and at the group's scale on the canvas's top level. Its angle is
-    /// kept as an element keeps one (`Rotation.kept`): from 0 up to 360, and none when upright.
+    /// A free group of one's child in the group's place: see `released(_:from:)`.
     private static func dissolved(_ group: LayerNode) -> LayerNode {
-        var child = inParent(group.children[0], of: group)
+        released(group.children[0], from: group)
+    }
+
+    /// A container's child in the container's place, as a free group of one dissolves and as Ungroup
+    /// puts it: where it was on screen, locked or hidden if either was, and at the container's scale,
+    /// which only a node on the canvas's top level has. Its angle is kept as an element keeps one
+    /// (`Rotation.kept`): from 0 up to 360, and none when upright.
+    static func released(_ child: LayerNode, from container: LayerNode) -> LayerNode {
+        var child = inParent(child, of: container)
         child.rotation = child.rotation.flatMap(Rotation.kept)
-        child.isLocked = child.isLocked || group.isLocked
-        child.isHidden = child.isHidden || group.isHidden
-        child.scale = group.scale
+        child.isLocked = child.isLocked || container.isLocked
+        child.isHidden = child.isHidden || container.isHidden
+        child.scale = container.scale
         return child
     }
 

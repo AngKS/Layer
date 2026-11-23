@@ -433,6 +433,15 @@ extension A2UIImporter {
 
 // MARK: - Building a screen
 
+/// The spacings an import starts from, which A2UI doesn't give: steps of Layer's rhythm in the
+/// standard tokens. A screen root's sections are 24 apart, as the outline spaces them; a section's
+/// lines, and a grid's cells, 12; and what is in a card, a list, or a row of a mark and its label, 8.
+private enum Rhythm {
+    static let screen = DesignTokens.standard.rhythm[3]
+    static let section = DesignTokens.standard.rhythm[1]
+    static let tight = DesignTokens.standard.rhythm[0]
+}
+
 /// Where a component is built: how deep in the graph below root, under which components, in
 /// which template item, and along which axis its parent stacks it.
 private struct Place {
@@ -737,7 +746,7 @@ private struct ScreenBuilder {
         case _ where Self.containerTypes.contains(type):
             var node = make(.group, id, at: place)
             // A screen's root column is spaced as the outline spaces one, and a column in it as a section.
-            node.layout = layout(of: id, component, spacing: place.depth == 0 && type == "Column" ? 24 : 12)
+            node.layout = layout(of: id, component, spacing: place.depth == 0 && type == "Column" ? Rhythm.screen : Rhythm.section)
             let requests = childRequests(of: id, component, at: place.inside(id, axis: node.layout?.stackAxis))
             return .container(OpenContainer(node: node, id: id, component: component, place: place, requests: requests))
         case "Card":
@@ -887,8 +896,8 @@ private struct ScreenBuilder {
         case "LayerGrid":
             return .grid(LayerNode.Grid(
                 columns: component["columns"]?.intValue ?? 2,
-                columnSpacing: CGFloat(component["columnSpacing"]?.doubleValue ?? 12),
-                rowSpacing: CGFloat(component["rowSpacing"]?.doubleValue ?? 12),
+                columnSpacing: component["columnSpacing"]?.doubleValue.map { CGFloat($0) } ?? Rhythm.section,
+                rowSpacing: component["rowSpacing"]?.doubleValue.map { CGFloat($0) } ?? Rhythm.section,
                 alignment: LayerNode.Alignment(horizontal: .start, vertical: .start)))
         case "LayerOverlay":
             return .overlay(LayerNode.Alignment(
@@ -966,12 +975,12 @@ private struct ScreenBuilder {
     private mutating func card(_ id: String, _ component: Component, at place: Place) -> OpenContainer {
         var card = make(.card, id, at: place)
         card.padding = LayerNode.Padding(all: DesignTokens.standard.card.padding)
-        card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 8))
+        card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.tight))
         var requests: [Request] = []
         let inside = place.inside(id)
         if let childID = component["child"]?.stringValue, let child = admit(childID, from: id, field: "child", at: inside) {
             if let type = child["component"]?.stringValue, Self.containerTypes.contains(type) {
-                card.layout = look(of: childID, child).layout ?? layout(of: childID, child, spacing: 8)
+                card.layout = look(of: childID, child).layout ?? layout(of: childID, child, spacing: Rhythm.tight)
                 requests = childRequests(of: childID, child, at: inside.inside(childID, axis: card.layout?.stackAxis))
             } else {
                 requests = [Request(id: childID, parent: id, field: "child", place: inside)]
@@ -1070,7 +1079,7 @@ private struct ScreenBuilder {
             return node
         }
         var row = make(.group, id, at: place)
-        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 8, alignment: .center))
+        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: Rhythm.tight, alignment: .center))
         var box = make(.checkbox, id, part: "box", at: place)
         box.content.isOn = isOn
         var label = make(.text, id, part: "label", at: place)
@@ -1085,7 +1094,7 @@ private struct ScreenBuilder {
         let mark: ElementKind = component["variant"]?.stringValue == "multipleSelection" ? .checkbox : .radio
         let chosen = Set(strings(component["value"], of: id, field: "value", at: place) ?? [])
         var column = make(.group, id, at: place)
-        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 8))
+        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.tight))
         if let label = Self.nonEmpty(string(component["label"], of: id, field: "label", at: place)) {
             var text = make(.text, id, part: "label", at: place)
             text.content.text = label
@@ -1094,7 +1103,7 @@ private struct ScreenBuilder {
         for (index, option) in (component["options"]?.arrayValue ?? []).enumerated() {
             guard madeNodes <= budget.nodes else { break }
             var row = make(.group, id, part: "\(index)", at: place)
-            row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 8, alignment: .center))
+            row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: Rhythm.tight, alignment: .center))
             var box = make(mark, id, part: "\(index)/mark", at: place)
             box.content.isOn = option.objectValue?["value"]?.stringValue.map { chosen.contains($0) } ?? false
             var text = make(.text, id, part: "\(index)/label", at: place)
@@ -1218,7 +1227,7 @@ private struct ScreenBuilder {
         if !isScreen {
             root = LayerNode(kind: .group)
             (root.width, root.height) = NaturalSize.defaultSizing(for: .group)
-            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 24, alignment: .fill))
+            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.screen, alignment: .fill))
             root.source = LayerNode.Source(origin: .imported, key: nil)
             root.children = [mapped]
         }

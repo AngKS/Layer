@@ -3,7 +3,8 @@ import Foundation
 
 /// A lookup over a `TreeContent`, built in one walk over every node (O(N)): where each
 /// node sits, its place in the tree, how it maps to its host, and whether it is locked or
-/// hidden through an ancestor. It holds no nodes: `node(_:in:)` finds one by its path.
+/// hidden through an ancestor (a screen's own lock isn't one). It holds no nodes: `node(_:in:)`
+/// finds one by its path.
 struct TreeIndex: Sendable {
     enum Host: Hashable, Sendable { case screen(TreeScreen.ID), canvas }
 
@@ -30,9 +31,9 @@ struct TreeIndex: Sendable {
         for screen in content.screens { count += screen.root.children.count }
         entries.reserveCapacity(count)
         for screen in content.screens {
+            // A screen's own lock keeps the screen where it is; what is on it stays editable.
             walk(screen.root, host: .screen(screen.id), parent: nil, siblingIndex: 0, path: [],
-                 parentToHost: nil, parentScale: 1, parentDegrees: 0,
-                 locked: screen.isLocked ?? false, hidden: false)
+                 parentToHost: nil, parentScale: 1, parentDegrees: 0, locked: false, hidden: false)
         }
         for (index, node) in content.canvas.enumerated() {
             walk(node, host: .canvas, parent: nil, siblingIndex: index, path: [index],
