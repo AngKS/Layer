@@ -139,6 +139,7 @@
 		643E315E6C6402AB53213E33 /* AppleIntelligenceInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A48C5BF2D37782F112D64E89 /* AppleIntelligenceInterpreter.swift */; };
 		64695F3411AD7E19FFAADD44 /* SwiftUICodeGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B49037E510BE058584D38049 /* SwiftUICodeGenerator.swift */; };
 		663FC76379452693AC64093F /* image_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 2BBD16E9EF710487B95B09E5 /* image_jittered_1a.json */; };
+		66464C0664425C92A0EB76C2 /* A2UIImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB7A8DB4716A5DFFF649DDC /* A2UIImporter.swift */; };
 		68A051131105B9524DBA52BE /* OutlineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDE7F449A84CACB19D513E2 /* OutlineTests.swift */; };
 		68B0FE5B7FBFEE8FD684468C /* checkbox_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = AB5DF74E91859F550E8EBB85 /* checkbox_jittered_2b.json */; };
 		68D54963ED5B6E48B7352182 /* ScreenTidy.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECCAA5A67E8574034481759 /* ScreenTidy.swift */; };
@@ -218,6 +219,7 @@
 		98D50F2498929819491F85FA /* PencilVoiceBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1446FA55E59D7D056A0197 /* PencilVoiceBubble.swift */; };
 		98E5D0F3B4AB52DA3528CA7F /* HostedModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E9CF91BDC7654B1CAA911E /* HostedModelTests.swift */; };
 		9C45A91F7426D9DBC26A31C2 /* radio_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 64B6362E744A11D2855E4335 /* radio_noisy_2.json */; };
+		9C6B2E56A2E344466C2542A6 /* A2UIImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ABF5FC0F8168404A68678ED /* A2UIImportTests.swift */; };
 		9C7CC44E813E72CA55880882 /* SystemSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46E911A7B1F12EA42626BB26 /* SystemSymbol.swift */; };
 		9C95090DD71FF3DA318C69BD /* LayerOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA6044F295DC2817A3A8248A /* LayerOrder.swift */; };
 		9CE45D385886F30826C0C3A1 /* title_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = B6299CD47E8661BFDE897701 /* title_noisy_1.json */; };
@@ -234,6 +236,7 @@
 		A2EEB738A11F451143DA6442 /* avatar_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = DD077F4F9A58B91E3DA0DCA1 /* avatar_noisy_2.json */; };
 		A32951A8DC6A42B42F2913FC /* a2ui-modal.json in Resources */ = {isa = PBXBuildFile; fileRef = 2EFAA38A4E078F8A185BF266 /* a2ui-modal.json */; };
 		A4C1E3832AECFF667E5B9B5C /* image_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = FACAA2404D2218B0BB196272 /* image_jittered_2b.json */; };
+		A51B251F1844E696BBB98307 /* A2UIIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63FEBB47E594FF4BE1E5D0B /* A2UIIcons.swift */; };
 		A5C7560F3AB465A4B9455EC9 /* textField_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 822515325C156C7B3ED6C2C6 /* textField_clean_1.json */; };
 		A6DD5DD333BD839E9733F295 /* screen_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 0AA9B8CAA3E00D4460CB6213 /* screen_jittered_2b.json */; };
 		A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D745E1FC169922426572F /* SketchInterpreter.swift */; };
@@ -275,6 +278,7 @@
 		BBD41C14BA97336EF912CF3C /* divider_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 0C2474707D9CE44292D1BEAD /* divider_jittered_2b.json */; };
 		BC22062B766C64855EF387B7 /* FormatPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F34A79C6F9F3993C28EB386 /* FormatPanelTests.swift */; };
 		BC7071F7DCC1454ABF783A72 /* StrokeScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A1BE05FEB2747C363F1535 /* StrokeScript.swift */; };
+		BCE2DF18E7CE5926DED7AABB /* A2UIDiagnostic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CCD6C50053E816FCB2D5889 /* A2UIDiagnostic.swift */; };
 		BCFAEB8475FD7C795F69E77E /* AppleSpeechRecogniser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E058E7CD5CAC405B9BB005 /* AppleSpeechRecogniser.swift */; };
 		BD6E2961D2742374AD2E63AE /* DesignIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61D240D664A446C47FDFA82 /* DesignIntents.swift */; };
 		BE2E3299E1D5DB7F0308CE2E /* toggle_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 1F2F9E3C7D7BE0824538D30C /* toggle_jittered_1a.json */; };
@@ -438,6 +442,7 @@
 		1DE0E6A440DF2AA2B5692B26 /* button_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_2a.json; sourceTree = "<group>"; };
 		1E382C29EBB644B30B58C797 /* body_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_jittered_2b.json; sourceTree = "<group>"; };
 		1E5D745E1FC169922426572F /* SketchInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchInterpreter.swift; sourceTree = "<group>"; };
+		1EB7A8DB4716A5DFFF649DDC /* A2UIImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIImporter.swift; sourceTree = "<group>"; };
 		1F2F9E3C7D7BE0824538D30C /* toggle_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_jittered_1a.json; sourceTree = "<group>"; };
 		1F3F65930923986507700DF7 /* unknown_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_jittered_1a.json; sourceTree = "<group>"; };
 		1FBBF5A3BCE7E5D6FDC651B7 /* CanvasBenchmarkUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBenchmarkUITests.swift; sourceTree = "<group>"; };
@@ -509,6 +514,7 @@
 		4A2452B50A25ACD85E727421 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		4C43E23B66611010DCADB150 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4C860245772672A5BCE55B13 /* HostedSketchInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedSketchInterpreter.swift; sourceTree = "<group>"; };
+		4CCD6C50053E816FCB2D5889 /* A2UIDiagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIDiagnostic.swift; sourceTree = "<group>"; };
 		4E4E7D26BE33B184C10808A4 /* textField_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_clean_2.json; sourceTree = "<group>"; };
 		4E7D979078F7E76B34146D9F /* CallPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPill.swift; sourceTree = "<group>"; };
 		4ED1415691EB8753973D446A /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -548,6 +554,7 @@
 		67E058E7CD5CAC405B9BB005 /* AppleSpeechRecogniser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechRecogniser.swift; sourceTree = "<group>"; };
 		6851D1D0137D621C746CCFDB /* toggle_progress_toggle_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_progress_toggle_2.json; sourceTree = "<group>"; };
 		68A6C9E38A9DEA1D5F1BAFDB /* ImageIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageIntents.swift; sourceTree = "<group>"; };
+		6ABF5FC0F8168404A68678ED /* A2UIImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIImportTests.swift; sourceTree = "<group>"; };
 		6AD900EFB3352CA687E60F15 /* ShapeElementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeElementView.swift; sourceTree = "<group>"; };
 		6B54C441B9B6BAC1F17E8276 /* SelectionLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionLayer.swift; sourceTree = "<group>"; };
 		6C2F1B0E9354D93D9B272F96 /* OnscreenContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnscreenContext.swift; sourceTree = "<group>"; };
@@ -653,6 +660,7 @@
 		B49037E510BE058584D38049 /* SwiftUICodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUICodeGenerator.swift; sourceTree = "<group>"; };
 		B61D240D664A446C47FDFA82 /* DesignIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignIntents.swift; sourceTree = "<group>"; };
 		B6299CD47E8661BFDE897701 /* title_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = title_noisy_1.json; sourceTree = "<group>"; };
+		B63FEBB47E594FF4BE1E5D0B /* A2UIIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIIcons.swift; sourceTree = "<group>"; };
 		B8304F493FAD2779908982EB /* button_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_1b.json; sourceTree = "<group>"; };
 		B913F32A038AC223100E64C4 /* avatar_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_2b.json; sourceTree = "<group>"; };
 		B99EA13F6706F71173016180 /* VoiceModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeUITests.swift; sourceTree = "<group>"; };
@@ -982,6 +990,7 @@
 		8FBD4FEB927C49E122F68541 /* LayerTests */ = {
 			isa = PBXGroup;
 			children = (
+				6ABF5FC0F8168404A68678ED /* A2UIImportTests.swift */,
 				098FF6A3CD1011FAE07CB421 /* A2UIPackageTests.swift */,
 				75038A2AE7C9F3344E801F1B /* AssetLibraryTests.swift */,
 				A1550A22E1500191461C4B68 /* CanvasDragLandingTests.swift */,
@@ -1333,6 +1342,9 @@
 		FE1EE9A31C6614B656FE5503 /* A2UI */ = {
 			isa = PBXGroup;
 			children = (
+				4CCD6C50053E816FCB2D5889 /* A2UIDiagnostic.swift */,
+				B63FEBB47E594FF4BE1E5D0B /* A2UIIcons.swift */,
+				1EB7A8DB4716A5DFFF649DDC /* A2UIImporter.swift */,
 				9CF22400A1624472321B028F /* LayerCatalog.swift */,
 			);
 			path = A2UI;
@@ -1683,6 +1695,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9C6B2E56A2E344466C2542A6 /* A2UIImportTests.swift in Sources */,
 				B564BA23AA9BCA692BA66F48 /* A2UIPackageTests.swift in Sources */,
 				0456A2D9BE73FB50F88700C3 /* AssetLibraryTests.swift in Sources */,
 				F376F8FE5D328F8D44244A6B /* CanvasDragLandingTests.swift in Sources */,
@@ -1741,6 +1754,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BCE2DF18E7CE5926DED7AABB /* A2UIDiagnostic.swift in Sources */,
+				A51B251F1844E696BBB98307 /* A2UIIcons.swift in Sources */,
+				66464C0664425C92A0EB76C2 /* A2UIImporter.swift in Sources */,
 				A94EA65553B399A36903BA4D /* APIKeyStore.swift in Sources */,
 				ED03AEFBB91DB401B2FD1298 /* AppModel.swift in Sources */,
 				1F6AF56C0D52E41B20EC5FF9 /* AppSettings.swift in Sources */,
