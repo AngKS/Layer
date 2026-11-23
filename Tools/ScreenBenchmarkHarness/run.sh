@@ -15,6 +15,7 @@ swiftc -parse-as-library -target arm64-apple-macos27.0 -O \
     "$R/Layer/Sketch/SketchInterpreter.swift" "$R/Layer/Sketch/ComponentRule.swift" "$R/Layer/Sketch/GlyphMatcher.swift" \
     "$R/Layer/Sketch/HandwritingRecognizer.swift" "$R/Layer/Sketch/AppleIntelligenceInterpreter.swift" \
     "$R/Layer/Sketch/ScreenPrompt.swift" "$R/Layer/Model/ScreenBlueprint.swift" \
+    "$R/Layer/Tree/LookWords.swift" "$R/Layer/Tree/LayerNode.swift" "$R/Layer/Tree/LayerNode+Coding.swift" \
     "$R/Tools/SketchBenchmarkHarness/Stubs.swift" "$R/Tools/Shared/RotationStub.swift" "$R/Tools/ScreenBenchmarkHarness/LayoutStubs.swift" \
     "$R/Tools/ScreenBenchmarkHarness/Harness.swift" -o "$BIN"
 exec "$BIN" "$@"
