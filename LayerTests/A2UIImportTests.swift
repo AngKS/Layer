@@ -391,6 +391,67 @@ import UIKit
         #expect(result.diagnostics.map(\.reason) == [.invalidComponent])
     }
 
+    @Test func aDeeplyNestedPayloadIsRefusedNotCrashed() async throws {
+        // Each is read off the main actor, where a thread's stack is small. Foundation reads JSON
+        // up to 512 deep, and decoding 450 deep runs such a thread out of stack, so anything past
+        // Layer's limit is refused before anything decodes it.
+        func arrays(_ depth: Int) -> Data {
+            Data((String(repeating: "[", count: depth) + String(repeating: "]", count: depth)).utf8)
+        }
+        func objects(_ depth: Int) -> Data {
+            Data((String(repeating: #"{"a":"#, count: depth) + "1" + String(repeating: "}", count: depth)).utf8)
+        }
+        let unclosed = Data(String(repeating: "[", count: 1_000).utf8)
+        for payload in [arrays(450), objects(450), arrays(1_000), objects(1_000), unclosed] {
+            let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
+            #expect(result.screens.isEmpty)
+            #expect(result.diagnostics.map(\.reason) == [.parseFailed])
+            #expect(result.diagnostics.first?.path == nil)
+        }
+
+        // The limit is 64: 64 deep is decoded (and isn't a message), 65 deep is refused unread.
+        let inside = await Task.detached { A2UIImporter.importJSON(arrays(A2UIImporter.maximumJSONDepth)) }.value
+        #expect(inside.diagnostics.map(\.reason) == [.parseFailed])
+        #expect(inside.diagnostics.first?.path == "messages[0]")
+        let past = await Task.detached { A2UIImporter.importJSON(arrays(A2UIImporter.maximumJSONDepth + 1)) }.value
+        #expect(past.diagnostics.map(\.reason) == [.parseFailed])
+        #expect(past.diagnostics.first?.path == nil)
+
+        // Brackets inside a string aren't nesting, nor is an escaped quote the string's end.
+        let brackets = String(repeating: "[{", count: 500)
+        let text = surface(#"{"id":"root","component":"Column","children":["t"]},{"id":"t","component":"Text","text":"say \"\#(brackets)\\"}"#)
+        let read = await Task.detached { A2UIImporter.importJSON(text) }.value
+        #expect(read.screens.first?.root.child(0).content.text == #"say "\#(brackets)\"#)
+        #expect(read.diagnostics.isEmpty, "\(read.diagnostics)")
+    }
+
+    @Test func aVeryLongPathIsCapped() async throws {
+        func messages(path: String) -> Data {
+            var written = String(decoding: surface("""
+                {"id":"root","component":"Column","children":["name"]},
+                {"id":"name","component":"Text","text":{"@path":"\(path)"}}
+                """), as: UTF8.self)
+            written.removeLast()
+            written += #",{"version":"1.0","updateDataModel":{"surfaceId":"s","path":"\#(path)","value":"Deep"}}]"#
+            return Data(written.utf8)
+        }
+
+        // 5,000 steps: neither written nor read, each said so.
+        let long = messages(path: String(repeating: "/a", count: 5_000))
+        let capped = await Task.detached { A2UIImporter.importJSON(long) }.value
+        let text = try #require(capped.screens.first?.root.child(0))
+        #expect(text.content.text == ElementKind.text.placeholder)
+        #expect(capped.diagnostics.allSatisfy { $0.reason == .binding }, "\(capped.diagnostics)")
+        #expect(capped.diagnostics.contains { $0.componentID == nil && $0.path == "updateDataModel.path" })
+        #expect(capped.diagnostics.contains { $0.componentID == "name" && $0.path == "text" })
+
+        // 64 steps, the most a path may take, are written and read.
+        let longest = messages(path: String(repeating: "/a", count: A2UIImporter.maximumPathSteps))
+        let kept = await Task.detached { A2UIImporter.importJSON(longest) }.value
+        #expect(kept.screens.first?.root.child(0).content.text == "Deep")
+        #expect(kept.diagnostics.isEmpty, "\(kept.diagnostics)")
+    }
+
     @Test func componentsWithoutCreateSurfaceStillImport() throws {
         let data = Data("""
             {"version":"1.0","updateComponents":{"surfaceId":"loose","components":[

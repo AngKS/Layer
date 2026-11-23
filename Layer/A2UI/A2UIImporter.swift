@@ -37,6 +37,15 @@ enum A2UIImporter {
     /// How deep a component graph is read below its root, as A2UI's own validator allows.
     static let maximumGraphDepth = 50
 
+    /// How deeply a payload's arrays and objects may nest. Decoding JSON goes one call deeper for
+    /// each level, and off the main actor a thread has little stack, so a payload nested past this
+    /// is refused before anything decodes it. Real A2UI stays far inside: the SDK refuses a
+    /// message nested deeper than 50.
+    static let maximumJSONDepth = 64
+
+    /// How many steps a data-model path may take. Writing one goes a call deeper for each step.
+    static let maximumPathSteps = 64
+
     /// Nonisolated; never throws. One screen per surface that has a resolvable root.
     static func importJSON(_ data: Data) -> A2UIImport {
         var diagnostics: [A2UIDiagnostic] = []
@@ -90,6 +99,12 @@ extension A2UIImporter {
     /// The messages as JSON: one message, an array of them or an object holding `messages` (as
     /// the official examples are written); or one message per line, as a model streams them.
     private static func items(in data: Data, into diagnostics: inout [A2UIDiagnostic]) -> [OrderedJSON.JSONValue] {
+        guard !nests(data, deeperThan: maximumJSONDepth) else {
+            diagnostics.append(A2UIDiagnostic(
+                reason: .parseFailed,
+                message: "This JSON is nested more than \(maximumJSONDepth) deep, deeper than any A2UI, so it isn't read."))
+            return []
+        }
         let decoder = JSONDecoder()
         guard let whole = try? decoder.decode(OrderedJSON.JSONValue.self, from: data) else {
             var items: [OrderedJSON.JSONValue] = []
@@ -120,6 +135,44 @@ extension A2UIImporter {
             diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This JSON holds no A2UI messages."))
             return []
         }
+    }
+
+    /// Whether `data` opens more than `limit` arrays and objects inside one another, counted in
+    /// one pass over its bytes, outside strings, without decoding anything.
+    private static func nests(_ data: Data, deeperThan limit: Int) -> Bool {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for byte in data {
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if byte == UInt8(ascii: "\\") {
+                    escaped = true
+                } else if byte == UInt8(ascii: "\"") {
+                    inString = false
+                }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: "\""):
+                inString = true
+            case UInt8(ascii: "["), UInt8(ascii: "{"):
+                depth += 1
+                if depth > limit { return true }
+            case UInt8(ascii: "]"), UInt8(ascii: "}"):
+                depth = max(depth - 1, 0)
+            default:
+                break
+            }
+        }
+        return false
+    }
+
+    /// Whether a data-model path takes more steps than Layer follows. It looks at no more of the
+    /// path than it needs to tell.
+    fileprivate static func isTooLong(_ path: String) -> Bool {
+        path.split(separator: "/", maxSplits: maximumPathSteps, omittingEmptySubsequences: true).count > maximumPathSteps
     }
 }
 
@@ -211,6 +264,12 @@ extension A2UIImporter {
                 surfaces[index].write(update.components, in: "updateComponents", into: &diagnostics)
             case .updateDataModel(let update):
                 let index = surfaceIndex(update.surfaceID, for: "updateDataModel")
+                guard !isTooLong(update.path) else {
+                    diagnostics.append(A2UIDiagnostic(
+                        reason: .binding, path: "updateDataModel.path",
+                        message: "Its path is more than \(maximumPathSteps) steps long, so this update is skipped."))
+                    continue
+                }
                 var model = surfaces[index].dataModel ?? [:]
                 model[update.path] = update.value
                 surfaces[index].dataModel = model
@@ -668,7 +727,10 @@ private struct ScreenBuilder {
         guard let item, let path else { return [] }
         let pointer = Self.pointer(path, in: place.scope)
         let count: Int
-        if let list = surface.dataModel?[pointer]?.arrayValue {
+        if A2UIImporter.isTooLong(pointer) {
+            report(.template, id, "children", "Its children repeat over a path more than \(A2UIImporter.maximumPathSteps) steps long, so one is shown.")
+            count = 1
+        } else if let list = surface.dataModel?[pointer]?.arrayValue {
             // Each item makes a node at least, so no more are asked for than can be kept.
             count = min(list.count, TreeRules.maximumNodes + 1)
         } else {
@@ -836,11 +898,16 @@ private struct ScreenBuilder {
     private mutating func value(_ written: OrderedJSON.JSONValue?, of id: String, field: String, at place: Place) -> OrderedJSON.JSONValue? {
         guard let written, let fields = written.objectValue else { return written }
         if let path = fields["@path"]?.stringValue {
+            let pointer = Self.pointer(path, in: place.scope)
+            guard !A2UIImporter.isTooLong(pointer) else {
+                report(.binding, id, field, "It reads a path more than \(A2UIImporter.maximumPathSteps) steps long, so a placeholder stands in.")
+                return nil
+            }
             guard let model = surface.dataModel else {
                 report(.binding, id, field, "It reads \(path) from a data model that wasn't sent, so a placeholder stands in.")
                 return nil
             }
-            guard let found = model[Self.pointer(path, in: place.scope)], found != .null else {
+            guard let found = model[pointer], found != .null else {
                 report(.binding, id, field, "It reads \(path), which the data model doesn't have, so a placeholder stands in.")
                 return nil
             }
