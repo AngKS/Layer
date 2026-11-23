@@ -203,8 +203,8 @@ extension DesignStore {
     }
 
     /// Copies everything selected: each element a little down and to the right of its
-    /// original, a group whole with everything in it, and the screens together to the right
-    /// of them all, as one step. Returns the copies.
+    /// original, a container whole with everything in it (`duplicate(node:)`), and the screens
+    /// together to the right of them all, as one step. Returns the copies.
     @discardableResult
     func duplicate(_ selection: CanvasSelection) -> CanvasSelection? {
         let originals = things(in: selection)
@@ -218,7 +218,7 @@ extension DesignStore {
             for thing in originals {
                 switch thing {
                 case .element(let ref):
-                    if let copy = duplicate(ref) { copies.append(.element(copy)) }
+                    if let copy = duplicate(node: ref.element) { copies.append(.element(ElementRef(host: ref.host, element: copy))) }
                 case .screen(let id):
                     guard let original = screen(id), let copy = duplicateScreen(id) else { continue }
                     updateScreen(copy.id) { $0.origin.x = original.origin.x + shift }
@@ -232,13 +232,14 @@ extension DesignStore {
     }
 
     /// Deletes everything selected that isn't locked, by itself or by a group above it, as
-    /// one step. A group goes with everything in it, those locked on their own too.
+    /// one step. A container goes with everything in it, those locked on their own too
+    /// (`delete(nodes:)`).
     func delete(_ selection: CanvasSelection) {
         let things = things(in: selection).filter { !isLocked($0) }
         asOneStep {
-            delete(things.compactMap { thing -> ElementRef? in
-                if case .element(let ref) = thing { ref } else { nil }
-            })
+            delete(nodes: Set(things.compactMap { thing -> DesignElement.ID? in
+                if case .element(let ref) = thing { ref.element } else { nil }
+            }))
             for case .screen(let id) in things { deleteScreen(id) }
         }
     }

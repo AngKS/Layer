@@ -489,28 +489,19 @@ extension DesignStore {
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
     /// things and drawings are left out of it; the rest are to be two or more, on one screen
-    /// or all on the open canvas, and in one group (or none) without being all of that group,
+    /// or all on the open canvas, and in one container (or none) without being all of it,
     /// with no screen among what is selected. Nil, and nothing changes, when they aren't.
     ///
-    /// The group is made in the group its members are in, and is built whole in one change:
-    /// an item added on its own, with no members, would be taken away at the end of that
-    /// change (see `DesignContent.keepGroupsSound()`), which also gathers the members, from
-    /// wherever they were, just behind the item, where the frontmost of them was, and fits
-    /// the item's box round them. On the open canvas the item is drawn at its frontmost
-    /// member's scale; members drawn at others are boxed in canvas points (L5). It is named
-    /// as its kind until it is renamed.
+    /// The group is a free one, wrapped round them in the container they are in, in the slot
+    /// of the frontmost of them, which a row or a column then lays out as one thing (`wrap`).
+    /// It fits round them on both axes, so nothing moves. On the open canvas it is drawn at its
+    /// frontmost member's scale; members drawn at others are boxed in canvas points (L5). It
+    /// is named as its kind until it is renamed.
     @discardableResult
     func group(_ selection: CanvasSelection) -> ElementRef? {
-        guard let members = groupable(selection), let front = members.last else { return nil }
-        var item = Self.newElement(.group)
-        item.group = front.element.group
-        let made = item
-        apply { content in
-            content.add(made, to: front.element.parent, scale: front.element.scale)
-            for member in members { content.update(member.element.id) { $0.group = made.id } }
-        }
-        let ref = ElementRef(host: front.ref.host, element: made.id)
-        return resolve(ref) != nil ? ref : nil
+        guard let members = groupable(selection), let front = members.last,
+              let made = wrap(members.map(\.element.id), in: .group, layout: .free) else { return nil }
+        return ElementRef(host: front.ref.host, element: made)
     }
 
     /// The things Group puts in a group, back to front, or nil when it can't: see `group(_:)`.
@@ -532,24 +523,15 @@ extension DesignStore {
     }
 
     /// Takes a group apart, as one step, and returns its members as a selection. They go to
-    /// the group the group was in (or to none), where they are in the order, and take on its
-    /// lock and hide, so that a hidden group's members don't reappear. Not its members'
-    /// groups: those stay whole. Nil, and nothing changes, when `ref` isn't a group.
+    /// the container the group was in (or to none), in the group's slot, so that a row they
+    /// join lays them out there (`unwrap`). Each stays where it is on screen, its turn and the
+    /// group's added up, and takes on the group's lock and hide, so that a hidden group's
+    /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
+    /// changes, when `ref` isn't a group, or holds something this build couldn't read.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        let members = self.members(of: item.id)
-        apply { content in
-            for member in members {
-                content.update(member.id) {
-                    $0.group = item.group
-                    $0.isLocked = $0.isLocked || item.isLocked
-                    $0.isHidden = $0.isHidden || item.isHidden
-                }
-            }
-            content.remove([item.id])
-        }
-        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0.id)) })
+        return CanvasSelection(unwrap(item.id).map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked group above it, as

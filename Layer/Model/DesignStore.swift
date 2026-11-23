@@ -258,14 +258,12 @@ final class DesignStore {
         return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
-    /// Deletes several elements as one undo step. A group goes with everything in it, at any
-    /// depth, whatever their own locks: a group is one thing.
+    /// Deletes several elements as one undo step. A container goes with everything in it, at
+    /// any depth, whatever their own locks: a group is one thing. What held it keeps the rest
+    /// of what it holds, laid out again if it lays them out. The sketch reading log is told
+    /// once, of everything that went (`delete(nodes:)`).
     func delete(_ refs: [ElementRef]) {
-        let ids = withWhatIsInThem(Set(refs.map(\.element)))
-        change { $0.remove(ids) }
-        // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
-        // deleted soon after it was made. See SketchReadingLog.
-        tellTheReadingLogOfDeleted(ids)
+        delete(nodes: Set(refs.map(\.element)))
     }
 
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
@@ -301,13 +299,11 @@ final class DesignStore {
         )
     }
 
-    /// Deletes an element, or a group with everything in it, as one undo step.
+    /// Deletes an element, or a container with everything in it, as one undo step: see
+    /// `delete(_ refs:)`.
     func delete(_ ref: ElementRef) {
         guard resolve(ref) != nil else { return }
-        let ids = withWhatIsInThem([ref.element])
-        change { $0.remove(ids) }
-        // See the matching note on delete(_ refs:).
-        tellTheReadingLogOfDeleted(ids)
+        delete(nodes: [ref.element])
     }
 
     /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
@@ -320,87 +316,38 @@ final class DesignStore {
         Task { await SketchReadingLog.shared.noteDeleted(ids) }
     }
 
-    /// Some elements, and everything in any group among them, at any depth.
-    private func withWhatIsInThem(_ ids: Set<DesignElement.ID>) -> Set<DesignElement.ID> {
-        var all = ids
-        for id in ids where groupItem(id) != nil { all.formUnion(contents(of: id).map(\.id)) }
-        return all
-    }
-
-    /// A copy of an element beside the original, a little down and to the right, as one
-    /// change. It goes on top of what is on its host; or, when the original is in a group,
-    /// just in front of it, in the same group: on top, it would pull the whole group to the
-    /// front with it, as the group is gathered where its frontmost member is.
+    /// A copy of an element beside the original, 16 of its points down and to the right,
+    /// whatever the turn of what holds it, as one change (`duplicate(node:)`). It goes on top
+    /// of what is on its host; or, inside a container, just in front of the original there:
+    /// next to it in a row or a column, and in a group without pulling the group to the front.
     ///
-    /// A group is copied whole, with everything in it, in the same change: copied over
-    /// several, the copies would be put right in between and come apart (see
-    /// `DesignContent.keepGroupsSound()`). Each copy is new, and each thing copied points at
-    /// the copy of its group. The copies keep their order, and everything in the group moves
-    /// as far across the canvas as the group does, 16 of its points: on the open canvas a
-    /// member drawn at another scale moves as many of its own as that takes. The copy itself
-    /// is unlocked, as a copy is; what is in it keeps its own lock and hide.
+    /// A container is copied whole, with everything in it, as what it is: a row stays a row
+    /// and a card a card. Each copy is new. The copy itself is unlocked, as a copy is; what is
+    /// in it keeps its own lock and hide, and a drawing's copy has strokes of its own. Nil
+    /// when it is gone, or the copy would take the design past 5,000 things.
     @discardableResult
     func duplicate(_ ref: ElementRef) -> ElementRef? {
-        guard let (element, placement) = resolve(ref) else { return nil }
-        let originals = element.kind == .group ? contents(of: element.id) + [element] : [element]
-        var ids: [DesignElement.ID: DesignElement.ID] = [:]
-        for original in originals { ids[original.id] = UUID() }
-        let shift = 16 * placement.scale
-        let copies = originals.map { original in
-            // A drawing's copy is made of strokes of its own.
-            var copy = original.withStrokesOfItsOwn()
-            copy.id = ids[original.id] ?? UUID()
-            let own: CGFloat
-            if original.id == element.id {
-                copy.isLocked = false
-                own = placement.scale
-            } else {
-                copy.group = original.group.flatMap { ids[$0] }
-                own = self.placement(of: original)?.scale ?? placement.scale
-            }
-            copy.frame = original.frame.offsetBy(dx: shift / own, dy: shift / own)
-            return copy
-        }
-        let parent = element.parent
-        apply { content in
-            for copy in copies { content.add(copy, to: parent, scale: copy.scale) }
-            guard element.group != nil else { return }
-            // Just in front of the original: in front of its item, for a group, which is in
-            // front of everything in it.
-            let copied = Set(copies.map(\.id))
-            var order = content.children(of: parent).map(\.id).filter { !copied.contains($0) }
-            guard let place = order.firstIndex(of: element.id) else { return }
-            order.insert(contentsOf: copies.map(\.id), at: place + 1)
-            content.reorder(parent, to: order)
-        }
-        guard let copy = ids[element.id] else { return nil }
+        guard resolve(ref) != nil, let copy = duplicate(node: ref.element) else { return nil }
         return ElementRef(host: ref.host, element: copy)
     }
 
-    /// A copy of a screen and everything on it, to its right, as one change. Its groups are
-    /// copied too, with the rest: each copy is new and points at the copy of its group, and
-    /// everything keeps its own lock and hide, as the list holds them.
+    /// A copy of a screen and everything on it, to its right, as one change. What is on it is
+    /// copied as it is, its root's layout, rows and cards included, each thing new and keeping
+    /// its own lock and hide. The copy is unlocked and named for the original. Nil when the
+    /// screen is gone, or the copy would take the design past 5,000 things.
     @discardableResult
     func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen? {
-        guard let screen = screen(id) else { return nil }
-        var copy = screen
+        let tree = tree
+        guard let original = tree.screens.first(where: { $0.id == id }), let frame = screen(id)?.canvasFrame else { return nil }
+        var copy = original
         copy.id = UUID()
-        copy.name = Self.copyName(for: screen.name, among: screens.map(\.name))
+        copy.root = TreeEdit.copyWithNewIDs(original.root)
+        // A screen's root takes the screen's identifier, as one made from a view does (`DesignContent.addScreen`).
+        copy.root.id = copy.id
+        copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
-        copy.origin.x = screen.canvasFrame.maxX + 60
-        let originals = content.children(of: id)
-        var ids: [DesignElement.ID: DesignElement.ID] = [:]
-        for original in originals { ids[original.id] = UUID() }
-        copy.elements = originals.map { original in
-            var element = original
-            element.id = ids[original.id] ?? UUID()
-            element.parent = copy.id
-            element.group = original.group.flatMap { ids[$0] }
-            return element
-        }
-        let made = copy
-        change { $0.addScreen(made) }
-        return self.screen(made.id) ?? made
+        copy.origin.x = frame.maxX + 60
+        return screen(addScreen(copy))
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
@@ -511,19 +458,39 @@ final class DesignStore {
         change { $0 = previous }
     }
 
-    /// Adds ready-made elements to a screen as one change, replacing what is there when
-    /// `replacing` is set. Returns where they now live.
+    /// Adds ready-made elements to a screen as one step, in front of what is there, or in
+    /// place of all of it when `replacing` is set. The screen's root keeps its layout, and lays
+    /// them out if it lays things out. Returns where they now live.
+    ///
+    /// The tree keeps sticky notes and drawings on the open canvas, never on a screen: one
+    /// given here goes on the canvas where the screen would have shown it, at the screen's
+    /// scale, in front of what is there.
     @discardableResult
     func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID, replacing: Bool) -> [ElementRef] {
-        guard screen(screenID) != nil else { return [] }
-        change { content in
-            if replacing {
-                content.setChildren(of: screenID, to: elements)
-            } else {
-                for element in elements { content.add(element, to: screenID) }
+        guard let screen = tree.screens.first(where: { $0.id == screenID }) else { return [] }
+        let scale = screen.scale.isFinite && screen.scale > 0 ? screen.scale : 1
+        var onScreen: [LayerNode] = [], onCanvas: [LayerNode] = []
+        for element in elements {
+            var node = LayerNode(element: element)
+            guard !element.kind.belongsOnScreens else {
+                onScreen.append(node)
+                continue
             }
+            // From the screen's points to the canvas's, drawn as large.
+            node.frame.origin.x += screen.origin.x / scale
+            node.frame.origin.y += screen.origin.y / scale
+            node.scale = scale
+            onCanvas.append(node)
         }
-        return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
+        asOneStep {
+            if replacing {
+                replaceChildren(of: .screen(screenID), with: onScreen)
+            } else {
+                for node in onScreen { add(node, to: .screen(screenID)) }
+            }
+            for node in onCanvas { add(node, to: .canvas) }
+        }
+        return elements.map { ElementRef(host: $0.kind.belongsOnScreens ? .screen(screenID) : .canvas, element: $0.id) }
     }
 
     /// Writes a screen being generated as its latest version says, over what was written
