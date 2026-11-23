@@ -294,6 +294,7 @@ struct DesignContent: Equatable, Sendable {
     }
 }
 
+// PROJECTION: deleted in plan 6
 private extension DesignElement {
     func placed(on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
         var element = self
@@ -303,6 +304,7 @@ private extension DesignElement {
     }
 }
 
+// PROJECTION: deleted in plan 6
 /// The list operations that the projection's writes run on a host's lowered list, as the
 /// design's one list ran them (F15).
 extension [DesignElement] {
