@@ -16,17 +16,23 @@ import OrderedJSON
 ///   `LayerNode` is saved in. A Column or Row has no spacing, so a container's `layout` is there
 ///   too, and a node's `frame` (as `[x, y, width, height]`) and `rotation` when its parent is free.
 /// - Hidden nodes and drawings are left out. A button's action is an inert event that is never run.
+/// - A screen's name and device, when given, are in `createSurface.metadata.extensions.layer`,
+///   which the importer reads back.
 ///
 /// It is plain values, so it runs off the main actor.
 enum A2UIExporter {
-    /// `createSurface` (catalogue `LayerCatalog.id`), then one `updateComponents` holding every component.
-    static func messages(for root: LayerNode, surfaceID: String) -> [OrderedJSON.JSONValue] {
+    /// `createSurface` (catalogue `LayerCatalog.id`, and the screen's `name` and `deviceID` in its
+    /// metadata when given), then one `updateComponents` holding every component.
+    static func messages(for root: LayerNode, surfaceID: String, name: String? = nil,
+                         deviceID: String? = nil) -> [OrderedJSON.JSONValue] {
         var writer = Writer()
         writer.write(root, id: "root", parent: nil)
-        let created: [String: Any] = [
-            "version": "1.0",
-            "createSurface": ["surfaceId": surfaceID, "catalogId": LayerCatalog.id] as [String: Any],
-        ]
+        var surface: [String: Any] = ["surfaceId": surfaceID, "catalogId": LayerCatalog.id]
+        var screen: [String: Any] = [:]
+        if let name { screen["name"] = name }
+        if let deviceID { screen["deviceID"] = deviceID }
+        if !screen.isEmpty { surface["metadata"] = ["extensions": ["layer": screen]] }
+        let created: [String: Any] = ["version": "1.0", "createSurface": surface]
         let updated: [String: Any] = [
             "version": "1.0",
             "updateComponents": ["surfaceId": surfaceID, "components": writer.components] as [String: Any],
@@ -34,20 +40,35 @@ enum A2UIExporter {
         return [created, updated].map(Self.value)
     }
 
+    /// A screen's messages: its root, with its name and device.
+    static func messages(for screen: TreeScreen, surfaceID: String) -> [OrderedJSON.JSONValue] {
+        messages(for: screen.root, surfaceID: surfaceID, name: screen.name, deviceID: screen.deviceID)
+    }
+
     /// The same messages, one on each line.
-    static func jsonLines(for root: LayerNode, surfaceID: String) -> String {
+    static func jsonLines(for root: LayerNode, surfaceID: String, name: String? = nil, deviceID: String? = nil) -> String {
+        lines(messages(for: root, surfaceID: surfaceID, name: name, deviceID: deviceID))
+    }
+
+    /// A screen's messages, one on each line.
+    static func jsonLines(for screen: TreeScreen, surfaceID: String) -> String {
+        lines(messages(for: screen, surfaceID: surfaceID))
+    }
+
+    private static func lines(_ messages: [OrderedJSON.JSONValue]) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
-        return messages(for: root, surfaceID: surfaceID)
+        return messages
             .compactMap { try? encoder.encode($0) }
             .map { String(decoding: $0, as: UTF8.self) }
             .joined(separator: "\n")
     }
 
-    /// Plain Foundation JSON as the SDK's value. Every number put in is finite, so this can't fail.
+    /// Plain Foundation JSON as the SDK's value, read back as every A2UI text is read
+    /// (`A2UIImporter.decodeJSON`). Every number put in is finite, so this can't fail.
     private static func value(_ object: [String: Any]) -> OrderedJSON.JSONValue {
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let value = try? JSONDecoder().decode(OrderedJSON.JSONValue.self, from: data) else { return .null }
+              case .value(let value) = A2UIImporter.decodeJSON(data) else { return .null }
         return value
     }
 
@@ -167,12 +188,13 @@ private struct Writer {
         ["id": id, "component": "Text", "text": words]
     }
 
-    /// A button's text is its child component's.
+    /// A button's variant. A button with no look is filled, the screen's primary action, so it is
+    /// `primary` too.
     private func variant(of look: ButtonLook?) -> String {
         switch look {
-        case .filled: "primary"
+        case .filled, nil: "primary"
+        case .bordered: "default"
         case .plain: "borderless"
-        case .bordered, nil: "default"
         }
     }
 

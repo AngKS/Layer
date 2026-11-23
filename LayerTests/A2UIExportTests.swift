@@ -176,6 +176,67 @@ import Testing
         Self.expectSame(try #require(result.screens.first?.root), root, isRoot: true)
     }
 
+    @Test func aDefaultButtonIsWrittenAsThePrimaryAction() throws {
+        func button(_ words: String, _ look: ButtonLook?) -> LayerNode {
+            var node = LayerNode(kind: .button)
+            node.content.text = words
+            node.content.buttonLook = look
+            return node
+        }
+        // A button with no look is filled: the screen's primary action.
+        var root = LayerNode(kind: .group)
+        root.layout = .stack(.init(axis: .vertical))
+        root.children = [button("Go", nil), button("Back", .bordered), button("Skip", .plain), button("Buy", .filled)]
+        let messages = A2UIExporter.messages(for: root, surfaceID: "s")
+        let variants = Self.components(in: messages).filter { $0["component"]?.string == "Button" }.compactMap { $0["variant"]?.string }
+        #expect(variants == ["primary", "default", "borderless", "primary"])
+
+        // Back through Layer's look it is the same button; read as plain A2UI, primary is filled.
+        let lines = A2UIExporter.jsonLines(for: root, surfaceID: "s")
+        let same = try #require(A2UIImporter.importJSON(Data(lines.utf8)).screens.first?.root)
+        #expect(same.children.map(\.content.buttonLook) == [nil, .bordered, .plain, .filled])
+        let plain = try lines.split(separator: "\n").map { line -> String in
+            var message = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            if var update = message["updateComponents"] as? [String: Any], let components = update["components"] as? [[String: Any]] {
+                update["components"] = components.map { $0.filter { $0.key != "@metadata" } }
+                message["updateComponents"] = update
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: message), as: UTF8.self)
+        }.joined(separator: "\n")
+        let read = try #require(A2UIImporter.importJSON(Data(plain.utf8)).screens.first?.root)
+        #expect(read.children.map(\.content.buttonLook) == [.filled, .bordered, .plain, .filled])
+    }
+
+    @Test func aScreensNameAndDeviceRoundTrip() throws {
+        // Ruling M2: in createSurface.metadata.extensions.layer.
+        var title = LayerNode(kind: .title)
+        title.content.text = "Checkout"
+        var screen = TreeScreen(name: "Checkout", origin: .zero, scale: 1, deviceID: "ipad-mini")
+        screen.root.layout = .stack(.init(axis: .vertical, spacing: 24))
+        screen.root.children = [title]
+
+        let messages = A2UIExporter.messages(for: screen, surfaceID: "checkout")
+        let create = try #require(messages.first?.object?["createSurface"]?.object)
+        let layer = create["metadata"]?.object?["extensions"]?.object?["layer"]?.object
+        #expect(layer?["name"]?.string == "Checkout")
+        #expect(layer?["deviceID"]?.string == "ipad-mini")
+        for message in messages {
+            #expect(throws: Never.self) { _ = try AgentToRendererMessage.parseAll(message, protocolVersion: .v10) }
+        }
+
+        let result = A2UIImporter.importJSON(Data(A2UIExporter.jsonLines(for: screen, surfaceID: "checkout").utf8))
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics)")
+        let imported = try #require(result.screens.first)
+        #expect(imported.name == "Checkout")
+        #expect(imported.deviceID == "ipad-mini")
+        Self.expectSame(imported.root, screen.root, isRoot: true)
+
+        // A surface that doesn't say leaves both to the importer's caller.
+        let plain = A2UIImporter.importJSON(Data(A2UIExporter.jsonLines(for: screen.root, surfaceID: "s").utf8))
+        #expect(plain.screens.first?.name == nil)
+        #expect(plain.screens.first?.deviceID == nil)
+    }
+
     // MARK: - Helpers
 
     /// The components of the `updateComponents` message.
