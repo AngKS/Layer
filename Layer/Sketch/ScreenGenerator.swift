@@ -2,9 +2,11 @@ import Foundation
 @_weakLinked import FoundationModels
 
 /// Writes a whole screen from a description, with the design's own model, and streams it:
-/// the model writes the screen as an outline (`Outline`), one line at a time, and each time
-/// a finished line adds to it the screen so far is handed on as a keyed tree (`OutlineStream`),
-/// so the canvas can show it growing while the model is still writing.
+/// the model writes the screen a line at a time, and each time a finished line adds to it the
+/// screen so far is handed on as a keyed tree, so the canvas can show it growing while the
+/// model is still writing. The on-device model writes an outline (`Outline`, read by
+/// `OutlineStream`); a hosted one writes A2UI 1.0, a message per line (`A2UIStream`), and what
+/// of that couldn't be brought in is said at the end (`Update.leftOut`).
 ///
 /// Every model goes through a Foundation Models `LanguageModelSession`: the on-device
 /// Apple Intelligence model, or a hosted one (`HostedLanguageModel`).
@@ -19,10 +21,34 @@ enum ScreenGenerator {
         }
     }
 
-    /// What `choice`'s model is told before it writes the screen in `description`. See
-    /// `ScreenPrompt` for how it is put together.
+    /// What a model writes a screen in.
+    enum Format: String, Sendable, CaseIterable {
+        /// The indented outline (`Outline`): the on-device model's, and the hosted fallback.
+        case outline
+        /// A2UI 1.0 in Layer's catalogue, a message per line (`A2UIPrompt`).
+        case a2ui
+    }
+
+    /// What hosted models write until plan 6 measures (My call 17). Flipping it to .outline is the fallback.
+    static let hostedFormat = Format.a2ui
+
+    /// The outline for the on-device model, and for a hosted model this system can't run (which falls back to it);
+    /// `hostedFormat` for a hosted model.
+    static func format(for choice: ModelChoice) -> Format {
+        room(for: choice) == .compact ? .outline : hostedFormat
+    }
+
+    /// What `choice`'s model is told before it writes the screen in `description`, in the format it writes. See
+    /// `ScreenPrompt` and `A2UIPrompt` for how each is put together.
     static func instructions(for description: String, using choice: ModelChoice) -> String {
-        ScreenPrompt.instructions(room(for: choice), for: description)
+        instructions(for: description, room: room(for: choice), format: format(for: choice))
+    }
+
+    private static func instructions(for description: String, room: ScreenPrompt.Room, format: Format) -> String {
+        switch format {
+        case .outline: ScreenPrompt.instructions(room, for: description)
+        case .a2ui: A2UIPrompt.instructions(for: description)
+        }
     }
 
     static func room(for choice: ModelChoice) -> ScreenPrompt.Room {
@@ -59,17 +85,26 @@ enum ScreenGenerator {
         /// The screen as far as it has been written: a keyed root, fixed (`TreeValidator.fixGenerated`) and not laid
         /// out, with ids fresh from the parse.
         case screen(LayerNode)
+        /// What the model wrote that couldn't be brought in, but for buttons' actions, which are never run anyway:
+        /// once, after the last screen, when there is any. Only A2UI says so.
+        case leftOut([A2UIDiagnostic])
     }
 
-    /// Writes the screen `request` describes with its model. Each screen update has more leaves than the one
-    /// before. Throws `nothingWritten` when the whole answer gave no screen.
+    /// Writes the screen `request` describes with its model, in the format its model writes (`format(for:)`).
     static func stream(_ request: Request) -> AsyncThrowingStream<Update, any Error> {
+        stream(request, format: format(for: request.choice))
+    }
+
+    /// Writes the screen `request` describes with its model, which is told to write `format`. Each screen update
+    /// has more leaves than the one before. Throws `nothingWritten` when the whole answer gave no screen.
+    static func stream(_ request: Request, format: Format) -> AsyncThrowingStream<Update, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let session = makeSession(for: request.choice, description: request.description)
-                    let prompt = ScreenPrompt.request(request.description, board: request.board, room: room(for: request.choice))
-                    var outline = OutlineStream(tokens: request.tokens)
+                    let room = Self.room(for: request.choice)
+                    let session = makeSession(for: request.choice, instructions: instructions(for: request.description, room: room, format: format))
+                    let prompt = ScreenPrompt.request(request.description, board: request.board, room: room)
+                    var reader = Reader(format, tokens: request.tokens)
                     var text = ""
                     var hasHandedOn = false
                     var hasStarted = false
@@ -79,16 +114,18 @@ enum ScreenGenerator {
                             hasStarted = true
                             continuation.yield(.startedWriting)
                         }
-                        if let root = outline.take(text, isComplete: false) {
+                        if let root = reader.take(text, isComplete: false) {
                             hasHandedOn = true
                             continuation.yield(.screen(root))
                         }
                     }
-                    if let root = outline.take(text, isComplete: true) {
+                    if let root = reader.take(text, isComplete: true) {
                         hasHandedOn = true
                         continuation.yield(.screen(root))
                     }
                     if !hasHandedOn { throw GenerationError.nothingWritten }
+                    let leftOut = reader.leftOut
+                    if !leftOut.isEmpty { continuation.yield(.leftOut(leftOut)) }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -98,12 +135,42 @@ enum ScreenGenerator {
         }
     }
 
-    private static func makeSession(for choice: ModelChoice, description: String) -> LanguageModelSession {
-        let instructions = instructions(for: description, using: choice)
+    private static func makeSession(for choice: ModelChoice, instructions: String) -> LanguageModelSession {
         if let provider = choice.hostedProvider, let model = choice.model, HostedLanguageModel.isSupported {
             return LanguageModelSession(model: HostedLanguageModel(provider: provider, model: model), instructions: instructions)
         }
         return LanguageModelSession(instructions: instructions)
+    }
+
+    /// The answer read in the format the model was told to write.
+    private enum Reader {
+        case outline(OutlineStream)
+        case a2ui(A2UIStream)
+
+        init(_ format: Format, tokens: DesignTokens) {
+            switch format {
+            case .outline: self = .outline(OutlineStream(tokens: tokens))
+            case .a2ui: self = .a2ui(A2UIStream(tokens: tokens))
+            }
+        }
+
+        mutating func take(_ text: String, isComplete: Bool) -> LayerNode? {
+            switch self {
+            case .outline(var outline):
+                defer { self = .outline(outline) }
+                return outline.take(text, isComplete: isComplete)
+            case .a2ui(var a2ui):
+                defer { self = .a2ui(a2ui) }
+                return a2ui.take(text, isComplete: isComplete)
+            }
+        }
+
+        /// Once the answer is complete, what couldn't be brought in, but for buttons' actions: Layer never runs
+        /// one, so that isn't something left out. The outline reads every line it can and passes over the rest.
+        var leftOut: [A2UIDiagnostic] {
+            guard case .a2ui(let a2ui) = self else { return [] }
+            return a2ui.diagnostics.filter { $0.reason != .actionNotRun }
+        }
     }
 }
 

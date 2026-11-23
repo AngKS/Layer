@@ -67,6 +67,15 @@ extension SSE {
     private static func quoted(_ text: String) -> String {
         String(String(data: try! JSONSerialization.data(withJSONObject: [text]), encoding: .utf8)!.dropFirst().dropLast())
     }
+
+    /// A screen of a heading and a button, as a hosted model writes one: A2UI 1.0, a message per line.
+    static func screen(title: String, button: String) -> [String] {
+        [
+            #"{"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}"# + "\n",
+            ###"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["title","action"]},{"id":"title","component":"Text","text":"## \###(title)"}]}}"### + "\n",
+            #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"action","component":"Button","child":"action_label","variant":"primary","action":{"event":{"name":"go"}}},{"id":"action_label","component":"Text","text":"\#(button)"}]}}"# + "\n",
+        ]
+    }
 }
 
 /// These share the stubbed providers and their keys with the rest of the suite, so they
@@ -306,7 +315,7 @@ extension HostedModelTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
     func aSpokenScreenIsWrittenByTheDesignsModel() async throws {
-        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
+        StubProvider.answer(with: .init(body: SSE.openAI(text: SSE.screen(title: "Welcome", button: "Sign in"))))
         let (app, _) = VoiceFixture.undoableLogin()
         app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
         let handles = VoiceHandles()
@@ -335,7 +344,7 @@ extension HostedModelTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
     func aSpokenScreenIsOnTheDeviceAskedFor() async throws {
-        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Dashboard\n", "button: Refresh\n"])))
+        StubProvider.answer(with: .init(body: SSE.openAI(text: SSE.screen(title: "Dashboard", button: "Refresh"))))
         let (app, _) = VoiceFixture.undoableLogin()
         app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
         let handles = VoiceHandles()
@@ -387,7 +396,7 @@ extension HostedModelTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     @MainActor
     func aDragHeldThroughASpokenScreenIsStillOneStep() async throws {
-        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Welcome\n", "button: Sign in [blue]\n"])))
+        StubProvider.answer(with: .init(body: SSE.openAI(text: SSE.screen(title: "Welcome", button: "Sign in"))))
         let (app, screen) = VoiceFixture.undoableLogin()
         app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
         let undo = try #require(app.store.undoManager)

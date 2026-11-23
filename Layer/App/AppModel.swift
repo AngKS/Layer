@@ -491,6 +491,9 @@ final class AppModel {
         var phase = Phase.writing
         /// True until the model starts writing its answer.
         var isThinking = true
+        /// How many parts of what the model wrote couldn't be brought in: every diagnostic but a button's action,
+        /// which Layer never runs. Said once the answer is complete.
+        var leftOut = 0
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
@@ -576,6 +579,8 @@ final class AppModel {
                         }
                         generation?.isThinking = false
                         generation?.elementCount = root.leafCount
+                    case .leftOut(let diagnostics):
+                        generation?.leftOut = diagnostics.count { $0.reason != .actionNotRun }
                     }
                 }
                 self?.finishGeneration(error: nil, edit: edit, ownsEdit: ownsEdit)
