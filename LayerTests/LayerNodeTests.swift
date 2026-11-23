@@ -91,6 +91,20 @@ import UIKit
         #expect(written.map { $0["id"] as? String } == [a.uuidString, b.uuidString, c.uuidString])
     }
 
+    @Test func unreadChildrenPastTheEndOrSharingAnIndexAreKeptOnSave() throws {
+        let hologram = JSONValue.object(["id": .string(UUID().uuidString), "kind": .string("hologram")])
+        let teleport = JSONValue.object(["id": .string(UUID().uuidString), "kind": .string("teleport")])
+        var group = LayerNode(kind: .group)
+        group.children = [LayerNode(kind: .shape)]
+        // One past the end of the list, and two at one index, as edits elsewhere can leave them.
+        group.unreadChildren = [.init(index: 3, raw: hologram), .init(index: 0, raw: teleport), .init(index: 0, raw: hologram)]
+
+        let read = try JSONDecoder().decode(LayerNode.self, from: JSONEncoder().encode(group))
+        #expect(read.children.map(\.id) == group.children.map(\.id))
+        // Each is written at its index when it can be, else at the next place free, else at the end.
+        #expect(read.unreadChildren == [.init(index: 0, raw: teleport), .init(index: 1, raw: hologram), .init(index: 3, raw: hologram)])
+    }
+
     @Test func missingFieldsTakeTheirDefaults() throws {
         let node = try decode(#"{"id":"\#(UUID())","kind":"text"}"#)
         #expect(node.width == LayerNode.Sizing(.fixed))

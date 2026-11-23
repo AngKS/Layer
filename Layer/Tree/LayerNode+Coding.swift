@@ -53,17 +53,19 @@ extension LayerNode: KeepsUnknownKeys {
         try container.encode(id, forKey: .id)
         try container.encode(kind, forKey: .kind)
         if !children.isEmpty || !unreadChildren.isEmpty {
+            // Each unread child goes at its index, or at the first place after it that is free
+            // when another has that index; one past the end of the list goes at the end. None is lost.
             var list = container.nestedUnkeyedContainer(forKey: .children)
-            var next = children.makeIterator()
-            let raw = Dictionary(unreadChildren.map { ($0.index, $0.raw) }, uniquingKeysWith: { first, _ in first })
-            var position = 0
-            while true {
-                if let unread = raw[position] {
-                    try list.encode(unread)
-                } else if let child = next.next() {
-                    try list.encode(child)
+            let unread = unreadChildren.enumerated()
+                .sorted { ($0.element.index, $0.offset) < ($1.element.index, $1.offset) }.map(\.element)
+            var nextUnread = 0, nextChild = 0, position = 0
+            while nextUnread < unread.count || nextChild < children.count {
+                if nextUnread < unread.count, unread[nextUnread].index <= position || nextChild == children.count {
+                    try list.encode(unread[nextUnread].raw)
+                    nextUnread += 1
                 } else {
-                    break
+                    try list.encode(children[nextChild])
+                    nextChild += 1
                 }
                 position += 1
             }
