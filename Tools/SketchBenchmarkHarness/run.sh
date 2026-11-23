@@ -20,6 +20,7 @@ swiftc \
     "$REPO_ROOT/Layer/Model/ShapeKind.swift" \
     "$REPO_ROOT/Layer/Components/ComponentSpec.swift" \
     "$REPO_ROOT/Layer/Components/Catalogue.swift" \
+    "$REPO_ROOT/Layer/Tree/DesignTokens.swift" \
     "$REPO_ROOT/Layer/Document/JSONValue.swift" \
     "$REPO_ROOT/Layer/Debug/SketchSamples.swift" \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \

@@ -8,6 +8,13 @@ enum NaturalSize {
     static func fontSize(of node: LayerNode) -> CGFloat {
         if let size = node.style.fontSize { return size }
         let spec = node.kind.spec
+        let sizes = DesignTokens.standard.textSizes
+        switch node.kind {
+        case .title: return sizes.title
+        case .body: return sizes.body
+        case .text: return sizes.text
+        default: break
+        }
         switch spec.fontSize {
         case .points(let points): return points
         case .ofHeight(let fraction):

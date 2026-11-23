@@ -200,45 +200,10 @@ extension DesignContent {
         }
         for parent in hosts {
             let things = children(of: parent).filter { $0.kind != .drawing }
-            let order = Self.gathered(things)
+            let order = TreeLift.gathered(things)
             guard order != things.map(\.id) else { continue }
             reorder(parent, to: rawOrder(on: parent, withDrawingsKept: order))
         }
-    }
-
-    /// Things that share a host, back to front, drawings left out, with each group's members
-    /// gathered into one run, in their order, and the group item just in front of them. A
-    /// run takes the place of the frontmost thing in it; everything else keeps its order.
-    private static func gathered(_ things: [DesignElement]) -> [DesignElement.ID] {
-        var place: [DesignElement.ID: Int] = [:]
-        for (index, thing) in things.enumerated() where place[thing.id] == nil { place[thing.id] = index }
-        var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
-        var outermost: [DesignElement.ID] = []
-        for thing in things {
-            if let group = thing.group, place[group] != nil {
-                inside[group, default: []].append(thing.id)
-            } else {
-                outermost.append(thing.id)
-            }
-        }
-        // Where each thing's run goes: where its frontmost leaf is.
-        var anchors: [DesignElement.ID: Int] = [:]
-        var visiting: Set<DesignElement.ID> = []
-        func anchor(_ id: DesignElement.ID) -> Int {
-            if let known = anchors[id] { return known }
-            let own = place[id] ?? 0
-            guard let members = inside[id], visiting.insert(id).inserted else { return own }
-            let found = members.map(anchor).max() ?? own
-            anchors[id] = found
-            return found
-        }
-        var written: Set<DesignElement.ID> = []
-        func run(_ id: DesignElement.ID) -> [DesignElement.ID] {
-            guard written.insert(id).inserted else { return [] }
-            guard let members = inside[id] else { return [id] }
-            return members.sorted { anchor($0) < anchor($1) }.flatMap(run) + [id]
-        }
-        return outermost.sorted { anchor($0) < anchor($1) }.flatMap(run)
     }
 
     /// Rule 5. Each box is worked out in canvas terms and kept in the item's own points: its

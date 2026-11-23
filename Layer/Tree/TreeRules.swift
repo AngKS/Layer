@@ -6,9 +6,10 @@ import Foundation
 /// the store holds a `TreeContent` (plan 2); until then nothing in the app runs them.
 ///
 /// The structure, in order:
-/// 1. Each screen's root is kept to its device: a group at the device's bounds, fixed and
-///    upright. A root that lays its children out is inset by the device's safe areas and its
-///    margin, and on a desktop its column is at most 1080 wide, centred. A free root isn't inset.
+/// 1. Each screen's root is kept to its device (built-in or the design's own): a group at the
+///    device's bounds, fixed and upright. A root that lays its children out is inset by the
+///    device's safe areas and its margin, and its column is at most the device's
+///    `maxContentWidth` wide (1080 on a desktop), centred. A free root isn't inset.
 /// 2. Drawings live only at the canvas's top level, and 3. sticky notes only on the canvas. One
 ///    anywhere else moves there, where it was on the canvas, in front of what is already there.
 /// 4. An empty free group goes, and 5. a free group of one dissolves, its child taking its place,
@@ -26,15 +27,12 @@ enum TreeRules {
     static let maximumDepth = 32
     static let maximumNodes = 5_000
 
-    /// The widest a screen's column runs, on a desktop.
-    private static let widestColumn: CGFloat = 1080
-
     /// Structure first, then layout of what changed since `previous` (everything when nil). Idempotent.
     @discardableResult
     static func apply(to content: inout TreeContent, after previous: TreeContent?,
                       measure: TextMeasure = .shared) -> [LayoutDiagnostic] {
         for index in content.screens.indices {
-            keepToDevice(&content.screens[index])
+            keepToDevice(&content.screens[index], on: content.device(of: content.screens[index]))
         }
         moveToCanvas(&content)
         for index in content.screens.indices {
@@ -44,31 +42,32 @@ enum TreeRules {
         return layOut(&content, after: previous, measure: measure)
     }
 
-    /// Desktop column at most 1080; the margin for a device's family: 20, 32, 48.
-    static func margin(for device: DeviceFrame) -> CGFloat {
-        switch device.family {
-        case .phone: 20
-        case .tablet: 32
-        case .desktop: 48
-        }
-    }
+    /// The margin round a device's column: its token (20, 32 and 48 for the built-in families).
+    static func margin(for device: DeviceFrame) -> CGFloat { device.margin }
 
     // MARK: - 1. Screen roots
 
-    private static func keepToDevice(_ screen: inout TreeScreen) {
-        screen.keepRootToDevice()
-        screen.root.padding = padding(for: screen.root.resolvedLayout, on: screen.device)
+    private static func keepToDevice(_ screen: inout TreeScreen, on device: DeviceFrame) {
+        screen.keepRootToDevice(device)
+        screen.root.padding = padding(for: screen.root.resolvedLayout, on: device)
     }
 
     /// The safe areas and the margin round a root that lays its children out, its sides
-    /// widened on a desktop to keep the column to `widestColumn`, centred. None round a free
+    /// widened to keep the column to the device's `maxContentWidth`, centred. None round a free
     /// root, whose children stay where they were put.
     private static func padding(for layout: LayerNode.Layout, on device: DeviceFrame) -> LayerNode.Padding {
         guard layout != .free else { return LayerNode.Padding() }
         let margin = margin(for: device)
-        let side = max(margin, (device.size.width - widestColumn) / 2)
-        return LayerNode.Padding(top: device.safeTop + margin, leading: side,
-                                 bottom: device.safeBottom + margin, trailing: side)
+        var leading = device.safeLeading + margin, trailing = device.safeTrailing + margin
+        if let widest = device.maxContentWidth {
+            let extra = device.size.width - leading - trailing - widest
+            if extra > 0 {
+                leading += extra / 2
+                trailing += extra / 2
+            }
+        }
+        return LayerNode.Padding(top: device.safeTop + margin, leading: leading,
+                                 bottom: device.safeBottom + margin, trailing: trailing)
     }
 
     // MARK: - 2 and 3. Drawings and sticky notes
@@ -212,7 +211,7 @@ enum TreeRules {
     /// Keeps each unread child at its place among those left when the children at `removed`
     /// (indices into `node.children`, not yet taken out) go. A file lists the unread ones at
     /// their indices among all of them (see `LayerNode`'s coding).
-    private static func keepUnreadPlaces(in node: inout LayerNode, removing removed: [Int]) {
+    static func keepUnreadPlaces(in node: inout LayerNode, removing removed: [Int]) {
         guard !node.unreadChildren.isEmpty, !removed.isEmpty else { return }
         let unread = Set(node.unreadChildren.map(\.index))
         var places: [Int] = [], place = 0
@@ -240,7 +239,8 @@ enum TreeRules {
         let screens = Dictionary((previous?.screens ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for index in content.screens.indices {
             let screen = content.screens[index], before = screens[screen.id]
-            if let before, before.device == screen.device, before.root == screen.root { continue }
+            if let before, let previous, previous.device(of: before) == content.device(of: screen),
+               before.root == screen.root { continue }
             LayoutEngine.layOut(&content.screens[index].root, previous: before?.root, measure: measure,
                                 diagnostics: &diagnostics)
         }

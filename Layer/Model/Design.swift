@@ -236,23 +236,34 @@ struct FloatingElement: Identifiable, Equatable, Codable, Sendable {
     var canvasFrame: CGRect { placement.canvasRect(for: element.frame) }
 }
 
-/// A device a screen can be drawn as: its size in points and the furniture round its edges.
-struct DeviceFrame: Identifiable, Equatable, Sendable {
+/// A device a screen can be drawn as: its size in points and the furniture round its edges,
+/// and the layout tokens its screens are laid out by.
+struct DeviceFrame: Identifiable, Equatable, Sendable, Codable {
     let id: String
     let name: String
     let size: CGSize
     /// The space the status bar and the home indicator keep clear.
     let safeTop: CGFloat
     let safeBottom: CGFloat
+    var safeLeading: CGFloat
+    var safeTrailing: CGFloat
     let cornerRadius: CGFloat
+    /// Whether a status bar runs along the top: on phones, tablets and others by default.
+    var hasStatusBar: Bool
     let hasIsland: Bool
     let hasHomeIndicator: Bool
     /// What kind of device it is, which decides the furniture drawn round its screen:
     /// a status bar on phones and tablets, a menu bar on a Mac.
-    var family = Family.phone
+    var family: Family
+    /// A token: the space kept round a screen's column, beyond the safe areas.
+    var margin: CGFloat
+    /// A token: the widest a screen's column runs, centred. Nil is as wide as the screen.
+    var maxContentWidth: CGFloat?
+    /// What a newer Layer saved with a custom frame that this version doesn't know.
+    var unknownKeys = UnknownKeys()
 
-    enum Family: String, CaseIterable, Sendable {
-        case phone, tablet, desktop
+    enum Family: String, CaseIterable, Sendable, Codable {
+        case phone, tablet, desktop, watch, other
 
         /// The heading devices of this family are listed under.
         var name: String {
@@ -260,8 +271,59 @@ struct DeviceFrame: Identifiable, Equatable, Sendable {
             case .phone: "Phones"
             case .tablet: "Tablets"
             case .desktop: "Desktops"
+            case .watch: "Watches"
+            case .other: "Other"
             }
         }
+
+        /// The margin a device of this family has unless it is given one.
+        var defaultMargin: CGFloat {
+            switch self {
+            case .phone: 20
+            case .tablet: 32
+            case .desktop: 48
+            case .watch: 8
+            case .other: 20
+            }
+        }
+
+        /// The widest column on a device of this family unless it is given a limit.
+        var defaultMaxContentWidth: CGFloat? { self == .desktop ? 1080 : nil }
+
+        /// Whether devices of this family have a status bar unless it is said they don't.
+        var defaultHasStatusBar: Bool { self != .desktop && self != .watch }
+    }
+
+    /// The parameters the built-in table has always had, with the rest from the family.
+    init(id: String, name: String, size: CGSize, safeTop: CGFloat, safeBottom: CGFloat, cornerRadius: CGFloat,
+         hasIsland: Bool, hasHomeIndicator: Bool, family: Family = .phone,
+         safeLeading: CGFloat = 0, safeTrailing: CGFloat = 0, hasStatusBar: Bool? = nil,
+         margin: CGFloat? = nil, maxContentWidth: CGFloat? = nil) {
+        self.id = id
+        self.name = name
+        self.size = size
+        self.safeTop = safeTop
+        self.safeBottom = safeBottom
+        self.safeLeading = safeLeading
+        self.safeTrailing = safeTrailing
+        self.cornerRadius = cornerRadius
+        self.hasStatusBar = hasStatusBar ?? family.defaultHasStatusBar
+        self.hasIsland = hasIsland
+        self.hasHomeIndicator = hasHomeIndicator
+        self.family = family
+        self.margin = margin ?? family.defaultMargin
+        self.maxContentWidth = maxContentWidth ?? family.defaultMaxContentWidth
+    }
+
+    /// The prefix of every custom frame's id, which no built-in has.
+    static let customPrefix = "custom-"
+
+    var isCustom: Bool { id.hasPrefix(Self.customPrefix) }
+
+    /// A plain frame of the family with the size given, to be adjusted.
+    static func custom(name: String, size: CGSize, family: Family) -> DeviceFrame {
+        DeviceFrame(id: customPrefix + UUID().uuidString, name: name, size: size, safeTop: 0, safeBottom: 0,
+                    cornerRadius: 0, hasIsland: false, hasHomeIndicator: false, family: family)
     }
 
     /// The device a sketched screen becomes.
@@ -308,8 +370,79 @@ struct DeviceFrame: Identifiable, Equatable, Sendable {
         ),
     ]
 
+    /// The built-in with the id, or the iPhone.
     static func named(_ id: String?) -> DeviceFrame {
         all.first { $0.id == id } ?? iPhone
+    }
+
+    /// The built-in with the id, else the custom frame, else the iPhone.
+    static func named(_ id: String?, among custom: [DeviceFrame]) -> DeviceFrame {
+        all.first { $0.id == id } ?? custom.first { $0.id == id } ?? iPhone
+    }
+}
+
+extension DeviceFrame {
+    enum CodingKeys: String, CodingKey {
+        case id, name, size, safeTop, safeBottom, safeLeading, safeTrailing, cornerRadius, hasStatusBar
+        case hasIsland, hasHomeIndicator, family, margin, maxContentWidth
+    }
+
+    /// Reads a custom frame leniently: insets that aren't finite or are negative are 0, a
+    /// margin that isn't is the family's, a widest column of 0 or less is none, and a family
+    /// this version doesn't know is `.other`. A size that isn't finite and positive throws.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let size = try container.decode(CGSize.self, forKey: .size)
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .size, in: container,
+                                                   debugDescription: "A device's sides are finite and positive.")
+        }
+        func inset(_ key: CodingKeys) throws -> CGFloat {
+            let value = try container.decodeIfPresent(CGFloat.self, forKey: key) ?? 0
+            return value.isFinite && value >= 0 ? value : 0
+        }
+        let family = (try container.decodeIfPresent(String.self, forKey: .family)).map { Family(rawValue: $0) ?? .other } ?? .phone
+        let margin = try container.decodeIfPresent(CGFloat.self, forKey: .margin)
+        var maxContentWidth = family.defaultMaxContentWidth
+        if container.contains(.maxContentWidth) {
+            let value = try container.decodeIfPresent(CGFloat.self, forKey: .maxContentWidth)
+            maxContentWidth = value.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        }
+        self.init(id: try container.decode(String.self, forKey: .id),
+                  name: try container.decodeIfPresent(String.self, forKey: .name) ?? "Custom",
+                  size: size, safeTop: try inset(.safeTop), safeBottom: try inset(.safeBottom),
+                  cornerRadius: try inset(.cornerRadius),
+                  hasIsland: try container.decodeIfPresent(Bool.self, forKey: .hasIsland) ?? false,
+                  hasHomeIndicator: try container.decodeIfPresent(Bool.self, forKey: .hasHomeIndicator) ?? false,
+                  family: family, safeLeading: try inset(.safeLeading), safeTrailing: try inset(.safeTrailing),
+                  hasStatusBar: try container.decodeIfPresent(Bool.self, forKey: .hasStatusBar),
+                  margin: margin.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil })
+        self.maxContentWidth = maxContentWidth
+        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        try unknownKeys.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(size, forKey: .size)
+        try container.encode(safeTop, forKey: .safeTop)
+        try container.encode(safeBottom, forKey: .safeBottom)
+        try container.encode(safeLeading, forKey: .safeLeading)
+        try container.encode(safeTrailing, forKey: .safeTrailing)
+        try container.encode(cornerRadius, forKey: .cornerRadius)
+        try container.encode(hasStatusBar, forKey: .hasStatusBar)
+        try container.encode(hasIsland, forKey: .hasIsland)
+        try container.encode(hasHomeIndicator, forKey: .hasHomeIndicator)
+        try container.encode(family, forKey: .family)
+        try container.encode(margin, forKey: .margin)
+        // Written as null when there is none, so that a desktop's missing limit isn't read as 1080.
+        if let maxContentWidth {
+            try container.encode(maxContentWidth, forKey: .maxContentWidth)
+        } else {
+            try container.encodeNil(forKey: .maxContentWidth)
+        }
     }
 }
 
@@ -334,8 +467,11 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// What a newer Layer saved with the screen that this version doesn't know, to be
     /// written back with it.
     var unknownKeys = UnknownKeys()
+    /// The device when it is a custom frame, which `deviceID` alone can't name here. Not
+    /// saved; set where a screen is made from a design's tree.
+    var resolvedDevice: DeviceFrame?
 
-    var device: DeviceFrame { DeviceFrame.named(deviceID) }
+    var device: DeviceFrame { resolvedDevice ?? DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }
 
     /// `current` with the properties that changed from `before` to `after` back as they
@@ -475,6 +611,12 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     var background: RGBColor?
     /// The device a tall rectangle drawn with the Magic Pen becomes; an iPhone when unset.
     var sketchDeviceID: String?
+    /// The device frames this design adds to the built-in ones.
+    var customDevices: [DeviceFrame] = []
+    /// Custom frames this build can't read, as they were read, written back after the others.
+    var unreadDevices: [JSONValue] = []
+    /// The numbers this design is laid out and styled by. The standard ones when unset.
+    var tokens = DesignTokens.standard
     var code = CodeSettings()
     /// The model that reads this design's sketches and names it. Nil in designs saved
     /// before there was a choice, which use the app's default (`ModelPreferences`).
@@ -486,7 +628,7 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     /// Everything about the settings that is saved with the design.
     enum CodingKeys: String, CodingKey {
         case showsGrid, gridStyle, gridSpacing, snapsToGuides, snapsToGrid, showsMeasurements, showsFrameNames
-        case background, sketchDeviceID, code, model
+        case background, sketchDeviceID, code, model, customDevices, tokens
     }
 
     static let paper = RGBColor(hex: 0xF4F3EC)
@@ -494,7 +636,10 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     static let backgrounds: [RGBColor] = [paper, RGBColor(hex: 0xFFFFFF), RGBColor(hex: 0xECEFF3), RGBColor(hex: 0xEFF3EA), RGBColor(hex: 0x2A2A2E)]
 
     var resolvedBackground: RGBColor { background ?? Self.paper }
-    var sketchDevice: DeviceFrame { DeviceFrame.named(sketchDeviceID) }
+    var sketchDevice: DeviceFrame { device(named: sketchDeviceID) }
+
+    /// The device with the id: a built-in, or one of this design's own, or the iPhone.
+    func device(named id: String?) -> DeviceFrame { DeviceFrame.named(id, among: customDevices) }
 
     /// Whether the background is dark enough that marks on it should be light.
     var isDark: Bool {
@@ -516,7 +661,9 @@ extension CanvasSettings {
         background = try container.decodeIfPresent(RGBColor.self, forKey: .background)
         sketchDeviceID = try container.decodeIfPresent(String.self, forKey: .sketchDeviceID)
         code = try container.decodeIfPresent(CodeSettings.self, forKey: .code) ?? CodeSettings()
+        tokens = ((try? container.decodeIfPresent(DesignTokens.self, forKey: .tokens)) ?? nil) ?? .standard
         unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        (customDevices, unreadDevices) = Self.readDevices(in: container)
         // A choice this version can't read, from a newer Layer, is treated as no choice. It
         // is kept as it was read and written back, unless a model is chosen here meanwhile.
         do {
@@ -525,6 +672,49 @@ extension CanvasSettings {
             model = nil
             unknownKeys[CodingKeys.model.stringValue] = try? container.decode(JSONValue.self, forKey: .model)
         }
+    }
+
+    /// Writes the settings with the keys this version doesn't know, as `TreeContent` writes them
+    /// unwrapped. The tokens and a list of custom frames are left out when there are none to keep.
+    func encode(to encoder: any Encoder) throws {
+        try unknownKeys.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(showsGrid, forKey: .showsGrid)
+        try container.encode(gridStyle, forKey: .gridStyle)
+        try container.encode(gridSpacing, forKey: .gridSpacing)
+        try container.encode(snapsToGuides, forKey: .snapsToGuides)
+        try container.encode(snapsToGrid, forKey: .snapsToGrid)
+        try container.encode(showsMeasurements, forKey: .showsMeasurements)
+        try container.encode(showsFrameNames, forKey: .showsFrameNames)
+        try container.encodeIfPresent(background, forKey: .background)
+        try container.encodeIfPresent(sketchDeviceID, forKey: .sketchDeviceID)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(model, forKey: .model)
+        if tokens != .standard { try container.encode(tokens, forKey: .tokens) }
+        if !customDevices.isEmpty || !unreadDevices.isEmpty {
+            var list = container.nestedUnkeyedContainer(forKey: .customDevices)
+            for device in customDevices { try list.encode(device) }
+            for json in unreadDevices { try list.encode(json) }
+        }
+    }
+
+    /// The custom frames in the list, one at a time. Those that can't be used come back as
+    /// they were read: an id that isn't `custom-` or is a built-in's or an earlier one's, or
+    /// a size that isn't finite and positive.
+    private static func readDevices(in container: KeyedDecodingContainer<CodingKeys>) -> ([DeviceFrame], [JSONValue]) {
+        guard let list = try? container.decodeIfPresent([JSONValue].self, forKey: .customDevices) else { return ([], []) }
+        var frames: [DeviceFrame] = [], unread: [JSONValue] = []
+        let builtIn = Set(DeviceFrame.all.map(\.id))
+        for json in list {
+            guard let data = try? JSONEncoder().encode(json), let frame = try? JSONDecoder().decode(DeviceFrame.self, from: data),
+                  frame.isCustom, !builtIn.contains(frame.id), !frames.contains(where: { $0.id == frame.id })
+            else {
+                unread.append(json)
+                continue
+            }
+            frames.append(frame)
+        }
+        return (frames, unread)
     }
 
     /// The model this design uses: its own choice, or the app's default.

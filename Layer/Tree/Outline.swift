@@ -212,7 +212,7 @@ enum Outline {
 
     private static func makeCard() -> LayerNode {
         var node = container(kind: .card, layout: column(spacing: 8))
-        node.padding = LayerNode.Padding(all: 16)
+        node.padding = LayerNode.Padding(all: DesignTokens.standard.card.padding)
         return node
     }
 

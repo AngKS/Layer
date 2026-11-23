@@ -55,7 +55,7 @@ enum ElementLayout {
     /// The gap between two elements side by side.
     static let gutter: CGFloat = 12
     /// The gaps between one element and the next that a sketched element snaps to.
-    static let rhythm: [CGFloat] = [8, 12, 16, 24, 32]
+    static let rhythm: [CGFloat] = DesignTokens.standard.rhythm
 
     /// A new element drawn with the Magic Pen. It starts from `frame(for:sketch:on:)` and
     /// keeps more of what was drawn: the width of a box drawn clearly narrower than the

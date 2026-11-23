@@ -79,13 +79,7 @@ enum ScreenTidy {
     static let backdropShare: CGFloat = 0.9
 
     /// The side margin on a device.
-    static func margin(on device: DeviceFrame) -> CGFloat {
-        switch device.family {
-        case .phone: ElementLayout.margin
-        case .tablet: 32
-        case .desktop: 48
-        }
-    }
+    static func margin(on device: DeviceFrame) -> CGFloat { device.margin }
 
     /// The column everything is laid out in, from its leading edge.
     static func column(on device: DeviceFrame) -> (x: CGFloat, width: CGFloat) {

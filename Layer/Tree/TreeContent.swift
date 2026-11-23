@@ -33,7 +33,10 @@ struct TreeScreen: Identifiable, Equatable, Sendable, Codable, KeepsUnknownKeys 
 
     /// Makes the root what a screen's root always is: a group at the device's bounds, fixed
     /// in both directions and upright. Padding and the rest of it are left as they are.
-    mutating func keepRootToDevice() {
+    mutating func keepRootToDevice() { keepRootToDevice(device) }
+
+    /// The same for a device that may be one of the design's own, which `deviceID` alone can't name.
+    mutating func keepRootToDevice(_ device: DeviceFrame) {
         root.kind = .group
         root.frame = CGRect(origin: .zero, size: device.size)
         root.width = LayerNode.Sizing(.fixed)
