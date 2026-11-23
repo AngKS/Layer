@@ -2411,14 +2411,10 @@ final class AppModel {
     func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
         guard let root = AssetLibrary.template(named: name) else { return }
         let device = store.canvas.sketchDevice
-        let room = (canvasSize.height - 220) / viewport.scale
-        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
-        let middle = point ?? middleOfView
-        let origin = CGPoint(x: (middle.x - device.size.width * scale / 2).rounded(),
-                             y: (middle.y - device.size.height * scale / 2).rounded())
+        let placement = framePlacement(device, centeredAt: point)
         // Its own step even in the middle of a drag, which it leaves open (M3).
         store.asOwnStep {
-            store.addScreen(TreeScreen(name: name, origin: origin, scale: scale,
+            store.addScreen(TreeScreen(name: name, origin: placement.origin, scale: placement.scale,
                                        deviceID: device == .iPhone ? nil : device.id, root: root))
         }
         tool = .select
@@ -2457,17 +2453,23 @@ final class AppModel {
     /// points, sized to fit comfortably in the view.
     @discardableResult
     func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> DesignScreen {
-        let room = (canvasSize.height - 220) / viewport.scale
-        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
-        let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
-        let middle = point ?? middleOfView
-        let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
-        let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
+        let screen = store.addScreen(device, at: framePlacement(device, centeredAt: point))
         tool = .select
         // A new frame comes in unselected.
         selection = nil
         suggestTitleIfNeeded()
         return screen
+    }
+
+    /// Where a new screen of `device` goes: centred on `point` in canvas points, or in the middle
+    /// of the view, and scaled to fit comfortably in the view.
+    private func framePlacement(_ device: DeviceFrame, centeredAt point: CGPoint?) -> Placement {
+        let room = (canvasSize.height - 220) / viewport.scale
+        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
+        let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
+        let middle = point ?? middleOfView
+        let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
+        return Placement(origin: origin, scale: scale)
     }
 
     /// Names the board once, the first time it has something on it worth naming.
