@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 /// The room offered to a node on each axis. Nil on an axis means "take your ideal size".
 struct ProposedSize: Equatable, Sendable {
@@ -19,35 +20,95 @@ struct LayoutDiagnostic: Equatable, Sendable {
 /// sizing. It is pure and deterministic: the same tree always gets the same frames. No UIKit
 /// and no SwiftUI, so it builds on macOS and runs off the main actor.
 ///
-/// Measure, then place. A width always settles before its height, because a text's height
-/// depends on the width it wraps to. Bad numbers (non-finite or negative) read as 0, or as no
-/// limit for a minimum or maximum, and no frame it writes is ever non-finite.
+/// Settle, measure, then place. What a free container decides on its own is settled first,
+/// inside out (see `settle`). Then rows, columns, grids and overlays measure and place, top
+/// down. A width always settles before its height, because a text's height depends on the
+/// width it wraps to. Bad numbers (non-finite or negative) read as 0, or as no limit for a
+/// minimum or maximum, and no frame it writes is ever non-finite.
 enum LayoutEngine {
     /// The size `node` takes for `proposal`: fixed sizes, natural sizes, or (containers) content plus padding.
     static func size(of node: LayerNode, proposal: ProposedSize, measure: TextMeasure) -> CGSize {
+        var node = node
+        settle(&node, previous: nil, placedByParent: true, measure: measure)
         let width = Self.width(of: node, offered: offer(proposal.width), measure: measure)
         let height = Self.height(of: node, width: width, offered: offer(proposal.height), measure: measure)
         return CGSize(width: finite(width), height: finite(height))
     }
 
     /// Places `node`'s children for `node.frame.size`, recursively, writing their frames.
-    /// `previous` is not used yet. A `.free` container's children keep their frames.
+    ///
+    /// A `.free` container leaves its children's frames as they are, except that a container
+    /// sized to fit takes the size of what it holds (see `settle`). A free root sized to fit
+    /// does too, moving so that nothing it holds moves.
+    ///
+    /// `previous` is `node` as it was last laid out. A container that is the same as its same-id
+    /// one there, at the same size, is left as it is with everything inside it. So diagnostics
+    /// come only from the containers laid out this time.
     static func layOut(_ node: inout LayerNode, previous: LayerNode?, measure: TextMeasure,
                        diagnostics: inout [LayoutDiagnostic]) {
+        settle(&node, previous: previous, placedByParent: false, measure: measure)
+        place(&node, previous: previous, measure: measure, diagnostics: &diagnostics)
+    }
+
+    /// Settles what free containers decide on their own, inside out, before anything is placed.
+    /// A free container sized to fit hugs what it holds (see `hug`), and a row, column, grid or
+    /// overlay sized to fit in a free container takes its fitting size there. Neither depends on
+    /// the room a parent offers, so a row or column measuring a free child later only reads it.
+    /// `placedByParent` is true under a row, column, grid or overlay, which will write its frame.
+    private static func settle(_ node: inout LayerNode, previous: LayerNode?, placedByParent: Bool,
+                               measure: TextMeasure) {
         guard node.isContainer else { return }
-        // Hidden children take no space, and their frames and insides are left as they are.
-        let visible = node.children.indices.filter { !node.children[$0].isHidden }
-        if !visible.isEmpty, let placement = place(node, kids: visible.map { node.children[$0] }, measure: measure) {
-            for (index, frame) in zip(visible, placement.frames) {
-                node.children[index].frame = written(frame, for: node.children[index])
-            }
-            if placement.overflows { diagnostics.append(LayoutDiagnostic(node: node.id, kind: .overflow)) }
-            for index in visible where hasWordTooWide(node.children[index], measure: measure) {
-                diagnostics.append(LayoutDiagnostic(node: node.children[index].id, kind: .textTooWide))
+        let free = node.resolvedLayout == .free
+        if !isUnchanged(node, since: previous) {
+            let earlier = sameIDContainers(in: previous)
+            // Hidden children, and what is inside them, are left as they are.
+            for index in node.children.indices where node.children[index].isContainer && !node.children[index].isHidden {
+                settle(&node.children[index], previous: earlier[node.children[index].id], placedByParent: !free,
+                       measure: measure)
+                if free, let frame = fittedInFreeParent(node.children[index], measure: measure) {
+                    node.children[index].frame = frame
+                }
             }
         }
+        // Even unchanged inside, a free container takes the size it hugs, which is the size its
+        // place gives it: under a new free parent, a frame a column stretched gives way to it.
+        if free { hug(&node, movingItsFrame: !placedByParent) }
+    }
+
+    /// Places children, top down, once everything is settled. A free container's children are
+    /// already where they go, so it only passes on down.
+    private static func place(_ node: inout LayerNode, previous: LayerNode?, measure: TextMeasure,
+                              diagnostics: inout [LayoutDiagnostic]) {
+        guard node.isContainer, !isUnchanged(node, since: previous) else { return }
+        #if DEBUG
+        countLaidOut(node.id)
+        #endif
+        // Hidden children take no space, and what is inside them is left as it is.
+        let visible = node.children.indices.filter { !node.children[$0].isHidden }
+        let earlier = sameIDContainers(in: previous)
+        let kids = visible.map { node.children[$0] }
+        let placement: Placement
+        switch node.resolvedLayout {
+        case .free:
+            for index in visible {
+                place(&node.children[index], previous: earlier[node.children[index].id], measure: measure,
+                      diagnostics: &diagnostics)
+            }
+            return
+        case .stack(let stack): placement = placeStack(kids, stack, in: contentBox(of: node), measure: measure)
+        case .grid(let grid): placement = placeGrid(kids, grid, in: contentBox(of: node), measure: measure)
+        case .overlay(let alignment): placement = placeOverlay(kids, alignment, in: contentBox(of: node), measure: measure)
+        }
+        for (index, frame) in zip(visible, placement.frames) {
+            node.children[index].frame = written(frame, for: node.children[index])
+        }
+        if placement.overflows { diagnostics.append(LayoutDiagnostic(node: node.id, kind: .overflow)) }
+        for index in visible where hasWordTooWide(node.children[index], measure: measure) {
+            diagnostics.append(LayoutDiagnostic(node: node.children[index].id, kind: .textTooWide))
+        }
         for index in visible {
-            layOut(&node.children[index], previous: nil, measure: measure, diagnostics: &diagnostics)
+            place(&node.children[index], previous: earlier[node.children[index].id], measure: measure,
+                  diagnostics: &diagnostics)
         }
     }
 
@@ -77,12 +138,9 @@ enum LayoutEngine {
         guard node.isContainer else {
             return clean(NaturalSize.of(node, width: offered.flatMap { $0 > 0 ? $0 : nil }, measure: measure).width)
         }
-        let layout = node.resolvedLayout
-        // Until free containers hug their content, a fitting one keeps its size.
-        if layout == .free { return clean(node.frame.size.width) }
         let padding = cleaned(node.padding)
         let inner = offered.map { max(0, $0 - padding.leading - padding.trailing) }
-        return contentWidth(visibleChildren(of: node), layout, offered: inner, measure: measure)
+        return contentWidth(visibleChildren(of: node), node.resolvedLayout, offered: inner, measure: measure)
             + padding.leading + padding.trailing
     }
 
@@ -91,22 +149,21 @@ enum LayoutEngine {
         guard node.isContainer else {
             return clean(NaturalSize.of(node, width: width > 0 ? width : nil, measure: measure).height)
         }
-        let layout = node.resolvedLayout
-        if layout == .free { return clean(node.frame.size.height) }
         let padding = cleaned(node.padding)
         let inner = max(0, width - padding.leading - padding.trailing)
-        return contentHeight(visibleChildren(of: node), layout, width: inner, measure: measure)
+        return contentHeight(visibleChildren(of: node), node.resolvedLayout, width: inner, measure: measure)
             + padding.top + padding.bottom
     }
 
-    /// How wide a container's content is when it fits it. This asks only for widths, so
-    /// measuring a deep tree never measures a subtree twice over for each level above it.
+    /// How wide a container's content is when it fits it. This asks only for widths (a free
+    /// container's children are settled, so it only reads their frames), so measuring a deep tree
+    /// never measures a subtree twice over for each level above it.
     private static func contentWidth(_ kids: [LayerNode], _ layout: LayerNode.Layout, offered: CGFloat?,
                                      measure: TextMeasure) -> CGFloat {
         guard !kids.isEmpty else { return 0 }
         switch layout {
         case .free:
-            return 0
+            return shapesBox(of: kids)?.width ?? 0
         case .stack(let stack):
             let widths = Self.widths(of: kids, in: stack, box: offered, stretching: false, measure: measure)
             return stack.axis == .vertical ? widths.max() ?? 0 : widths.reduce(0, +) + gaps(stack.spacing, kids.count)
@@ -126,45 +183,47 @@ enum LayoutEngine {
     private static func contentHeight(_ kids: [LayerNode], _ layout: LayerNode.Layout, width: CGFloat,
                                       measure: TextMeasure) -> CGFloat {
         guard !kids.isEmpty else { return 0 }
-        let sizes = childSizes(kids, layout, width: width, height: nil, measure: measure)
         switch layout {
         case .free:
-            return 0
+            return shapesBox(of: kids)?.height ?? 0
         case .stack(let stack):
-            let heights = sizes.map(\.height)
+            let heights = stackSizes(kids, stack, width: width, height: nil, measure: measure).map(\.height)
             return stack.axis == .vertical ? heights.reduce(0, +) + gaps(stack.spacing, kids.count) : heights.max() ?? 0
         case .grid(let grid):
-            let rows = rowHeights(sizes, columns: columnCount(grid))
+            let rows = rowHeights(gridSizes(kids, grid, width: width, measure: measure), columns: columnCount(grid))
             return rows.reduce(0, +) + gaps(grid.rowSpacing, rows.count)
         case .overlay:
-            return sizes.map(\.height).max() ?? 0
+            return overlaySizes(kids, width: width, height: nil, measure: measure).map(\.height).max() ?? 0
         }
     }
 
-    /// Each child's size in a content box `width` wide and `height` high (nil while the
-    /// container is fitting its content, when nothing stretches to a height).
-    private static func childSizes(_ kids: [LayerNode], _ layout: LayerNode.Layout, width: CGFloat, height: CGFloat?,
+    /// Each child's size in a stack whose content box is `width` wide and `height` high (nil
+    /// while the stack is fitting its content, when nothing stretches to a height).
+    private static func stackSizes(_ kids: [LayerNode], _ stack: LayerNode.Stack, width: CGFloat, height: CGFloat?,
                                    measure: TextMeasure) -> [CGSize] {
-        switch layout {
-        case .free:
-            return kids.map(\.frame.size)
-        case .stack(let stack):
-            let widths = Self.widths(of: kids, in: stack, box: width, stretching: true, measure: measure)
-            let heights = Self.heights(of: kids, widths: widths, in: stack, box: height, measure: measure)
-            return zip(widths, heights).map { CGSize(width: $0, height: $1) }
-        case .grid(let grid):
-            // Filling children take the column's width (and, when placed, the row's height);
-            // the rest their fixed or natural size at the column's width.
-            let column = columnWidth(grid, width)
-            return kids.map { kid in
-                let childWidth = self.width(of: kid, offered: column, measure: measure)
-                return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: nil, measure: measure))
-            }
-        case .overlay:
-            return kids.map { kid in
-                let childWidth = self.width(of: kid, offered: width, measure: measure)
-                return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: height, measure: measure))
-            }
+        let widths = Self.widths(of: kids, in: stack, box: width, stretching: true, measure: measure)
+        let heights = Self.heights(of: kids, widths: widths, in: stack, box: height, measure: measure)
+        return zip(widths, heights).map { CGSize(width: $0, height: $1) }
+    }
+
+    /// Each child's size in a grid whose content box is `width` wide. Filling children take the
+    /// column's width (and, when placed, the row's height); the rest their fixed or natural size
+    /// at the column's width.
+    private static func gridSizes(_ kids: [LayerNode], _ grid: LayerNode.Grid, width: CGFloat,
+                                  measure: TextMeasure) -> [CGSize] {
+        let column = columnWidth(grid, width)
+        return kids.map { kid in
+            let childWidth = self.width(of: kid, offered: column, measure: measure)
+            return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: nil, measure: measure))
+        }
+    }
+
+    /// Each child's size in an overlay whose content box is `width` wide and `height` high (nil while fitting).
+    private static func overlaySizes(_ kids: [LayerNode], width: CGFloat, height: CGFloat?,
+                                     measure: TextMeasure) -> [CGSize] {
+        kids.map { kid in
+            let childWidth = self.width(of: kid, offered: width, measure: measure)
+            return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: height, measure: measure))
         }
     }
 
@@ -233,25 +292,19 @@ enum LayoutEngine {
         var overflows: Bool
     }
 
-    /// Children's frames in `node`'s space, or nil for a free container, whose children stay put.
-    private static func place(_ node: LayerNode, kids: [LayerNode], measure: TextMeasure) -> Placement? {
+    /// Where a container's children go: its frame's size, inset by its padding, in its own space.
+    private static func contentBox(of node: LayerNode) -> CGRect {
         let padding = cleaned(node.padding)
-        let box = CGRect(
+        return CGRect(
             x: padding.leading, y: padding.top,
             width: max(0, clean(node.frame.size.width) - padding.leading - padding.trailing),
             height: max(0, clean(node.frame.size.height) - padding.top - padding.bottom))
-        switch node.resolvedLayout {
-        case .free: return nil
-        case .stack(let stack): return placeStack(kids, stack, in: box, measure: measure)
-        case .grid(let grid): return placeGrid(kids, grid, in: box, measure: measure)
-        case .overlay(let alignment): return placeOverlay(kids, alignment, in: box, measure: measure)
-        }
     }
 
     private static func placeStack(_ kids: [LayerNode], _ stack: LayerNode.Stack, in box: CGRect,
                                    measure: TextMeasure) -> Placement {
         let vertical = stack.axis == .vertical
-        let sizes = childSizes(kids, .stack(stack), width: box.width, height: box.height, measure: measure)
+        let sizes = stackSizes(kids, stack, width: box.width, height: box.height, measure: measure)
         let along = sizes.map { vertical ? $0.height : $0.width }
         let room = vertical ? box.height : box.width
         let spacing = clean(stack.spacing)
@@ -281,7 +334,7 @@ enum LayoutEngine {
         let column = columnWidth(grid, box.width)
         let columnSpacing = clean(grid.columnSpacing)
         let rowSpacing = clean(grid.rowSpacing)
-        let sizes = childSizes(kids, .grid(grid), width: box.width, height: nil, measure: measure)
+        let sizes = gridSizes(kids, grid, width: box.width, measure: measure)
         let rows = rowHeights(sizes, columns: columns)
         var frames: [CGRect] = []
         var top = box.minY
@@ -304,7 +357,7 @@ enum LayoutEngine {
 
     private static func placeOverlay(_ kids: [LayerNode], _ alignment: LayerNode.Alignment, in box: CGRect,
                                      measure: TextMeasure) -> Placement {
-        let sizes = childSizes(kids, .overlay(alignment), width: box.width, height: box.height, measure: measure)
+        let sizes = overlaySizes(kids, width: box.width, height: box.height, measure: measure)
         let frames = sizes.map { size in
             CGRect(x: box.minX + offset(alignment.horizontal, room: box.width, size: size.width),
                    y: box.minY + offset(alignment.vertical, room: box.height, size: size.height),
@@ -370,6 +423,99 @@ enum LayoutEngine {
 
     /// How far in from each side a sticky note's words sit, as the canvas draws them.
     private static let stickyNoteTextInset: CGFloat = 12
+
+    // MARK: - Free containers
+
+    /// In a free parent, a row, column, grid or overlay sized to fit takes its fitting size on that
+    /// axis. Its top-left corner stays where it is, turned or not. Nil when its frame stays as it is.
+    private static func fittedInFreeParent(_ node: LayerNode, measure: TextMeasure) -> CGRect? {
+        let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
+        guard node.isContainer, node.resolvedLayout != .free, fitsWidth || fitsHeight else { return nil }
+        let width = fitsWidth ? snap(width(of: node, offered: nil, measure: measure)) : clean(node.frame.size.width)
+        let height = fitsHeight
+            ? snap(height(of: node, width: width, offered: nil, measure: measure)) : clean(node.frame.size.height)
+        return reframed(node, size: CGSize(width: width, height: height), shift: .zero)
+    }
+
+    /// A free container sized to fit hugs its visible children's turned shapes. On each axis that
+    /// fits, it takes their box plus its padding, and everything it holds, hidden children too,
+    /// moves so that the box starts inside the padding. With nothing visible it fits its padding,
+    /// and nothing moves. Unless a laid-out parent will place it, its frame then moves so that
+    /// each child stays where it was in the parent's space, turned or not.
+    private static func hug(_ node: inout LayerNode, movingItsFrame: Bool) {
+        let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
+        guard fitsWidth || fitsHeight else { return }
+        let padding = cleaned(node.padding)
+        let box = shapesBox(of: visibleChildren(of: node))
+        let content = box ?? .zero
+        let shift = CGVector(dx: fitsWidth && box != nil ? padding.leading - content.minX : 0,
+                             dy: fitsHeight && box != nil ? padding.top - content.minY : 0)
+        if shift != .zero {
+            for index in node.children.indices {
+                let frame = node.children[index].frame
+                node.children[index].frame = CGRect(
+                    x: finite(finite(frame.origin.x) + shift.dx), y: finite(finite(frame.origin.y) + shift.dy),
+                    width: finite(frame.size.width), height: finite(frame.size.height))
+            }
+        }
+        let size = CGSize(
+            width: fitsWidth
+                ? snap(clamped(content.width + padding.leading + padding.trailing, node.width)) : clean(node.frame.size.width),
+            height: fitsHeight
+                ? snap(clamped(content.height + padding.top + padding.bottom, node.height)) : clean(node.frame.size.height))
+        if movingItsFrame, let frame = reframed(node, size: size, shift: shift) { node.frame = frame }
+    }
+
+    /// `node`'s frame at `size` once what it holds has moved by `shift`, placed so that nothing it
+    /// holds moves in its parent's space: the point that was at -shift is its new top-left
+    /// corner, wherever its turn puts that. Nil when neither changes, so a turned frame doesn't creep.
+    private static func reframed(_ node: LayerNode, size: CGSize, shift: CGVector) -> CGRect? {
+        guard size != node.frame.size || shift != .zero else { return nil }
+        let corner = CGPoint(x: -shift.dx, y: -shift.dy).applying(node.transformToParent)
+        var resized = node
+        resized.frame = CGRect(origin: .zero, size: size)
+        let offset = CGPoint.zero.applying(resized.transformToParent)
+        return CGRect(x: finite(corner.x - offset.x), y: finite(corner.y - offset.y), width: size.width, height: size.height)
+    }
+
+    /// The box round children's turned shapes, out to whole points, or nil when there are none.
+    /// A thousandth of a point is a turn's rounding error, not a reason to take a whole point more.
+    private static func shapesBox(of kids: [LayerNode]) -> CGRect? {
+        guard !kids.isEmpty else { return nil }
+        var minX = CGFloat.infinity, minY = CGFloat.infinity, maxX = -CGFloat.infinity, maxY = -CGFloat.infinity
+        for kid in kids {
+            let frame = kid.frame
+            let rect = CGRect(x: finite(frame.origin.x), y: finite(frame.origin.y),
+                              width: clean(frame.size.width), height: clean(frame.size.height))
+            let degrees = kid.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
+            let shape = degrees == 0 ? rect : TurnedRect(rect: rect, degrees: degrees).bounds
+            (minX, minY) = (min(minX, shape.minX), min(minY, shape.minY))
+            (maxX, maxY) = (max(maxX, shape.maxX), max(maxY, shape.maxY))
+        }
+        let left = (minX + roundingError).rounded(.down), top = (minY + roundingError).rounded(.down)
+        let right = max(left, (maxX - roundingError).rounded(.up)), bottom = max(top, (maxY - roundingError).rounded(.up))
+        return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
+
+    private static let roundingError: CGFloat = 0.001
+
+    // MARK: - Laying out only what changed
+
+    /// Whether a container is as it was when it was last laid out, at the same size. Where it
+    /// sits makes no difference to what is inside it.
+    private static func isUnchanged(_ node: LayerNode, since previous: LayerNode?) -> Bool {
+        guard let previous, node.frame.size == previous.frame.size else { return false }
+        var placed = node
+        placed.frame.origin = previous.frame.origin
+        return placed == previous
+    }
+
+    /// The containers among `previous`'s children, by id, so each can be found as it was last laid out.
+    private static func sameIDContainers(in previous: LayerNode?) -> [UUID: LayerNode] {
+        guard let previous else { return [:] }
+        return Dictionary(previous.children.lazy.filter(\.isContainer).map { ($0.id, $0) },
+                          uniquingKeysWith: { first, _ in first })
+    }
 
     // MARK: - Grids
 
@@ -445,3 +591,24 @@ private extension LayerNode.Sizing.Mode {
         if case .fill = self { true } else { false }
     }
 }
+
+#if DEBUG
+extension LayoutEngine {
+    /// Containers laid out, rather than left as they were, since launch. Counted under a lock,
+    /// since layouts run on any thread.
+    static var containersLaidOut: Int { work.withLock { $0.total } }
+
+    /// How many times the container with this id has been laid out. Tests count this way,
+    /// because suites that run alongside lay out containers of their own.
+    static func timesLaidOut(_ id: UUID) -> Int { work.withLock { $0.byContainer[id] ?? 0 } }
+
+    fileprivate static func countLaidOut(_ id: UUID) {
+        work.withLock { work in
+            work.total += 1
+            work.byContainer[id, default: 0] += 1
+        }
+    }
+
+    private static let work = OSAllocatedUnfairLock(initialState: (total: 0, byContainer: [UUID: Int]()))
+}
+#endif

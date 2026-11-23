@@ -170,3 +170,15 @@ extension LayerNode {
         var raw: JSONValue
     }
 }
+
+extension LayerNode {
+    /// This node's own space to its parent's: translate to frame.origin, then turn about the frame's centre.
+    /// Clockwise on screen, as `TurnedRect` turns. An angle that isn't a number is upright.
+    var transformToParent: CGAffineTransform {
+        let halfWidth = frame.size.width / 2, halfHeight = frame.size.height / 2
+        let degrees = rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
+        return CGAffineTransform(translationX: -halfWidth, y: -halfHeight)
+            .concatenating(CGAffineTransform(rotationAngle: degrees * .pi / 180))
+            .concatenating(CGAffineTransform(translationX: frame.origin.x + halfWidth, y: frame.origin.y + halfHeight))
+    }
+}

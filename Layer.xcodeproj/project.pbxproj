@@ -268,6 +268,7 @@
 		BE2E3299E1D5DB7F0308CE2E /* toggle_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 1F2F9E3C7D7BE0824538D30C /* toggle_jittered_1a.json */; };
 		BFC0D703B308332B3CA789A3 /* checkbox_radio_radio_3.json in Resources */ = {isa = PBXBuildFile; fileRef = AC17B009FF499090B9EFC578 /* checkbox_radio_radio_3.json */; };
 		C0AF79D64637575651231DDD /* toggle_progress_progress_4.json in Resources */ = {isa = PBXBuildFile; fileRef = DBBBA926AD691E78D35E35C3 /* toggle_progress_progress_4.json */; };
+		C0B85F2FCCA8D17C9CAACDE7 /* LayoutEngineFreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6507A2CA2C335F8AF0345681 /* LayoutEngineFreeTests.swift */; };
 		C1E025F0BBA780736712B003 /* title_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 70C379365FC91FFBCAAE60E8 /* title_jittered_1a.json */; };
 		C2687FAAE956A236F8AA116B /* ZoomStops.swift in Sources */ = {isa = PBXBuildFile; fileRef = E640E46BE098DAC8B9033770 /* ZoomStops.swift */; };
 		C273C6E33BD736FD9070CBC5 /* title_body_body_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 3C7FE69D6FCFD8D6C5D1EF67 /* title_body_body_3.json */; };
@@ -510,6 +511,7 @@
 		64285F161FD6A296212059CB /* AudioChunk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChunk.swift; sourceTree = "<group>"; };
 		648F8E45F2B97A3BBAE52BAC /* design-profile.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "design-profile.json"; sourceTree = "<group>"; };
 		64B6362E744A11D2855E4335 /* radio_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_noisy_2.json; sourceTree = "<group>"; };
+		6507A2CA2C335F8AF0345681 /* LayoutEngineFreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutEngineFreeTests.swift; sourceTree = "<group>"; };
 		65F5F078306FE99EF1BB61AC /* SqueezeRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqueezeRouter.swift; sourceTree = "<group>"; };
 		666C306910A1813C3D3D54BA /* progress_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_clean_1.json; sourceTree = "<group>"; };
 		668450F113C2467B09C2359A /* toggle_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_clean_2.json; sourceTree = "<group>"; };
@@ -940,6 +942,7 @@
 				26CDC805F53A2DBEC089F4E5 /* LayerNodeTests.swift */,
 				E45C0B6754EA9966F83DF35B /* LayerOrderTests.swift */,
 				BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */,
+				6507A2CA2C335F8AF0345681 /* LayoutEngineFreeTests.swift */,
 				2432F3E4740CB3B25E9F5345 /* LayoutEngineTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
@@ -1595,6 +1598,7 @@
 				A9C39EC84CCDF1B1837F05CD /* LayerNodeTests.swift in Sources */,
 				DCD806CB71CFF764ABDFA96D /* LayerOrderTests.swift in Sources */,
 				6EEDB23E93684CC1B26AB427 /* LayersPanelTests.swift in Sources */,
+				C0B85F2FCCA8D17C9CAACDE7 /* LayoutEngineFreeTests.swift in Sources */,
 				E88B49D3E718BB837ED6C379 /* LayoutEngineTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
