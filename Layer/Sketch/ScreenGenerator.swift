@@ -2,9 +2,9 @@ import Foundation
 @_weakLinked import FoundationModels
 
 /// Writes a whole screen from a description, with the design's own model, and streams it:
-/// the model writes one element per line in `ScreenBlueprint`'s written form, and each
-/// time a line is finished the screen so far is handed on, so the canvas can show it
-/// growing while the model is still writing.
+/// the model writes the screen as an outline (`Outline`), one line at a time, and each time
+/// a finished line adds to it the screen so far is handed on as a keyed tree (`OutlineStream`),
+/// so the canvas can show it growing while the model is still writing.
 ///
 /// Every model goes through a Foundation Models `LanguageModelSession`: the on-device
 /// Apple Intelligence model, or a hosted one (`HostedLanguageModel`).
@@ -29,20 +29,6 @@ enum ScreenGenerator {
         choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported ? .full : .compact
     }
 
-    /// The screen so far: the blueprint of every finished line in `text`, with one
-    /// primary action. While the model is still writing, the last line may be half
-    /// written, so it waits for the next.
-    static func blueprint(ofFinishedLinesIn text: String, isComplete: Bool) -> ScreenBlueprint? {
-        var lines = text.components(separatedBy: "\n")
-        if !isComplete { lines.removeLast() }
-        // Models sometimes wrap the lines in a code block or add a heading anyway.
-        let kept = lines.filter { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return !trimmed.hasPrefix("```") && !trimmed.hasPrefix("#")
-        }
-        return ScreenBlueprint.parse(kept.joined(separator: "\n"))?.withOnePrimaryAction()
-    }
-
     /// A short name for the new screen, from the first words of its description.
     static func name(for description: String) -> String {
         let words = description.split(whereSeparator: \.isWhitespace).prefix(4).joined(separator: " ")
@@ -51,45 +37,58 @@ enum ScreenGenerator {
         return first.uppercased() + trimmed.dropFirst()
     }
 
+    /// What a screen is written from.
+    struct Request: Equatable, Sendable {
+        /// What the screen is for, as the person said it.
+        var description: String
+        /// What the rest of the design says (`SketchPrompt.describe(board:)`), so the new screen's words match it;
+        /// nil for an empty design.
+        var board: String? = nil
+        /// The model that writes it.
+        var choice: ModelChoice
+        /// The design's tokens, which the screen's spacings and cards are read with: no model picks a number.
+        var tokens = DesignTokens.standard
+    }
+
     /// How far a screen has got.
     enum Update: Equatable, Sendable {
         /// The model has begun its answer. Until then it is thinking: a model that
         /// reasons first can spend most of the time there, and Foundation Models sends no
         /// update until the answer itself starts.
         case startedWriting
-        /// The screen as far as it has been written.
-        case screen(ScreenBlueprint)
+        /// The screen as far as it has been written: a keyed root, fixed (`TreeValidator.fixGenerated`) and not laid
+        /// out, with ids fresh from the parse.
+        case screen(LayerNode)
     }
 
-    /// Writes a screen described in `description` with `choice`'s model. `board` is what
-    /// the rest of the design says (`SketchPrompt.describe(board:)`), so the new screen's
-    /// words match it; nil for an empty design. Each screen update has more elements than
-    /// the one before.
-    static func stream(_ description: String, board: String? = nil, using choice: ModelChoice) -> AsyncThrowingStream<Update, any Error> {
+    /// Writes the screen `request` describes with its model. Each screen update has more leaves than the one
+    /// before. Throws `nothingWritten` when the whole answer gave no screen.
+    static func stream(_ request: Request) -> AsyncThrowingStream<Update, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let session = makeSession(for: choice, description: description)
-                    let request = ScreenPrompt.request(description, board: board, room: room(for: choice))
+                    let session = makeSession(for: request.choice, description: request.description)
+                    let prompt = ScreenPrompt.request(request.description, board: request.board, room: room(for: request.choice))
+                    var outline = OutlineStream(tokens: request.tokens)
                     var text = ""
-                    var count = 0
+                    var hasHandedOn = false
                     var hasStarted = false
-                    for try await snapshot in session.streamResponse(to: request) {
+                    for try await snapshot in session.streamResponse(to: prompt) {
                         text = snapshot.content
                         if !hasStarted, !text.isEmpty {
                             hasStarted = true
                             continuation.yield(.startedWriting)
                         }
-                        if let blueprint = blueprint(ofFinishedLinesIn: text, isComplete: false), blueprint.itemCount > count {
-                            count = blueprint.itemCount
-                            continuation.yield(.screen(blueprint))
+                        if let root = outline.take(text, isComplete: false) {
+                            hasHandedOn = true
+                            continuation.yield(.screen(root))
                         }
                     }
-                    if let blueprint = blueprint(ofFinishedLinesIn: text, isComplete: true), blueprint.itemCount > count {
-                        count = blueprint.itemCount
-                        continuation.yield(.screen(blueprint))
+                    if let root = outline.take(text, isComplete: true) {
+                        hasHandedOn = true
+                        continuation.yield(.screen(root))
                     }
-                    if count == 0 { throw GenerationError.nothingWritten }
+                    if !hasHandedOn { throw GenerationError.nothingWritten }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -108,7 +107,3 @@ enum ScreenGenerator {
     }
 }
 
-extension ScreenBlueprint {
-    /// How many elements it has, in every section.
-    var itemCount: Int { sections.reduce(0) { $0 + $1.items.count } }
-}

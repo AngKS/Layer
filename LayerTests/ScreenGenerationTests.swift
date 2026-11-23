@@ -8,21 +8,28 @@ import Testing
 struct ScreenStreamParsingTests {
     @Test func aHalfWrittenLineWaitsForTheNext() throws {
         let partial = "title: Welcome back\ntext field: Em"
-        let soFar = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: partial, isComplete: false))
-        #expect(soFar.itemCount == 1)
-        let whole = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: partial, isComplete: true))
-        #expect(whole.itemCount == 2)
-        #expect(whole.sections.flatMap(\.items).last?.text == "Em")
+        var outline = OutlineStream(tokens: .standard)
+        let soFarTaken = outline.take(partial, isComplete: false)
+        let soFar = try #require(soFarTaken)
+        #expect(soFar.leafCount == 1)
+        let wholeTaken = outline.take(partial, isComplete: true)
+        let whole = try #require(wholeTaken)
+        #expect(whole.leafCount == 2)
+        #expect(leaves(whole).last?.content.text == "Em")
     }
 
     @Test func codeFencesAndHeadingsAreIgnored() throws {
         let written = "# Login\n```\ntitle: Hi\nbutton: Go [blue]\n```\n"
-        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
-        #expect(blueprint.sections.flatMap(\.items).map(\.kind) == [.title, .button])
+        var outline = OutlineStream(tokens: .standard)
+        let taken = outline.take(written, isComplete: true)
+        let root = try #require(taken)
+        #expect(leaves(root).map(\.kind) == [.title, .button])
     }
 
     @Test func nothingFinishedIsNothingToShow() {
-        #expect(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: Wel", isComplete: false) == nil)
+        var outline = OutlineStream(tokens: .standard)
+        let taken = outline.take("title: Wel", isComplete: false)
+        #expect(taken == nil)
     }
 
     @Test func aScreenIsNamedFromItsDescription() {
@@ -38,8 +45,10 @@ struct ScreenStreamParsingTests {
             row: button: Not now | button: Upgrade
             button: Restore purchase [plain]
             """
-        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
-        let looks = blueprint.sections.flatMap(\.items).filter { $0.kind == .button }.map(\.buttonLook)
+        var outline = OutlineStream(tokens: .standard)
+        let taken = outline.take(written, isComplete: true)
+        let root = try #require(taken)
+        let looks = leaves(root).filter { $0.kind == .button }.map(\.content.buttonLook)
         // The first stays filled; the rest step down, plainly beside others in a row;
         // a look the model chose stays.
         #expect(looks == [nil, .bordered, .plain, .plain, .plain])
@@ -47,16 +56,25 @@ struct ScreenStreamParsingTests {
 
     @Test func theButtonWrittenAsFilledIsThePrimaryOne() throws {
         let written = "button: Cancel\nbutton: Pay now [filled]"
-        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
-        #expect(blueprint.sections.flatMap(\.items).map(\.buttonLook) == [.bordered, .filled])
+        var outline = OutlineStream(tokens: .standard)
+        let taken = outline.take(written, isComplete: true)
+        let root = try #require(taken)
+        #expect(leaves(root).map(\.content.buttonLook) == [.bordered, .filled])
     }
 
     @Test func aScreenOfOnlyBorderedButtonsGetsAMainOne() throws {
         // As the on-device model wrote a recipe screen: every action bordered or plain.
         let written = "image\ntitle: Lemon curd\nbutton: Print [bordered]\nbutton: Save to recipe book [bordered]\nbutton: Share [plain]"
-        let blueprint = try #require(ScreenGenerator.blueprint(ofFinishedLinesIn: written, isComplete: true))
-        let looks = blueprint.sections.flatMap(\.items).filter { $0.kind == .button }.map(\.buttonLook)
+        var outline = OutlineStream(tokens: .standard)
+        let taken = outline.take(written, isComplete: true)
+        let root = try #require(taken)
+        let looks = leaves(root).filter { $0.kind == .button }.map(\.content.buttonLook)
         #expect(looks == [.bordered, nil, .plain])
+    }
+
+    /// The leaves under `node`, in reading order.
+    private func leaves(_ node: LayerNode) -> [LayerNode] {
+        node.children.flatMap { $0.isContainer ? leaves($0) : [$0] }
     }
 }
 
@@ -246,12 +264,12 @@ struct ScreenGenerationLifecycleTests {
         undo.groupsByEvent = false
         app.store.undoManager = undo
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        app.screenStream = { _, _, _ in stream }
+        app.screenStream = { _ in stream }
         return (app, undo, feed)
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
-        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+        .screen(Outline.parse(text, isComplete: true))
     }
 
     /// Undo pressed while a screen is written takes it away. The generation still
@@ -275,7 +293,7 @@ struct ScreenGenerationLifecycleTests {
         #expect(app.store.historyMark != mark)
         // And the next generation goes.
         let (stream, next) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        app.screenStream = { _, _, _ in stream }
+        app.screenStream = { _ in stream }
         app.generateScreen(from: "a profile screen")
         #expect(app.isGenerating)
         next.finish()
@@ -295,7 +313,7 @@ struct ScreenGenerationLifecycleTests {
         #expect(!undo.canUndo)
 
         let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        app.screenStream = { _, _, _ in stream }
+        app.screenStream = { _ in stream }
         app.generateScreen(from: "a profile screen")
         empty.finish()
         await app.waitForGeneration()
@@ -319,7 +337,7 @@ struct ScreenGenerationLifecycleTests {
         #expect(shown.last == false, "the controls were told the step went")
 
         let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        app.screenStream = { _, _, _ in stream }
+        app.screenStream = { _ in stream }
         app.generateScreen(from: "a profile screen")
         #expect(shown.last == true)
         empty.finish()

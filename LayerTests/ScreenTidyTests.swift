@@ -593,7 +593,7 @@ struct VoiceScreenLayoutTests {
         for (said, expected) in [("iPad", "ipad"), ("webpage", "macbook-air"), (nil, nil) as (String?, String?)] {
             let bench = bench()
             let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-            bench.app.screenStream = { _, _, _ in stream }
+            bench.app.screenStream = { _ in stream }
             let making = Task { try await bench.box.createScreen(name: "Shop", description: "an Apple product page", device: said) }
             #expect(await eventually { bench.app.isGenerating })
             let made = try #require(bench.app.store.screens.last)

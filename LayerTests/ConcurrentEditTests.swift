@@ -42,12 +42,12 @@ struct ConcurrentEditTests {
         ], on: screen.id, replacing: false)
         undo.removeAllActions()
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        model.screenStream = { _, _, _ in stream }
+        model.screenStream = { _ in stream }
         return (Board(model: model, undo: undo, screen: screen.id, title: refs[0], button: refs[1]), feed)
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
-        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+        .screen(Outline.parse(text, isComplete: true))
     }
 
     /// A finger drags the button while the knob turns the title. Whichever ends first, the
@@ -405,7 +405,7 @@ struct ConcurrentEditsGroupedByEventTests {
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
         ], on: screen.id, replacing: false)
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        model.screenStream = { _, _, _ in stream }
+        model.screenStream = { _ in stream }
         return (model, undo, screen.id, refs[0], refs[1], feed)
     }
 
@@ -421,7 +421,7 @@ struct ConcurrentEditsGroupedByEventTests {
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
-        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+        .screen(Outline.parse(text, isComplete: true))
     }
 
     @Test func aDragIsOneStep() async throws {
