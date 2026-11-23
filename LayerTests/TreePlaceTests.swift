@@ -177,7 +177,7 @@ struct TreePlaceTests {
         let model = AppModel(document: LayerDocument())
         model.canvasSize = CGSize(width: 1210, height: 834)
         let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
-        let added = model.store.addScreen(screen([r]))
+        let added = try #require(model.store.addScreen(screen([r])))
         let ref = DesignStore.ElementRef(host: .screen(added), element: r.id)
         model.selection = .element(ref)
         let before = try #require(model.store.node(r.id))
@@ -324,7 +324,7 @@ struct TreePlaceTests {
         model.canvasSize = CGSize(width: 1210, height: 834)
         let r = container(row(), [leaf(60), leaf(50)])
         let g = container(nil, at: CGPoint(x: 20, y: 100), [r, leaf(100, at: CGPoint(x: 0, y: 40))])
-        let added = model.store.addScreen(screen([g]))
+        let added = try #require(model.store.addScreen(screen([g])))
         model.selection = .element(DesignStore.ElementRef(host: .screen(added), element: g.id))
         let row = try #require(model.store.node(r.id))
 

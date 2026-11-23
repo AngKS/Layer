@@ -84,7 +84,7 @@ struct StoreChangeBudgetTests {
             item.width = LayerNode.Sizing(.fill(weight: 1))
             return item
         }
-        let screenID = store.addScreen(screen)
+        let screenID = try #require(store.addScreen(screen))
         let root = try #require(store.tree.screens.first { $0.id == screenID }?.root)
         try #require(root.children.count == 25)
         #expect(root.children.reduce(0) { $0 + $1.children.count } == 100)
@@ -141,7 +141,7 @@ struct StoreChangeBudgetTests {
         card.children = [Self.generated(.body, "Inside a card"), Self.laidOut(Self.row, [Self.generated(.text, "A"), Self.generated(.button, "B")])]
         var screen = TreeScreen(name: "Free", origin: CGPoint(x: 100, y: 50), scale: 0.5, deviceID: nil)
         screen.root.children = [dragged, listRow, group, card]
-        let screenID = model.store.addScreen(screen)
+        let screenID = try #require(model.store.addScreen(screen))
         let root = try #require(model.store.tree.screens.first { $0.id == screenID }?.root)
         #expect(root.resolvedLayout == .free)
         let others = Self.containers(in: root).filter { $0 != root.id }

@@ -84,13 +84,14 @@ extension DesignStore {
         return true
     }
 
-    /// Adds a screen, with everything on it, after the others. Nothing is added, and the id names no
-    /// screen, when the design already has the screen's id or one of its nodes', or for `add`'s other
-    /// refusals: a drawing or sticky note on it, a node deeper than 32, or more than 5,000 nodes.
+    /// Adds a screen, with everything on it, after the others, and returns its id. Nil, and nothing is
+    /// added, when the design already has the screen's id or one of its nodes', or for `add`'s other
+    /// refusals: a drawing or sticky note on it, a node deeper than 32, or more than 5,000 nodes. A
+    /// refused screen's id may name another screen the design has, so it is never handed back.
     @discardableResult
-    func addScreen(_ screen: TreeScreen) -> TreeScreen.ID {
+    func addScreen(_ screen: TreeScreen) -> TreeScreen.ID? {
         let top = Holder(host: .screen(screen.id), path: [], node: screen.root, depth: 0, toHost: .identity, degrees: 0)
-        guard !tree.screens.contains(where: { $0.id == screen.id }), accepts([screen.root], in: top) else { return screen.id }
+        guard !tree.screens.contains(where: { $0.id == screen.id }), accepts([screen.root], in: top) else { return nil }
         changeTree(writing: 0) { $0.screens.append(screen) }
         return screen.id
     }
@@ -174,14 +175,19 @@ extension DesignStore {
     }
 
     /// Changes a node in place: any field but its id and what it holds, which stay as they were.
-    /// `body` runs inside the change, so it mustn't read the store.
+    /// Its kind changes only to another of the same sort, a container's to a container's and a leaf's
+    /// to a leaf's: a leaf made a group would be an empty group, which the rules take away, and a
+    /// container made a leaf would hold what a leaf can't. Wrapping and unwrapping (`wrap`, `unwrap`)
+    /// make and take away containers. `body` runs inside the change, so it mustn't read the store.
     func update(_ id: UUID, _ body: (inout LayerNode) -> Void) {
         guard let entry = index[id] else { return }
         changeTree(writing: 1) { tree in
             tree.changeNode(on: entry.host, at: entry.path) { node in
-                let kept = (id: node.id, children: node.children, unread: node.unreadChildren)
+                let kept = (id: node.id, kind: node.kind, isContainer: node.isContainer, children: node.children,
+                            unread: node.unreadChildren)
                 body(&node)
                 (node.id, node.children, node.unreadChildren) = (kept.id, kept.children, kept.unread)
+                if node.isContainer != kept.isContainer { node.kind = kept.kind }
             }
         }
     }
