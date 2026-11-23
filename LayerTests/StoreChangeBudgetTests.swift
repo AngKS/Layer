@@ -4,8 +4,9 @@ import Testing
 @testable import Layer
 
 /// The spec's budgets for a change on the tree (§13), held on every run: one change through the
-/// store on a screen of 100 nodes takes under 16 ms at the 95th percentile, and a frame of a drag
-/// lays out only the containers on the path from what it moves to its screen's root.
+/// store on a screen of 100 nodes, and the next read of the screens after it, take under 16 ms at
+/// the 95th percentile, and a frame of a drag lays out only the containers on the path from what
+/// it moves to its screen's root.
 @MainActor
 @Suite("A store change's budget")
 struct StoreChangeBudgetTests {
@@ -51,57 +52,93 @@ struct StoreChangeBudgetTests {
         Double(duration.components.seconds) * 1e3 + Double(duration.components.attoseconds) / 1e15
     }
 
-    /// The p50 and p95 of `runs` timed runs of `operation`, in milliseconds, printed as a BENCH line.
-    /// `tidy` runs after each, untimed.
-    private func measure(_ name: String, _ operation: (Int) -> Void, tidy: (Int) -> Void = { _ in }) -> (p50: Double, p95: Double) {
-        var times: [Double] = []
+    /// The p50 and p95 of a list of times.
+    private static func percentiles(_ times: [Double]) -> (p50: Double, p95: Double) {
+        let sorted = times.sorted()
+        return (sorted[sorted.count / 2], sorted[Int((Double(sorted.count) * 0.95).rounded(.up)) - 1])
+    }
+
+    /// The p50 and p95 of `runs` timed runs of `operation` followed by the next read of `store`'s
+    /// screens, which lowers the tree again, in milliseconds: printed as two BENCH lines, the change
+    /// alone and the change with the read, and returned for the change with the read. `tidy` runs
+    /// after each, untimed.
+    private func measure(_ name: String, reading store: DesignStore, _ operation: (Int) -> Void,
+                         tidy: (Int) -> Void = { _ in }) -> (p50: Double, p95: Double) {
+        var changes: [Double] = [], withReads: [Double] = []
         for run in 0..<Self.runs {
             let start = ContinuousClock.now
             operation(run)
-            times.append(Self.milliseconds(ContinuousClock.now - start))
+            let changed = ContinuousClock.now
+            _ = store.screens
+            let read = ContinuousClock.now
+            changes.append(Self.milliseconds(changed - start))
+            withReads.append(Self.milliseconds(read - start))
             tidy(run)
         }
-        let sorted = times.sorted()
-        let p50 = sorted[sorted.count / 2]
-        let p95 = sorted[Int((Double(sorted.count) * 0.95).rounded(.up)) - 1]
-        print(String(format: "BENCH tree %@ p50=%.3f p95=%.3f", name, p50, p95))
-        return (p50, p95)
+        let change = Self.percentiles(changes), withRead = Self.percentiles(withReads)
+        print(String(format: "BENCH tree %@ p50=%.3f p95=%.3f", name, change.p50, change.p95))
+        print(String(format: "BENCH tree %@+read p50=%.3f p95=%.3f", name, withRead.p50, withRead.p95))
+        return withRead
+    }
+
+    /// 25 rows, each a row of a text, a body, a toggle and a divider: 100 things in all. In a column
+    /// each fills its width; on a free root each is put down the screen, as wide as it fits.
+    private static func settingsRows(placedFreely: Bool) -> [LayerNode] {
+        (0..<25).map { index in
+            var item = Self.laidOut(Self.row, [Self.generated(.text, "Label \(index)"), Self.generated(.body, "What setting \(index) does"),
+                                               Self.generated(.toggle), Self.generated(.divider)])
+            if placedFreely {
+                item.frame.origin = CGPoint(x: 20, y: 60 + 30 * CGFloat(index))
+            } else {
+                item.width = LayerNode.Sizing(.fill(weight: 1))
+            }
+            return item
+        }
     }
 
     // MARK: Budgets
 
     /// An iPhone screen whose root is a column of 25 rows, each a row of a text, a body, a toggle
-    /// and a divider: 100 things in all. A leaf moved in a row there is laid back by it (My call 20,
-    /// a column root's exception), so the move times the whole change and its laying back.
+    /// and a divider: 100 things in all. A body is resized, a text edited and a text added to a
+    /// row there. A leaf moved in a row under a column root would be laid back by it, its origin
+    /// dropped before anything is written (My call 20, a column root's exception), so the move is
+    /// timed on the same rows on a free root, where row 12 moves whole and what it holds rides in it.
     @Test func aStoreChangeOnAHundredNodeScreenIsWithinBudget() throws {
         let model = AppModel(document: LayerDocument())
         let store = model.store
         var screen = TreeScreen(name: "Settings", origin: CGPoint(x: 100, y: 50), scale: 1, deviceID: nil)
         screen.root.layout = Self.column
-        screen.root.children = (0..<25).map { index in
-            var item = Self.laidOut(Self.row, [Self.generated(.text, "Label \(index)"), Self.generated(.body, "What setting \(index) does"),
-                                               Self.generated(.toggle), Self.generated(.divider)])
-            item.width = LayerNode.Sizing(.fill(weight: 1))
-            return item
-        }
+        screen.root.children = Self.settingsRows(placedFreely: false)
         let screenID = try #require(store.addScreen(screen))
         let root = try #require(store.tree.screens.first { $0.id == screenID }?.root)
         try #require(root.children.count == 25)
         #expect(root.children.reduce(0) { $0 + $1.children.count } == 100)
 
-        // What the runs change: row 12's text (moved and edited) and its body (resized), and what
-        // is added to row 12 and taken away again after each run.
+        // The move: row 12 of the same rows on a free root, a point to the right each run.
+        let freeModel = AppModel(document: LayerDocument())
+        var freeScreen = TreeScreen(name: "Settings, free", origin: CGPoint(x: 100, y: 50), scale: 1, deviceID: nil)
+        freeScreen.root.children = Self.settingsRows(placedFreely: true)
+        let freeID = try #require(freeModel.store.addScreen(freeScreen))
+        let freeRoot = try #require(freeModel.store.tree.screens.first { $0.id == freeID }?.root)
+        #expect(freeRoot.resolvedLayout == .free)
+        #expect(freeRoot.children.reduce(0) { $0 + $1.children.count } == 100)
+        let freeRow = freeRoot.children[12]
+        let rowRef = DesignStore.ElementRef(host: .screen(freeID), element: freeRow.id)
+        let move = measure("move", reading: freeModel.store) { _ in freeModel.store.update(rowRef) { $0.frame.origin.x += 1 } }
+        let moved = try #require(freeModel.store.node(freeRow.id))
+        #expect(moved.frame.origin.x == freeRow.frame.origin.x + CGFloat(Self.runs), "the row moved a point each run")
+        #expect(moved.children.map(\.frame) == freeRow.children.map(\.frame), "what it holds rode in it")
+
+        // What the other runs change: row 12's text (edited) and its body (resized), and what is
+        // added to row 12 and taken away again after each run.
         let row = root.children[12]
         let text = DesignStore.ElementRef(host: .screen(screenID), element: row.children[0].id)
         let body = DesignStore.ElementRef(host: .screen(screenID), element: row.children[1].id)
 
-        let laidOut = try #require(store.node(text.element)).frame
-        let move = measure("move") { _ in store.update(text) { $0.frame.origin.x += 1 } }
-        #expect(store.node(text.element)?.frame == laidOut, "laid back by its row")
-        let resize = measure("resize") { _ in store.update(body) { $0.frame.size.width += 1 } }
-        let edit = measure("text") { _ in store.update(text) { $0.text += "a" } }
+        let resize = measure("resize", reading: store) { _ in store.update(body) { $0.frame.size.width += 1 } }
+        let edit = measure("text", reading: store) { _ in store.update(text) { $0.text += "a" } }
         var added: UUID?
-        let add = measure("add") { run in
+        let add = measure("add", reading: store) { run in
             let node = Self.generated(.text, "Added \(run)")
             added = store.add(node, to: .node(row.id), at: nil) ? node.id : nil
         } tidy: { _ in
