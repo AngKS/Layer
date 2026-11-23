@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
 
-// Undo on the tree. Today's three-way revert (`DesignContent.reverting`) takes back one step's
-// own changes from elements in a host's list, and leaves what anything else changed since. Here
-// the same is done for nodes in a parent's list: each node is compared as a record, its fields
+// Undo on the tree. The flat list's three-way revert took back one step's own changes from
+// elements in a host's list, and left what anything else changed since. Here the same is done
+// for nodes in a parent's list: each node is compared as a record, its fields
 // without its children, its parent, and its pose in its host, and the lists are put back in
 // order parent by parent.
 
@@ -259,8 +259,7 @@ extension TreeContent {
     /// was taken away comes back where it was; what was altered goes back to how it was; what
     /// was moved among the rest goes back where it was. Anything else, in `current` alone, stays.
     ///
-    /// Today's list rule (`DesignContent.reverting`), copied for the tree's screens until the
-    /// store moves onto the tree and today's is deleted (plan 2, F15).
+    /// The rule the flat list was taken back by, kept for the tree's screens.
     private static func reverting<Item: Equatable, ID: Hashable>(
         _ current: [Item], after: [Item], before: [Item], id: (Item) -> ID,
         fields: (_ current: Item, _ after: Item, _ before: Item) -> Item

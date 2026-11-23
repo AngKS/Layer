@@ -132,8 +132,9 @@ struct CanvasDragWorkTests {
         for dx in BusyBoard.outAndBack { board.drag(drags, group: g, by: CGFloat(dx), owner: owner) }
         let groupWrites = ListWork.elementsWritten - start
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
-        // Three lines and the group's box, on each of 60 frames.
-        #expect(groupWrites == 60 * 4, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
+        // Three lines on each of 60 frames. The group's box is fitted round them by the tree's
+        // rules, whose frames aren't counted as written (plan 2, call 13).
+        #expect(groupWrites == 60 * 3, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
         #expect(!board.store.isEditing)
 
         // A line outside the group, dragged beside it: only the line is written.

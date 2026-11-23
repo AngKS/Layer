@@ -3,10 +3,11 @@ import Foundation
 
 /// Groups: several things on one screen, or on the open canvas, kept together as one.
 ///
-/// A group is an element of the kind `.group` in the design's one list, on the host its
-/// members are on. Each member says which group it belongs to with its `group`, and groups
-/// nest by a group item belonging to another. The item carries the group's name, lock,
-/// hide and angle; its frame is the box round its members.
+/// A group is a container in the design's tree. In the list the tree is lowered to
+/// (`DesignContent.elements`) it is an element of the kind `.group`, on the host its members
+/// are on, just in front of them. Each member says which group it belongs to with its
+/// `group`, and groups nest by a group item belonging to another. The item carries the
+/// group's name, lock, hide and angle; its frame is the box round its members.
 ///
 /// What draws, exports, describes and hit-tests elements reads the design's views
 /// (`screens`, `floating`), which leave group items out and give each member the lock and
@@ -36,6 +37,7 @@ extension DesignContent {
 
     /// Everything in a group at any depth, the groups inside it included, back to front.
     func contents(of group: DesignElement.ID) -> [DesignElement] {
+        let elements = elements
         var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
         for element in elements {
             if let parentGroup = element.group { inside[parentGroup, default: []].append(element.id) }
@@ -119,134 +121,24 @@ extension DesignContent {
 
     // MARK: Keeping groups sound
 
-    /// Puts right whatever a change has left unsound about the design's groups, writing only
-    /// what differs. It runs at the end of every change to the design, after undo and redo,
-    /// and when a design is read, so anything that builds or moves a group does all of it in
-    /// one change: split over several, this would run in between and undo the half-built
-    /// group. In turn:
+    // PROJECTION: deleted in plan 6
+    /// Puts right whatever a change has left unsound about the design's groups. It runs at the
+    /// end of every change to the design, after undo and redo, and when a design is read, so
+    /// anything that builds or moves a group does all of it in one change: split over several,
+    /// this would run in between and undo the half-built group.
     ///
-    /// 1. A member is ungrouped when its group isn't there, isn't a group item, is on another
-    ///    host, or has it inside itself; and a drawing is never in a group.
-    /// 2. A group with no members goes.
-    /// 3. A group of one dissolves: its member takes its place in the group above, and its
-    ///    lock and hide, so that a hidden group's member doesn't reappear.
-    /// 4. Each group's members are gathered into one run, in their order, ending where the
-    ///    frontmost of them was, with the group item just in front. Nothing else moves, and
-    ///    each drawing keeps its slot, as when things are arranged.
-    /// 5. Each group's box is fitted round its members' shapes, at the group's own angle,
-    ///    innermost groups first.
+    /// The tree holds what the list could get wrong, so of today's rules:
+    /// 1. a member whose group isn't there, isn't a group, is on another host or has it inside
+    ///    itself, and a drawing in a group, are pointers the lift couldn't honour: they wait in
+    ///    `pendingPointers`, and are cut here, leaving each where it is;
+    /// 2. a group with no members goes, and 3. a group of one dissolves into the group above,
+    ///    with its lock and hide: `TreeRules`;
+    /// 4. a group's members are one run with the group in front of them: the lift nests them;
+    /// 5. each group's box is fitted round its members, at its angle: `TreeRules` lays out a
+    ///    free group that fits what it holds.
     mutating func keepGroupsSound() {
-        ungroupStrays()
-        dissolveHollowGroups()
-        gatherMembers()
-        fitGroupBoxes()
-    }
-
-    /// Rule 1. Only group items are looked up: a member whose group isn't one of them, there
-    /// or not, is a stray either way.
-    private mutating func ungroupStrays() {
-        var groups = groupItemsByID
-        for element in elements where element.group != nil {
-            // A group item ungrouped earlier in this pass is taken as it now is.
-            let member = element.kind == .group ? groups[element.id] ?? element : element
-            guard let groupID = member.group, Self.isStray(member, in: groupID, groups: groups) else { continue }
-            update(member.id) { $0.group = nil }
-            if member.kind == .group { groups[member.id]?.group = nil }
-        }
-    }
-
-    private static func isStray(_ member: DesignElement, in groupID: DesignElement.ID, groups: [DesignElement.ID: DesignElement]) -> Bool {
-        guard member.kind != .drawing, let group = groups[groupID], group.parent == member.parent else { return true }
-        // Inside itself: its chain of groups comes back to it. A loop above it that doesn't
-        // pass through it is broken when the groups in it are seen to.
-        var seen: Set<DesignElement.ID> = []
-        var next: DesignElement.ID? = groupID
-        while let id = next {
-            if id == member.id { return true }
-            guard seen.insert(id).inserted else { return false }
-            next = groups[id]?.group
-        }
-        return false
-    }
-
-    /// Rules 2 and 3, one group at a time: one going can leave the group above it hollow.
-    private mutating func dissolveHollowGroups() {
-        while true {
-            var counts: [DesignElement.ID: Int] = [:]
-            var lastMember: [DesignElement.ID: DesignElement.ID] = [:]
-            for element in elements {
-                guard let group = element.group else { continue }
-                counts[group, default: 0] += 1
-                lastMember[group] = element.id
-            }
-            guard let hollow = elements.first(where: { $0.kind == .group && counts[$0.id, default: 0] < 2 }) else { return }
-            if counts[hollow.id] == 1, let member = lastMember[hollow.id] {
-                update(member) {
-                    $0.group = hollow.group
-                    $0.isLocked = $0.isLocked || hollow.isLocked
-                    $0.isHidden = $0.isHidden || hollow.isHidden
-                }
-            }
-            remove([hollow.id])
-        }
-    }
-
-    /// Rule 4, host by host: written through `reorder` with the host's whole order, and only
-    /// where it changes.
-    private mutating func gatherMembers() {
-        var hosts: [DesignScreen.ID?] = []
-        for element in elements where element.kind == .group && !hosts.contains(element.parent) {
-            hosts.append(element.parent)
-        }
-        for parent in hosts {
-            let things = children(of: parent).filter { $0.kind != .drawing }
-            let order = TreeLift.gathered(things)
-            guard order != things.map(\.id) else { continue }
-            reorder(parent, to: rawOrder(on: parent, withDrawingsKept: order))
-        }
-    }
-
-    /// Rule 5. Each box is worked out in canvas terms and kept in the item's own points: its
-    /// screen's, or on the open canvas its own scale's. Members on the open canvas can each
-    /// have a scale of their own (L5), so a member drawn at another scale than the item is
-    /// carried into the item's points through canvas points. One drawn at the same scale,
-    /// as everything on a screen is, is taken as it is: the box round shapes moved and scaled
-    /// alike is the same box moved and scaled, and the round trip through canvas points
-    /// picked up rounding that changed whenever a screen moved, rewriting its groups. The
-    /// group's angle is kept.
-    private mutating func fitGroupBoxes() {
-        var screenPlacements: [DesignScreen.ID: Placement] = [:]
-        for screen in screenFrames where screenPlacements[screen.id] == nil { screenPlacements[screen.id] = screen.placement }
-        func placement(of element: DesignElement) -> Placement? {
-            guard let parent = element.parent else { return Placement(origin: .zero, scale: element.scale ?? 1) }
-            return screenPlacements[parent]
-        }
-        var inside: [DesignElement.ID: [DesignElement]] = [:]
-        var items: [DesignElement] = []
-        for element in elements {
-            if element.kind == .group { items.append(element) }
-            if let group = element.group { inside[group, default: []].append(element) }
-        }
-        // Each group's box in its own points, innermost first.
-        var boxes: [DesignElement.ID: TurnedRect] = [:]
-        var visiting: Set<DesignElement.ID> = []
-        func box(of group: DesignElement) -> TurnedRect? {
-            if let known = boxes[group.id] { return known }
-            guard visiting.insert(group.id).inserted, let own = placement(of: group), own.scale > 0 else { return nil }
-            let shapes = (inside[group.id] ?? []).compactMap { member -> TurnedRect? in
-                guard let theirs = placement(of: member) else { return nil }
-                let shape: TurnedRect? = member.kind == .group ? box(of: member) : TurnedRect(rect: member.frame, degrees: member.resolvedRotation)
-                guard let shape else { return nil }
-                return theirs == own ? shape : TurnedRect(rect: own.localRect(for: theirs.canvasRect(for: shape.rect)), degrees: shape.degrees)
-            }
-            let found = TurnedRect.enclosing(shapes, at: group.resolvedRotation)
-            boxes[group.id] = found
-            return found
-        }
-        for item in items {
-            guard let frame = box(of: item)?.rect, frame != item.frame else { continue }
-            update(item.id) { $0.frame = frame }
-        }
+        pendingPointers = [:]
+        TreeRules.apply(to: &tree, after: nil)
     }
 }
 
@@ -254,7 +146,7 @@ extension DesignStore {
     /// What is on a screen, or on the open canvas, back to front, as the design's own list
     /// holds it: group items included, and each thing with its own lock and hide.
     func children(on host: ElementRef.Host) -> [DesignElement] {
-        content.children(of: host.parent)
+        projection.children(of: host.parent)
     }
 
     /// The group items on a screen, or on the open canvas, back to front.
@@ -315,7 +207,7 @@ extension DesignStore {
         guard let item = groupItem(group), let end = indexInList(of: group) else { return nil }
         let host: ElementRef.Host = item.parent.map { .screen($0) } ?? .canvas
         let onScreen = item.parent.flatMap { screen($0)?.placement }
-        let elements = content.elements
+        let elements = projection.elements
         for element in elements[..<end].reversed() where element.parent == item.parent && element.kind != .drawing {
             let above = groups(above: element)
             guard above.contains(where: { $0.id == group }) else { break }
@@ -365,7 +257,7 @@ extension DesignStore {
             #endif
             var found: [ElementRef.Host: [DesignElement]] = [:]
             let showing = groupsWithSomethingShowing()
-            for element in content.elements where isTarget(element, entered: entered, showing: showing) {
+            for element in projection.elements where isTarget(element, entered: entered, showing: showing) {
                 found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
             }
             if let floating = found[.canvas] { found[.canvas] = Self.drawnOrder(floating) }
@@ -379,11 +271,12 @@ extension DesignStore {
     /// leaves went over the list for every group.
     private func groupsWithSomethingShowing() -> Set<DesignElement.ID> {
         // A design without groups costs one scan, and no dictionary.
-        guard content.elements.contains(where: { $0.kind == .group }) else { return [] }
+        let elements = projection.elements
+        guard elements.contains(where: { $0.kind == .group }) else { return [] }
         var byID: [DesignElement.ID: DesignElement] = [:]
-        for element in content.elements where byID[element.id] == nil { byID[element.id] = element }
+        for element in elements where byID[element.id] == nil { byID[element.id] = element }
         var showing: Set<DesignElement.ID> = []
-        for leaf in content.elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
+        for leaf in elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
             guard !DesignContent.groups(above: leaf, find: { byID[$0] }).contains(where: \.isHidden) else { continue }
             // Up the chain of groups it says it is in; what is above one already marked is too.
             var seen: Set<DesignElement.ID> = [leaf.id]
@@ -530,7 +423,7 @@ extension DesignStore {
         if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
         let moving = Set(inside.map(\.id) + [item.id])
         var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
-        for element in content.elements where moving.contains(element.id) {
+        for element in projection.elements where moving.contains(element.id) {
             guard let own = self.placement(of: element) else { return ref }
             // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
             let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)

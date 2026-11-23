@@ -128,7 +128,7 @@ extension DesignStore {
         }
         // The list itself, group items in it: only what is in no group is picked, a group
         // standing for everything in it. Its own lock and hide are then all it has.
-        for element in content.elements where element.group == nil {
+        for element in projection.elements where element.group == nil {
             let placement: Placement
             if let parent = element.parent {
                 guard let onScreen = placements[parent] else { continue }

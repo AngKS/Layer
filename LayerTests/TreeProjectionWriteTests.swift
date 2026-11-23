@@ -312,6 +312,61 @@ import Testing
         #expect(pending.isEmpty)
     }
 
+    /// An element added pointing at a group already on its host goes on top inside it: added at the
+    /// end of the host and gathered at once, it would take the group to the top of the host with it
+    /// before the rest of the change (a copy put just in front of its original) had put it in place.
+    @Test func anElementAddedIntoAGroupOnItsHostGoesOnTopInsideIt() throws {
+        let a = Self.node(.text, CGRect(x: 20, y: 40, width: 100, height: 20))
+        let b = Self.node(.text, CGRect(x: 0, y: 0, width: 100, height: 20))
+        let d = Self.node(.text, CGRect(x: 0, y: 30, width: 100, height: 20))
+        let e = Self.node(.text, CGRect(x: 20, y: 130, width: 100, height: 20))
+        let g = Self.group(CGRect(x: 20, y: 70, width: 100, height: 50), [b, d])
+        let screen = Self.screen([a, g, e])
+        var content = Self.content(screens: [screen])
+        var pending: [UUID: UUID] = [:]
+        var copy = Self.element(.text, CGRect(x: 36, y: 86, width: 100, height: 20))
+        copy.group = g.id
+
+        content.projectedAdd(copy, to: screen.id, scale: nil, pending: &pending)
+
+        #expect(content.screens[0].root.children.map(\.id) == [a.id, g.id, e.id])
+        #expect(try Self.node(g.id, in: content).children.map(\.id) == [b.id, d.id, copy.id])
+        #expect(try Self.lowered(copy.id, in: content).frame == copy.frame)
+        #expect(pending.isEmpty)
+    }
+
+    /// A list written as the design keeps it, each element with its own flags, writes each flag that
+    /// differs from the node's own, though it matches what a container above shows: a member taken
+    /// out of a hidden group, hidden as the group was, stays hidden on its own. A list written as the
+    /// views show it keeps the node's own flag where the view's matches the container's.
+    @Test func aFlagWrittenAsKeptIsTheNodesOwnThoughItsContainerShowsIt() throws {
+        let b = Self.node(.text, CGRect(x: 0, y: 0, width: 100, height: 20))
+        let d = Self.node(.text, CGRect(x: 0, y: 30, width: 100, height: 20))
+        var g = Self.group(CGRect(x: 20, y: 70, width: 100, height: 50), [b, d])
+        g.isHidden = true
+        let screen = Self.screen([g])
+        var content = Self.content(screens: [screen])
+        var pending: [UUID: UUID] = [:]
+
+        content.projectedUpdate(b.id, pending: &pending) {
+            $0.group = nil
+            $0.isHidden = true
+        }
+        #expect(content.screens[0].root.children.map(\.id) == [b.id, g.id])
+        #expect(try Self.node(b.id, in: content).isHidden)
+
+        let shown = try #require(TreeProjection.lower(content).screens.first?.elements.first { $0.id == d.id })
+        #expect(shown.isHidden)
+        var kept = TreeProjection.lowerHost(.screen(screen.id), in: content)
+        let index = try #require(kept.firstIndex { $0.id == d.id })
+        kept[index].isHidden = true
+        var asShown = content
+        asShown.projectedSetHost(screen.id, to: kept.map { $0.id == d.id ? shown : $0 }, pending: &pending)
+        #expect(try !Self.node(d.id, in: asShown).isHidden)
+        content.projectedSetHost(screen.id, to: kept, asKept: true, pending: &pending)
+        #expect(try Self.node(d.id, in: content).isHidden)
+    }
+
     @Test func membersAddedBeforeTheirGroupJoinItWhenItComes() throws {
         let screen = Self.screen([Self.node(.image, CGRect(x: 20, y: 300, width: 100, height: 80))])
         var content = Self.content(screens: [screen])

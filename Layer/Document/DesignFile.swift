@@ -7,35 +7,53 @@ extension UTType {
     static let layerDesign = UTType(exportedAs: "kahshin.layer.design")
 }
 
+// PROJECTION: deleted in plan 6
 /// The part of a design that the design tools edit: its screens, everything on them and
 /// on the open canvas, its title and how its canvas is set up.
 ///
-/// Everything that isn't a screen is kept in one list, `elements`, and each element says
-/// what it is on. `screens` and `floating` are views of that list: each screen with the
-/// elements on it, and the elements on the open canvas. Reading them is how most of the
-/// app sees a design; changing the list is done with the methods below, or by setting
-/// either view whole.
+/// It is kept as a tree, `tree`: each screen's root holds what is on the screen, and the
+/// canvas holds its own nodes. The members below are the flat list the app was written
+/// against, one list of elements each saying what it is on, worked out from the tree
+/// (`TreeProjection`) and written back into it until each caller reads and writes the tree
+/// itself. A field or frame written to one element goes to its node alone; a write that
+/// changes what is on a host, or what holds what, lowers that host, makes the change on
+/// its list as the list did, and lifts the list back into the tree.
 struct DesignContent: Equatable, Sendable {
-    /// The screens themselves, without what is on them.
-    private var frames: [DesignScreen] = []
-    /// Everything on the board that isn't a screen, back to front. Among elements on the
-    /// same screen, or together on the open canvas, later ones sit on top; the order of
-    /// two elements that share neither means nothing.
-    private(set) var elements: [DesignElement] = []
-    /// Elements that were read but not understood, to be written back where they were.
-    private var unread: [UnreadElement] = []
-    /// The board's name. Nil until one has been suggested or typed.
-    var title: String?
-    var canvas = CanvasSettings()
-    /// What a newer Layer saved with the design that this version doesn't know, to be
-    /// written back with it.
-    private var unknownKeys = UnknownKeys()
+    var tree = TreeContent()
+    /// Pointers a flat write named that the tree can't hold yet; cut when the change ends. Not saved, not compared.
+    var pendingPointers: [UUID: UUID] = [:]
+    /// Version-3 elements this build couldn't read. Only until Task 8, which deletes the v3 bridge.
+    var legacyUnread: [UnreadElement] = []
 
     init() {}
 
+    init(tree: TreeContent) {
+        self.tree = tree
+    }
+
+    /// The board's name. Nil until one has been suggested or typed.
+    var title: String? {
+        get { tree.title }
+        set { tree.title = newValue }
+    }
+
+    var canvas: CanvasSettings {
+        get { tree.settings }
+        set { tree.settings = newValue }
+    }
+
+    /// The tree, and what couldn't be read. Pointers waiting for a change to end aren't compared.
+    static func == (a: DesignContent, b: DesignContent) -> Bool {
+        a.tree == b.tree && a.legacyUnread == b.legacyUnread
+    }
+
     /// The pictures the design shows.
     var imageIDs: Set<UUID> {
-        Set(elements.compactMap(\.imageID))
+        var ids: Set<UUID> = []
+        forEachNode { node in
+            if let id = node.content.imageID { ids.insert(id) }
+        }
+        return ids
     }
 
     /// Every string in what this version read but didn't understand: elements of kinds
@@ -44,9 +62,11 @@ struct DesignContent: Equatable, Sendable {
     /// name are kept when the design is saved, so that the newer Layer that wrote them
     /// still finds them.
     var unreadNames: Set<String> {
-        var names = unread.reduce(into: unknownKeys.strings.union(canvas.unknownKeys.strings)) { $0.formUnion($1.json.strings) }
-        for screen in frames where !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
-        for element in elements where !element.unknownKeys.values.isEmpty { names.formUnion(element.unknownKeys.strings) }
+        var names = legacyUnread.reduce(into: tree.unknownKeys.strings.union(canvas.unknownKeys.strings)) { $0.formUnion($1.json.strings) }
+        for screen in tree.screens where !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
+        forEachNode { node in
+            if !node.unknownKeys.values.isEmpty { names.formUnion(node.unknownKeys.strings) }
+        }
         return names
     }
 
@@ -54,96 +74,104 @@ struct DesignContent: Equatable, Sendable {
     /// elements. In a design saved before version 3 they are keys earlier versions of Layer
     /// stopped using, not ones a newer Layer added, and aren't to be written back.
     mutating func forgetUnknownKeys() {
-        unknownKeys = UnknownKeys()
-        canvas.unknownKeys = UnknownKeys()
-        for index in frames.indices { frames[index].unknownKeys = UnknownKeys() }
-        for index in elements.indices { elements[index].unknownKeys = UnknownKeys() }
+        tree.unknownKeys = UnknownKeys()
+        tree.settings.unknownKeys = UnknownKeys()
+        func forget(_ node: inout LayerNode) {
+            node.unknownKeys = UnknownKeys()
+            for index in node.children.indices { forget(&node.children[index]) }
+        }
+        for screen in tree.screens.indices {
+            tree.screens[screen].unknownKeys = UnknownKeys()
+            for index in tree.screens[screen].root.children.indices { forget(&tree.screens[screen].root.children[index]) }
+        }
+        for index in tree.canvas.indices { forget(&tree.canvas[index]) }
+    }
+
+    /// Every node on the screens, below their roots, and on the open canvas, each before what it holds.
+    private func forEachNode(_ body: (LayerNode) -> Void) {
+        func visit(_ node: LayerNode) {
+            body(node)
+            for child in node.children { visit(child) }
+        }
+        for screen in tree.screens { screen.root.children.forEach(visit) }
+        tree.canvas.forEach(visit)
     }
 
     // MARK: Views of the list
 
+    /// Everything on the board that isn't a screen, back to front, host by host: the screens'
+    /// in their order, then the open canvas's. Each container is a group item just in front of
+    /// what it holds, which points at it with `group`. Among elements on the same screen, or
+    /// together on the open canvas, later ones sit on top; the order of two elements that share
+    /// neither means nothing.
+    var elements: [DesignElement] {
+        TreeProjection.lower(tree, pending: pendingPointers).elements
+    }
+
     /// Each screen with what is on it. Group items are left out, and each member is locked or
     /// hidden as it is with its groups: what reads this draws, exports and describes the
     /// members as they are, unaware of groups. See `Groups.swift`.
+    ///
+    /// Set, each screen keeps its root as it is, and a new one gets a free root. What each holds
+    /// is lifted into it, with the group items it had that weren't given, every screen against
+    /// the design as it was, so that what moves between them keeps what only the tree knows.
     var screens: [DesignScreen] {
-        get {
-            guard !frames.isEmpty else { return [] }
-            let groups = groupItemsByID
-            var onScreen: [DesignScreen.ID: [DesignElement]] = [:]
-            for element in elements where element.kind != .group {
-                if let parent = element.parent { onScreen[parent, default: []].append(Self.shown(element, groups: groups)) }
-            }
-            return frames.map { frame in
-                var screen = frame
-                screen.elements = onScreen[frame.id] ?? []
-                return screen
-            }
-        }
+        get { TreeProjection.lower(tree, pending: pendingPointers).screens }
         set {
-            let groups = groupItemsByID
-            let stored = storedForWritingBack(groups)
-            let loose = elements.filter { $0.parent == nil }
-            let kept = groupItems(besides: newValue.flatMap(\.elements))
-            frames = newValue.map(\.withoutElements)
-            // The group items each screen had go back on it, after what it now holds: the
-            // groups are put in front of their members, or taken away, by `keepGroupsSound()`.
-            elements = newValue.flatMap { screen in
-                screen.elements.map { Self.written($0, over: stored[$0.id], groups: groups).placed(on: screen.id, scale: nil) }
-                    + kept.filter { $0.parent == screen.id }
-            } + loose
+            let given = Set(newValue.flatMap(\.elements).map(\.id))
+            let lists = newValue.map { screen in (host: Optional(screen.id), elements: screen.elements + groupItems(on: screen.id, besides: given)) }
+            let wanted = Set(newValue.map(\.id))
+            let gone = tree.screens.filter { !wanted.contains($0.id) }
+            let kept = Dictionary(tree.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // Those it no longer has stay until the lift, where what has moved off them is found.
+            tree.screens = newValue.map { view in
+                var screen = kept[view.id] ?? Self.newScreen(view)
+                Self.write(view, to: &screen)
+                return screen
+            } + gone
+            tree.projectedSetHosts(lists, pending: &pendingPointers)
+            let goneIDs = Set(gone.map(\.id))
+            tree.screens.removeAll { goneIDs.contains($0.id) }
         }
     }
 
     /// The elements on the open canvas, outside every screen. Group items are left out, and
     /// each member is locked or hidden as it is with its groups, as in `screens`.
     var floating: [FloatingElement] {
-        get {
-            let groups = groupItemsByID
-            return elements.filter { $0.parent == nil && $0.kind != .group }.map { FloatingElement(element: Self.shown($0, groups: groups), scale: $0.scale ?? 1) }
-        }
+        get { TreeProjection.lower(tree, pending: pendingPointers).floating }
         set {
-            let groups = groupItemsByID
-            let stored = storedForWritingBack(groups)
-            let kept = groupItems(besides: newValue.map(\.element)).filter { $0.parent == nil }
-            elements = elements.filter { $0.parent != nil }
-                + newValue.map { Self.written($0.element, over: stored[$0.id], groups: groups).placed(on: nil, scale: $0.scale) }
-                + kept
+            let given = Set(newValue.map(\.id))
+            let list = newValue.map { floating in
+                var element = floating.element
+                element.scale = floating.scale
+                return element
+            }
+            tree.projectedSetHost(nil, to: list + groupItems(on: nil, besides: given), pending: &pendingPointers)
         }
     }
 
-    /// Each element as it is kept, by identifier, when there are groups whose lock and hide a
-    /// view showed on their members; otherwise nothing, as there is nothing to tell apart.
-    private func storedForWritingBack(_ groups: [DesignElement.ID: DesignElement]) -> [DesignElement.ID: DesignElement] {
-        guard !groups.isEmpty else { return [:] }
-        var stored: [DesignElement.ID: DesignElement] = [:]
-        for element in elements where stored[element.id] == nil { stored[element.id] = element }
-        return stored
-    }
-
-    /// The group items the design has, apart from any among `given`.
-    private func groupItems(besides given: [DesignElement]) -> [DesignElement] {
-        let items = elements.filter { $0.kind == .group }
-        guard !items.isEmpty else { return [] }
-        let ids = Set(given.map(\.id))
-        return items.filter { !ids.contains($0.id) }
+    /// The group items on a screen, or on the open canvas, apart from any among `given`.
+    private func groupItems(on host: DesignScreen.ID?, besides given: Set<DesignElement.ID>) -> [DesignElement] {
+        children(of: host).filter { $0.kind == .group && !given.contains($0.id) }
     }
 
     /// One screen with what is on it, as `screens` shows it: group items left out, and each
     /// member locked or hidden as it is with its groups. `children(of:)` has the list as it is.
     func screen(_ id: DesignScreen.ID) -> DesignScreen? {
-        guard var screen = frames.first(where: { $0.id == id }) else { return nil }
-        let groups = groupItemsByID
-        screen.elements = children(of: id).filter { $0.kind != .group }.map { Self.shown($0, groups: groups) }
-        return screen
+        guard let screen = tree.screens.first(where: { $0.id == id }) else { return nil }
+        var view = TreeProjection.view(of: screen)
+        view.elements = TreeProjection.lowerHostNodes(.screen(id), in: tree, pending: pendingPointers)
+            .filter { !$0.node.isContainer }.map(\.shown)
+        return view
     }
 
     func element(_ id: DesignElement.ID) -> DesignElement? {
-        elements.first { $0.id == id }
+        tree.projectedElement(id, pending: pendingPointers)
     }
 
     /// What is on a screen, or on the open canvas when `parent` is nil, back to front.
     func children(of parent: DesignScreen.ID?) -> [DesignElement] {
-        elements.filter { $0.parent == parent }
+        TreeProjection.lowerHost(parent.map { .screen($0) } ?? .canvas, in: tree, pending: pendingPointers)
     }
 
     // MARK: Changing the list
@@ -153,286 +181,120 @@ struct DesignContent: Equatable, Sendable {
     /// already there. Returns the element as it is kept.
     @discardableResult
     mutating func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
-        let placed = [DesignElement].placed(element, on: parent, scale: scale)
-        elements.append(placed)
-        #if DEBUG
-        ListWork.wrote()
-        #endif
-        return placed
+        tree.projectedAdd(element, to: parent, scale: scale, pending: &pendingPointers)
     }
 
     /// Changes an element in place. What it is and what it is on stay as they are: use
     /// `move` for the second.
     mutating func update(_ id: DesignElement.ID, _ body: (inout DesignElement) -> Void) {
-        guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
-        let before = elements[index]
-        var element = before
-        body(&element)
-        element.id = before.id
-        element.parent = before.parent
-        element.scale = before.scale
-        // Left as it was, as a drag's frame held on a snap is, the list isn't written to:
-        // written, it is copied, only for the whole design to be compared and found the same.
-        guard element != before else { return }
-        elements[index] = element
-        #if DEBUG
-        ListWork.wrote()
-        #endif
+        tree.projectedUpdate(id, pending: &pendingPointers, body)
     }
 
     mutating func remove(_ ids: Set<DesignElement.ID>) {
-        #if DEBUG
-        let count = elements.count
-        defer { ListWork.wrote(count - elements.count) }
-        #endif
-        elements.removeAll { ids.contains($0.id) }
+        tree.projectedRemove(ids, pending: &pendingPointers)
     }
 
     /// Gives an element to another screen, or to the open canvas, at `frame` there. It
     /// goes on top of what is already there.
     mutating func move(_ id: DesignElement.ID, to parent: DesignScreen.ID?, scale: CGFloat? = nil, frame: CGRect) {
-        guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
-        var element = [DesignElement].placed(elements.remove(at: index), on: parent, scale: scale)
-        element.frame = frame
-        elements.append(element)
-        #if DEBUG
-        ListWork.wrote()
-        #endif
+        tree.projectedMove(id, to: parent, scale: scale, frame: frame, pending: &pendingPointers)
     }
 
     /// Puts the elements on one screen, or on the open canvas, in a new order, back to
-    /// front. `order` holds the same identifiers they have now. Elements elsewhere keep
-    /// their places in the list.
+    /// front. `order` holds the same identifiers they have now.
     mutating func reorder(_ parent: DesignScreen.ID?, to order: [DesignElement.ID]) {
-        [DesignElement].reorder(&elements, slots: elements.indices.filter { elements[$0].parent == parent }, to: order)
+        tree.projectedReorder(parent, to: order, pending: &pendingPointers)
     }
 
     /// Replaces what is on a screen. Its group items that `children` doesn't hold stay on it,
-    /// after the rest; those it holds aren't written twice (F8). The groups are then put in
-    /// front of their members, or taken away, by `keepGroupsSound()`.
+    /// after the rest; those it holds aren't written twice (F8). The groups are put in front
+    /// of their members as the list is lifted into the tree.
     mutating func setChildren(of screen: DesignScreen.ID, to children: [DesignElement]) {
-        let kept = groupItems(besides: children).filter { $0.parent == screen }
-        elements.removeAll { $0.parent == screen }
-        elements += children.map { $0.placed(on: screen, scale: nil) } + kept
+        let kept = groupItems(on: screen, besides: Set(children.map(\.id)))
+        tree.projectedSetHost(screen, to: children + kept, asKept: true, pending: &pendingPointers)
     }
 
-    /// Adds a screen, with whatever it holds.
+    /// Adds a screen, with whatever it holds. Its root is free.
     mutating func addScreen(_ screen: DesignScreen) {
-        frames.append(screen.withoutElements)
-        elements += screen.elements.map { $0.placed(on: screen.id, scale: nil) }
+        tree.screens.append(Self.newScreen(screen))
+        guard !screen.elements.isEmpty else { return }
+        tree.projectedSetHost(screen.id, to: screen.elements, asKept: true, pending: &pendingPointers)
     }
 
     /// Removes a screen and everything on it.
     mutating func removeScreen(_ id: DesignScreen.ID) {
-        frames.removeAll { $0.id == id }
-        elements.removeAll { $0.parent == id }
+        tree.screens.removeAll { $0.id == id }
+    }
+
+    /// Changes a screen. `body` is given the screen with what is on it, and may change that too.
+    mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
+        guard let index = tree.screens.firstIndex(where: { $0.id == id }) else { return }
+        let before = children(of: id)
+        var screen = TreeProjection.view(of: tree.screens[index])
+        screen.elements = before
+        body(&screen)
+        Self.write(screen, to: &tree.screens[index])
+        if screen.elements != before { setChildren(of: id, to: screen.elements) }
+    }
+
+    /// A screen new to the tree, as a view gives it: with a free root, and nothing on it yet.
+    /// The root takes the screen's identifier, as the version-3 file keeps no identifier of
+    /// its own for it, so that a design saved and read back is the same tree.
+    private static func newScreen(_ view: DesignScreen) -> TreeScreen {
+        var screen = TreeScreen(name: view.name, origin: view.origin, scale: view.scale, deviceID: view.deviceID)
+        screen.id = view.id
+        screen.root.id = view.id
+        write(view, to: &screen)
+        return screen
+    }
+
+    /// A screen's own fields, as a view gives them, written over the tree's screen. Its root,
+    /// and what is on it, stay as they are, and so does its identifier.
+    private static func write(_ view: DesignScreen, to screen: inout TreeScreen) {
+        screen.name = view.name
+        screen.origin = view.origin
+        screen.scale = view.scale
+        screen.deviceID = view.deviceID
+        screen.isLocked = view.isLocked
+        screen.unknownKeys = view.unknownKeys
     }
 
     // MARK: Taking a change back
 
     /// The screens themselves, without what is on them.
-    var screenFrames: [DesignScreen] { frames }
+    var screenFrames: [DesignScreen] { tree.screens.map(TreeProjection.view(of:)) }
 
-    /// Elements that say they are on a screen the design doesn't have. They are drawn
-    /// nowhere, can't be touched and are left out of the code, so a design should never
-    /// have any: tests check it after every undo and redo.
-    var elementsOnMissingScreens: [DesignElement.ID] {
-        let screens = Set(frames.map(\.id))
-        return elements.filter { $0.parent.map { !screens.contains($0) } ?? false }.map(\.id)
-    }
-
-    /// Puts every element left on a screen the design no longer has onto the open canvas,
-    /// where it was on that screen in `previous`, at the screen's scale, and takes the scale
-    /// off anything on a screen, which has none of its own. Undo uses it: a step that took a
-    /// screen away may leave there something another edit put on it meanwhile.
-    mutating func rehostElementsOnMissingScreens(from previous: DesignContent) {
-        let screens = Set(frames.map(\.id))
-        for element in elements {
-            guard let parent = element.parent, !screens.contains(parent) else { continue }
-            guard let gone = previous.frames.first(where: { $0.id == parent }), gone.scale > 0 else {
-                move(element.id, to: nil, scale: 1, frame: element.frame)
-                continue
-            }
-            let onCanvas = gone.placement.canvasRect(for: element.frame)
-            let origin = CGPoint(x: onCanvas.minX / gone.scale, y: onCanvas.minY / gone.scale)
-            move(element.id, to: nil, scale: gone.scale, frame: CGRect(origin: origin, size: element.frame.size))
-        }
-        for index in elements.indices where elements[index].parent != nil && elements[index].scale != nil {
-            elements[index].scale = nil
-        }
-    }
+    /// Elements that say they are on a screen the design doesn't have. The tree can't hold
+    /// any: what an undo leaves on a screen that has gone lands on the open canvas.
+    var elementsOnMissingScreens: [DesignElement.ID] { [] }
 
     /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
     func boardDiffers(from other: DesignContent) -> Bool {
-        title != other.title || canvas != other.canvas || unread != other.unread
+        title != other.title || canvas != other.canvas || legacyUnread != other.legacyUnread
+            || tree.unknownKeys != other.tree.unknownKeys || tree.manifestUnknownKeys != other.tree.manifestUnknownKeys
     }
 
     /// This content with the change that turned `before` into `after` taken back, and only
     /// that change: whatever has changed since `after` stays as it is now. With nothing
-    /// else changed since, that is `before` itself.
+    /// else changed since, that is `before` itself. See `TreeContent.reverting(_:to:)`.
     ///
     /// An undo step is taken back this way, so that a step made while something else was
     /// changing the design too (a screen being written, a spoken command, a drag) takes
     /// back its own changes and leaves the others'.
-    ///
-    /// The board's name goes back only if it is still the one the change gave it. A name
-    /// given since without a step, the file renamed in Files for instance, is the board's
-    /// name now: put back, the file was renamed back to match (M4).
     func reverting(_ after: DesignContent, to before: DesignContent) -> DesignContent {
-        if self == after { return before }
-        var result = self
-        if after.title != before.title, title == after.title { result.title = before.title }
-        if after.canvas != before.canvas { result.canvas = before.canvas }
-        if after.unread != before.unread { result.unread = before.unread }
-        result.frames = Self.reverting(frames, after: after.frames, before: before.frames, id: \.id, fields: DesignScreen.reverting)
-        result.elements = Self.reverting(elements, after: after.elements, before: before.elements, id: \.id, fields: DesignElement.reverting)
+        var result = DesignContent(tree: tree.reverting(after.tree, to: before.tree))
+        result.legacyUnread = after.legacyUnread != before.legacyUnread ? before.legacyUnread : legacyUnread
         return result
     }
-
-    /// `current` with what turned `before` into `after` taken back: what was added goes;
-    /// what was taken away comes back where it was; what was altered goes back to how it
-    /// was; what was moved among the rest goes back where it was. Anything else, in
-    /// `current` alone, stays.
-    private static func reverting<Item: Equatable, ID: Hashable>(
-        _ current: [Item], after: [Item], before: [Item], id: (Item) -> ID,
-        fields: (_ current: Item, _ after: Item, _ before: Item) -> Item
-    ) -> [Item] {
-        guard after != before else { return current }
-        let beforeIDs = Set(before.map(id))
-        var kept: [ID: Item] = [:]
-        for item in after where kept[id(item)] == nil { kept[id(item)] = item }
-        var result = current
-
-        let added = Set(kept.keys).subtracting(beforeIDs)
-        if !added.isEmpty { result.removeAll { added.contains(id($0)) } }
-
-        // Of what was there before and after, what the change moved among the rest: what
-        // has something else just before it now.
-        let stayedBefore = before.map(id).filter { kept[$0] != nil }
-        let stayedAfter = after.map(id).filter { beforeIDs.contains($0) }
-        var moved: Set<ID> = []
-        if stayedBefore != stayedAfter {
-            func predecessors(_ order: [ID]) -> [ID: ID] {
-                Dictionary(zip(order.dropFirst(), order), uniquingKeysWith: { first, _ in first })
-            }
-            let was = predecessors(stayedBefore)
-            let now = predecessors(stayedAfter)
-            moved = Set(stayedBefore.filter { was[$0] != now[$0] })
-        }
-
-        for (index, item) in before.enumerated() {
-            let key = id(item)
-            let afterwards = kept[key]
-            let altered = afterwards.map { $0 != item } ?? true
-            let isMoved = moved.contains(key)
-            guard altered || isMoved else { continue }
-            let at = result.firstIndex { id($0) == key }
-            // Altered: what the change altered goes back, and what something else has
-            // altered since stays, as when a handle is dragged while the knob turns.
-            func restored(_ now: Item) -> Item { afterwards.map { fields(now, $0, item) } ?? item }
-            if let at, !isMoved {
-                // Altered in place, or taken away and since put back.
-                result[at] = restored(result[at])
-                continue
-            }
-            // Altered or moved, and since taken away by something else: it stays away.
-            if at == nil, afterwards != nil { continue }
-            // Taken away by the change: back as it was. Moved: as it is now, or as it was
-            // in what the change altered.
-            let value = at.map { altered ? restored(result[$0]) : result[$0] } ?? item
-            if let at { result.remove(at: at) }
-            // Just after the nearest of those before it that is still there, or first.
-            var place = 0
-            for earlier in before[..<index].reversed() {
-                let earlierID = id(earlier)
-                if let found = result.firstIndex(where: { id($0) == earlierID }) {
-                    place = found + 1
-                    break
-                }
-            }
-            result.insert(value, at: place)
-        }
-        return result
-    }
-
-    /// Changes a screen. `body` is given the screen with what is on it, and may change that too.
-    mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
-        guard let index = frames.firstIndex(where: { $0.id == id }) else { return }
-        let before = children(of: id)
-        var screen = frames[index]
-        screen.elements = before
-        body(&screen)
-        screen.id = id
-        frames[index] = screen.withoutElements
-        if screen.elements != before { setChildren(of: id, to: screen.elements) }
-    }
-
-    // MARK: Taking a change back
 
     /// Takes back the change that turned `before` into `after`, as far as what it changed
     /// is still as the change left it. Whatever has been changed since, the same things
     /// included, is left as it is now. Siri's undo of an action taken a while ago works this
-    /// way, so that it doesn't take back what was done by hand meanwhile.
+    /// way, so that it doesn't take back what was done by hand meanwhile. See
+    /// `TreeContent.takeBack(_:to:)`.
     mutating func takeBack(_ after: DesignContent, to before: DesignContent) {
-        if before.title != after.title, title == after.title { title = before.title }
-        if before.canvas != after.canvas, canvas == after.canvas { canvas = before.canvas }
-
-        // Screens it changed are put back, and those it removed come back, first, so that
-        // what was on them can come back too.
-        let screensAfter = Dictionary(after.frames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for (index, screen) in before.frames.enumerated() {
-            if let left = screensAfter[screen.id] {
-                if left != screen, let here = frames.firstIndex(where: { $0.id == screen.id }), frames[here] == left {
-                    frames[here] = screen
-                }
-            } else if !frames.contains(where: { $0.id == screen.id }) {
-                frames.insert(screen, at: min(index, frames.count))
-            }
-        }
-
-        // Elements it changed are put back, those it removed come back where they were,
-        // and those it added go.
-        let elementsAfter = Dictionary(after.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let screenIDs = Set(frames.map(\.id))
-        for (index, element) in before.elements.enumerated() {
-            if let left = elementsAfter[element.id] {
-                guard left != element, let here = elements.firstIndex(where: { $0.id == element.id }), elements[here] == left else { continue }
-                if left.parent == element.parent {
-                    elements[here] = element
-                } else if element.parent.map(screenIDs.contains) ?? true {
-                    // Moved to another screen: back where it was, if that is still there.
-                    elements.remove(at: here)
-                    elements.insert(element, at: min(index, elements.count))
-                }
-            } else if !elements.contains(where: { $0.id == element.id }), element.parent.map(screenIDs.contains) ?? true {
-                elements.insert(element, at: min(index, elements.count))
-            }
-        }
-        let wereThere = Set(before.elements.map(\.id))
-        elements.removeAll { !wereThere.contains($0.id) && elementsAfter[$0.id] == $0 }
-
-        // Screens it added go too, once nothing is left on them.
-        let screensBefore = Set(before.frames.map(\.id))
-        frames.removeAll { screen in
-            !screensBefore.contains(screen.id) && screensAfter[screen.id] == screen && !elements.contains { $0.parent == screen.id }
-        }
-
-        // Things it only put in a new order go back to the old one, unless they have been
-        // put in another since.
-        for parent in Set(before.elements.map(\.parent)) {
-            let order = before.children(of: parent).map(\.id)
-            let left = after.children(of: parent).map(\.id)
-            guard order != left, Set(order) == Set(left), children(of: parent).map(\.id) == left else { continue }
-            reorder(parent, to: order)
-        }
-    }
-}
-
-private extension DesignScreen {
-    var withoutElements: DesignScreen {
-        var screen = self
-        screen.elements = []
-        return screen
+        tree.takeBack(after.tree, to: before.tree)
+        if before.legacyUnread != after.legacyUnread, legacyUnread == after.legacyUnread { legacyUnread = before.legacyUnread }
     }
 }
 
@@ -445,8 +307,8 @@ private extension DesignElement {
     }
 }
 
-/// The list operations that `DesignContent` runs on its one list, and the projection's writes run
-/// on a host's lowered list, shared so that both do exactly the same (F15).
+/// The list operations that the projection's writes run on a host's lowered list, as the
+/// design's one list ran them (F15).
 extension [DesignElement] {
     /// `element` as `add` and `move` put it on a screen, or on the open canvas when `parent` is nil:
     /// said to be there, drawn `scale` canvas points to each of its own on the open canvas (1 when
@@ -478,6 +340,11 @@ extension [DesignElement] {
     }
 }
 
+// PROJECTION: deleted in plan 6
+/// The version-3 file, kept through the projection until the file moves to version 4 (Task 8):
+/// the screens without what is on them, and one list of elements, `elements`, which is the tree
+/// lowered as `elements` shows it, with the elements this build couldn't read back at their
+/// places in it.
 extension DesignContent: Codable {
     private enum CodingKeys: String, CodingKey {
         case screens, elements, floating, title, canvas
@@ -485,35 +352,56 @@ extension DesignContent: Codable {
 
     /// Reads every part that is present, so designs saved before a part existed still
     /// open. Until version 3 each screen held its own elements and those on the open
-    /// canvas were a list of their own, `floating`; they are gathered into the one list.
+    /// canvas were a list of their own, `floating`. Each host's elements are lifted into the
+    /// tree, and the tree's rules run, so that a design edited elsewhere, or saved by a build
+    /// that doesn't know groups, opens sound: a member of a group that has gone opens
+    /// ungrouped (Review Focus 4).
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let screens = try container.decodeIfPresent([DesignScreen].self, forKey: .screens) ?? []
+        self.init()
         title = try container.decodeIfPresent(String.self, forKey: .title)
         canvas = try container.decodeIfPresent(CanvasSettings.self, forKey: .canvas) ?? CanvasSettings()
-        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        tree.unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
         if container.contains(.elements) {
-            frames = screens.map(\.withoutElements)
-            (elements, unread) = try DesignElement.readList(in: container, forKey: .elements)
+            let (elements, unread) = try DesignElement.readList(in: container, forKey: .elements)
+            legacyUnread = unread
+            var hosts: [DesignScreen.ID?: [DesignElement]] = [:]
+            var known: Set<DesignScreen.ID> = []
+            for screen in screens where known.insert(screen.id).inserted {
+                var frame = screen
+                frame.elements = []
+                addScreen(frame)
+            }
+            for element in elements {
+                // One on a screen the design doesn't have, which only a damaged file has, is put
+                // on the open canvas where its frame says, as an undo puts one whose screen is gone.
+                guard let parent = element.parent, known.contains(parent) else {
+                    var loose = element
+                    if loose.parent != nil { loose.scale = 1 }
+                    hosts[nil, default: []].append(loose)
+                    continue
+                }
+                hosts[parent, default: []].append(element)
+            }
+            tree.projectedSetHosts(hosts.map { (host: $0.key, elements: $0.value) }, asKept: true, pending: &pendingPointers)
         } else {
-            self.screens = screens
+            for screen in screens { addScreen(screen) }
             floating = try container.decodeIfPresent([FloatingElement].self, forKey: .floating) ?? []
         }
-        // A design edited elsewhere, or saved by a build that doesn't know groups, opens with
-        // its groups sound: a member of a group that has gone opens ungrouped (Review Focus 4).
-        if hasGroups { keepGroupsSound() }
+        keepGroupsSound()
     }
 
     func encode(to encoder: any Encoder) throws {
-        try unknownKeys.encode(to: encoder)
+        try tree.unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(frames, forKey: .screens)
+        try container.encode(screenFrames, forKey: .screens)
         try container.encodeIfPresent(title, forKey: .title)
         try container.encode(WithUnknownKeys(canvas), forKey: .canvas)
 
         // Elements this version couldn't read go back where they were among the others.
         var list = container.nestedUnkeyedContainer(forKey: .elements)
-        var kept = unread[...]
+        var kept = legacyUnread[...]
         var written = 0
         func writeUnread(all: Bool = false) throws {
             while let next = kept.first, all || next.index <= written {

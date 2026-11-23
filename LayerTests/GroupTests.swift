@@ -167,12 +167,13 @@ struct GroupModelTests {
 
     // MARK: Order
 
-    /// D2: the item starts in front of E, so it has to move back to between D and E.
+    /// D2: the item starts in front of E, so it has to move back to between D and E. The tree
+    /// can't hold a group away from its members, so it is gathered as they are pointed at it.
     @Test func membersAreGatheredWithTheGroupInFrontOfThem() {
         let board = OrderBoard()
         var content = board.store.content
         _ = OrderBoard.addGroup(named: "G", holding: [board.b.element, board.d.element], to: board.screen, in: &content)
-        #expect(names(content, on: board.screen) == ["A", "B", "C", "D", "E", "G"])
+        #expect(names(content, on: board.screen) == ["A", "C", "B", "D", "G", "E"])
 
         content.keepGroupsSound()
 
@@ -181,18 +182,21 @@ struct GroupModelTests {
         #expect(names(content, on: nil) == ["note 1", "note 2", "drawing"])
     }
 
-    /// Drawings are in no layer order, so gathering leaves each in the slot it holds, as
-    /// arranging does (F7): only the things around it move.
-    @Test func aDrawingAmongMembersKeepsItsSlot() {
+    /// Drawings are in no layer order, so gathering leaves each where it is among the canvas's
+    /// own nodes, as arranging does (F7, F10): only the things around it move. A drawing can't be
+    /// among a group's members in the tree, so the group is beside it.
+    @Test func aDrawingBesideACanvasGroupKeepsItsIndexAmongTheCanvasNodes() {
         let board = OrderBoard()
-        board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        let note3 = board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
+        let note4 = board.addNote(named: "note 4", at: CGPoint(x: 1100, y: 100))
         var content = board.store.content
-        let note3 = content.children(of: nil).last!.id
-        _ = OrderBoard.addGroup(named: "G", holding: [board.note1.element, note3], to: nil, in: &content)
+        #expect(content.tree.canvas.map(\.kind) == [.stickyNote, .stickyNote, .drawing, .stickyNote, .stickyNote])
+        _ = OrderBoard.addGroup(named: "G", holding: [note3.element, note4.element], to: nil, in: &content)
 
         content.keepGroupsSound()
 
-        #expect(names(content, on: nil) == ["note 2", "note 1", "drawing", "note 3", "G"])
+        #expect(content.tree.canvas.map(\.kind) == [.stickyNote, .stickyNote, .drawing, .group])
+        #expect(names(content, on: nil) == ["note 1", "note 2", "drawing", "note 3", "note 4", "G"])
     }
 
     @Test func aGroupInsideAGroupIsGatheredAndBoxedInnermostFirst() throws {
@@ -443,7 +447,9 @@ struct GroupModelTests {
         let content = board.store.content
 
         #expect(content.screens[0].elements.map { $0.name ?? "" } == ["A", "C", "B", "D", "E"])
-        #expect(content.floating.map { $0.element.name ?? "" } == ["note 1", "note 2", "drawing"])
+        // The drawing, which the list kept between the notes and their group item, can't be in
+        // the group's block in the tree: it keeps its slot just behind the group.
+        #expect(content.floating.map { $0.element.name ?? "" } == ["drawing", "note 1", "note 2"])
         #expect(!content.screens.flatMap(\.elements).contains { $0.kind == .group })
         #expect(!content.floating.contains { $0.element.kind == .group })
 
@@ -900,13 +906,15 @@ struct GroupCommandTests {
         nested.store.arrange(.element(outer), .back)
         #expect(nested.screenOrder == ["B", "C", "I", "D", "G", "A", "E"])
 
-        // On the open canvas the drawing keeps its slot, though it is between members.
+        // On the open canvas a drawing can't be among a group's members: the group of the notes
+        // either side of it sits beside it, in front, where its frontmost member was, and goes to
+        // the back as one block, the drawing keeping its slot outside the block, just behind it.
         let canvas = OrderBoard()
         let note3 = canvas.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
         let notes = canvas.group(canvas.note1, note3)
-        #expect(canvas.canvasOrder == ["note 2", "note 1", "drawing", "note 3", "G"])
+        #expect(canvas.canvasOrder == ["note 2", "drawing", "note 1", "note 3", "G"])
         canvas.store.arrange(.element(notes), .back)
-        #expect(canvas.canvasOrder == ["note 1", "note 3", "drawing", "G", "note 2"])
+        #expect(canvas.canvasOrder == ["drawing", "note 1", "note 3", "G", "note 2"])
     }
 
     /// A thing next to a group steps past the whole group: stepped past a member alone, it
@@ -1325,18 +1333,6 @@ struct SelectingGroupsTests {
         board.store.update(g) { $0.isHidden = true }
         #expect(board.model.hoverTarget(at: onB) == .screen(board.screen))
         #expect(CanvasWork.targetPasses - start == 3)
-    }
-
-    /// The thing under a tap on a group's target is looked for in the group's own block,
-    /// which a drawing keeping its slot can lie inside.
-    @Test func aMemberIsFoundPastADrawingInsideItsGroupsBlock() {
-        let board = OrderBoard()
-        let note3 = board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
-        let g = board.group(board.note1, note3)
-        #expect(board.canvasOrder == ["note 2", "note 1", "drawing", "note 3", "G"])
-        #expect(board.store.leaf(at: board.middle(of: board.note1), in: g.element) == board.note1)
-        #expect(board.store.leaf(at: board.middle(of: note3), in: g.element) == note3)
-        #expect(board.store.leaf(at: board.middle(of: board.note2), in: g.element) == nil)
     }
 
     /// With a finger resting, a double-tap is read against what the first tap started from,

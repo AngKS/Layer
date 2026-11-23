@@ -35,14 +35,19 @@ extension TreeContent {
             let was = TreeProjection.lowerHostNodes(found.host, in: self, pending: pending)
             var list = was.map(\.element)
             if let index = list.firstIndex(where: { $0.id == id }) { list[index] = element }
-            lift([Lift(host: found.host, list: list, was: was)], pending: &pending)
+            lift([Lift(host: found.host, list: list, was: was)], asKept: true, pending: &pending)
             return
         }
         write(element, over: before, at: found)
     }
 
-    /// W5's add: `element` on top of what is on the host, placed as today's `add` places it.
-    /// Returns the element as it is kept. Nothing is added to a screen the design doesn't have.
+    /// W5's add: `element` on top of what is on the host, placed as today's `add` places it. One that
+    /// points at a group already on the host goes on top of what is in that group. Today's add put it at
+    /// the end of the list, and the change's end gathered it into its group once the rest of the change
+    /// (a copy put just in front of its original, the members of a group made inside another) had put
+    /// things where they go; the lift gathers at once, and at the end of the host it would take its group
+    /// to the top with it. Returns the element as it is kept. Nothing is added to a screen the design
+    /// doesn't have.
     @discardableResult
     mutating func projectedAdd(_ element: DesignElement, to host: DesignScreen.ID?, scale: CGFloat?,
                                pending: inout [UUID: UUID]) -> DesignElement {
@@ -53,7 +58,14 @@ extension TreeContent {
         #if DEBUG
         ListWork.wrote()
         #endif
-        lift([Lift(host: on, list: was.map(\.element) + [placed], was: was)], pending: &pending)
+        var list = was.map(\.element)
+        if placed.kind != .drawing, let group = placed.group,
+           let item = list.firstIndex(where: { $0.id == group && $0.kind == .group }) {
+            list.insert(placed, at: item)
+        } else {
+            list.append(placed)
+        }
+        lift([Lift(host: on, list: list, was: was)], asKept: true, pending: &pending)
         return placed
     }
 
@@ -73,7 +85,7 @@ extension TreeContent {
         #if DEBUG
         ListWork.wrote(removed)
         #endif
-        lift(lifts, pending: &pending)
+        lift(lifts, asKept: true, pending: &pending)
     }
 
     /// W5's move: the element taken off its host and put on top of what is on `host`, at `frame` there,
@@ -91,11 +103,11 @@ extension TreeContent {
         ListWork.wrote()
         #endif
         if to == from {
-            lift([Lift(host: from, list: list + [element], was: was)], pending: &pending)
+            lift([Lift(host: from, list: list + [element], was: was)], asKept: true, pending: &pending)
         } else {
             let there = TreeProjection.lowerHostNodes(to, in: self, pending: pending)
             lift([Lift(host: from, list: list, was: was), Lift(host: to, list: there.map(\.element) + [element], was: there)],
-                 pending: &pending)
+                 asKept: true, pending: &pending)
         }
     }
 
@@ -107,16 +119,41 @@ extension TreeContent {
         let was = TreeProjection.lowerHostNodes(on, in: self, pending: pending)
         var list = was.map(\.element)
         guard [DesignElement].reorder(&list, slots: Array(list.indices), to: order) > 0 else { return }
-        lift([Lift(host: on, list: list, was: was)], pending: &pending)
+        lift([Lift(host: on, list: list, was: was)], asKept: true, pending: &pending)
     }
 
     /// W5's host set whole: what is on the host becomes `elements`, lifted. Not counted, as today's bulk
     /// rewrites aren't. A laid-out child given a new frame this way is laid back by the engine (F23).
-    mutating func projectedSetHost(_ host: DesignScreen.ID?, to elements: [DesignElement], pending: inout [UUID: UUID]) {
-        let on = Self.host(host)
-        guard has(on) else { return }
-        let was = TreeProjection.lowerHostNodes(on, in: self, pending: pending)
-        lift([Lift(host: on, list: elements, was: was)], pending: &pending)
+    ///
+    /// `elements` are as the views show them (`screens`, `floating`), each member locked or hidden with its
+    /// containers, unless `asKept` says they are as the design keeps them (`children(of:)`), each with its
+    /// own flags: a flag is written where it differs from how the node is shown that way.
+    mutating func projectedSetHost(_ host: DesignScreen.ID?, to elements: [DesignElement], asKept: Bool = false,
+                                   pending: inout [UUID: UUID]) {
+        projectedSetHosts([(host: host, elements: elements)], asKept: asKept, pending: &pending)
+    }
+
+    /// W5's host set whole, for several hosts in one write: each is lifted against the design as it was
+    /// before any of them is set, so that a node moved from one to another is found where it was and keeps
+    /// what only the tree knows, whichever is given first. Hosts the design doesn't have, and a host given
+    /// twice after the first time, are left out. Not counted. `asKept` is as in `projectedSetHost`.
+    mutating func projectedSetHosts(_ lists: [(host: DesignScreen.ID?, elements: [DesignElement])], asKept: Bool = false,
+                                    pending: inout [UUID: UUID]) {
+        var lifts: [Lift] = []
+        for (host, elements) in lists {
+            let on = Self.host(host)
+            guard has(on), !lifts.contains(where: { $0.host == on }) else { continue }
+            lifts.append(Lift(host: on, list: elements, was: TreeProjection.lowerHostNodes(on, in: self, pending: pending)))
+        }
+        guard !lifts.isEmpty else { return }
+        lift(lifts, asKept: asKept, pending: &pending)
+    }
+
+    /// One element as `lowerHost` lowers it, found by its identifier alone without lowering anything else:
+    /// the first node with it in reading order, as `TreeProjection.pose(of:in:)` finds it. Nil for an
+    /// identifier the design doesn't have, and for a screen's root, which isn't lowered.
+    func projectedElement(_ id: UUID, pending: [UUID: UUID]) -> DesignElement? {
+        found(id)?.lowered(pending: pending)
     }
 }
 
@@ -302,10 +339,10 @@ private extension TreeContent {
     /// W6 for each host, every one against the design as it was and from the lowerings the write made,
     /// so that a node moved between them keeps what only the tree knows and no host is lowered twice.
     /// Then `pending` holds, for every element of those hosts, the pointer the lift couldn't honour, and
-    /// nothing for the rest.
-    mutating func lift(_ lifts: [Lift], pending: inout [UUID: UUID]) {
+    /// nothing for the rest. `asKept`: the lists are as the design keeps them, not as the views show them.
+    mutating func lift(_ lifts: [Lift], asKept: Bool, pending: inout [UUID: UUID]) {
         let lowered = Dictionary(lifts.map { ($0.host, $0.was) }, uniquingKeysWith: { first, _ in first })
-        let lifted = lifts.map { TreeLift.nodes(from: $0.list, host: $0.host, keeping: self, lowered: lowered) }
+        let lifted = lifts.map { TreeLift.nodes(from: $0.list, host: $0.host, keeping: self, lowered: lowered, asKept: asKept) }
         for (lift, result) in zip(lifts, lifted) {
             switch lift.host {
             case .screen(let id):

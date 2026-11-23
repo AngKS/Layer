@@ -965,7 +965,7 @@ private struct ScreenBuilder {
     /// holding anything else stacks it.
     private mutating func card(_ id: String, _ component: Component, at place: Place) -> OpenContainer {
         var card = make(.card, id, at: place)
-        card.padding = LayerNode.Padding(all: 16)
+        card.padding = LayerNode.Padding(all: DesignTokens.standard.card.padding)
         card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 8))
         var requests: [Request] = []
         let inside = place.inside(id)

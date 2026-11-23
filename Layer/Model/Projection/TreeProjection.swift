@@ -56,10 +56,7 @@ enum TreeProjection {
             var lowering = Lowering(host: screen.id, pending: pending)
             lowering.lowerRoot(screen.root)
             elements += lowering.raw
-            var view = DesignScreen(id: screen.id, name: screen.name, origin: screen.origin, scale: screen.scale,
-                                    deviceID: screen.deviceID)
-            view.isLocked = screen.isLocked
-            view.unknownKeys = screen.unknownKeys
+            var view = Self.view(of: screen)
             view.elements = lowering.shown
             screens.append(view)
         }
@@ -74,6 +71,15 @@ enum TreeProjection {
             position[element.id] = index
         }
         return Lowered(elements: elements, screens: screens, floating: floating, position: position)
+    }
+
+    /// A screen as `lower(_:pending:)` shows it, without what is on it.
+    static func view(of screen: TreeScreen) -> DesignScreen {
+        var view = DesignScreen(id: screen.id, name: screen.name, origin: screen.origin, scale: screen.scale,
+                                deviceID: screen.deviceID)
+        view.isLocked = screen.isLocked
+        view.unknownKeys = screen.unknownKeys
+        return view
     }
 
     /// One host's part of `lower(_:pending:)`'s `elements`: nothing for a screen the design doesn't have.

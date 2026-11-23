@@ -6,8 +6,9 @@ import Observation
 /// document's undo manager, which is also what tells the system that the document needs
 /// saving.
 ///
-/// The design keeps its elements in one list (`DesignContent.elements`). `screens` and
-/// `floating` are views of that list, worked out once per change.
+/// The design is kept as a tree (`DesignContent.tree`), and the tree's rules (`TreeRules`) run
+/// inside every change, undo and redo. `screens` and `floating`, and the one list of elements
+/// they are views of, are the tree lowered (`TreeProjection`), worked out once per change.
 @MainActor @Observable
 final class DesignStore {
     /// Points at one element: where it lives, and which one it is there.
@@ -25,7 +26,7 @@ final class DesignStore {
     private(set) var content: DesignContent {
         didSet {
             guard content != oldValue else { return }
-            views = nil
+            kept = nil
             targets = nil
             changeCount += 1
             // A change made through `change(_:)` is told once it has been recorded: see there.
@@ -61,28 +62,26 @@ final class DesignStore {
     /// spoken correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
 
-    /// The views of the list, and where each element is in it, for the content as it is now.
-    private struct Views {
-        var screens: [DesignScreen]
-        var floating: [FloatingElement]
-        var index: [DesignElement.ID: Int]
+    /// What is worked out from the tree for the content as it is now, each part when it is
+    /// first asked for: where every node is, and the tree lowered to the list and its views.
+    private struct Kept {
+        let tree: TreeContent
+        lazy var index = TreeIndex(tree)
+        lazy var lowered = TreeProjection.lower(tree)
     }
-    @ObservationIgnored private var views: Views?
+    @ObservationIgnored private var kept: Kept?
 
     init(content: DesignContent = DesignContent()) {
         self.content = content
     }
 
-    private var current: Views {
+    // PROJECTION: deleted in plan 6
+    /// The tree lowered to the list and its views, once per version of the content.
+    var projection: TreeProjection.Lowered {
         // Read first, so that whatever draws from a view is redrawn when the content changes.
         let content = content
-        if let views { return views }
-        let made = Views(
-            screens: content.screens, floating: content.floating,
-            index: Dictionary(content.elements.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        )
-        views = made
-        return made
+        if kept == nil { kept = Kept(tree: content.tree) }
+        return kept!.lowered
     }
 
     /// What can be touched on each host, for the groups that had been gone into when it was
@@ -103,13 +102,13 @@ final class DesignStore {
 
     /// Where an element is in the design's own list.
     func indexInList(of id: DesignElement.ID) -> Int? {
-        current.index[id]
+        projection.position[id]
     }
 
     /// Each screen with what is on it.
-    var screens: [DesignScreen] { current.screens }
+    var screens: [DesignScreen] { projection.screens }
     /// The elements on the open canvas.
-    var floating: [FloatingElement] { current.floating }
+    var floating: [FloatingElement] { projection.floating }
     var title: String? { content.title }
     var canvas: CanvasSettings { content.canvas }
 
@@ -131,7 +130,8 @@ final class DesignStore {
 
     /// An element, wherever it is.
     func element(_ id: DesignElement.ID) -> DesignElement? {
-        current.index[id].map { content.elements[$0] }
+        let lowered = projection
+        return lowered.position[id].map { lowered.elements[$0] }
     }
 
     /// An element together with the placement that turns its frame into canvas points.
@@ -950,9 +950,9 @@ final class DesignStore {
         let before = content
         let count = changeCount
         isChanging = true
-        // The change and the groups put right after it, in one access to the content, so that
-        // the whole design is compared once (C6). A design without groups costs one scan.
-        Self.applying(body, to: &content)
+        // The change and the tree's rules after it, in one access to the content, so that the
+        // whole design is compared once (C6).
+        Self.applying(body, to: &content, previous: before)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -974,12 +974,13 @@ final class DesignStore {
         onChange?(content)
     }
 
-    /// Makes a change, then puts right whatever it left unsound about the design's groups:
-    /// see `DesignContent.keepGroupsSound()`. Anything that builds or moves a group whole
-    /// therefore does it in one change.
-    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent) {
+    /// Makes a change, then cuts the pointers it left that the tree can't hold and runs the
+    /// tree's rules, laying out what changed since `previous`. Anything that builds or moves a
+    /// group whole therefore does it in one change: see `DesignContent.keepGroupsSound()`.
+    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent, previous: DesignContent) {
         body(&content)
-        if content.hasGroups { content.keepGroupsSound() }
+        content.pendingPointers = [:]
+        TreeRules.apply(to: &content.tree, after: previous.tree)
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
@@ -1019,7 +1020,7 @@ final class DesignStore {
             }
             if lastChange == change - 1 {
                 runs[runs.count - 1].after = after
-            } else if !Touched(from: last.after, to: before).meets(Touched(from: last.before, to: last.after)) {
+            } else if !TreeChange(from: last.after, to: before).meets(TreeChange(from: last.before, to: last.after)) {
                 runs[runs.count - 1] = Run(before: last.before.reverting(last.after, to: before), after: after)
             } else {
                 runs.append(Run(before: before, after: after))
@@ -1052,27 +1053,24 @@ final class DesignStore {
         }
 
         /// What its changes touched.
-        var touched: Touched {
-            runs.reduce(into: Touched()) { $0.formUnion(Touched(from: $1.before, to: $1.after)) }
+        var touched: TreeChange {
+            runs.reduce(into: TreeChange()) { $0.formUnion(TreeChange(from: $1.before, to: $1.after)) }
         }
 
         /// The one screen all its changes were to or on: see `DesignStore.onlyScreen(changedBy:)`.
         var onlyScreen: DesignScreen.ID? {
             var screens: Set<DesignScreen.ID> = []
             for run in runs {
-                let touched = Touched(from: run.before, to: run.after)
+                let touched = TreeChange(from: run.before, to: run.after)
                 guard !touched.board else { return nil }
                 screens.formUnion(touched.screens)
-                // Where each element it changed was, and is: a screen, or the open canvas.
-                func hosts(in content: DesignContent) -> [DesignElement.ID: DesignScreen.ID?] {
-                    Dictionary(content.elements.map { ($0.id, $0.parent) }, uniquingKeysWith: { first, _ in first })
-                }
-                let was = hosts(in: run.before), now = hosts(in: run.after)
-                for id in touched.elements {
+                // Where each node it changed was, and is: a screen, or the open canvas.
+                let was = TreeChange.hosts(in: run.before.tree), now = TreeChange.hosts(in: run.after.tree)
+                for id in touched.nodes {
                     for host in [was[id], now[id]] {
                         // Not there on that side: added, or taken away.
                         guard let host else { continue }
-                        guard let screen = host else { return nil }
+                        guard case .screen(let screen) = host else { return nil }
                         screens.insert(screen)
                     }
                 }
@@ -1080,50 +1078,10 @@ final class DesignStore {
             // A screen the step made or took away isn't one a correction for it may undo:
             // that would take the screen away, or bring it back, again.
             guard screens.count == 1, let screen = screens.first,
-                  runs.first?.before.screenFrames.contains(where: { $0.id == screen }) == true,
-                  runs.last?.after.screenFrames.contains(where: { $0.id == screen }) == true
+                  runs.first?.before.tree.screens.contains(where: { $0.id == screen }) == true,
+                  runs.last?.after.tree.screens.contains(where: { $0.id == screen }) == true
             else { return nil }
             return screen
-        }
-    }
-
-    /// What a change touched: the elements it added, took away or altered, the screens it
-    /// added, took away or altered, and the screens it put an element on or took one off,
-    /// and whether it changed the board's name, its canvas, or what wasn't understood.
-    fileprivate struct Touched {
-        var elements: Set<DesignElement.ID> = []
-        var screens: Set<DesignScreen.ID> = []
-        var board = false
-
-        init() {}
-
-        init(from before: DesignContent, to after: DesignContent) {
-            board = before.boardDiffers(from: after)
-            let was = Dictionary(before.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let now = Dictionary(after.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            for id in Set(was.keys).union(now.keys) where was[id] != now[id] {
-                elements.insert(id)
-                // Added, taken away or moved to another host: the host is touched too.
-                if was[id]?.parent != now[id]?.parent || was[id] == nil || now[id] == nil {
-                    if let parent = was[id]?.parent { screens.insert(parent) }
-                    if let parent = now[id]?.parent { screens.insert(parent) }
-                }
-            }
-            let screensBefore = Dictionary(before.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let screensAfter = Dictionary(after.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            for id in Set(screensBefore.keys).union(screensAfter.keys) where screensBefore[id] != screensAfter[id] {
-                screens.insert(id)
-            }
-        }
-
-        mutating func formUnion(_ other: Touched) {
-            elements.formUnion(other.elements)
-            screens.formUnion(other.screens)
-            board = board || other.board
-        }
-
-        func meets(_ other: Touched) -> Bool {
-            (board && other.board) || !elements.isDisjoint(with: other.elements) || !screens.isDisjoint(with: other.screens)
         }
     }
 
@@ -1246,14 +1204,14 @@ final class DesignStore {
     private func takeBack(_ step: HistoryStep) {
         forget(step)
         let current = content
+        // A node whose parent the step took away, a screen or a group, may have been put
+        // there by another edit since: it lands on the open canvas where it was, rather than
+        // on nothing, drawn nowhere and saved so (review C-1).
         var result = step.undone(from: current)
-        // A screen the step took away may have had something put on it by another edit
-        // since: it goes onto the open canvas where it was, rather than on no screen, drawn
-        // nowhere and saved so (review C-1).
-        result.rehostElementsOnMissingScreens(from: current)
-        // Taken back among changes made since, a step can leave a group unsound: put right
-        // here, so that the reverse step holds it too.
-        if result.hasGroups { result.keepGroupsSound() }
+        // Taken back among changes made since, a step can leave the tree as its rules wouldn't:
+        // put right here, so that the reverse step holds it too.
+        result.pendingPointers = [:]
+        TreeRules.apply(to: &result.tree, after: current.tree)
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand
@@ -1261,5 +1219,14 @@ final class DesignStore {
         register(reverse)
         // An edit still open whose step this was goes on from here, as a step of its own.
         for edit in edits where edit.step === step { edit.step = nil }
+    }
+}
+
+private extension TreeChange {
+    /// What a change to the content touched: the tree's, and the board when what this build
+    /// couldn't read changed too.
+    init(from before: DesignContent, to after: DesignContent) {
+        self.init(from: before.tree, to: after.tree)
+        if before.legacyUnread != after.legacyUnread { board = true }
     }
 }

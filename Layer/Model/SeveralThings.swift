@@ -54,7 +54,7 @@ extension DesignStore {
         let picked = selection.things
         guard picked.count > 1 else { return Array(picked.filter { canvasFrame(of: $0) != nil }) }
         var ordered: [CanvasSelection] = screens.map { .screen($0.id) }.filter(picked.contains)
-        for element in content.elements {
+        for element in projection.elements {
             let host: ElementRef.Host = element.parent.map { .screen($0) } ?? .canvas
             let thing = CanvasSelection.element(ElementRef(host: host, element: element.id))
             if picked.contains(thing) { ordered.append(thing) }

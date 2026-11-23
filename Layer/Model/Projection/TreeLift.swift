@@ -18,7 +18,10 @@ enum TreeLift {
     ///    keeps its slot in the list (F10). A list with two elements of one identifier, which only a
     ///    damaged file has, keeps the order it has, as today's reorder refuses to change it.
     /// 3. Each node is `content`'s node with that identifier, or a new one, with what the element
-    ///    says that differs from how it was shown written over it (F9).
+    ///    says that differs from how it was shown written over it (F9). A list of elements as the
+    ///    views show them (`asKept` false) is compared with them shown so; a list of elements as the
+    ///    design keeps them, each with its own lock and hide (`asKept`), with them as kept, so that
+    ///    a flag written to match a container's is still the node's own.
     /// 4. Each node goes into its group's children, in order; those in none are the top level.
     /// 5. Each pose, top down, is the element's absolute pose seen from its parent's. A canvas child
     ///    drawn at another scale than its top-level node is carried into that scale through canvas
@@ -35,7 +38,8 @@ enum TreeLift {
     /// `nodes(from:host:keeping:)`, given the hosts its caller has already lowered from `content` (with
     /// `TreeProjection.lowerHostNodes`, pending pointers or not), so that no host is lowered twice for one write.
     static func nodes(from elements: [DesignElement], host: TreeIndex.Host, keeping content: TreeContent,
-                      lowered: [TreeIndex.Host: [TreeProjection.LoweredNode]]) -> (nodes: [LayerNode], pending: [UUID: UUID]) {
+                      lowered: [TreeIndex.Host: [TreeProjection.LoweredNode]],
+                      asKept: Bool = false) -> (nodes: [LayerNode], pending: [UUID: UUID]) {
         // 1. Which pointers the tree can hold.
         var first: [UUID: Int] = [:]
         for (index, element) in elements.enumerated() where first[element.id] == nil { first[element.id] = index }
@@ -92,7 +96,7 @@ enum TreeLift {
             var node: LayerNode
             if let found = known[index] {
                 node = found.lowering.node
-                node.take(element, shown: found.lowering.shown)
+                node.take(element, shown: asKept ? found.lowering.element : found.lowering.shown)
             } else {
                 node = LayerNode(element: element)
             }
