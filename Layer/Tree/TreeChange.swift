@@ -17,8 +17,8 @@ struct TreeChange: Sendable {
         board = before.title != after.title || before.settings != after.settings
             || before.unknownKeys != after.unknownKeys || before.manifestUnknownKeys != after.manifestUnknownKeys
         guard before.screens != after.screens || before.canvas != after.canvas else { return }
-        // A screen the same on both sides holds the same nodes the same way: not looked into.
-        let alike = TreeRecords.screens(alikeIn: [before, after])
+        // A host the same on both sides holds the same nodes the same way: not looked into.
+        let alike = TreeRecords.hosts(alikeIn: [before, after])
         let was = TreeRecords(before, leavingWhole: alike), now = TreeRecords(after, leavingWhole: alike)
         for id in Set(was.records.keys).union(now.records.keys) {
             let old = was.records[id], new = now.records[id]
@@ -27,6 +27,18 @@ struct TreeChange: Sendable {
             // Added, removed, or moved to another host: the hosts are touched too.
             guard old?.host != new?.host else { continue }
             for case .screen(let screen)? in [old?.host, new?.host] { screens.insert(screen) }
+        }
+        // Nodes that share an id with another, which only a damaged design has, are compared
+        // whole, those of each id in turn.
+        if !was.passengers.isEmpty || !now.passengers.isEmpty {
+            let old = Dictionary(grouping: was.passengers, by: \.node.id), new = Dictionary(grouping: now.passengers, by: \.node.id)
+            for id in Set(old.keys).union(new.keys) {
+                let oldOnes = old[id] ?? [], newOnes = new[id] ?? []
+                guard oldOnes.count != newOnes.count || zip(oldOnes, newOnes).contains(where: { !$0.isSame(as: $1) }) else { continue }
+                nodes.insert(id)
+                guard oldOnes.map(\.host) != newOnes.map(\.host) else { continue }
+                for case .screen(let screen) in (oldOnes + newOnes).map(\.host) { screens.insert(screen) }
+            }
         }
         let screensBefore = Dictionary(was.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let screensAfter = Dictionary(now.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

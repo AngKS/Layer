@@ -347,6 +347,120 @@ import Testing
         #expect(reverted.screens[0].root.children.map(\.id) == [a.id, b.id])
     }
 
+    /// An undo that sends a node to the canvas gives it its screen's scale there. A later undo
+    /// that puts it back on a screen takes that scale off again, as today's rehost did.
+    @Test func anOrphanPutBackOnAScreenLosesItsCanvasScale() throws {
+        let n = Self.node(.button, CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go")
+        let start = Self.design([n])
+        // Step B adds screen G; step A then moves N onto it.
+        var added = start
+        added.screens.append(TreeScreen(name: "G", origin: CGPoint(x: 1000, y: 0), scale: 0.5, deviceID: nil))
+        var moved = added
+        var onG = n
+        onG.frame.origin = CGPoint(x: 20, y: 400)
+        moved.screens[0].root.children = []
+        moved.screens[1].root.children = [onG]
+
+        // B is undone first: G goes, and N lands on the canvas at G's scale.
+        let withoutG = moved.reverting(added, to: start)
+        #expect(withoutG.screens.map(\.id) == [start.screens[0].id])
+        #expect(withoutG.canvas.map(\.id) == [n.id])
+        #expect(withoutG.canvas.first?.scale == 0.5)
+
+        // Then A: N goes back where it was on its screen, with no scale of its own.
+        let undone = withoutG.reverting(moved, to: added)
+        #expect(Self.find(n.id, in: undone)?.scale == nil)
+        #expect(undone == start)
+    }
+
+    // MARK: - Nodes that share an id
+
+    private static func encoded(_ nodes: [LayerNode]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try encoder.encode(nodes)
+    }
+
+    /// Only a damaged design has two nodes of one id. An undo of something else leaves them,
+    /// and all they hold, as they are.
+    @Test func aDuplicatedIDOnAnUntouchedCanvasComesBackByteEqual() throws {
+        let child = Self.node(.body, CGRect(x: 10, y: 10, width: 20, height: 20), text: "Child")
+        let first = Self.node(.group, CGRect(x: 0, y: 0, width: 100, height: 100), children: [child])
+        var second = Self.node(.stickyNote, CGRect(x: 200, y: 0, width: 100, height: 100), text: "Same id")
+        second.id = first.id
+        let a = Self.node(text: "A"), b = Self.node(text: "B")
+        var before = Self.design([a, b])
+        before.canvas = [first, second]
+        // The step changes A on the screen; another edit then moves B, so the undo runs in full.
+        var after = before
+        Self.edit(&after, a.id) { $0.content.text = "Changed" }
+        var current = after
+        Self.edit(&current, b.id) { $0.frame.origin.x = 40 }
+
+        let reverted = current.reverting(after, to: before)
+        #expect(reverted.canvas == before.canvas)
+        #expect(try Self.encoded(reverted.canvas) == Self.encoded(before.canvas))
+        #expect(Self.find(a.id, in: reverted)?.content.text == "A")
+        #expect(Self.find(b.id, in: reverted)?.frame.origin.x == 40)
+
+        var taken = current
+        taken.takeBack(after, to: before)
+        #expect(taken.canvas == before.canvas)
+        #expect(try Self.encoded(taken.canvas) == Self.encoded(before.canvas))
+        #expect(Self.find(a.id, in: taken)?.content.text == "A")
+    }
+
+    /// When the canvas is taken apart because the step changed something on it, nodes that
+    /// share an id stay, each where it was and with what it holds.
+    @Test func nodesThatShareAnIDStayWhenTheirHostIsTakenApart() throws {
+        let k = Self.node(.stickyNote, CGRect(x: 0, y: 300, width: 80, height: 80), text: "k")
+        let c1 = Self.node(.body, CGRect(x: 0, y: 0, width: 20, height: 20), text: "One")
+        let c2 = Self.node(.body, CGRect(x: 0, y: 0, width: 20, height: 20), text: "Two")
+        let first = Self.node(.group, CGRect(x: 0, y: 0, width: 100, height: 100), children: [c1])
+        var second = Self.node(.group, CGRect(x: 200, y: 0, width: 100, height: 100), children: [c2])
+        second.id = first.id
+        let b = Self.node(text: "B")
+        var before = Self.design([b])
+        before.canvas = [k, first, second]
+        var after = before
+        after.canvas[0].content.text = "Changed"
+        var current = after
+        Self.edit(&current, b.id) { $0.frame.origin.x = 40 }
+
+        let reverted = current.reverting(after, to: before)
+        #expect(reverted.canvas == before.canvas)
+        #expect(try Self.encoded(reverted.canvas) == Self.encoded(before.canvas))
+
+        var taken = current
+        taken.takeBack(after, to: before)
+        #expect(taken.canvas == before.canvas)
+        #expect(try Self.encoded(taken.canvas) == Self.encoded(before.canvas))
+    }
+
+    /// One whose parent an undo takes away lands on the canvas where it was, as any node does.
+    @Test func aNodeThatSharesAnIDLandsOnTheCanvasWhenItsParentGoes() throws {
+        let x = Self.node(.body, CGRect(x: 0, y: 0, width: 10, height: 10), text: "X")
+        let before = Self.design([x])
+        // The step adds group G; another edit then puts in it a node of X's id, holding one.
+        let y = Self.node(.body, CGRect(x: 0, y: 0, width: 5, height: 5))
+        let inside = Self.node(.body, CGRect(x: 0, y: 0, width: 10, height: 10))
+        let g = Self.node(.group, CGRect(x: 100, y: 100, width: 50, height: 50), children: [y])
+        var after = before
+        after.screens[0].root.children = [x, g]
+        var current = after
+        var copy = Self.node(.group, CGRect(x: 10, y: 10, width: 20, height: 20), children: [inside])
+        copy.id = x.id
+        Self.edit(&current, g.id) { $0.children.append(copy) }
+
+        let reverted = current.reverting(after, to: before)
+
+        #expect(reverted.screens[0].root.children == [x])
+        var landed = copy
+        landed.frame = CGRect(x: 110, y: 110, width: 20, height: 20)
+        landed.scale = 1
+        #expect(reverted.canvas == [landed])
+    }
+
     // MARK: - Siri's late undo
 
     @Test func takingBackLeavesWhatChangedSince() throws {
