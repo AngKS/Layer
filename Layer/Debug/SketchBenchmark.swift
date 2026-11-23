@@ -76,8 +76,11 @@ extension SketchFixture {
 enum SketchFixtureCorpus {
     static func load(from directory: URL) throws -> [SketchFixture] {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            // The `design-` files are other tests' whole designs, bundled beside these.
-            .filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasPrefix("design-") }
+            // Other tests' files are bundled beside these: whole designs (`design-`) and A2UI
+            // examples (`a2ui-`).
+            .filter { url in
+                url.pathExtension == "json" && !["design-", "a2ui-"].contains { url.lastPathComponent.hasPrefix($0) }
+            }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let decoder = JSONDecoder()
         return try files.map { try decoder.decode(SketchFixture.self, from: Data(contentsOf: $0)) }

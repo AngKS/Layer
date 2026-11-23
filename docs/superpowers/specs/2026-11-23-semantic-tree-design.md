@@ -878,6 +878,50 @@ A baseline is recorded on main before the store changes. The same measurements r
 | Generation tokens and time to first content | `ScreenBenchmarkHarness` on macOS (on-device outline; hosted A2UI and outline) | recorded, and the hosted default chosen from them |
 | Canvas workout | `CanvasBenchmarkUITests.testCanvasWorkout` (CPU, memory, clock) | no worse than baseline by more than 5% |
 
+### 14. Custom device frames and design tokens (added 2026-11-23)
+
+The user asked on 2026-11-23: "support custom device frame components as well for the design
+tokens". I proposed the design below to the user, who may correct it.
+
+- **Custom device frames.** `DeviceFrame` becomes data that can be stored. Today's 9 built-in
+  frames stay. A design also holds its own frames, in its settings, saved in the version-4 file:
+  - `id` (`custom-<uuid>`) and name;
+  - size in points, and corner radius;
+  - safe-area insets: top, bottom, leading and trailing;
+  - whether it has a status bar, an island and a home indicator;
+  - family: phone, tablet, desktop, watch or other.
+
+  A screen's `deviceID` resolves against the built-ins plus the design's own frames. An unknown
+  id falls back to the iPhone, as today.
+- **How to make one:** "Custom size…" in the device picker, or a frame made from a selected
+  screen's current size. Custom frames appear in the device picker and the asset library's
+  Frames tab.
+- **Device tokens.** Every frame, built-in or custom, carries layout tokens:
+  - `margin`: phone 20, tablet 32, desktop 48, watch 8, other 20;
+  - `maxContentWidth`: desktop 1080, otherwise none.
+
+  The rules pad a column screen from these tokens and its safe areas, instead of fixed numbers.
+  Device changes reflow with them.
+- **Design tokens.** Each design has one editable `DesignTokens` value. Its defaults are
+  today's numbers, so nothing changes visually:
+  - rhythm 8, 12, 16, 24, 32;
+  - corner radii: small 8, medium 12, large 16;
+  - card: padding 16, radius 16, fill `RGBColor(hex: 0xF2F2F7)`;
+  - text sizes: title 28, body 15, text 17.
+- **Who uses the tokens.** The engine's defaults, the structure pass's rhythm, the outline's and
+  importer's starting spacing, and the validator all read the tokens instead of constants. No
+  model ever picks a number.
+- **Export.** The SwiftUI export writes a `DesignTokens.swift` file with the design's tokens and
+  the margins of the screens' devices. The views use those names, such as
+  `.padding(DesignTokens.margin)` and `spacing: DesignTokens.rhythm[2]`, instead of raw numbers.
+  A custom frame's size sets the `#Preview`'s fixed layout.
+- **Where each part lands:**
+  - the data, the file and the token-reading rules: plan 2;
+  - the export: plan 3;
+  - the device picker, the "Custom size…" sheet, the Frames tab and token editing in the canvas
+    settings: plan 4;
+  - Siri's and voice's device choices including custom frames by name: plan 6.
+
 ## My calls (correct any of them)
 
 1. **How the tree is held:** nested values with an index, and frames relative to the parent

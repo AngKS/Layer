@@ -21,7 +21,7 @@
 - A `historyTransform` must keep the instructions entry.
 - New files go under `Layer/Voice/` (chrome under `Layer/Chrome/`, debug under `Layer/Debug/`). Run `xcodegen generate` after adding or removing files and commit `Layer.xcodeproj`.
 - Tests use Swift Testing, in `LayerTests/`. Run one suite with:
-  `xcodebuild -project Layer.xcodeproj -scheme Layer -testPlan CI -destination "platform=iOS Simulator,id=$VOICE_SIM" -only-testing:LayerTests/<Suite> test`
+  `xcodebuild -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI -destination "platform=iOS Simulator,id=$VOICE_SIM" -only-testing:LayerTests/<Suite> test`
   where `$VOICE_SIM` is the UDID of the simulator "Layer iPad Pro 11 (voice-mode)" on iOS 27.2.
 - Chrome changes are looked at in a narrow (about 375 pt), a medium (about 675 pt) and a full-screen window before a task is called done.
 - Work happens on branch `feature/voice-mode`. Commit after each task. Do not push.
@@ -68,7 +68,7 @@
 - Produces: `AppModel.tool` is the only state for the bar in a narrow window: bar up exactly when `tool == .draw` and no panel sheet is open.
 
 - [ ] **Step 1:** Remove `PaletteToggle`, `isPaletteCollapsed` and its UserDefaults key use. In `CanvasScreen`, `hidesPalette` becomes `usesSheets && (model.isLayersOpen || model.isInspectorOpen)`. In `InkCanvas.Coordinator.refresh()` remove the unused `isTuckedAway`.
-- [ ] **Step 2:** Build the app target (`xcodebuild … build`). Expected: succeeds with no reference to `PaletteToggle` or `isPaletteCollapsed` (`grep -rn` finds none).
+- [ ] **Step 2:** Build the app target (`xcodebuild -skipPackagePluginValidation … build`). Expected: succeeds with no reference to `PaletteToggle` or `isPaletteCollapsed` (`grep -rn` finds none).
 - [ ] **Step 3:** Commit: "Narrow window: the Draw menu item alone shows and hides the pencil bar".
 
 ### Task 2: The call's state

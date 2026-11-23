@@ -49,9 +49,12 @@ open Layer.xcodeproj
 Run the tests in a simulator:
 
 ```sh
-xcodebuild -project Layer.xcodeproj -scheme Layer \
+xcodebuild -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation \
   -destination "platform=iOS Simulator,name=<an iPad simulator>" test
 ```
+
+The official A2UI Swift package generates code with a build-tool plugin. Xcode asks once to
+"Trust & Enable" it; `xcodebuild` needs `-skipPackagePluginValidation` instead.
 
 The UI tests expect a landscape iPad simulator with the app's window full screen.
 
