@@ -53,6 +53,12 @@ struct A2UIImportSheet: View {
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
             }
+            // What is said of no one component, such as a file that couldn't be read, is said as it was.
+            ForEach(Self.messagesOfNoComponent(in: group), id: \.self) { message in
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -61,6 +67,13 @@ struct A2UIImportSheet: View {
     private static func componentIDs(in group: A2UIImportReport.Group) -> [String] {
         var seen: Set<String> = []
         return group.diagnostics.compactMap(\.componentID).filter { seen.insert($0).inserted }
+    }
+
+    /// What the diagnostics that name no component say, each once, and no more than three of them.
+    private static func messagesOfNoComponent(in group: A2UIImportReport.Group) -> [String] {
+        var seen: Set<String> = []
+        let messages = group.diagnostics.filter { $0.componentID == nil }.map(\.message).filter { seen.insert($0).inserted }
+        return Array(messages.prefix(3))
     }
 
     private static func listing(_ ids: [String]) -> String {

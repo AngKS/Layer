@@ -653,29 +653,6 @@ import UIKit
         #expect(result.diagnostics.count == 2, "\(result.diagnostics)")
     }
 
-    @Test func aFanOutPayloadIsReadQuickly() async throws {
-        // A column reached 4,096 times over, each time holding 1,000 references: half to nothing,
-        // half back up to an ancestor. Each is turned away, but each costs time, so an import
-        // considers no more than `maximumChildRequests` children in all. (Validating one component
-        // with 10,000 children takes the SDK's validator about 0.4 s in a debug build on its own,
-        // so the payload is kept to 1,000 in the one component, to time only the fan-out.)
-        let levels = 12
-        var components = (0..<levels).map { index in
-            let id = index == 0 ? "root" : "level\(index)"
-            return #"{"id":"\#(id)","component":"Column","children":["level\#(index + 1)","level\#(index + 1)"]}"#
-        }
-        let references = Array(repeating: #""nowhere""#, count: 500) + Array(repeating: #""level1""#, count: 500)
-        components.append(#"{"id":"level\#(levels)","component":"Column","children":[\#(references.joined(separator: ","))]}"#)
-        let payload = surface(components.joined(separator: ","))
-
-        let clock = ContinuousClock()
-        let started = clock.now
-        let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
-        let took = clock.now - started
-        #expect(took < .seconds(1), "\(took)")
-        #expect(result.screens.count == 1)
-    }
-
     /// The work an import does, counted by the import itself: each component's references are read once, each
     /// reference is followed once by the walk, and each child or search step is charged to `maximumChildRequests`.
     private static func workBound(components: Int, references: Int) -> Int {
@@ -705,8 +682,11 @@ import UIKit
         #expect(result.work <= read + followed + buttons.count + 2 * 100, "\(result.work)")
     }
 
-    @Test func aFanOutsWorkIsBounded() throws {
-        // aFanOutPayloadIsReadQuickly's payload, bounded by the work counted rather than by the clock.
+    @Test func aFanOutsWorkIsBounded() async throws {
+        // A column reached 4,096 times over, each time holding 1,000 references: half to nothing,
+        // half back up to an ancestor. Each is turned away, but each costs work, so an import
+        // considers no more than `maximumChildRequests` children in all. Bounded by the work the import
+        // counts, not by the clock, which a loaded machine stretches (this was aFanOutPayloadIsReadQuickly).
         let levels = 12
         var components = (0..<levels).map { index in
             let id = index == 0 ? "root" : "level\(index)"
@@ -715,7 +695,10 @@ import UIKit
         let references = Array(repeating: #""nowhere""#, count: 500) + Array(repeating: #""level1""#, count: 500)
         components.append(#"{"id":"level\#(levels)","component":"Column","children":[\#(references.joined(separator: ","))]}"#)
 
-        let result = A2UIImporter.importJSON(surface(components.joined(separator: ",")))
+        let payload = surface(components.joined(separator: ","))
+
+        // Off the main actor, where an import runs.
+        let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
 
         #expect(result.screens.count == 1)
         #expect(result.work > 0)

@@ -124,7 +124,7 @@ extension AppModel {
         var diagnostics = imported.diagnostics
         for (surface, screen) in zip(imported.screens, screens) where !added.contains(screen.id) {
             diagnostics.append(A2UIDiagnostic(
-                reason: .invalidComponent, componentID: "root",
+                reason: .invalidComponent,
                 message: "Surface \(surface.surfaceID) isn't imported: this design can't take its screen, which would take it past \(TreeRules.maximumNodes) nodes or holds what a screen can't."))
         }
         if let shown = CanvasSelection(added.map(CanvasSelection.screen)) {
