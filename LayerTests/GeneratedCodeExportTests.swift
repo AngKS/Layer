@@ -6,7 +6,7 @@ import Testing
 /// Writes the code the generator makes for a spread of designs into the folder named by
 /// `LAYER_CODE_OUT`, so `scripts/check-generated-swiftui.sh` can typecheck it with swiftc.
 /// xcodebuild forwards the variable as `TEST_RUNNER_LAYER_CODE_OUT`. Without it, nothing runs.
-@Suite
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["LAYER_CODE_OUT"] != nil))
 struct GeneratedCodeExportTests {
     private static let outputFolder = ProcessInfo.processInfo.environment["LAYER_CODE_OUT"]
 
@@ -55,7 +55,7 @@ struct GeneratedCodeExportTests {
         ]
     }
 
-    @Test(.enabled(if: outputFolder != nil))
+    @Test
     func writesGeneratedCodeForTheCheck() throws {
         let root = URL(fileURLWithPath: try #require(Self.outputFolder), isDirectory: true)
         let screens = Self.screens()
