@@ -25,7 +25,7 @@ extension LayerNode {
 
     /// The names `reverting` covers, as `Mirror` labels: "kind", "content.text", "style.tint", …
     static let revertedFields: Set<String> = {
-        var names = FieldNames()
+        var names = FieldNames<LayerNode>()
         LayerNode.visitRevertedFields(&names)
         return names.names
     }()
@@ -38,7 +38,7 @@ extension LayerNode {
     }
 
     /// Every field `reverting` takes back, with its name. Both of them read this one list.
-    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor) {
+    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor<LayerNode>) {
         visitor.visit("id", \.id)
         visitor.visit("kind", \.kind)
         visitor.visit("unreadChildren", \.unreadChildren)
@@ -78,25 +78,26 @@ extension LayerNode {
     }
 }
 
-fileprivate protocol RevertedFieldVisitor {
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>)
+fileprivate protocol RevertedFieldVisitor<Root> {
+    associatedtype Root
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>)
 }
 
 /// Puts each field that changed from `before` to `after` back as it was before.
-private struct FieldsBack: RevertedFieldVisitor {
-    var result: LayerNode
-    let after: LayerNode
-    let before: LayerNode
+private struct FieldsBack<Root>: RevertedFieldVisitor {
+    var result: Root
+    let after: Root
+    let before: Root
 
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>) {
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>) {
         if after[keyPath: field] != before[keyPath: field] { result[keyPath: field] = before[keyPath: field] }
     }
 }
 
-private struct FieldNames: RevertedFieldVisitor {
+private struct FieldNames<Root>: RevertedFieldVisitor {
     var names: Set<String> = []
 
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>) {
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>) {
         names.insert(name)
     }
 }
@@ -107,17 +108,34 @@ extension TreeScreen {
     /// whole screen.
     static func reverting(_ current: TreeScreen, after: TreeScreen, to before: TreeScreen) -> TreeScreen {
         func reverted(_ screen: TreeScreen) -> TreeScreen {
-            var result = screen
-            func back<Value: Equatable>(_ field: WritableKeyPath<TreeScreen, Value>) {
-                if after[keyPath: field] != before[keyPath: field] { result[keyPath: field] = before[keyPath: field] }
-            }
-            back(\.id); back(\.name); back(\.origin); back(\.scale); back(\.deviceID); back(\.isLocked); back(\.unknownKeys)
+            var back = FieldsBack(result: screen, after: after, before: before)
+            visitRevertedFields(&back)
+            var result = back.result
             result.root = LayerNode.reverting(screen.root, after: after.root, to: before.root)
             return result
         }
         var result = reverted(after).withoutRootChildren == before.withoutRootChildren ? reverted(current) : before
         result.root.children = current.root.children
         return result
+    }
+
+    /// The names `reverting` covers, as `Mirror` labels: "name", "origin", … and "root", whose own
+    /// fields `LayerNode.reverting` takes back.
+    static let revertedFields: Set<String> = {
+        var names = FieldNames<TreeScreen>()
+        visitRevertedFields(&names)
+        return names.names.union(["root"])
+    }()
+
+    /// Every field of its own `reverting` takes back, with its name. Both of them read this one list.
+    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor<TreeScreen>) {
+        visitor.visit("id", \.id)
+        visitor.visit("name", \.name)
+        visitor.visit("origin", \.origin)
+        visitor.visit("scale", \.scale)
+        visitor.visit("deviceID", \.deviceID)
+        visitor.visit("isLocked", \.isLocked)
+        visitor.visit("unknownKeys", \.unknownKeys)
     }
 
     /// The screen without what is on it: its record.

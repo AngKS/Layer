@@ -178,6 +178,56 @@ import Testing
         }
     }
 
+    /// For each of a screen's own fields, as `Mirror` names it, a change to it alone.
+    private static let screenChanges: [String: @Sendable (inout TreeScreen) -> Void] = [
+        "name": { $0.name = "Renamed by the step" },
+        "origin": { $0.origin.x += 100 },
+        "scale": { $0.scale = 0.25 },
+        "deviceID": { $0.deviceID = "ipad-pro-11" },
+        "isLocked": { $0.isLocked = true },
+        "unknownKeys": { $0.unknownKeys["future"] = .bool(false) },
+        "root": { $0.root.name = "Root named by the step" },
+    ]
+
+    /// A field a screen gains must be put in `TreeScreen.reverting`'s list, or undo takes the
+    /// whole screen back, another edit's changes to it since included.
+    @Test func screenFieldListNamesEveryField() {
+        var full = TreeScreen(name: "Every field", origin: CGPoint(x: 10, y: 20), scale: 0.5, deviceID: "iphone-17-pro-max")
+        full.isLocked = false
+        full.unknownKeys["future"] = .bool(true)
+        full.root.children = [Self.node()]
+        let labels = Mirror(reflecting: full).children.compactMap(\.label)
+        #expect(labels.contains("name") && labels.contains("root"))
+        for label in labels {
+            #expect(TreeScreen.revertedFields.contains(label), "\(label) is missing from TreeScreen.revertedFields")
+        }
+
+        // A changed id is a removal and an addition, so it isn't one of these.
+        for label in labels where label != "id" {
+            guard let change = Self.screenChanges[label] else {
+                Issue.record("No change is written here for \(label)")
+                continue
+            }
+            var before = TreeContent()
+            before.screens = [full]
+            var after = before
+            change(&after.screens[0])
+            guard after != before else {
+                Issue.record("The change written here for \(label) changes nothing")
+                continue
+            }
+            let since: (inout TreeScreen) -> Void = label == "name" ? { $0.origin.y += 5 } : { $0.name = "Renamed since" }
+            var current = after
+            since(&current.screens[0])
+            var expected = full
+            since(&expected)
+
+            let reverted = current.reverting(after, to: before)
+
+            #expect(reverted.screens == [expected], "Undoing a change to \(label) didn't take back that field alone")
+        }
+    }
+
     @Test func aStepsOwnFieldGoesBackAndAnothersStays() throws {
         let a = Self.node(.body, CGRect(x: 0, y: 0, width: 10, height: 10), text: "A")
         let before = Self.design([a])
