@@ -205,6 +205,27 @@ import UIKit
         #expect(result.diagnostics.isEmpty, "\(result.diagnostics)")
     }
 
+    @Test func aRootLayerFreeBecomesAFreeScreenRoot() throws {
+        let components = """
+            {"id":"root","component":"LayerFree","children":["title","go"]},
+            {"id":"title","component":"Text","text":"Sketch",
+             "@metadata":{"extensions":{"layer":{"frame":[24,60,200,40],"width":{"mode":"fixed"},"height":{"mode":"fixed"}}}}},
+            {"id":"go","component":"Button","child":"go_label","action":{"event":{"name":"\(A2UIImporter.layerActionName)"}},
+             "@metadata":{"extensions":{"layer":{"frame":[24,600,320,50],"rotation":5,"width":{"mode":"fixed"},"height":{"mode":"fixed"}}}}},
+            {"id":"go_label","component":"Text","text":"Go"}
+            """
+        let result = A2UIImporter.importJSON(surface(components, catalog: LayerCatalog.id))
+        let root = try #require(result.screens.first?.root)
+        // The free group is the screen root itself: no column is added round it.
+        #expect(shape(root) == "group(free)[text,button]")
+        #expect(root.source?.key == "root")
+        #expect(root.padding == LayerNode.Padding())
+        #expect(root.child(0).frame == CGRect(x: 24, y: 60, width: 200, height: 40))
+        #expect(root.child(1).frame == CGRect(x: 24, y: 600, width: 320, height: 50))
+        #expect(root.child(1).rotation == 5)
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics)")
+    }
+
     @Test func textsReadTheirMarkdown() throws {
         let components = """
             {"id":"root","component":"Column","children":["one","two","three","body","note"]},

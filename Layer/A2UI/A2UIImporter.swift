@@ -310,7 +310,8 @@ private struct ScreenBuilder {
         }
         walk()
         guard let mapped = tree(from: "root") else { return nil }
-        var root = screenRoot(mapped, isColumn: rootComponent["component"]?.stringValue == "Column")
+        let rootType = rootComponent["component"]?.stringValue
+        var root = screenRoot(mapped, isScreen: rootType == "Column" || rootType == "LayerFree")
         fix(&root)
         return root
     }
@@ -925,11 +926,13 @@ private struct ScreenBuilder {
 
     // MARK: The screen root and the fixes
 
-    /// A root Column is the screen root. Anything else is held in a column that is. Either way
-    /// it's a group with no padding: TreeRules writes a screen root's padding.
-    private func screenRoot(_ mapped: LayerNode, isColumn: Bool) -> LayerNode {
+    /// A root Column is the screen root, as is a root LayerFree, which is how Layer writes a free
+    /// screen, its children placed by their frames in Layer's look. Anything else is held in a
+    /// column that is the screen root. Either way it's a group with no padding: TreeRules writes
+    /// a screen root's padding.
+    private func screenRoot(_ mapped: LayerNode, isScreen: Bool) -> LayerNode {
         var root = mapped
-        if !isColumn {
+        if !isScreen {
             root = LayerNode(kind: .group)
             (root.width, root.height) = NaturalSize.defaultSizing(for: .group)
             root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 12, alignment: .fill))
