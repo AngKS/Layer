@@ -136,9 +136,11 @@ extension TreeContent {
     /// keys and the canvas nodes this build couldn't read go back whole, as today. Screens go back by today's list rule, their roots' children
     /// left out. Then each node the step changed has its fields taken back (its parent among
     /// them), what it added goes and what it removed comes back, and each parent's list has what
-    /// the step moved in it put back where it was among what is there now. A node moved to
-    /// another parent, by the step or since, keeps the place on screen the merge gives it there.
-    /// One whose parent is gone lands on the canvas where it was.
+    /// the step moved in it put back where it was among what is there now. A node the step
+    /// changed goes where the merge of its pose in its host puts it, in whatever parent it
+    /// lands in; any other node stays where it is on its host. One whose parent is gone lands
+    /// in the nearest of its ancestors still there, on its screen; only one whose screen is
+    /// gone lands on the canvas, where it was.
     func reverting(_ after: TreeContent, to before: TreeContent) -> TreeContent {
         if self == after { return before }
         var result = self
@@ -172,9 +174,9 @@ extension TreeContent {
             var merged = c
             merged.node = LayerNode.reverting(c.node, after: a.node, to: b.node)
             merged.parent = a.parent != b.parent ? b.parent : c.parent
-            if !(c.parent == a.parent && a.parent == b.parent) {
-                posed[id] = TreeRecords.Posed(now: c, after: a, before: b)
-            }
+            // Its frame and angle are merged as its pose in its host, not as numbers in its
+            // parent's space, which a container fitted again round what it holds renumbers.
+            posed[id] = TreeRecords.Posed(now: c, after: a, before: b)
             undone.records[id] = merged
         }
 
@@ -220,12 +222,15 @@ extension TreeContent {
             }
         }
 
+        var posed: [UUID: TreeRecords.Posed] = [:]
         for id in was.order where !shared.contains(id) {
             guard let b = was.records[id] else { continue }
             if let a = left.records[id] {
                 guard !a.isSame(as: b), let c = now.records[id], c.isSame(as: a) else { continue }
                 if a.parent == b.parent {
+                    // Back where it was on its host, in a parent that may have been fitted again since.
                     now.records[id]?.node = b.node
+                    posed[id] = TreeRecords.Posed(at: b)
                 } else if now.holds(b.parent), !now.isWithin(b.parent, of: id) {
                     // Moved to another parent: back where it was, if that is still there.
                     now.take(id)
@@ -254,7 +259,7 @@ extension TreeContent {
             now.lists[parent] = order
         }
 
-        now.rebuild(into: &self, posed: [:])
+        now.rebuild(into: &self, posed: posed)
     }
 
     /// `current` with what turned `before` into `after` taken back: what was added goes; what

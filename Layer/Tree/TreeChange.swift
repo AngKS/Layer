@@ -3,7 +3,10 @@ import Foundation
 /// What a change touched, on the tree: the nodes it added, removed or altered, the screens it
 /// added, removed or altered and those it put a node on or took one off, and whether it changed
 /// the board. A node is compared as `TreeRecords` keeps it: its fields without its children,
-/// its parent and its pose in its host, so that a pure reorder touches nothing, as today.
+/// its parent and its pose in its host, so that a pure reorder touches nothing, as today, and
+/// neither does a container fitted again round what it holds, to what is inside. A node moved
+/// from one container to another touches both, as one moved between hosts touches both hosts:
+/// a change that made a container meets one that put something in it.
 /// The undo history asks it whether two changes meet, and which screen a step was to.
 struct TreeChange: Sendable {
     var nodes: Set<UUID> = []
@@ -26,6 +29,11 @@ struct TreeChange: Sendable {
             let old = was.records[id], new = now.records[id]
             if let old, let new, old.isSame(as: new) { continue }
             nodes.insert(id)
+            if let old, let new, old.parent != new.parent {
+                for case .node(let parent) in [old.parent, new.parent] where was.records[parent] != nil || now.records[parent] != nil {
+                    nodes.insert(parent)
+                }
+            }
             // Added, removed, or moved to another host: the hosts are touched too.
             guard old?.host != new?.host else { continue }
             for case .screen(let screen)? in [old?.host, new?.host] { screens.insert(screen) }

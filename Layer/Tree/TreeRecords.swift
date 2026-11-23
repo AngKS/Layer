@@ -60,6 +60,33 @@ struct TreeRecords {
         }
     }
 
+    /// Where a host's points lie on the canvas: through a screen's placement, as `TreeIndex.canvasShape`
+    /// takes them; the canvas's own points are the canvas's.
+    struct Placing: Equatable {
+        var origin: CGPoint
+        var scale: CGFloat
+
+        static let canvas = Placing(origin: .zero, scale: 1)
+
+        init(origin: CGPoint, scale: CGFloat) {
+            self.origin = origin
+            self.scale = scale
+        }
+
+        /// A scale that isn't a size draws at 1, as `land` and the rules read it.
+        init(_ screen: TreeScreen) {
+            self.init(origin: screen.origin, scale: screen.scale.isFinite && screen.scale > 0 ? screen.scale : 1)
+        }
+
+        func toCanvas(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: origin.x + point.x * scale, y: origin.y + point.y * scale)
+        }
+
+        func fromCanvas(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: (point.x - origin.x) / scale, y: (point.y - origin.y) / scale)
+        }
+    }
+
     /// A node's fields without its children, where it hangs, and where it was in its host.
     struct Record {
         var node: LayerNode
@@ -70,21 +97,33 @@ struct TreeRecords {
         let host: TreeIndex.Host
         /// As `TreeIndex.Entry.hostShape` has it.
         let pose: TurnedRect
+        /// The pose's centre in canvas points, through its host's placement when taken apart.
+        let canvasCentre: CGPoint
         /// Its parent's.
         let space: Space
 
-        init(node: LayerNode, parent: Parent, host: TreeIndex.Host, space: Space) {
+        init(node: LayerNode, parent: Parent, host: TreeIndex.Host, space: Space, placing: Placing) {
             self.node = node.withoutChildren
             self.parent = parent
             takenFrom = parent
             self.host = host
             pose = space.pose(of: node)
+            canvasCentre = placing.toCanvas(pose.centre)
             self.space = space
         }
 
-        /// The same node, in the same place in the same host.
+        /// Its size in its own points, as its pose has it.
+        var ownSize: CGSize {
+            CGSize(width: pose.rect.width / space.scale, height: pose.rect.height / space.scale)
+        }
+
+        /// The same node, in the same place in the same host. Its frame and angle are compared as its
+        /// pose in the host, not as numbers in its parent's space: a container fitted again round
+        /// what it holds gives everything in it new numbers without moving any of it, and that is
+        /// no change to them, as the flat list, which kept frames in the host's points, never saw one.
         func isSame(as other: Record) -> Bool {
-            node == other.node && parent == other.parent && host == other.host && pose == other.pose
+            parent == other.parent && host == other.host && Posed.isNear(pose, other.pose)
+                && node.withoutPlace == other.node.withoutPlace
         }
     }
 
@@ -107,25 +146,65 @@ struct TreeRecords {
         }
     }
 
-    /// A node moved between parents, by the step or since: its frame and angle merged as poses
-    /// in the host, to be put into its parent's space once that is known.
+    /// Where a node the step changed goes: its frame and angle merged as a pose in its host,
+    /// each back to before's if the step changed it, else as now, to be put into its parent's
+    /// space once that is known. A pose is compared in its host's points, and carried to
+    /// another host through the canvas.
     struct Posed {
+        /// Its box in `host`'s points, and its summed angle.
         var pose: TurnedRect
+        var host: TreeIndex.Host
+        /// The box's centre in canvas points, and its size in its own points: how it is put on
+        /// another host, as a move between hosts puts it.
+        var canvasCentre: CGPoint
+        var ownSize: CGSize
         /// Where it already sat at that pose, in a parent: its frame and angle there are kept
         /// as they are when it lands in the same parent, in the same space.
         var sources: [Record]
 
-        /// Each of the frame and the angle, back to before's if the step changed it, else as now.
+        /// Each of the box and the angle, back to before's if the step changed it, else as now. A
+        /// step that moved it to another host changed its box.
         init(now c: Record, after a: Record, before b: Record) {
-            let rect = Self.isNear(a.pose.rect, b.pose.rect) ? c.pose.rect : b.pose.rect
+            let box = a.host == b.host && Self.isNear(a.pose.rect, b.pose.rect) ? c : b
             let degrees = Self.isNear(a.pose.degrees, b.pose.degrees) ? c.pose.degrees : b.pose.degrees
-            pose = TurnedRect(rect: rect, degrees: degrees)
-            sources = [c, b].filter { Self.isNear($0.pose.rect, rect) && Self.isNear($0.pose.degrees, degrees) }
+            self.init(box, degrees: degrees, sources: [c, b])
+        }
+
+        /// Where `record` is.
+        init(at record: Record) {
+            self.init(record, degrees: record.pose.degrees, sources: [record])
+        }
+
+        private init(_ box: Record, degrees: Double, sources: [Record]) {
+            pose = TurnedRect(rect: box.pose.rect, degrees: degrees)
+            host = box.host
+            canvasCentre = box.canvasCentre
+            ownSize = box.ownSize
+            let pose = pose
+            self.sources = sources.filter { $0.host == box.host && Self.isNear($0.pose, pose) }
+        }
+
+        /// Gives `node` the frame and angle that put it at this pose, in `space` on `landing`,
+        /// placed on the canvas by `placing`. On another host its centre stays where it is on
+        /// the canvas, at its size in its own points.
+        func place(_ node: inout LayerNode, in space: Space, on landing: TreeIndex.Host, placedBy placing: Placing?) {
+            guard landing != host, let placing else {
+                space.place(&node, at: pose)
+                return
+            }
+            let centre = placing.fromCanvas(canvasCentre)
+            let size = CGSize(width: ownSize.width * space.scale, height: ownSize.height * space.scale)
+            let rect = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
+            space.place(&node, at: TurnedRect(rect: rect, degrees: pose.degrees))
         }
 
         /// Within a millionth of a point: moving a node from one parent's space to another's
         /// and back doesn't always come to the same number.
         private static let tolerance = 1e-6
+
+        static func isNear(_ a: TurnedRect, _ b: TurnedRect) -> Bool {
+            isNear(a.rect, b.rect) && isNear(a.degrees, b.degrees)
+        }
 
         private static func isNear(_ a: CGRect, _ b: CGRect) -> Bool {
             abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
@@ -158,6 +237,9 @@ struct TreeRecords {
     private var wholeCanvas: [LayerNode]?
     private var rootIDs: Set<UUID> = []
     private var seen: Set<UUID> = []
+    /// Each record `takeOutOrphans` put in the nearest of its ancestors still here, with the
+    /// one it came out of on the way, which is gone: it takes that one's place.
+    private var landings: [UUID: UUID?] = [:]
 
     init(_ content: TreeContent, leavingWhole untouched: Set<TreeIndex.Host> = []) {
         rootIDs = Set(content.screens.map(\.root.id))
@@ -168,17 +250,18 @@ struct TreeRecords {
                 whole[screen.id] = screen
                 continue
             }
-            add(screen.root.children, to: .node(screen.root.id), on: .screen(screen.id), in: Space.screen.inside(screen.root))
+            add(screen.root.children, to: .node(screen.root.id), on: .screen(screen.id), in: Space.screen.inside(screen.root),
+                placedBy: Placing(screen))
         }
         if untouched.contains(.canvas) {
             wholeCanvas = content.canvas
         } else {
-            add(content.canvas, to: .canvas, on: .canvas, in: nil)
+            add(content.canvas, to: .canvas, on: .canvas, in: nil, placedBy: .canvas)
         }
     }
 
     /// `nodes` and what they hold, under `parent`, in `space`; the canvas's top level when nil.
-    private mutating func add(_ nodes: [LayerNode], to parent: Parent, on host: TreeIndex.Host, in space: Space?) {
+    private mutating func add(_ nodes: [LayerNode], to parent: Parent, on host: TreeIndex.Host, in space: Space?, placedBy placing: Placing) {
         var list: [UUID] = []
         for node in nodes {
             let space = space ?? .canvas(scale: node.scale)
@@ -189,11 +272,11 @@ struct TreeRecords {
                 meet(node.children)
                 continue
             }
-            records[node.id] = Record(node: node, parent: parent, host: host, space: space)
+            records[node.id] = Record(node: node, parent: parent, host: host, space: space, placing: placing)
             order.append(node.id)
             ordered.insert(node.id)
             list.append(node.id)
-            add(node.children, to: .node(node.id), on: host, in: space.inside(node))
+            add(node.children, to: .node(node.id), on: host, in: space.inside(node), placedBy: placing)
         }
         if !list.isEmpty { lists[parent, default: []] += list }
     }
@@ -283,11 +366,14 @@ struct TreeRecords {
         lists[record.parent] = list
     }
 
-    /// Moves to the canvas's top level each record whose parent isn't here, and, of records whose
-    /// parents would make a loop, the one latest in `was`'s order. Each lands where it was on the
-    /// canvas: as `now` has it if it is there, else as `was` does, through the screen it was on
-    /// as `content` or `previous` placed it, and at that screen's scale. A passenger whose parent
-    /// isn't here goes the same way, after them.
+    /// Puts each record whose parent isn't here in the nearest of its ancestors that is, on the
+    /// same host, where it is on that host: its screen's root, if nothing nearer is left. Only
+    /// one whose screen is gone, or one on the canvas whose ancestors there are all gone, goes
+    /// to the canvas's top level, where it was on the canvas: as `now` has it if it is there,
+    /// else as `was` does, through the screen it was on as `content` or `previous` placed it,
+    /// and at that screen's scale. Of records whose parents would make a loop, the one latest
+    /// in `was`'s order goes to the canvas the same way. A passenger whose parent isn't here
+    /// goes there too, after them. Returns those that went to the canvas.
     mutating func takeOutOrphans(placedFrom now: TreeRecords, else was: TreeRecords, posed: inout [UUID: Posed],
                                  in content: TreeContent, else previous: TreeContent) -> [UUID] {
         var orphans: [UUID] = [], taken: Set<UUID> = []
@@ -300,12 +386,20 @@ struct TreeRecords {
             record.parent = .canvas
             records[id] = record
             posed[id] = nil
+            landings[id] = nil
             orphans.append(id)
         }
 
         for id in order {
             guard let record = records[id], !holds(record.parent) else { continue }
-            takeOut(id)
+            if let found = nearestAncestorHere(of: id, as: now.records[id] != nil ? now : was), found.parent != .canvas {
+                // Where it is, or where the merge put it, in that ancestor's space.
+                posed[id] = posed[id] ?? Posed(at: record)
+                records[id]?.parent = found.parent
+                landings[id] = found.outOf
+            } else {
+                takeOut(id)
+            }
         }
         // Each chain of parents is followed up once: to the canvas, a screen's root, or a loop.
         var settled: Set<UUID> = []
@@ -338,6 +432,20 @@ struct TreeRecords {
             passengers[index].isLast = true
         }
         return orphans
+    }
+
+    /// The nearest of `id`'s ancestors, as `side` holds them, that is here and isn't inside it, with
+    /// the ancestor below that one on the way, which is gone. Nil when none is: its screen is gone.
+    private func nearestAncestorHere(of id: UUID, as side: TreeRecords) -> (parent: Parent, outOf: UUID?)? {
+        var next = side.records[id]?.parent, outOf: UUID?
+        var seen: Set<UUID> = [id]
+        while let parent = next {
+            if holds(parent), !isWithin(parent, of: id) { return (parent, outOf) }
+            guard case .node(let ancestor) = parent, seen.insert(ancestor).inserted, let record = side.records[ancestor] else { return nil }
+            outOf = ancestor
+            next = record.parent
+        }
+        return nil
     }
 
     /// Gives `node` the frame, angle and scale that put it on the canvas's top level at `pose`:
@@ -392,13 +500,39 @@ struct TreeRecords {
             }
             if !list.isEmpty { result[parent] = list }
         }
+        // One put in an ancestor and not already there takes the place of the ancestor it came out
+        // of: just after the nearest node before that one there that is still there, or first.
+        // Several out of one go in their order. One out of nothing known goes in front.
+        var lastIn: [UUID: UUID] = [:]
+        for id in order {
+            guard let outOf = landings[id], let parent = records[id]?.parent, !away.contains(id) else { continue }
+            var list = result[parent] ?? []
+            guard !list.contains(id) else { continue }
+            var place = list.count
+            if let outOf, let earlier = lastIn[outOf], let at = list.firstIndex(of: earlier) {
+                place = at + 1
+            } else if let outOf, let held = lists[parent], let at = held.firstIndex(of: outOf) {
+                place = 0
+                for earlier in held[..<at].reversed() {
+                    if let found = list.firstIndex(of: earlier) {
+                        place = found + 1
+                        break
+                    }
+                }
+            }
+            list.insert(id, at: place)
+            result[parent] = list
+            if let outOf { lastIn[outOf] = id }
+        }
         if !orphans.isEmpty { result[.canvas, default: []] += orphans }
         lists = result
     }
 
     /// Writes the screens and the canvas into `content`, each node's children in their list's
     /// order with the passengers among them. A node in `posed` is put into its parent's space at
-    /// its pose now. A host left whole is written as it was.
+    /// its pose now. Any other node still in the parent it was taken from stays where it is on
+    /// its host, should that parent have moved or been fitted again round what it holds. A host
+    /// left whole is written as it was.
     func rebuild(into content: inout TreeContent, posed: [UUID: Posed]) {
         enum Entry: Equatable {
             case record(UUID), passenger(after: UUID?), last
@@ -409,12 +543,13 @@ struct TreeRecords {
             }
         }
         let riders = Dictionary(grouping: passengers, by: \.parent)
+        let placings = Dictionary(screens.map { (TreeIndex.Host.screen($0.id), Placing($0)) }, uniquingKeysWith: { first, _ in first })
         var built: Set<UUID> = []
 
-        func children(of parent: Parent, in space: Space?) -> [LayerNode] {
+        func children(of parent: Parent, in space: Space?, on host: TreeIndex.Host) -> [LayerNode] {
             var nodes: [LayerNode] = [], entries: [Entry] = []
             for id in lists[parent] ?? [] {
-                guard let node = build(id, under: parent, in: space ?? .canvas(scale: records[id]?.node.scale)) else { continue }
+                guard let node = build(id, under: parent, in: space ?? .canvas(scale: records[id]?.node.scale), on: host) else { continue }
                 nodes.append(node)
                 entries.append(.record(id))
             }
@@ -434,21 +569,24 @@ struct TreeRecords {
             return nodes
         }
 
-        func build(_ id: UUID, under parent: Parent, in space: Space) -> LayerNode? {
+        func build(_ id: UUID, under parent: Parent, in space: Space, on host: TreeIndex.Host) -> LayerNode? {
             guard let record = records[id], built.insert(id).inserted else { return nil }
             var node = record.node
+            let placing = host == .canvas ? Placing.canvas : placings[host]
             if let posed = posed[id] {
                 if let source = posed.sources.first(where: { $0.parent == parent && $0.space == space }) {
                     node.frame = source.node.frame
                     node.rotation = source.node.rotation
                 } else {
-                    space.place(&node, at: posed.pose)
+                    posed.place(&node, in: space, on: host, placedBy: placing)
                 }
+            } else if record.parent == record.takenFrom, record.space != space || record.host != host {
+                Posed(at: record).place(&node, in: space, on: host, placedBy: placing)
             }
             // Drawn at its own scale on the canvas's top level; anywhere else it has none, as
             // today's rehost of what was left on a missing screen took it off.
             if record.takenFrom == .canvas, parent != .canvas { node.scale = nil }
-            node.children = children(of: .node(id), in: space.inside(node))
+            node.children = children(of: .node(id), in: space.inside(node), on: host)
             return node
         }
 
@@ -457,10 +595,20 @@ struct TreeRecords {
             if let whole = whole[screen.id] {
                 screen.root.children = whole.root.children
             } else {
-                screen.root.children = children(of: .node(screen.root.id), in: Space.screen.inside(screen.root))
+                screen.root.children = children(of: .node(screen.root.id), in: Space.screen.inside(screen.root), on: .screen(screen.id))
             }
             return screen
         }
-        content.canvas = (wholeCanvas ?? []) + children(of: .canvas, in: nil)
+        content.canvas = (wholeCanvas ?? []) + children(of: .canvas, in: nil, on: .canvas)
+    }
+}
+
+private extension LayerNode {
+    /// Its fields but its frame and angle, which a record compares as its pose.
+    var withoutPlace: LayerNode {
+        var node = self
+        node.frame = .zero
+        node.rotation = nil
+        return node
     }
 }
