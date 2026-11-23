@@ -1,0 +1,278 @@
+// ----- Structures
+import SwiftUI
+
+struct Structures: View {
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            Button {
+            } label: {
+                Text("Go")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 63, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 310, y: 79)
+            Text("Label")
+                .font(.body)
+                .frame(width: 42, height: 21, alignment: .leading)
+                .offset(x: 20, y: 94)
+            Text("Fills the gap")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .frame(width: 224, height: 18, alignment: .center)
+                .offset(x: 74, y: 95)
+            Text("One")
+                .font(.body)
+                .frame(width: 32, height: 21, alignment: .leading)
+                .offset(x: 20, y: 145)
+            Text("Two")
+                .font(.body)
+                .frame(width: 32, height: 21, alignment: .leading)
+                .offset(x: 142, y: 145)
+            Text("Three")
+                .font(.body)
+                .frame(width: 45, height: 21, alignment: .leading)
+                .offset(x: 263, y: 145)
+            Text("Four")
+                .font(.body)
+                .frame(width: 35, height: 21, alignment: .leading)
+                .offset(x: 20, y: 174)
+            Text("Five")
+                .font(.body)
+                .frame(width: 31, height: 21, alignment: .leading)
+                .offset(x: 142, y: 174)
+            Text("Six")
+                .font(.body)
+                .frame(width: 23, height: 21, alignment: .leading)
+                .offset(x: 263, y: 174)
+            Image("photo")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 353, height: 120)
+                .clipShape(.rect(cornerRadius: 16))
+                .offset(x: 20, y: 211)
+            Text("On top")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .frame(width: 88, height: 34, alignment: .center)
+                .offset(x: 153, y: 254)
+            Text("Turned")
+                .font(.body)
+                .frame(width: 100, height: 30, alignment: .leading)
+                .rotationEffect(.degrees(30))
+                .offset(x: 40, y: 367)
+            RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                .fill(DesignTokens.cardFill)
+                .frame(width: 353, height: 119)
+                .offset(x: 20, y: 483)
+            Text("Outer card")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .frame(width: 139, height: 34, alignment: .center)
+                .offset(x: 36, y: 499)
+            RoundedRectangle(cornerRadius: 12)
+                .fill(DesignTokens.cardFill)
+                .frame(width: 321, height: 45)
+                .offset(x: 36, y: 541)
+            Text("Inside the inner card")
+                .font(.body)
+                .frame(width: 297, height: 21, alignment: .leading)
+                .offset(x: 48, y: 553)
+            // Say "hi" 👋
+            Text("Say \"hi\" 👋")
+                .font(.body)
+                .frame(width: 88, height: 21, alignment: .leading)
+                .offset(x: 20, y: 618)
+            Button {
+            } label: {
+                Text("Filled")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 83, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 20, y: 655)
+            Button {
+            } label: {
+                Text("Bordered")
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.80, green: 0.42, blue: 0.34))
+                    .frame(width: 114, height: 50)
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color(red: 0.80, green: 0.42, blue: 0.34), lineWidth: 1.5)
+                    }
+            }
+                .offset(x: 20, y: 721)
+            Button {
+            } label: {
+                Text("Plain")
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.80, green: 0.42, blue: 0.34))
+                    .frame(width: 79, height: 50)
+            }
+                .offset(x: 20, y: 787)
+            TextField("Email", text: .constant(""))
+                .padding(.horizontal, 16)
+                .frame(width: 353, height: 48)
+                .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12))
+                .offset(x: 20, y: 853)
+            Toggle("", isOn: .constant(true))
+                .labelsHidden()
+                .frame(width: 51, height: 31)
+                .offset(x: 20, y: 913)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+    }
+}
+
+/// The numbers this design is laid out and styled by.
+enum DesignTokens {
+    /// The steps the space between things is made of, smallest first.
+    static let rhythm: [CGFloat] = [4, 8, 12, 20, 28]
+    static let cornerRadiusSmall: CGFloat = 8
+    static let cornerRadiusMedium: CGFloat = 12
+    static let cornerRadiusLarge: CGFloat = 16
+    static let cardPadding: CGFloat = 12
+    static let cardRadius: CGFloat = 16
+    static let cardFill = Color(red: 0.90, green: 0.94, blue: 1.00)
+    static let titleSize: CGFloat = 28
+    static let bodySize: CGFloat = 15
+    static let textSize: CGFloat = 17
+    /// The space kept round a screen's column, inside its safe area.
+    static let marginIPhone: CGFloat = 20
+    static let marginWatch45: CGFloat = 8
+}
+
+#Preview {
+    Structures()
+}
+// ----- Watch
+import SwiftUI
+
+struct Watch: View {
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            Text("Today")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .frame(width: 79, height: 34, alignment: .center)
+                .offset(x: 8, y: 8)
+            Toggle("", isOn: .constant(true))
+                .labelsHidden()
+                .frame(width: 51, height: 31)
+                .offset(x: 8, y: 50)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+    }
+}
+
+#Preview(traits: .fixedLayout(width: 198, height: 242)) {
+    Watch()
+}
+// ----- Sketched
+import SwiftUI
+
+struct Sketched: View {
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            Text("Dashboard")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .frame(width: 228, height: 40, alignment: .center)
+                .offset(x: 20, y: 80)
+            Button {
+            } label: {
+                Text("Save")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 160, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 20, y: 140)
+            Button {
+            } label: {
+                Text("Cancel")
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.80, green: 0.42, blue: 0.34))
+                    .frame(width: 160, height: 50)
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color(red: 0.80, green: 0.42, blue: 0.34), lineWidth: 1.5)
+                    }
+            }
+                .offset(x: 200, y: 140)
+            Text("Status")
+                .font(.body)
+                .frame(width: 100, height: 24, alignment: .leading)
+                .offset(x: 40, y: 240)
+            Text("Tilted")
+                .font(.body)
+                .frame(width: 100, height: 24, alignment: .leading)
+                .rotationEffect(.degrees(15))
+                .offset(x: 80, y: 300)
+            Toggle("", isOn: .constant(true))
+                .labelsHidden()
+                .frame(width: 51, height: 31)
+                .offset(x: 128, y: 407)
+            Text("Notifications")
+                .font(.body)
+                .frame(width: 96, height: 21, alignment: .leading)
+                .offset(x: 20, y: 412)
+            // Profile card
+            RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                .fill(DesignTokens.cardFill)
+                .frame(width: 353, height: 100)
+                .offset(x: 20, y: 500)
+            Image("avatar")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 48, height: 48)
+                .clipShape(.circle)
+                .offset(x: 36, y: 516)
+            Text("Alex Tan")
+                .font(.body)
+                .frame(width: 200, height: 24, alignment: .leading)
+                .offset(x: 100, y: 528)
+            Button {
+            } label: {
+                Text("Continue")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 353, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 20, y: 760)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+    }
+}
+
+/// The numbers this design is laid out and styled by.
+enum DesignTokens {
+    /// The steps the space between things is made of, smallest first.
+    static let rhythm: [CGFloat] = [4, 8, 12, 20, 28]
+    static let cornerRadiusSmall: CGFloat = 8
+    static let cornerRadiusMedium: CGFloat = 12
+    static let cornerRadiusLarge: CGFloat = 16
+    static let cardPadding: CGFloat = 12
+    static let cardRadius: CGFloat = 16
+    static let cardFill = Color(red: 0.90, green: 0.94, blue: 1.00)
+    static let titleSize: CGFloat = 28
+    static let bodySize: CGFloat = 15
+    static let textSize: CGFloat = 17
+    /// The space kept round a screen's column, inside its safe area.
+    static let marginIPhone: CGFloat = 20
+    static let marginWatch45: CGFloat = 8
+}
+
+#Preview {
+    Sketched()
+}

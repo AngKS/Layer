@@ -84,6 +84,7 @@
 		3804BA5019B68811B2C75B9C /* text_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 3EBB8406C2392530B865E791 /* text_noisy_1.json */; };
 		381D8D4D87C49B05D2486562 /* HostedProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7251FAEF5B5DCCDEA0C4642 /* HostedProvider.swift */; };
 		38334891B1E19CA8B528F70E /* radio_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = E14BD9AC08BB6AB501A5D9EB /* radio_clean_1.json */; };
+		3833B09C910DCDA3F66BBB6C /* design-structures.json in Resources */ = {isa = PBXBuildFile; fileRef = 5896790F74FED7EE5B3AE33A /* design-structures.json */; };
 		38B2F10637575389FDA03E7F /* scratchOut_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = 3D60DB1831A2EA8839464B29 /* scratchOut_jittered_2a.json */; };
 		38C38F1B607854D855CC2C57 /* SystemSymbolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C6CDAFC9C665AE14DECD2B3 /* SystemSymbolTests.swift */; };
 		38E24ED3DCD85EA5E803AB9A /* radio_avatar_radio_2.json in Resources */ = {isa = PBXBuildFile; fileRef = E0E9A3C3175D23604BD0A70B /* radio_avatar_radio_2.json */; };
@@ -361,6 +362,7 @@
 		E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D91D32C8960E072A4A7C5AA /* PhoneScreenView.swift */; };
 		E64E655881D8EA9045675A5F /* checkbox_image_checkbox_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 8B58233F4E9A0EF2ABC44DD1 /* checkbox_image_checkbox_2.json */; };
 		E6863986677A40B9CA9DA93A /* a2ui-user-profile.json in Resources */ = {isa = PBXBuildFile; fileRef = E5B8391378BEAD2EC68E8F82 /* a2ui-user-profile.json */; };
+		E704F1F2281D21F840A93317 /* structures-exact.swift.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4534BB15EB25427FAAC15F0C /* structures-exact.swift.txt */; };
 		E798BFC2A9574FE65D0C4562 /* toggle_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = E9F0B5812BDDAD1996295A16 /* toggle_noisy_1.json */; };
 		E88B49D3E718BB837ED6C379 /* LayoutEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2432F3E4740CB3B25E9F5345 /* LayoutEngineTests.swift */; };
 		E894349596A03326F915D659 /* title_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 6C655E8E30BDFE28A3FB50B8 /* title_jittered_2b.json */; };
@@ -385,6 +387,7 @@
 		F5DCA672A5447414D35E8898 /* GroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FBE89B42A2C9324AB9B7AF8 /* GroupTests.swift */; };
 		F6F261FBE0256D6E766CB712 /* PanelStepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FFCF33D10A4C78E35864A6 /* PanelStepTests.swift */; };
 		F70BB47E9F4EDBA47727D068 /* TreeLift.swift in Sources */ = {isa = PBXBuildFile; fileRef = E414BF63BEB93FFEBB474C24 /* TreeLift.swift */; };
+		F79122F975AA5F12DAB3FC83 /* structures-structure.swift.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4AFFBA4580CA7CEDCD9F8CEE /* structures-structure.swift.txt */; };
 		F7FC74FDABD0D39CAD410FD3 /* scratchOut_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 7942B5562158100754E89A7B /* scratchOut_noisy_2.json */; };
 		F862E71019C3B17F7AE5B644 /* CanvasPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F6B8D8DE32A50687E15648 /* CanvasPicture.swift */; };
 		F997EC4625D66DA01E70C75A /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85EF7EB01015117DC8F76E0 /* PerformanceTests.swift */; };
@@ -548,6 +551,7 @@
 		449640F3E0130D8D0352A408 /* LayerNode+Coding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LayerNode+Coding.swift"; sourceTree = "<group>"; };
 		44F591A734E9BC9CC0AFDB01 /* checkbox_radio_radio_4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_radio_4.json; sourceTree = "<group>"; };
 		450E3AF29ABC2CF8B0EB9654 /* ScreenPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPrompt.swift; sourceTree = "<group>"; };
+		4534BB15EB25427FAAC15F0C /* structures-exact.swift.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "structures-exact.swift.txt"; sourceTree = "<group>"; };
 		454E825DC90519D50A9E5B82 /* design-sketch.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "design-sketch.json"; sourceTree = "<group>"; };
 		46E911A7B1F12EA42626BB26 /* SystemSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSymbol.swift; sourceTree = "<group>"; };
 		477F1E99CE379C9A7BA707E3 /* FreeformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformTests.swift; sourceTree = "<group>"; };
@@ -557,6 +561,7 @@
 		4846A01DE529740062611EFC /* TreeRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeRecords.swift; sourceTree = "<group>"; };
 		4A2452B50A25ACD85E727421 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		4A962BE1E5650EE6BBE4353A /* StoreChangeBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreChangeBenchmarkTests.swift; sourceTree = "<group>"; };
+		4AFFBA4580CA7CEDCD9F8CEE /* structures-structure.swift.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "structures-structure.swift.txt"; sourceTree = "<group>"; };
 		4C43E23B66611010DCADB150 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4C860245772672A5BCE55B13 /* HostedSketchInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedSketchInterpreter.swift; sourceTree = "<group>"; };
 		4CCD6C50053E816FCB2D5889 /* A2UIDiagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIDiagnostic.swift; sourceTree = "<group>"; };
@@ -575,6 +580,7 @@
 		55A1BE05FEB2747C363F1535 /* StrokeScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrokeScript.swift; sourceTree = "<group>"; };
 		5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiSelectionTests.swift; sourceTree = "<group>"; };
 		584EE4E584DAA4F206C8059F /* title_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = title_clean_2.json; sourceTree = "<group>"; };
+		5896790F74FED7EE5B3AE33A /* design-structures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "design-structures.json"; sourceTree = "<group>"; };
 		5B0F5DA2A3FD075C29339026 /* button_textField_textField_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_textField_textField_3.json; sourceTree = "<group>"; };
 		5B913915C2B0A41F3C06545B /* body_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_noisy_1.json; sourceTree = "<group>"; };
 		5D122FA3665A59285EC5D151 /* unknown_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_jittered_2b.json; sourceTree = "<group>"; };
@@ -1017,6 +1023,7 @@
 			children = (
 				648F8E45F2B97A3BBAE52BAC /* design-profile.json */,
 				454E825DC90519D50A9E5B82 /* design-sketch.json */,
+				5896790F74FED7EE5B3AE33A /* design-structures.json */,
 			);
 			path = Designs;
 			sourceTree = "<group>";
@@ -1028,6 +1035,8 @@
 				F588178437828A50F852BEB5 /* profile-exact.swift.txt */,
 				030523A35F11F2C346C2163B /* profile-structure.swift.txt */,
 				CA62CD7CE57EC5E6030EEAD1 /* sketch-structure.swift.txt */,
+				4534BB15EB25427FAAC15F0C /* structures-exact.swift.txt */,
+				4AFFBA4580CA7CEDCD9F8CEE /* structures-structure.swift.txt */,
 			);
 			path = Code;
 			sourceTree = "<group>";
@@ -1678,6 +1687,7 @@
 				5E350192BB6A875EA10DCEEA /* checkbox_radio_radio_4.json in Resources */,
 				FF5DEFA8CF6A9820FD8A964C /* design-profile.json in Resources */,
 				894C3C7C32B7A621F626F9A2 /* design-sketch.json in Resources */,
+				3833B09C910DCDA3F66BBB6C /* design-structures.json in Resources */,
 				31B9FE12BEA7E9C3A1B42323 /* divider_clean_1.json in Resources */,
 				AE6A78FD61E8AF8B898C5CB0 /* divider_clean_2.json in Resources */,
 				A06C28941B21D953FC69D31E /* divider_jittered_1a.json in Resources */,
@@ -1745,6 +1755,8 @@
 				CEE81C9EF25B30AB5D5BA34D /* stickyNote_jittered_2b.json in Resources */,
 				93E569B6431C568429C742A3 /* stickyNote_noisy_1.json in Resources */,
 				09B6559B809AE1A0963A75A9 /* stickyNote_noisy_2.json in Resources */,
+				E704F1F2281D21F840A93317 /* structures-exact.swift.txt in Resources */,
+				F79122F975AA5F12DAB3FC83 /* structures-structure.swift.txt in Resources */,
 				A5C7560F3AB465A4B9455EC9 /* textField_clean_1.json in Resources */,
 				ACFE53E58D0160C00135BD00 /* textField_clean_2.json in Resources */,
 				63A4D622D4AE02350DC2165C /* textField_jittered_1a.json in Resources */,

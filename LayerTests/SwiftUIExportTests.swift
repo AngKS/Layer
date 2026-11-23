@@ -579,11 +579,81 @@ struct SwiftUIExportTests {
         #expect(GenerateSwiftUICodeIntent.code(for: UUID(), in: profile) == nil)
     }
 
+    // MARK: - The structures fixture
+
+    /// Every screen's code in one text, each after a line naming its screen.
+    private static func everyScreensCode(_ content: TreeContent, settings: CodeSettings) -> String {
+        content.screens.indices
+            .map { "// ----- \(content.screens[$0].name)\n" + code(content, screen: $0, settings: settings) }
+            .joined(separator: "\n")
+    }
+
+    @Test func theStructuresFixtureReadsAndHoldsEachStructure() throws {
+        let content = try Self.fixture("design-structures")
+        #expect(content.screens.count == 3)
+
+        let first = content.screens[0].root
+        #expect(first.resolvedLayout != .free)
+        let layouts = first.children.map(\.resolvedLayout)
+        func isRow(_ node: LayerNode) -> Bool {
+            if case .stack(let stack) = node.resolvedLayout { return stack.axis == .horizontal }
+            return false
+        }
+        #expect(first.children.contains { isRow($0) && $0.children.count == 3 && $0.children.contains { $0.width.mode != .fit } })
+        #expect(layouts.contains { if case .grid(let grid) = $0 { return grid.columns == 3 } else { return false } })
+        #expect(first.children.contains { $0.resolvedLayout == .overlay(LayerNode.Alignment()) && $0.children.count == 2 })
+        let freeGroup = try #require(first.children.first { $0.kind == .group && $0.resolvedLayout == .free })
+        #expect(freeGroup.children.contains { $0.isHidden })
+        #expect(freeGroup.children.contains { $0.rotation == 30 })
+        let outer = try #require(first.children.first { $0.kind == .card })
+        #expect(outer.children.contains { $0.kind == .card })
+        let fillColumn = try #require(first.children.first {
+            if case .stack(let stack) = $0.resolvedLayout { return stack.axis == .vertical && stack.alignment == .fill }
+            return false
+        })
+        #expect(fillColumn.children.map(\.kind) == [.textField, .toggle])
+        #expect(first.children.contains { isRow($0) && $0.children.isEmpty })
+        #expect(first.children.contains { $0.name == "Say \"hi\" \u{1F44B}" })
+        #expect(Set(first.children.filter { $0.kind == .button }.compactMap(\.content.buttonLook)) == [.filled, .bordered, .plain])
+
+        #expect(content.device(of: content.screens[1]).isCustom)
+        #expect(content.device(of: content.screens[1]).size == CGSize(width: 198, height: 242))
+        #expect(content.screens[1].root.resolvedLayout != .free)
+
+        let sketched = content.screens[2].root
+        #expect(sketched.resolvedLayout == .free)
+        #expect(sketched.children.contains { $0.kind == .group && $0.resolvedLayout == .free && $0.children.count == 2 })
+        #expect(sketched.children.contains { isRow($0) })
+        #expect(sketched.children.contains { $0.kind == .card && $0.resolvedLayout == .free })
+        #expect(content.settings.tokens.rhythm == [4, 8, 12, 20, 28])
+        #expect(content.settings.tokens.card.padding == 12)
+        #expect(content.settings.tokens.card.fill == RGBColor(hex: 0xE5F0FF))
+    }
+
+    @Test func aFreeScreenWithStructureInsideReadsInReadingOrder() throws {
+        let content = try Self.fixture("design-structures")
+        let code = Self.code(content, screen: 2)
+        let lines = Self.lines(code)
+        #expect(lines.contains { $0.hasPrefix("VStack(alignment: .leading, spacing:") })
+        #expect(!code.contains("ZStack(alignment: .topLeading)"))
+        // The two buttons are one row.
+        let buttons = Self.block(startingWith: "HStack(", in: code)
+        #expect(!buttons.isEmpty)
+        // The laid-out row of a text and a toggle keeps its own stack, with the design's rhythm.
+        #expect(lines.contains { $0.hasPrefix("HStack(alignment: .center, spacing: DesignTokens.rhythm[") })
+        // The free group's texts are items of the root's inference: no block of their own.
+        #expect(code.contains("Text(\"Status\")") && code.contains("Text(\"Tilted\")"))
+        #expect(code.contains(".rotationEffect(.degrees(15))"))
+    }
+
     // MARK: - Goldens
 
     @Test func theGoldensAreWhatIsWritten() throws {
         let profile = try Self.fixture("design-profile")
+        let structures = try Self.fixture("design-structures")
         let written = [
+            "structures-structure.swift": Self.everyScreensCode(structures, settings: CodeSettings()),
+            "structures-exact.swift": Self.everyScreensCode(structures, settings: CodeSettings(layout: .absolute)),
             "profile-structure.swift": Self.code(profile),
             "profile-exact.swift": Self.code(profile, settings: CodeSettings(layout: .absolute)),
             "DesignTokens-standard.swift": Generator.tokensFile(in: Generator.Context(profile)).source,
