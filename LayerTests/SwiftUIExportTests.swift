@@ -123,6 +123,15 @@ struct SwiftUIExportTests {
             .map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
+    /// The modifiers after the closing brace of the first view that starts with `prefix`, trimmed.
+    static func modifiers(startingWith prefix: String, in code: String) -> [String] {
+        let raw = rawBlock(startingWith: prefix, in: code)
+        guard let first = raw.first,
+              let close = raw.lastIndex(where: { indent($0) == indent(first) && $0.trimmingCharacters(in: .whitespaces).hasPrefix("}") })
+        else { return [] }
+        return raw[(close + 1)...].map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
     static func number(_ value: CGFloat) -> String {
         let rounded = (value * 10).rounded() / 10
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(Double(rounded))
@@ -182,7 +191,9 @@ struct SwiftUIExportTests {
         leading.width = LayerNode.Sizing(.fit)
         var field = Self.leaf(.textField)
         field.width = LayerNode.Sizing(.fit)
-        let code = Self.code(Self.design(Self.stack(.vertical, spacing: 16, alignment: .fill), [title, trailing, leading, field]))
+        var button = Self.leaf(.button, "Continue")
+        button.width = LayerNode.Sizing(.fit)
+        let code = Self.code(Self.design(Self.stack(.vertical, spacing: 16, alignment: .fill), [title, trailing, leading, field, button]))
 
         let centred = Self.block(startingWith: "Text(\"Centred\")", in: code)
         #expect(centred.contains(".frame(maxWidth: .infinity)"))
@@ -190,6 +201,54 @@ struct SwiftUIExportTests {
         #expect(Self.block(startingWith: "Text(\"Trailing\")", in: code).contains(".frame(maxWidth: .infinity, alignment: .trailing)"))
         #expect(Self.block(startingWith: "Text(\"Leading\")", in: code).contains(".frame(maxWidth: .infinity, alignment: .leading)"))
         #expect(Self.block(startingWith: "TextField(", in: code).contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        // A stretched button's capsule spans the column, its title in the middle, as the canvas draws it.
+        let stretchedButton = Self.block(startingWith: "Button {", in: code)
+        #expect(stretchedButton.contains(".frame(maxWidth: .infinity)"))
+        #expect(!stretchedButton.contains { $0.hasPrefix(".frame(maxWidth: .infinity, alignment:") })
+    }
+
+    /// SwiftUI's stacks grow to the room they're offered when a child can, and the engine's hug what
+    /// they hold (review, Important 1). A stretching row that fits its height stays its tallest
+    /// child's height, and a stretching column that fits its width its widest child's, unless its own
+    /// stack stretches it; a stretched button in the row keeps its title in the middle (Important 2).
+    @Test func aStretchingStackThatFitsKeepsItsSize() {
+        // A row of words and a button, filling the column's width, fitting its height.
+        let row = Self.container(.group, Self.stack(.horizontal, spacing: 8, alignment: .fill),
+                                 [Self.text("One"), Self.text("Two"), Self.leaf(.button, "Go")])
+        // A stretching column that fits its width, beside words in a row.
+        let column = Self.container(.group, Self.stack(.vertical, spacing: 4, alignment: .fill),
+                                    [Self.text("Short"), Self.text("A longer line")], width: .fit)
+        let holder = Self.container(.group, Self.stack(.horizontal, spacing: 12), [column, Self.text("Beside")])
+        // The same rows, but held by their own sizes or stretched by their parent.
+        var tall = Self.container(.group, Self.stack(.horizontal, spacing: 24, alignment: .fill), [Self.text("Tall")], height: .fixed)
+        tall.frame.size.height = 80
+        let code = Self.code(Self.design(Self.stack(.vertical, spacing: 16), [row, holder, tall]))
+
+        let rowModifiers = Self.modifiers(startingWith: "HStack(alignment: .top, spacing: DesignTokens.rhythm[0])", in: code)
+        #expect(rowModifiers.first == ".fixedSize(horizontal: false, vertical: true)")
+        #expect(rowModifiers.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        let goButton = Self.block(startingWith: "Button {", in: code)
+        #expect(goButton.contains(".frame(height: 50)"))
+        #expect(goButton.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
+        #expect(!goButton.contains { $0.contains("alignment: .top") })
+
+        let columnModifiers = Self.modifiers(startingWith: "VStack(alignment: .leading, spacing: 4)", in: code)
+        #expect(columnModifiers.first == ".fixedSize(horizontal: true, vertical: false)")
+        // The row that holds the column fits, and nothing in it grows: nothing holds it.
+        #expect(!Self.modifiers(startingWith: "HStack(alignment: .top, spacing: DesignTokens.rhythm[1])", in: code)
+            .contains { $0.hasPrefix(".fixedSize(") })
+        // A row of fixed height is held by its frame.
+        let tallModifiers = Self.modifiers(startingWith: "HStack(alignment: .top, spacing: DesignTokens.rhythm[3])", in: code)
+        #expect(tallModifiers.contains(".frame(height: 80, alignment: .top)"))
+        #expect(!tallModifiers.contains { $0.hasPrefix(".fixedSize(") })
+
+        // Under a stretching column, the column is stretched across, so only the row's height is held.
+        let stretched = Self.code(Self.design(Self.stack(.vertical, spacing: 16, alignment: .fill), [row, column]))
+        #expect(Self.modifiers(startingWith: "HStack(alignment: .top, spacing: DesignTokens.rhythm[0])", in: stretched).first
+            == ".fixedSize(horizontal: false, vertical: true)")
+        let stretchedColumn = Self.modifiers(startingWith: "VStack(alignment: .leading, spacing: 4)", in: stretched)
+        #expect(!stretchedColumn.contains { $0.hasPrefix(".fixedSize(") })
+        #expect(stretchedColumn.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
     }
 
     @Test func justifyBecomesSpacers() {

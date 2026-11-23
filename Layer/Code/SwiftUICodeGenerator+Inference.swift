@@ -198,7 +198,7 @@ extension SwiftUICodeGenerator.ScreenWriter {
         }
         let fillsWidth = item.frame.width >= contentWidth - 1
         let centered = ElementLayout.isCentered(item.frame, in: screenWidth)
-        return container(item.node, frames: framesInFreeParent(item.node), rotation: item.rotation)
+        return container(item.node, frames: framesInFreeParent(item.node), stretched: (false, false), rotation: item.rotation)
             + Generator.placement(of: item.frame, margin: margin, fillsWidth: fillsWidth, centered: centered)
     }
 }

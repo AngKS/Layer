@@ -200,12 +200,14 @@ extension SwiftUICodeGenerator.ScreenWriter {
     }
 
     /// A container below the screen root as one view, its modifiers indented: a free one inferred
-    /// inside its content box and framed to its size; a laid-out one's block, padding and
-    /// `frames` (unindented); then a card's background, and its turn.
-    mutating func container(_ node: LayerNode, frames: [String], rotation: Double?) -> [String] {
+    /// inside its content box and framed to its size; a laid-out one's block, held to its own size
+    /// where it fits it, its padding and `frames` (unindented); then a card's background, and its
+    /// turn. `stretched` says which of its axes its stack stretches it across (F6).
+    mutating func container(_ node: LayerNode, frames: [String], stretched: (across: Bool, down: Bool),
+                            rotation: Double?) -> [String] {
         var lines = node.resolvedLayout == .free
             ? freeContainer(node)
-            : block(of: node) + padding(node) + Generator.indented(frames)
+            : block(of: node) + heldToItsSize(node, stretched: stretched) + padding(node) + Generator.indented(frames)
         if node.kind == .card {
             let background = cardBackground(node)
             lines.append("    .background(\(background.fill), in: .rect(cornerRadius: \(background.radius)))")
@@ -296,19 +298,31 @@ extension SwiftUICodeGenerator.ScreenWriter {
         let frames = Self.sizingFrames(of: child, in: parent)
         let rotation = Rotation.kept(child.rotation ?? 0)
         if child.isContainer {
-            lines += container(child, frames: frames, rotation: rotation)
+            lines += container(child, frames: frames.lines, stretched: (frames.stretchedAcross, frames.stretchedDown), rotation: rotation)
         } else {
-            lines += Generator.laidOutLeaf(Generator.Leaf(node: child, frame: child.frame, rotation: rotation), frames: frames)
+            lines += Generator.laidOutLeaf(Generator.Leaf(node: child, frame: child.frame, rotation: rotation), frames: frames.lines)
         }
         return lines
     }
 
-    /// The frames a child of a row, column, grid or overlay is written with, unindented: first
-    /// its fixed lengths, and the lengths of a fitting leaf whose SwiftUI view wouldn't take them
-    /// by itself; then, as far as it can go, a filling length, a length its stack stretches it
-    /// across (not a toggle, checkbox, radio, avatar or symbol, as in the engine: F6), and a grid
-    /// column's width, which the columns share equally.
-    private static func sizingFrames(of child: LayerNode, in parent: LayerNode) -> [String] {
+    /// A child's frames in a row, column, grid or overlay, and how they let it grow.
+    struct ChildFrames {
+        /// The frame modifiers, unindented.
+        var lines: [String] = []
+        /// Whether a frame lets it grow across, or down, as far as it is offered.
+        var growsAcross = false
+        var growsDown = false
+        /// Whether its stack stretches it across, or down, to the stack's own length (F6).
+        var stretchedAcross = false
+        var stretchedDown = false
+    }
+
+    /// The frames a child of a row, column, grid or overlay is written with: first its fixed
+    /// lengths, and the lengths of a fitting leaf whose SwiftUI view wouldn't take them by itself;
+    /// then, as far as it can go, a filling length, a length its stack stretches it across (not a
+    /// toggle, checkbox, radio, avatar or symbol, as in the engine: F6), and a grid column's width,
+    /// which the columns share equally.
+    private static func sizingFrames(of child: LayerNode, in parent: LayerNode) -> ChildFrames {
         func exact(_ sizing: LayerNode.Sizing, _ length: CGFloat, across: Bool) -> CGFloat? {
             switch sizing.mode {
             case .fixed: length
@@ -316,22 +330,24 @@ extension SwiftUICodeGenerator.ScreenWriter {
             case .fill: nil
             }
         }
-        func fills(_ sizing: LayerNode.Sizing) -> Bool {
-            if case .fill = sizing.mode { return true }
-            return false
-        }
         let own = Generator.contentAlignment(of: child)
         var width = (exact: exact(child.width, child.frame.width, across: true), flexible: fills(child.width), edge: own.horizontal)
         var height = (exact: exact(child.height, child.frame.height, across: false), flexible: fills(child.height), edge: own.vertical)
+        var found = ChildFrames()
 
         switch parent.resolvedLayout {
         case .stack(let stack) where stack.alignment == .fill && !NaturalSize.keepsItsShape(child.kind):
-            // Words keep their alignment across the room they're stretched over, as the canvas draws
-            // them; anything else sits at the start (F6, and the controller's ruling on it).
+            // Words, and a button's title, keep their place in the room they're stretched over, as
+            // the canvas draws them; anything else sits at the start (F6, and the rulings on it).
+            let keepsItsPlace = Generator.isText(child.kind) || child.kind == .button
             if stack.axis == .vertical, child.width.mode != .fixed {
-                (width.flexible, width.edge) = (true, Generator.isText(child.kind) ? own.horizontal : .start)
+                (width.flexible, width.edge) = (true, keepsItsPlace ? own.horizontal : .start)
+                found.stretchedAcross = true
             }
-            if stack.axis == .horizontal, child.height.mode != .fixed { (height.flexible, height.edge) = (true, .start) }
+            if stack.axis == .horizontal, child.height.mode != .fixed {
+                (height.flexible, height.edge) = (true, keepsItsPlace ? own.vertical : .start)
+                found.stretchedDown = true
+            }
         case .grid(let grid):
             (width.flexible, width.edge) = (true, grid.alignment.horizontal)
             // A grid row is as tall as its tallest child.
@@ -339,6 +355,7 @@ extension SwiftUICodeGenerator.ScreenWriter {
         default:
             break
         }
+        (found.growsAcross, found.growsDown) = (width.flexible, height.flexible)
 
         var frames: [String] = []
         let exactParts = [width.exact.map { "width: \(Generator.number($0))" }, height.exact.map { "height: \(Generator.number($0))" }]
@@ -352,7 +369,35 @@ extension SwiftUICodeGenerator.ScreenWriter {
             let alignment = Generator.alignmentName(horizontal: width.flexible ? width.edge : nil, vertical: height.flexible ? height.edge : nil)
             frames.append(".frame(\((flexibleParts + [alignment.map { "alignment: .\($0)" }]).compactMap { $0 }.joined(separator: ", ")))")
         }
-        return frames
+        found.lines = frames
+        return found
+    }
+
+    private static func fills(_ sizing: LayerNode.Sizing) -> Bool {
+        if case .fill = sizing.mode { return true }
+        return false
+    }
+
+    /// SwiftUI's stacks grow to the room they're offered when a child can grow; the engine's
+    /// containers hug what they hold. So a container that fits what it holds, and isn't stretched
+    /// by its own stack, is held to its own size on an axis where a child would grow it:
+    /// - down, when any child grows down (the engine measures a fitting height with no room
+    ///   offered, so nothing that fills or stretches down makes it taller): a stretching row's
+    ///   children then take the row's height, the tallest of them, as in the engine;
+    /// - across, for a stretching column when no child fills across (the engine measures a
+    ///   stretching column's width without stretching it, but a child that fills across takes the
+    ///   width offered, in both).
+    private func heldToItsSize(_ node: LayerNode, stretched: (across: Bool, down: Bool)) -> [String] {
+        let children = node.children.filter(isWritten)
+        let frames = children.map { Self.sizingFrames(of: $0, in: node) }
+        let down = node.height.mode == .fit && !stretched.down && frames.contains { $0.growsDown }
+        var across = false
+        if case .stack(let stack) = node.resolvedLayout, stack.axis == .vertical, stack.alignment == .fill,
+           node.width.mode == .fit, !stretched.across, !children.contains(where: { Self.fills($0.width) }) {
+            across = frames.contains { $0.growsAcross }
+        }
+        guard across || down else { return [] }
+        return ["    .fixedSize(horizontal: \(across), vertical: \(down))"]
     }
 
     /// The frame a row, column, grid or overlay is written with as an item of the inference, in
