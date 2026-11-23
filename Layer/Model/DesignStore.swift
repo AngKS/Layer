@@ -41,6 +41,9 @@ final class DesignStore {
     /// the change before its own was its own too.
     @ObservationIgnored private var changeCount = 0
 
+    /// Screens' roots laid out off the main actor, for the next change alone: see `withLaidOutAhead`.
+    @ObservationIgnored private var laidOutAhead: [TreeScreen.ID: LayerNode] = [:]
+
     /// Moves on with every change to the content, and is read so that whatever draws from
     /// something kept for one version is drawn again when the content changes. For keeping
     /// what is worked out from the content, for as long as it is as it was.
@@ -940,6 +943,14 @@ final class DesignStore {
         return try act(for: edit, body)
     }
 
+    /// Runs `body`, whose next change commits roots laid out off the main actor: `roots`, by screen. For that change
+    /// alone, the rules lay out nothing on a screen whose root is then the one given for it (plan 3, call 6).
+    func withLaidOutAhead<T>(_ roots: [TreeScreen.ID: LayerNode], _ body: () throws -> T) rethrows -> T {
+        laidOutAhead = roots
+        defer { laidOutAhead = [:] }
+        return try body()
+    }
+
     // MARK: Undo
 
     /// Adds an element to the list as its own change. Returns it as it is kept.
@@ -961,10 +972,13 @@ final class DesignStore {
     private func change(_ body: (inout DesignContent) -> Void) {
         let before = content
         let count = changeCount
+        // A hint for this change alone.
+        let ahead = laidOutAhead
+        laidOutAhead = [:]
         isChanging = true
         // The change and the tree's rules after it, in one access to the content, so that the
         // whole design is compared once (C6).
-        Self.applying(body, to: &content, previous: before)
+        Self.applying(body, to: &content, previous: before, laidOutAhead: ahead)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -989,10 +1003,31 @@ final class DesignStore {
     /// Makes a change, then cuts the pointers it left that the tree can't hold and runs the
     /// tree's rules, laying out what changed since `previous`. Anything that builds or moves a
     /// group whole therefore does it in one change: see `DesignContent.keepGroupsSound()`.
-    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent, previous: DesignContent) {
+    ///
+    /// A screen whose root was laid out ahead, and is that root now, is laid out already: the rules are told it was
+    /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
+    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent, previous: DesignContent,
+                                 laidOutAhead: [TreeScreen.ID: LayerNode] = [:]) {
         body(&content)
         content.pendingPointers = [:]
-        TreeRules.apply(to: &content.tree, after: previous.tree)
+        TreeRules.apply(to: &content.tree, after: holding(laidOutAhead, in: previous.tree, as: content.tree))
+    }
+
+    /// `previous` with each screen of `laidOut` holding its root there, when `content` has that screen with that root:
+    /// in its place, or added for a new screen.
+    private static func holding(_ laidOut: [TreeScreen.ID: LayerNode], in previous: TreeContent,
+                                as content: TreeContent) -> TreeContent {
+        guard !laidOut.isEmpty else { return previous }
+        var previous = previous
+        for screen in content.screens {
+            guard let root = laidOut[screen.id], screen.root == root else { continue }
+            if let index = previous.screens.firstIndex(where: { $0.id == screen.id }) {
+                previous.screens[index].root = root
+            } else {
+                previous.screens.append(screen)
+            }
+        }
+        return previous
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
