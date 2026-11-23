@@ -19,25 +19,65 @@
 
 **Starts when:** plan 4 is complete and merged into `feature/semantic-tree`; the "After plan 4" column of `docs/benchmarks/semantic-tree.md` is filled; `scripts/check-generated-swiftui.sh` and `Tools/ScreenBenchmarkHarness/run.sh check` pass on the branch.
 
+## Pre-flight amendments 2026-11-23
+
+The pre-flight scan is in `.superpowers/sdd/2026-11-23-semantic-tree-5-sketch-path/preflight.md`. The controller accepted every ruling, and each is written into the tasks below.
+
+- **F1.** Task 5 keeps `sketchedElement` for today's `changeKind`. Task 7 deletes it when `changeKind` becomes the wrapper.
+- **F2.** A sketched card (a reading, or Did you mean) has `style.tint == nil`, so it draws and exports the design's card fill, and it has no placeholder text.
+- **F3.** Plan 4's `setDevice(of:to:)` and the screen part of `addCustomDevice(_:forScreen:)` call `changeDevice`. `updateCustomDevice(_:)` reflows its free screens by intent in the same step. `changeDevice` writes through `updateTreeScreen` and lives in plan 4's `DesignStore+Devices.swift`.
+- **F4.** A move out of a container the pass made is declined by one check in the store's change pipeline, written outside the step. `ungroup` keeps its own decline. Tests go through `move`, `moveLayer` and plan 4's lift dropped free.
+- **F5.** A structure never holds one of its own shape: a row never takes a row, a column never takes a column, and a grid takes only leaves and cards.
+- **F6.** `aRaggedRowIsOfferedNotBuilt` uses 100 × 24 texts, and the accepted row's spacing is 16.
+- **F7.** No test reads a global counter. `neighbourhoodSizes(of:)` is kept per receiving container, and layout counts use `LayoutEngine.timesLaidOut(id)`.
+- **F8.** `-only-testing` takes struct names (the table in the Global Constraints). A run of 0 tests fails, and each new suite is one struct named as its file.
+- **F9.** The landing, a card's take and the pass stay within depth 32. At 5,000 nodes `addSketched` returns nil, and `convert` treats the strokes as unread.
+- **F10.** "As it made it" (call 2) is the container's whole value, children included, as it was after `build`. `TreeReconciler.Record` stays the reconciler's.
+- **F11.** The person's group in Task 9 holds two things, and drawings stay in Task 1's test. Task 6's locked image sits below the login's image.
+- **F12.** Task 11 converts batch 1's two waves as two batches, so their order is fixed.
+- **F13.** Task 11's UI test must pass. If simulated touches can't make the readings, it calls `XCTSkip` with the reason, which the ledger records.
+- **F14.** Task 12's marker set is plan 4's end-state set plus `DesignStore.swift`, which holds the two sketch wrappers, `addFloating` and `place(_:centeredAt:)`.
+- **F15.** Task 9 moves the suggestion's `place(of:)` onto the tree. `place(_:centeredAt:)` and `addFloating` stay marked, and Task 12 records them for plan 6.
+- **F16.** The fallout policy carries plan 4's (i)–(l). Plan 5's new clauses are (o) and (p).
+- **F17.** `CardReadingTests` asserts against `SketchConventions`' card constants. Task 8's tuning changes only the constants.
+- **F18.** Task 8 lists its 32 fixtures by count per variant.
+- **F19.** Recorded timings run on a quiet machine in "Layer iPad Pro 11 (st2-lane-c)". The always-on budget test measures up to three times.
+- **F20.** A column takes leading on a tie; a row takes centres.
+- **F21.** Call 8's placement reading is recorded in spec §5.
+- **F22.** Before a task that waits on another lane's task, its lane merges `feature/semantic-tree` into its branch.
+- **F23.** Task 7 runs the UI suite.
+- **F24.** `printsTheStructureReport` asserts the counts it prints.
+- **F25.** `SketchLanding` takes a laid-out parent's slot from plan 4's `TreeDrop.slot`.
+- **F26.** The sketch harness gets `TurnedRect`, `Rotation.rotate` and `DesignElement.shapeBounds` the way plan 3's screen package does, or from the shared stub, copied unchanged.
+- **F27.** The `addElement` wrapper passes confidence 1 and `.rules`.
+
 ## Depends on plan 4
 
 Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`, `update`, `parent(of:)`, `index`, `tree`, `device(of:)`) and none of plan 4's UI, except at four call sites. Assumed:
 
-1. **The device picker** (today `StylePanel.swift:288`; plan 4 adds custom frames to it) ends in one write of the screen's device. Task 4 replaces that write with `store.changeDevice(of:to:)`, inside the panel's edit run as today.
-2. **Moves and Ungroup** go through plan 2's `DesignStore.move(_:to:at:)` (the drag out of a row, the Layers panel) and `DesignStore.ungroup(_:)` in `Groups.swift` (the popover's Ungroup), as plan 2 Task 10 left them. Task 9 marks declines there. If plan 4 calls lower-level code, Task 9 adds the same one-line call at plan 4's call sites.
+1. **The device picker** is plan 4's `DevicePicker`, which writes through `DesignStore.setDevice(of:to:)` (nil is the iPhone). Plan 4 also changes a screen's device through `addCustomDevice(_:forScreen:)`, and resizes every screen on a custom frame through `updateCustomDevice(_:)`, which plan 4's F16 allows while screens use it. Task 4 makes `setDevice` and the screen part of `addCustomDevice` call `store.changeDevice(of:to:)`, and makes `updateCustomDevice` reflow each free screen on the device by intent, in the same step (F3). `MagicPenTab`'s New Screens picker sets the default for new screens, and isn't a device change.
+2. **Moves and Ungroup.** A node leaves a container through plan 2's `move(_:to:at:)` (plan 4's drops and `place`), `moveLayer(_:to:before:)` (the Layers panel), `position` (several things dragged), or the projection's My call 20 take-out (Siri and voice until plan 6). So Task 9 declines a move out of a container the pass made in one check in the store's change pipeline, which every path passes (call 11, F4). The popover's Ungroup reaches `DesignStore.ungroup(_:)` in `Groups.swift`, which declines on its own; plan 6's voice `ungroup` relies on it.
 3. **The selection and its rect:** `AppModel.selection` has one case for a single node, and `AppModel.viewRect(of:)` answers for it. This plan writes that case as `.element(ref)`; use plan 4's spelling. The structure pill computes its own rect from `TreeIndex.canvasShape(of:in:)` and the viewport.
-4. **The Layers panel** lists a container under its kind's or layout's name ("Card", "Grid"). The milestone UI test (Task 11) looks for those labels; if plan 4 labels them otherwise, the test uses plan 4's labels.
+4. **The Layers panel** lists a container under its kind's or layout's name ("Card", "Grid"), as plan 4's F7 has it. The milestone UI test (Task 11) looks for those labels.
+5. **What plan 4 leaves on the projection for plan 5** (its Task 12 Step 4), and where each goes (F15):
+   - `AppModel.convert`: Task 5 moves it to the tree;
+   - the suggestion's `place(of:)`: Task 9 moves it to the tree;
+   - `DesignStore.addElement` and `changeKind`: Tasks 5 and 7 make them marked wrappers;
+   - `addFloating` and `place(_:centeredAt:)` (library drops): they stay, marked, and Task 12 records them for plan 6;
+   - `ScreenTidy`: Task 10 deletes it.
+6. **The projection-marker set** is plan 4's end-state set, as its Task 12 and its F21 leave it (with `SelectionLayer.swift` and `PhoneScreenView.swift`). Task 12 adds `DesignStore.swift` to it (F14).
 
 ## Calls made in this plan
 
 1. **The pass runs once a batch settles, inside the last conversion's step.** A batch is the readings in flight together. When a conversion commits and no other group is in flight, the pass runs over the batch's nodes inside that conversion's edit, so an automatic structure undoes with it. If that last sketch made nothing, the pass's changes are a step of their own.
    - Why: §5 says "after a conversion batch settles" and "it joins the conversion's undo step". Each reading stays its own step, as today.
 2. **Every structure holds a new node, and the structures the pass made can grow.**
-   - A container the pass made in this session, still as it made it, is read as its members. "As it made it" means its `TreeReconciler.Record` (plan 3) is unchanged.
+   - A container the pass made in this session, still as it made it, is read as its members. "As it made it" means its whole value (`LayerNode ==`, its children included) is still the one recorded after `build` (F10). Plan 3's `TreeReconciler.Record` isn't used here: it leaves out `children`, and leaves out the frame of a container sized to fit, which every container the pass makes is.
    - A candidate that holds any of those members must hold all of them, plus a new node, and be bigger: more members, or a grid over a row or column. It replaces the old container.
    - The record lives in memory only, so after reopening nothing grows.
    - Why: a grid drawn a cell at a time with pauses arrives in four batches, and without growing it would end as two rows. Supersets only, so the pass never breaks up what it made, and any edit by the person stops it growing.
 3. **The order of inference:** a new card's inside, then grids, then rows, then columns, in which a row just built counts as one item. That gives one level of nesting per run (a column holding a row). Candidates are taken greedily by member count, then confidence, then reading order, and applied inner first.
+   - A structure never holds one of its own shape: a row never takes a row, a column never takes a column, and a grid takes only leaves and cards. A column may hold rows and grids (F5). A container the pass made that can't grow is therefore left alone by a structure of its shape.
    - Why: the hierarchy appears at once for the common form (a label and a toggle in a row, inside a column); a grid is never split into rows; the result is deterministic.
 4. **Confidence** is the product of three factors (§5): alignment, gaps and sizes. Each is `clamp(1 − error / (2 × limit), 0.5, 1)`, with the spec's tolerance as the limit.
    - Rows compare heights, columns compare widths, and grids compare both.
@@ -50,21 +90,23 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
    - One thing inside: card scores 0.6, and the others are unchanged.
    - Nothing inside: nothing changes.
    - The card is `.fixed` at the drawn box (whole points, grown to hold what it takes), free, and padded by the design's card padding. It takes the arrangeable siblings at least 90% inside only when it lands in a free container.
+   - The card has `style.tint` nil, so it draws and exports the design's card fill, and it has no placeholder text (F2). The accent other sketched kinds take would be its fill.
    - Why: two or more things inside make a container the likely meaning; one is as likely a button round its label. No corpus fixture has anything inside its outline, so no corpus reading can change. A card drawn in a row takes nothing, since taking a member out of a row is the person's choice.
 7. **Where a sketch lands** (§5, Edge cases):
    - The topmost screen under the sketch's centre, then the deepest container there whose turned shape holds the centre. A locked or hidden one hands it to its nearest unlocked, visible ancestor.
    - A card's sketch skips containers it encloses: they become its children, not its parent.
    - In a free container, `ElementLayout.sketched` places it. On the root it is given the screen's device. In a nested container it works in that container's own space, with a stand-in `DeviceFrame.custom` of the container's size.
-   - In a row, column or grid, it takes the slot nearest its centre (by x, by y, or in reading order). It is sized like the nearest sibling of its kind, else by the kind's natural sizing.
+   - In a row, column or grid, it takes the slot nearest its centre (by x, by y, or in reading order), which plan 4's `TreeDrop.slot(for:among:skipping:layout:)` gives (F25). It is sized like the nearest sibling of its kind, else by the kind's natural sizing.
+   - It lands in the deepest container whose child stays within depth 32, and a card takes no sibling whose subtree would pass it (F9).
    - Why: the stand-in keeps today's rules (two columns, centring, leading text) meaningful inside a card, and matching a sibling keeps a grid's cells alike.
 8. **Placement intents** are classified from the drawn box in screen points. The first match wins:
    - proportional: it spans at least 90% of the *content* width, which is the screen's width less its margin token on each side;
    - centred: its centre is within 6% of the screen's width of the middle;
-   - leading: it starts before the margin plus 15% of the content width (`ElementLayout`'s own "drawn leading" zone);
+   - leading: it starts before the margin plus 15% of the content width (`ElementLayout`'s "drawn leading" rule, with the device's margin token where `ElementLayout` uses a fixed 20);
    - trailing: it ends past the mirror of that;
    - fixed: none of these.
 
-   Canvas nodes get normalised bounds of zero and `.fixed`.
+   Canvas nodes get normalised bounds of zero and `.fixed`. Spec §5 records this reading of its placement list (F21).
    - Why: a button drawn across a phone between its margins spans 84–100% of the content but only 76–90% of the screen. Measured against the screen, almost nothing would be proportional.
 9. **Device changes:**
    - Only a free root's direct children move, and containers carry their insides.
@@ -82,6 +124,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - a column's gaps needn't be regular, and its gap factor is left out.
     - Why: the person asked ("tidy up", "space things out"), and evening out gaps is what they ask for. With the sketch's bar a typical screen has nothing that qualifies, so an existing feature would quietly stop working (anti-goal).
 11. **Declines:** three things mark `structureDeclined`: ✕ on the offer, Ungroup of a container the pass made, and moving a node out of one to another parent.
+    - Moving out is caught by one check in the store's change pipeline, whichever verb moved it (F4). After a change that isn't an undo or a redo, each node whose parent before the change was a container the pass made (`sketch?.decidedBy == .structure`), that container still existing, and whose parent now differs, is declined. A container that is gone (grown into another, undone, ungrouped) declines nothing this way. `ungroup` declines on its own.
     - A node with no intent gets one that carries the mark: its frame as its bounds, `decidedBy .structure`, its placement classified.
     - A decline is written without an undo step, as a suggested title is (`setTitle(undoable: false)`).
     - Why: §5, "the pass never fights the user". An undo step that only un-declined would be an Undo that seems to do nothing.
@@ -96,11 +139,11 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - Why: §5. Keeping the struct keeps today's `CorrectedReadingTests` unchanged.
 14. **Turned nodes are left out of structures.**
     - Why: rows and columns line up frames, and a turned node's frame isn't what is seen.
-15. **The sketch path reads the tree.** `convert` finds the screen and the reading's `existing` list from the tree. `addElement(_:from:to:adjust:)` and `changeKind(of:to:sketchedAt:adjust:)` keep their signatures as thin wrappers over the new verbs, marked `// PROJECTION: deleted in plan 6`.
+15. **The sketch path reads the tree.** `convert` finds the screen and the reading's `existing` list from the tree. `addElement(_:from:to:adjust:)` and `changeKind(of:to:sketchedAt:adjust:)` keep their signatures as thin wrappers over the new verbs, marked `// PROJECTION: deleted in plan 6`. `addElement`'s wrapper passes confidence 1 and `.rules`, as plan 6 converts its call sites (F27).
     - Why: 27 and 5 test call sites keep passing unchanged, which shows today's placement is kept.
 16. **Structure fixtures** are generated by the corpus generator beside the 156, named `structure-…`. The sketch corpus loader skips them, and the 156 stay byte for byte.
     - Why: the corpus style, deterministic. `generate` rewrites the folder, so both must come from one run.
-17. **The test-fallout policy gains (i) and (j)**, below.
+17. **The test-fallout policy gains (o) and (p)**, below. Plan 4's (i)–(l) still apply (F16).
 
 ## Global Constraints
 
@@ -113,6 +156,8 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - tree depth 32;
   - 5,000 nodes per design;
   - grid columns 1–12.
+
+  New: the store's actions refuse past depth 32 and 5,000 nodes (plan 1's fix). The sketch path and the pass keep within them: the landing and a card's take (call 7, Task 5), the structures the pass proposes (Task 3), and a refused `addSketched` leaving the strokes unread (Task 5) (F9).
 - **Layer's numbers:**
   - rhythm 8, 12, 16, 24, 32;
   - margins 20 (phone), 32 (tablet), 48 (desktop), 8 (watch), 20 (other);
@@ -143,7 +188,9 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - the full unit suite passes;
   - the UI suite fails no test outside plan 1's recorded baseline set (spec My call 19).
 
-  The UI suite runs in Tasks 4, 5, 9, 10, 11 and 12. `scripts/check-generated-swiftui.sh` passes at the end of Tasks 11 and 12.
+  The UI suite runs in Tasks 4, 5, 7, 9, 10, 11 and 12 (F23). `scripts/check-generated-swiftui.sh` passes at the end of Tasks 11 and 12.
+
+  The baseline set: failing `testAChangeIsKeptWhenTheAppGoesToTheBackgroundAndIsEnded`, `testMagicPenSketchesBecomeADesignWithCode` and `testTheReferenceDesignFitsTheCanvas`; flaky `testACloseCallOffersWhatItNearlyWasAndBecomesThatWhenTapped`, which counts as failing only if it fails again when run on its own. The set is fixed (My call 19). A new UI test that simulated touches can't drive calls `XCTSkip` with its reason, recorded in the ledger. It never joins the set (F13).
 - **The test-fallout policy.** A test written before this plan may be changed or retired only if it asserts one of these:
   - (a) the v1–v3 file or its readers: the JSON keys `elements` or `floating`, a top-level `canvas` object of settings, `drawing.data`, or a version below 4;
   - (b) a flat-list state the tree can't hold:
@@ -153,10 +200,11 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - (c) members of one canvas group at different scales;
   - (d) a write count the tree lowers, such as a container moved as one write instead of one write per member;
   - (e) floating-point noise below 1e-9 from composing transforms through a turned container. Switch to the file's `close` helper, or add one with tolerance 1e-6.
-  - (f)–(h) as in plan 3.
-  - New in plan 5:
-  - (i) it tests `ScreenTidy`'s one-column relayout, which this plan deletes (§5: the structure pass and placement intents replace it). It is retired.
-  - (j) it asserts `ScreenTidy`'s result through voice's `tidyScreen` or `changeScreenDevice` (frames, margins, the column, the rhythm). It is rewritten to assert the structure pass's or the placement intents' result. The voice lines and the one-step assertions stay.
+  - (f)–(h) as in plan 3: a replaced generation or export API, a stubbed hosted answer in the written form, and a record of something plan 3 deleted;
+  - (i)–(l) as in plan 4: a replaced canvas or panel API, a counter's lower bound, a counter narrowed to the test's own ids or a fixed wait made a poll, and a record of something plan 4 deleted.
+  - New in plan 5 (F16; plan 6 uses (k)–(n) for its own, so these are (o) and (p)):
+  - (o) it tests `ScreenTidy`'s one-column relayout, which this plan deletes (§5: the structure pass and placement intents replace it). It is retired.
+  - (p) it asserts `ScreenTidy`'s result through voice's `tidyScreen` or `changeScreenDevice` (frames, margins, the column, the rhythm). It is rewritten to assert the structure pass's or the placement intents' result. The voice lines and the one-step assertions stay.
 
   Each change is listed in its task, or recorded in the ledger with its clause. Every other failure is a bug to fix, not a test to change.
 - **Test commands.** `<Suite>` is the `@Suite` struct's name.
@@ -171,6 +219,26 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
   - The full unit suite is the same command without `-only-testing`.
   - The UI suite is the same command with `-testPlan Layer -only-testing:LayerUITests`.
+  - **Suite names (F8).** Where a step names a test file rather than a suite struct, run every struct the table lists, each with its own `-only-testing:LayerTests/<Struct>`. A suite nested in `HostedWindowSuites` runs as `-only-testing:LayerTests/HostedWindowSuites/<Struct>`. Plans 2–4 may rename or split some of these, so expand them as the branch has them when the step runs. A run that executes 0 tests counts as a failure. Every new suite in this plan is one struct named as its file.
+
+    | Name in this plan | Structs to run |
+    |---|---|
+    | SketchReadingTests | SketchAnalyzerTests, RuleInterpreterTests, SketchEngineTests, BoardTitleTests, SketchPromptTests, AskedReadingTests, HandwritingRecognizerTests |
+    | MagicPenComponentTests | InnerMarkTests, SmallControlTests, SketchedLayoutTests, NewControlCodeTests |
+    | ScreenGenerationTests (with SketchHintTests) | ScreenStreamParsingTests, ScreenPromptTests, SketchHintTests, ScreenGenerationLifecycleTests, as plan 3 leaves them (LMStudioLiveTests is gated) |
+    | HostedModelTests | HostedModelTests, ModelChoiceTests |
+    | CorrectedReadingTests | ChangedKindTests, KindSuggestionTests, SketchReadingLogTests |
+    | SiriIntentsTests | EntityKeyTests, ColourTests, DesignLibraryTests, DesignIndexTests, OpeningDesignTests, DesignActionTests, ImagePlaygroundTests, StrokeScriptTests, LookWordTests, MovingTests, and the suite plan 3 renamed ScreenBlueprintTests to |
+    | FormatPanelTests | HostedWindowSuites/TypingIntoTheFormatPanelTests, ScrubbingAFieldTests, PanelChangesBesideADragTests, HostedWindowSuites/PanelOriginTests, NumberDraftTests |
+    | DesignTests | ElementLayoutTests, ViewportTests, DesignStoreTests, AppModelTests, DesignFileTests, CodeGenerationTests, SymbolCatalogTests, DesignFileNameTests, CloudFileTests, ResourceTests, ClosingTests, FormatPanelEditTests, FileCheckTests, TurnedCodeTests |
+    | FlatStoreTests | FlatStoreTests, GradualEditStepTests, FlatFormatTests, as plan 2 leaves them |
+    | FreeformTests | SettingsTests, FreeformBehaviourTests, MoreMagicPenTests, MoreCodeTests, ScrubbingTests |
+    | GroupTests | GroupModelTests, GroupCommandTests, SelectingGroupsTests, GroupGeometryTests, GroupAsOneThingTests, LayerTreeTests (as plan 4 re-expresses it) |
+    | ConcurrentEditTests | ConcurrentEditTests, ConcurrentEditsGroupedByEventTests |
+    | VoiceToolsTests | VoiceToolsTests (the tidy lines), VoiceHandlesTests, CanvasPictureTests |
+    | already structs | SketchBenchmarkTests, LayoutEngineTests, VoiceScreenLayoutTests, DeviceFrameTests, VoiceAgentTests, PencilVoiceTests |
+  - **Counters (F7).** No test asserts a value of a global or process-wide counter, because suites run side by side. `StructureInference.neighbourhoodSizes(of:)` is kept per receiving container, and a test reads its own parent's entries. Layout is counted with `LayoutEngine.timesLaidOut(id)`, never `containersLaidOut`.
+  - **Timings (F19).** Every number written to the ledger or `docs/benchmarks/semantic-tree.md` (Task 8's pass timings, Task 12's measurements) is measured with no other lane or `xcodebuild` running, in "Layer iPad Pro 11 (st2-lane-c)" (19CD922B-1564-4FEF-A86A-4AF37B114B47), the baseline's simulator. The ledger records that the machine was quiet. An always-on timing test measures again, up to three times, while it is over budget, and fails only if all three are.
   - **Lanes B and C** run in their own worktrees (`.claude/worktrees/st5-lane-b`, `.claude/worktrees/st5-lane-c`). Their branches are `st5/lane-b` and `st5/lane-c`, cut from `feature/semantic-tree` after Task 1 is merged. Their commands are the same with:
     - simulator `Layer iPad Pro 11 (st5-lane-b)` or `Layer iPad Pro 11 (st5-lane-c)`, each cloned from `iPad Pro 11-inch (M5)`;
     - DerivedData `$HOME/Library/Developer/Xcode/DerivedData/Layer-st5-lane-b` or `-st5-lane-c`.
@@ -212,7 +280,8 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - Task 9 waits for Tasks 3 and 6;
   - Task 10 waits for Task 9 (`build`);
   - Task 11 waits for Tasks 1–10, and Task 12 for all.
-- No two lanes edit the same file at the same time. `Tools/SketchBenchmarkHarness/` is edited by Task 2, then by Task 8 after it. `VoiceToolbox.swift` and `ScreenTidyTests.swift` are lane C's. `AppModel.swift` and `DesignStore.swift` are lane A's.
+  - Before a task that waits on another lane's task, its lane merges `feature/semantic-tree`, with the awaited tasks merged, into its own branch, and re-runs `xcodegen generate` on a project-file conflict (F22). That is lane B before Task 8 (Tasks 2 and 5), and lane C before Task 10 (Tasks 6 and 9).
+- No two lanes edit the same file at the same time. `Tools/SketchBenchmarkHarness/` is edited by Task 2, then by Task 8 after it. `VoiceToolbox.swift`, `ScreenTidyTests.swift` and plan 4's `DesignStore+Devices.swift` are lane C's. `AppModel.swift` and `DesignStore.swift` are lane A's.
 
 ---
 
@@ -305,6 +374,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - The build adds `Layer/Tree/*.swift` and the model, projection and `Tools/Shared/` files that `Tools/ScreenBenchmarkHarness/run.sh` compiles (plan 3 Task 12), but not `Layer/A2UI/`, the screen prompt or the hosted client.
   - A `check` mode is added.
   - A type still missing on macOS gets a stub in `Tools/Shared/`. No app file changes to suit the harness.
+  - `TreeIndex` needs `TurnedRect`, and Task 8's `ElementLayout.swift` also needs `Rotation.rotate` and `DesignElement.shapeBounds`. All three live in `Layer/Model/Rotation.swift`. Do what plan 3's screen package does for `TurnedRect`: if it compiles the real `Rotation.swift` (with what that needs, such as `Viewport.swift`), the sketch harness compiles it too and drops `Tools/Shared/RotationStub.swift`; otherwise the stub gains them, copied unchanged, as its header asks (F26).
 - Create: `LayerTests/Goldens/SketchReadings.txt` (recorded in Step 1, before any rule changes), `LayerTests/CardReadingTests.swift`
 
 **Interfaces:**
@@ -337,10 +407,11 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The lines must equal `Goldens/SketchReadings.txt`.
     - With `TEST_RUNNER_LAYER_RECORD_READINGS=<dir>` set, the test writes the file there instead. Record it now, before Step 3, and commit it with the tests.
     - No fixture's candidates contain `card`.
+  - The card tests name the constants, not their values, so a tuning in Task 8 changes only `SketchConventions` (F17).
   - `anOutlineRoundTwoThingsIsACard`:
     - Existing are a title (96, 120, 200, 40) and a body (20, 170, 353, 40). The sketch is `StrokeScript` `box 10 100 373 130 16`.
-    - The top reading is `.element(.card)` at 0.95. Every other score is at most 0.5, and `RuleInterpreter().isCloseCall` is false.
-  - `anOutlineRoundOneThingMightBeACard`: a 260 × 56 pill round one text gives `.button` on top, and `.card` among the candidates at 0.6.
+    - The top reading is `.element(.card)` at `SketchConventions.cardAroundSeveral` (0.95). Every other score is at most `cardElsewhere` (0.5) times its score without the card, and `RuleInterpreter().isCloseCall` is false.
+  - `anOutlineRoundOneThingMightBeACard`: a 260 × 56 pill round one text gives `.button` on top, and `.card` among the candidates at `SketchConventions.cardAroundOne` (0.6).
   - `nothingInsideMeansNoCard`: the same box with the title at (20, 400, 200, 40) gives exactly today's candidates and scores.
   - `aThingHalfInsideIsNotInside`: a body straddling the outline with 50% inside gives no card.
   - `anOutcomeSaysHowSureAndWhoDecided`. It uses `SketchEngine(provider:)` with stub providers, as `SketchReadingTests` builds them.
@@ -409,7 +480,8 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
       /// no longer `parent`'s child, or not arrangeable.
       static func applying(_ structure: Structure, to parent: LayerNode) -> LayerNode?
       #if DEBUG
-      static var neighbourhoodSizes: [Int] { get }    // one entry per run, counted under a lock
+      /// One entry per run in that receiving container, counted under a lock (F7).
+      static func neighbourhoodSizes(of parent: UUID) -> [Int]
       #endif
   }
   ```
@@ -427,7 +499,10 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
         a row needs ≥ 2 members, one of them new
   columns: the items are the rows just applied (as one item, at their container's frame) and the rest; sort by minY;
         ≥ 3 items, gaps ≥ 0, one shared edge (leading, centre or trailing within 4), the largest and smallest gaps within
-        4 of each other (not required in tidy), nothing else between, one item new or a row holding one
+        4 of each other (not required in tidy), nothing else between, one item new or a row holding one;
+        when more than one edge fits, the one whose error is smallest against its tolerance, leading on a tie (F20)
+  never (F5, F9): a row holding a row, a column holding a column, a grid holding anything but leaves and cards, or a
+        structure that would put a member's subtree past depth 32
   confidence = alignment × gaps × sizes, each f(e, limit) = clamp(1 − e / (2·limit), 0.5, 1)    (call 4)
         alignment: e = the largest distance of the shared line or edge from its median, limit = its tolerance
         gaps:      e = largest gap − smallest; limit 32 for rows, 4 for columns (left out in tidy)
@@ -469,7 +544,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - two established texts (neither new);
     - a partner that is locked, hidden, turned 10°, declined, or a `.group` the person made (`sketch == nil`);
     - a partner farther than 48 from the neighbourhood.
-  - `threeAlignedFieldsMakeAColumn`: text fields (20, 200, 353, 44), (20, 260, 353, 44) and (20, 320, 353, 44) give a column `.start`, spacing 16, container (20, 200, 353, 164), confidence 1, applied.
+  - `threeAlignedFieldsMakeAColumn`: text fields (20, 200, 353, 44), (20, 260, 353, 44) and (20, 320, 353, 44) give a column `.start` (all three edges tie, so leading: F20), spacing 16, container (20, 200, 353, 164), confidence 1, applied.
   - `twoStackedThingsAreNotAColumn`.
   - `irregularGapsAreNotAColumnUnlessTidying`:
     - Fields at y 200, 260 and 328 (gaps 16 and 24) give nothing in sketch mode.
@@ -485,7 +560,9 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The result is `[X, Y, row[A, B]]`: the row takes B's slot.
     - A's and B's ids are kept, the row's id is the proposal's, and the members' frames are the proposal's.
     - `applying` returns nil once B is deleted from the parent.
-  - `thePassLooksOnlyAtTheNeighbourhood`: a root of 60 established texts, none within 48 pt of another or of one new text, gives no decision, and the last `neighbourhoodSizes` entry is 1.
+  - `thePassLooksOnlyAtTheNeighbourhood`: a root of 60 established texts, none within 48 pt of another or of one new text, gives no decision, and the last entry of `neighbourhoodSizes(of: root.id)` is 1 (F7).
+  - `aRowNeverHoldsARow` (F5): a row R the pass made, not in `grows`, and a new text beside it give no decision.
+  - `nothingIsBuiltPastDepth32` (F9): two new texts side by side in a free group whose children sit at depth 32 give no decision.
 
 - [ ] **Step 2: Run them.** Run `StructureInferenceTests`. Expected: FAIL.
 
@@ -502,23 +579,23 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 **Lane:** C (first; waits for Task 1)
 
 **Files:**
-- Create: `Layer/Tree/DeviceReflow.swift`, `Layer/Model/DesignStore+Device.swift`
+- Create: `Layer/Tree/DeviceReflow.swift`
 - Modify:
+  - `Layer/Model/DesignStore+Devices.swift` (plan 4's): `changeDevice(of:to:)` goes here. `setDevice(of:to:)` and the screen part of `addCustomDevice(_:forScreen:)` call it, and `updateCustomDevice(_:)` reflows each free screen on the device by intent in its own step (Depends on plan 4, item 1; F3);
   - `Layer/Intents/ScreenIntents.swift`: `ChangeScreenDeviceIntent.perform`;
-  - `Layer/Voice/VoiceToolbox.swift`: `changeScreenDevice`, whose words are unchanged;
-  - the device picker's write (Depends on plan 4, item 1).
-- Modify (fallout j): `LayerTests/ScreenTidyTests.swift`, only `VoiceScreenLayoutTests.changingTheDeviceReflowsTheScreen`
+  - `Layer/Voice/VoiceToolbox.swift`: `changeScreenDevice`, whose words are unchanged.
+- Modify (fallout p): `LayerTests/ScreenTidyTests.swift`, only `VoiceScreenLayoutTests.changingTheDeviceReflowsTheScreen`
 - Test: `LayerTests/DeviceReflowTests.swift`
 
 **Interfaces:**
-- Consumes: Task 1, plan 2's `reconcile(_:_:)`, `updateScreen(_:_:)`, `asOneStep(_:)`, `device(of:)` and `TreeValidator.check(_:on:)`.
+- Consumes: Task 1; plan 2's `reconcile(_:_:)`, `asOneStep(_:)` and `device(of:)`; plan 4's `updateTreeScreen(_:_:)`, `setDevice(of:to:)`, `addCustomDevice(_:forScreen:)` and `updateCustomDevice(_:)`; plan 1's `TreeValidator.check(_:on:)`.
 - Produces:
   ```swift
   enum DeviceReflow {   // pure
       /// New frames for a free root's children when its screen goes from `old` to `new` (§5, call 9). Unmoved ones aren't listed.
       static func frames(for root: LayerNode, from old: DeviceFrame, to new: DeviceFrame) -> [UUID: CGRect]
   }
-  extension DesignStore {
+  extension DesignStore {   // Layer/Model/DesignStore+Devices.swift
       /// One step: the screen's device, and its contents by placement intent (a free root) or re-laid by the rules (any
       /// other root). An iPhone is kept as no device, as today. Nothing happens for the same device.
       func changeDevice(of screenID: TreeScreen.ID, to device: DeviceFrame)
@@ -549,9 +626,10 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `aColumnScreenIsLaidOutAgain`: a column root's fill-width child is at minX 32 with width 756 on the iPad, and the root's frame is (0, 0, 820, 1180).
   - `aDeviceChangeIsOneUndoStep`: one undo restores every frame and the `deviceID`.
   - `everyPathChangesTheDeviceTheSameWay`:
-    - Three identical free screens are each changed to the iPad, one through the picker's binding, one through `ChangeScreenDeviceIntent`'s `perform` and one through voice's `changeScreenDevice(screen:device:)`.
+    - Three identical free screens are each changed to the iPad, one through `store.setDevice(of:to:)` (which plan 4's picker calls), one through `ChangeScreenDeviceIntent`'s `perform` and one through voice's `changeScreenDevice(screen:device:)`.
     - Their roots' children have equal frames, each `deviceID` is `"ipad"`, and each made one undo step.
-  - Rewrite `VoiceScreenLayoutTests.changingTheDeviceReflowsTheScreen` (fallout j):
+  - `editingACustomDeviceReflowsItsFreeScreens` (F3): a free screen on a 393 × 852 custom frame holds (203, 300, 170, 120). `updateCustomDevice` to 820 × 1180 moves it to (630, 300, 170, 120), in one undo step.
+  - Rewrite `VoiceScreenLayoutTests.changingTheDeviceReflowsTheScreen` (fallout p):
     - The line stays "Made S1 an iPad screen (820 × 1180)."
     - The login's title becomes (42, 75, 737, 41), its button (42, 420, 737, 50), and its image stays (20, 500, 200, 200).
     - Back to the iPhone, every frame is as it was and `deviceID` is nil.
@@ -560,14 +638,14 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 - [ ] **Step 2: Run them.** Run `DeviceReflowTests`. Expected: FAIL.
 
 - [ ] **Step 3: Implement.** `changeDevice` is `asOneStep`:
-  1. `updateScreen` sets the `deviceID`.
+  1. `updateTreeScreen` sets the `deviceID`, never the projection's `updateScreen`.
   2. For a free root, `reconcile` writes `DeviceReflow.frames` (computed from the old device).
 
-  Point the picker, the intent and voice's tool at it.
+  Point `setDevice(of:to:)`, the screen part of `addCustomDevice(_:forScreen:)`, the intent and voice's tool at it. `updateCustomDevice(_:)` reflows each free screen on that device by `DeviceReflow.frames` from the device's old size, in its own step; column screens re-lay through the rules, as plan 4 has them. `MagicPenTab`'s New Screens picker is left alone.
 
 - [ ] **Step 4: Run them, and the suites that must pass unchanged.** Run `DeviceReflowTests`, then these, which must pass unchanged apart from the rewritten test:
   - `VoiceScreenLayoutTests`, including `aTurnedElementKeepsItsAngleAndSizeOnANewDevice`;
-  - `SiriIntentsTests`, `FormatPanelTests`, `DeviceFrameTests`.
+  - `SiriIntentsTests`, `FormatPanelTests`, `DeviceFrameTests`, and plan 4's `CustomDevicesAndTokensTests`.
 
   Then run the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
@@ -583,12 +661,12 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 - Create: `Layer/Tree/SketchLanding.swift`, `Layer/Sketch/SketchedNode.swift`, `Layer/Model/DesignStore+Sketch.swift`
 - Modify:
   - `Layer/Sketch/SketchInterpreter.swift`: `LayerNode.adoptMarks(of:)`;
-  - `Layer/Model/DesignStore.swift`: `addElement(_:from:to:adjust:)` becomes a wrapper, and `sketchedElement` is deleted;
+  - `Layer/Model/DesignStore.swift`: `addElement(_:from:to:adjust:)` becomes a wrapper (confidence 1, `.rules`: F27). `sketchedElement` stays, private, because today's `changeKind` still calls it until Task 7 (F1);
   - `Layer/App/AppModel.swift`: `convert` reads the tree's screen and `existing`, writes through `addSketched`, and gives canvas readings an intent.
 - Test: `LayerTests/SketchLandingTests.swift`, `LayerTests/SketchToNodeTests.swift`
 
 **Interfaces:**
-- Consumes: Tasks 1 and 2, plan 1's `TreeIndex`, `NaturalSize` and `TurnedRect`, plan 2's `reconcile`, `update`, `device(of:)` and `DeviceFrame.custom`, and today's `ElementLayout.sketched`.
+- Consumes: Tasks 1 and 2, plan 1's `TreeIndex`, `NaturalSize` and `TurnedRect`, plan 2's `reconcile`, `update`, `device(of:)` and `DeviceFrame.custom`, plan 4's `TreeDrop.slot(for:among:skipping:layout:)` (F25), and today's `ElementLayout.sketched`.
 - Produces:
   ```swift
   struct SketchLanding: Equatable, Sendable {      // pure, Layer/Tree
@@ -631,9 +709,13 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - It has today's fields: placeholder text and `style.tint = Theme.accent`.
     - Its frame and text alignment come from `ElementLayout.sketched`, among the parent's visible children (call 7). It is `.fixed` on both axes.
     - A second button on a screen that has a filled one becomes bordered "Cancel", as today.
-  - In a laid-out parent: the slot is call 7's, and so is the sizing; the engine places it.
-  - A card is as in call 6, with `padding` from the design's card padding.
+  - In a laid-out parent: the slot is call 7's, given by `TreeDrop.slot` with a fresh id to skip (F25), and so is the sizing; the engine places it.
+  - A card is as in call 6, with `padding` from the design's card padding. Its `style.tint` is nil and it has no placeholder text, so it draws and exports the design's card fill (F2).
   - Every node carries `SketchIntent(sketched: <sketch in screen points>, on: device.size, margin: device.margin, …)`.
+- **Limits (F9):**
+  - The landing stops at the deepest container whose child stays within depth 32.
+  - A card takes no sibling whose subtree would pass depth 32.
+  - At 5,000 nodes `addSketched` returns nil, and `convert` treats the strokes as unread (`reject(keys)`), as it does a sketch it can't read.
 - **`convert`:**
   - Off a screen, the reading goes through `addFloating` as today, then gets `SketchIntent(sketched: bounds, on: nil, …)` in the same act.
   - The reading-log link, the recognised words (`content.text`) and the "Did you mean" offer stay as they are.
@@ -653,6 +735,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `onlyACentreInsideTheRowGoesIn`: a sketch centred 4 pt below the row lands on the root.
   - `offEveryScreenThereIsNoLanding`: nil.
   - `aCardSkipsWhatItEncloses`: a card sketch (10, 100, 373, 140) round a free group at (20, 110, 353, 100) lands on the root.
+  - `aSketchPastDepth32LandsInItsParent` (F9): a sketch over an empty free card at depth 32, whose child would sit at 33, lands in the card's parent.
 
   In `SketchToNodeTests` (`@MainActor`, with a store and an undo manager):
   - `aSketchedButtonIsANodeWithItsIntent`:
@@ -669,7 +752,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `aCardTakesWhatItEncloses`:
     - A title and a body sit on a free root. A card is sketched at (10, 100, 373, 120) round them, inside `asOwnStep`.
     - The root's children are `[card]`, and the card's are `[title, body]`, with the same ids and order and unchanged screen frames.
-    - The card's frame is the drawn box grown to hold them, `.fixed`, with layout nil and padding 16.
+    - The card's frame is the drawn box grown to hold them, `.fixed`, with layout nil, padding 16 and `style.tint == nil` (F2).
     - One undo leaves the root `[title, body]` at their frames.
   - `aCardInARowTakesNothing`, and `aCardLeavesLockedThingsWhereTheyAre`.
   - `theSecondButtonIsBorderedCancel`.
@@ -679,10 +762,11 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The root's last child is a `.button` whose `sketch.decidedBy` is `.rules` and whose confidence is that request's top score.
     - One undo removes it.
   - `aSketchOnTheCanvasRemembersItsBounds`: a wave off every screen gives a canvas text whose `originalBounds` are the sketch's canvas bounds, with `normalizedBounds == .zero` and `.fixed`.
+  - `aSketchOnAFullDesignIsLeftUnread` (F9): on a design of 5,000 nodes, `addSketched` returns nil, and after a conversion the strokes are still on the canvas, unread.
 
 - [ ] **Step 2: Run them.** Run `SketchLandingTests` and `SketchToNodeTests`. Expected: FAIL.
 
-- [ ] **Step 3: Implement** `SketchLanding`, `SketchedNode`, the store verbs (`addSketched` is `reconcile` with `SketchedNode.inserting`), the wrapper, and `convert`'s changes.
+- [ ] **Step 3: Implement** `SketchLanding`, `SketchedNode`, the store verbs (`addSketched` is `reconcile` with `SketchedNode.inserting`), the wrapper, and `convert`'s changes. Leave `sketchedElement` in place for `changeKind` (F1).
 
 - [ ] **Step 4: Run them, and the suites that must pass unchanged.** Run both suites, then these, which must pass unchanged (the wrapper keeps their 27 calls):
   - `SketchReadingTests`, `MagicPenComponentTests`, `CorrectedReadingTests`;
@@ -735,7 +819,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - Container frame (30, 300, 332, 256), confidence 1, movement 1.
   - `aGridGrowsFromItsRow`: a row R the pass made holds the top two images and is in `grows`. With the bottom two new, the result is one `.apply` grid of all four with `replacing == [R.id]`.
   - `aRowGrowsLonger`: R holds `[a, b]` and is in `grows`. A new `c` beside `b` gives a row `[a, b, c]` replacing R.
-  - `aRowNotInGrowsIsLeftAlone`: the same with R not in `grows` gives nothing.
+  - `aRowNotInGrowsIsLeftAlone`: the same with R not in `grows` gives nothing, since a row never takes a row (F5).
   - `aGrownStructureMustHoldAllOfIt`: a candidate holding one of R's members and a new node gives nothing.
   - `anLOfThreeIsNotAGrid`, and `aGridGrowsIntoAShortLastRow`: a growing 2 × 2 plus a new fifth image under its first column gives a 2-column grid of five.
   - `gridNearMisses`. Each case gives no grid:
@@ -752,7 +836,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The result is one `.apply(column)`: spacing 32 (the rhythm's nearest to the median gap, 167) and alignment `.start`.
     - The frame is (20, 75, 353, 355): the button's minY is 148 and the image's 230.
     - The confidence is 0.6175.
-  - `tidyingStillLeavesTheUntouchable`: a locked image between them stays out, and the column is above it.
+  - `tidyingStillLeavesTheUntouchable` (F11): a locked image at (20, 720, 120, 100), below the login's image and between no two members, stays a root child, unchanged, and the column of three is built above it.
   - `applyingAGrowthOpensTheOldContainer`: the result holds the grid, not R, and every image keeps its id.
 
 - [ ] **Step 2: Run them.** Run `StructureGridTests`. Expected: FAIL.
@@ -773,7 +857,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 - Modify:
   - `Layer/Model/DesignStore+Sketch.swift`: `changeKind(of:to:fallback:adjust:)`;
   - `Layer/Sketch/SketchedNode.swift`: `remade`;
-  - `Layer/Model/DesignStore.swift`: `changeKind(of:to:sketchedAt:adjust:)` becomes a wrapper;
+  - `Layer/Model/DesignStore.swift`: `changeKind(of:to:sketchedAt:adjust:)` becomes a wrapper, and `sketchedElement` is deleted (F1);
   - `Layer/App/AppModel.swift`: `acceptSuggestion`.
 - Test: `LayerTests/DidYouMeanTests.swift`
 
@@ -813,7 +897,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
 - [ ] **Step 3: Implement.** `acceptSuggestion` calls `changeKind(of: suggestion.ref.element, to:, fallback: <suggestion.sketch in screen points>) { $0.adoptMarks(of: suggestion.observation) }`.
 
-- [ ] **Step 4: Run them.** Run `DidYouMeanTests` and `CorrectedReadingTests`, which passes unchanged, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run `DidYouMeanTests` and `CorrectedReadingTests`, which passes unchanged, then the full unit suite and the UI suite: accepting "Did you mean" is a UI path (F23). Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Did you mean: the node is laid out again from the sketch it remembers, in the container it is in"`
 
@@ -821,13 +905,13 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
 ### Task 8: Structure fixtures, in the corpus's style
 
-**Lane:** B (after Task 6; waits for Tasks 2 and 5)
+**Lane:** B (after Task 6; waits for Tasks 2 and 5, which lane B merges in from `feature/semantic-tree` first: F22)
 
 **Files:**
 - Modify:
   - `Tools/SketchBenchmarkHarness/Generate.swift`: structure fixtures written beside the 156;
   - `Tools/SketchBenchmarkHarness/Harness.swift`: a `structure <fixtures-dir>` mode;
-  - `Tools/SketchBenchmarkHarness/run.sh`: adds `Layer/Model/ElementLayout.swift`, `Layer/Sketch/SketchedNode.swift` and `Layer/Debug/StructureBenchmark.swift`;
+  - `Tools/SketchBenchmarkHarness/run.sh`: adds `Layer/Model/ElementLayout.swift`, `Layer/Sketch/SketchedNode.swift` and `Layer/Debug/StructureBenchmark.swift`. `ElementLayout.swift` needs `Rotation.rotate`, `TurnedRect` and `DesignElement.shapeBounds`, which come as Task 2 settled (F26);
   - `Layer/Debug/SketchBenchmark.swift`: `SketchFixtureCorpus.load` also skips `structure-`.
 - Create: `Layer/Debug/StructureBenchmark.swift`, `LayerTests/Fixtures/structure-*.json` (generated), `LayerTests/StructureFixtureTests.swift`
 - Modify: `docs/benchmarks/semantic-tree.md` (a "Structure pass" section)
@@ -855,11 +939,11 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   }
   #endif
   ```
-- **The fixtures** number 32, drawn with `SketchSamples`' strokes and seeded jitter, like the corpus. Each holds things already on the screen (`existing`) and one batch of new sketches, using kinds that `ElementLayout.sketched` can put side by side:
-  - rows (8): a sketched toggle beside an existing label, two half-width images, three avatars; jittered; noisy;
-  - columns (6): three wide boxes (text fields), four stacked-line bodies; jittered; noisy;
-  - grids (6): 2 × 2 and 2 × 3 half-width images; jittered; noisy;
-  - cards (4): an outline round two existing texts, and round three. A card fixture's label is "card" when the reading made a card holding everything enclosed, and its decision is that of the card's inside: "none" for two, "apply" (a column) for three. Jittered and noisy versions of each;
+- **The fixtures** number 32, drawn with `SketchSamples`' strokes and seeded jitter, like the corpus. Each holds things already on the screen (`existing`) and one batch of new sketches, using kinds that `ElementLayout.sketched` can put side by side. The counts per variant are fixed (F18):
+  - rows (8): three bases (a sketched toggle beside an existing label, two half-width images, three avatars); 3 clean, 3 jittered (one of each base), 2 noisy (the toggle and the images);
+  - columns (6): two bases (three wide boxes as text fields, four stacked-line bodies); 2 clean, 2 jittered, 2 noisy;
+  - grids (6): two bases (2 × 2 and 2 × 3 half-width images); 2 clean, 2 jittered, 2 noisy;
+  - cards (4): two bases, an outline round two existing texts and round three; 2 clean, 1 jittered (round two), 1 noisy (round three). A card fixture's label is "card" when the reading made a card holding everything enclosed, and its decision is that of the card's inside: "none" for two, "apply" (a column) for three;
   - near misses (8):
     - a title 120 pt above a button;
     - two texts 40 apart;
@@ -875,7 +959,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `cleanAndJitteredFixturesBecomeTheirStructure`: the label and the decision equal what each fixture expects.
   - `nearMissesNeverGroup`: every near miss gives "none".
   - `noisyFixturesAreNeverTheWrongStructure`: the label found is the expected one, or "none".
-  - `printsTheStructureReport`: the counts, and the pass's p50 and p95.
+  - `printsTheStructureReport`: prints the counts, and the pass's p50 and p95, and asserts what it prints: 32 fixtures ran, and near misses grouped 0 (F24).
 
 - [ ] **Step 2: Run them.** Run `StructureFixtureTests`. Expected: FAIL (no fixtures).
 
@@ -885,13 +969,13 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `git status --porcelain LayerTests/Fixtures` must list only new `structure-` files: the 156 are byte for byte (call 16).
 
 - [ ] **Step 4: Run them, and tune within the limits.** Run `StructureFixtureTests`.
-  - If a fixture fails, tune only the builder's numbers: `reach`, and the card scores (re-running `CardReadingTests`).
+  - If a fixture fails, tune only the builder's numbers: `reach`, and the card scores, by their constants in `SketchConventions` alone, re-running `CardReadingTests`, which names the constants (F17).
   - The spec's thresholds and bars don't move.
   - Record each change, with before and after counts, in the doc's new section.
 
   Expected: PASS.
 
-- [ ] **Step 5: Run the harness.** `run.sh check` passes. `run.sh structure LayerTests/Fixtures` prints `structure: 32 fixtures, 32 as expected, near misses grouped 0` and the pass's p50 and p95. Record them in `docs/benchmarks/semantic-tree.md`.
+- [ ] **Step 5: Run the harness.** `run.sh check` passes. `run.sh structure LayerTests/Fixtures` prints `structure: 32 fixtures, 32 as expected, near misses grouped 0` and the pass's p50 and p95. Record them in `docs/benchmarks/semantic-tree.md`, measured on a quiet machine, and say so in the ledger (F19). The simulator p50 and p95 that `printsTheStructureReport` prints are recorded the same way, in "Layer iPad Pro 11 (st2-lane-c)".
 
 - [ ] **Step 6: Commit.** `git add -A && git commit -m "Structure fixtures: rows, columns, grids, cards and near misses drawn in the corpus's style, run through the rules and the pass on macOS and in the simulator"`
 
@@ -904,14 +988,14 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 **Files:**
 - Create: `Layer/Model/DesignStore+Structure.swift`, `Layer/App/AppModel+Structure.swift`
 - Modify:
-  - `Layer/App/AppModel.swift`: `convert` adds its node to the batch and ends the batch; `dropSelectionOfMissingThings` drops a stale offer;
+  - `Layer/App/AppModel.swift`: `convert` adds its node to the batch and ends the batch; `dropSelectionOfMissingThings` drops a stale offer; the kind suggestion's `place(of:)` reads the tree (`store.placed(_:)` and the index), so `dropSelectionOfMissingThings` never lowers the projection (F15). The stored state (`structureOffer`, the batch, the recorded values of the containers built) is declared in the class here; `AppModel+Structure.swift` holds the methods;
   - `Layer/Model/Groups.swift`: `ungroup` declines (Depends on plan 4, item 2);
-  - `Layer/Model/DesignStore+Tree.swift`: `move(_:to:at:)` declines a node leaving a container the pass made;
+  - `Layer/Model/DesignStore.swift`: the change pipeline declines a node moved out of a container the pass made, whichever verb moved it (call 11, F4);
   - `Layer/Chrome/SuggestionPill.swift`: shows the structure offer when no kind suggestion is up.
 - Test: `LayerTests/StructurePassTests.swift`
 
 **Interfaces:**
-- Consumes: Tasks 3, 5, 6 and 7, plan 2's `reconcile` and `update`, and plan 3's `TreeReconciler.Record`.
+- Consumes: Tasks 3, 5, 6 and 7, plan 2's `reconcile` and `update`, and plan 4's `placed(_:)`.
 - Produces:
   ```swift
   extension DesignStore {
@@ -937,7 +1021,8 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   ```
 - **The pass:**
   - **The receiving containers** are each batch node's parent that is free and is either a screen root or a container with a `sketch`, plus every new card, whose children count as new.
-  - **`grows`** holds the containers this model built in this session whose `TreeReconciler.Record` is still the one it recorded at building.
+  - **`grows`** holds the containers this model built in this session whose value (`LayerNode ==`, children included) is still the one it recorded after building (F10).
+  - **Declines** (call 11, F4): the move-out check runs after a change that isn't an undo or a redo, and writes its marks outside that change's step, as `setTitle(undoable: false)` does. A container that is gone declines nothing this way, so growth and undo stay clean.
   - **`.apply` decisions** are built in order. An `.offer` decision is kept only if it beats the one already kept on confidence: one offer per pass.
   - **The batch** is the nodes made since the batch began. It ends at the commit of a conversion while no other group is in flight. The pass then runs inside that conversion's `act`, or as a step of its own if that conversion made nothing (call 1).
   - **The offer goes** when a member's place, parent or presence changes, or its screen's place does: the same check as for a kind suggestion. Accepting builds the structure with the rhythm's spacing.
@@ -948,27 +1033,29 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The root's children are `[row]`, a `.stack(horizontal, spacing 12, .center)`, and `row.sketch.decidedBy == .structure`.
     - One undo leaves one image on the root at its frame, (30, 300, 160, 120) or (203, 300, 160, 120). A second undo leaves the root empty.
   - `aRaggedRowIsOfferedNotBuilt`:
-    - Three texts added by `store.add` at x 20, 124 and 254 go through `structurePass(over:)`.
+    - Three 100 × 24 texts added by `store.add` at x 20, 124 and 254 (as in `aRaggedRowIsOffered`) go through `structurePass(over:)`.
     - The root is unchanged, `shownStructureOffer?.structure.title == "Make a row?"`, and no undo step was added.
-    - `acceptStructureOffer()` builds the row as one step named "Make Row", with spacing 12, and one undo puts all three back.
+    - `acceptStructureOffer()` builds the row as one step named "Make Row", with spacing 16 (the median gap, 17, on the rhythm: F6), and one undo puts all three back.
   - `decliningMarksThemAndTheyAreNeverOfferedAgain`:
     - After `declineStructureOffer()`, each member's `sketch?.structureDeclined` is true, and `undoManager.canUndo` is as before.
     - A second pass over them gives no offer.
   - `anUngroupedStructureIsDeclined`: after a built row is ungrouped with `store.ungroup`, its children are declined, and a pass makes nothing.
-  - `takingOneOutOfARowDeclinesIt`: after `store.move(member, to: .screen(id))`, that member is declined.
+  - `takingOneOutOfARowDeclinesIt`: after `store.move(member, to: .screen(id))`, that member is declined. So is one taken out through `store.moveLayer(_:to:before:)` (the Layers panel), and one taken out by plan 4's lift dropped free (F4).
+  - `undoingABuiltRowDeclinesNothing`: one undo of a built row returns its members to the root, and none is declined.
   - `theOfferGoesWhenAMemberIsDeletedOrMoved`: one case each for deleted, moved, resized, turned, reparented and the screen moved.
   - `aStructureOfferWaitsForTheKindSuggestion`: while a kind suggestion is up, `shownStructureOffer` is nil. After `dismissSuggestion()` it is the offer.
-  - `lockedHiddenTurnedDrawnAndThePersonsAreNeverTouched`: a pass over a root holding each kind beside a new text never lists one of them as a member.
+  - `lockedHiddenTurnedDrawnAndThePersonsAreNeverTouched`: a pass over a root holding a locked, a hidden, a turned and a declined text, and a free `.group` of two the person made, beside a new text, never lists one of them as a member. A drawing never sits on a screen (the rules move it to the canvas), so Task 1's `whatThePassMayTake` covers it (F11).
   - `aGridDrawnCellByCellIsOneGrid`:
     - The four cells of `fourBoxesMakeATwoColumnGrid` are drawn as `box … ; cross …` in four separate batches.
     - After the second there is a row. After the fourth, the root holds one grid of the four images, every image id unchanged, and no row.
   - `buildingAGridFromARowDeclinesNothing`.
-  - `aPassLaysOutOnlyWhatItBuilt`: on a free screen of 100 nodes, one pass that builds a row raises `LayoutEngine.containersLaidOut` by at most 2: the new row and the root.
+  - `aPassLaysOutOnlyWhatItBuilt`: on a free screen of 100 nodes, one pass that builds a row raises `LayoutEngine.timesLaidOut` by at most 1 for the new row and for the root, and by 0 for every other container on the screen (F7).
+  - `theSuggestionsPlaceIsReadFromTheTree` (F15): with a kind suggestion up, a tree-verb change elsewhere on the screen raises that screen's `TreeProjection.lowerings(of:)` by 0, the counter first shown to be live as plan 4's F11 does it.
 
 - [ ] **Step 2: Run them.** Run `StructurePassTests`. Expected: FAIL.
 
 - [ ] **Step 3: Implement.**
-  - `build` is `reconcile` plus `update`. After building, the model records the container's `Record`.
+  - `build` is `reconcile` plus `update`. After building, the model records the container's value.
   - The pill shows `shownStructureOffer` with the label "Make a row?" (or column or grid), and the hint "Lays these out as a row".
   - Its ✕ has the label "Keep them as drawn". It is placed under the members' union, from `TreeIndex.canvasShape` through the viewport (Depends on plan 4, item 3).
 
@@ -980,15 +1067,15 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
 ### Task 10: Tidy is the structure pass, and ScreenTidy is gone
 
-**Lane:** C (waits for Task 9)
+**Lane:** C (waits for Tasks 6 and 9, which lane C merges in from `feature/semantic-tree` first: F22)
 
 **Files:**
 - Create: `Layer/Model/DesignStore+Tidy.swift`
 - Modify: `Layer/Voice/VoiceToolbox.swift` (`tidyScreen`; its words and the tool's description are unchanged)
 - Delete: `Layer/Model/ScreenTidy.swift`
-- Modify (fallout i, j): rename `LayerTests/ScreenTidyTests.swift` to `LayerTests/VoiceScreenLayoutTests.swift`:
-  - retire the suite "Tidying a screen's layout" (i);
-  - rewrite `VoiceScreenLayoutTests.tidyingLaysTheScreenOutAsOneUndoStep` (j).
+- Modify (fallout o, p): rename `LayerTests/ScreenTidyTests.swift` to `LayerTests/VoiceScreenLayoutTests.swift`:
+  - retire the suite "Tidying a screen's layout" (o);
+  - rewrite `VoiceScreenLayoutTests.tidyingLaysTheScreenOutAsOneUndoStep` (p).
 - Test: `LayerTests/TidyTests.swift`
 
 **Interfaces:**
@@ -1011,7 +1098,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
   - `aColumnScreenHasNothingToTidy`.
   - `tidyingLeavesTheUntouchableAlone`: a locked image stays a root child, where it was.
 
-  Rewrite `tidyingLaysTheScreenOutAsOneUndoStep` (j):
+  Rewrite `tidyingLaysTheScreenOutAsOneUndoStep` (p):
   - The line stays "Tidied the layout of S1."
   - The login's root holds one column of `[title, button, image]`, with the button's minY 148 and the image's 230.
   - One undo restores `content` exactly.
@@ -1020,7 +1107,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
 - [ ] **Step 3: Implement** `tidy`, and point `tidyScreen` at it. It answers "There is nothing on S1 that can be tidied." when `tidy` returns false. Then delete `ScreenTidy.swift` and retire its suite.
   - `grep -rn "ScreenTidy" Layer LayerTests Tools` finds nothing.
-  - Record the 27 retired tests in the ledger under (i).
+  - Record the 27 retired tests in the ledger under (o).
 
 - [ ] **Step 4: Run them, and the suites that must pass unchanged.** Run `TidyTests` and `VoiceScreenLayoutTests`, then these, which must pass unchanged: `VoiceToolsTests` (its `tidyScreen` lines, the scope and "gone"), `VoiceAgentTests` (the tool list) and `PencilVoiceTests`. Then run the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
@@ -1043,7 +1130,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
 - [ ] **Step 1: Write the failing tests.** `FirstMilestoneTests.aCardAndAGridSketchedBecomeTheTreeAndItsCode` (`@MainActor`):
   - **Setup:** an `AppModel` with an iPhone screen at (0, 0), scale 1, and zoom 1. The strokes come from `StrokeScript`, and each batch is converted with `sketchChanged`, `convertNow()` and `await waitForConversions()`.
-  - **Batch 1:** `wave 140 120 110 30 3; wave 30 170 330 34 4`. The root's kinds are `[.title, .body]`.
+  - **Batch 1:** `wave 140 120 110 30 3`, converted, then `wave 30 170 330 34 4`, converted. They are two conversions, one after the other, because conversions in one batch commit in no fixed order (F12). The root's kinds are `[.title, .body]`.
   - **Batch 2:** `box 10 100 373 130 16`.
     - The root's kinds are `[.card]`, and the card's are `[.title, .body]`, with their ids unchanged.
     - The card's layout is nil.
@@ -1059,14 +1146,14 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 
   UI: `SketchFlowUITests.testASketchedCardAndGridExportAGridAndACard`, with the file's helpers:
   - Draw a screen and `convert()`.
-  - Draw two zigzags as above and `convert()`.
+  - Draw the two zigzags as above, with a `convert()` after each.
   - Draw the card's box and `convert()`.
   - Draw four boxes, each with its two crossing strokes, and `convert()`.
   - In Layers, "Card" and the grid's row are listed (Depends on plan 4, item 4).
   - In Code, a line containing `Grid(` and one containing `.background(.background.secondary` exist.
 
 - [ ] **Step 2: Run them.** Run `FirstMilestoneTests`. Expected: PASS if Tasks 1–10 are right. A failure here is a bug in those tasks, never a change to the expected tree. Run the UI test.
-  - If simulated touches can't make the readings (the memory notes on stuck touches and pixel checks), record why in the ledger.
+  - The UI test must pass. If simulated touches can't make the readings (the memory notes on stuck touches and pixel checks), the test calls `XCTSkip` with the reason, and the ledger records it. It never joins the baseline set (F13).
   - The unit test stays the gate.
 
 - [ ] **Step 3: Record the design.** Record `design-sketched-milestone.json` and commit it. Run `scripts/check-generated-swiftui.sh`: it prints `N files typecheck`, counting the new design, and exits 0.
@@ -1086,7 +1173,7 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 - Modify: `docs/benchmarks/semantic-tree.md` (the "After plan 5" column, and the reading row)
 
 **Interfaces:**
-- Consumes: everything above, `SketchFixtureCorpus`, `RuleInterpreter`, `StructureInference.neighbourhoodSizes` and `LayoutEngine.containersLaidOut`.
+- Consumes: everything above, `SketchFixtureCorpus`, `RuleInterpreter`, `StructureInference.neighbourhoodSizes(of:)` and `LayoutEngine.timesLaidOut(_:)` (F7).
 - Produces: the measurements, and two always-on budget tests.
 
 - [ ] **Step 1: Write the budget tests** in `SketchConversionBudgetTests`:
@@ -1094,15 +1181,16 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
     - The screen is a free iPhone screen of 100 sketched nodes: 25 rows of a text, a body, a toggle and a divider, each with an intent.
     - Each of the 156 fixtures placed `.onScreen` whose rules reading is an element is timed with `ContinuousClock`. The timing covers the rules' reading plus `asOwnStep { addSketched; structurePass(over: [id]) }`; an untimed undo follows.
     - The timing leaves out the 900 ms rest and the 750 ms re-trace, which are deliberate pauses.
-    - The p95 is under 100 ms. It prints `BENCH sketch reading p50 p95` and `BENCH structure pass p50 p95`.
+    - The p95 is under 100 ms. While it is over, it is measured again, up to three times, and the test fails only if all three are (F19). It prints `BENCH sketch reading p50 p95` and `BENCH structure pass p50 p95`.
   - `thePassLooksOnlyAtTheReceivingContainer`:
     - Two such screens, and one reading on screen A.
-    - The last `neighbourhoodSizes` entry is at most the number of A's root children within `reach` of the new node, plus 1.
-    - `containersLaidOut` rises only for A's root and any container built.
+    - The last entry of `neighbourhoodSizes(of:)` A's root is at most the number of A's root children within `reach` of the new node, plus 1.
+    - `timesLaidOut` rises only for A's root and any container built, and by 0 for every container on screen B (F7).
 
 - [ ] **Step 2: Run them.** Run `SketchConversionBudgetTests`. Expected: PASS. If the time fails, profile the conversion (the landing, `reconcile`, the pass, `TreeRules`) and fix it before going on: the budget is the spec's.
 
 - [ ] **Step 3: Measure, and check the harnesses.**
+  - Measure with no other lane or `xcodebuild` running, in "Layer iPad Pro 11 (st2-lane-c)" (19CD922B-1564-4FEF-A86A-4AF37B114B47), the simulator the baseline used, and record in the ledger that the machine was quiet (F19).
   - `SketchBenchmarkTests.printsTheFullBenchmarkReport` gives the rules' p95.
   - `Tools/SketchBenchmarkHarness/run.sh check`, `run.sh run LayerTests/Fixtures` (87.8%, 137/156) and `run.sh structure LayerTests/Fixtures` pass.
   - `run.sh run LayerTests/Fixtures --model` gives 89.1% (139/156) if Apple Intelligence answers on this Mac; otherwise say so.
@@ -1112,8 +1200,9 @@ Plan 5 uses plan 2's store verbs (`reconcile`, `replaceChildren`, `add`, `move`,
 - [ ] **Step 4: Verify the plan's end state.**
   - The full unit suite passes, and the UI suite fails nothing outside the baseline set.
   - `scripts/check-generated-swiftui.sh` prints `N files typecheck` and exits 0.
-  - `grep -rn "ScreenTidy\|sketchedElement" Layer LayerTests Tools` finds nothing.
-  - `grep -rln "PROJECTION: deleted in plan 6" Layer` lists plan 3's set plus `Layer/Model/DesignStore.swift`, for the two sketch wrappers.
+  - `grep -rn "ScreenTidy\|sketchedElement" Layer LayerTests Tools` finds nothing. Comments don't name either.
+  - `grep -rln "PROJECTION: deleted in plan 6" Layer` lists plan 4's end-state set, as plan 4's ledger records it (with `SelectionLayer.swift` and `PhoneScreenView.swift`), plus `Layer/Model/DesignStore.swift`, for the two sketch wrappers, `addFloating` and `place(_:centeredAt:)` (F14, F15).
+  - Record that exact list in the ledger for plan 6, naming `addFloating` and `place(_:centeredAt:)` (library drops) as the projection callers plan 6 must move. Plan 6's text gains a line naming `place(_:centeredAt:)` before it runs (F15).
   - Record in the ledger the iPad checks plan 6's checklist must carry:
     - Pencil latency while sketching rows and a grid cell by cell;
     - "Make a row?" offered and declined;

@@ -454,6 +454,14 @@ and what it remembers.
     - `proportional`, when it spans 90% or more of the width;
     - `fixed` otherwise.
 
+  Amended 2026-11-23 by plan 5's call 8 (its pre-flight F21). The list above is not the order
+  the rules are tried in. They are tried proportional, centred, leading, trailing, then fixed,
+  because tried leading first, a button drawn across the screen between its margins would never
+  be proportional. "The width" for proportional is the content width: the screen's width less
+  its margin token on each side. The left margin zone runs to the margin plus 15% of the content
+  width, and the right one mirrors it. Device changes still scale proportional nodes with the
+  screen's width.
+
   "Did you mean" now re-lays out from `originalBounds` on the node, not from the 8-second
   suggestion alone. The offer still lasts 8 seconds.
 - **Placement intent on device changes.** When a free screen changes device, each sketched node
