@@ -634,6 +634,8 @@ the kinds A2UI lacks, using the SDK's `derive(id:components:functions:)`.
   - a per-screen "A2UI JSON" item in the Share menu;
   - Layer's own uses: telling a hosted model a screen, and round-trip tests.
 
+  Amended 2026-11-23 by plan 6's call 11 (its pre-flight F6). No hosted path edits or regenerates a screen whole. Typed screen edits and voice are told the indented canvas picture (§11), and a second description of the same screen would cost tokens and add nothing. So Layer's own use of the exporter this round is the round-trip tests, besides Share. Telling a hosted model a screen as A2UI is left for later and flagged to the user. Goal 6's "hosted edits" is read the same way.
+
 **Typed screen edits and voice** stay on the voice agent's tools, which now work on the tree (see
 §11). They are not regenerations.
 
