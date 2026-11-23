@@ -127,6 +127,48 @@ struct Structures: View {
                     .labelsHidden()
             }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            // Buttons in a fill column
+            VStack(alignment: .leading, spacing: DesignTokens.rhythm[1]) {
+                Button {
+                } label: {
+                    Text("Save")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 353, height: 50)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+                }
+                Button {
+                } label: {
+                    Text("Cancel")
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0.80, green: 0.42, blue: 0.34))
+                        .frame(width: 353, height: 50)
+                        .frame(maxWidth: .infinity)
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(Color(red: 0.80, green: 0.42, blue: 0.34), lineWidth: 1.5)
+                        }
+                }
+            }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Buttons in a fill row
+            HStack(alignment: .top, spacing: DesignTokens.rhythm[1]) {
+                Text("Hint")
+                    .font(.body)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                Button {
+                } label: {
+                    Text("Retry")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 83, height: 50)
+                        .frame(maxHeight: .infinity)
+                        .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+                }
+            }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             // Empty row
             HStack(alignment: .top, spacing: DesignTokens.rhythm[1]) {
             }

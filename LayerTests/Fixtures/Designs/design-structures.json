@@ -3,7 +3,7 @@
     "canvas": [],
     "screens": [
       {
-        "id": "7E570030-0000-4000-8000-A11CE0000030",
+        "id": "7E570036-0000-4000-8000-A11CE0000036",
         "name": "Structures",
         "origin": [
           0,
@@ -445,11 +445,98 @@
               }
             },
             {
+              "children": [
+                {
+                  "buttonLook": "filled",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001D-0000-4000-8000-A11CE000001D",
+                  "kind": "button",
+                  "text": "Save",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "buttonLook": "bordered",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001E-0000-4000-8000-A11CE000001E",
+                  "kind": "button",
+                  "text": "Cancel",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E57001F-0000-4000-8000-A11CE000001F",
+              "kind": "group",
+              "layout": {
+                "alignment": "fill",
+                "axis": "vertical",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "name": "Buttons in a fill column",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570020-0000-4000-8000-A11CE0000020",
+                  "kind": "text",
+                  "text": "Hint",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "buttonLook": "filled",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570021-0000-4000-8000-A11CE0000021",
+                  "kind": "button",
+                  "text": "Retry",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570022-0000-4000-8000-A11CE0000022",
+              "kind": "group",
+              "layout": {
+                "alignment": "fill",
+                "axis": "horizontal",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "name": "Buttons in a fill row",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
               "children": [],
               "height": {
                 "mode": "fit"
               },
-              "id": "7E57001D-0000-4000-8000-A11CE000001D",
+              "id": "7E570023-0000-4000-8000-A11CE0000023",
               "kind": "group",
               "layout": {
                 "alignment": "start",
@@ -477,7 +564,7 @@
           "height": {
             "mode": "fixed"
           },
-          "id": "7E57001E-0000-4000-8000-A11CE000001E",
+          "id": "7E570024-0000-4000-8000-A11CE0000024",
           "kind": "group",
           "layout": {
             "alignment": "start",
@@ -499,7 +586,7 @@
       },
       {
         "deviceID": "custom-7E57C0DE-0000-4000-8000-000000000045",
-        "id": "7E570031-0000-4000-8000-A11CE0000031",
+        "id": "7E570037-0000-4000-8000-A11CE0000037",
         "name": "Watch",
         "origin": [
           1000,
@@ -511,7 +598,7 @@
               "height": {
                 "mode": "fit"
               },
-              "id": "7E57001F-0000-4000-8000-A11CE000001F",
+              "id": "7E570025-0000-4000-8000-A11CE0000025",
               "kind": "title",
               "text": "Today",
               "width": {
@@ -522,7 +609,7 @@
               "height": {
                 "mode": "fit"
               },
-              "id": "7E570020-0000-4000-8000-A11CE0000020",
+              "id": "7E570026-0000-4000-8000-A11CE0000026",
               "kind": "toggle",
               "width": {
                 "mode": "fit"
@@ -542,7 +629,7 @@
           "height": {
             "mode": "fixed"
           },
-          "id": "7E570021-0000-4000-8000-A11CE0000021",
+          "id": "7E570027-0000-4000-8000-A11CE0000027",
           "kind": "group",
           "layout": {
             "alignment": "start",
@@ -563,7 +650,7 @@
         "scale": 1
       },
       {
-        "id": "7E570032-0000-4000-8000-A11CE0000032",
+        "id": "7E570038-0000-4000-8000-A11CE0000038",
         "name": "Sketched",
         "origin": [
           2000,
@@ -585,7 +672,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E570022-0000-4000-8000-A11CE0000022",
+              "id": "7E570028-0000-4000-8000-A11CE0000028",
               "kind": "title",
               "text": "Dashboard",
               "width": {
@@ -607,7 +694,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E570023-0000-4000-8000-A11CE0000023",
+              "id": "7E570029-0000-4000-8000-A11CE0000029",
               "kind": "button",
               "text": "Save",
               "width": {
@@ -629,7 +716,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E570024-0000-4000-8000-A11CE0000024",
+              "id": "7E57002A-0000-4000-8000-A11CE000002A",
               "kind": "button",
               "text": "Cancel",
               "width": {
@@ -652,7 +739,7 @@
                   "height": {
                     "mode": "fixed"
                   },
-                  "id": "7E570025-0000-4000-8000-A11CE0000025",
+                  "id": "7E57002B-0000-4000-8000-A11CE000002B",
                   "kind": "text",
                   "text": "Status",
                   "width": {
@@ -673,7 +760,7 @@
                   "height": {
                     "mode": "fixed"
                   },
-                  "id": "7E570026-0000-4000-8000-A11CE0000026",
+                  "id": "7E57002C-0000-4000-8000-A11CE000002C",
                   "kind": "text",
                   "rotation": 15,
                   "text": "Tilted",
@@ -695,7 +782,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E570027-0000-4000-8000-A11CE0000027",
+              "id": "7E57002D-0000-4000-8000-A11CE000002D",
               "kind": "group",
               "layout": {
                 "type": "free"
@@ -711,7 +798,7 @@
                   "height": {
                     "mode": "fit"
                   },
-                  "id": "7E570028-0000-4000-8000-A11CE0000028",
+                  "id": "7E57002E-0000-4000-8000-A11CE000002E",
                   "kind": "text",
                   "text": "Notifications",
                   "width": {
@@ -722,7 +809,7 @@
                   "height": {
                     "mode": "fit"
                   },
-                  "id": "7E570029-0000-4000-8000-A11CE0000029",
+                  "id": "7E57002F-0000-4000-8000-A11CE000002F",
                   "kind": "toggle",
                   "width": {
                     "mode": "fit"
@@ -742,7 +829,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E57002A-0000-4000-8000-A11CE000002A",
+              "id": "7E570030-0000-4000-8000-A11CE0000030",
               "kind": "group",
               "layout": {
                 "alignment": "center",
@@ -771,7 +858,7 @@
                   "height": {
                     "mode": "fixed"
                   },
-                  "id": "7E57002B-0000-4000-8000-A11CE000002B",
+                  "id": "7E570031-0000-4000-8000-A11CE0000031",
                   "kind": "avatar",
                   "width": {
                     "mode": "fixed"
@@ -791,7 +878,7 @@
                   "height": {
                     "mode": "fixed"
                   },
-                  "id": "7E57002C-0000-4000-8000-A11CE000002C",
+                  "id": "7E570032-0000-4000-8000-A11CE0000032",
                   "kind": "text",
                   "text": "Alex Tan",
                   "width": {
@@ -812,7 +899,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E57002D-0000-4000-8000-A11CE000002D",
+              "id": "7E570033-0000-4000-8000-A11CE0000033",
               "kind": "card",
               "layout": {
                 "type": "free"
@@ -843,7 +930,7 @@
               "height": {
                 "mode": "fixed"
               },
-              "id": "7E57002E-0000-4000-8000-A11CE000002E",
+              "id": "7E570034-0000-4000-8000-A11CE0000034",
               "kind": "button",
               "text": "Continue",
               "width": {
@@ -864,7 +951,7 @@
           "height": {
             "mode": "fixed"
           },
-          "id": "7E57002F-0000-4000-8000-A11CE000002F",
+          "id": "7E570035-0000-4000-8000-A11CE0000035",
           "kind": "group",
           "layout": {
             "type": "free"

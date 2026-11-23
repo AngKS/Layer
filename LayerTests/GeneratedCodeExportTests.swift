@@ -89,7 +89,8 @@ struct GeneratedCodeExportTests {
         tall.frame.size.height = 80
         let fills = Tests.container(.group, Tests.stack(.horizontal, spacing: 8, alignment: .center),
                                     [Tests.text("Left"), Tests.container(.group, Tests.stack(.vertical, spacing: 4, alignment: .fill),
-                                                                         [Tests.leaf(.textField), Tests.leaf(.toggle)])])
+                                                                         [Tests.leaf(.textField), Tests.leaf(.toggle),
+                                                                          Tests.leaf(.button, "Save"), Tests.leaf(.button, "Cancel")])])
         let justified = [LayerNode.Justify.spaceBetween, .center, .end, .spaceAround, .spaceEvenly].map { justify in
             Tests.container(.group, Tests.stack(.horizontal, spacing: 8, alignment: .center, justify: justify),
                             [Tests.text("A"), Tests.text("B"), Tests.leaf(.toggle)])

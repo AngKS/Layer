@@ -636,14 +636,26 @@ struct SwiftUIExportTests {
         let lines = Self.lines(code)
         #expect(lines.contains { $0.hasPrefix("VStack(alignment: .leading, spacing:") })
         #expect(!code.contains("ZStack(alignment: .topLeading)"))
-        // The two buttons are one row.
-        let buttons = Self.block(startingWith: "HStack(", in: code)
-        #expect(!buttons.isEmpty)
+        // The two buttons are one row: the first HStack holds both, and nothing else holds a button.
+        let buttonRow = Self.inside(startingWith: "HStack(alignment: .center, spacing: 20)", in: code)
+        #expect(buttonRow.filter { $0 == "Button {" }.count == 2)
+        #expect(code.components(separatedBy: "Button {").count - 1 == 3)
         // The laid-out row of a text and a toggle keeps its own stack, with the design's rhythm.
         #expect(lines.contains { $0.hasPrefix("HStack(alignment: .center, spacing: DesignTokens.rhythm[") })
-        // The free group's texts are items of the root's inference: no block of their own.
-        #expect(code.contains("Text(\"Status\")") && code.contains("Text(\"Tilted\")"))
+        // The free group's texts are items of the root's inference: the root's stack holds them directly,
+        // and no stack or overlay is opened between "Status" and "Tilted".
+        let root = Self.inside(startingWith: "VStack(alignment: .leading, spacing: 16)", in: code)
+        let status = try #require(root.firstIndex(of: "Text(\"Status\")"))
+        let tilted = try #require(root.firstIndex(of: "Text(\"Tilted\")"))
+        #expect(!root[status...tilted].contains { $0.hasPrefix("VStack(") || $0.hasPrefix("HStack(") || $0.hasPrefix("ZStack(") })
         #expect(code.contains(".rotationEffect(.degrees(15))"))
+        // The card's block is inferred inside its padding: the avatar and text row, then its padding and background.
+        let cardStart = try #require(code.range(of: "// Profile card"))
+        let card = Self.block(startingWith: "VStack(alignment: .leading, spacing: 16)", in: String(code[cardStart.lowerBound...]))
+        let cardRow = try #require(card.firstIndex { $0.hasPrefix("HStack(alignment: .center, spacing: 16)") })
+        let padding = try #require(card.firstIndex(of: ".padding(16)"))
+        let background = try #require(card.firstIndex { $0.hasPrefix(".background(DesignTokens.cardFill") })
+        #expect(cardRow < padding && padding < background)
     }
 
     // MARK: - Goldens

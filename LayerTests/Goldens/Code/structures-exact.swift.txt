@@ -123,6 +123,40 @@ struct Structures: View {
                 .labelsHidden()
                 .frame(width: 51, height: 31)
                 .offset(x: 20, y: 913)
+            Button {
+            } label: {
+                Text("Save")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 353, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 20, y: 960)
+            Button {
+            } label: {
+                Text("Cancel")
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.80, green: 0.42, blue: 0.34))
+                    .frame(width: 353, height: 50)
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color(red: 0.80, green: 0.42, blue: 0.34), lineWidth: 1.5)
+                    }
+            }
+                .offset(x: 20, y: 1018)
+            Text("Hint")
+                .font(.body)
+                .frame(width: 32, height: 50, alignment: .leading)
+                .offset(x: 20, y: 1084)
+            Button {
+            } label: {
+                Text("Retry")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 83, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 60, y: 1084)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea()
