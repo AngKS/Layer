@@ -24,6 +24,13 @@ struct ShareMenu: View {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
+            if let screen = sharedScreen(in: tree) {
+                let typeName = SwiftUICodeGenerator.typeNames(for: tree.screens)[screen.id] ?? SwiftUICodeGenerator.typeName(of: screen)
+                let shared = SharedA2UI(screen: screen, typeName: typeName)
+                ShareLink(item: shared, preview: SharePreview(shared.fileName)) {
+                    Label("A2UI JSON", systemImage: "curlybraces")
+                }
+            }
             if tree.screens.count > 1 {
                 Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
                     if let urls = CodeFiles.write(model.store.tree) {
@@ -96,6 +103,34 @@ struct SharedSwiftUICode: Transferable, Sendable {
 
     static var transferRepresentation: some TransferRepresentation {
         ProxyRepresentation(exporting: \.source)
+    }
+}
+
+/// A screen's A2UI, written when it is shared and not before, like `SharedSwiftUICode`: the menu is
+/// made again on every change to the design, and the file is as long as the screen is full.
+struct SharedA2UI: Transferable, Sendable {
+    let screen: TreeScreen
+    let typeName: String
+
+    init(screen: TreeScreen, typeName: String) {
+        self.screen = screen
+        self.typeName = typeName
+    }
+
+    /// The file's contents: the screen's messages as one JSON array.
+    var data: Data { A2UIExporter.document(for: screen, surfaceID: typeName) }
+
+    /// "<TypeName>.a2ui.json".
+    var fileName: String { typeName + ".a2ui.json" }
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .json) { shared in
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("A2UI-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(shared.fileName)
+            try shared.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
     }
 }
 

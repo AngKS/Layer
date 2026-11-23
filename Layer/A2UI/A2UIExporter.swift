@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import OrderedJSON
+import os
 
 /// Writes a screen's tree as A2UI 1.0 (spec §6, "A2UI export"): the import table read backwards.
 ///
@@ -54,6 +55,24 @@ enum A2UIExporter {
     static func jsonLines(for screen: TreeScreen, surfaceID: String) -> String {
         lines(messages(for: screen, surfaceID: surfaceID))
     }
+
+    /// The screen's messages as one JSON array, pretty-printed: a file the importer, and other A2UI tools,
+    /// read whole. It carries the screen's name and deviceID.
+    static func document(for screen: TreeScreen, surfaceID: String) -> Data {
+        #if DEBUG
+        written.withLock { $0[surfaceID, default: 0] += 1 }
+        #endif
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        return (try? encoder.encode(OrderedJSON.JSONValue.array(messages(for: screen, surfaceID: surfaceID)))) ?? Data("[]".utf8)
+    }
+
+    #if DEBUG
+    /// Documents written for this surface id, counted under a lock: tests count per surface.
+    static func documentsWritten(for surfaceID: String) -> Int { written.withLock { $0[surfaceID] ?? 0 } }
+
+    private static let written = OSAllocatedUnfairLock(initialState: [String: Int]())
+    #endif
 
     private static func lines(_ messages: [OrderedJSON.JSONValue]) -> String {
         let encoder = JSONEncoder()
