@@ -615,6 +615,8 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     var customDevices: [DeviceFrame] = []
     /// Custom frames this build can't read, as they were read, written back after the others.
     var unreadDevices: [JSONValue] = []
+    /// The numbers this design is laid out and styled by. The standard ones when unset.
+    var tokens = DesignTokens.standard
     var code = CodeSettings()
     /// The model that reads this design's sketches and names it. Nil in designs saved
     /// before there was a choice, which use the app's default (`ModelPreferences`).
@@ -626,7 +628,7 @@ struct CanvasSettings: Equatable, Codable, Sendable {
     /// Everything about the settings that is saved with the design.
     enum CodingKeys: String, CodingKey {
         case showsGrid, gridStyle, gridSpacing, snapsToGuides, snapsToGrid, showsMeasurements, showsFrameNames
-        case background, sketchDeviceID, code, model, customDevices
+        case background, sketchDeviceID, code, model, customDevices, tokens
     }
 
     static let paper = RGBColor(hex: 0xF4F3EC)
@@ -659,6 +661,7 @@ extension CanvasSettings {
         background = try container.decodeIfPresent(RGBColor.self, forKey: .background)
         sketchDeviceID = try container.decodeIfPresent(String.self, forKey: .sketchDeviceID)
         code = try container.decodeIfPresent(CodeSettings.self, forKey: .code) ?? CodeSettings()
+        tokens = ((try? container.decodeIfPresent(DesignTokens.self, forKey: .tokens)) ?? nil) ?? .standard
         unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
         (customDevices, unreadDevices) = Self.readDevices(in: container)
         // A choice this version can't read, from a newer Layer, is treated as no choice. It
@@ -672,7 +675,7 @@ extension CanvasSettings {
     }
 
     /// Writes the settings with the keys this version doesn't know, as `TreeContent` writes them
-    /// unwrapped. A list of custom frames is left out when there are none.
+    /// unwrapped. The tokens and a list of custom frames are left out when there are none to keep.
     func encode(to encoder: any Encoder) throws {
         try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -687,6 +690,7 @@ extension CanvasSettings {
         try container.encodeIfPresent(sketchDeviceID, forKey: .sketchDeviceID)
         try container.encode(code, forKey: .code)
         try container.encodeIfPresent(model, forKey: .model)
+        if tokens != .standard { try container.encode(tokens, forKey: .tokens) }
         if !customDevices.isEmpty || !unreadDevices.isEmpty {
             var list = container.nestedUnkeyedContainer(forKey: .customDevices)
             for device in customDevices { try list.encode(device) }

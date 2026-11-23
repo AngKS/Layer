@@ -241,8 +241,8 @@ enum Catalogue {
         isAskedForOnScreens: false,
         size: .fixed(.zero),
         minimumSize: CGSize(width: 8, height: 8),
-        tint: RGBColor(hex: 0xF2F2F7),
-        cornerRadius: .points(16),
+        tint: DesignTokens.standard.card.fill,
+        cornerRadius: .points(DesignTokens.standard.card.radius),
         hasEffects: true,
         traits: [.fill, .cornerRadius, .border]
     )
