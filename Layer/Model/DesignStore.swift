@@ -1215,10 +1215,8 @@ final class DesignStore {
 }
 
 private extension TreeChange {
-    /// What a change to the content touched: the tree's, and the board when what this build
-    /// couldn't read changed too.
+    /// What a change to the content touched: what it touched in the tree.
     init(from before: DesignContent, to after: DesignContent) {
         self.init(from: before.tree, to: after.tree)
-        if before.legacyUnread != after.legacyUnread { board = true }
     }
 }

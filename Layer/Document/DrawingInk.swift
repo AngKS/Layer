@@ -220,8 +220,8 @@ extension DesignContent {
         PKDrawing(strokes: elements.filter { $0.kind == .drawing && !$0.isHidden }.flatMap(\.canvasStrokes))
     }
 
-    /// Takes in ink that was kept as one drawing for the whole board, as it was until
-    /// file version 3: strokes that touch become one drawing each, on the open canvas.
+    /// Takes in ink for the whole board as one drawing: strokes that touch become one
+    /// drawing each, on the open canvas.
     mutating func adopt(_ ink: PKDrawing) {
         for strokes in InkGeometry.groups(ink.strokes) {
             if let drawing = DesignElement.drawing(strokes) { add(drawing, to: nil, scale: 1) }

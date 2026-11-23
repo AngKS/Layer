@@ -135,7 +135,7 @@ struct DesignLibraryTests {
         let url = folder.appendingPathComponent("Travel.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
-        let summary = DesignLibrary.read(url)
+        let summary = try #require(DesignLibrary.read(url))
         #expect(summary.title == "Travel")
         #expect(summary.content.screens.map(\.name) == ["Login"])
         #expect(summary.content.screens[0].elements.count == 1)
@@ -158,16 +158,16 @@ struct DesignLibraryTests {
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
         // Reading it would download it, and wait for that.
-        let listed = DesignLibrary.listed(url, isDownloaded: { _ in false })
+        let listed = try #require(DesignLibrary.listed(url, isDownloaded: { _ in false }))
         #expect(listed.title == "Trip")
         #expect(listed.content.screens.isEmpty)
         #expect(listed.id == DesignLibrary.id(for: url))
 
-        let downloaded = DesignLibrary.listed(url, isDownloaded: { _ in true })
+        let downloaded = try #require(DesignLibrary.listed(url, isDownloaded: { _ in true }))
         #expect(downloaded.title == "Travel")
         #expect(downloaded.content.screens.map(\.name) == ["Login"])
         // A design asked for by name is read whatever it takes.
-        #expect(DesignLibrary.read(url).title == "Travel")
+        #expect(try #require(DesignLibrary.read(url)).title == "Travel")
     }
 
     @Test func everyDesignIsListedWithThoseICloudHasNotDownloadedByTheirNamesAlone() throws {
@@ -209,7 +209,7 @@ struct DesignLibraryTests {
     @Test func aDesignUnchangedSinceItWasListedIsNotReadAgain() throws {
         let url = try savedDesign()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+        #expect(try #require(DesignLibrary.listed(url, isDownloaded: { _ in true })).title == "Travel")
 
         // The design inside changes, but its dates are put back as they were.
         let design = url.appendingPathComponent(DesignPackage.design)
@@ -220,11 +220,11 @@ struct DesignLibraryTests {
         for (item, date) in zip([url, design], dates) {
             try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: item.path)
         }
-        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Travel")
+        #expect(try #require(DesignLibrary.listed(url, isDownloaded: { _ in true })).title == "Travel")
 
         // Changed in the usual way, it is read again.
         try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(5)], ofItemAtPath: design.path)
-        #expect(DesignLibrary.listed(url, isDownloaded: { _ in true }).title == "Holiday")
+        #expect(try #require(DesignLibrary.listed(url, isDownloaded: { _ in true })).title == "Holiday")
     }
 }
 

@@ -38,7 +38,9 @@ enum TreeRules {
         for index in content.screens.indices {
             tidyInside(&content.screens[index].root)
         }
-        _ = tidy(&content.canvas)
+        let count = content.canvas.count
+        let removed = tidy(&content.canvas)
+        keepUnreadPlaces(&content.unreadCanvas, among: count, removing: removed)
         return layOut(&content, after: previous, measure: measure)
     }
 
@@ -218,18 +220,24 @@ enum TreeRules {
     /// (indices into `node.children`, not yet taken out) go. A file lists the unread ones at
     /// their indices among all of them (see `LayerNode`'s coding).
     static func keepUnreadPlaces(in node: inout LayerNode, removing removed: [Int]) {
-        guard !node.unreadChildren.isEmpty, !removed.isEmpty else { return }
-        let unread = Set(node.unreadChildren.map(\.index))
+        keepUnreadPlaces(&node.unreadChildren, among: node.children.count, removing: removed)
+    }
+
+    /// The same for any list of nodes with unread ones among them, a node's children or the
+    /// canvas's nodes: `count` read nodes, of which those at `removed` go.
+    static func keepUnreadPlaces(_ unread: inout [LayerNode.UnreadChild], among count: Int, removing removed: [Int]) {
+        guard !unread.isEmpty, !removed.isEmpty else { return }
+        let taken = Set(unread.map(\.index))
         var places: [Int] = [], place = 0
-        for _ in node.children {
-            while unread.contains(place) { place += 1 }
+        for _ in 0..<count {
+            while taken.contains(place) { place += 1 }
             places.append(place)
             place += 1
         }
         let gone = removed.map { places[$0] }
-        for index in node.unreadChildren.indices {
-            let place = node.unreadChildren[index].index
-            node.unreadChildren[index].index = place - gone.count { $0 < place }
+        for index in unread.indices {
+            let place = unread[index].index
+            unread[index].index = place - gone.count { $0 < place }
         }
     }
 

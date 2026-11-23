@@ -136,6 +136,17 @@ enum TreeLift {
         TreeEdit.give(children, to: &node)
     }
 
+    /// Gives the canvas `nodes` in place of those it has, as `give(_:to:)` gives a node its children:
+    /// each canvas node this build couldn't read keeps its place among those that stay.
+    static func give(_ nodes: [LayerNode], toCanvasOf content: inout TreeContent) {
+        if !content.unreadCanvas.isEmpty {
+            let staying = Set(nodes.map(\.id))
+            TreeRules.keepUnreadPlaces(&content.unreadCanvas, among: content.canvas.count,
+                                       removing: content.canvas.indices.filter { !staying.contains(content.canvas[$0].id) })
+        }
+        content.canvas = nodes
+    }
+
     /// How many canvas points each of an element's own is drawn as: 1 for none, or one that isn't a size.
     private static func drawnScale(_ scale: CGFloat?) -> CGFloat {
         scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1

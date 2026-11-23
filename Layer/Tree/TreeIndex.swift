@@ -59,10 +59,13 @@ struct TreeIndex: Sendable {
         let rect = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
                           width: size.width, height: size.height)
         let isLocked = locked || node.isLocked, isHidden = hidden || node.isHidden
-        guard entries[node.id] == nil else { return }
-        entries[node.id] = Entry(host: host, parent: parent, siblingIndex: siblingIndex, depth: path.count - (host == .canvas ? 1 : 0),
-                                 path: path, toHost: toHost, hostShape: TurnedRect(rect: rect, degrees: degrees),
-                                 isLockedWithAncestors: isLocked, isHiddenWithAncestors: isHidden)
+        // A second node of one id, which only a damaged design has, leaves the first its entry;
+        // what it holds is still indexed, where it is.
+        if entries[node.id] == nil {
+            entries[node.id] = Entry(host: host, parent: parent, siblingIndex: siblingIndex, depth: path.count - (host == .canvas ? 1 : 0),
+                                     path: path, toHost: toHost, hostShape: TurnedRect(rect: rect, degrees: degrees),
+                                     isLockedWithAncestors: isLocked, isHiddenWithAncestors: isHidden)
+        }
         for (index, child) in node.children.enumerated() {
             walk(child, host: host, parent: node.id, siblingIndex: index, path: path + [index],
                  parentToHost: toHost, parentScale: scale, parentDegrees: degrees, locked: isLocked, hidden: isHidden)

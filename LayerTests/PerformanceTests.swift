@@ -26,7 +26,7 @@ final class DesignIndexerPerformanceTests: XCTestCase {
     }
 }
 
-/// Saving a design re-encodes `drawing.data` every time, even when only the design's
+/// Saving a design writes its design file every time, even when only the design's
 /// screens and elements changed and the ink was left untouched. That should be cheap.
 @MainActor
 final class DesignFilePerformanceTests: XCTestCase {

@@ -79,6 +79,9 @@ struct TreeScreen: Identifiable, Equatable, Sendable, Codable, KeepsUnknownKeys 
 struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
     var screens: [TreeScreen] = []
     var canvas: [LayerNode] = []
+    /// Canvas nodes this build couldn't read, each kept at its index among the canvas's nodes,
+    /// as a node keeps its unread children.
+    var unreadCanvas: [LayerNode.UnreadChild] = []
     var title: String?
     var settings = CanvasSettings()
     /// What a newer Layer saved in the content that this version doesn't know.
@@ -95,7 +98,11 @@ struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         screens = try container.decodeIfPresent([TreeScreen].self, forKey: .screens) ?? []
-        canvas = try container.decodeIfPresent([LayerNode].self, forKey: .canvas) ?? []
+        if container.contains(.canvas), try !container.decodeNil(forKey: .canvas) {
+            // One at a time, so that a node this build can't read doesn't stop the rest from opening.
+            var list = try container.nestedUnkeyedContainer(forKey: .canvas)
+            (canvas, unreadCanvas) = try LayerNode.read(from: &list)
+        }
         title = try container.decodeIfPresent(String.self, forKey: .title)
         settings = try container.decodeIfPresent(CanvasSettings.self, forKey: .settings) ?? CanvasSettings()
         unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
@@ -105,7 +112,8 @@ struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
         try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(screens, forKey: .screens)
-        try container.encode(canvas, forKey: .canvas)
+        var list = container.nestedUnkeyedContainer(forKey: .canvas)
+        try LayerNode.write(canvas, with: unreadCanvas, to: &list)
         try container.encodeIfPresent(title, forKey: .title)
         try container.encode(settings, forKey: .settings)
     }
@@ -129,10 +137,11 @@ enum TreeManifest {
         }
     }
 
-    static func encode(_ content: TreeContent, fileName: String?) throws -> Data {
+    /// The file as `version` says, which is this one's unless a test writes a design from another.
+    static func encode(_ content: TreeContent, fileName: String?, version: Int = TreeManifest.version) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        return try encoder.encode(WithUnknownKeys(File(content: content, fileName: fileName)))
+        return try encoder.encode(WithUnknownKeys(File(content: content, fileName: fileName, version: version)))
     }
 
     static func decode(_ data: Data) throws -> (content: TreeContent, fileName: String?) {
@@ -153,15 +162,18 @@ enum TreeManifest {
     private struct File: Codable, KeepsUnknownKeys {
         var content: TreeContent
         var fileName: String?
+        /// Read from the header rather than here; written as it is.
+        var version = TreeManifest.version
         var unknownKeys: UnknownKeys { content.manifestUnknownKeys }
 
         enum CodingKeys: String, CodingKey {
             case version, content, fileName
         }
 
-        init(content: TreeContent, fileName: String?) {
+        init(content: TreeContent, fileName: String?, version: Int) {
             self.content = content
             self.fileName = fileName
+            self.version = version
         }
 
         init(from decoder: any Decoder) throws {
@@ -174,7 +186,7 @@ enum TreeManifest {
         func encode(to encoder: any Encoder) throws {
             try unknownKeys.encode(to: encoder)
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(TreeManifest.version, forKey: .version)
+            try container.encode(version, forKey: .version)
             try container.encode(content, forKey: .content)
             try container.encodeIfPresent(fileName, forKey: .fileName)
         }

@@ -348,7 +348,7 @@ private extension TreeContent {
             case .screen(let id):
                 if let screen = screens.firstIndex(where: { $0.id == id }) { TreeLift.give(result.nodes, to: &screens[screen].root) }
             case .canvas:
-                canvas = result.nodes
+                TreeLift.give(result.nodes, toCanvasOf: &self)
             }
             for entry in lift.was { pending[entry.element.id] = nil }
             for element in lift.list { pending[element.id] = nil }

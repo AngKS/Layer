@@ -377,7 +377,7 @@ struct ModelChoiceTests {
     /// The default is the app's, so it is never changed here, even for a moment: other
     /// tests running alongside read it.
     @Test func aDesignSavedBeforeThereWasAChoiceUsesTheDefault() throws {
-        let old = #"{"screens":[],"floating":[],"canvas":{"showsGrid":true}}"#
+        let old = #"{"screens":[],"canvas":[],"settings":{"showsGrid":true}}"#
         let content = try JSONDecoder().decode(DesignContent.self, from: Data(old.utf8))
         #expect(content.canvas.model == nil)
         #expect(content.canvas.resolvedModel(defaultingTo: .hosted(.openAI, model: "gpt-test")) == .hosted(.openAI, model: "gpt-test"))
@@ -395,7 +395,7 @@ struct ModelChoiceTests {
     }
 
     @Test func aChoiceFromANewerLayerStillOpens() throws {
-        let newer = #"{"canvas":{"model":{"provider":42}}}"#
+        let newer = #"{"canvas":[],"settings":{"model":{"provider":42}}}"#
         let content = try JSONDecoder().decode(DesignContent.self, from: Data(newer.utf8))
         #expect(content.canvas.model == nil)
     }

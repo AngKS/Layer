@@ -132,8 +132,8 @@ extension TreeContent {
     /// The change `before`→`after` taken back from this content, and only that change: whatever
     /// has changed since stays as it is now. With nothing else changed since, that is `before`.
     ///
-    /// The title goes back only if it is still the one the step gave; the settings and unknown
-    /// keys go back whole, as today. Screens go back by today's list rule, their roots' children
+    /// The title goes back only if it is still the one the step gave; the settings, unknown
+    /// keys and the canvas nodes this build couldn't read go back whole, as today. Screens go back by today's list rule, their roots' children
     /// left out. Then each node the step changed has its fields taken back (its parent among
     /// them), what it added goes and what it removed comes back, and each parent's list has what
     /// the step moved in it put back where it was among what is there now. A node moved to
@@ -146,6 +146,7 @@ extension TreeContent {
         if after.settings != before.settings { result.settings = before.settings }
         if after.unknownKeys != before.unknownKeys { result.unknownKeys = before.unknownKeys }
         if after.manifestUnknownKeys != before.manifestUnknownKeys { result.manifestUnknownKeys = before.manifestUnknownKeys }
+        if after.unreadCanvas != before.unreadCanvas { result.unreadCanvas = before.unreadCanvas }
         guard after.screens != before.screens || after.canvas != before.canvas else { return result }
 
         let untouched = TreeRecords.hosts(alikeIn: [self, after, before])
@@ -197,6 +198,7 @@ extension TreeContent {
         if before.manifestUnknownKeys != after.manifestUnknownKeys, manifestUnknownKeys == after.manifestUnknownKeys {
             manifestUnknownKeys = before.manifestUnknownKeys
         }
+        if before.unreadCanvas != after.unreadCanvas, unreadCanvas == after.unreadCanvas { unreadCanvas = before.unreadCanvas }
         guard after.screens != before.screens || after.canvas != before.canvas else { return }
 
         let untouched = TreeRecords.hosts(alikeIn: [self, after, before])
