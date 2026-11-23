@@ -321,6 +321,34 @@ import Testing
         #expect(TreeProjection.lowerHost(.screen(UUID()), in: content).isEmpty)
     }
 
+    /// What the lift reads to write over each node only what differs: the lowering's own record of where
+    /// each element came from, so nothing restates its walk or how it shows lock and hide.
+    @Test func aHostLoweredWithItsNodesPairsEachElementWithTheNodeItCameFrom() throws {
+        let a = Self.leaf(), b = Self.leaf(), c = Self.leaf(.button)
+        var g = Self.node(.group, CGRect(x: 30, y: 40, width: 100, height: 100), [b, c])
+        g.isLocked = true
+        g.isHidden = true
+        let screen = Self.screen([a, g])
+        var note = Self.leaf(.stickyNote)
+        note.scale = 0.5
+        let content = Self.content(screens: [screen], canvas: [note])
+        let pending = [a.id: g.id]
+        let lowered = TreeProjection.lowerHostNodes(.screen(screen.id), in: content, pending: pending)
+
+        #expect(lowered.map(\.element) == TreeProjection.lowerHost(.screen(screen.id), in: content, pending: pending))
+        #expect(lowered.map(\.node.id) == [a.id, b.id, c.id, g.id])
+        #expect(lowered.last?.node == g)
+        // The container that holds each node in the tree, whatever pointer is waiting for it.
+        #expect(lowered.map(\.holder) == [nil, g.id, g.id, nil])
+        #expect(lowered.first?.element.group == g.id)
+        // Shown as the views show it: a leaf with its containers' lock and hide, a container as it is kept.
+        #expect(lowered.filter { !$0.node.isContainer }.map(\.shown) == TreeProjection.lower(content, pending: pending).screens[0].elements)
+        let item = try #require(lowered.last)
+        #expect(item.shown == item.element)
+        #expect(TreeProjection.lowerHostNodes(.canvas, in: content).map(\.element) == TreeProjection.lowerHost(.canvas, in: content))
+        #expect(TreeProjection.lowerHostNodes(.screen(UUID()), in: content).isEmpty)
+    }
+
     @Test func aPoseIsWhereTheLoweringPutsIt() throws {
         let child = Self.node(.text, CGRect(x: 0, y: 0, width: 20, height: 20))
         var turned = Self.node(.group, CGRect(x: 100, y: 100, width: 200, height: 100), [child])

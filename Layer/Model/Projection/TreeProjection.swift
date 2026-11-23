@@ -78,16 +78,41 @@ enum TreeProjection {
 
     /// One host's part of `lower(_:pending:)`'s `elements`: nothing for a screen the design doesn't have.
     static func lowerHost(_ host: TreeIndex.Host, in content: TreeContent, pending: [UUID: UUID] = [:]) -> [DesignElement] {
+        lowering(host, in: content, pending: pending, keepsNodes: false)?.raw ?? []
+    }
+
+    // PROJECTION: deleted in plan 6
+    /// One element of a host's lowering, with the node it was lowered from: what the writes read to write
+    /// over each node only what differs, without walking the tree again.
+    struct LoweredNode: Sendable {
+        /// As it is in the design, with its children.
+        var node: LayerNode
+        /// As `lowerHost` lowers it: its own flags, its pointer a pending one where there is one.
+        var element: DesignElement
+        /// The container that holds it in the tree: nil under a screen's root and on the canvas's top level.
+        var holder: UUID?
+        /// As the views show it: a leaf locked or hidden with its containers, a container as it is lowered.
+        var shown: DesignElement
+    }
+
+    /// `lowerHost(_:in:pending:)`, each element with the node it came from, in the same order.
+    static func lowerHostNodes(_ host: TreeIndex.Host, in content: TreeContent, pending: [UUID: UUID] = [:]) -> [LoweredNode] {
+        lowering(host, in: content, pending: pending, keepsNodes: true)?.nodes ?? []
+    }
+
+    /// One host lowered, or nil for a screen the design doesn't have.
+    private static func lowering(_ host: TreeIndex.Host, in content: TreeContent, pending: [UUID: UUID],
+                                 keepsNodes: Bool) -> Lowering? {
         switch host {
         case .screen(let id):
-            guard let screen = content.screens.first(where: { $0.id == id }) else { return [] }
-            var lowering = Lowering(host: id, pending: pending)
+            guard let screen = content.screens.first(where: { $0.id == id }) else { return nil }
+            var lowering = Lowering(host: id, pending: pending, keepsNodes: keepsNodes)
             lowering.lowerRoot(screen.root)
-            return lowering.raw
+            return lowering
         case .canvas:
-            var lowering = Lowering(host: nil, pending: pending)
+            var lowering = Lowering(host: nil, pending: pending, keepsNodes: keepsNodes)
             lowering.lowerCanvas(content.canvas)
-            return lowering.raw
+            return lowering
         }
     }
 
@@ -169,12 +194,16 @@ enum TreeProjection {
         /// The screen the elements are on, or nil on the canvas.
         let host: DesignScreen.ID?
         let pending: [UUID: UUID]
+        /// Whether each element is kept with its node in `nodes` too.
+        let keepsNodes: Bool
         var raw: [DesignElement] = []
         var shown: [DesignElement] = []
+        var nodes: [LoweredNode] = []
 
-        init(host: DesignScreen.ID?, pending: [UUID: UUID]) {
+        init(host: DesignScreen.ID?, pending: [UUID: UUID], keepsNodes: Bool = false) {
             self.host = host
             self.pending = pending
+            self.keepsNodes = keepsNodes
         }
 
         /// A screen's root's children, pointing at nothing. The screen's own lock isn't shown on them.
@@ -205,11 +234,13 @@ enum TreeProjection {
             let element = DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: host,
                                         scale: scale, group: pending[node.id] ?? group)
             raw.append(element)
-            guard !node.isContainer else { return }
             var view = element
-            view.isLocked = view.isLocked || locked
-            view.isHidden = view.isHidden || hidden
-            shown.append(view)
+            if !node.isContainer {
+                view.isLocked = view.isLocked || locked
+                view.isHidden = view.isHidden || hidden
+                shown.append(view)
+            }
+            if keepsNodes { nodes.append(LoweredNode(node: node, element: element, holder: group, shown: view)) }
         }
     }
 }

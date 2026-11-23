@@ -29,6 +29,13 @@ enum TreeLift {
     /// child given a new frame here is laid back by the engine (F23).
     static func nodes(from elements: [DesignElement], host: TreeIndex.Host, keeping content: TreeContent)
         -> (nodes: [LayerNode], pending: [UUID: UUID]) {
+        nodes(from: elements, host: host, keeping: content, lowered: [:])
+    }
+
+    /// `nodes(from:host:keeping:)`, given the hosts its caller has already lowered from `content` (with
+    /// `TreeProjection.lowerHostNodes`, pending pointers or not), so that no host is lowered twice for one write.
+    static func nodes(from elements: [DesignElement], host: TreeIndex.Host, keeping content: TreeContent,
+                      lowered: [TreeIndex.Host: [TreeProjection.LoweredNode]]) -> (nodes: [LayerNode], pending: [UUID: UUID]) {
         // 1. Which pointers the tree can hold.
         var first: [UUID: Int] = [:]
         for (index, element) in elements.enumerated() where first[element.id] == nil { first[element.id] = index }
@@ -77,15 +84,15 @@ enum TreeLift {
         }
 
         // 3 and 5. The nodes, posed top down.
-        let known = known(elements, host: host, in: content)
+        let known = knownNodes(elements, host: host, in: content, lowered: lowered)
         let onCanvas = host == .canvas
         func build(_ index: Int, at place: TreeProjection.Place, in parentID: UUID?, parentKept: Bool,
                    drawnAt topScale: CGFloat) -> LayerNode {
             let element = elements[index]
             var node: LayerNode
             if let found = known[index] {
-                node = found.node
-                node.take(element, shown: found.shown)
+                node = found.lowering.node
+                node.take(element, shown: found.lowering.shown)
             } else {
                 node = LayerNode(element: element)
             }
@@ -99,8 +106,8 @@ enum TreeLift {
             }
             var kept = false
             if parentKept, let found = known[index], found.isOnHost {
-                let was = found.lowered
-                kept = was.group == parentID && was.frame == element.frame && was.rotation == element.rotation
+                let was = found.lowering.element
+                kept = found.lowering.holder == parentID && was.frame == element.frame && was.rotation == element.rotation
                     && (!onCanvas || was.scale == element.scale)
             }
             if !kept {
@@ -140,53 +147,44 @@ enum TreeLift {
     // PROJECTION: deleted in plan 6
     /// A node the design already has, for an element of the list.
     private struct Known {
-        /// As it is in the design, with its children.
-        var node: LayerNode
-        /// As it is lowered, its own flags and its pointer the tree's (no pending one).
-        var lowered: DesignElement
-        /// As the views show it: a leaf locked or hidden with its containers, a container as it is lowered.
-        var shown: DesignElement
+        /// The node as it is in the design, and as its host's lowering lowered and showed it.
+        var lowering: TreeProjection.LoweredNode
         /// Whether it is on the host being lifted, rather than come from another.
         var isOnHost: Bool
     }
 
     /// The node each element names, by its place in the list: looked for on the host first, then on
     /// the others, for an element moved from one. Two elements of one identifier take its nodes in turn.
-    private static func known(_ elements: [DesignElement], host: TreeIndex.Host, in content: TreeContent) -> [Known?] {
+    /// Each host is read from its own lowering: from `lowered` when the caller has it, or lowered here,
+    /// another host only once it is seen to hold one of the elements.
+    private static func knownNodes(_ elements: [DesignElement], host: TreeIndex.Host, in content: TreeContent,
+                                   lowered: [TreeIndex.Host: [TreeProjection.LoweredNode]]) -> [Known?] {
         var wanted: [UUID: [Int]] = [:]
         for (index, element) in elements.enumerated() { wanted[element.id, default: []].append(index) }
         var known = [Known?](repeating: nil, count: elements.count)
         let others: [TreeIndex.Host] = content.screens.map { .screen($0.id) } + [.canvas]
         for candidate in [host] + others.filter({ $0 != host }) {
             guard !wanted.isEmpty else { break }
-            func holds(_ node: LayerNode) -> Bool { wanted[node.id] != nil || node.children.contains(where: holds) }
-            let top = topLevel(of: candidate, in: content)
-            guard candidate == host || top.contains(where: holds) else { continue }
-            // In the order the lowering lists them: each node's children first, then the node.
-            var walked: [(node: LayerNode, locked: Bool, hidden: Bool)] = []
-            func walk(_ node: LayerNode, locked: Bool, hidden: Bool) {
-                let lockedInside = locked || (node.isContainer && node.isLocked)
-                let hiddenInside = hidden || (node.isContainer && node.isHidden)
-                for child in node.children { walk(child, locked: lockedInside, hidden: hiddenInside) }
-                walked.append((node, locked, hidden))
+            let entries: [TreeProjection.LoweredNode]
+            if let given = lowered[candidate] {
+                entries = given
+            } else {
+                func holds(_ node: LayerNode) -> Bool { wanted[node.id] != nil || node.children.contains(where: holds) }
+                guard candidate == host || topLevel(of: candidate, in: content).contains(where: holds) else { continue }
+                entries = TreeProjection.lowerHostNodes(candidate, in: content)
             }
-            for node in top { walk(node, locked: false, hidden: false) }
-            for (entry, lowered) in zip(walked, TreeProjection.lowerHost(candidate, in: content)) {
+            for entry in entries {
+                precondition(entry.node.id == entry.element.id, "a lowered element is paired with the node it came from")
                 guard var indices = wanted[entry.node.id] else { continue }
                 let index = indices.removeFirst()
                 wanted[entry.node.id] = indices.isEmpty ? nil : indices
-                var shown = lowered
-                if !entry.node.isContainer {
-                    shown.isLocked = shown.isLocked || entry.locked
-                    shown.isHidden = shown.isHidden || entry.hidden
-                }
-                known[index] = Known(node: entry.node, lowered: lowered, shown: shown, isOnHost: candidate == host)
+                known[index] = Known(lowering: entry, isOnHost: candidate == host)
             }
         }
         return known
     }
 
-    /// What is on a host, as the lowering walks it: a screen's root's children, or the canvas's nodes.
+    /// What is on a host: a screen's root's children, or the canvas's nodes.
     private static func topLevel(of host: TreeIndex.Host, in content: TreeContent) -> [LayerNode] {
         switch host {
         case .screen(let id): content.screens.first { $0.id == id }?.root.children ?? []

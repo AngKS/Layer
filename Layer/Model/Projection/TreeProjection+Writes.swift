@@ -32,8 +32,8 @@ extension TreeContent {
         ListWork.wrote()
         #endif
         guard element.group == before.group else {
-            let was = TreeProjection.lowerHost(found.host, in: self, pending: pending)
-            var list = was
+            let was = TreeProjection.lowerHostNodes(found.host, in: self, pending: pending)
+            var list = was.map(\.element)
             if let index = list.firstIndex(where: { $0.id == id }) { list[index] = element }
             lift([Lift(host: found.host, list: list, was: was)], pending: &pending)
             return
@@ -49,11 +49,11 @@ extension TreeContent {
         let placed = [DesignElement].placed(element, on: host, scale: scale)
         let on = Self.host(host)
         guard has(on) else { return placed }
-        let was = TreeProjection.lowerHost(on, in: self, pending: pending)
+        let was = TreeProjection.lowerHostNodes(on, in: self, pending: pending)
         #if DEBUG
         ListWork.wrote()
         #endif
-        lift([Lift(host: on, list: was + [placed], was: was)], pending: &pending)
+        lift([Lift(host: on, list: was.map(\.element) + [placed], was: was)], pending: &pending)
         return placed
     }
 
@@ -64,8 +64,8 @@ extension TreeContent {
         var lifts: [Lift] = []
         var removed = 0
         for host in hosts(holding: ids) {
-            let was = TreeProjection.lowerHost(host, in: self, pending: pending)
-            let list = was.filter { !ids.contains($0.id) }
+            let was = TreeProjection.lowerHostNodes(host, in: self, pending: pending)
+            let list = was.map(\.element).filter { !ids.contains($0.id) }
             removed += was.count - list.count
             lifts.append(Lift(host: host, list: list, was: was))
         }
@@ -82,9 +82,9 @@ extension TreeContent {
                                 pending: inout [UUID: UUID]) {
         let to = Self.host(host)
         guard has(to), let from = hosts(holding: [id]).first else { return }
-        let was = TreeProjection.lowerHost(from, in: self, pending: pending)
-        guard let index = was.firstIndex(where: { $0.id == id }) else { return }
-        var list = was
+        let was = TreeProjection.lowerHostNodes(from, in: self, pending: pending)
+        var list = was.map(\.element)
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
         var element = [DesignElement].placed(list.remove(at: index), on: host, scale: scale)
         element.frame = frame
         #if DEBUG
@@ -93,8 +93,8 @@ extension TreeContent {
         if to == from {
             lift([Lift(host: from, list: list + [element], was: was)], pending: &pending)
         } else {
-            let there = TreeProjection.lowerHost(to, in: self, pending: pending)
-            lift([Lift(host: from, list: list, was: was), Lift(host: to, list: there + [element], was: there)],
+            let there = TreeProjection.lowerHostNodes(to, in: self, pending: pending)
+            lift([Lift(host: from, list: list, was: was), Lift(host: to, list: there.map(\.element) + [element], was: there)],
                  pending: &pending)
         }
     }
@@ -104,8 +104,8 @@ extension TreeContent {
     mutating func projectedReorder(_ host: DesignScreen.ID?, to order: [UUID], pending: inout [UUID: UUID]) {
         let on = Self.host(host)
         guard has(on) else { return }
-        let was = TreeProjection.lowerHost(on, in: self, pending: pending)
-        var list = was
+        let was = TreeProjection.lowerHostNodes(on, in: self, pending: pending)
+        var list = was.map(\.element)
         guard [DesignElement].reorder(&list, slots: Array(list.indices), to: order) > 0 else { return }
         lift([Lift(host: on, list: list, was: was)], pending: &pending)
     }
@@ -115,7 +115,7 @@ extension TreeContent {
     mutating func projectedSetHost(_ host: DesignScreen.ID?, to elements: [DesignElement], pending: inout [UUID: UUID]) {
         let on = Self.host(host)
         guard has(on) else { return }
-        let was = TreeProjection.lowerHost(on, in: self, pending: pending)
+        let was = TreeProjection.lowerHostNodes(on, in: self, pending: pending)
         lift([Lift(host: on, list: elements, was: was)], pending: &pending)
     }
 }
@@ -292,18 +292,20 @@ private extension LayerNode {
 // PROJECTION: deleted in plan 6
 private extension TreeContent {
     // PROJECTION: deleted in plan 6
-    /// A host's new list, and the list it was lowered as.
+    /// A host's new list, and its lowering before the write: what the lift reads each node from.
     struct Lift {
         var host: TreeIndex.Host
         var list: [DesignElement]
-        var was: [DesignElement]
+        var was: [TreeProjection.LoweredNode]
     }
 
-    /// W6 for each host, every one against the design as it was, so that a node moved between them
-    /// keeps what only the tree knows. Then `pending` holds, for every element of those hosts, the
-    /// pointer the lift couldn't honour, and nothing for the rest.
+    /// W6 for each host, every one against the design as it was and from the lowerings the write made,
+    /// so that a node moved between them keeps what only the tree knows and no host is lowered twice.
+    /// Then `pending` holds, for every element of those hosts, the pointer the lift couldn't honour, and
+    /// nothing for the rest.
     mutating func lift(_ lifts: [Lift], pending: inout [UUID: UUID]) {
-        let lifted = lifts.map { TreeLift.nodes(from: $0.list, host: $0.host, keeping: self) }
+        let lowered = Dictionary(lifts.map { ($0.host, $0.was) }, uniquingKeysWith: { first, _ in first })
+        let lifted = lifts.map { TreeLift.nodes(from: $0.list, host: $0.host, keeping: self, lowered: lowered) }
         for (lift, result) in zip(lifts, lifted) {
             switch lift.host {
             case .screen(let id):
@@ -311,7 +313,7 @@ private extension TreeContent {
             case .canvas:
                 canvas = result.nodes
             }
-            for element in lift.was { pending[element.id] = nil }
+            for entry in lift.was { pending[entry.element.id] = nil }
             for element in lift.list { pending[element.id] = nil }
         }
         for result in lifted { pending.merge(result.pending) { _, new in new } }
