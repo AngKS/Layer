@@ -65,8 +65,8 @@ final class DesignStore {
     /// What is worked out from the tree for the content as it is now, each part when it is
     /// first asked for: where every node is, and the tree lowered to the list and its views.
     private struct Kept {
-        let tree: TreeContent
-        lazy var index = TreeIndex(tree)
+        /// Made by `index` when it is first read.
+        var index: TreeIndex?
         /// Made by `projection` when it is first read.
         var lowered: TreeProjection.Lowered?
     }
@@ -76,6 +76,9 @@ final class DesignStore {
     /// How many times this store has lowered its tree: at most once for each version of the content
     /// that was read. For the tests that hold what is lowered on a change to the store's memo.
     @ObservationIgnored private(set) var timesLowered = 0
+    /// How many times this store has built its index: at most once for each version of the content
+    /// that was read. For the tests that hold a gesture's frames to building it only when they need it.
+    @ObservationIgnored private(set) var timesIndexed = 0
     #endif
 
     init(content: DesignContent = DesignContent()) {
@@ -92,7 +95,7 @@ final class DesignStore {
         #if DEBUG
         timesLowered += 1
         #endif
-        if kept == nil { kept = Kept(tree: content.tree) }
+        if kept == nil { kept = Kept() }
         kept?.lowered = lowered
         return lowered
     }
@@ -105,8 +108,14 @@ final class DesignStore {
     var index: TreeIndex {
         // Read first, so that whatever reads it is redrawn when the content changes.
         let content = content
-        if kept == nil { kept = Kept(tree: content.tree) }
-        return kept!.index
+        if let index = kept?.index { return index }
+        let index = TreeIndex(content.tree)
+        #if DEBUG
+        timesIndexed += 1
+        #endif
+        if kept == nil { kept = Kept() }
+        kept?.index = index
+        return index
     }
 
     /// What can be touched on each host, for the groups that had been gone into when it was

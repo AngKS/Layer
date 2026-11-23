@@ -116,7 +116,6 @@ extension DesignStore {
         var screens: [DesignScreen.ID: CGPoint] = [:]
         // A member given beside its container moves with it, not on its own.
         let alone = Set(things(in: CanvasSelection(origins.keys)))
-        let memo = index
         for (thing, origin) in origins where !isLocked(thing) && alone.contains(thing) {
             switch thing {
             case .element(let ref):
@@ -128,6 +127,9 @@ extension DesignStore {
                     elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
                     continue
                 }
+                // Read only for a container: built again for each version of the design, the index
+                // would cost a drag of several things that aren't containers a walk of the tree a frame.
+                let memo = index
                 guard let entry = memo[ref.element], let moved = self.origin(of: ref.element, movedBy: distance),
                       let node = memo.node(ref.element, in: tree) else { continue }
                 let landed = CGPoint(x: moved.x.rounded(), y: moved.y.rounded())

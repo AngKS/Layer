@@ -2126,11 +2126,13 @@ final class AppModel {
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
         let placed = session.placed(turnedBy: degrees)
-        let laidOut = Set(placed.keys.map(\.element).filter(store.isLaidOut))
+        // A free group's box is fitted round what is in it, as the session found when it formed:
+        // asked of the design on every frame, that would walk the whole tree each time.
+        let fitted = Set(session.baseline.compactMap { ref, member in member.isGroup ? ref : nil })
         store.apply { content in
             for (ref, place) in placed {
                 content.update(ref.element) {
-                    if $0.kind != .group || laidOut.contains(ref.element) { $0.frame = place.frame }
+                    if !fitted.contains(ref) { $0.frame = place.frame }
                     $0.rotation = place.rotation
                 }
             }

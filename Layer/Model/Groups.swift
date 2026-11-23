@@ -368,6 +368,9 @@ extension DesignStore {
         /// The least the group can be scaled by: any less, and something in it would be smaller
         /// than its kind can be. Never more than 1: one that already is stops it shrinking.
         var smallestScale: CGFloat
+        /// Whether it is a row, column, grid or overlay itself, its own one leaf: resized by its
+        /// frame, with what is in it laid out by the engine.
+        var isLaidOut = false
     }
 
     /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group. A row, column, grid or
@@ -375,8 +378,8 @@ extension DesignStore {
     /// is laid out by the engine, never scaled (`parts(of:)`).
     func groupPose(of ref: ElementRef) -> GroupPose? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
-        let leaves = isLaidOut(item.id) ? [item] : parts(of: item.id).filter { $0.kind != .group || isLaidOut($0.id) }
+        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0, isLaidOut: isLaidOut(item.id))
+        let leaves = pose.isLaidOut ? [item] : parts(of: item.id).filter { $0.kind != .group || isLaidOut($0.id) }
         for element in leaves {
             pose.leaves[element.id] = element.frame
             let spec = element.kind.spec
@@ -427,7 +430,8 @@ extension DesignStore {
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
         var frames: [DesignElement.ID: CGRect] = [:]
-        if isLaidOut(item.id) {
+        // Read from the pose, not the design: on every frame of a handle's drag that would walk the whole tree.
+        if pose.isLaidOut {
             frames[item.id] = frame
         } else if frame == pose.box {
             // Back where it began: exactly as it was, with no arithmetic to round.
