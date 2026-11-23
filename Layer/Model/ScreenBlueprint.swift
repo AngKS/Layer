@@ -115,19 +115,13 @@ struct ScreenBlueprint: Equatable, Sendable {
     }
 
     private static func stripPrefix(_ line: String, _ prefixes: [String]) -> String? {
-        for prefix in prefixes where line.lowercased().hasPrefix(prefix) {
-            return String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        return nil
+        LookWords.stripPrefix(line, prefixes)
     }
 
     /// The words people use for each kind of element. No word belongs to two kinds.
-    static let kindWords: [(words: [String], kind: ElementKind)] = ElementKind.allCases.map { ($0.spec.writtenNames, $0) }
+    static let kindWords = LookWords.kindWords
 
-    static func kind(named word: String) -> ElementKind? {
-        let word = word.lowercased().trimmingCharacters(in: .whitespaces)
-        return kindWords.first { $0.words.contains(word) }?.kind
-    }
+    static func kind(named word: String) -> ElementKind? { LookWords.kind(named: word) }
 
     /// One element from `kind: words [look]`.
     static func item(_ written: String) -> Item? {
@@ -163,64 +157,23 @@ struct ScreenBlueprint: Equatable, Sendable {
 
     /// Reads look words, such as `blue`, `bold`, `18pt`, `radius 12`, `text white`, `off`,
     /// `40%`, `bordered`, `centre`, `shadow`, `border red` or `opacity 50%`, into an item.
-    /// Words it doesn't know are skipped.
+    /// Words it doesn't know are skipped. See `LookWords`.
     static func applyLook(_ words: [String], to item: inout Item) {
-        for word in words.map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !word.isEmpty {
-            if word == "fill" || word == "full width" {
-                item.width = .fill
-            } else if word == "fit" {
-                item.width = .fit
-            } else if let weight = FontWeightChoice(rawValue: word) {
-                item.weight = weight
-            } else if ["on", "checked", "ticked", "selected"].contains(word) {
-                item.isOn = true
-            } else if ["off", "unchecked", "unticked", "unselected"].contains(word) {
-                item.isOn = false
-            } else if ["filled", "solid", "primary"].contains(word) {
-                item.buttonLook = .filled
-            } else if ["bordered", "outlined", "secondary"].contains(word) {
-                item.buttonLook = .bordered
-            } else if ["plain", "borderless", "link", "text only"].contains(word) {
-                item.buttonLook = .plain
-            } else if ["left", "leading", "align left"].contains(word) {
-                item.alignment = .leading
-            } else if ["center", "centre", "centered", "centred", "align center", "align centre"].contains(word) {
-                item.alignment = .center
-            } else if ["right", "trailing", "align right"].contains(word) {
-                item.alignment = .trailing
-            } else if word == "shadow" {
-                item.hasShadow = true
-            } else if word == "no shadow" {
-                item.hasShadow = false
-            } else if let amount = stripPrefix(word, ["opacity"]).flatMap(fraction) {
-                item.opacity = amount
-            } else if let border = stripPrefix(word, ["border", "outline"]) {
-                if let width = Double(border.hasSuffix("pt") ? String(border.dropLast(2)) : border) {
-                    item.borderWidth = CGFloat(width)
-                } else if let colour = ColourWords.parse(border) {
-                    item.borderColour = colour
-                }
-            } else if word.hasSuffix("%"), let amount = fraction(word) {
-                item.value = amount
-            } else if word.hasSuffix("pt"), let size = Double(word.dropLast(2).trimmingCharacters(in: .whitespaces)) {
-                item.fontSize = CGFloat(size)
-            } else if let radius = stripPrefix(word, ["radius", "corner", "corners"]).flatMap({ Double($0) }) {
-                item.cornerRadius = CGFloat(radius)
-            } else if let colour = stripPrefix(word, ["text "]).flatMap(ColourWords.parse) {
-                item.textColour = colour
-            } else if let colour = ColourWords.parse(word) {
-                item.colour = colour
-            }
-        }
-    }
-
-    /// `40%` or `0.4` as 0.4.
-    private static func fraction(_ word: String) -> Double? {
-        let trimmed = word.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasSuffix("%") {
-            return Double(trimmed.dropLast().trimmingCharacters(in: .whitespaces)).map { min(max($0 / 100, 0), 1) }
-        }
-        return Double(trimmed).map { min(max($0 > 1 ? $0 / 100 : $0, 0), 1) }
+        let look = LookWords.look(from: words)
+        if let width = look.width { item.width = width == .fill ? .fill : .fit }
+        if let tint = look.tint { item.colour = tint }
+        if let textColor = look.textColor { item.textColour = textColor }
+        if let fontSize = look.fontSize { item.fontSize = fontSize }
+        if let fontWeight = look.fontWeight { item.weight = fontWeight }
+        if let cornerRadius = look.cornerRadius { item.cornerRadius = cornerRadius }
+        if let alignment = look.alignment { item.alignment = alignment }
+        if let isOn = look.isOn { item.isOn = isOn }
+        if let value = look.value { item.value = value }
+        if let buttonLook = look.buttonLook { item.buttonLook = buttonLook }
+        if let hasShadow = look.hasShadow { item.hasShadow = hasShadow }
+        if let borderColor = look.borderColor { item.borderColour = borderColor }
+        if let borderWidth = look.borderWidth { item.borderWidth = borderWidth }
+        if let opacity = look.opacity { item.opacity = opacity }
     }
 
     // MARK: Laying it out
@@ -291,29 +244,5 @@ struct ScreenBlueprint: Equatable, Sendable {
         }
         item.applyLook(to: &element)
         return element
-    }
-}
-
-/// Colour names and hex codes, shared by the blueprint and the colour parameters.
-enum ColourWords {
-    static let named: [String: RGBColor] = [
-        "accent": Theme.accent, "layer orange": Theme.accent,
-        "black": RGBColor(hex: 0x1C1C1E), "white": RGBColor(hex: 0xFFFFFF),
-        "gray": RGBColor(hex: 0x8E8E93), "grey": RGBColor(hex: 0x8E8E93),
-        "red": RGBColor(hex: 0xFF3B30), "orange": RGBColor(hex: 0xFF9500),
-        "yellow": RGBColor(hex: 0xFFCC00), "green": RGBColor(hex: 0x34C759),
-        "mint": RGBColor(hex: 0x00C7BE), "teal": RGBColor(hex: 0x30B0C7),
-        "blue": RGBColor(hex: 0x007AFF), "indigo": RGBColor(hex: 0x5856D6),
-        "purple": RGBColor(hex: 0xAF52DE), "pink": RGBColor(hex: 0xFF2D55),
-        "brown": RGBColor(hex: 0xA2845E),
-    ]
-
-    /// A colour from a name or a hex code such as `#0A84FF` or `0A84FF`.
-    static func parse(_ text: String) -> RGBColor? {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let colour = named[cleaned] { return colour }
-        let hex = cleaned.hasPrefix("#") ? String(cleaned.dropFirst()) : cleaned
-        guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return nil }
-        return RGBColor(hex: value)
     }
 }
