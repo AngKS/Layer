@@ -87,6 +87,7 @@ import Testing
         full.source = LayerNode.Source(origin: .generated, key: "key")
         full.interaction = .object(["tap": .string("next")])
         full.unknownKeys["future"] = .bool(true)
+        full.unknownPartKeys["style", default: UnknownKeys()]["letterSpacing"] = .number(2)
         return full
     }
 
@@ -127,6 +128,7 @@ import Testing
         "source": { $0.source?.key = "other" },
         "interaction": { $0.interaction = .null },
         "unknownKeys": { $0.unknownKeys["future"] = .bool(false) },
+        "unknownPartKeys": { $0.unknownPartKeys["style", default: UnknownKeys()]["letterSpacing"] = .number(4) },
     ]
 
     /// Every field `Mirror` finds, `content`'s and `style`'s by theirs, without `children`.

@@ -67,6 +67,14 @@ struct UnknownKeys: Equatable, Sendable {
         }
     }
 
+    /// Reads the keys of the object `decoder` is reading that aren't among `known`.
+    init(from decoder: any Decoder, besidesNamed known: Set<String>) throws {
+        let container = try decoder.container(keyedBy: AnyKey.self)
+        for key in container.allKeys where !known.contains(key.stringValue) {
+            values[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+        }
+    }
+
     subscript(key: String) -> JSONValue? {
         get { values[key] }
         set { values[key] = newValue }

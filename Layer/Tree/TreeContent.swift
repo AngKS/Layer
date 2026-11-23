@@ -82,6 +82,9 @@ struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
     /// Canvas nodes this build couldn't read, each kept at its index among the canvas's nodes,
     /// as a node keeps its unread children.
     var unreadCanvas: [LayerNode.UnreadChild] = []
+    /// Screens this build couldn't read, a screen whose root it can't read among them, each kept as
+    /// it was read at its index among the screens and written back so: the rest of the design opens.
+    var unreadScreens: [LayerNode.UnreadChild] = []
     var title: String?
     var settings = CanvasSettings()
     /// What a newer Layer saved in the content that this version doesn't know.
@@ -97,7 +100,19 @@ struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        screens = try container.decodeIfPresent([TreeScreen].self, forKey: .screens) ?? []
+        if container.contains(.screens), try !container.decodeNil(forKey: .screens) {
+            // One at a time, so that a screen this build can't read doesn't stop the rest from opening.
+            var list = try container.nestedUnkeyedContainer(forKey: .screens)
+            while !list.isAtEnd {
+                let index = list.currentIndex
+                // A failed read leaves the list where it was, so the same entry is read again as it is.
+                if let screen = try? list.decode(TreeScreen.self) {
+                    screens.append(screen)
+                } else {
+                    unreadScreens.append(LayerNode.UnreadChild(index: index, raw: try list.decode(JSONValue.self)))
+                }
+            }
+        }
         if container.contains(.canvas), try !container.decodeNil(forKey: .canvas) {
             // One at a time, so that a node this build can't read doesn't stop the rest from opening.
             var list = try container.nestedUnkeyedContainer(forKey: .canvas)
@@ -111,7 +126,8 @@ struct TreeContent: Equatable, Sendable, Codable, KeepsUnknownKeys {
     func encode(to encoder: any Encoder) throws {
         try unknownKeys.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(screens, forKey: .screens)
+        var screenList = container.nestedUnkeyedContainer(forKey: .screens)
+        try LayerNode.write(screens, with: unreadScreens, to: &screenList)
         var list = container.nestedUnkeyedContainer(forKey: .canvas)
         try LayerNode.write(canvas, with: unreadCanvas, to: &list)
         try container.encodeIfPresent(title, forKey: .title)
