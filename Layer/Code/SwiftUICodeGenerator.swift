@@ -283,7 +283,7 @@ enum SwiftUICodeGenerator {
             // Ink is a note about the design, not part of the interface: no code for it.
             return []
 
-        case .group:
+        case .group, .card:
             // Groups aren't in the code: their members are written as they are. A group item
             // never reaches here, as a screen's elements leave it out.
             return []
@@ -374,7 +374,7 @@ enum SwiftUICodeGenerator {
         case .progress:
             lines = progress(element) + ["    .frame(width: \(number(frame.width)))"]
 
-        case .drawing, .group:
+        case .drawing, .group, .card:
             return []
         }
 

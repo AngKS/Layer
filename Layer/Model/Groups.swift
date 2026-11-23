@@ -701,11 +701,11 @@ extension DesignStore.ElementRef.Host {
 /// One row of the Layers panel's tree: a thing and what is in it, with the lock and hide it
 /// has through the groups above it. Never given to a row itself: a frame changes on every
 /// frame of a drag.
-struct LayerNode: Identifiable {
+struct LayerListNode: Identifiable {
     var element: DesignElement
     var ref: DesignStore.ElementRef
     /// What is in it, topmost first: empty for anything but a group.
-    var children: [LayerNode]
+    var children: [LayerListNode]
     /// Hidden by its own flag or a group above it.
     var isHiddenWithItsGroups: Bool
     /// Locked by its own flag or a group above it.
@@ -720,17 +720,17 @@ extension DesignStore {
     /// drawings (see `drawings`). Built from `SiblingLists`, which holds the rule for which
     /// list a thing is in. Each node has its own flags for the toggles, and the effective
     /// ones, worked down from the top once, not looked up for each row.
-    func layerTree(on host: ElementRef.Host) -> [LayerNode] {
+    func layerTree(on host: ElementRef.Host) -> [LayerListNode] {
         let things = children(on: host)
         let lists = SiblingLists(things).lists
         let byID = Dictionary(things.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen: Set<DesignElement.ID> = []
-        func nodes(in list: DesignElement.ID?, hidden: Bool, locked: Bool) -> [LayerNode] {
+        func nodes(in list: DesignElement.ID?, hidden: Bool, locked: Bool) -> [LayerListNode] {
             (lists[list] ?? []).reversed().compactMap { id in
                 guard let element = byID[id], seen.insert(id).inserted else { return nil }
                 let isHidden = hidden || element.isHidden
                 let isLocked = locked || element.isLocked
-                return LayerNode(
+                return LayerListNode(
                     element: element, ref: ElementRef(host: host, element: id),
                     children: element.kind == .group ? nodes(in: id, hidden: isHidden, locked: isLocked) : [],
                     isHiddenWithItsGroups: isHidden, isLockedWithItsGroups: isLocked

@@ -285,7 +285,7 @@ struct ElementView: View {
             // it. Locked, it is off that canvas, out of the eraser's reach, and drawn here.
             if element.isLocked { InkPicture(ink: element.ink) }
 
-        case .group:
+        case .group, .card:
             // A group draws nothing of its own: its members are drawn. A screen's elements
             // leave group items out, so one never reaches here.
             EmptyView()

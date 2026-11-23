@@ -252,7 +252,7 @@ private struct SelectionSummary: View {
             case .drawing:
                 let strokes = selected.element.strokeCount
                 return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
-            case .group:
+            case .group, .card:
                 // Told apart from an element, by VoiceOver and the UI tests.
                 return "Group · \(size)"
             default:

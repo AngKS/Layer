@@ -151,6 +151,7 @@
 		6FF5BD54A0848654E83B48BF /* scratchOut_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 6DCD29CBE5A03B6E15F90FD1 /* scratchOut_jittered_2b.json */; };
 		7090D84D41F2EB5963685A6B /* image_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = B1D2FF7572BE3BC72C090667 /* image_noisy_2.json */; };
 		718BBD36F1EB666DC10C683C /* HandwritingRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B6243D62E7152C04A2D74D /* HandwritingRecognizer.swift */; };
+		719E3FE6CCA99B91D4410876 /* LayerNode+Coding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 449640F3E0130D8D0352A408 /* LayerNode+Coding.swift */; };
 		71C222CE184D451835EAA3C4 /* SketchFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CFDCF2FE12D75FF22A1DD6A /* SketchFlowUITests.swift */; };
 		72FF7821AECAC994A5808A0F /* Catalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482BB5E652E4557CFBD3A10A /* Catalogue.swift */; };
 		731596DB59F13747DF68A4E0 /* unknown_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = F3D4915B74569167B85F1CC7 /* unknown_noisy_2.json */; };
@@ -222,6 +223,7 @@
 		A6DD5DD333BD839E9733F295 /* screen_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 0AA9B8CAA3E00D4460CB6213 /* screen_jittered_2b.json */; };
 		A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D745E1FC169922426572F /* SketchInterpreter.swift */; };
 		A94EA65553B399A36903BA4D /* APIKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119ACB4D80F6D2F766AE21CE /* APIKeyStore.swift */; };
+		A9C39EC84CCDF1B1837F05CD /* LayerNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26CDC805F53A2DBEC089F4E5 /* LayerNodeTests.swift */; };
 		AA636D9ACE3CC5F199B8F51C /* button_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = C6185A374D6A12454DD66923 /* button_jittered_1a.json */; };
 		AAA7B18F0A3EFFBE3BFB86A7 /* CallPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E7D979078F7E76B34146D9F /* CallPill.swift */; };
 		ABE7CBA580F4F56397429ED2 /* textField_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = 212D1539287FCE5A1C9D6F0C /* textField_jittered_2a.json */; };
@@ -242,6 +244,7 @@
 		B40438032782589250C74E31 /* HostedToolCallingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */; };
 		B4BFFA6336C01602437B03BA /* body_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 5B913915C2B0A41F3C06545B /* body_noisy_1.json */; };
 		B4E3DDA5D5411A2C15FF8234 /* body_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = 6146F23918E9A59F98B6A301 /* body_jittered_2a.json */; };
+		B6AA41CC9DA4B18561C7F7E5 /* LayerNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 038228D4E98BB11926D47907 /* LayerNode.swift */; };
 		B7CDC2A6A937F9CF3CE7CCCF /* VoiceAgentLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CBB0C567E920CD0EDB9F33 /* VoiceAgentLiveTests.swift */; };
 		B864118BC7248D0EDB408350 /* DemoScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055B2F810E6B0244E35A6D56 /* DemoScript.swift */; };
 		B8C0F6CECF03D0709B486088 /* checkbox_image_image_4.json in Resources */ = {isa = PBXBuildFile; fileRef = 8BCFE9B8274F2FCE4E0CA064 /* checkbox_image_image_4.json */; };
@@ -371,6 +374,7 @@
 
 /* Begin PBXFileReference section */
 		01548CA8886933886FFD4CCD /* DesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTests.swift; sourceTree = "<group>"; };
+		038228D4E98BB11926D47907 /* LayerNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerNode.swift; sourceTree = "<group>"; };
 		03F26D6207862EDB065EB4F9 /* InkPicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkPicture.swift; sourceTree = "<group>"; };
 		0476590DFA55D55191D3B427 /* button_textField_button_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_textField_button_2.json; sourceTree = "<group>"; };
 		055B2F810E6B0244E35A6D56 /* DemoScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScript.swift; sourceTree = "<group>"; };
@@ -413,6 +417,7 @@
 		25AB0AA8BC013810EEFF269C /* stickyNote_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_1b.json; sourceTree = "<group>"; };
 		25BE23EC1AD2CB3824DCFBEB /* textField_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_noisy_2.json; sourceTree = "<group>"; };
 		2635FEAE6E6657C7B97B1E77 /* ImageLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLibrary.swift; sourceTree = "<group>"; };
+		26CDC805F53A2DBEC089F4E5 /* LayerNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerNodeTests.swift; sourceTree = "<group>"; };
 		29F8C2525F9DB616AB0A57D1 /* divider_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_noisy_2.json; sourceTree = "<group>"; };
 		2BBD16E9EF710487B95B09E5 /* image_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_jittered_1a.json; sourceTree = "<group>"; };
 		2BD7C010B0BC879191EAB904 /* PencilVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PencilVoice.swift; sourceTree = "<group>"; };
@@ -449,6 +454,7 @@
 		4431D1888DF19CC7CFCE617D /* JSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONValue.swift; sourceTree = "<group>"; };
 		4479046F419ECCEE5E7EF1D5 /* avatar_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_1a.json; sourceTree = "<group>"; };
 		44881224CD104B4E6B77BDE5 /* screen_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = screen_noisy_2.json; sourceTree = "<group>"; };
+		449640F3E0130D8D0352A408 /* LayerNode+Coding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LayerNode+Coding.swift"; sourceTree = "<group>"; };
 		44F591A734E9BC9CC0AFDB01 /* checkbox_radio_radio_4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_radio_4.json; sourceTree = "<group>"; };
 		450E3AF29ABC2CF8B0EB9654 /* ScreenPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPrompt.swift; sourceTree = "<group>"; };
 		46E911A7B1F12EA42626BB26 /* SystemSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSymbol.swift; sourceTree = "<group>"; };
@@ -724,6 +730,15 @@
 			path = Chrome;
 			sourceTree = "<group>";
 		};
+		08472F2381F9AA9928039598 /* Tree */ = {
+			isa = PBXGroup;
+			children = (
+				038228D4E98BB11926D47907 /* LayerNode.swift */,
+				449640F3E0130D8D0352A408 /* LayerNode+Coding.swift */,
+			);
+			path = Tree;
+			sourceTree = "<group>";
+		};
 		2F6B81EADB09C4623C1D3C8A /* Debug */ = {
 			isa = PBXGroup;
 			children = (
@@ -840,6 +855,7 @@
 				C4D78A4965E9499803DD7B6D /* Providers */,
 				55806F54F8C6AEBE460557DC /* Resources */,
 				94A09FF9A9C4643F73B40E0C /* Sketch */,
+				08472F2381F9AA9928039598 /* Tree */,
 				488D8CC81CB1B3674045CCE6 /* Voice */,
 			);
 			path = Layer;
@@ -890,6 +906,7 @@
 				8FBE89B42A2C9324AB9B7AF8 /* GroupTests.swift */,
 				C0E9CF91BDC7654B1CAA911E /* HostedModelTests.swift */,
 				FA3D476A7251D5D9505D70E9 /* HostedToolCallingTests.swift */,
+				26CDC805F53A2DBEC089F4E5 /* LayerNodeTests.swift */,
 				E45C0B6754EA9966F83DF35B /* LayerOrderTests.swift */,
 				BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
@@ -1538,6 +1555,7 @@
 				F5DCA672A5447414D35E8898 /* GroupTests.swift in Sources */,
 				98E5D0F3B4AB52DA3528CA7F /* HostedModelTests.swift in Sources */,
 				B40438032782589250C74E31 /* HostedToolCallingTests.swift in Sources */,
+				A9C39EC84CCDF1B1837F05CD /* LayerNodeTests.swift in Sources */,
 				DCD806CB71CFF764ABDFA96D /* LayerOrderTests.swift in Sources */,
 				6EEDB23E93684CC1B26AB427 /* LayersPanelTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
@@ -1621,6 +1639,8 @@
 				D90DBC2CE6972D4D8C525BA3 /* LayerApp.swift in Sources */,
 				59F9B0DDB39C57D3518576F2 /* LayerDocument.swift in Sources */,
 				35E631087D51BB9F8DC1355F /* LayerEntities.swift in Sources */,
+				719E3FE6CCA99B91D4410876 /* LayerNode+Coding.swift in Sources */,
+				B6AA41CC9DA4B18561C7F7E5 /* LayerNode.swift in Sources */,
 				9C95090DD71FF3DA318C69BD /* LayerOrder.swift in Sources */,
 				2EBD147309CF43F4BD40E660 /* LayersPanel.swift in Sources */,
 				09B758904EB6E05613E2DE33 /* MagicPen.swift in Sources */,

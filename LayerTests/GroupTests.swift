@@ -2354,7 +2354,7 @@ struct GroupAsOneThingTests {
 @MainActor
 @Suite("The layers tree")
 struct LayerTreeTests {
-    private func names(_ nodes: [LayerNode]) -> [String] {
+    private func names(_ nodes: [LayerListNode]) -> [String] {
         nodes.map { $0.element.name ?? "" }
     }
 

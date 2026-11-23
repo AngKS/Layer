@@ -12,6 +12,9 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
     /// its members are, and they point at it with their `group`. Its frame is the box round
     /// them, which the design keeps current; see `DesignContent.keepGroupsSound()`.
     case group
+    /// A container the design lays out: a rounded, filled box holding other nodes. Like a
+    /// group it is never drawn, written or described itself by the old model.
+    case card
 
     // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
 

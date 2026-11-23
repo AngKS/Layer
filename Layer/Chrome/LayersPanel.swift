@@ -69,7 +69,7 @@ struct LayersPanel: View {
 /// The design's layers, topmost first under each screen, groups with their members nested
 /// beneath, then those on the open canvas, drawings in a section of their own. Only this reads
 /// the design, the selection and the hover, which change on every frame of a drag and every
-/// move of the pencil: each row is given what it shows, never a `LayerNode` or element, whose
+/// move of the pencil: each row is given what it shows, never a `LayerListNode` or element, whose
 /// frames change on every frame, and is built again only when that changes.
 private struct LayersList: View {
     @Environment(AppModel.self) private var model
@@ -79,7 +79,7 @@ private struct LayersList: View {
 
     /// One row of the list: a thing, how far in it is, and whether it is open, for a group.
     private struct Line: Identifiable {
-        var node: LayerNode
+        var node: LayerListNode
         var depth: Int
         var isOpen: Bool
         var id: DesignElement.ID { node.id }
@@ -151,12 +151,12 @@ private struct LayersList: View {
     /// first, each an open group's own list under its row. Its rows can be dragged to reorder
     /// them, and into and out of the groups.
     private func branch(
-        _ nodes: [LayerNode], in list: LayerList, parent: (list: LayerList, group: DesignElement.ID)?, depth: Int,
+        _ nodes: [LayerListNode], in list: LayerList, parent: (list: LayerList, group: DesignElement.ID)?, depth: Int,
         entered: Set<DesignElement.ID>, selection: CanvasSelection?, hovered: CanvasSelection?
     ) -> AnyView {
         // An open group's own list sits between its row and the rows after it, so a list is
         // shown in runs, each ending at an open group, as separate `ForEach`s of one collection.
-        var runs: [[(index: Int, node: LayerNode)]] = [[]]
+        var runs: [[(index: Int, node: LayerListNode)]] = [[]]
         for (index, node) in nodes.enumerated() {
             runs[runs.count - 1].append((index, node))
             if isOpen(node, entered: entered) { runs.append([]) }
@@ -185,7 +185,7 @@ private struct LayersList: View {
         })
     }
 
-    private func isOpen(_ node: LayerNode, entered: Set<DesignElement.ID>) -> Bool {
+    private func isOpen(_ node: LayerListNode, entered: Set<DesignElement.ID>) -> Bool {
         node.element.kind == .group && (entered.contains(node.id) || openGroups.contains(node.id))
     }
 
