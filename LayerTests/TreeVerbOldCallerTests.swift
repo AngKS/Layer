@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PencilKit
 import Testing
 @testable import Layer
 
@@ -260,5 +261,90 @@ struct TreeVerbOldCallerTests {
         undo.undo()
         #expect(store.tree.canvas.isEmpty)
         #expect(!undo.canUndo)
+    }
+
+    /// A group holding something this build couldn't read has no place to put it, so it isn't
+    /// ungrouped: nothing changes.
+    @Test func aGroupHoldingAnUnreadChildIsntUngrouped() throws {
+        var g = container(nil, frame: CGRect(x: 20, y: 100, width: 0, height: 0),
+                          [leaf(CGRect(x: 0, y: 0, width: 50, height: 20)), leaf(CGRect(x: 60, y: 0, width: 40, height: 20))])
+        g.unreadChildren = [LayerNode.UnreadChild(index: 1, raw: .object(["kind": .string("hologram")]))]
+        let (store, undo) = makeStore(design([g]))
+        let screenID = try #require(store.tree.screens.first?.id)
+        let before = store.tree
+
+        #expect(store.ungroup(.init(host: .screen(screenID), element: g.id)) == nil)
+
+        #expect(store.tree == before)
+        #expect(!undo.canUndo)
+    }
+
+    /// A row duplicated and a card deleted through the selection, as the canvas's menus do: the
+    /// copy is a row, the card goes whole and comes back a card. A card selected with what is in
+    /// it is copied once, what is in it with it.
+    @Test func aRowAndACardGoThroughTheSelectionWhole() throws {
+        let r = container(row(), frame: CGRect(x: 20, y: 100, width: 0, height: 0),
+                          [leaf(CGRect(x: 0, y: 0, width: 60, height: 20)), leaf(CGRect(x: 0, y: 0, width: 50, height: 20))])
+        let inside = leaf(CGRect(x: 16, y: 16, width: 80, height: 20))
+        var card = container(nil, frame: CGRect(x: 20, y: 300, width: 0, height: 0), [inside])
+        card.kind = .card
+        card.padding = LayerNode.Padding(all: 16)
+        let (store, undo) = makeStore(design([r, card]))
+        let screenID = try #require(store.tree.screens.first?.id)
+        func ref(_ id: UUID) -> DesignStore.ElementRef { .init(host: .screen(screenID), element: id) }
+
+        let rowAlone = try #require(CanvasSelection([.element(ref(r.id))]))
+        let copies = try #require(store.duplicate(rowAlone))
+        guard case .element(let copyRef) = copies else {
+            Issue.record("One row was copied, as \(copies)")
+            return
+        }
+        let copy = try #require(store.node(copyRef.element))
+        #expect(copy.layout == row())
+        #expect(copy.children.count == 2)
+        undo.undo()
+
+        let cardAndInside = try #require(CanvasSelection([.element(ref(card.id)), .element(ref(inside.id))]))
+        #expect(store.duplicate(cardAndInside) != nil)
+        let root = try #require(store.tree.screens.first?.root)
+        #expect(root.children.count == 3, "the row, the card and one copy of the card")
+        #expect(root.children.filter { $0.kind == .card }.allSatisfy { $0.children.count == 1 })
+        undo.undo()
+
+        let cardAlone = try #require(CanvasSelection([.element(ref(card.id))]))
+        store.delete(cardAlone)
+        #expect(store.node(card.id) == nil && store.node(inside.id) == nil)
+        undo.undo()
+        #expect(store.node(card.id)?.kind == .card)
+        #expect(store.node(card.id)?.children.map(\.id) == [inside.id])
+    }
+
+    /// A drawing given to a screen goes on the canvas where the screen would have shown it, adding
+    /// to what is there as well as replacing it.
+    @Test func aDrawingGivenToAScreenGoesOnTheCanvas() throws {
+        var tree = design([leaf(CGRect(x: 20, y: 100, width: 120, height: 20))])
+        tree.screens[0].origin = CGPoint(x: 100, y: 50)
+        tree.screens[0].scale = 0.5
+        let (store, _) = makeStore(tree)
+        let screenID = try #require(store.tree.screens.first?.id)
+        let kept = try #require(store.tree.screens.first?.root.children.first?.id)
+        var title = DesignStore.newElement(.title)
+        title.frame = CGRect(x: 20, y: 80, width: 200, height: 40)
+        let point = { (x: CGFloat, t: TimeInterval) in
+            PKStrokePoint(location: CGPoint(x: x, y: x), timeOffset: t, size: CGSize(width: 4, height: 4), opacity: 1, force: 1,
+                          azimuth: 0, altitude: .pi / 2)
+        }
+        let stroke = PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: [point(0, 0), point(40, 0.1)], creationDate: Date()))
+        var drawing = try #require(DesignElement.drawing([stroke]))
+        drawing.frame.origin = CGPoint(x: 40, y: 60)
+
+        let refs = store.setElements([title, drawing], on: screenID, replacing: false)
+
+        #expect(refs == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
+        #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
+        let landed = try #require(store.tree.canvas.first { $0.id == drawing.id })
+        #expect(landed.kind == .drawing)
+        #expect(landed.frame.origin == CGPoint(x: 40 + 100 / 0.5, y: 60 + 50 / 0.5))
+        #expect(landed.scale == 0.5)
     }
 }

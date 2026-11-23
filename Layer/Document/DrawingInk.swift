@@ -84,16 +84,6 @@ extension DesignElement {
         }
     }
 
-    /// The same drawing with strokes of its own: each stroke is made again with a new
-    /// key. A copy needs this, or its strokes would be taken for the original's once
-    /// both are on the ink canvas.
-    func withStrokesOfItsOwn() -> DesignElement {
-        guard kind == .drawing, let ink, let own = InkGeometry.strokesOfTheirOwn(ink) else { return self }
-        var copy = self
-        copy.ink = own
-        return copy
-    }
-
     /// Whether a touch anywhere in the element's frame picks it. A drawing on the ink
     /// canvas is picked by its strokes instead, which leaves the space round and inside
     /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
@@ -103,8 +93,9 @@ extension DesignElement {
 }
 
 extension LayerNode {
-    /// The same drawing with strokes of its own, as `DesignElement.withStrokesOfItsOwn()` makes
-    /// one: what a copied drawing's ink needs. Anything else is returned as it is.
+    /// The same drawing with strokes of its own: each stroke is made again with a new key. A
+    /// copy needs this, or its strokes would be taken for the original's once both are on the
+    /// ink canvas. Anything else is returned as it is.
     func withStrokesOfItsOwn() -> LayerNode {
         guard kind == .drawing, let ink = content.ink, let own = InkGeometry.strokesOfTheirOwn(ink) else { return self }
         var copy = self
