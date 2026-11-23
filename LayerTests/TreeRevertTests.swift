@@ -87,6 +87,7 @@ import Testing
         full.source = LayerNode.Source(origin: .generated, key: "key")
         full.interaction = .object(["tap": .string("next")])
         full.unknownKeys["future"] = .bool(true)
+        full.unknownPartKeys["style", default: UnknownKeys()]["letterSpacing"] = .number(2)
         return full
     }
 
@@ -127,6 +128,7 @@ import Testing
         "source": { $0.source?.key = "other" },
         "interaction": { $0.interaction = .null },
         "unknownKeys": { $0.unknownKeys["future"] = .bool(false) },
+        "unknownPartKeys": { $0.unknownPartKeys["style", default: UnknownKeys()]["letterSpacing"] = .number(4) },
     ]
 
     /// Every field `Mirror` finds, `content`'s and `style`'s by theirs, without `children`.
@@ -175,6 +177,56 @@ import Testing
             let reverted = current.reverting(after, to: before)
 
             #expect(reverted.canvas == [expected], "Undoing a change to \(label) didn't take back that field alone")
+        }
+    }
+
+    /// For each of a screen's own fields, as `Mirror` names it, a change to it alone.
+    private static let screenChanges: [String: @Sendable (inout TreeScreen) -> Void] = [
+        "name": { $0.name = "Renamed by the step" },
+        "origin": { $0.origin.x += 100 },
+        "scale": { $0.scale = 0.25 },
+        "deviceID": { $0.deviceID = "ipad-pro-11" },
+        "isLocked": { $0.isLocked = true },
+        "unknownKeys": { $0.unknownKeys["future"] = .bool(false) },
+        "root": { $0.root.name = "Root named by the step" },
+    ]
+
+    /// A field a screen gains must be put in `TreeScreen.reverting`'s list, or undo takes the
+    /// whole screen back, another edit's changes to it since included.
+    @Test func screenFieldListNamesEveryField() {
+        var full = TreeScreen(name: "Every field", origin: CGPoint(x: 10, y: 20), scale: 0.5, deviceID: "iphone-17-pro-max")
+        full.isLocked = false
+        full.unknownKeys["future"] = .bool(true)
+        full.root.children = [Self.node()]
+        let labels = Mirror(reflecting: full).children.compactMap(\.label)
+        #expect(labels.contains("name") && labels.contains("root"))
+        for label in labels {
+            #expect(TreeScreen.revertedFields.contains(label), "\(label) is missing from TreeScreen.revertedFields")
+        }
+
+        // A changed id is a removal and an addition, so it isn't one of these.
+        for label in labels where label != "id" {
+            guard let change = Self.screenChanges[label] else {
+                Issue.record("No change is written here for \(label)")
+                continue
+            }
+            var before = TreeContent()
+            before.screens = [full]
+            var after = before
+            change(&after.screens[0])
+            guard after != before else {
+                Issue.record("The change written here for \(label) changes nothing")
+                continue
+            }
+            let since: (inout TreeScreen) -> Void = label == "name" ? { $0.origin.y += 5 } : { $0.name = "Renamed since" }
+            var current = after
+            since(&current.screens[0])
+            var expected = full
+            since(&expected)
+
+            let reverted = current.reverting(after, to: before)
+
+            #expect(reverted.screens == [expected], "Undoing a change to \(label) didn't take back that field alone")
         }
     }
 
@@ -262,6 +314,119 @@ import Testing
         let landed = try #require(reverted.canvas.last)
         #expect(landed.frame == CGRect(x: 2010, y: 10, width: 20, height: 20))
         #expect(landed.scale == 0.5)
+    }
+
+    /// Step A makes a group K on screen S; step H, by hand, then puts X, already on S, into K.
+    /// Undoing both, in either order, gives the design they started from: X never leaves its
+    /// screen, though K, which A made, goes. Each order is also run with A's later change
+    /// taking H's in at its run's start, as the history merges two edits that don't meet.
+    @Test(arguments: [true, false], [true, false])
+    func aNodePutInAContainerAnotherStepMadeStaysOnItsScreen(containerStepFirst: Bool, merged: Bool) throws {
+        let x = Self.node(.body, CGRect(x: 40, y: 300, width: 60, height: 40), text: "X")
+        let start = Self.design([x], origin: CGPoint(x: 400, y: 0), scale: 0.5)
+        let y1 = Self.node(.body, CGRect(x: 0, y: 0, width: 30, height: 30), text: "Y1")
+        let y2 = Self.node(.body, CGRect(x: 130, y: 150, width: 30, height: 30), text: "Y2")
+        let k = Self.node(.group, CGRect(x: 20, y: 250, width: 160, height: 180), children: [y1, y2])
+        // A: K is made, round where X is.
+        var made = start
+        made.screens[0].root.children = [x, k]
+        // H: X into K, where it was on the screen.
+        var putIn = made
+        var inK = x
+        inK.frame.origin = CGPoint(x: 20, y: 50)
+        putIn.screens[0].root.children = [k]
+        putIn.screens[0].root.children[0].children = [y1, y2, inK]
+        // A again: Y1 renamed.
+        var renamed = putIn
+        Self.edit(&renamed, y1.id) { $0.content.text = "Renamed" }
+
+        // A's runs, as the history keeps them: merged, its start takes H's change in.
+        let aRuns: [(before: TreeContent, after: TreeContent)]
+        if merged {
+            let mergedStart = start.reverting(made, to: putIn)
+            #expect(mergedStart == start, "Taking H in at A's start took X off its screen")
+            aRuns = [(mergedStart, renamed)]
+        } else {
+            aRuns = [(start, made), (putIn, renamed)]
+        }
+        func undoA(_ content: TreeContent) -> TreeContent {
+            aRuns.reversed().reduce(content) { $0.reverting($1.after, to: $1.before) }
+        }
+        func undoH(_ content: TreeContent) -> TreeContent { content.reverting(putIn, to: made) }
+
+        let once = containerStepFirst ? undoA(renamed) : undoH(renamed)
+        if containerStepFirst {
+            // K is gone, and X is on its screen where it was, not on the canvas.
+            #expect(once.canvas.isEmpty)
+            #expect(once.screens[0].root.children == [x])
+        }
+        let both = containerStepFirst ? undoH(once) : undoA(once)
+
+        #expect(both == start)
+    }
+
+    /// Of several things in a container that goes, each lands on the screen in the container's
+    /// place among what is there, in their order.
+    @Test func whatWasInAContainerThatGoesTakesItsPlace() throws {
+        let a = Self.node(text: "A"), b = Self.node(text: "B")
+        let start = Self.design([a, b])
+        // The step makes K between A and B; another edit then puts X and Z in it.
+        let y1 = Self.node(.body, CGRect(x: 0, y: 0, width: 10, height: 10)), y2 = Self.node(.body, CGRect(x: 50, y: 50, width: 10, height: 10))
+        let k = Self.node(.group, CGRect(x: 100, y: 100, width: 60, height: 60), children: [y1, y2])
+        var made = start
+        made.screens[0].root.children = [a, k, b]
+        let x = Self.node(.body, CGRect(x: 10, y: 10, width: 10, height: 10), text: "X")
+        let z = Self.node(.body, CGRect(x: 20, y: 20, width: 10, height: 10), text: "Z")
+        var current = made
+        Self.edit(&current, k.id) { $0.children += [x, z] }
+
+        let reverted = current.reverting(made, to: start)
+
+        #expect(reverted.screens[0].root.children.map(\.id) == [a.id, x.id, z.id, b.id])
+        #expect(Self.find(x.id, in: reverted)?.frame == CGRect(x: 110, y: 110, width: 10, height: 10))
+        #expect(Self.find(z.id, in: reverted)?.frame == CGRect(x: 120, y: 120, width: 10, height: 10))
+        #expect(reverted.canvas.isEmpty)
+    }
+
+    /// A step put X into group K on screen S; another edit then moved X to screen T. Taken
+    /// back, X goes back to S's root, as the step changed what holds it, and stays where it is
+    /// on the canvas, at its size in its own points, as the step didn't move it: its place on T
+    /// is carried into S's points through the canvas, not read as S's.
+    @Test func aPlaceKeptAcrossScreensIsCarriedThroughTheCanvas() throws {
+        let x = Self.node(.body, CGRect(x: 10, y: 10, width: 40, height: 20), text: "X")
+        let y1 = Self.node(.body, CGRect(x: 0, y: 0, width: 20, height: 20)), y2 = Self.node(.body, CGRect(x: 80, y: 80, width: 20, height: 20))
+        let k = Self.node(.group, CGRect(x: 100, y: 100, width: 100, height: 100), children: [y1, y2])
+        var before = Self.design([x, k])
+        before.screens.append(TreeScreen(name: "T", origin: CGPoint(x: 1000, y: 0), scale: 0.5, deviceID: nil))
+        var after = before
+        var inK = x
+        inK.frame.origin = CGPoint(x: -90, y: -90)
+        after.screens[0].root.children = [k]
+        after.screens[0].root.children[0].children = [y1, y2, inK]
+
+        // Moved to T, at T's (40, 60): its centre is at (1030, 35) on the canvas.
+        var onT = after
+        onT.screens[0].root.children[0].children = [y1, y2]
+        var movedToT = x
+        movedToT.frame.origin = CGPoint(x: 40, y: 60)
+        onT.screens[1].root.children = [movedToT]
+        let fromT = onT.reverting(after, to: before)
+        #expect(fromT.screens[0].root.children.map(\.id) == [x.id, k.id])
+        #expect(fromT.screens[1].root.children.isEmpty)
+        #expect(Self.find(x.id, in: fromT)?.frame == CGRect(x: 1010, y: 25, width: 40, height: 20))
+
+        // Moved to the canvas, drawn at half its size: its centre is at (1010, 30) there.
+        var onCanvas = after
+        onCanvas.screens[0].root.children[0].children = [y1, y2]
+        var movedOut = x
+        movedOut.frame.origin = CGPoint(x: 2000, y: 50)
+        movedOut.scale = 0.5
+        onCanvas.canvas = [movedOut]
+        let fromCanvas = onCanvas.reverting(after, to: before)
+        #expect(fromCanvas.canvas.isEmpty)
+        let back = try #require(Self.find(x.id, in: fromCanvas))
+        #expect(back.frame == CGRect(x: 990, y: 20, width: 40, height: 20))
+        #expect(back.scale == nil)
     }
 
     @Test func revertingWithNothingElseChangedGivesBefore() {

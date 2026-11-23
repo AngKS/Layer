@@ -104,7 +104,8 @@ import Testing
         #expect(frame.maxContentWidth == 1080)
         frame.maxContentWidth = nil
         let back = try Self.roundTrip(Self.design(on: frame))
-        #expect(back.settings.customDevices.first?.maxContentWidth == nil)
+        let kept = try #require(back.settings.customDevices.first)
+        #expect(kept.maxContentWidth == nil)
     }
 
     @Test func aSettingThisBuildDoesNotKnowSurvivesTheFile() throws {

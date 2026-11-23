@@ -198,6 +198,107 @@ struct DesignFileV4Tests {
         }
     }
 
+    /// Keys a newer Layer put inside a node's style, layout, padding, sizing, accessibility, sketch
+    /// or source are written back into those parts, after an edit of the part too; a picture one of
+    /// them names stays in the package.
+    @Test func keysInsideANodesPartsSurviveASave() throws {
+        let card = UUID(), label = UUID(), picture = UUID()
+        let node: [String: Any] = [
+            "id": label.uuidString, "kind": "text", "frame": [[0, 0], [120, 24]], "text": "Hello",
+            "style": ["fontSize": 17, "letterSpacing": 2, "backgroundImage": picture.uuidString],
+            "width": ["mode": "fixed", "curve": "ease"],
+            "accessibility": ["label": "Greeting", "traits": ["header"]],
+            "sketch": ["originalBounds": [[0, 0], [10, 10]], "normalizedBounds": [[0, 0], [1, 1]], "confidence": 0.5,
+                       "decidedBy": "rules", "placement": "leading", "pressure": 0.25],
+            "source": ["origin": "generated", "key": "greeting", "model": "future"],
+        ]
+        let container: [String: Any] = [
+            "id": card.uuidString, "kind": "card", "frame": [[20, 100], [200, 80]], "children": [node],
+            "layout": ["type": "stack", "axis": "vertical", "spacing": 8, "wraps": true],
+            "padding": ["top": 16, "leading": 16, "bottom": 16, "trailing": 16, "safeArea": "keyboard"],
+        ]
+        let screen: [String: Any] = ["id": UUID().uuidString, "name": "Screen", "origin": [0, 0], "scale": 1,
+                                     "root": ["id": UUID().uuidString, "kind": "group", "children": [container]]]
+        let original = try package(["version": 4, "content": ["screens": [screen], "canvas": []]], parts: [
+            DesignPackage.images: FileWrapper(directoryWithFileWrappers: [
+                picture.uuidString: FileWrapper(regularFileWithContents: Data([7, 7, 7])),
+            ]),
+        ])
+
+        var file = try DesignFile(wrapper: original)
+        let read = try #require(file.content.tree.screens.first?.root.children.first)
+        #expect(read.unknownPartKeys["layout"]?["wraps"] == .bool(true))
+        #expect(read.unknownPartKeys["padding"]?["safeArea"] == .string("keyboard"))
+        let text = try #require(read.children.first)
+        #expect(text.style.fontSize == 17)
+        #expect(text.unknownPartKeys["style"]?["letterSpacing"] == .number(2))
+        #expect(Set(text.unknownPartKeys.keys) == ["style", "width", "accessibility", "sketch", "source"])
+        // The style is edited: what it didn't know stays in it.
+        file.content.tree.screens[0].root.children[0].children[0].style.fontSize = 20
+
+        let saved = try file.wrapper()
+        let screens = try #require(try content(of: saved)["screens"] as? [[String: Any]])
+        let root = try #require(screens.first?["root"] as? [String: Any])
+        let writtenCard = try #require((root["children"] as? [[String: Any]])?.first)
+        let layout = try #require(writtenCard["layout"] as? [String: Any])
+        #expect(layout["wraps"] as? Bool == true && layout["type"] as? String == "stack")
+        #expect((writtenCard["padding"] as? [String: Any])?["safeArea"] as? String == "keyboard")
+        let writtenText = try #require((writtenCard["children"] as? [[String: Any]])?.first)
+        let style = try #require(writtenText["style"] as? [String: Any])
+        #expect(style["fontSize"] as? Double == 20)
+        #expect(style["letterSpacing"] as? Double == 2)
+        #expect((writtenText["width"] as? [String: Any])?["curve"] as? String == "ease")
+        #expect((writtenText["accessibility"] as? [String: Any])?["traits"] as? [String] == ["header"])
+        #expect((writtenText["sketch"] as? [String: Any])?["pressure"] as? Double == 0.25)
+        #expect((writtenText["source"] as? [String: Any])?["model"] as? String == "future")
+        #expect(saved.fileWrappers?[DesignPackage.images]?.fileWrappers?[picture.uuidString]?.regularFileContents == Data([7, 7, 7]))
+
+        // Read again, it is the same design: nothing this version knows was taken for unknown.
+        let again = try DesignFile(wrapper: saved)
+        #expect(again.content.tree == file.content.tree)
+    }
+
+    /// A screen this build can't read, here one whose root lays its children out in a way a newer
+    /// Layer added, doesn't stop the design from opening: the other screens open, and that one is
+    /// written back as it was read, in its place among them, with the picture it names.
+    @Test func aScreenThisBuildCannotReadIsKeptAndTheRestOpen() throws {
+        let first = UUID(), unread = UUID(), last = UUID(), picture = UUID()
+        func screen(_ id: UUID, _ name: String, x: Double, root: [String: Any]) -> [String: Any] {
+            ["id": id.uuidString, "name": name, "origin": [x, 0], "scale": 1, "root": root]
+        }
+        let leaf: [String: Any] = ["id": UUID().uuidString, "kind": "image", "frame": [[0, 0], [100, 100]],
+                                   "imageID": picture.uuidString]
+        let flowing: [String: Any] = ["id": UUID().uuidString, "kind": "group", "layout": ["type": "flow", "gap": 8],
+                                      "children": [leaf]]
+        let screens: [[String: Any]] = [
+            screen(first, "First", x: 0, root: ["id": UUID().uuidString, "kind": "group"]),
+            screen(unread, "Flowing", x: 500, root: flowing),
+            screen(last, "Last", x: 1000, root: ["id": UUID().uuidString, "kind": "group"]),
+        ]
+        let original = try package(["version": 4, "content": ["screens": screens, "canvas": []]], parts: [
+            DesignPackage.images: FileWrapper(directoryWithFileWrappers: [
+                picture.uuidString: FileWrapper(regularFileWithContents: Data([4, 2])),
+            ]),
+        ])
+
+        let file = try DesignFile(wrapper: original)
+
+        #expect(file.content.tree.screens.map(\.id) == [first, last])
+        #expect(file.content.tree.unreadScreens.map(\.index) == [1])
+        for saved in [try file.wrapper(), try file.wrapper(replacing: original)] {
+            let written = try #require(try content(of: saved)["screens"] as? [[String: Any]])
+            #expect(written.map { $0["id"] as? String } == [first, unread, last].map(\.uuidString))
+            #expect(NSDictionary(dictionary: written[1]).isEqual(to: screens[1]))
+            #expect(saved.fileWrappers?[DesignPackage.images]?.fileWrappers?[picture.uuidString]?.regularFileContents == Data([4, 2]))
+        }
+
+        // Siri and Spotlight read it too.
+        let folder = try temporaryFolder()
+        let url = folder.appendingPathComponent("Flowing.layer")
+        try original.write(to: url, options: [], originalContentsURL: nil)
+        #expect(try DesignFile.content(at: url).tree.screens.map(\.id) == [first, last])
+    }
+
     @Test func savedFramesAreLaidOutAgainOnOpening() throws {
         var screen = TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil)
         screen.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 12, alignment: .start))

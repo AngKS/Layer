@@ -7,12 +7,12 @@ are filled when plan 2 and plan 6 end, with the same simulator and the same comm
 | What | How | Budget | Before (main 8d00fc7) | After plan 2 | After plan 6 |
 |---|---|---|---|---|---|
 | Reading after the pen rests (rules path, no model) | `SketchBenchmark` timings over the 156 fixtures, plus the conversion including the structure pass | p95 under 100 ms | not measured in this baseline (it needs the tree) | not measured: plan 5 puts the reading on the tree | — |
-| Layout of one edit on a 100-node screen: the store | `StoreChangeBenchmarkTests`, 50 runs each, `ContinuousClock` | p95 under 16 ms in the simulator; checked on the iPad | move p50 0.174 ms, p95 0.183 ms; resize p50 0.175 ms, p95 0.186 ms; text p50 0.175 ms, p95 0.185 ms; add (and delete) p50 0.333 ms, p95 0.353 ms | move p50 0.433 ms, p95 0.457 ms; resize p50 0.429 ms, p95 0.464 ms; text p50 0.430 ms, p95 0.450 ms; add (and delete) p50 0.544 ms, p95 0.571 ms (median of three runs). About 2.5 times main, and within budget (see below) | — |
+| Layout of one edit on a 100-node screen: the store | `StoreChangeBenchmarkTests`, 50 runs each, `ContinuousClock`: each change alone, and (since the fix wave) with the next read of the screens after it, a `+read` line | p95 under 16 ms in the simulator; checked on the iPad | move p50 0.174 ms, p95 0.183 ms; resize p50 0.175 ms, p95 0.186 ms; text p50 0.175 ms, p95 0.185 ms; add (and delete) p50 0.333 ms, p95 0.353 ms. The change alone: no read was timed | move p50 0.433 ms, p95 0.457 ms; resize p50 0.429 ms, p95 0.464 ms; text p50 0.430 ms, p95 0.450 ms; add (and delete) p50 0.544 ms, p95 0.571 ms (median of three runs). The change alone. About 2.5 times main, and within budget (see below). The next read adds about 0.17 ms (fix wave, below) | — |
 | Layout of one edit on a 100-node screen: the rules | plan 1's `TreeRulesTests.oneEditOnAHundredNodeScreenIsQuick` (at 130a4f1, from plan 1's ledger) | p95 under 16 ms | p50 0.957 ms, p95 1.292 ms | p50 0.646 ms, p95 0.820 ms (median of three runs, on this branch) | — |
 | A drag frame | `CanvasDragWorkTests.aDragFrameWritesOnlyWhatItMoves` | today's numbers or better | a 60-frame drag of a group of three writes 240 elements (60 x 4: three lines and the group's box); a drag of one line writes 60 | a group of three writes 60 (the group alone, its lines riding in it); one line writes 60. A leaf dragged 60 frames on a free screen lays out its screen's root 60 times and the screen's other four containers 0 times (`StoreChangeBudgetTests.aLeafDragLaysOutOnlyItsDirtyPath`). A 60-frame drag of several lines, a twist and a group's handle each build the store's index at most once (`CanvasDragWorkTests.aGesturesFramesBuildTheIndexOnlyWhenAContainerMoves`) | — |
 | Streaming generation | ids of unaffected nodes are stable across updates; one commit per update; layout off the main actor | 100% stable | not measured in this baseline | not measured: plan 3 streams generation through the tree | — |
 | Generation tokens and time to first content | `ScreenBenchmarkHarness` on macOS | recorded, and the hosted default chosen from them | not measured in this baseline | not measured: plan 3 builds the harness on the tree | — |
-| One change through the store on a 100-node column screen, on the tree | `StoreChangeBudgetTests.aStoreChangeOnAHundredNodeScreenIsWithinBudget` (always on), 50 runs each: a leaf moved (laid back by its row), a body resized, a text edited, a text added to a row | p95 under 16 ms | not measurable on main (it needs the tree) | move p50 0.161 ms, p95 0.196 ms; resize p50 0.874 ms, p95 0.966 ms; text p50 0.912 ms, p95 1.012 ms; add p50 0.791 ms, p95 0.881 ms (median of three runs) | — |
+| One change through the store on a 100-node screen, on the tree | `StoreChangeBudgetTests.aStoreChangeOnAHundredNodeScreenIsWithinBudget` (always on), 50 runs each. On a column of 25 rows: a body resized, a text edited, a text added to a row. On the same rows on a free root: row 12 moved whole (since the fix wave; see below). Each change alone, and with the next read of the screens, which lowers the tree again; the budget holds the change with the read | p95 under 16 ms | not measurable on main (it needs the tree) | resize p50 0.874 ms, p95 0.966 ms; text p50 0.912 ms, p95 1.012 ms; add p50 0.791 ms, p95 0.881 ms (median of three runs, the change alone). The move measured then, p50 0.161 ms, p95 0.196 ms, timed nothing: see "The budget's move" below | — |
 | Canvas workout | `CanvasBenchmarkUITests.testCanvasWorkout`, Release, 5 iterations a run, median of 3 runs | no worse than baseline by more than 5% | CPU time 4.479 s; peak physical memory 84.65 MB; clock 30.233 s (see below) | CPU time 4.777 s; peak physical memory 84.79 MB; clock 30.437 s. CPU time is 6.7% over the Before column, and 0.4% over main measured again in the same hour on the same simulator (4.757 s): see below | — |
 
 ## How the baseline was measured
@@ -85,8 +85,12 @@ with the commands above. The host is an Apple M4 Max (12 performance and 4 effic
     p95 1.011 / 0.966 / 0.949; text p50 0.907 / 0.912 / 0.924, p95 0.993 / 1.012 / 1.012; add p50 0.791 / 0.796 / 0.787,
     p95 0.891 / 0.881 / 0.870.
 - A change through the store costs about 2.5 times what it did on main (0.43 ms against 0.17 ms for a move). Each change
-  on the branch writes through the projection, runs the tree's rules and compares the tree, and the next read lowers the
-  tree again once. It is still about 35 times under the 16 ms budget.
+  on the branch writes through the projection, runs the tree's rules and compares the tree. The next read lowers the
+  tree again once; that read wasn't in these numbers, and is timed since the fix wave (below). It is still about 35
+  times under the 16 ms budget.
+- The rules row's Before figure is plan 1's, taken at 130a4f1 in another session. The workout below shows the cores'
+  clock moving between sessions (about 3.47 GHz on 2026-11-23, 2.86 GHz here), so the change from 0.957 to 0.646 ms
+  can't be credited to the code.
 - Nested fit rows (plan 1's final review: their measuring grows polynomially with depth) caused no regression seen
   here. Nothing measured nests fit rows more than one deep: rows in a column, and a row in a card.
 
@@ -108,9 +112,44 @@ plan there only. The app was uninstalled before every run.
 | **Main median, again** | **4.757** | **84.33** | **30.460** | **25.56** | **13.58** |
 | Discarded: branch 3, main 1 | 4.677, 4.769 | 85.27, 84.58 | 30.518, 30.462 | 25.58, 25.60 | 14.28, 13.68 |
 
+The Before column is therefore no longer a valid comparator for CPU time. For the "After plan 6" column, measure main
+again in the same hour, interleave the two (branch, main, branch, main) and record the order, and compare instructions
+retired first.
+
 Against the Before column the branch's CPU time is 6.7% higher, over the 5% budget. Against main measured again in
 the same hour it is 0.4% higher, within it. Main itself now takes 6.2% more CPU time than it did on 2026-11-23 for
 the same instructions (25.56 G against 25.53 G) in 12.5% fewer cycles: the cores ran at about 2.86 GHz on average
 against 3.47 GHz then. So the difference from the Before column is the machine, not the code: the branch retires the
 same instructions as main (25.53 G against 25.56 G), and its peak memory and clock are within 1% of main's.
 
+## The budget's move, and the next read (plan 2's fix wave)
+
+Plan 2's final review found that the always-on budget's "move" timed nothing. It moved row 12's text, which sits in a
+row under a column root; a position written to a column root's child is laid back by it (My call 20), so the write drops
+the origin before anything is written. The tree came out equal, nothing was laid out, and nothing was laid back: its
+0.161 ms is the cost of a change that changes nothing. The env-gated `StoreChangeBenchmarkTests` was never affected: its
+screen's root is free, and its move writes.
+
+The budget now moves row 12 whole on the same 25 rows on a free root, a point to the right each run, and checks that the
+row moved 50 points and what it holds rode in it. Both benchmarks also time the next read of the screens after each
+change, which lowers the tree again: a `+read` BENCH line beside each change's own. The budget holds the change with the
+read under 16 ms.
+
+Measured on feature/semantic-tree in the fix wave (2026-11-24, Xcode 27.2, Debug), three runs each, median shown. These
+ran in the "Layer iPad Pro 11 (semantic-tree)" simulator, not st2-lane-c's, at 1-minute loads of 40 to 170 with other
+lanes building: the machine wasn't quiet (F14), so they show what the read adds and that the budget holds, and are not
+comparable with the columns above. Plan 6's After column measures both, quiet, in st2-lane-c's simulator.
+
+| Benchmark | Change | Alone p50 / p95 ms | With the next read p50 / p95 ms |
+|---|---|---|---|
+| Store (`StoreChangeBenchmarkTests`) | move | 0.272 / 0.287 | 0.449 / 0.468 |
+| | resize | 0.276 / 0.290 | 0.451 / 0.471 |
+| | text | 0.267 / 0.288 | 0.437 / 0.473 |
+| | add (and delete) | 0.560 / 0.576 | 0.733 / 0.752 |
+| Tree (`StoreChangeBudgetTests`) | move (a row on a free root) | 0.590 / 0.626 | 0.814 / 0.856 |
+| | resize | 0.627 / 0.664 | 0.852 / 0.893 |
+| | text | 0.753 / 0.807 | 0.976 / 1.036 |
+| | add | 0.849 / 0.903 | 1.079 / 1.150 |
+
+The next read adds about 0.17 ms to a change in the store benchmark, and about 0.22 ms in the tree's, where a screen holds
+25 rows as well as 100 things. Every change with its read is still over 13 times under the 16 ms budget.

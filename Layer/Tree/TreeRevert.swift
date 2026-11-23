@@ -25,7 +25,7 @@ extension LayerNode {
 
     /// The names `reverting` covers, as `Mirror` labels: "kind", "content.text", "style.tint", …
     static let revertedFields: Set<String> = {
-        var names = FieldNames()
+        var names = FieldNames<LayerNode>()
         LayerNode.visitRevertedFields(&names)
         return names.names
     }()
@@ -38,7 +38,7 @@ extension LayerNode {
     }
 
     /// Every field `reverting` takes back, with its name. Both of them read this one list.
-    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor) {
+    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor<LayerNode>) {
         visitor.visit("id", \.id)
         visitor.visit("kind", \.kind)
         visitor.visit("unreadChildren", \.unreadChildren)
@@ -75,28 +75,30 @@ extension LayerNode {
         visitor.visit("source", \.source)
         visitor.visit("interaction", \.interaction)
         visitor.visit("unknownKeys", \.unknownKeys)
+        visitor.visit("unknownPartKeys", \.unknownPartKeys)
     }
 }
 
-fileprivate protocol RevertedFieldVisitor {
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>)
+fileprivate protocol RevertedFieldVisitor<Root> {
+    associatedtype Root
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>)
 }
 
 /// Puts each field that changed from `before` to `after` back as it was before.
-private struct FieldsBack: RevertedFieldVisitor {
-    var result: LayerNode
-    let after: LayerNode
-    let before: LayerNode
+private struct FieldsBack<Root>: RevertedFieldVisitor {
+    var result: Root
+    let after: Root
+    let before: Root
 
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>) {
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>) {
         if after[keyPath: field] != before[keyPath: field] { result[keyPath: field] = before[keyPath: field] }
     }
 }
 
-private struct FieldNames: RevertedFieldVisitor {
+private struct FieldNames<Root>: RevertedFieldVisitor {
     var names: Set<String> = []
 
-    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<LayerNode, Value>) {
+    mutating func visit<Value: Equatable>(_ name: String, _ field: WritableKeyPath<Root, Value>) {
         names.insert(name)
     }
 }
@@ -107,17 +109,34 @@ extension TreeScreen {
     /// whole screen.
     static func reverting(_ current: TreeScreen, after: TreeScreen, to before: TreeScreen) -> TreeScreen {
         func reverted(_ screen: TreeScreen) -> TreeScreen {
-            var result = screen
-            func back<Value: Equatable>(_ field: WritableKeyPath<TreeScreen, Value>) {
-                if after[keyPath: field] != before[keyPath: field] { result[keyPath: field] = before[keyPath: field] }
-            }
-            back(\.id); back(\.name); back(\.origin); back(\.scale); back(\.deviceID); back(\.isLocked); back(\.unknownKeys)
+            var back = FieldsBack(result: screen, after: after, before: before)
+            visitRevertedFields(&back)
+            var result = back.result
             result.root = LayerNode.reverting(screen.root, after: after.root, to: before.root)
             return result
         }
         var result = reverted(after).withoutRootChildren == before.withoutRootChildren ? reverted(current) : before
         result.root.children = current.root.children
         return result
+    }
+
+    /// The names `reverting` covers, as `Mirror` labels: "name", "origin", … and "root", whose own
+    /// fields `LayerNode.reverting` takes back.
+    static let revertedFields: Set<String> = {
+        var names = FieldNames<TreeScreen>()
+        visitRevertedFields(&names)
+        return names.names.union(["root"])
+    }()
+
+    /// Every field of its own `reverting` takes back, with its name. Both of them read this one list.
+    fileprivate static func visitRevertedFields(_ visitor: inout some RevertedFieldVisitor<TreeScreen>) {
+        visitor.visit("id", \.id)
+        visitor.visit("name", \.name)
+        visitor.visit("origin", \.origin)
+        visitor.visit("scale", \.scale)
+        visitor.visit("deviceID", \.deviceID)
+        visitor.visit("isLocked", \.isLocked)
+        visitor.visit("unknownKeys", \.unknownKeys)
     }
 
     /// The screen without what is on it: its record.
@@ -133,12 +152,14 @@ extension TreeContent {
     /// has changed since stays as it is now. With nothing else changed since, that is `before`.
     ///
     /// The title goes back only if it is still the one the step gave; the settings, unknown
-    /// keys and the canvas nodes this build couldn't read go back whole, as today. Screens go back by today's list rule, their roots' children
+    /// keys and the canvas nodes and screens this build couldn't read go back whole, as today. Screens go back by today's list rule, their roots' children
     /// left out. Then each node the step changed has its fields taken back (its parent among
     /// them), what it added goes and what it removed comes back, and each parent's list has what
-    /// the step moved in it put back where it was among what is there now. A node moved to
-    /// another parent, by the step or since, keeps the place on screen the merge gives it there.
-    /// One whose parent is gone lands on the canvas where it was.
+    /// the step moved in it put back where it was among what is there now. A node the step
+    /// changed goes where the merge of its pose in its host puts it, in whatever parent it
+    /// lands in; any other node stays where it is on its host. One whose parent is gone lands
+    /// in the nearest of its ancestors still there, on its screen; only one whose screen is
+    /// gone lands on the canvas, where it was.
     func reverting(_ after: TreeContent, to before: TreeContent) -> TreeContent {
         if self == after { return before }
         var result = self
@@ -147,6 +168,7 @@ extension TreeContent {
         if after.unknownKeys != before.unknownKeys { result.unknownKeys = before.unknownKeys }
         if after.manifestUnknownKeys != before.manifestUnknownKeys { result.manifestUnknownKeys = before.manifestUnknownKeys }
         if after.unreadCanvas != before.unreadCanvas { result.unreadCanvas = before.unreadCanvas }
+        if after.unreadScreens != before.unreadScreens { result.unreadScreens = before.unreadScreens }
         guard after.screens != before.screens || after.canvas != before.canvas else { return result }
 
         let untouched = TreeRecords.hosts(alikeIn: [self, after, before])
@@ -172,9 +194,9 @@ extension TreeContent {
             var merged = c
             merged.node = LayerNode.reverting(c.node, after: a.node, to: b.node)
             merged.parent = a.parent != b.parent ? b.parent : c.parent
-            if !(c.parent == a.parent && a.parent == b.parent) {
-                posed[id] = TreeRecords.Posed(now: c, after: a, before: b)
-            }
+            // Its frame and angle are merged as its pose in its host, not as numbers in its
+            // parent's space, which a container fitted again round what it holds renumbers.
+            posed[id] = TreeRecords.Posed(now: c, after: a, before: b)
             undone.records[id] = merged
         }
 
@@ -199,6 +221,7 @@ extension TreeContent {
             manifestUnknownKeys = before.manifestUnknownKeys
         }
         if before.unreadCanvas != after.unreadCanvas, unreadCanvas == after.unreadCanvas { unreadCanvas = before.unreadCanvas }
+        if before.unreadScreens != after.unreadScreens, unreadScreens == after.unreadScreens { unreadScreens = before.unreadScreens }
         guard after.screens != before.screens || after.canvas != before.canvas else { return }
 
         let untouched = TreeRecords.hosts(alikeIn: [self, after, before])
@@ -220,12 +243,15 @@ extension TreeContent {
             }
         }
 
+        var posed: [UUID: TreeRecords.Posed] = [:]
         for id in was.order where !shared.contains(id) {
             guard let b = was.records[id] else { continue }
             if let a = left.records[id] {
                 guard !a.isSame(as: b), let c = now.records[id], c.isSame(as: a) else { continue }
                 if a.parent == b.parent {
+                    // Back where it was on its host, in a parent that may have been fitted again since.
                     now.records[id]?.node = b.node
+                    posed[id] = TreeRecords.Posed(at: b)
                 } else if now.holds(b.parent), !now.isWithin(b.parent, of: id) {
                     // Moved to another parent: back where it was, if that is still there.
                     now.take(id)
@@ -254,7 +280,7 @@ extension TreeContent {
             now.lists[parent] = order
         }
 
-        now.rebuild(into: &self, posed: [:])
+        now.rebuild(into: &self, posed: posed)
     }
 
     /// `current` with what turned `before` into `after` taken back: what was added goes; what

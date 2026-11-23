@@ -540,10 +540,16 @@ final class AppModel {
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
         let placement = DesignActions.placementForNewScreen(device, in: self, near: anchor)
         // An empty column, as the outline of nothing is: the model's lines fill it.
-        let screenID = store.act(for: edit) {
+        let added = store.act(for: edit) {
             store.addScreen(TreeScreen(name: name ?? ScreenGenerator.name(for: prompt), origin: placement.origin,
                                        scale: placement.scale, deviceID: device == .iPhone ? nil : device.id,
                                        root: Outline.parse("", isComplete: true, tokens: tokens)))
+        }
+        // A design with no room for another screen refuses it: there is nothing to write on, so
+        // the model isn't asked, and the step ends with nothing in it.
+        guard let screenID = added else {
+            if ownsEdit { store.endEdit(edit) }
+            return
         }
         // Shown, not selected: a new screen comes in without selection handles round it.
         DesignActions.reveal(.screen(screenID), in: self, selecting: false)

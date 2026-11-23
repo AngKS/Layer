@@ -36,6 +36,10 @@ struct LayerNode: Identifiable, Equatable, Sendable, Codable {
     var interaction: JSONValue?
     /// What a newer Layer saved with the node that this version doesn't know.
     var unknownKeys = UnknownKeys()
+    /// The same inside the node's parts, by each part's key: its `style`, `layout`, `padding`,
+    /// `width`, `height`, `accessibility`, `sketch` or `source`. Written back into the part
+    /// whenever the node has it.
+    var unknownPartKeys: [String: UnknownKeys] = [:]
 
     init(kind: ElementKind) {
         self.kind = kind

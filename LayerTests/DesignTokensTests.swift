@@ -8,13 +8,13 @@ import Testing
         try TreeManifest.decode(TreeManifest.encode(content, fileName: nil)).content
     }
 
-    /// A design's file with `tokens` as given JSON in its settings.
+    /// A design's file with `tokens` as given JSON in its settings: `null` when nil.
     private static func file(tokens: [String: Any]?) throws -> Data {
         let data = try TreeManifest.encode(TreeContent(), fileName: nil)
         var json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         var inner = try #require(json["content"] as? [String: Any])
         var settings = inner["settings"] as? [String: Any] ?? [:]
-        settings["tokens"] = tokens
+        settings["tokens"] = tokens ?? NSNull()
         inner["settings"] = settings
         json["content"] = inner
         return try JSONSerialization.data(withJSONObject: json)
@@ -49,7 +49,9 @@ import Testing
         let plain = try TreeManifest.encode(TreeContent(), fileName: nil)
         #expect(!String(decoding: plain, as: UTF8.self).contains("tokens"))
         #expect(try TreeManifest.decode(plain).content.settings.tokens == .standard)
-        let nulled = try TreeManifest.decode(Self.file(tokens: nil)).content
+        let nulledFile = try Self.file(tokens: nil)
+        #expect(String(decoding: nulledFile, as: UTF8.self).contains(#""tokens":null"#))
+        let nulled = try TreeManifest.decode(nulledFile).content
         #expect(nulled.settings.tokens == .standard)
     }
 
@@ -72,11 +74,21 @@ import Testing
         #expect(allBad.rhythm == DesignTokens.standard.rhythm)
     }
 
+    /// JSON can't carry a number that isn't finite to the tokens: the file's own decoder refuses
+    /// 1e999 outright. A decoder that reads "inf" and "nan" as numbers hands them on, and each is
+    /// read as the standard's, as a step of the rhythm, a card's padding and a radius.
     @Test func nonFiniteNumbersReadAsTheStandardOnes() throws {
-        let json = #"{"rhythm":[1e999,8],"card":{"padding":1e999}}"#.data(using: .utf8)!
-        let tokens = (try? JSONDecoder().decode(DesignTokens.self, from: json)) ?? .standard
-        #expect(tokens.rhythm.allSatisfy { $0.isFinite && $0 > 0 })
+        let json = Data(#"{"rhythm":["inf",8,"nan","-inf"],"card":{"padding":"inf","radius":"nan"},"cornerRadii":{"small":"nan"},"textSizes":{"title":"inf"}}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+
+        let tokens = try decoder.decode(DesignTokens.self, from: json)
+
+        #expect(tokens.rhythm == [8])
         #expect(tokens.card.padding == 16)
+        #expect(tokens.card.radius == 16)
+        #expect(tokens.cornerRadii.small == 8)
+        #expect(tokens.textSizes.title == 28)
     }
 
     @Test func unknownTokenKeysSurvive() throws {
