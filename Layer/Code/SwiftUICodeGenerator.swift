@@ -326,7 +326,11 @@ extension SwiftUICodeGenerator.ScreenWriter {
 
         switch parent.resolvedLayout {
         case .stack(let stack) where stack.alignment == .fill && !NaturalSize.keepsItsShape(child.kind):
-            if stack.axis == .vertical, child.width.mode != .fixed { (width.flexible, width.edge) = (true, .start) }
+            // Words keep their alignment across the room they're stretched over, as the canvas draws
+            // them; anything else sits at the start (F6, and the controller's ruling on it).
+            if stack.axis == .vertical, child.width.mode != .fixed {
+                (width.flexible, width.edge) = (true, Generator.isText(child.kind) ? own.horizontal : .start)
+            }
             if stack.axis == .horizontal, child.height.mode != .fixed { (height.flexible, height.edge) = (true, .start) }
         case .grid(let grid):
             (width.flexible, width.edge) = (true, grid.alignment.horizontal)
@@ -372,13 +376,9 @@ extension SwiftUICodeGenerator {
     /// top-left corner; anything else centred.
     static func contentAlignment(of node: LayerNode) -> (horizontal: LayerNode.Edge3, vertical: LayerNode.Edge3) {
         guard node.isContainer else {
-            switch node.kind {
-            case .title, .body, .text:
-                let alignment = node.style.textAlignment ?? node.kind.spec.textAlignment
-                return (alignment == .leading ? .start : alignment == .center ? .center : .end, .start)
-            default:
-                return (.center, .center)
-            }
+            guard isText(node.kind) else { return (.center, .center) }
+            let alignment = node.style.textAlignment ?? node.kind.spec.textAlignment
+            return (alignment == .leading ? .start : alignment == .center ? .center : .end, .start)
         }
         switch node.resolvedLayout {
         case .free:
@@ -394,6 +394,14 @@ extension SwiftUICodeGenerator {
             return (.center, .start)
         case .overlay(let alignment):
             return (alignment.horizontal, alignment.vertical)
+        }
+    }
+
+    /// Whether a kind is words, placed by their text alignment: a title, body, text, or a sticky note's words.
+    static func isText(_ kind: ElementKind) -> Bool {
+        switch kind {
+        case .title, .body, .text, .stickyNote: true
+        default: false
         }
     }
 

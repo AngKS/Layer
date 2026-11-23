@@ -171,6 +171,27 @@ struct SwiftUIExportTests {
         #expect(!toggleLines.contains { $0.hasPrefix(".frame(") })
     }
 
+    /// Words stretched across a `.fill` column keep their alignment in the room, as the canvas draws
+    /// them; centred is SwiftUI's default, so its frame names none. Anything else sits at the start (F6).
+    @Test func centredTextInAStretchedColumnExportsCentred() {
+        var title = Self.leaf(.title, "Centred")
+        title.width = LayerNode.Sizing(.fit)
+        var trailing = Self.leaf(.body, "Trailing")
+        trailing.style.textAlignment = .trailing
+        var leading = Self.text("Leading")
+        leading.width = LayerNode.Sizing(.fit)
+        var field = Self.leaf(.textField)
+        field.width = LayerNode.Sizing(.fit)
+        let code = Self.code(Self.design(Self.stack(.vertical, spacing: 16, alignment: .fill), [title, trailing, leading, field]))
+
+        let centred = Self.block(startingWith: "Text(\"Centred\")", in: code)
+        #expect(centred.contains(".frame(maxWidth: .infinity)"))
+        #expect(!centred.contains { $0.hasPrefix(".frame(maxWidth: .infinity, alignment:") })
+        #expect(Self.block(startingWith: "Text(\"Trailing\")", in: code).contains(".frame(maxWidth: .infinity, alignment: .trailing)"))
+        #expect(Self.block(startingWith: "Text(\"Leading\")", in: code).contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(Self.block(startingWith: "TextField(", in: code).contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
+
     @Test func justifyBecomesSpacers() {
         func row(_ justify: LayerNode.Justify, filling: Bool = false) -> [String] {
             var children = ["One", "Two", "Three"].map { Self.leaf(.button, $0, frame: CGRect(x: 0, y: 0, width: 60, height: 44)) }
