@@ -67,12 +67,15 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
     static let description = IntentDescription(
         """
         Builds a whole screen in a Layer design from a description, one element per line from top to bottom, \
-        such as “title: Welcome back”, “text field: Email”, “button: Sign in [blue, bold]”. Start a line with \
-        “row:” and split elements with “|” to put them side by side; a blank line or “---” starts a new section. \
-        Kinds: title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, \
-        avatar, text. Square brackets hold the look: a colour name or hex code, a weight, a size such as 18pt, \
-        radius 12, text white, fill or fit, on or off, a percentage such as 40% for a progress bar, filled, \
-        bordered or plain for a button, left, centre or right, shadow, border red, opacity 50%.
+        such as “title: Welcome back”, “text field: Email”, “button: Sign in [blue, bold]”. Indent lines under \
+        “card:”, “column:” or “grid 2:” to put them inside it; start a line with “row:” and split elements with \
+        “|” to put them side by side; a blank line or “---” starts a new section. Kinds: title, body, button, \
+        text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar, text. Square brackets \
+        hold the look: a colour name or hex code, a weight, a size such as 18pt, radius 12, text white, fill or \
+        fit, on or off, a percentage such as 40% for a progress bar, filled, bordered or plain for a button, \
+        left, centre or right, shadow, border red, opacity 50%. Or give A2UI 1.0 JSON, starting with “{” or “[”, \
+        and Layer builds its components. When rebuilding a screen, what was built before is kept in place and \
+        what was added by hand is left alone.
         """,
         categoryName: "Screens"
     )
@@ -80,7 +83,7 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
 
     @Parameter(
         title: "Layout",
-        description: "The screen's elements, one per line from top to bottom, written as kind: words [look].",
+        description: "The screen's elements, one per line from top to bottom, written as kind: words [look], or A2UI JSON.",
         inputOptions: String.IntentInputOptions(multiline: true)
     )
     var layout: String
@@ -106,37 +109,133 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> & ProvidesDialog {
-        guard let blueprint = ScreenBlueprint.parse(layout) else { throw LayerIntentError.invalidBlueprint }
         let model: AppModel
-        let target: DesignScreen?
+        let target: TreeScreen.ID?
         if let screen {
             let found = try await DesignActions.screen(screen)
             model = found.model
-            target = found.screen
+            target = found.screen.id
         } else {
             model = try await DesignActions.model(for: design)
             target = nil
         }
-        let built = try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> DesignScreen in
-            let host: DesignScreen
-            if let target {
-                guard target.isLocked != true else { throw LayerIntentError.locked }
-                host = target
-            } else {
-                var added = model.store.addScreen(device.frame, at: DesignActions.placementForNewScreen(device.frame, in: model))
-                if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                    model.store.updateScreen(added.id) { $0.name = name }
-                    added.name = name
-                }
-                host = added
-            }
-            model.store.setElements(blueprint.layout(on: host.device), on: host.id, replacing: true)
-            return model.store.screen(host.id) ?? host
+        let id = try await Self.build(layout, on: target, name: name, device: device.frame, in: model, undoManager: undoManager)
+        DesignActions.reveal(.screen(id), in: model, selecting: false)
+        guard let built = model.store.screen(id), let entity = DesignActions.entity(for: built, in: model) else {
+            throw LayerIntentError.screenNotFound
         }
-        DesignActions.reveal(.screen(built.id), in: model, selecting: false)
-        guard let entity = DesignActions.entity(for: built, in: model) else { throw LayerIntentError.screenNotFound }
-        let count = built.elements.count
+        let count = model.store.root(of: id)?.leafCount ?? 0
         return .result(value: entity, dialog: "Built \(built.name) with \(count == 1 ? "1 element" : "\(count) elements").")
+    }
+}
+
+/// Why Build Screen made nothing from A2UI.
+enum BuildScreenError: LocalizedError, Equatable {
+    /// The JSON made no screen. Carries what the importer said about it: the missing root's message when it said one,
+    /// else its first diagnostic's.
+    case nothingInA2UI(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .nothingInA2UI(let message): message
+        }
+    }
+}
+
+extension BuildScreenIntent {
+    /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline. A new screen
+    /// (no `target`) is laid out off the main actor and added. An existing one is merged by a reconciler that
+    /// adopts it and committed through `commitGenerated`. One step through `DesignActions.edit` ("Build Screen").
+    ///
+    /// Siri sees leaves only. A new screen with no `name` takes the surface's own when the A2UI carries one (F3), and
+    /// is on `device`. When the screen's root has changed since it was read (by the person, while this worked off
+    /// the main actor), the generated root is merged again over the root as it is now, and committed without the
+    /// layout hint, so the rules lay it out (call 1).
+    @MainActor
+    static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
+                      undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        if let target {
+            guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
+            guard screen.isLocked != true else { throw LayerIntentError.locked }
+        }
+        // Worked off the main actor for the design's settings as they are, and again when they change meanwhile.
+        var prepared: Prepared
+        repeat {
+            let settings = model.store.tree.settings
+            let snapshot = target.flatMap { model.store.root(of: $0) }
+            let deviceID = target.flatMap { id in model.store.tree.screens.first { $0.id == id }?.deviceID }
+                ?? (device == .iPhone ? nil : device.id)
+            prepared = try await Task.detached {
+                try Prepared.make(layout, snapshot: snapshot, deviceID: deviceID, settings: settings)
+            }.value
+        } while prepared.settings != model.store.tree.settings
+
+        return try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
+            guard let target else {
+                let screen = Self.newScreen(prepared, name: name, device: device, in: model)
+                guard let id = model.store.addLaidOutScreens([screen]).first else { throw LayerIntentError.invalidBlueprint }
+                return id
+            }
+            guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
+            guard screen.isLocked != true else { throw LayerIntentError.locked }
+            guard let snapshot = prepared.snapshot else { throw LayerIntentError.screenNotFound }
+            if screen.root == snapshot {
+                model.store.commitGenerated(prepared.laidOut, on: target, laidOutOver: snapshot)
+            } else {
+                let again = TreeReconciler(adopting: snapshot).merged(prepared.generated, over: screen.root)
+                model.store.commitGenerated(again.root, on: target, laidOutOver: nil)
+            }
+            return target
+        }
+    }
+
+    /// The new screen a prepared build makes, named, placed and on `device`.
+    @MainActor
+    private static func newScreen(_ prepared: Prepared, name: String?, device: DeviceFrame, in model: AppModel) -> TreeScreen {
+        let given = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let surface = prepared.surfaceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chosen = [given, surface].compactMap { $0 }.first { !$0.isEmpty }
+        let placement = DesignActions.placementForNewScreen(device, in: model)
+        var screen = TreeScreen(name: chosen ?? "Screen \(model.store.tree.screens.count + 1)", origin: placement.origin,
+                                scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
+        // Set after: `init` keeps a root to a built-in device only, and this one is laid out for the design's own.
+        screen.root = prepared.laidOut
+        return screen
+    }
+
+    /// A layout read, merged where there is a screen to merge into, and laid out: all pure, for off the main actor.
+    fileprivate struct Prepared: Sendable {
+        var settings: CanvasSettings
+        var generated: LayerNode
+        var surfaceName: String?
+        /// The screen's root as it was read, when rebuilding.
+        var snapshot: LayerNode?
+        var laidOut: LayerNode
+
+        static func make(_ layout: String, snapshot: LayerNode?, deviceID: String?, settings: CanvasSettings) throws -> Prepared {
+            let generated: LayerNode
+            var surfaceName: String?
+            if A2UIImporter.looksLikeA2UI(layout) {
+                let imported = A2UIImporter.importJSON(Data(layout.utf8), tokens: settings.tokens, trustsLayerLook: true)
+                guard let screen = imported.screens.first else {
+                    let said = imported.diagnostics.first { $0.reason == .missingRoot } ?? imported.diagnostics.first
+                    throw BuildScreenError.nothingInA2UI(said?.message ?? "There was no A2UI screen in that.")
+                }
+                generated = screen.root
+                surfaceName = screen.name
+            } else {
+                generated = Outline.parse(layout, isComplete: true, tokens: settings.tokens)
+                guard generated.leafCount > 0 else { throw LayerIntentError.invalidBlueprint }
+            }
+            guard let snapshot else {
+                let laid = TreeRules.laidOut(generated, deviceID: deviceID, settings: settings, previous: nil)
+                return Prepared(settings: settings, generated: generated, surfaceName: surfaceName, laidOut: laid)
+            }
+            let merge = TreeReconciler(adopting: snapshot).merged(generated, over: snapshot)
+            let laid = TreeRules.laidOut(merge.root, deviceID: deviceID, settings: settings, previous: snapshot)
+            return Prepared(settings: settings, generated: generated, surfaceName: surfaceName, snapshot: snapshot,
+                            laidOut: laid)
+        }
     }
 }
 
