@@ -129,27 +129,51 @@ import Testing
         #expect(after.canvas.first?.children.map(\.id) == [staying.id, shape.id])
     }
 
-    @Test func anEmptyGroupGoesButAnEmptyCardStays() {
+    @Test func anEmptyFreeGroupGoesButEmptyLaidOutGroupsAndCardsStay() {
         let emptyGroup = Self.group(CGRect(x: 20, y: 100, width: 50, height: 50), [])
-        // Whatever its layout.
-        let emptyColumn = Self.laidOut(Self.column, [])
         // Left empty once the group inside it has gone, so it goes too.
         let holdingAnEmptyGroup = Self.group(CGRect(x: 20, y: 200, width: 50, height: 50),
                                              [Self.group(CGRect(x: 0, y: 0, width: 10, height: 10), [])])
+        // A group that lays its children out stays with none, as a card does (Ruling: empty
+        // laid-out groups), even once an empty free group inside it has gone.
+        let emptyColumn = Self.laidOut(Self.column, [])
+        let emptyRow = Self.laidOut(Self.row, [Self.group(CGRect(x: 0, y: 0, width: 10, height: 10), [])])
+        let emptyGrid = Self.laidOut(.grid(LayerNode.Grid(columns: 2)), [])
+        let emptyOverlay = Self.laidOut(.overlay(LayerNode.Alignment()), [])
         let emptyCard = Self.node(.card, CGRect(x: 20, y: 300, width: 200, height: 100))
         let button = Self.node(.button, CGRect(x: 20, y: 700, width: 353, height: 50))
         let onCanvasGroup = Self.group(CGRect(x: 0, y: 0, width: 50, height: 50), [])
         let onCanvasCard = Self.node(.card, CGRect(x: 100, y: 0, width: 50, height: 50))
+        var onCanvasRow = Self.laidOut(Self.row, [])
+        onCanvasRow.frame.origin = CGPoint(x: 200, y: 0)
         let emptyScreen = Self.screen([])
         let before = Self.design(
-            screens: [Self.screen([emptyGroup, emptyColumn, holdingAnEmptyGroup, emptyCard, button]), emptyScreen],
-            canvas: [onCanvasGroup, onCanvasCard])
+            screens: [Self.screen([emptyGroup, emptyColumn, emptyRow, emptyGrid, emptyOverlay, holdingAnEmptyGroup,
+                                   emptyCard, button]), emptyScreen],
+            canvas: [onCanvasGroup, onCanvasCard, onCanvasRow])
 
         let after = Self.applied(before)
-        #expect(after.screens[0].root.children.map(\.id) == [emptyCard.id, button.id])
-        #expect(after.canvas.map(\.id) == [onCanvasCard.id])
+        #expect(after.screens[0].root.children.map(\.id)
+            == [emptyColumn.id, emptyRow.id, emptyGrid.id, emptyOverlay.id, emptyCard.id, button.id])
+        #expect(after.screens[0].root.children[1].children.isEmpty)
+        #expect(after.canvas.map(\.id) == [onCanvasCard.id, onCanvasRow.id])
         // A screen's root is never taken away, however empty.
         #expect(after.screens[1].root.id == emptyScreen.root.id)
+        // Applying again changes nothing.
+        #expect(Self.applied(after, after: after) == after)
+    }
+
+    @Test func aDissolvedGroupsAngleIsKeptAsAnElementKeepsIt() {
+        let child = Self.node(.shape, CGRect(x: 0, y: 0, width: 40, height: 40), turned: 20)
+        let turned = Self.group(CGRect(x: 100, y: 100, width: 40, height: 40), turned: 350, [child])
+        let upright = Self.node(.shape, CGRect(x: 0, y: 0, width: 40, height: 40), turned: 45)
+        let undone = Self.group(CGRect(x: 100, y: 300, width: 40, height: 40), turned: -45, [upright])
+        let after = Self.applied(Self.design(screens: [Self.screen([turned, undone])]))
+        let children = after.screens[0].root.children
+        #expect(children.map(\.id) == [child.id, upright.id])
+        // From 0 up to 360, and nothing when upright, as `Rotation.kept` keeps an element's angle.
+        #expect(children[0].rotation.map { abs($0 - 10) < 0.000_1 } == true, "\(String(describing: children[0].rotation))")
+        #expect(children[1].rotation == nil)
     }
 
     @Test func aFreeGroupOfOneDissolvesWithoutMovingAndHandsDownLockAndHide() throws {

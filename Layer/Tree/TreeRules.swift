@@ -11,9 +11,10 @@ import Foundation
 ///    margin, and on a desktop its column is at most 1080 wide, centred. A free root isn't inset.
 /// 2. Drawings live only at the canvas's top level, and 3. sticky notes only on the canvas. One
 ///    anywhere else moves there, where it was on the canvas, in front of what is already there.
-/// 4. An empty group goes, and 5. a free group of one dissolves, its child taking its place,
-///    its lock and its hide. Screen roots and cards stay, and so do groups that lay their
-///    children out, with any number of children: a row of one is still a row.
+/// 4. An empty free group goes, and 5. a free group of one dissolves, its child taking its place,
+///    its lock and its hide, at the angle the two make together. Screen roots and cards stay, and
+///    so do groups that lay their children out, with any number of children, none included: a row
+///    of one is still a row, and a row whose last child was dragged out is still there.
 ///
 /// Then each screen that changed is laid out at its device's size, and each container on the
 /// canvas's top level that changed at its own size, which it fits on each axis sized to fit, as
@@ -164,8 +165,9 @@ enum TreeRules {
         isEmptyGroup(node) || isFreeGroupOfOne(node) || node.children.contains(where: needsTidying)
     }
 
+    /// A free group holding nothing. One that lays its children out stays, as a card does.
     private static func isEmptyGroup(_ node: LayerNode) -> Bool {
-        node.kind == .group && node.children.isEmpty && node.unreadChildren.isEmpty
+        node.kind == .group && node.resolvedLayout == .free && node.children.isEmpty && node.unreadChildren.isEmpty
     }
 
     private static func isFreeGroupOfOne(_ node: LayerNode) -> Bool {
@@ -173,9 +175,11 @@ enum TreeRules {
     }
 
     /// A free group of one's child in the group's place: where it was on screen, locked or
-    /// hidden if either was, and at the group's scale on the canvas's top level.
+    /// hidden if either was, and at the group's scale on the canvas's top level. Its angle is
+    /// kept as an element keeps one (`Rotation.kept`): from 0 up to 360, and none when upright.
     private static func dissolved(_ group: LayerNode) -> LayerNode {
         var child = inParent(group.children[0], of: group)
+        child.rotation = child.rotation.flatMap(Rotation.kept)
         child.isLocked = child.isLocked || group.isLocked
         child.isHidden = child.isHidden || group.isHidden
         child.scale = group.scale
