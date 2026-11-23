@@ -127,6 +127,7 @@ extension DesignStore {
     }
 
     /// Changes a node in place: any field but its id and what it holds, which stay as they were.
+    /// `body` runs inside the change, so it mustn't read the store.
     func update(_ id: UUID, _ body: (inout LayerNode) -> Void) {
         guard let entry = index[id] else { return }
         changeTree(writing: 1) { tree in
@@ -255,16 +256,26 @@ extension DesignStore {
 
     /// The point a reconciler commits through: one change, one rules pass. False when the screen is gone.
     ///
-    /// `body` is given the screen's root as it is, and may change anything in it; the root keeps its id.
-    /// Not counted in `ListWork`: a whole host set at once.
+    /// Also false, and nothing changes, when the root `body` leaves is more than the tree can hold: a node
+    /// deeper than 32, or a design of more than 5,000 nodes. `body` is given a copy of the screen's root
+    /// before the change is made, so it may read the store, and may change anything in it. The root keeps
+    /// its id. A node below it whose id the design uses elsewhere, or that one before it in the root has,
+    /// is given a new one, so that no id is held twice. Not counted in `ListWork`: a whole host set at once.
     @discardableResult
     func reconcile(_ screenID: TreeScreen.ID, _ body: (inout LayerNode) -> Void) -> Bool {
-        guard tree.screens.contains(where: { $0.id == screenID }) else { return false }
+        let index = index
+        guard let old = tree.screens.first(where: { $0.id == screenID })?.root else { return false }
+        var root = old
+        body(&root)
+        root.id = old.id
+        TreeEdit.renewIDs(below: &root) { id in index[id].map { $0.host != .screen(screenID) } ?? false }
+        guard TreeEdit.levels(below: root) <= TreeRules.maximumDepth,
+              index.count - Set(TreeEdit.ids(in: old)).count + TreeEdit.count(of: root) <= TreeRules.maximumNodes
+        else { return false }
+        let made = root
         changeTree(writing: 0) { tree in
             guard let screen = tree.screens.firstIndex(where: { $0.id == screenID }) else { return }
-            let id = tree.screens[screen].root.id
-            body(&tree.screens[screen].root)
-            tree.screens[screen].root.id = id
+            tree.screens[screen].root = made
         }
         return true
     }

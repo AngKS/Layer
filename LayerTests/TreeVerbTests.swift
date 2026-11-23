@@ -429,6 +429,66 @@ struct TreeVerbTests {
     }
     #endif
 
+    @Test func reconcileRefusesWhatGoesDeeperThan32() throws {
+        let target = screen([leaf(.text, CGRect(x: 20, y: 100, width: 80, height: 20))])
+        let (store, undo) = makeStore(design([target]))
+        let before = store.tree
+        // A leaf 32 below its top: 33 below the root.
+        var deep = leaf(.text, CGRect(x: 0, y: 0, width: 40, height: 20))
+        for _ in 0..<TreeRules.maximumDepth { deep = container(.group, column(), [deep]) }
+        let tooDeep = deep
+
+        #expect(!store.reconcile(target.id) { root in root.children = [tooDeep] })
+        #expect(store.tree == before)
+        #expect(!undo.canUndo)
+        #expect(store.reconcile(target.id) { root in root.children = [tooDeep.children[0]] })
+    }
+
+    @Test func reconcileRefusesADesignOfMoreThan5000Nodes() throws {
+        // 2 roots, 1 text and 4,990 leaves: 4,993 nodes.
+        let crowd = (0..<4_990).map { _ in leaf(.text, CGRect(x: 0, y: 0, width: 10, height: 10)) }
+        let target = screen([leaf(.text, CGRect(x: 20, y: 100, width: 80, height: 20))])
+        let (store, undo) = makeStore(design([target, screen(crowd)]))
+        let before = store.tree
+        func texts(_ count: Int) -> [LayerNode] {
+            (0..<count).map { leaf(.text, CGRect(x: 20, y: 140 + 30 * CGFloat($0), width: 80, height: 20)) }
+        }
+
+        #expect(!store.reconcile(target.id) { root in root.children += texts(8) })
+        #expect(store.tree == before)
+        #expect(!undo.canUndo)
+        #expect(store.reconcile(target.id) { root in root.children += texts(7) })
+        #expect(store.index.count == TreeRules.maximumNodes)
+    }
+
+    @Test func reconcileNeverHoldsAnIDTwice() throws {
+        let kept = leaf(.text, CGRect(x: 20, y: 100, width: 80, height: 20))
+        let elsewhere = leaf(.text, CGRect(x: 20, y: 100, width: 80, height: 20))
+        let target = screen([kept])
+        let other = screen([elsewhere])
+        let (store, _) = makeStore(design([target, other]))
+        let rootID = try #require(store.tree.screens.first?.root.id)
+
+        #expect(store.reconcile(target.id) { root in
+            var stray = leaf(.button, CGRect(x: 20, y: 200, width: 120, height: 44))
+            stray.id = elsewhere.id
+            var twin = leaf(.title, CGRect(x: 20, y: 300, width: 120, height: 40))
+            twin.id = kept.id
+            root.children += [stray, twin]
+            root.id = UUID()
+        })
+
+        let root = try #require(store.tree.screens.first?.root)
+        let ids = root.children.map(\.id)
+        #expect(root.id == rootID)
+        #expect(ids.count == 3 && Set(ids).count == 3)
+        #expect(ids.first == kept.id)
+        #expect(!ids.contains(elsewhere.id))
+        #expect(root.children.map(\.kind) == [.text, .button, .title])
+        #expect(store.index[elsewhere.id]?.host == .screen(other.id))
+        #expect(store.index.count == 2 + 4)
+    }
+
     // MARK: Duplicate and delete
 
     @Test func aDuplicatedContainerHasNewIDsThroughout() throws {

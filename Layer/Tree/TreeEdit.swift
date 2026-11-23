@@ -45,6 +45,21 @@ enum TreeEdit {
         return copy
     }
 
+    /// Gives each node below `node`, in reading order, whose id `isTaken` or that a node before it has a
+    /// new id. `node` keeps its own, which counts as had.
+    static func renewIDs(below node: inout LayerNode, isTaken: (UUID) -> Bool) {
+        var had: Set<UUID> = [node.id]
+        renewIDs(below: &node, had: &had, isTaken: isTaken)
+    }
+
+    private static func renewIDs(below node: inout LayerNode, had: inout Set<UUID>, isTaken: (UUID) -> Bool) {
+        for index in node.children.indices {
+            if isTaken(node.children[index].id) || had.contains(node.children[index].id) { node.children[index].id = UUID() }
+            had.insert(node.children[index].id)
+            renewIDs(below: &node.children[index], had: &had, isTaken: isTaken)
+        }
+    }
+
     /// `nodes` sorted by `key`, those of equal keys in the order given.
     private static func sorted(_ nodes: [LayerNode], by key: (LayerNode) -> (CGFloat, CGFloat)) -> [LayerNode] {
         nodes.enumerated()

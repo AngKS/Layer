@@ -84,24 +84,10 @@ struct TreeIndex: Sendable {
         return result
     }
 
-    /// The node itself, found by walking its path through `content`.
+    /// The node itself, found by walking its path through `content` (`TreeContent.node(on:at:)`).
     func node(_ id: UUID, in content: TreeContent) -> LayerNode? {
         guard let entry = entries[id] else { return nil }
-        var path = entry.path[...]
-        var current: LayerNode
-        switch entry.host {
-        case .screen(let screenID):
-            guard let screen = content.screens.first(where: { $0.id == screenID }) else { return nil }
-            current = screen.root
-        case .canvas:
-            guard let first = path.popFirst(), content.canvas.indices.contains(first) else { return nil }
-            current = content.canvas[first]
-        }
-        for index in path {
-            guard current.children.indices.contains(index) else { return nil }
-            current = current.children[index]
-        }
-        return current.id == id ? current : nil
+        return content.node(on: entry.host, at: entry.path).flatMap { $0.id == id ? $0 : nil }
     }
 
     /// Its shape on the canvas: a screen's nodes go through the screen's placement.
