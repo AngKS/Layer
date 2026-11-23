@@ -46,6 +46,26 @@ enum NaturalSize {
         }
     }
 
+    /// Whether a leaf's natural width is (up to) the width offered it: text wraps to it, and a
+    /// text field, divider, progress bar or image spans it. Every other leaf is one width whatever
+    /// it is offered.
+    static func takesTheWidthOffered(_ kind: ElementKind) -> Bool {
+        switch kind {
+        case .title, .body, .text, .textField, .divider, .progress, .image: true
+        default: false
+        }
+    }
+
+    /// Whether a kind keeps its natural size when a row or column stretches its children across
+    /// (Ruling M3): a toggle, checkbox, radio button, avatar or symbol drawn any other size is
+    /// drawn wrong, so it stays at its size, at the stack's start edge.
+    static func keepsItsShape(_ kind: ElementKind) -> Bool {
+        switch kind {
+        case .toggle, .checkbox, .radio, .avatar, .symbol: true
+        default: false
+        }
+    }
+
     /// The sizing a generated or imported node of this kind starts with.
     static func defaultSizing(for kind: ElementKind) -> (width: LayerNode.Sizing, height: LayerNode.Sizing) {
         let fills = kind == .card || kind.spec.fillsWrittenWidth

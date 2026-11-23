@@ -24,8 +24,14 @@ struct LayoutDiagnostic: Equatable, Sendable {
 /// inside out (see `settle`). Then rows, columns, grids and overlays measure and place, top
 /// down. A width always settles before its height, because a text's height depends on the
 /// width it wraps to. Bad numbers (non-finite or negative) read as 0, or as no limit for a
-/// minimum or maximum, and no frame it writes is ever non-finite.
+/// minimum or maximum; numbers far too large to be a design's read as the largest that can be
+/// (see `maximumLength`), so no frame it writes is ever non-finite.
 enum LayoutEngine {
+    /// The farthest any position reaches from its parent's origin, and the largest size, in points.
+    static let maximumLength: CGFloat = 1_000_000
+    /// The largest padding or spacing, in points.
+    static let maximumGap: CGFloat = 10_000
+
     /// The size `node` takes for `proposal`: fixed sizes, natural sizes, or (containers) content plus padding.
     static func size(of node: LayerNode, proposal: ProposedSize, measure: TextMeasure) -> CGSize {
         var node = node
@@ -229,16 +235,20 @@ enum LayoutEngine {
 
     /// Children's widths in a stack whose content is `box` wide (nil = ideal). `stretching` is
     /// false while a column works out how wide it is, so `.fill` alignment doesn't make it greedy.
+    /// A stretch leaves a kind with a shape of its own at its size (`NaturalSize.keepsItsShape`).
     private static func widths(of kids: [LayerNode], in stack: LayerNode.Stack, box: CGFloat?, stretching: Bool,
                                measure: TextMeasure) -> [CGFloat] {
         guard stack.axis == .vertical else {
-            return mainSizes(of: kids, sizing: \.width, room: box, spacing: stack.spacing) { index, offered in
+            return mainSizes(of: kids, sizing: \.width, room: box, spacing: stack.spacing,
+                             takesTheRoomOffered: { takesTheWidthOffered(kids[$0]) }) { index, offered in
                 width(of: kids[index], offered: offered, measure: measure)
             }
         }
         let stretches = stretching && stack.alignment == .fill
         return kids.map { kid in
-            if stretches, let box, kid.width.mode != .fixed { return clamped(box, kid.width) }
+            if stretches, let box, kid.width.mode != .fixed, !NaturalSize.keepsItsShape(kid.kind) {
+                return clamped(box, kid.width)
+            }
             return width(of: kid, offered: box, measure: measure)
         }
     }
@@ -247,40 +257,62 @@ enum LayoutEngine {
     private static func heights(of kids: [LayerNode], widths: [CGFloat], in stack: LayerNode.Stack, box: CGFloat?,
                                 measure: TextMeasure) -> [CGFloat] {
         guard stack.axis == .horizontal else {
-            return mainSizes(of: kids, sizing: \.height, room: box, spacing: stack.spacing) { index, offered in
+            // A fitting height is the same whatever room is offered: it depends on the width alone.
+            return mainSizes(of: kids, sizing: \.height, room: box, spacing: stack.spacing,
+                             takesTheRoomOffered: { _ in false }) { index, offered in
                 height(of: kids[index], width: widths[index], offered: offered, measure: measure)
             }
         }
         let stretches = stack.alignment == .fill
         return kids.indices.map { index in
             let kid = kids[index]
-            if stretches, let box, kid.height.mode != .fixed { return clamped(box, kid.height) }
+            if stretches, let box, kid.height.mode != .fixed, !NaturalSize.keepsItsShape(kid.kind) {
+                return clamped(box, kid.height)
+            }
             return height(of: kid, width: widths[index], offered: box, measure: measure)
         }
     }
 
-    /// Sizes along a stack's axis. Fixed and fitting children come first: fitting ones are offered
-    /// the room the spacing and fixed children leave. Filling children then share what is left by
-    /// weight, each clamped; a share cut by a maximum stays unused. With no room known (the stack
-    /// is fitting its content), filling children take their fitting size.
+    /// Whether a node fitting its width takes some of the width offered, rather than one size
+    /// whatever it's offered: a container, or a leaf whose natural width is the width offered.
+    private static func takesTheWidthOffered(_ node: LayerNode) -> Bool {
+        node.isContainer || NaturalSize.takesTheWidthOffered(node.kind)
+    }
+
+    /// Sizes along a stack's axis, sharing the room as SwiftUI's stacks share it. Fixed children
+    /// take their size, and so do fitting children whose size doesn't depend on the room offered.
+    /// The other fitting children share what is left after the spacing: smallest ideal size first,
+    /// each is offered an equal share of what is left and takes what it uses, so a long label
+    /// beside a toggle wraps in the room the toggle leaves rather than pushing it out, and two long
+    /// labels share a row about half and half. Filling children then share what is left by weight,
+    /// each clamped; a share cut by a maximum stays unused. With no room known (the stack is
+    /// fitting its content), every child takes its ideal size. Nothing is offered less than room
+    /// that is there, so a stack overflows only when what it holds can't fit.
     private static func mainSizes(of kids: [LayerNode], sizing: (LayerNode) -> LayerNode.Sizing, room: CGFloat?,
-                                  spacing: CGFloat, size: (Int, CGFloat?) -> CGFloat) -> [CGFloat] {
-        let spacingTotal = gaps(spacing, kids.count)
-        let fixed = kids.indices.filter { sizing(kids[$0]).mode == .fixed }.map { size($0, nil) }.reduce(0, +)
-        let fitOffer = room.map { max(0, $0 - spacingTotal - fixed) }
+                                  spacing: CGFloat, takesTheRoomOffered: (Int) -> Bool,
+                                  size: (Int, CGFloat?) -> CGFloat) -> [CGFloat] {
         var sizes: [CGFloat?] = kids.indices.map { index in
             switch sizing(kids[index]).mode {
             case .fixed: size(index, nil)
-            case .fit: size(index, fitOffer)
+            case .fit: room == nil || !takesTheRoomOffered(index) ? size(index, nil) : nil
             case .fill: room == nil ? size(index, nil) : nil
             }
         }
         guard let room else { return sizes.map { $0 ?? 0 } }
-        let rest = max(0, room - spacingTotal - sizes.compactMap { $0 }.reduce(0, +))
+        var left = max(0, room - gaps(spacing, kids.count) - sizes.compactMap { $0 }.reduce(0, +))
+        let sharing = kids.indices.filter { sizes[$0] == nil && sizing(kids[$0]).mode == .fit }
+        let ideals = sharing.map { size($0, nil) }
+        let order = sharing.indices.sorted { (ideals[$0], $0) < (ideals[$1], $1) }
+        for (count, place) in order.enumerated() {
+            let index = sharing[place]
+            let length = size(index, left / CGFloat(order.count - count))
+            sizes[index] = length
+            left = max(0, left - length)
+        }
         let weights = kids.map { weight(of: sizing($0)) }
         let total = weights.reduce(0, +)
         for index in kids.indices where sizes[index] == nil {
-            sizes[index] = clamped(total > 0 ? rest * weights[index] / total : 0, sizing(kids[index]))
+            sizes[index] = clamped(total > 0 ? left * weights[index] / total : 0, sizing(kids[index]))
         }
         return sizes.map { $0 ?? 0 }
     }
@@ -307,7 +339,7 @@ enum LayoutEngine {
         let sizes = stackSizes(kids, stack, width: box.width, height: box.height, measure: measure)
         let along = sizes.map { vertical ? $0.height : $0.width }
         let room = vertical ? box.height : box.width
-        let spacing = clean(stack.spacing)
+        let spacing = gap(stack.spacing)
         let needed = along.reduce(0, +) + gaps(spacing, kids.count)
         // Justify spreads leftover room only when no child fills it.
         let fills = kids.contains { (vertical ? $0.height : $0.width).mode.fills }
@@ -332,8 +364,8 @@ enum LayoutEngine {
                                   measure: TextMeasure) -> Placement {
         let columns = columnCount(grid)
         let column = columnWidth(grid, box.width)
-        let columnSpacing = clean(grid.columnSpacing)
-        let rowSpacing = clean(grid.rowSpacing)
+        let columnSpacing = gap(grid.columnSpacing)
+        let rowSpacing = gap(grid.rowSpacing)
         let sizes = gridSizes(kids, grid, width: box.width, measure: measure)
         let rows = rowHeights(sizes, columns: columns)
         var frames: [CGRect] = []
@@ -399,7 +431,9 @@ enum LayoutEngine {
 
     /// Whether a text leaf holds a word wider than the width its words wrap to, which Core Text
     /// can only break mid-word. `TextMeasure` never measures wider than the width offered, so
-    /// when the text is wider than that on one line, each of its words is measured on its own.
+    /// when the text is wider than that on one line, its widest word is measured on its own
+    /// (once for each text: see `TextMeasure.widestWord`, which keeps the words out of the cache
+    /// of texts the layout measures).
     private static func hasWordTooWide(_ node: LayerNode, measure: TextMeasure) -> Bool {
         let inset: CGFloat
         switch node.kind {
@@ -410,15 +444,9 @@ enum LayoutEngine {
         let text = node.content.text
         let width = max(0, clean(node.frame.size.width) - inset)
         let fontSize = NaturalSize.fontSize(of: node), weight = NaturalSize.fontWeight(of: node)
-        func tooWide(_ words: String) -> Bool {
-            measure.size(of: words, fontSize: fontSize, weight: weight, width: nil).width > width + slack
-        }
-        guard !text.isEmpty, tooWide(text) else { return false }
-        var words = Set<String>()
-        text.enumerateSubstrings(in: text.startIndex..., options: .byWords) { word, _, _, _ in
-            if let word { words.insert(word) }
-        }
-        return words.contains(where: tooWide)
+        guard !text.isEmpty,
+              measure.size(of: text, fontSize: fontSize, weight: weight, width: nil).width > width + slack else { return false }
+        return measure.widestWord(in: text, fontSize: fontSize, weight: weight) > width + slack
     }
 
     /// How far in from each side a sticky note's words sit, as the canvas draws them.
@@ -431,9 +459,9 @@ enum LayoutEngine {
     private static func fittedInFreeParent(_ node: LayerNode, measure: TextMeasure) -> CGRect? {
         let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
         guard node.isContainer, node.resolvedLayout != .free, fitsWidth || fitsHeight else { return nil }
-        let width = fitsWidth ? snap(width(of: node, offered: nil, measure: measure)) : clean(node.frame.size.width)
+        let width = fitsWidth ? clean(snap(width(of: node, offered: nil, measure: measure))) : clean(node.frame.size.width)
         let height = fitsHeight
-            ? snap(height(of: node, width: width, offered: nil, measure: measure)) : clean(node.frame.size.height)
+            ? clean(snap(height(of: node, width: width, offered: nil, measure: measure))) : clean(node.frame.size.height)
         return reframed(node, size: CGSize(width: width, height: height), shift: .zero)
     }
 
@@ -460,9 +488,9 @@ enum LayoutEngine {
         }
         let size = CGSize(
             width: fitsWidth
-                ? snap(clamped(content.width + padding.leading + padding.trailing, node.width)) : clean(node.frame.size.width),
+                ? clean(snap(clamped(content.width + padding.leading + padding.trailing, node.width))) : clean(node.frame.size.width),
             height: fitsHeight
-                ? snap(clamped(content.height + padding.top + padding.bottom, node.height)) : clean(node.frame.size.height))
+                ? clean(snap(clamped(content.height + padding.top + padding.bottom, node.height))) : clean(node.frame.size.height))
         if movingItsFrame, let frame = reframed(node, size: size, shift: shift) { node.frame = frame }
     }
 
@@ -510,10 +538,13 @@ enum LayoutEngine {
         return placed == previous
     }
 
-    /// The containers among `previous`'s children, by id, so each can be found as it was last laid out.
+    /// The containers among `previous`'s children, by id, so each can be found as it was last laid
+    /// out. A hidden one wasn't: what is inside a hidden child is left as it is, so it may have
+    /// changed since it was last laid out without being laid out again. Shown again, it is laid
+    /// out in full, as a first layout would.
     private static func sameIDContainers(in previous: LayerNode?) -> [UUID: LayerNode] {
         guard let previous else { return [:] }
-        return Dictionary(previous.children.lazy.filter(\.isContainer).map { ($0.id, $0) },
+        return Dictionary(previous.children.lazy.filter { $0.isContainer && !$0.isHidden }.map { ($0.id, $0) },
                           uniquingKeysWith: { first, _ in first })
     }
 
@@ -523,7 +554,7 @@ enum LayoutEngine {
 
     private static func columnWidth(_ grid: LayerNode.Grid, _ width: CGFloat) -> CGFloat {
         let columns = CGFloat(columnCount(grid))
-        return max(0, (width - (columns - 1) * clean(grid.columnSpacing)) / columns)
+        return max(0, (width - (columns - 1) * gap(grid.columnSpacing)) / columns)
     }
 
     private static func rowHeights(_ sizes: [CGSize], columns: Int) -> [CGFloat] {
@@ -551,16 +582,26 @@ enum LayoutEngine {
     /// Rounds half up, so a run of edges shifts as one.
     private static func snap(_ value: CGFloat) -> CGFloat { (value + 0.5).rounded(.down) }
 
-    private static func finite(_ value: CGFloat) -> CGFloat { value.isFinite ? value : 0 }
+    /// A position as the engine reads and writes it: non-finite is 0, and it's never farther than `maximumLength`.
+    private static func finite(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? min(max(value, -maximumLength), maximumLength) : 0
+    }
 
-    /// A length as the engine reads it: non-finite or negative is 0.
-    private static func clean(_ value: CGFloat) -> CGFloat { value.isFinite && value > 0 ? value : 0 }
+    /// A length as the engine reads it: non-finite or negative is 0, and it's never more than `maximumLength`.
+    private static func clean(_ value: CGFloat) -> CGFloat { value.isFinite && value > 0 ? min(value, maximumLength) : 0 }
+
+    /// A padding or spacing as the engine reads it: a length, never more than `maximumGap`.
+    private static func gap(_ value: CGFloat) -> CGFloat { min(clean(value), maximumGap) }
 
     /// An offered length: non-finite is no offer (the ideal size), negative is 0.
-    private static func offer(_ value: CGFloat?) -> CGFloat? { value.flatMap { $0.isFinite ? max(0, $0) : nil } }
+    private static func offer(_ value: CGFloat?) -> CGFloat? {
+        value.flatMap { $0.isFinite ? min(max(0, $0), maximumLength) : nil }
+    }
 
     /// A minimum or maximum: non-finite or negative is no limit.
-    private static func limit(_ value: CGFloat?) -> CGFloat? { value.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
+    private static func limit(_ value: CGFloat?) -> CGFloat? {
+        value.flatMap { $0.isFinite && $0 >= 0 ? min($0, maximumLength) : nil }
+    }
 
     /// Within the sizing's maximum, then its minimum (a minimum above the maximum wins).
     private static func clamped(_ value: CGFloat, _ sizing: LayerNode.Sizing) -> CGFloat {
@@ -576,11 +617,11 @@ enum LayoutEngine {
         return clean(weight)
     }
 
-    private static func gaps(_ spacing: CGFloat, _ count: Int) -> CGFloat { clean(spacing) * CGFloat(max(0, count - 1)) }
+    private static func gaps(_ spacing: CGFloat, _ count: Int) -> CGFloat { gap(spacing) * CGFloat(max(0, count - 1)) }
 
     private static func cleaned(_ padding: LayerNode.Padding) -> LayerNode.Padding {
-        LayerNode.Padding(top: clean(padding.top), leading: clean(padding.leading),
-                          bottom: clean(padding.bottom), trailing: clean(padding.trailing))
+        LayerNode.Padding(top: gap(padding.top), leading: gap(padding.leading),
+                          bottom: gap(padding.bottom), trailing: gap(padding.trailing))
     }
 
     private static func visibleChildren(of node: LayerNode) -> [LayerNode] { node.children.filter { !$0.isHidden } }

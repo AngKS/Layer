@@ -115,12 +115,18 @@ import Testing
         #expect(placed(.center, shape(50, 40)) == CGRect(x: 0, y: 30, width: 50, height: 40))
         #expect(placed(.end, shape(50, 40)) == CGRect(x: 0, y: 60, width: 50, height: 40))
 
-        // A symbol is 44 high by nature (a shape's 100 would match the row), so only a stretch makes it 100.
+        // A symbol is 44 high by nature (a shape's 100 would match the row). A stretch leaves it
+        // so, as it does every kind with a shape of its own (Ruling M3); a text it stretches.
         var fit = LayerNode(kind: .symbol)
         fit.frame = CGRect(x: 0, y: 0, width: 50, height: 40)
         fit.height = LayerNode.Sizing(.fit)
         #expect(placed(.start, fit) == CGRect(x: 0, y: 0, width: 50, height: 44))
-        #expect(placed(.fill, fit) == CGRect(x: 0, y: 0, width: 50, height: 100))
+        #expect(placed(.fill, fit) == CGRect(x: 0, y: 0, width: 50, height: 44))
+        var words = LayerNode(kind: .text)
+        words.content.text = "Hi"
+        words.frame = CGRect(x: 0, y: 0, width: 50, height: 40)
+        words.height = LayerNode.Sizing(.fit)
+        #expect(placed(.fill, words) == CGRect(x: 0, y: 0, width: 50, height: 100))
         #expect(placed(.fill, shape(50, 40)) == CGRect(x: 0, y: 0, width: 50, height: 40))
 
         var fill = fit
@@ -383,5 +389,203 @@ import Testing
         #expect(dozen[..<12].allSatisfy { $0.frame.minY == 0 })
         #expect(Set(dozen[..<12].map(\.frame.minX)).count == 12)
         #expect(dozen[12].frame.origin == CGPoint(x: 0, y: 10))
+    }
+
+    // MARK: - Final review fixes
+
+    private func words(_ text: String, kind: ElementKind = .text) -> LayerNode {
+        var node = LayerNode(kind: kind)
+        node.content.text = text
+        return fitting(node)
+    }
+
+    private func oneLine(_ node: LayerNode) -> CGSize {
+        measure.size(of: node.content.text, fontSize: NaturalSize.fontSize(of: node), weight: NaturalSize.fontWeight(of: node),
+                     width: nil)
+    }
+
+    @Test func aLongLabelAndAToggleShareARow() {
+        let label = words("Allow notifications when someone mentions you")
+        let row = stack(.horizontal, spacing: 8, alignment: .center, size: CGSize(width: 300, height: 100),
+                        children: [label, fitting(LayerNode(kind: .toggle))])
+        #expect(oneLine(label).width > 300 - 8 - 51)
+
+        let (laid, diagnostics) = laidOut(row)
+        let text = laid.children[0].frame, toggle = laid.children[1].frame
+        #expect(toggle.size == CGSize(width: 51, height: 31))
+        #expect(toggle.maxX <= 300)
+        #expect(text.width <= 300 - 8 - 51)
+        #expect(text.height > oneLine(label).height)
+        #expect(toggle.minX == text.maxX + 8)
+        #expect(diagnostics.isEmpty)
+
+        // A label that fits stays on one line, at its own width.
+        let short = words("Wi-Fi")
+        let fits = laidOut(stack(.horizontal, spacing: 8, size: CGSize(width: 300, height: 100),
+                                 children: [short, fitting(LayerNode(kind: .toggle))])).node
+        #expect(fits.children[0].frame.size == oneLine(short))
+        #expect(fits.children[1].frame.minX == oneLine(short).width + 8)
+    }
+
+    @Test func twoLongTextsShareARowAboutHalfAndHalf() {
+        let first = words("A long label that needs more room than half of a row can give it")
+        let second = words("Another long label that also needs more room than half of the row")
+        let (laid, diagnostics) = laidOut(stack(.horizontal, size: CGSize(width: 300, height: 400), children: [first, second]))
+        let widths = laid.children.map(\.frame.width)
+        #expect(widths.allSatisfy { $0 > 100 && $0 < 200 }, "\(widths)")
+        #expect(laid.children[1].frame.maxX <= 300)
+        #expect(laid.children.allSatisfy { $0.frame.height > oneLine($0).height })
+        #expect(diagnostics.isEmpty)
+    }
+
+    @Test func aContainerChangedWhileHiddenIsLaidOutWhenShownAgain() {
+        var row = stack(.horizontal, spacing: 8, size: .zero, children: [words("Hi"), words("there")])
+        row.width = LayerNode.Sizing(.fill(weight: 1))
+        row.height = LayerNode.Sizing(.fit)
+        var card = LayerNode(kind: .card)
+        card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 8))
+        card.padding = LayerNode.Padding(all: 16)
+        card.width = LayerNode.Sizing(.fill(weight: 1))
+        card.height = LayerNode.Sizing(.fit)
+        card.children = [row]
+        let root = stack(.vertical, size: CGSize(width: 393, height: 852), children: [card])
+
+        func step(_ node: LayerNode, after previous: LayerNode?) -> LayerNode {
+            var node = node
+            var diagnostics: [LayoutDiagnostic] = []
+            LayoutEngine.layOut(&node, previous: previous, measure: measure, diagnostics: &diagnostics)
+            return node
+        }
+        let shown = step(root, after: nil)
+        var hiding = shown
+        hiding.children[0].isHidden = true
+        let hidden = step(hiding, after: shown)
+        var editing = hidden
+        editing.children[0].children[0].children[0].content.text = "Hello, world"
+        let edited = step(editing, after: hidden)
+        var showing = edited
+        showing.children[0].isHidden = false
+        let reused = step(showing, after: edited)
+
+        #expect(reused == step(showing, after: nil))
+        let laidWords = reused.children[0].children[0].children
+        #expect(laidWords[0].frame.width == oneLine(laidWords[0]).width)
+        #expect(laidWords[1].frame.minX == laidWords[0].frame.maxX + 8)
+    }
+
+    @Test func hugeNumbersNeverMakeAnInfiniteFrame() throws {
+        var far = shape(1e308, 10)
+        far.frame.origin.x = 1e308
+        var hugging = LayerNode(kind: .group)
+        hugging.layout = .free
+        hugging.width = LayerNode.Sizing(.fit)
+        hugging.height = LayerNode.Sizing(.fit)
+        hugging.children = [far, shape(10, 10)]
+
+        var huge = words("Huge", kind: .title)
+        huge.style.fontSize = 1e308
+        var spaced = fitting(stack(.vertical, spacing: 1e308, size: .zero, children: [shape(10, 10), huge]))
+        spaced.padding = LayerNode.Padding(all: 1e308)
+        let cells = fitting(grid(columns: 3, columnSpacing: 1e308, rowSpacing: 1e308, size: .zero,
+                                 children: Array(repeating: shape(10, 10), count: 4)))
+
+        var root = LayerNode(kind: .group)
+        root.layout = .free
+        root.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        root.children = [hugging, spaced, cells]
+        let laid = laidOut(root).node
+
+        #expect(([laid.frame] + frames(in: laid)).allSatisfy {
+            [$0.origin.x, $0.origin.y, $0.size.width, $0.size.height].allSatisfy(\.isFinite)
+        }, "\(frames(in: laid))")
+        #expect(throws: Never.self) { _ = try JSONEncoder().encode(laid) }
+    }
+
+    /// Short phrases, the same every run.
+    private func phrases(_ count: Int) -> [String] {
+        let vocabulary = ["privacy", "playlist", "account", "summary", "status", "photo", "library", "settings",
+                          "message", "profile", "download", "network", "battery", "storage", "calendar", "reminder"]
+        var seed: UInt64 = 7
+        func next() -> Int {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int(seed >> 33)
+        }
+        return (0..<count).map { _ in (0..<(3 + next() % 4)).map { _ in vocabulary[next() % vocabulary.count] }.joined(separator: " ") }
+    }
+
+    @Test func textIsMeasuredAtTheWholeWidthItIsFramedAt() {
+        // A fractional width wraps as the whole points under it, which is all a frame is ever given.
+        for phrase in phrases(400) {
+            #expect(measure.size(of: phrase, fontSize: 15, weight: .regular, width: 109.67)
+                == measure.size(of: phrase, fontSize: 15, weight: .regular, width: 109), "\(phrase)")
+        }
+    }
+
+    @Test func textInAFractionalCellIsNeverFramedTooShort() {
+        // Three columns in 353 with 12 between are 109.67 wide; the middle one is framed 109 wide.
+        let bodies = phrases(900).map { phrase -> LayerNode in
+            var body = LayerNode(kind: .body)
+            body.content.text = phrase
+            body.width = LayerNode.Sizing(.fill(weight: 1))
+            body.height = LayerNode.Sizing(.fit)
+            return body
+        }
+        let cells = grid(columns: 3, columnSpacing: 12, size: CGSize(width: 353, height: 100_000), children: bodies)
+        let laid = laidOut(cells).node
+        #expect(laid.children[1].frame.width == 109)
+        let tooShort = laid.children.filter {
+            $0.frame.height < measure.size(of: $0.content.text, fontSize: NaturalSize.fontSize(of: $0),
+                                           weight: NaturalSize.fontWeight(of: $0), width: $0.frame.width).height
+        }
+        #expect(tooShort.isEmpty, "\(tooShort.map(\.content.text))")
+    }
+
+    #if DEBUG
+    @Test func lookingForTooWideWordsLeavesTheTextCacheAlone() {
+        let own = TextMeasure()
+        func word(_ number: Int) -> String {
+            var number = number, letters = "w"
+            repeat {
+                letters.append(Character(UnicodeScalar(UInt8(97 + number % 26))))
+                number /= 26
+            } while number > 0
+            return letters
+        }
+        // 60 paragraphs of 40 words, 2,400 different words in all: more than the cache holds.
+        let paragraphs = (0..<60).map { paragraph -> LayerNode in
+            var body = LayerNode(kind: .body)
+            body.content.text = (0..<40).map { word(paragraph * 40 + $0) }.joined(separator: " ")
+            body.width = LayerNode.Sizing(.fill(weight: 1))
+            body.height = LayerNode.Sizing(.fit)
+            return body
+        }
+        let column = stack(.vertical, spacing: 8, size: CGSize(width: 300, height: 100_000), children: paragraphs)
+        var diagnostics: [LayoutDiagnostic] = []
+        var first = column
+        LayoutEngine.layOut(&first, previous: nil, measure: own, diagnostics: &diagnostics)
+        let misses = own.misses
+        var second = column
+        LayoutEngine.layOut(&second, previous: nil, measure: own, diagnostics: &diagnostics)
+        #expect(own.misses == misses)
+        #expect(second == first)
+    }
+    #endif
+
+    @Test func aStretchingStackKeepsFixedShapesAtTheirSize() {
+        let kinds: [ElementKind] = [.toggle, .checkbox, .radio, .avatar, .symbol]
+        let column = stack(.vertical, spacing: 8, alignment: .fill, size: CGSize(width: 300, height: 600),
+                           children: kinds.map { fitting(LayerNode(kind: $0)) } + [words("Stretches")])
+        let laid = laidOut(column).node
+        for (index, kind) in kinds.enumerated() {
+            #expect(laid.children[index].frame.size == NaturalSize.of(LayerNode(kind: kind), width: nil, measure: measure), "\(kind)")
+            #expect(laid.children[index].frame.minX == 0, "\(kind)")
+        }
+        #expect(laid.children[kinds.count].frame.width == 300)
+
+        let row = stack(.horizontal, spacing: 8, alignment: .fill, size: CGSize(width: 300, height: 100),
+                        children: [fitting(LayerNode(kind: .toggle)), words("Stretches")])
+        let across = laidOut(row).node
+        #expect(across.children[0].frame == CGRect(x: 0, y: 0, width: 51, height: 31))
+        #expect(across.children[1].frame.height == 100)
     }
 }

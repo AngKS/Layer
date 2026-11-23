@@ -18,34 +18,58 @@ final class TextMeasure: Sendable {
         var width: CGFloat?
     }
 
-    private struct Cache {
-        var sizes: [Key: CGSize] = [:]
+    private struct Cache<Value: Sendable>: Sendable {
+        var values: [Key: Value] = [:]
         /// Oldest first.
         var order: [Key] = []
         var misses = 0
+
+        /// Keeps `value`, letting the oldest go past `capacity`.
+        mutating func keep(_ value: Value, for key: Key) {
+            misses += 1
+            guard values.updateValue(value, forKey: key) == nil else { return }
+            order.append(key)
+            if order.count > TextMeasure.capacity { values[order.removeFirst()] = nil }
+        }
     }
 
-    private static let capacity = 2_000
-    private let cache = OSAllocatedUnfairLock(initialState: Cache())
+    fileprivate static let capacity = 2_000
+    private let cache = OSAllocatedUnfairLock(initialState: Cache<CGSize>())
+    /// The widest word of each text, by the text, kept apart so that words never push the texts
+    /// the layout measures out of `cache`.
+    private let widestWords = OSAllocatedUnfairLock(initialState: Cache<CGFloat>())
 
     /// Whole points (rounded up). `width` nil = one line's natural width. Empty text = zero
     /// width, one line high. A `width` that is not finite, or is zero or negative, reads as nil.
+    /// Text wraps at the whole points within `width`, the most a frame is ever given of it, so
+    /// a frame snapped to whole points is never narrower than the width its text was measured at.
+    /// A font size that isn't one reads as 17, and one past 1,000 points as 1,000.
     func size(of text: String, fontSize: CGFloat, weight: FontWeightChoice, width: CGFloat?) -> CGSize {
-        let fontSize = fontSize.isFinite && fontSize > 0 ? fontSize : 17
-        let width = width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-        let key = Key(text: text, fontSize: fontSize, weight: weight, width: width)
-        if let hit = cache.withLock({ $0.sizes[key] }) { return hit }
+        let key = Key(text: text, fontSize: Self.fontSize(fontSize), weight: weight,
+                      width: width.flatMap { $0.isFinite && $0 > 0 ? ($0 >= 1 ? $0.rounded(.down) : $0) : nil })
+        if let hit = cache.withLock({ $0.values[key] }) { return hit }
         let size = Self.measure(key)
-        cache.withLock { cache in
-            cache.misses += 1
-            if cache.sizes.updateValue(size, forKey: key) == nil {
-                cache.order.append(key)
-                if cache.order.count > Self.capacity {
-                    cache.sizes[cache.order.removeFirst()] = nil
-                }
-            }
-        }
+        cache.withLock { $0.keep(size, for: key) }
         return size
+    }
+
+    /// How wide the widest word in `text` is on its own, in whole points; 0 for text without words.
+    /// Each text's words are measured once, and none of them is kept in the cache of texts.
+    func widestWord(in text: String, fontSize: CGFloat, weight: FontWeightChoice) -> CGFloat {
+        let key = Key(text: text, fontSize: Self.fontSize(fontSize), weight: weight, width: nil)
+        if let hit = widestWords.withLock({ $0.values[key] }) { return hit }
+        var words = Set<String>()
+        text.enumerateSubstrings(in: text.startIndex..., options: .byWords) { word, _, _, _ in
+            if let word { words.insert(word) }
+        }
+        let widest = words.map { Self.measure(Key(text: $0, fontSize: key.fontSize, weight: weight, width: nil)).width }.max() ?? 0
+        widestWords.withLock { $0.keep(widest, for: key) }
+        return widest
+    }
+
+    /// A font size as text is measured at: from 1 to 1,000 points, and 17 for one that isn't a size.
+    private static func fontSize(_ size: CGFloat) -> CGFloat {
+        size.isFinite && size > 0 ? min(max(size, 1), 1_000) : 17
     }
 
     #if DEBUG
