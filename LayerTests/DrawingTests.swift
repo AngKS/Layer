@@ -323,7 +323,7 @@ struct DrawingFileTests {
 
         let ink = try #require(package.fileWrappers?[DesignPackage.ink]?.fileWrappers)
         #expect(ink[drawing.id.uuidString]?.regularFileContents == drawing.ink)
-        #expect(package.fileWrappers?[DesignPackage.drawing] == nil, "ink is no longer one drawing for the whole board")
+        #expect(package.fileWrappers?["drawing.data"] == nil, "ink is no longer one drawing for the whole board")
         // The design file itself lists the drawing without its ink.
         let design = try #require(package.fileWrappers?[DesignPackage.design]?.regularFileContents)
         #expect(!String(decoding: design, as: UTF8.self).contains("\"ink\""))
@@ -345,20 +345,6 @@ struct DrawingFileTests {
         let second = try file.wrapper(replacing: first)
 
         #expect(second.fileWrappers?[DesignPackage.ink]?.fileWrappers?[name] === first.fileWrappers?[DesignPackage.ink]?.fileWrappers?[name])
-    }
-
-    @Test func aPackageSavedWithAllItsInkAsOneDrawingOpensWithDrawings() throws {
-        let manifest = try JSONSerialization.data(withJSONObject: ["version": 2, "content": ["screens": [], "floating": []]])
-        let whole = PKDrawing(strokes: cross(at: CGPoint(x: 100, y: 100)) + cross(at: CGPoint(x: 900, y: 600)))
-        let package = FileWrapper(directoryWithFileWrappers: [
-            DesignPackage.design: FileWrapper(regularFileWithContents: manifest),
-            DesignPackage.drawing: FileWrapper(regularFileWithContents: whole.dataRepresentation()),
-        ])
-
-        let file = try DesignFile(wrapper: package)
-
-        #expect(file.content.elements.map(\.kind) == [.drawing, .drawing])
-        #expect(file.drawing.strokes.count == 4)
     }
 }
 

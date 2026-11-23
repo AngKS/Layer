@@ -123,6 +123,31 @@ struct TreeIndexTests {
         #expect(index.ancestors(of: UUID()).isEmpty)
     }
 
+    /// Only a damaged design has two nodes of one id: the first keeps the entry, and what the
+    /// second holds is still indexed where it is.
+    @Test func aSecondNodeOfOneIDLeavesTheFirstsEntryAndWhatItHoldsIsIndexed() throws {
+        let shared = UUID()
+        var first = Self.node(.group, CGRect(x: 0, y: 0, width: 100, height: 100))
+        first.id = shared
+        first.children = [Self.node(.body, CGRect(x: 10, y: 10, width: 20, height: 20))]
+        var second = Self.node(.group, CGRect(x: 300, y: 0, width: 100, height: 100))
+        second.id = shared
+        let inside = Self.node(.body, CGRect(x: 10, y: 10, width: 20, height: 20))
+        second.children = [inside]
+        var content = TreeContent()
+        content.canvas = [first, second]
+
+        let index = TreeIndex(content)
+
+        #expect(index[shared]?.path == [0])
+        let entry = try #require(index[inside.id])
+        #expect(entry.path == [1, 0])
+        #expect(entry.hostShape.rect == CGRect(x: 310, y: 10, width: 20, height: 20))
+        #expect(index.node(inside.id, in: content) == inside)
+        // The first, what it holds, and what the second holds.
+        #expect(index.count == 3)
+    }
+
     @Test func aLargeDesignIsIndexedQuickly() {
         var content = TreeContent()
         for s in 0..<10 {

@@ -648,23 +648,6 @@ struct DesignFileTests {
         #expect(try DesignFile(wrapper: second).content.title == "Renamed")
     }
 
-    @Test func aDesignSavedBeforeFloatingElementsAndSymbolsStillOpens() throws {
-        let older = """
-            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":{
-              "accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
-              "screens":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Screen 1","origin":[400,100],"scale":0.75,
-                "elements":[{"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
-                  "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34}}]}]}}
-            """
-        // Version 1 designs were a single file rather than a package.
-        let file = try DesignFile(wrapper: FileWrapper(regularFileWithContents: Data(older.utf8)))
-        #expect(file.content.title == nil)
-        #expect(file.content.floating.isEmpty)
-        let title = try #require(file.content.screens.first?.elements.first)
-        #expect(title.kind == .title)
-        #expect(title.symbol == nil)
-    }
-
     @Test func picturesNothingShowsAreLeftOutOfTheSavedFile() throws {
         var file = sampleFile()
         let shown = UUID()
@@ -680,14 +663,13 @@ struct DesignFileTests {
     /// shows, and a folder of a kind it has never heard of.
     private func packageFromANewerLayer() throws -> (package: FileWrapper, picture: UUID, drawing: UUID, orphan: UUID) {
         let picture = UUID(), drawing = UUID(), orphan = UUID()
-        let tint = ["red": 0, "green": 0, "blue": 0]
         let elements: [[String: Any]] = [
-            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "textAlignment": "justified",
-             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "text": "", "tint": tint],
-            ["id": drawing.uuidString, "kind": "drawing", "textAlignment": "justified",
-             "frame": [[0, 0], [10, 10]], "text": "", "tint": tint],
+            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "style": ["textAlignment": "justified"],
+             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "scale": 1],
+            ["id": drawing.uuidString, "kind": "drawing", "style": ["textAlignment": "justified"],
+             "frame": [[0, 0], [10, 10]], "scale": 1],
         ]
-        let manifest = try JSONSerialization.data(withJSONObject: ["version": 3, "content": ["screens": [], "elements": elements]])
+        let manifest = try JSONSerialization.data(withJSONObject: ["version": 4, "content": ["screens": [], "canvas": elements]])
         let package = FileWrapper(directoryWithFileWrappers: [
             "design.json": FileWrapper(regularFileWithContents: manifest),
             "images": FileWrapper(directoryWithFileWrappers: [
@@ -720,7 +702,7 @@ struct DesignFileTests {
             #expect(again.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"] != nil)
             let manifest = try #require(again.fileWrappers?["design.json"]?.regularFileContents)
             let root = try #require(try JSONSerialization.jsonObject(with: manifest) as? [String: Any])
-            let written = try #require((root["content"] as? [String: Any])?["elements"] as? [[String: Any]])
+            let written = try #require((root["content"] as? [String: Any])?["canvas"] as? [[String: Any]])
             #expect(written.first?["rotation"] as? Double == 30)
             #expect(written.first?["blur"] as? Double == 4)
         }
@@ -747,18 +729,20 @@ struct DesignFileTests {
         // and saves the design's model in a shape this version can't read.
         var root = try manifest(of: file.wrapper())
         var saved = try #require(root["content"] as? [String: Any])
-        var elements = try #require(saved["elements"] as? [[String: Any]])
+        var screens = try #require(saved["screens"] as? [[String: Any]])
+        var screenRoot = try #require(screens[0]["root"] as? [String: Any])
+        var elements = try #require(screenRoot["children"] as? [[String: Any]])
         elements[0]["skew"] = 12
         elements[0]["maskImageID"] = mask.uuidString
         elements[0]["shadowStyle"] = ["blur": 8, "colour": "#000000"]
-        saved["elements"] = elements
-        var screens = try #require(saved["screens"] as? [[String: Any]])
+        screenRoot["children"] = elements
+        screens[0]["root"] = screenRoot
         screens[0]["background"] = "#FFFFFF"
         saved["screens"] = screens
-        var canvas = try #require(saved["canvas"] as? [String: Any])
-        canvas["rulers"] = true
-        canvas["model"] = ["provider": ["name": "future"]]
-        saved["canvas"] = canvas
+        var settings = try #require(saved["settings"] as? [String: Any])
+        settings["rulers"] = true
+        settings["model"] = ["provider": ["name": "future"]]
+        saved["settings"] = settings
         saved["groups"] = [["members": [button.id.uuidString]]]
         root["content"] = saved
         root["designID"] = "B7F0"
@@ -776,20 +760,21 @@ struct DesignFileTests {
         #expect(again["designID"] as? String == "B7F0")
         let content2 = try #require(again["content"] as? [String: Any])
         #expect((content2["groups"] as? [[String: Any]])?.first?["members"] as? [String] == [button.id.uuidString])
-        let element = try #require((content2["elements"] as? [[String: Any]])?.first)
+        let screen2 = try #require((content2["screens"] as? [[String: Any]])?.first)
+        let element = try #require(((screen2["root"] as? [String: Any])?["children"] as? [[String: Any]])?.first)
         #expect(element["rotation"] as? Double == 30)
         #expect(element["skew"] as? Double == 12)
         #expect((element["shadowStyle"] as? [String: Any])?["blur"] as? Double == 8)
-        #expect((content2["screens"] as? [[String: Any]])?.first?["background"] as? String == "#FFFFFF")
-        let canvas2 = try #require(content2["canvas"] as? [String: Any])
-        #expect(canvas2["rulers"] as? Bool == true)
-        #expect(((canvas2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
+        #expect(screen2["background"] as? String == "#FFFFFF")
+        let settings2 = try #require(content2["settings"] as? [String: Any])
+        #expect(settings2["rulers"] as? Bool == true)
+        #expect(((settings2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
         // The picture only the new key names is kept with it.
         #expect(written.fileWrappers?["images"]?.fileWrappers?[mask.uuidString] != nil)
 
         // A model chosen here is written in place of the one this version couldn't read.
         read.content.canvas.model = .appleIntelligence
-        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["canvas"] as? [String: Any])
+        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["settings"] as? [String: Any])
         #expect((chosen["model"] as? [String: Any])?["provider"] as? String == ModelChoice.appleIntelligence.provider)
     }
 
@@ -827,37 +812,6 @@ struct DesignFileTests {
 
         // What is written to disk opens as the same design.
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)
-    }
-
-    @Test func keysEarlierVersionsDroppedAreNotKeptFromAnOlderFile() throws {
-        let screen = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
-        let element = """
-            {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
-             "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34},"legacyFont":"Avenir"}
-            """
-        let content = """
-            {"accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
-             "canvas":{"oldSetting":true},
-             "screens":[{"id":"\(screen)","name":"Screen 1","origin":[400,100],"scale":0.75,"oldFrame":1,"elements":[\(element)]}]}
-            """
-        // Version 1: one file. Version 2: a package, with a key at the top of its design file.
-        let single = FileWrapper(regularFileWithContents: Data("""
-            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":\(content)}
-            """.utf8))
-        let package = FileWrapper(directoryWithFileWrappers: [
-            "design.json": FileWrapper(regularFileWithContents: Data("{\"version\":2,\"legacy\":true,\"content\":\(content)}".utf8)),
-        ])
-        for older in [single, package] {
-            let saved = try manifest(of: DesignFile(wrapper: older).wrapper())
-            #expect(saved["legacy"] == nil)
-            let written = try #require(saved["content"] as? [String: Any])
-            for key in ["accent", "branchName", "comments"] { #expect(written[key] == nil, "\(key)") }
-            #expect((written["canvas"] as? [String: Any])?["oldSetting"] == nil)
-            #expect((written["screens"] as? [[String: Any]])?.first?["oldFrame"] == nil)
-            let elements = try #require(written["elements"] as? [[String: Any]])
-            #expect(elements.count == 1)
-            #expect(elements.first?["legacyFont"] == nil)
-        }
     }
 
     @Test func theSharedDesignFileHasTheLatestEdit() async throws {

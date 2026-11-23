@@ -53,22 +53,8 @@ extension LayerNode: KeepsUnknownKeys {
         try container.encode(id, forKey: .id)
         try container.encode(kind, forKey: .kind)
         if !children.isEmpty || !unreadChildren.isEmpty {
-            // Each unread child goes at its index, or at the first place after it that is free
-            // when another has that index; one past the end of the list goes at the end. None is lost.
             var list = container.nestedUnkeyedContainer(forKey: .children)
-            let unread = unreadChildren.enumerated()
-                .sorted { ($0.element.index, $0.offset) < ($1.element.index, $1.offset) }.map(\.element)
-            var nextUnread = 0, nextChild = 0, position = 0
-            while nextUnread < unread.count || nextChild < children.count {
-                if nextUnread < unread.count, unread[nextUnread].index <= position || nextChild == children.count {
-                    try list.encode(unread[nextUnread].raw)
-                    nextUnread += 1
-                } else {
-                    try list.encode(children[nextChild])
-                    nextChild += 1
-                }
-                position += 1
-            }
+            try Self.write(children, with: unreadChildren, to: &list)
         }
         try container.encodeIfPresent(layout, forKey: .layout)
         if padding != Padding() { try container.encode(padding, forKey: .padding) }
@@ -98,18 +84,43 @@ extension LayerNode: KeepsUnknownKeys {
     /// its index in the list as it was saved.
     private static func readChildren(in container: KeyedDecodingContainer<CodingKeys>) throws -> ([LayerNode], [UnreadChild]) {
         var list = try container.nestedUnkeyedContainer(forKey: .children)
-        var children: [LayerNode] = []
+        return try read(from: &list)
+    }
+
+    /// Reads a list of nodes one at a time: a node's children, or the canvas's nodes. One that
+    /// can't be read comes back as unread, at its index in the list as it was saved.
+    static func read(from list: inout any UnkeyedDecodingContainer) throws -> ([LayerNode], [UnreadChild]) {
+        var nodes: [LayerNode] = []
         var unread: [UnreadChild] = []
         while !list.isAtEnd {
             let index = list.currentIndex
             // A failed read leaves the list where it was, so the same entry is read again as it is.
-            if let child = try? list.decode(LayerNode.self) {
-                children.append(child)
+            if let node = try? list.decode(LayerNode.self) {
+                nodes.append(node)
             } else {
                 unread.append(UnreadChild(index: index, raw: try list.decode(JSONValue.self)))
             }
         }
-        return (children, unread)
+        return (nodes, unread)
+    }
+
+    /// Writes a list of nodes with those this build couldn't read among them. Each unread one goes
+    /// at its index, or at the first place after it that is free when another has that index; one
+    /// past the end of the list goes at the end. None is lost.
+    static func write(_ nodes: [LayerNode], with unreadNodes: [UnreadChild], to list: inout any UnkeyedEncodingContainer) throws {
+        let unread = unreadNodes.enumerated()
+            .sorted { ($0.element.index, $0.offset) < ($1.element.index, $1.offset) }.map(\.element)
+        var nextUnread = 0, nextNode = 0, position = 0
+        while nextUnread < unread.count || nextNode < nodes.count {
+            if nextUnread < unread.count, unread[nextUnread].index <= position || nextNode == nodes.count {
+                try list.encode(unread[nextUnread].raw)
+                nextUnread += 1
+            } else {
+                try list.encode(nodes[nextNode])
+                nextNode += 1
+            }
+            position += 1
+        }
     }
 }
 

@@ -22,8 +22,6 @@ struct DesignContent: Equatable, Sendable {
     var tree = TreeContent()
     /// Pointers a flat write named that the tree can't hold yet; cut when the change ends. Not saved, not compared.
     var pendingPointers: [UUID: UUID] = [:]
-    /// Version-3 elements this build couldn't read. Only until Task 8, which deletes the v3 bridge.
-    var legacyUnread: [UnreadElement] = []
 
     init() {}
 
@@ -42,9 +40,9 @@ struct DesignContent: Equatable, Sendable {
         set { tree.settings = newValue }
     }
 
-    /// The tree, and what couldn't be read. Pointers waiting for a change to end aren't compared.
+    /// The tree, with what it couldn't read. Pointers waiting for a change to end aren't compared.
     static func == (a: DesignContent, b: DesignContent) -> Bool {
-        a.tree == b.tree && a.legacyUnread == b.legacyUnread
+        a.tree == b.tree
     }
 
     /// The pictures the design shows.
@@ -56,39 +54,34 @@ struct DesignContent: Equatable, Sendable {
         return ids
     }
 
-    /// Every string in what this version read but didn't understand: elements of kinds
-    /// it doesn't know, and keys it doesn't know on elements, screens, the canvas and the
-    /// design. Among them are the identifiers of drawings and pictures. The files they
-    /// name are kept when the design is saved, so that the newer Layer that wrote them
-    /// still finds them.
+    /// Every string in what this version read but didn't understand: nodes of kinds it
+    /// doesn't know, on the canvas and inside containers; custom frames it can't use; and keys
+    /// it doesn't know on nodes, screens, the settings, the design and its file. Among them are
+    /// the identifiers of drawings and pictures. The files they name are kept when the design
+    /// is saved, so that the newer Layer that wrote them still finds them.
     var unreadNames: Set<String> {
-        var names = legacyUnread.reduce(into: tree.unknownKeys.strings.union(canvas.unknownKeys.strings)) { $0.formUnion($1.json.strings) }
-        for screen in tree.screens where !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
-        forEachNode { node in
+        var names = tree.unknownKeys.strings.union(tree.manifestUnknownKeys.strings)
+        let settings = tree.settings
+        names.formUnion(settings.unknownKeys.strings)
+        names.formUnion(settings.tokens.unknownKeys.strings)
+        for device in settings.customDevices where !device.unknownKeys.values.isEmpty { names.formUnion(device.unknownKeys.strings) }
+        for json in settings.unreadDevices { names.formUnion(json.strings) }
+        for unread in tree.unreadCanvas { names.formUnion(unread.raw.strings) }
+        func visit(_ node: LayerNode) {
             if !node.unknownKeys.values.isEmpty { names.formUnion(node.unknownKeys.strings) }
+            for unread in node.unreadChildren { names.formUnion(unread.raw.strings) }
+            node.children.forEach(visit)
         }
+        for screen in tree.screens {
+            if !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
+            visit(screen.root)
+        }
+        tree.canvas.forEach(visit)
         return names
     }
 
-    /// Forgets the keys read but not understood on the design, its canvas, screens and
-    /// elements. In a design saved before version 3 they are keys earlier versions of Layer
-    /// stopped using, not ones a newer Layer added, and aren't to be written back.
-    mutating func forgetUnknownKeys() {
-        tree.unknownKeys = UnknownKeys()
-        tree.settings.unknownKeys = UnknownKeys()
-        func forget(_ node: inout LayerNode) {
-            node.unknownKeys = UnknownKeys()
-            for index in node.children.indices { forget(&node.children[index]) }
-        }
-        for screen in tree.screens.indices {
-            tree.screens[screen].unknownKeys = UnknownKeys()
-            for index in tree.screens[screen].root.children.indices { forget(&tree.screens[screen].root.children[index]) }
-        }
-        for index in tree.canvas.indices { forget(&tree.canvas[index]) }
-    }
-
     /// Every node on the screens, below their roots, and on the open canvas, each before what it holds.
-    private func forEachNode(_ body: (LayerNode) -> Void) {
+    fileprivate func forEachNode(_ body: (LayerNode) -> Void) {
         func visit(_ node: LayerNode) {
             body(node)
             for child in node.children { visit(child) }
@@ -238,8 +231,8 @@ struct DesignContent: Equatable, Sendable {
     }
 
     /// A screen new to the tree, as a view gives it: with a free root, and nothing on it yet.
-    /// The root takes the screen's identifier, as the version-3 file keeps no identifier of
-    /// its own for it, so that a design saved and read back is the same tree.
+    /// The root takes the screen's identifier, so that a screen made from the same view twice
+    /// is the same tree.
     private static func newScreen(_ view: DesignScreen) -> TreeScreen {
         var screen = TreeScreen(name: view.name, origin: view.origin, scale: view.scale, deviceID: view.deviceID)
         screen.id = view.id
@@ -270,7 +263,7 @@ struct DesignContent: Equatable, Sendable {
 
     /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
     func boardDiffers(from other: DesignContent) -> Bool {
-        title != other.title || canvas != other.canvas || legacyUnread != other.legacyUnread
+        title != other.title || canvas != other.canvas || tree.unreadCanvas != other.tree.unreadCanvas
             || tree.unknownKeys != other.tree.unknownKeys || tree.manifestUnknownKeys != other.tree.manifestUnknownKeys
     }
 
@@ -282,9 +275,7 @@ struct DesignContent: Equatable, Sendable {
     /// changing the design too (a screen being written, a spoken command, a drag) takes
     /// back its own changes and leaves the others'.
     func reverting(_ after: DesignContent, to before: DesignContent) -> DesignContent {
-        var result = DesignContent(tree: tree.reverting(after.tree, to: before.tree))
-        result.legacyUnread = after.legacyUnread != before.legacyUnread ? before.legacyUnread : legacyUnread
-        return result
+        DesignContent(tree: tree.reverting(after.tree, to: before.tree))
     }
 
     /// Takes back the change that turned `before` into `after`, as far as what it changed
@@ -294,7 +285,6 @@ struct DesignContent: Equatable, Sendable {
     /// `TreeContent.takeBack(_:to:)`.
     mutating func takeBack(_ after: DesignContent, to before: DesignContent) {
         tree.takeBack(after.tree, to: before.tree)
-        if before.legacyUnread != after.legacyUnread, legacyUnread == after.legacyUnread { legacyUnread = before.legacyUnread }
     }
 }
 
@@ -341,81 +331,16 @@ extension [DesignElement] {
 }
 
 // PROJECTION: deleted in plan 6
-/// The version-3 file, kept through the projection until the file moves to version 4 (Task 8):
-/// the screens without what is on them, and one list of elements, `elements`, which is the tree
-/// lowered as `elements` shows it, with the elements this build couldn't read back at their
-/// places in it.
+/// A design's content is coded as its tree is: `TreeContent`'s coding, exactly. The file reads
+/// and writes the tree through `TreeManifest`; this is for what codes the content on its own.
+/// Reading runs no rules: opening a file does (`DesignFile`).
 extension DesignContent: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case screens, elements, floating, title, canvas
-    }
-
-    /// Reads every part that is present, so designs saved before a part existed still
-    /// open. Until version 3 each screen held its own elements and those on the open
-    /// canvas were a list of their own, `floating`. Each host's elements are lifted into the
-    /// tree, and the tree's rules run, so that a design edited elsewhere, or saved by a build
-    /// that doesn't know groups, opens sound: a member of a group that has gone opens
-    /// ungrouped (Review Focus 4).
     init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let screens = try container.decodeIfPresent([DesignScreen].self, forKey: .screens) ?? []
-        self.init()
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        canvas = try container.decodeIfPresent(CanvasSettings.self, forKey: .canvas) ?? CanvasSettings()
-        tree.unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
-        if container.contains(.elements) {
-            let (elements, unread) = try DesignElement.readList(in: container, forKey: .elements)
-            legacyUnread = unread
-            var hosts: [DesignScreen.ID?: [DesignElement]] = [:]
-            var known: Set<DesignScreen.ID> = []
-            for screen in screens where known.insert(screen.id).inserted {
-                var frame = screen
-                frame.elements = []
-                addScreen(frame)
-            }
-            for element in elements {
-                // One on a screen the design doesn't have, which only a damaged file has, is put
-                // on the open canvas where its frame says, as an undo puts one whose screen is gone.
-                guard let parent = element.parent, known.contains(parent) else {
-                    var loose = element
-                    if loose.parent != nil { loose.scale = 1 }
-                    hosts[nil, default: []].append(loose)
-                    continue
-                }
-                hosts[parent, default: []].append(element)
-            }
-            tree.projectedSetHosts(hosts.map { (host: $0.key, elements: $0.value) }, asKept: true, pending: &pendingPointers)
-        } else {
-            for screen in screens { addScreen(screen) }
-            floating = try container.decodeIfPresent([FloatingElement].self, forKey: .floating) ?? []
-        }
-        keepGroupsSound()
+        self.init(tree: try TreeContent(from: decoder))
     }
 
     func encode(to encoder: any Encoder) throws {
-        try tree.unknownKeys.encode(to: encoder)
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(screenFrames, forKey: .screens)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encode(WithUnknownKeys(canvas), forKey: .canvas)
-
-        // Elements this version couldn't read go back where they were among the others.
-        var list = container.nestedUnkeyedContainer(forKey: .elements)
-        var kept = legacyUnread[...]
-        var written = 0
-        func writeUnread(all: Bool = false) throws {
-            while let next = kept.first, all || next.index <= written {
-                try list.encode(next.json)
-                kept = kept.dropFirst()
-                written += 1
-            }
-        }
-        for element in elements {
-            try writeUnread()
-            try list.encode(WithUnknownKeys(element))
-            written += 1
-        }
-        try writeUnread(all: true)
+        try tree.encode(to: encoder)
     }
 }
 
@@ -423,7 +348,7 @@ extension DesignContent: Codable {
 ///
 /// On disk a design is a package, a folder that Files shows as one document:
 ///
-///     design.json               the screens, elements, title and canvas settings
+///     design.json               the screens, each holding its tree, the canvas's nodes, title and settings
 ///     ink/<id>                  each drawing's ink, as PencilKit writes it
 ///     images/<id>               attached pictures, as they were imported
 ///     QuickLook/Thumbnail.jpg   a picture of the board, for the document browser
@@ -433,23 +358,14 @@ extension DesignContent: Codable {
 /// pictures, which never change once attached, are written and uploaded to iCloud once
 /// rather than on every save.
 struct DesignFile: Sendable {
-    enum ReadError: LocalizedError {
-        case newerVersion(Int)
+    typealias ReadError = TreeManifest.ReadError
 
-        var errorDescription: String? {
-            switch self {
-            case .newerVersion: "This design was saved by a newer version of Layer. Update Layer to open it."
-            }
-        }
-    }
+    /// Version 4 saves the design as its tree: each screen's root holding what is on the
+    /// screen, and the canvas's own nodes. A design saved by an earlier version is refused with
+    /// a message saying so, and one saved by a newer version with a message asking for an update.
+    static let currentVersion = TreeManifest.version
 
-    /// Version 1 was a single JSON file with the ink and pictures inside it. Version 2
-    /// made it a package, with each screen holding its own elements and all the ink as
-    /// one drawing. Version 3 keeps the elements in one list, each saying what it is on,
-    /// and the ink as drawings in that list. Earlier versions still open, and are saved
-    /// as version 3.
-    static let currentVersion = 3
-
+    /// The version written: this one's, unless a test writes a design from another.
     var version = currentVersion
     /// The design, its drawings' ink included. Magic Pen sketches are never saved: they
     /// either become elements or disappear.
@@ -469,13 +385,6 @@ struct DesignFile: Sendable {
     /// Parts of the package this version doesn't know, which a newer Layer may have added,
     /// as they were read. They are written back unchanged.
     var unknownParts: [String: PackagePart] = [:]
-    /// Keys at the top of the design's file that this version doesn't know, to be written back.
-    var unknownKeys = UnknownKeys()
-
-    /// The names of drawings and pictures that what this version couldn't read refers to.
-    private var unreadNames: Set<String> {
-        content.unreadNames.union(unknownKeys.strings)
-    }
 
     /// `drawing` is ink for the board as one PencilKit drawing, which is taken in as
     /// drawings: strokes that touch become one drawing each.
@@ -487,46 +396,27 @@ struct DesignFile: Sendable {
 
     // MARK: Reading
 
-    /// Reads a design from what the system hands over when a document opens.
+    /// Reads a design from what the system hands over when a document opens. Only a package
+    /// of version 4 opens; the design's saved frames are laid out again as it does (My call 18).
     init(wrapper: FileWrapper) throws {
-        guard wrapper.isDirectory else {
-            // Version 1: one file.
-            guard let data = wrapper.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
-            try self.init(singleFile: data)
-            return
-        }
+        guard wrapper.isDirectory else { throw Self.refusal(ofSingleFile: wrapper.regularFileContents) }
         let parts = wrapper.fileWrappers ?? [:]
         guard let data = parts[DesignPackage.design]?.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
-        let manifest = try JSONDecoder().decode(Manifest.self, from: data)
-        // A newer design may hold things this version would silently drop on the next save.
-        guard manifest.version <= Self.currentVersion else { throw ReadError.newerVersion(manifest.version) }
         self.init()
-        content = manifest.content
-        fileName = manifest.fileName
-        unknownKeys = manifest.unknownKeys
-        // What a design from before version 3 has that this version doesn't know, earlier
-        // versions put there.
-        if manifest.version < 3 {
-            content.forgetUnknownKeys()
-            unknownKeys = UnknownKeys()
-        }
-        // Each drawing's ink is beside the design, under the drawing's identifier.
+        (content, fileName) = try Self.read(data)
+        // Each drawing's ink is beside the design, under the drawing's identifier. The rules
+        // have put every drawing among the canvas's nodes.
         let ink = parts[DesignPackage.ink]?.fileWrappers ?? [:]
-        for drawing in content.elements where drawing.kind == .drawing {
-            let strokes = ink[drawing.id.uuidString]?.regularFileContents
-            content.update(drawing.id) { $0.ink = strokes }
+        for index in content.tree.canvas.indices where content.tree.canvas[index].kind == .drawing {
+            content.tree.canvas[index].content.ink = ink[content.tree.canvas[index].id.uuidString]?.regularFileContents
         }
         // So is the ink of drawings this version can't read, which is kept for writing back.
-        let named = unreadNames
+        let named = content.unreadNames
         for (name, strokes) in ink where named.contains(name) {
             unreadInk[name] = strokes.regularFileContents
         }
         for (name, part) in parts where !Self.knownParts.contains(name) {
             unknownParts[name] = PackagePart(part)
-        }
-        // Until version 3 all the ink was one drawing.
-        if manifest.version < 3, let whole = parts[DesignPackage.drawing]?.regularFileContents {
-            content.adopt(try PKDrawing(data: whole))
         }
         for (name, picture) in parts[DesignPackage.images]?.fileWrappers ?? [:] {
             images[name] = picture.regularFileContents
@@ -534,15 +424,24 @@ struct DesignFile: Sendable {
         preview = parts[DesignPackage.quickLook]?.fileWrappers?[DesignPackage.thumbnail]?.regularFileContents
     }
 
-    /// Reads a version 1 design, which was a single JSON file.
-    init(singleFile data: Data) throws {
-        let old = try JSONDecoder().decode(SingleFile.self, from: data)
-        guard old.version <= Self.currentVersion else { throw ReadError.newerVersion(old.version) }
-        self.init()
-        content = old.content
-        content.forgetUnknownKeys()
-        content.adopt(old.drawing)
-        images = old.images ?? [:]
+    /// The design in a package's design file, with the tree's rules applied: the frames it was
+    /// saved with are a snapshot, and each screen is laid out again. That is no change, and
+    /// makes no undo step.
+    private static func read(_ data: Data) throws -> (content: DesignContent, fileName: String?) {
+        var (tree, fileName) = try TreeManifest.decode(data)
+        TreeRules.apply(to: &tree, after: nil)
+        return (DesignContent(tree: tree), fileName)
+    }
+
+    /// Why a single file can't be opened: only version 1 saved a design as one file. Its JSON
+    /// says which version it is; something that doesn't can't be read.
+    private static func refusal(ofSingleFile data: Data?) -> ReadError {
+        guard let data, let header = try? JSONDecoder().decode(SingleFileHeader.self, from: data) else { return .unreadable }
+        return .olderVersion(header.version)
+    }
+
+    private struct SingleFileHeader: Decodable {
+        var version: Int
     }
 
     // MARK: Writing
@@ -550,27 +449,26 @@ struct DesignFile: Sendable {
     /// The design as a package, ready to be written. Parts that are already on disk
     /// unchanged are handed back as they are, which leaves their files untouched.
     /// Pictures that nothing in the design shows any more are left out. What this
-    /// version doesn't understand, elements of a kind it doesn't know and parts of the
+    /// version doesn't understand, nodes of a kind it doesn't know and parts of the
     /// package it has never heard of, is written back with the files it names.
     func wrapper(replacing existing: FileWrapper? = nil) throws -> FileWrapper {
         let old = existing?.isDirectory == true ? existing?.fileWrappers ?? [:] : [:]
         var parts: [String: FileWrapper] = [:]
 
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        let manifest = Manifest(version: version, content: content, fileName: fileName, unknownKeys: unknownKeys)
-        parts[DesignPackage.design] = Self.file(try encoder.encode(WithUnknownKeys(manifest)), named: DesignPackage.design, onDisk: old[DesignPackage.design])
+        let design = try TreeManifest.encode(content.tree, fileName: fileName, version: version)
+        parts[DesignPackage.design] = Self.file(design, named: DesignPackage.design, onDisk: old[DesignPackage.design])
 
         // A drawing whose ink is on disk unchanged keeps its file.
         let savedInk = old[DesignPackage.ink]?.fileWrappers ?? [:]
         var ink: [String: FileWrapper] = [:]
-        for drawing in content.elements where drawing.kind == .drawing {
-            guard let strokes = drawing.ink else { continue }
+        // Wherever a drawing is, though the rules keep them all among the canvas's nodes.
+        content.forEachNode { drawing in
+            guard drawing.kind == .drawing, let strokes = drawing.content.ink else { return }
             let name = drawing.id.uuidString
             ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
         }
         // What this version couldn't read keeps the ink and pictures it names.
-        let named = unreadNames
+        let named = content.unreadNames
         for (name, strokes) in unreadInk where ink[name] == nil && named.contains(name) {
             ink[name] = Self.file(strokes, named: name, onDisk: savedInk[name])
         }
@@ -604,7 +502,7 @@ struct DesignFile: Sendable {
     /// The parts of a package this version knows what to do with. Anything else in one is
     /// kept as it is.
     private static let knownParts: Set<String> = [
-        DesignPackage.design, DesignPackage.ink, DesignPackage.drawing, DesignPackage.images, DesignPackage.quickLook,
+        DesignPackage.design, DesignPackage.ink, DesignPackage.images, DesignPackage.quickLook,
     ]
 
     private static func file(_ data: Data, named name: String, onDisk saved: FileWrapper?) -> FileWrapper {
@@ -622,62 +520,17 @@ struct DesignFile: Sendable {
 
     // MARK: On disk
 
-    private struct Manifest: Codable, KeepsUnknownKeys {
-        var version: Int
-        var content: DesignContent
-        var fileName: String?
-        var unknownKeys = UnknownKeys()
-
-        enum CodingKeys: String, CodingKey {
-            case version, content, fileName
-        }
-
-        init(version: Int, content: DesignContent, fileName: String?, unknownKeys: UnknownKeys) {
-            self.version = version
-            self.content = content
-            self.fileName = fileName
-            self.unknownKeys = unknownKeys
-        }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            version = try container.decode(Int.self, forKey: .version)
-            content = try container.decode(DesignContent.self, forKey: .content)
-            fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
-            unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
-        }
-    }
-
-    private struct SingleFile: Decodable {
-        var version: Int
-        var content: DesignContent
-        var drawing: PKDrawing
-        var images: [String: Data]?
-    }
-
-    /// Just the version and content of a version 1 file, without decoding its ink.
-    private struct SingleFileContent: Decodable {
-        var version: Int
-        var content: DesignContent
-    }
-
-    /// Reads only a design's screens, elements, title and canvas settings from its file,
-    /// leaving the ink and pictures where they are: what Siri, Shortcuts and Spotlight need.
-    /// Reads the disk, so not for the main thread.
+    /// Reads only a design's screens, the nodes on them and on the canvas, its title and
+    /// settings from its file, leaving the ink and pictures where they are: what Siri, Shortcuts
+    /// and Spotlight need. The tree's rules are applied, as on opening. A design this version
+    /// can't open throws as opening it does. Reads the disk, so not for the main thread.
     nonisolated static func content(at url: URL) throws -> DesignContent {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
             throw CocoaError(.fileNoSuchFile)
         }
-        if isDirectory.boolValue {
-            let data = try Data(contentsOf: url.appendingPathComponent(DesignPackage.design))
-            let manifest = try JSONDecoder().decode(Manifest.self, from: data)
-            guard manifest.version <= currentVersion else { throw ReadError.newerVersion(manifest.version) }
-            return manifest.content
-        }
-        let old = try JSONDecoder().decode(SingleFileContent.self, from: Data(contentsOf: url))
-        guard old.version <= currentVersion else { throw ReadError.newerVersion(old.version) }
-        return old.content
+        guard isDirectory.boolValue else { throw refusal(ofSingleFile: try Data(contentsOf: url)) }
+        return try read(Data(contentsOf: url.appendingPathComponent(DesignPackage.design))).content
     }
 }
 

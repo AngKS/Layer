@@ -351,52 +351,6 @@ struct GroupModelTests {
 
     // MARK: Files
 
-    /// Review Focus 4.
-    @Test func aMemberOfAMissingGroupIsUngrouped() throws {
-        let board = OrderBoard()
-        var content = board.store.content
-        let missing = UUID()
-        content.update(board.c.element) { $0.group = missing }
-        let data = try JSONEncoder().encode(content)
-        // As written: C points at a group the design hasn't got.
-        let written = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let entry = try #require((written["elements"] as? [[String: Any]])?.first { $0["id"] as? String == board.c.element.uuidString })
-        #expect(entry["group"] as? String == missing.uuidString)
-
-        let read = try JSONDecoder().decode(DesignContent.self, from: data)
-
-        #expect(read.element(board.c.element)?.group == nil)
-        #expect(names(read, on: board.screen) == ["A", "B", "C", "D", "E"])
-    }
-
-    @Test(.timeLimit(.minutes(1)))
-    func aGroupOfADrawingOrALoopIsUndone() throws {
-        let board = OrderBoard()
-        var content = board.store.content
-        // A drawing pointing at a group of two notes.
-        let notes = OrderBoard.addGroup(named: "N", holding: [board.note1.element, board.note2.element, board.drawing.element], to: nil, in: &content)
-        // Two groups pointing at each other, each holding two buttons.
-        let first = OrderBoard.addGroup(named: "G1", holding: [board.a.element, board.b.element], to: board.screen, in: &content)
-        let second = OrderBoard.addGroup(named: "G2", holding: [board.c.element, board.d.element], to: board.screen, in: &content)
-        content.update(first) { $0.group = second }
-        content.update(second) { $0.group = first }
-
-        let read = try JSONDecoder().decode(DesignContent.self, from: JSONEncoder().encode(content))
-
-        #expect(read.element(board.drawing.element)?.group == nil)
-        #expect(read.members(of: notes).map { $0.name ?? "" } == ["note 1", "note 2"])
-        // The loop is broken: nothing is inside itself, and the buttons are still grouped.
-        #expect(!(read.element(first)?.group == second && read.element(second)?.group == first))
-        for element in read.elements {
-            #expect(!read.ancestors(of: element.id).contains(element.id))
-        }
-        #expect(read.members(of: first).contains { $0.id == board.a.element })
-        #expect(read.members(of: second).contains { $0.id == board.c.element })
-        for item in read.elements where item.kind == .group {
-            #expect(read.members(of: item.id).count >= 2)
-        }
-    }
-
     @Test func groupsSurviveTheFile() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d) {
@@ -415,56 +369,19 @@ struct GroupModelTests {
         #expect(reopened.element(g.element)?.isHidden == true)
         #expect(reopened.elements.allSatisfy { $0.unknownKeys.values.isEmpty })
 
-        // A member's group is written; nothing else says it is in one.
+        // A member is written inside its group; nothing else says it is in one.
         let written = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(board.store.content)) as? [String: Any])
-        let entries = try #require(written["elements"] as? [[String: Any]])
-        let pointing = entries.filter { $0["group"] != nil }.compactMap { $0["name"] as? String }
-        #expect(Set(pointing) == ["B", "D", "note 1", "note 2"])
-    }
-
-    /// Conflict A, build 0.2.0 (4) and later: neither the kind nor the key is known there, so
-    /// both are simulated as unknown: the item is an unread element, and the members' key one
-    /// that isn't read. Both are written back unchanged, in place.
-    @Test func aDesignSavedByABuildThatKnowsNoGroupsKeepsThem() throws {
-        let board = OrderBoard()
-        let g = board.group(board.b, board.d)
-        var root = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(board.store.content)) as? [String: Any])
-        var elements = try #require(root["elements"] as? [[String: Any]])
-        for index in elements.indices {
-            if elements[index]["id"] as? String == g.element.uuidString { elements[index]["kind"] = "futureGroup" }
-            if let pointer = elements[index].removeValue(forKey: "group") { elements[index]["futureGroupID"] = pointer }
+        func everyNode(_ nodes: [[String: Any]]) -> [[String: Any]] {
+            nodes + nodes.flatMap { everyNode($0["children"] as? [[String: Any]] ?? []) }
         }
-        root["elements"] = elements
-
-        let read = try JSONDecoder().decode(DesignContent.self, from: JSONSerialization.data(withJSONObject: root))
-
-        // Here: the item is unread, the members ungrouped, and everything else in place.
-        #expect(read.element(g.element) == nil)
-        #expect(names(read, on: board.screen) == ["A", "C", "B", "D", "E"])
-        #expect(read.elements.allSatisfy { $0.group == nil })
-        #expect(read.element(board.b.element)?.unknownKeys.values["futureGroupID"] != nil)
-
-        let again = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(read)) as? [String: Any])
-        let written = try #require(again["elements"] as? [[String: Any]])
-        #expect(NSArray(array: written) == NSArray(array: elements))
-    }
-
-    /// Builds up to 0.2.0 (3) drop keys they don't know when they save: the item comes back,
-    /// as an element they couldn't read, but nothing points at it.
-    @Test func aDesignWhoseMembersLostTheirPointersOpensUngrouped() throws {
-        let board = OrderBoard()
-        let g = board.group(board.b, board.d)
-        var root = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(board.store.content)) as? [String: Any])
-        var elements = try #require(root["elements"] as? [[String: Any]])
-        for index in elements.indices { elements[index].removeValue(forKey: "group") }
-        root["elements"] = elements
-
-        let read = try JSONDecoder().decode(DesignContent.self, from: JSONSerialization.data(withJSONObject: root))
-
-        #expect(read.element(g.element) == nil)
-        #expect(names(read, on: board.screen) == ["A", "C", "B", "D", "E"])
-        #expect(names(read, on: nil) == ["note 1", "note 2", "drawing"])
-        #expect(read.elements.allSatisfy { $0.group == nil && $0.kind != .group })
+        let screens = try #require(written["screens"] as? [[String: Any]])
+        let tops = screens.flatMap { ($0["root"] as? [String: Any])?["children"] as? [[String: Any]] ?? [] }
+            + (written["canvas"] as? [[String: Any]] ?? [])
+        let entries = everyNode(tops)
+        let held = entries.filter { $0["kind"] as? String == "group" }
+            .flatMap { ($0["children"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String } }
+        #expect(Set(held) == ["B", "D", "note 1", "note 2"])
+        #expect(entries.allSatisfy { $0["group"] == nil })
     }
 
     // MARK: What doesn't know about groups

@@ -356,6 +356,7 @@
 		E9C80F1D3D2799B8D559E1E1 /* InkCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70DA431B14684CFAD675461D /* InkCanvas.swift */; };
 		E9D88200B2AD65429300CB56 /* textField_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 82E6603F533B80E3402F70EE /* textField_noisy_1.json */; };
 		EB2BD5345F2BE29AC7B7AC46 /* OpenDesigns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE9428C3E252A6211C8A7C7 /* OpenDesigns.swift */; };
+		EC320670E7337DC8E2CDE1C7 /* DesignFileV4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EA6E5140652F40C930FD25 /* DesignFileV4Tests.swift */; };
 		ED03AEFBB91DB401B2FD1298 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2452B50A25ACD85E727421 /* AppModel.swift */; };
 		ED7F3FB469B7C0F106351BD4 /* checkbox_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 0C32E2AFBFA5D07D74D53568 /* checkbox_jittered_1b.json */; };
 		EEEA3F09BCD6A2AA6FA22A16 /* VoiceAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBED814500825C7C9D467D7 /* VoiceAgent.swift */; };
@@ -793,6 +794,7 @@
 		F18877DD363D1D2CC6BAA933 /* toggle_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_jittered_2a.json; sourceTree = "<group>"; };
 		F25855A74EEB164BC40B54CA /* DrawingSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSync.swift; sourceTree = "<group>"; };
 		F3D4915B74569167B85F1CC7 /* unknown_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_noisy_2.json; sourceTree = "<group>"; };
+		F4EA6E5140652F40C930FD25 /* DesignFileV4Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignFileV4Tests.swift; sourceTree = "<group>"; };
 		F4F72AEAB164D2EB607ECFBA /* checkbox_radio_checkbox_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_checkbox_1.json; sourceTree = "<group>"; };
 		F537D2FDDEF17BADA58A8636 /* screen_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = screen_jittered_1b.json; sourceTree = "<group>"; };
 		F5D4F2761354FA99E453EBDB /* ScreenTidyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTidyTests.swift; sourceTree = "<group>"; };
@@ -1058,6 +1060,7 @@
 				80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */,
 				7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */,
 				FA837C44409075331387E5B4 /* CorrectedReadingTests.swift */,
+				F4EA6E5140652F40C930FD25 /* DesignFileV4Tests.swift */,
 				01548CA8886933886FFD4CCD /* DesignTests.swift */,
 				2A66E13C6A8CB0AD687590DB /* DesignTokensTests.swift */,
 				A0CAA4328946B915ADA16A9C /* DeviceFrameTests.swift */,
@@ -1773,6 +1776,7 @@
 				AE217498FB6664260CE3D179 /* ComponentCatalogueTests.swift in Sources */,
 				5312CD8E17306FB20F9B4388 /* ConcurrentEditTests.swift in Sources */,
 				F570CE4CD3F43F48892C0B64 /* CorrectedReadingTests.swift in Sources */,
+				EC320670E7337DC8E2CDE1C7 /* DesignFileV4Tests.swift in Sources */,
 				3A7846E3163FA2ACB288B943 /* DesignTests.swift in Sources */,
 				E62476DC8F72B9D3B7643BB9 /* DesignTokensTests.swift in Sources */,
 				3FCEE851075CDC8CDFC8869C /* DeviceFrameTests.swift in Sources */,

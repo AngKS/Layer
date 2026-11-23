@@ -47,9 +47,9 @@ private func request(_ paths: [[CGPoint]], local: CGRect?) throws -> SketchReque
 struct SettingsTests {
     @Test func designsSavedBeforeTheNewSettingsStillOpen() throws {
         let old = """
-            {"screens":[{"id":"\(UUID().uuidString)","name":"Screen 1","origin":[0,0],"scale":1,"elements":[
-              {"id":"\(UUID().uuidString)","kind":"title","frame":[[82,112],[228,40]],"text":"Hi","tint":{"red":0,"green":0,"blue":0}}
-            ]}],"floating":[],"canvas":{"showsGrid":false,"gridStyle":"lines","gridSpacing":16,"snapsToGuides":true}}
+            {"screens":[{"id":"\(UUID().uuidString)","name":"Screen 1","origin":[0,0],"scale":1,"root":{"id":"\(UUID().uuidString)","kind":"group","children":[
+              {"id":"\(UUID().uuidString)","kind":"title","frame":[[82,112],[228,40]],"text":"Hi","style":{"tint":{"red":0,"green":0,"blue":0}}}
+            ]}}],"canvas":[],"settings":{"showsGrid":false,"gridStyle":"lines","gridSpacing":16,"snapsToGuides":true}}
             """
         let content = try JSONDecoder().decode(DesignContent.self, from: Data(old.utf8))
         let title = try #require(content.screens.first?.elements.first)

@@ -224,27 +224,6 @@ struct GradualEditStepTests {
     }
 }
 
-/// A design as it was saved before elements were one list: each screen held its own
-/// elements, and those on the open canvas were a list of their own.
-private struct EarlierDesign: Encodable {
-    struct Screen: Encodable {
-        var id = UUID()
-        var name: String
-        var origin: CGPoint
-        var scale: CGFloat
-        var elements: [DesignElement]
-    }
-
-    struct Loose: Encodable {
-        var element: DesignElement
-        var scale: CGFloat
-    }
-
-    var screens: [Screen]
-    var floating: [Loose]
-    var title: String?
-}
-
 @Suite("Saving the list of elements")
 struct FlatFormatTests {
     private func element(_ kind: ElementKind, at y: CGFloat = 100) -> DesignElement {
@@ -255,7 +234,7 @@ struct FlatFormatTests {
         try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(content)) as? [String: Any])
     }
 
-    @Test func aDesignIsSavedAsItsScreensAndOneListOfElements() throws {
+    @Test func aDesignIsSavedAsScreensHoldingTreesAndCanvasNodes() throws {
         var content = DesignContent()
         let screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [element(.title), element(.button, at: 200)])
         content.screens = [screen]
@@ -265,11 +244,16 @@ struct FlatFormatTests {
 
         let screens = try #require(saved["screens"] as? [[String: Any]])
         #expect(screens.count == 1)
-        #expect(screens[0]["elements"] == nil, "a screen no longer holds its elements")
-        let elements = try #require(saved["elements"] as? [[String: Any]])
-        #expect(elements.map { $0["kind"] as? String } == ["title", "button", "stickyNote"])
-        #expect(elements.map { $0["parent"] as? String } == [screen.id.uuidString, screen.id.uuidString, nil])
-        #expect(elements.map { $0["scale"] as? Double } == [nil, nil, 0.66])
+        #expect(screens[0]["elements"] == nil, "a screen holds its tree, not a list")
+        // What is on the screen is in its root; what is on the open canvas is among the canvas's nodes.
+        let children = try #require((screens[0]["root"] as? [String: Any])?["children"] as? [[String: Any]])
+        #expect(children.map { $0["kind"] as? String } == ["title", "button"])
+        #expect(children.map { $0["scale"] as? Double } == [nil, nil])
+        let canvas = try #require(saved["canvas"] as? [[String: Any]])
+        #expect(canvas.map { $0["kind"] as? String } == ["stickyNote"])
+        #expect(canvas.map { $0["scale"] as? Double } == [0.66])
+        #expect((children + canvas).allSatisfy { $0["parent"] == nil })
+        #expect(saved["elements"] == nil)
         #expect(saved["floating"] == nil)
     }
 
@@ -284,48 +268,33 @@ struct FlatFormatTests {
         #expect(read == content)
     }
 
-    @Test func aDesignSavedBeforeElementsWereOneListStillOpens() throws {
-        let title = element(.title)
-        let button = element(.button, at: 200)
-        let note = element(.stickyNote)
-        let earlier = EarlierDesign(
-            screens: [.init(name: "Screen 1", origin: CGPoint(x: 40, y: 60), scale: 0.5, elements: [title, button])],
-            floating: [.init(element: note, scale: 0.66)],
-            title: "Sign In"
-        )
-
-        let content = try JSONDecoder().decode(DesignContent.self, from: JSONEncoder().encode(earlier))
-
-        let screen = try #require(content.screens.first)
-        #expect(screen.id == earlier.screens[0].id)
-        #expect(screen.origin == CGPoint(x: 40, y: 60))
-        #expect(screen.elements.map(\.id) == [title.id, button.id])
-        #expect(content.floating.map(\.id) == [note.id])
-        #expect(content.floating.first?.scale == 0.66)
-        #expect(content.elements.map(\.parent) == [screen.id, screen.id, nil])
-        #expect(content.title == "Sign In")
-    }
-
     @Test func anElementOfAKindThisVersionDoesNotKnowIsKeptAndWrittenBackWhereItWas() throws {
         var content = DesignContent()
         let screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [element(.title), element(.button, at: 200)])
         content.screens = [screen]
         var saved = try json(content)
-        var elements = try #require(saved["elements"] as? [[String: Any]])
-        // A later version of Layer put a carousel between the two.
-        let carousel: [String: Any] = ["id": UUID().uuidString, "kind": "carousel", "parent": screen.id.uuidString, "pages": 3, "frame": [[20, 150], [353, 180]]]
-        elements.insert(carousel, at: 1)
-        saved["elements"] = elements
+        var screens = try #require(saved["screens"] as? [[String: Any]])
+        var root = try #require(screens[0]["root"] as? [String: Any])
+        var children = try #require(root["children"] as? [[String: Any]])
+        // A later version of Layer put a carousel between the two, and the three in a group.
+        let carousel: [String: Any] = ["id": UUID().uuidString, "kind": "carousel", "pages": 3, "frame": [[0, 50], [353, 180]]]
+        children.insert(carousel, at: 1)
+        let group: [String: Any] = ["id": UUID().uuidString, "kind": "group", "frame": [[20, 100], [353, 230]], "children": children]
+        root["children"] = [group]
+        screens[0]["root"] = root
+        saved["screens"] = screens
 
         let read = try JSONDecoder().decode(DesignContent.self, from: JSONSerialization.data(withJSONObject: saved))
 
         // The design opens with what this version understands.
         #expect(read.screens.first?.elements.map(\.kind) == [.title, .button])
         // And saving it loses nothing.
-        let written = try #require(try json(read)["elements"] as? [[String: Any]])
+        let writtenScreen = try #require((try json(read)["screens"] as? [[String: Any]])?.first)
+        let writtenGroup = try #require(((writtenScreen["root"] as? [String: Any])?["children"] as? [[String: Any]])?.first)
+        let written = try #require(writtenGroup["children"] as? [[String: Any]])
         #expect(written.map { $0["kind"] as? String } == ["title", "carousel", "button"])
         #expect(written[1]["pages"] as? Int == 3)
-        #expect(written[1]["parent"] as? String == screen.id.uuidString)
+        #expect(writtenScreen["id"] as? String == screen.id.uuidString)
     }
 
     @Test func elementsThatShareAnIdentifierAreLeftInTheirOrderRatherThanTrapping() {
@@ -338,22 +307,5 @@ struct FlatFormatTests {
         let before = content
         content.reorder(nil, to: [note.id, note.id])
         #expect(content == before)
-    }
-
-    @Test func aPackageSavedByTheVersionBeforeOpens() throws {
-        let earlier = EarlierDesign(
-            screens: [.init(name: "Screen 1", origin: .zero, scale: 1, elements: [element(.title)])],
-            floating: [], title: nil
-        )
-        let manifest = try JSONSerialization.data(withJSONObject: [
-            "version": 2,
-            "content": try JSONSerialization.jsonObject(with: JSONEncoder().encode(earlier)),
-        ])
-        let package = FileWrapper(directoryWithFileWrappers: [DesignPackage.design: FileWrapper(regularFileWithContents: manifest)])
-
-        let file = try DesignFile(wrapper: package)
-
-        #expect(file.content.screens.first?.elements.map(\.kind) == [.title])
-        #expect(DesignFile.currentVersion == 3)
     }
 }

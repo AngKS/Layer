@@ -8,7 +8,8 @@ import Foundation
 struct TreeChange: Sendable {
     var nodes: Set<UUID> = []
     var screens: Set<TreeScreen.ID> = []
-    /// The title, the settings, or what this version didn't understand of the content or its manifest.
+    /// The title, the settings, or what this version didn't understand of the content or its
+    /// manifest, the canvas nodes it couldn't read among them.
     var board = false
 
     init() {}
@@ -16,6 +17,7 @@ struct TreeChange: Sendable {
     init(from before: TreeContent, to after: TreeContent) {
         board = before.title != after.title || before.settings != after.settings
             || before.unknownKeys != after.unknownKeys || before.manifestUnknownKeys != after.manifestUnknownKeys
+            || before.unreadCanvas != after.unreadCanvas
         guard before.screens != after.screens || before.canvas != after.canvas else { return }
         // A host the same on both sides holds the same nodes the same way: not looked into.
         let alike = TreeRecords.hosts(alikeIn: [before, after])
