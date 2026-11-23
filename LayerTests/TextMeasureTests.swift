@@ -5,7 +5,7 @@ import Testing
 import UIKit
 @testable import Layer
 
-@Suite(.serialized) struct TextMeasureTests {
+@Suite struct TextMeasureTests {
     private let measure = TextMeasure.shared
 
     @Test func emptyTextIsOneLineHigh() {
@@ -49,11 +49,12 @@ import UIKit
 
     #if DEBUG
     @Test func measuringAgainUsesTheCache() {
-        let text = "cache probe \(UUID().uuidString)"
-        let before = measure.misses
-        _ = measure.size(of: text, fontSize: 15, weight: .regular, width: 200)
-        _ = measure.size(of: text, fontSize: 15, weight: .regular, width: 200)
-        #expect(measure.misses == before + 1)
+        let own = TextMeasure()
+        let text = "cache probe"
+        let before = own.misses
+        _ = own.size(of: text, fontSize: 15, weight: .regular, width: 200)
+        _ = own.size(of: text, fontSize: 15, weight: .regular, width: 200)
+        #expect(own.misses == before + 1)
     }
     #endif
 

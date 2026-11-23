@@ -8,6 +8,9 @@ import os
 final class TextMeasure: Sendable {
     static let shared = TextMeasure()
 
+    /// For tests that need a cache of their own; everything else uses `shared`.
+    init() {}
+
     private struct Key: Hashable {
         var text: String
         var fontSize: CGFloat
