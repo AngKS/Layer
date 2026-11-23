@@ -158,6 +158,7 @@
 		71C222CE184D451835EAA3C4 /* SketchFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CFDCF2FE12D75FF22A1DD6A /* SketchFlowUITests.swift */; };
 		72FF7821AECAC994A5808A0F /* Catalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482BB5E652E4557CFBD3A10A /* Catalogue.swift */; };
 		731596DB59F13747DF68A4E0 /* unknown_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = F3D4915B74569167B85F1CC7 /* unknown_noisy_2.json */; };
+		7382F364E573DAB4553200A0 /* LayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FC0D40CA2EBE295EB13B23 /* LayoutEngine.swift */; };
 		7450B51DEEBC497F61D22759 /* image_textField_textField_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 7D6B1D49DDA8A27174F2A7A5 /* image_textField_textField_3.json */; };
 		745C3C176FC8ABFFE87B684B /* unknown_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = CDB218D30560727DA016E005 /* unknown_jittered_2a.json */; };
 		74833BAB3D92098463F2D27E /* SketchSamples.swift in Sources */ = {isa = PBXBuildFile; fileRef = 830F53A99F0E355FD0457E6A /* SketchSamples.swift */; };
@@ -311,6 +312,7 @@
 		E62843052C6AE5A237480011 /* PhoneScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D91D32C8960E072A4A7C5AA /* PhoneScreenView.swift */; };
 		E64E655881D8EA9045675A5F /* checkbox_image_checkbox_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 8B58233F4E9A0EF2ABC44DD1 /* checkbox_image_checkbox_2.json */; };
 		E798BFC2A9574FE65D0C4562 /* toggle_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = E9F0B5812BDDAD1996295A16 /* toggle_noisy_1.json */; };
+		E88B49D3E718BB837ED6C379 /* LayoutEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2432F3E4740CB3B25E9F5345 /* LayoutEngineTests.swift */; };
 		E894349596A03326F915D659 /* title_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 6C655E8E30BDFE28A3FB50B8 /* title_jittered_2b.json */; };
 		E9C80F1D3D2799B8D559E1E1 /* InkCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70DA431B14684CFAD675461D /* InkCanvas.swift */; };
 		E9D88200B2AD65429300CB56 /* textField_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 82E6603F533B80E3402F70EE /* textField_noisy_1.json */; };
@@ -420,6 +422,7 @@
 		21E425BB63DD6A2017EA6A99 /* ElementLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLayout.swift; sourceTree = "<group>"; };
 		2257980B2B7A148361B67DE1 /* CanvasSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelection.swift; sourceTree = "<group>"; };
 		2378BF1C976284C911BAF263 /* SuggestionPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionPill.swift; sourceTree = "<group>"; };
+		2432F3E4740CB3B25E9F5345 /* LayoutEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutEngineTests.swift; sourceTree = "<group>"; };
 		2560799044EE8C84396A1DBB /* TwistGestureRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwistGestureRecognizer.swift; sourceTree = "<group>"; };
 		256854F5FF9A4150D645BB42 /* AssetLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetLibrary.swift; sourceTree = "<group>"; };
 		25AB0AA8BC013810EEFF269C /* stickyNote_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = stickyNote_jittered_1b.json; sourceTree = "<group>"; };
@@ -550,6 +553,7 @@
 		830F53A99F0E355FD0457E6A /* SketchSamples.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchSamples.swift; sourceTree = "<group>"; };
 		83EACE39A1933E73EDE22325 /* body_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_jittered_1b.json; sourceTree = "<group>"; };
 		86D147145295F9A54C7F7589 /* LayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerApp.swift; sourceTree = "<group>"; };
+		86FC0D40CA2EBE295EB13B23 /* LayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutEngine.swift; sourceTree = "<group>"; };
 		88DAE4F858342123D4699084 /* SymbolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolCatalog.swift; sourceTree = "<group>"; };
 		89BCFA94096E01D308318FA2 /* title_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = title_clean_1.json; sourceTree = "<group>"; };
 		8A5219B3D10FD0645E9CD5D0 /* divider_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_clean_2.json; sourceTree = "<group>"; };
@@ -749,6 +753,7 @@
 			children = (
 				038228D4E98BB11926D47907 /* LayerNode.swift */,
 				449640F3E0130D8D0352A408 /* LayerNode+Coding.swift */,
+				86FC0D40CA2EBE295EB13B23 /* LayoutEngine.swift */,
 				D16077A6A0599161263162A2 /* NaturalSize.swift */,
 				CF88529E7753C026EC47961F /* TextMeasure.swift */,
 				06D49AD82D01E044088BBFA0 /* TreeContent.swift */,
@@ -935,6 +940,7 @@
 				26CDC805F53A2DBEC089F4E5 /* LayerNodeTests.swift */,
 				E45C0B6754EA9966F83DF35B /* LayerOrderTests.swift */,
 				BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */,
+				2432F3E4740CB3B25E9F5345 /* LayoutEngineTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
 				61FFCF33D10A4C78E35864A6 /* PanelStepTests.swift */,
@@ -1589,6 +1595,7 @@
 				A9C39EC84CCDF1B1837F05CD /* LayerNodeTests.swift in Sources */,
 				DCD806CB71CFF764ABDFA96D /* LayerOrderTests.swift in Sources */,
 				6EEDB23E93684CC1B26AB427 /* LayersPanelTests.swift in Sources */,
+				E88B49D3E718BB837ED6C379 /* LayoutEngineTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
 				F6F261FBE0256D6E766CB712 /* PanelStepTests.swift in Sources */,
@@ -1676,6 +1683,7 @@
 				B6AA41CC9DA4B18561C7F7E5 /* LayerNode.swift in Sources */,
 				9C95090DD71FF3DA318C69BD /* LayerOrder.swift in Sources */,
 				2EBD147309CF43F4BD40E660 /* LayersPanel.swift in Sources */,
+				7382F364E573DAB4553200A0 /* LayoutEngine.swift in Sources */,
 				09B758904EB6E05613E2DE33 /* MagicPen.swift in Sources */,
 				790565CF0FB4A72244743AE7 /* MicrophoneTap.swift in Sources */,
 				6C550A2C8CEC7316A715F0A0 /* ModelChoice.swift in Sources */,
