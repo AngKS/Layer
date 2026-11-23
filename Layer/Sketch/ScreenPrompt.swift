@@ -40,8 +40,9 @@ enum ScreenPrompt {
         ].joined(separator: "\n\n")
     }
 
-    /// How a screen is written down. Shown with real lines rather than a `kind: words`
-    /// template, which the on-device model measurably copied word for word.
+    /// How a screen is written down: the outline `Outline.parse` reads. Shown with real lines
+    /// rather than a `kind: words` template, which the on-device model measurably copied word
+    /// for word.
     static var grammar: String {
         PromptOverrides.text(.screenGrammar, default: """
             Write one line per element, from top to bottom. A line is the element's kind, a colon \
@@ -50,7 +51,14 @@ enum ScreenPrompt {
             button: Skip [plain]
 
             Kinds: \(kindNames.joined(separator: ", ")). Use only the kinds the screen needs.
-            - "row:" puts elements side by side, separated by "|", such as row: text: Wi-Fi | toggle [on]
+            - "row:", "card:" or "grid 2:" on a line of its own holds the lines indented two spaces \
+            under it. A row puts them side by side, a card groups them on a panel, and a grid sets \
+            them in that many columns, such as:
+            card:
+              text: Arrives Thursday [semibold]
+              body: Free delivery to your door.
+            - A short row can stay on one line, its elements separated by "|", such as \
+            row: text: Wi-Fi | toggle [on]
             - A blank line starts a new section.
             - For a symbol, the words are an SF Symbol name, such as bell or gearshape.
             - Most lines need no look. Looks: filled, bordered or plain for a button; bold or \
@@ -88,9 +96,9 @@ enum ScreenPrompt {
                 and red only for something destructive such as Delete account.
                 - Make hierarchy with size and weight, not colour: one title, body for whatever \
                 explains, text grey for small print.
-                - Group with blank lines: a form's fields together, a list's rows together. Two to \
-                four sections.
-                - Use 5 to 14 lines. Fewer, better elements beat a crowded screen.
+                - Group with blank lines or in a card: a form's fields together, a list's rows together. \
+                Two to four sections.
+                - Use 5 to 14 elements. Fewer, better elements beat a crowded screen.
                 """)
         case .compact:
             PromptOverrides.text(.screenRulesCompact, default: """
@@ -102,7 +110,7 @@ enum ScreenPrompt {
                 - Real, specific words such as "Card number" or "Save address". Never "Placeholder", \
                 "Submit" or lorem ipsum. No invented claims or ratings.
                 - No colours unless the description names one.
-                - Use 5 to 12 lines.
+                - Use 5 to 12 elements.
                 """)
         }
     }
@@ -171,8 +179,9 @@ enum ScreenPrompt {
                 title: Cast-iron skillet, 26 cm
                 body: Pre-seasoned and oven-safe. Ships in two days.
 
-                row: text: Size | text: 26 cm [right]
-                row: text: Colour | text: Black [right]
+                card:
+                  row: text: Size | text: 26 cm [right]
+                  row: text: Colour | text: Black [right]
 
                 button: Add to bag
                 button: Save for later [plain]
@@ -188,7 +197,13 @@ enum ScreenPrompt {
                 row: button: Follow | button: Message [bordered]
 
                 text: Recent work [semibold]
-                row: image | image | image
+                grid 3:
+                  image
+                  image
+                  image
+                  image
+                  image
+                  image
                 """
         ),
         Example(
@@ -199,7 +214,9 @@ enum ScreenPrompt {
 
                 text field: Full name
                 text field: Street and number
-                row: text field: Postcode | text field: City
+                row:
+                  text field: Postcode
+                  text field: City
                 text field: Phone, for the courier
 
                 row: text: Same address for billing | toggle [on]
@@ -232,43 +249,4 @@ enum ScreenPrompt {
                 """
         ),
     ]
-}
-
-// MARK: - Polish
-
-extension ScreenBlueprint {
-    /// The blueprint with one primary action. A model told to write one filled button
-    /// still sometimes writes several, and a screen of equal filled buttons has no
-    /// hierarchy. The button kept filled is the one written as filled when exactly one
-    /// was, and otherwise the first; the rest become bordered, or plain beside others
-    /// in a row. A screen whose buttons were all written as bordered has its last one on
-    /// its own made filled, since a screen with actions should have a main one; plain
-    /// buttons are links and stay plain.
-    func withOnePrimaryAction() -> ScreenBlueprint {
-        var filled: [(section: Int, item: Int)] = []
-        var explicit: [(section: Int, item: Int)] = []
-        var bordered: [(section: Int, item: Int)] = []
-        for (s, section) in sections.enumerated() {
-            for (i, item) in section.items.enumerated() where item.kind == .button {
-                switch item.buttonLook {
-                case nil: filled.append((s, i))
-                case .filled?: filled.append((s, i)); explicit.append((s, i))
-                case .bordered?: if section.axis == .vertical { bordered.append((s, i)) }
-                case .plain?: break
-                }
-            }
-        }
-        var polished = self
-        if filled.isEmpty, let last = bordered.last {
-            polished.sections[last.section].items[last.item].buttonLook = nil
-            return polished
-        }
-        guard filled.count > 1 else { return self }
-        let keeper = explicit.count == 1 ? explicit[0] : filled[0]
-        for spot in filled where spot != keeper {
-            polished.sections[spot.section].items[spot.item].buttonLook =
-                sections[spot.section].axis == .horizontal ? .plain : .bordered
-        }
-        return polished
-    }
 }

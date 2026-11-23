@@ -85,7 +85,7 @@ struct ScreenPromptTests {
         #expect(!names.contains("sticky note"))
         #expect(names.contains("text field") && names.contains("progress"))
         for name in names {
-            #expect(ScreenBlueprint.kind(named: name) != nil, "\(name) should read back as a kind")
+            #expect(LookWords.kind(named: name) != nil, "\(name) should read back as a kind")
         }
     }
 
@@ -96,15 +96,6 @@ struct ScreenPromptTests {
         // Nothing matched: not a sign-in form, which every screen would otherwise copy.
         let unmatched = ScreenPrompt.examples(for: "a weather dashboard", count: 2).map(\.name)
         #expect(unmatched.count == 2 && !unmatched.contains("sign in"))
-    }
-
-    @Test func everyExampleIsAScreenWithOnePrimaryAction() throws {
-        for example in ScreenPrompt.library {
-            let blueprint = try #require(ScreenBlueprint.parse(example.lines), "\(example.name)")
-            #expect(blueprint == blueprint.withOnePrimaryAction(), "\(example.name) should already have one primary action")
-            #expect(!blueprint.sections.flatMap(\.items).contains { $0.kind == .text && ScreenBlueprint.kind(named: $0.text) != nil },
-                    "\(example.name) has a line that didn't read as its kind")
-        }
     }
 
     @Test func theOnDeviceModelIsToldLess() {

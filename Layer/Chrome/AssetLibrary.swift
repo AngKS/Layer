@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import UIKit
 
@@ -131,11 +132,19 @@ enum AssetLibrary {
         ("Product", "product"), ("Form", "form"), ("Empty State", "empty"),
     ]
 
-    static func template(named name: String) -> ScreenBlueprint? {
+    /// A library screen as an outline root, with its rows, cards and grids; every node's source is `.template`.
+    static func template(named name: String) -> LayerNode? {
         guard let example = templates.first(where: { $0.name == name })?.example,
               let lines = ScreenPrompt.library.first(where: { $0.name == example })?.lines
         else { return nil }
-        return ScreenBlueprint.parse(lines)
+        var root = Outline.parse(lines, isComplete: true, tokens: .standard)
+        markAsTemplate(&root)
+        return root
+    }
+
+    private static func markAsTemplate(_ node: inout LayerNode) {
+        node.source = LayerNode.Source(origin: .template, key: node.source?.key)
+        for index in node.children.indices { markAsTemplate(&node.children[index]) }
     }
 
     // MARK: Everything
@@ -435,6 +444,44 @@ enum AssetLibrary {
         }
         return synonyms
     }()
+}
+
+// PROJECTION: deleted in plan 6
+extension AssetLibrary {
+    /// A template's thumbnail: its screen laid out on the iPhone and lowered to the elements the thumbnail
+    /// draws. Made once per name and kept, since the library's tiles ask for it whenever they are drawn.
+    static func templatePreview(named name: String) -> [DesignElement] {
+        previews.withLock { previews in
+            if let made = previews.elements[name] { return made }
+            guard let root = template(named: name) else { return [] }
+            var content = TreeContent()
+            content.screens = [TreeScreen(name: name, origin: .zero, scale: 1, deviceID: nil,
+                                          root: TreeRules.laidOut(root, deviceID: nil, settings: content.settings, previous: nil))]
+            let elements = TreeProjection.lower(content).screens.first?.elements ?? []
+            previews.elements[name] = elements
+            #if DEBUG
+            previews.made[name, default: 0] += 1
+            #endif
+            return elements
+        }
+    }
+
+    #if DEBUG
+    /// Previews made for this name, counted under a lock: tests count per name (F13).
+    static func templatePreviewsMade(named name: String) -> Int {
+        previews.withLock { $0.made[name] ?? 0 }
+    }
+    #endif
+
+    private struct Previews: Sendable {
+        var elements: [String: [DesignElement]] = [:]
+        #if DEBUG
+        var made: [String: Int] = [:]
+        #endif
+    }
+
+    /// Held while a preview is made, so that one asked for twice at once is made once.
+    private static let previews = OSAllocatedUnfairLock(initialState: Previews())
 }
 
 // MARK: - The library's view
@@ -766,9 +813,7 @@ private struct AssetTile: View {
 
         case .template(let name):
             labelled(asset.name) {
-                if let blueprint = AssetLibrary.template(named: name) {
-                    TemplatePreview(elements: blueprint.layout(on: .iPhone), device: .iPhone, height: 52)
-                }
+                TemplatePreview(elements: AssetLibrary.templatePreview(named: name), device: .iPhone, height: 52)
             }
         }
     }

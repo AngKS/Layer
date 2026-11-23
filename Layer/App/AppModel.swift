@@ -2405,17 +2405,25 @@ final class AppModel {
         }
     }
 
-    /// Adds a ready-made screen from the library, laid out on the design's usual device,
-    /// as one undo step.
+    /// Adds a ready-made screen from the library, with its rows, cards and grids, laid out on
+    /// the design's usual device as one undo step. It is placed and sized as `addFrame` places
+    /// an empty frame, and comes in unselected as one does.
     func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
-        guard let blueprint = AssetLibrary.template(named: name) else { return }
+        guard let root = AssetLibrary.template(named: name) else { return }
         let device = store.canvas.sketchDevice
+        let room = (canvasSize.height - 220) / viewport.scale
+        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
+        let middle = point ?? middleOfView
+        let origin = CGPoint(x: (middle.x - device.size.width * scale / 2).rounded(),
+                             y: (middle.y - device.size.height * scale / 2).rounded())
         // Its own step even in the middle of a drag, which it leaves open (M3).
         store.asOwnStep {
-            let screen = addFrame(device, centeredAt: point)
-            store.updateScreen(screen.id) { $0.name = name }
-            _ = store.setElements(blueprint.layout(on: device), on: screen.id, replacing: true)
+            store.addScreen(TreeScreen(name: name, origin: origin, scale: scale,
+                                       deviceID: device == .iPhone ? nil : device.id, root: root))
         }
+        tool = .select
+        selection = nil
+        suggestTitleIfNeeded()
     }
 
     func addSymbol(_ name: String) {
