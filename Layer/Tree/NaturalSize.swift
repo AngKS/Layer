@@ -1,0 +1,54 @@
+import CoreGraphics
+import Foundation
+
+/// How big each kind of leaf is when nothing else decides, and what sizing a new node of a
+/// kind starts with. The layout engine asks here for every `.fit` leaf.
+enum NaturalSize {
+    /// The node's own font size, or its kind's.
+    static func fontSize(of node: LayerNode) -> CGFloat {
+        if let size = node.style.fontSize { return size }
+        let spec = node.kind.spec
+        switch spec.fontSize {
+        case .points(let points): return points
+        case .ofHeight(let fraction):
+            // The kind's standard height, not the node's: a title is 0.7 x 40 = 28 wherever it sits.
+            if case .fixed(let size) = spec.size { return fraction * size.height }
+            return fraction * node.frame.height
+        }
+    }
+
+    static func fontWeight(of node: LayerNode) -> FontWeightChoice {
+        node.style.fontWeight ?? node.kind.spec.fontWeight
+    }
+
+    /// A leaf's natural size for an offered width (nil = ideal). Not for containers.
+    static func of(_ node: LayerNode, width: CGFloat?, measure: TextMeasure) -> CGSize {
+        switch node.kind {
+        case .title, .body, .text:
+            return measure.size(
+                of: node.content.text, fontSize: fontSize(of: node), weight: fontWeight(of: node), width: width)
+        case .stickyNote:
+            return CGSize(width: 150, height: 150)
+        case .button:
+            let label = measure.size(of: node.content.text, fontSize: 17, weight: .semibold, width: nil)
+            return CGSize(width: max(label.width + 40, 44), height: 50)
+        case .textField: return CGSize(width: width ?? 280, height: 48)
+        case .divider: return CGSize(width: width ?? 1, height: 1)
+        case .progress: return CGSize(width: width ?? 333, height: 6)
+        case .image: return CGSize(width: width ?? 333, height: 200)
+        case .symbol: return CGSize(width: 44, height: 44)
+        case .toggle: return CGSize(width: 51, height: 31)
+        case .checkbox, .radio: return CGSize(width: 24, height: 24)
+        case .avatar: return CGSize(width: 48, height: 48)
+        case .shape: return CGSize(width: 100, height: 100)
+        case .drawing: return node.frame.size
+        case .group, .card: return .zero
+        }
+    }
+
+    /// The sizing a generated or imported node of this kind starts with.
+    static func defaultSizing(for kind: ElementKind) -> (width: LayerNode.Sizing, height: LayerNode.Sizing) {
+        let fills = kind == .card || kind.spec.fillsWrittenWidth
+        return (LayerNode.Sizing(fills ? .fill(weight: 1) : .fit), LayerNode.Sizing(.fit))
+    }
+}
