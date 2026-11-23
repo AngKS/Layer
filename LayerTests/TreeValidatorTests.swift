@@ -193,6 +193,82 @@ import Testing
         #expect(again == fixed)
     }
 
+    @Test func controlsTheLayoutSizesAreLeftToIt() {
+        // Before layout a fit or fill height reads as 0; the layout gives a control its natural height.
+        var fitButton = leaf(.button, 0, 0, 100, 0)
+        fitButton.height = .init(.fit)
+        var fillField = leaf(.textField, 0, 60, 100, 0)
+        fillField.height = .init(.fill(weight: 1))
+        // One the layout could only make short, and one fixed short, are raised.
+        var capped = leaf(.button, 0, 120, 100, 0)
+        capped.height = .init(.fit, maximum: 30)
+        let fixedButton = leaf(.button, 0, 200, 100, 30)
+        var fixed = root([fitButton, fillField, capped, fixedButton])
+
+        let issues = TreeValidator.fixGenerated(&fixed)
+        #expect(issues == [.init(node: capped.id, kind: .smallControl), .init(node: fixedButton.id, kind: .smallControl)])
+        #expect(fixed.children[0] == fitButton)
+        #expect(fixed.children[1] == fillField)
+        #expect(fixed.children[2].height == .init(.fit, maximum: 44))
+        #expect(fixed.children[3].frame.height == 44)
+    }
+
+    @Test func hugeNumbersAreBroughtIntoRange() throws {
+        let far = leaf(.shape, 1e308, -1e308, 1e308, .greatestFiniteMagnitude)
+        var padded = LayerNode(kind: .group)
+        padded.layout = .stack(.init(axis: .vertical, spacing: 1e308))
+        padded.padding = .init(all: 1e308)
+        padded.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        var cells = LayerNode(kind: .group)
+        cells.layout = .grid(.init(columns: 3, columnSpacing: 1e308, rowSpacing: 1e308))
+        cells.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        cells.children = Array(repeating: leaf(.shape, 0, 0, 10, 10), count: 4)
+        var styled = leaf(.body, 0, 0, 100, 20)
+        styled.style.fontSize = 1e308
+        styled.style.cornerRadius = 1e308
+        styled.style.borderWidth = .infinity
+        styled.style.opacity = .nan
+        var progress = leaf(.progress)
+        progress.content.value = 1e308
+        var turned = leaf()
+        turned.rotation = .infinity
+        var sized = leaf()
+        sized.width = .init(.fill(weight: 1e308), minimum: 1e308, maximum: .nan)
+        var tree = root([far, padded, cells, styled, progress, turned, sized])
+
+        let issues = TreeValidator.fixGenerated(&tree)
+        for node in [far, padded, cells, styled, progress, turned, sized] {
+            #expect(issues.contains(.init(node: node.id, kind: .badGeometry)), "\(node.kind)")
+        }
+        let found = tree.children
+        #expect(found[0].frame == CGRect(x: 1_000_000, y: -1_000_000, width: 1_000_000, height: 1_000_000))
+        #expect(found[1].padding == .init(all: 10_000))
+        #expect(found[1].layout == .stack(.init(axis: .vertical, spacing: 10_000)))
+        #expect(found[2].layout == .grid(.init(columns: 3, columnSpacing: 10_000, rowSpacing: 10_000)))
+        #expect(found[3].style.fontSize == 1_000)
+        #expect(found[3].style.cornerRadius == 10_000)
+        #expect(found[3].style.borderWidth == nil)
+        #expect(found[3].style.opacity == nil)
+        #expect(found[4].content.value == 1)
+        #expect(found[5].rotation == nil)
+        #expect(found[6].width == .init(.fill(weight: 1_000_000), minimum: 1_000_000))
+        // Fixing again finds nothing.
+        var again = tree
+        #expect(TreeValidator.fixGenerated(&again).isEmpty)
+
+        // Laid out, nothing is infinite, so the design can be saved.
+        var diagnostics: [LayoutDiagnostic] = []
+        LayoutEngine.layOut(&tree, previous: nil, measure: .shared, diagnostics: &diagnostics)
+        var frames: [CGRect] = []
+        var pending = [tree]
+        while let node = pending.popLast() {
+            frames.append(node.frame)
+            pending += node.children
+        }
+        #expect(frames.allSatisfy { [$0.minX, $0.minY, $0.width, $0.height].allSatisfy(\.isFinite) })
+        #expect(throws: Never.self) { _ = try JSONEncoder().encode(tree) }
+    }
+
     @Test func aSoundTreeIsLeftAloneByFixGenerated() {
         let tree = root([leaf(.title, 20, 20, 200, 30), leaf(.button, 20, 100, 200, 44)])
         var copy = tree

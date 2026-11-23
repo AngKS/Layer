@@ -61,7 +61,9 @@ enum LookWords {
 
     /// Reads look words, such as `blue`, `bold`, `18pt`, `radius 12`, `text white`, `off`,
     /// `40%`, `bordered`, `centre`, `shadow`, `border red` or `opacity 50%`. A later word wins
-    /// over an earlier one for the same field. Words it doesn't know are skipped.
+    /// over an earlier one for the same field. Words it doesn't know are skipped, and so is a
+    /// number that isn't one (`inf`, `nan`); one too large or too small for its field is brought
+    /// into range: text from 1 to 1,000 points, a radius or border from 0 to 10,000.
     static func look(from words: [String]) -> Look {
         var look = Look()
         for word in words.map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !word.isEmpty {
@@ -95,16 +97,16 @@ enum LookWords {
                 look.opacity = amount
             } else if let border = stripPrefix(word, ["border", "outline"]) {
                 if let width = Double(border.hasSuffix("pt") ? String(border.dropLast(2)) : border) {
-                    look.borderWidth = CGFloat(width)
+                    if width.isFinite { look.borderWidth = CGFloat(min(max(width, 0), largestLength)) }
                 } else if let colour = ColourWords.parse(border) {
                     look.borderColor = colour
                 }
             } else if word.hasSuffix("%"), let amount = fraction(word) {
                 look.value = amount
             } else if word.hasSuffix("pt"), let size = Double(word.dropLast(2).trimmingCharacters(in: .whitespaces)) {
-                look.fontSize = CGFloat(size)
+                if size.isFinite { look.fontSize = CGFloat(min(max(size, 1), largestText)) }
             } else if let radius = stripPrefix(word, ["radius", "corner", "corners"]).flatMap({ Double($0) }) {
-                look.cornerRadius = CGFloat(radius)
+                if radius.isFinite { look.cornerRadius = CGFloat(min(max(radius, 0), largestLength)) }
             } else if let colour = stripPrefix(word, ["text "]).flatMap(ColourWords.parse) {
                 look.textColor = colour
             } else if let colour = ColourWords.parse(word) {
@@ -122,13 +124,20 @@ enum LookWords {
         return nil
     }
 
-    /// `40%` or `0.4` as 0.4.
+    /// The largest text a look asks for, and the largest radius or border, in points.
+    private static let largestText: Double = 1_000
+    private static let largestLength: Double = 10_000
+
+    /// `40%` or `0.4` as 0.4; nil for a number that isn't one.
     private static func fraction(_ word: String) -> Double? {
         let trimmed = word.trimmingCharacters(in: .whitespaces)
+        let amount: Double?
         if trimmed.hasSuffix("%") {
-            return Double(trimmed.dropLast().trimmingCharacters(in: .whitespaces)).map { min(max($0 / 100, 0), 1) }
+            amount = Double(trimmed.dropLast().trimmingCharacters(in: .whitespaces)).map { $0 / 100 }
+        } else {
+            amount = Double(trimmed).map { $0 > 1 ? $0 / 100 : $0 }
         }
-        return Double(trimmed).map { min(max($0 > 1 ? $0 / 100 : $0, 0), 1) }
+        return amount.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
     }
 }
 

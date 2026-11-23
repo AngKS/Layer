@@ -194,6 +194,25 @@ import Testing
         #expect(ColourWords.named["accent"] == Theme.accent)
     }
 
+    @Test func lookWordsKeepNumbersToSizesThatCanBeDrawn() {
+        // Words that read as numbers that aren't any are left out.
+        let wild = LookWords.look(from: ["infpt", "radius nan", "border inf", "opacity nan", "nan%"])
+        #expect(wild.fontSize == nil)
+        #expect(wild.cornerRadius == nil)
+        #expect(wild.borderWidth == nil)
+        #expect(wild.opacity == nil)
+        #expect(wild.value == nil)
+        // Ones far too large are brought into range.
+        let huge = LookWords.look(from: ["1e308pt", "radius 1e308", "border 1e308", "opacity 1e308"])
+        #expect(huge.fontSize == 1_000)
+        #expect(huge.cornerRadius == 10_000)
+        #expect(huge.borderWidth == 10_000)
+        #expect(huge.opacity == 1)
+        let small = LookWords.look(from: ["0pt", "radius -4"])
+        #expect(small.fontSize == 1)
+        #expect(small.cornerRadius == 0)
+    }
+
     @Test func theBlueprintStillReadsItsLooks() throws {
         let blueprint = try #require(ScreenBlueprint.parse("button: Go [bordered, 20pt]"))
         let item = try #require(blueprint.sections.first?.items.first)
