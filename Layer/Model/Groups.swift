@@ -179,6 +179,23 @@ extension DesignStore {
         DesignContent.contents(of: group, in: projection.elements)
     }
 
+    /// What is in a group, at any depth, that moves, turns and is resized with it as a part of
+    /// its own, back to front: everything in it, but a row, column, grid or overlay in it is one
+    /// part without what it holds, which the engine lays out in it. Empty for a group that is laid
+    /// out itself, which is one rigid part.
+    func parts(of group: DesignElement.ID) -> [DesignElement] {
+        guard let node = node(group), node.resolvedLayout == .free else { return [] }
+        var ids: Set<UUID> = []
+        func collect(_ node: LayerNode) {
+            for child in node.children {
+                ids.insert(child.id)
+                if child.isContainer, child.resolvedLayout == .free { collect(child) }
+            }
+        }
+        collect(node)
+        return contents(of: group).filter { ids.contains($0.id) }
+    }
+
     /// The group items on a screen, or on the open canvas, back to front.
     func groupItems(on host: ElementRef.Host) -> [DesignElement] {
         children(on: host).filter { $0.kind == .group }
@@ -353,11 +370,14 @@ extension DesignStore {
         var smallestScale: CGFloat
     }
 
-    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group.
+    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group. A row, column, grid or
+    /// overlay in it counts as one leaf, and one resized itself is its own one leaf: what is in it
+    /// is laid out by the engine, never scaled (`parts(of:)`).
     func groupPose(of ref: ElementRef) -> GroupPose? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
         var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
-        for element in contents(of: item.id) where element.kind != .group {
+        let leaves = isLaidOut(item.id) ? [item] : parts(of: item.id).filter { $0.kind != .group || isLaidOut($0.id) }
+        for element in leaves {
             pose.leaves[element.id] = element.frame
             let spec = element.kind.spec
             if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
@@ -378,9 +398,13 @@ extension DesignStore {
     /// apart from the height of a kind that keeps its height, a divider. Their angles, and their
     /// text's size, stay as they are, so that a turned member is never sheared. A frame in
     /// proportion with the box, as the handles and the fields give, scales everything alike; the
-    /// box is then fitted round them again (`keepGroupsSound()`). Made smaller than something in
-    /// it can be, it is scaled only as far as that can go, about the same point. Nothing happens
-    /// to a group that is locked, by itself or by a group above it.
+    /// box is then fitted round them again by the tree's rules. Made smaller than something in it
+    /// can be, it is scaled only as far as that can go, about the same point. Nothing happens to a
+    /// group that is locked, by itself or by a group above it.
+    ///
+    /// A row, column, grid or overlay in it is one leaf, scaled as one and fixed at its new size,
+    /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
+    /// at that size, and the engine lays out what is in it.
     func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
         guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
@@ -403,7 +427,9 @@ extension DesignStore {
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
         var frames: [DesignElement.ID: CGRect] = [:]
-        if frame == pose.box {
+        if isLaidOut(item.id) {
+            frames[item.id] = frame
+        } else if frame == pose.box {
             // Back where it began: exactly as it was, with no arithmetic to round.
             frames = pose.leaves
         } else {
@@ -430,43 +456,22 @@ extension DesignStore {
         }
     }
 
-    /// Gives a group to whatever the middle of its box now lies on, as after a drag: the
-    /// screen there, or the open canvas when there is none. Everything in it, at any depth,
-    /// goes there in one change, back to front, so that it lands whole and stacked as it was,
-    /// on top of what is there; built over several, the groups would be put right in between
-    /// and come apart. It lands as one element does, keeping its middle where it is on the
-    /// canvas and its size in points: each thing in it keeps its size in its own points, and
-    /// its distance from the box's middle in them, so that on a screen drawn at another scale
-    /// the group arrives whole, scaled about its middle, rather than with its members spaced
-    /// as they were on the canvas, overlapping or apart. A group holding something that
-    /// doesn't go on screens, a sticky note, stays where it is instead of landing on a screen.
-    /// Returns where the group now lives.
+    /// Gives a container to whatever the middle of its box now lies on, as after a drag: the
+    /// screen there, or the open canvas when there is none. It goes whole, in one change, on top
+    /// of what is there (`move(_:to:at:)`): its middle stays where it is on the canvas and its
+    /// size in its own points, and what is in it keeps its own frames, so that on a screen drawn
+    /// at another scale it arrives scaled about its middle, rather than with its members spaced
+    /// as they were on the canvas, overlapping or apart. One holding something that doesn't go on
+    /// screens, a sticky note, stays where it is instead of landing on a screen. Returns where the
+    /// container now lives.
     @discardableResult
     func rehostGroup(_ ref: ElementRef) -> ElementRef {
         guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
-        // Worked out as a turn under way works it out (`TurnSession.rehosted`), to the last bit.
         let middle = placement.canvasPoint(for: CGPoint(x: item.frame.midX, y: item.frame.midY))
         let target = screen(at: middle)
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host else { return ref }
-        let inside = contents(of: item.id)
-        if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
-        let moving = Set(inside.map(\.id) + [item.id])
-        var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
-        for element in projection.elements where moving.contains(element.id) {
-            guard let own = self.placement(of: element) else { return ref }
-            // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-            let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)
-            let onCanvas = own.canvasPoint(for: CGPoint(x: element.frame.midX, y: element.frame.midY))
-            let centre = landing.localPoint(for: Self.landedMiddle(of: onCanvas, about: middle, from: own, to: landing))
-            var origin = CGPoint(x: centre.x - element.frame.width / 2, y: centre.y - element.frame.height / 2)
-            // A group's box is fitted round its members once they have landed.
-            if element.kind != .group, element.kind != .drawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
-            moves.append((element.id, landing.scale, CGRect(origin: origin, size: element.frame.size)))
-        }
-        apply { content in
-            for move in moves { content.move(move.id, to: target?.id, scale: move.scale, frame: move.frame) }
-        }
+        // Refused, as for a sticky note going onto a screen, it stays where it is.
+        guard host != ref.host, move(item.id, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
         let landed = ElementRef(host: host, element: item.id)
         return resolve(landed) != nil ? landed : ref
     }

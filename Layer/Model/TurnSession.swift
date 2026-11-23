@@ -15,7 +15,9 @@ import Foundation
 ///
 /// A group selected turns as one rigid piece: everything in it, at any depth, goes round with
 /// it, and it and each group inside it turn by as much, so that their boxes go round too. One
-/// group alone turns about the middle of its own box, from its own angle.
+/// group alone turns about the middle of its own box, from its own angle. A row, column, grid or
+/// overlay, selected or in a group, is one rigid part with no contents of its own here: its
+/// frame goes round, and what is in it goes with it, laid out as it was (`DesignStore.parts(of:)`).
 struct TurnSession: Equatable {
     /// An element's frame, in its host's points, and its angle as it keeps it.
     struct Pose: Equatable {
@@ -36,7 +38,8 @@ struct TurnSession: Equatable {
         let owner: DesignElement.ID
         /// A drawing goes exactly where it is put; anything else lands on whole points.
         let isDrawing: Bool
-        /// A group item: only its angle is its own, its box being fitted round its members.
+        /// A free group's item: only its angle is its own, its box being fitted round its members.
+        /// A laid-out container isn't one: its frame is its own.
         let isGroup: Bool
     }
 
@@ -68,15 +71,17 @@ struct TurnSession: Equatable {
             guard let (element, placement) = store.resolve(ref) else { continue }
             shapes.append(TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation))
             // Locked by itself or by a group above it, it stays where it is (F4), and so does
-            // everything in it. Unlocked, a group turns all of it, whatever their own locks.
+            // everything in it. Unlocked, a group turns all of it, whatever their own locks. A
+            // laid-out container has no parts: it turns as one.
             let isLocked = store.isLocked(thing)
-            let turning = element.kind == .group ? [element] + store.contents(of: element.id) : [element]
+            let turning = element.kind == .group ? [element] + store.parts(of: element.id) : [element]
             for part in turning {
                 let partRef = DesignStore.ElementRef(host: ref.host, element: part.id)
                 guard let partPlacement = part.id == element.id ? placement : store.resolve(partRef)?.placement else { continue }
                 baseline[partRef] = Member(
                     pose: Pose(frame: part.frame, rotation: part.rotation), placement: partPlacement,
-                    isLocked: isLocked, owner: element.id, isDrawing: part.kind == .drawing, isGroup: part.kind == .group
+                    isLocked: isLocked, owner: element.id, isDrawing: part.kind == .drawing,
+                    isGroup: part.kind == .group && !store.isLaidOut(part.id)
                 )
             }
         }
@@ -167,7 +172,7 @@ struct TurnSession: Equatable {
             guard case .element(let ref) = thing else { return nil }
             refs[ref.element] = ref
             guard store.groupItem(ref.element) != nil else { continue }
-            for part in store.contents(of: ref.element) {
+            for part in store.parts(of: ref.element) {
                 refs[part.id] = DesignStore.ElementRef(host: ref.host, element: part.id)
             }
         }

@@ -153,6 +153,8 @@ struct DesignContent: Equatable, Sendable {
     func screen(_ id: DesignScreen.ID) -> DesignScreen? {
         guard let screen = tree.screens.first(where: { $0.id == id }) else { return nil }
         var view = TreeProjection.view(of: screen)
+        let device = tree.device(of: screen)
+        if device != view.device { view.resolvedDevice = device }
         view.elements = TreeProjection.lowerHostNodes(.screen(id), in: tree, pending: pendingPointers)
             .filter { !$0.node.isContainer }.map(\.shown)
         return view

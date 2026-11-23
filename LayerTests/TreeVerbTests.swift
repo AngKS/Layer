@@ -580,4 +580,17 @@ struct TreeVerbTests {
         #expect(store.screen(custom.id)?.device == frame)
         #expect(store.device(of: UUID()) == nil)
     }
+
+    /// The content's own view of one screen resolves its device as the store's views do.
+    @Test func theContentsViewOfAScreenResolvesItsCustomDevice() throws {
+        let frame = DeviceFrame.custom(name: "Kiosk", size: CGSize(width: 600, height: 400), family: .other)
+        var custom = screen([leaf(.text, CGRect(x: 20, y: 20, width: 80, height: 20))])
+        custom.deviceID = frame.id
+        var tree = design([custom])
+        tree.settings.customDevices = [frame]
+        let (store, _) = makeStore(tree)
+
+        #expect(store.content.screen(custom.id)?.device == frame)
+        #expect(store.content.screen(custom.id) == store.screen(custom.id))
+    }
 }

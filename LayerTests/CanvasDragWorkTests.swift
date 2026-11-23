@@ -144,8 +144,8 @@ struct CanvasDragWorkTests {
     }
 
     /// With groups on the board every change puts them right as well, and a frame of a drag
-    /// writes only what it moves: a group's members and its box, or one element. Nothing that
-    /// stays as it was is written, so nothing is copied for it (C6, M6).
+    /// writes only what it moves: a group, or one element. Nothing that stays as it was is
+    /// written, so nothing is copied for it (C6, M6).
     @Test func aDragFrameWritesOnlyWhatItMoves() throws {
         let board = BusyBoard()
         let g = try #require(board.groupThreeLines())
@@ -157,9 +157,9 @@ struct CanvasDragWorkTests {
         for dx in BusyBoard.outAndBack { board.drag(drags, group: g, by: CGFloat(dx), owner: owner) }
         let groupWrites = ListWork.elementsWritten - start
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
-        // Three lines on each of 60 frames. The group's box is fitted round them by the tree's
-        // rules, whose frames aren't counted as written (plan 2, call 13).
-        #expect(groupWrites == 60 * 3, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
+        // The group is written alone on each of 60 frames, and its three lines ride along in it
+        // (plan 2, call 13).
+        #expect(groupWrites == 60, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
         #expect(!board.store.isEditing)
 
         // A line outside the group, dragged beside it: only the line is written.

@@ -381,8 +381,8 @@ final class DesignStore {
         }
     }
 
-    /// Moves an element up or down among its siblings: see `arrange(_ selection:_:)`, and
-    /// `SiblingLists` for what its siblings are. Siri's Change Element Order comes this way.
+    /// Moves an element up or down among its siblings, the children of its parent: see
+    /// `arrange(_ selection:_:)`. Siri's Change Element Order comes this way.
     func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
         arrange(.element(ref), arrangement)
     }
@@ -526,13 +526,14 @@ final class DesignStore {
 
     /// Gives an element to whatever it now lies on: the screen under its centre, or the
     /// open canvas when there is none. It keeps its size in points and its position on
-    /// the canvas. A group lands whole, everything in it with it: see `rehostGroup(_:)`.
+    /// the canvas. A container lands whole, everything in it with it: see `rehostGroup(_:)`.
     /// Returns where the element now lives.
     @discardableResult
     func rehost(_ ref: ElementRef) -> ElementRef {
         guard let (element, placement) = resolve(ref) else { return ref }
         if element.kind == .group { return rehostGroup(ref) }
         let frame = placement.canvasRect(for: element.frame)
+        // Sticky notes and drawings stay on the canvas.
         let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
         guard host != ref.host else { return ref }
@@ -549,8 +550,10 @@ final class DesignStore {
 
     /// Moves an element onto a screen, or onto the open canvas when `screenID` is nil.
     /// `origin` is where its top-left corner goes, in its new host's points; when nil it
-    /// keeps its place on the canvas. It keeps its size in points. Returns where it now
-    /// lives, or nil when the element or screen is gone or the element can't go on screens.
+    /// keeps its place on the canvas, its corner on whole points. It keeps its size in its own
+    /// points, and a container goes whole, everything in it with it (`move(_:to:at:)`). Returns
+    /// where it now lives, or nil when the element or screen is gone or the element can't go on
+    /// screens. One step to undo.
     @discardableResult
     func move(_ ref: ElementRef, toScreen screenID: DesignScreen.ID?, origin: CGPoint?) -> ElementRef? {
         guard let (element, placement) = resolve(ref) else { return nil }
@@ -560,24 +563,32 @@ final class DesignStore {
             target = found
         }
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-        let newPlacement = target?.placement ?? Placement(origin: .zero, scale: placement.scale)
 
-        var frame = element.frame
-        if let origin {
-            frame.origin = origin
-        } else {
-            let onCanvas = placement.canvasRect(for: element.frame)
-            let center = newPlacement.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
-            frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
-        }
-
-        if host == ref.host {
-            update(ref) { $0.frame = frame }
+        guard host != ref.host else {
+            var frame = element.frame
+            if let origin {
+                frame.origin = origin
+            } else {
+                let onCanvas = placement.canvasRect(for: element.frame)
+                let center = placement.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
+                frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
+            }
+            let distance = CGSize(width: frame.minX - element.frame.minX, height: frame.minY - element.frame.minY)
+            if element.kind == .group, let moved = self.origin(of: element.id, movedBy: distance) {
+                // A container moves by its own frame, and what is in it rides along.
+                update(element.id) { $0.frame.origin = moved }
+            } else {
+                update(ref) { $0.frame = frame }
+            }
             return ref
         }
-        change { $0.move(element.id, to: target?.id, scale: newPlacement.scale, frame: frame) }
-        return ElementRef(host: host, element: element.id)
+        // It lands at the top level of its new host, on top, where its own frame is in the host's points.
+        var moved = false
+        asOneStep {
+            moved = move(element.id, to: target.map { .screen($0.id) } ?? .canvas)
+            if moved, let origin { update(element.id) { $0.frame.origin = origin } }
+        }
+        return moved ? ElementRef(host: host, element: element.id) : nil
     }
 
     // MARK: Changes made gradually

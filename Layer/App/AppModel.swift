@@ -2088,7 +2088,8 @@ final class AppModel {
 
     /// Turns each of `refs` to `degrees`, in one step: an element on its own pivot, and a
     /// group as one piece about the middle of its box, as a group selected alone turns, unless
-    /// it is locked, by itself or by a group above it.
+    /// it is locked, by itself or by a group above it. A row, column, grid or overlay is one
+    /// rigid part, whose frame is written with its angle.
     private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
         var angles: [DesignElement.ID: Double] = [:]
         var frames: [DesignElement.ID: CGRect] = [:]
@@ -2101,15 +2102,16 @@ final class AppModel {
             guard let session = TurnSession.form(for: .element(ref), in: store) else { continue }
             for (part, place) in session.placed(turnedBy: degrees - element.resolvedRotation) {
                 angles[part.element] = place.rotation ?? 0
-                if part.element != element.id { frames[part.element] = place.frame }
+                frames[part.element] = place.frame
             }
         }
         guard !angles.isEmpty else { return }
+        // A free group's box is fitted round what is in it; any other part's frame is written.
+        let framed = Set(frames.keys.filter { store.element($0)?.kind != .group || store.isLaidOut($0) })
         store.apply { content in
             for (id, angle) in angles {
                 content.update(id) {
-                    // A group's box is fitted round what is in it.
-                    if $0.kind != .group, let frame = frames[id] { $0.frame = frame }
+                    if framed.contains(id), let frame = frames[id] { $0.frame = frame }
                     $0.setRotation(angle)
                 }
             }
@@ -2119,14 +2121,16 @@ final class AppModel {
     /// Puts several things where their session turned `degrees` places them, as one change,
     /// and keeps the session. A group's angle is written in the same change as its members'
     /// places, so that its box, fitted round them at the end of it, goes round as one with
-    /// them: a group selected alone has the outline's angle.
+    /// them: a group selected alone has the outline's angle. A row, column, grid or overlay is
+    /// one rigid part, whose frame is written with its angle, and what is in it goes with it.
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
         let placed = session.placed(turnedBy: degrees)
+        let laidOut = Set(placed.keys.map(\.element).filter(store.isLaidOut))
         store.apply { content in
             for (ref, place) in placed {
                 content.update(ref.element) {
-                    if $0.kind != .group { $0.frame = place.frame }
+                    if $0.kind != .group || laidOut.contains(ref.element) { $0.frame = place.frame }
                     $0.rotation = place.rotation
                 }
             }
