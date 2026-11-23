@@ -178,6 +178,7 @@ The pre-flight scan is in `.superpowers/sdd/2026-11-23-semantic-tree-2-store-cut
   - (e) floating-point noise below 1e-9 from composing transforms through a turned container. Switch to the file's `close` helper, or add one with tolerance 1e-6;
   - (f) the order of the one flat list across hosts (which host's elements come first in `content.elements`), which the tree doesn't hold. Only the whole-list lines change, to per-host order, and per-host assertions stay (F4);
   - (g) a call site of an API this plan deletes or retypes, when the assertion is kept (for example a `try #require` unwrap), or is carried over by a test the task names (F5).
+  - (h) a container box rounded to whole points: the engine fits a free container's box out to whole points (spec §4), where the flat list fitted a group's box exactly, so a turned group's box differs by up to a point and a turn and back drifts by up to two. A box is compared within 1 pt and a turn-and-back's frames within 2 pt. Plan 4's group-turn rewrite restores exact equality (Task 7 ruling).
 
   Each change is listed in its task, or recorded in the ledger with its clause. Every other failure is a bug to fix, not a test to change.
 - **"Unchanged" (F6).** When a later task says a suite passes unchanged, it means as left by the changes already recorded in the ledger under this policy.

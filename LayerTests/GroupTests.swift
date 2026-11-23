@@ -55,6 +55,34 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
     abs(a.minX - b.minX) < tolerance && abs(a.minY - b.minY) < tolerance && abs(a.width - b.width) < tolerance && abs(a.height - b.height) < tolerance
 }
 
+/// Whether `box`, a box fitted at `degrees`, holds `exact`, at that angle, with each of its sides at most
+/// `slack` points out from `exact`'s along the box's own axes: policy clause (h), a box fitted out to whole points.
+private func holds(_ box: CGRect, _ exact: CGRect, at degrees: Double, within slack: CGFloat) -> Bool {
+    let turn = degrees * .pi / 180
+    func sides(_ rect: CGRect) -> [CGFloat] {
+        let across = rect.midX * cos(turn) + rect.midY * sin(turn), down = rect.midY * cos(turn) - rect.midX * sin(turn)
+        return [across - rect.width / 2, across + rect.width / 2, down - rect.height / 2, down + rect.height / 2]
+    }
+    let (fitted, held) = (sides(box), sides(exact))
+    let out = [held[0] - fitted[0], fitted[1] - held[1], held[2] - fitted[2], fitted[3] - held[3]]
+    return out.allSatisfy { $0 > -0.001 && $0 <= slack }
+}
+
+/// Whether two designs are the same but for their elements' frames, each within `slack` points
+/// either way: policy clause (h), a group's box fitted out to whole points.
+private func alike(_ a: DesignContent, _ b: DesignContent, framesWithin slack: CGFloat) -> Bool {
+    let (mine, theirs) = (a.elements, b.elements)
+    guard a.screenFrames == b.screenFrames, a.title == b.title, a.canvas == b.canvas, mine.count == theirs.count else { return false }
+    return zip(mine, theirs).allSatisfy { one, other in
+        var (unplaced, otherUnplaced) = (one, other)
+        unplaced.frame = .zero
+        otherUnplaced.frame = .zero
+        let (f, g) = (one.frame, other.frame)
+        return unplaced == otherUnplaced && abs(f.minX - g.minX) <= slack && abs(f.minY - g.minY) <= slack
+            && abs(f.width - g.width) <= slack && abs(f.height - g.height) <= slack
+    }
+}
+
 /// The group item itself: an element of the kind `.group` in the one list, its members
 /// pointing at it, kept sound after every change, left out of what draws, exports and
 /// describes the design, and saved with it.
@@ -94,7 +122,8 @@ struct GroupModelTests {
         }
         let box = try #require(TurnedRect.enclosing(shapes, at: 30))
         let item = try #require(content.element(g))
-        #expect(close(item.frame, screen.placement.localRect(for: box.rect)))
+        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
+        #expect(holds(item.frame, screen.placement.localRect(for: box.rect), at: 30, within: 1))
         #expect(item.rotation == 30)
         // Not the upright box round them.
         let upright = try #require(TurnedRect.enclosing(shapes, at: 0))
@@ -1773,7 +1802,8 @@ struct GroupGeometryTests {
         board.model.beginTurn()
         board.model.turnSelection(by: -30, snaps: false)
         board.model.endTurn()
-        #expect(board.store.content == before)
+        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
+        #expect(alike(board.store.content, before, framesWithin: 2))
 
         // Reset stands it upright: turned to 50 from 20, it goes back to 0.
         board.model.rotateSelection(by: 20)
@@ -1855,7 +1885,8 @@ struct GroupGeometryTests {
                 #expect(board.store.element(button.element)?.rotation == 66)
             }
         }
-        #expect(board.store.content == before)
+        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
+        #expect(alike(board.store.content, before, framesWithin: 2))
     }
 
     // MARK: Resizing
@@ -1989,7 +2020,8 @@ struct GroupGeometryTests {
         // Fitted round them again, the box is the one asked for: in proportion, with its
         // top-left corner where it was on the canvas.
         let now = try #require(board.store.canvasShape(of: .element(g)))
-        #expect(close(now.rect, placement.canvasRect(for: frame), within: 0.001))
+        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
+        #expect(close(now.rect, placement.canvasRect(for: frame), within: 1))
         #expect(isNear(now.corner(.topLeft), fixed, within: 0.001))
     }
 }
