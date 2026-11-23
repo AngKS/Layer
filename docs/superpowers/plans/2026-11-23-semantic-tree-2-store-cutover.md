@@ -18,6 +18,42 @@
 **Spec:** `docs/superpowers/specs/2026-11-23-semantic-tree-design.md`. Read Approaches ("How the branch gets there"), §1–§3, §8, §10 (only where the store verbs are named), §12, §13, and My calls 15–21. Plan 1 (`docs/superpowers/plans/2026-11-23-semantic-tree-1-foundations.md`) is the source of every tree name used here.
 
 **Starts when:** plan 1 is complete and merged into `feature/semantic-tree`. Its Task 13 recorded the UI baseline set in the ledger.
+- **Exception, lane C:** Tasks 5 and 6 may start before plan 1's Tasks 11–13 finish. They run in `st2-lane-c`, cut from f306eed, which holds everything they consume.
+- After plan 1's Tasks 11–13 and lane C have both merged, run the full unit suite. A new exhaustive `switch` on `DeviceFrame.Family` in that code would stop compiling.
+
+## Pre-flight amendments 2026-11-23
+
+The pre-flight scan is in `.superpowers/sdd/2026-11-23-semantic-tree-2-store-cutover/preflight.md`. The controller accepted every ruling, and each is written into the tasks below.
+
+- **F1.** Lanes B and C are `st2-lane-b` and `st2-lane-c` (branches `st2/lane-b`, `st2/lane-c`), never plan 1's `st-lane-b` and `st-lane-c`.
+- **F2.** Task 8 waits for Tasks 5 and 6, and consumes them.
+- **F3.** `unreadCanvas` is Task 8's: it adds it to `TreeChange.board`, the revert, `takeBack` and the canvas tidy in `TreeRules`. Task 4 leaves it out.
+- **F4.** Policy clause (f), the one list's order across hosts, covers four `FlatStoreTests` cases in Task 7.
+- **F5.** Policy clause (g), call sites of a deleted or retyped API, covers more tests:
+  - the SiriIntentsTests unwraps and the `rawOrder` test;
+  - Task 8's table gains `aDrawingsInkIsSavedBesideTheDesignUnderItsIdentifier` and drops `elementsThatShareAnIdentifier…`;
+  - `groupsSurviveTheFile` is expected to change;
+  - `listed` keeps its default `isDownloaded:`.
+- **F6.** "Unchanged" in a later task means as left by the changes already recorded in the ledger.
+- **F7.** Suite names that are file names expand to their structs (table in the Global Constraints), and a run of 0 tests is a failure.
+- **F8.** Layout counts use `LayoutEngine.timesLaidOut(id)`. `TreeProjection.lowerings` counts on the main thread only, and the tests that count `ListWork` or lowerings are `@MainActor` and synchronous.
+- **F9.** `take(_:shown:)` writes only the fields that differ from `shown`, and never takes a container's kind from a `.group` element. W1 passes the raw lowering as `shown`.
+- **F10.** The lift orders the non-drawings with `gathered`, and keeps each drawing at its index.
+- **F11.** When the host's root isn't free, an origin written to a laid-out child is dropped. My call 20 applies exactly under a free root.
+- **F12.** `CanvasSettings` writes its own unknown keys (Task 5), so `TreeContent` keeps them in the file.
+- **F13.** Task 6 adds `DesignTokens.swift` (and `LookWords.swift`) to the harness scripts, and typechecks the sketch harness.
+- **F14.** Task 1's and Task 12's measurements run on a quiet machine, in lane C's simulator. Lane C may run 5 → 6 → 1.
+- **F15.** Task 3 shares today's flat operations instead of copying them. Task 4's copy of the list revert is temporary, and Task 7 deletes the original.
+- **F16.** `plan1sMarginsAreUnchanged` is not a test. Step 4's `TreeRulesTests` run checks it.
+- **F17.** Task 9 moves the card and rhythm numbers in `Layer/A2UI/` onto `DesignTokens.standard`.
+- **F18.** Comments don't name the functions Task 12's grep looks for.
+- **F19.** The `keepGroupsSound` rules are numbered as the code numbers them: rules 2, 3 and 5 go to `TreeRules`, and rules 1 and 4 to the lift.
+- **F20.** Task 2 leaves `resolvedDevice` nil, and Task 9 sets it.
+- **F21.** ScreenTidy's margin reads `device.margin`. The device-picker sentence is dropped.
+- **F22.** A malformed custom frame is written back equal as JSON, not byte for byte.
+- **F23.** The lift doesn't apply My call 20. Whole-host setters are bulk rewrites that the engine re-lays (recorded, accepted).
+- **F24.** `undoAndRedoGoThroughTheTree` checks the leaves' frames within 1e-6.
+- **F25.** `fieldListNamesEveryField`'s per-field loop skips `id`. When the field under test is `name`, the concurrent edit changes `isHidden`.
 
 ## Calls made in this plan
 
@@ -51,10 +87,12 @@
    - A size change sets `fixed` on the changed axis.
    - An origin change takes the child out to its host's root at that place: free, `fixed` on both axes, on top.
    - **Addition:** under a laid-out *screen root* there is nowhere to take a child out to, so an origin change is dropped and the engine lays it back. The drop's rehost to another host still works.
+   - **Addition (F11):** the same holds for any laid-out child on a host whose root isn't free, a row's child in a column root included: its origin change is dropped. My call 20 applies exactly when the host's root is free.
+   - **Not through the lift (F23):** frames written through a whole-host setter (`screens`, `floating`, `setChildren`) aren't put through this rule. Those setters are bulk rewrites, and the engine re-lays their laid-out children.
 7. **The store verbs that rebuild structure move onto the tree in this plan.** That is delete, duplicate, group, ungroup, arrange, layer moves, rehost and position. Plan 3 adds rows, columns and cards to live designs, and pointer surgery would tear them apart: moving a row's leaves one by one would take each one out.
    - Resize and turn stay on the projection with two guards (Task 11): a laid-out container is one rigid part with no contents, and its frame is written in a several-things turn. Plan 4 rewrites both.
 8. **What happens to the flat-list machinery:**
-   - `keepGroupsSound()` becomes a shim that cuts pending pointers and runs `TreeRules.apply(to:after: nil)`. Its rules 2 and 4 are now `TreeRules`; rules 1 and 3 are now the lift.
+   - `keepGroupsSound()` becomes a shim that cuts pending pointers and runs `TreeRules.apply(to:after: nil)`. Its rules 2 (an empty group), 3 (a group of one) and 5 (the box) are now `TreeRules`; rules 1 (strays) and 4 (the gather) are now the lift. These are the numbers in `Groups.swift`'s comment (F19).
    - `fitGroupBoxes`, `dissolveHollowGroups`, `ungroupStrays` and `gatherMembers` are deleted (Task 7).
    - `gathered` moves into `TreeLift` (Task 3).
    - `rawOrder` is deleted when arrange moves (Task 11).
@@ -74,7 +112,7 @@
     - `TreeIndex` stops folding a screen's lock into its nodes. Today a locked screen's elements stay editable; plan 1 folds the lock in.
 13. **The counters.**
     - `ListWork` moves to `Layer/Tree/ListWork.swift`. `elementsWritten` now counts **nodes** written by store verbs and projection writes, and the engine's frames are not counted.
-    - The engine's work is counted by plan 1's `LayoutEngine.containersLaidOut`.
+    - The engine's work is counted by plan 1's `LayoutEngine` counters. Tests read `timesLaidOut(id)` per container, not the global `containersLaidOut` (F8).
     - `CanvasWork`, `LayersPanelWork` and `CodeWork` are unchanged, because their producers still read the projection.
     - One assertion lowers: a group drag now writes the group alone (60 writes, not 240).
 14. **Custom device frames (the user's scope addition, data only).**
@@ -137,9 +175,15 @@
     - a group item that isn't just in front of its members;
   - (c) members of one canvas group at different scales;
   - (d) a write count the tree lowers, such as a container moved as one write instead of one write per member;
-  - (e) floating-point noise below 1e-9 from composing transforms through a turned container. Switch to the file's `close` helper, or add one with tolerance 1e-6.
+  - (e) floating-point noise below 1e-9 from composing transforms through a turned container. Switch to the file's `close` helper, or add one with tolerance 1e-6;
+  - (f) the order of the one flat list across hosts (which host's elements come first in `content.elements`), which the tree doesn't hold. Only the whole-list lines change, to per-host order, and per-host assertions stay (F4);
+  - (g) a call site of an API this plan deletes or retypes, when the assertion is kept (for example a `try #require` unwrap), or is carried over by a test the task names (F5).
 
   Each change is listed in its task, or recorded in the ledger with its clause. Every other failure is a bug to fix, not a test to change.
+- **"Unchanged" (F6).** When a later task says a suite passes unchanged, it means as left by the changes already recorded in the ledger under this policy.
+- **Counters (F8).** Tests never assert exact values of a global counter that other suites also raise while they run in parallel:
+  - Layout is counted with `LayoutEngine.timesLaidOut(id)`, summed over the test design's own containers.
+  - `ListWork` and `TreeProjection.lowerings` count on the main thread only, and tests that assert on them are `@MainActor` and synchronous.
 - **Test commands.** `<Suite>` is the `@Suite` struct's name.
   - Lane A, this worktree:
 
@@ -152,11 +196,35 @@
 
   - The full unit suite is the same command without `-only-testing`.
   - The UI suite is the same command with `-testPlan Layer -only-testing:LayerUITests`.
-  - **Lanes B and C** run in their own worktrees (`.claude/worktrees/st2-lane-b`, `.claude/worktrees/st2-lane-c`). Their branches are `st2/lane-b` and `st2/lane-c`, cut from `feature/semantic-tree` when plan 2 starts. Their commands are the same with:
-    - simulator `Layer iPad Pro 11 (st2-lane-b)` or `Layer iPad Pro 11 (st2-lane-c)`, each cloned from `iPad Pro 11-inch (M5)`;
-    - DerivedData `$HOME/Library/Developer/Xcode/DerivedData/Layer-st2-lane-b` or `-st2-lane-c`.
+  - **Suite names (F7).** Where this plan names a test file rather than a suite struct, run every struct below with `-only-testing:LayerTests/<Struct>`. A run that executes 0 tests counts as a failure.
+
+    | Name in this plan | Structs to run |
+    |---|---|
+    | DesignTests | ElementLayoutTests, ViewportTests, DesignStoreTests, AppModelTests, DesignFileTests, CodeGenerationTests, SymbolCatalogTests, DesignFileNameTests, CloudFileTests, ResourceTests, ClosingTests, FormatPanelEditTests, FileCheckTests, TurnedCodeTests |
+    | MultiSelectionTests | SeveralThingsSelectedTests, LiningUpTests, EnclosureTests, PickedByALoopTests, SeveralThingsChangedTogetherTests, SeveralThingsOnTheCanvasTests, TapToAddTests, CanvasDragTests, PencilOnChromeTests |
+    | CanvasHitTestTests | HiddenHitTestTests, InkOverAnElementTests, CanvasFocusTests, PaletteAndTypingTests, GlideAndFingerTests, PaletteStateInTestsTests, SelectionAreaTapTests |
+    | RotationTests | RotationGeometryTests, TurnedThingsOnTheBoardTests, TurningOneElementTests, TurningSeveralThingsTests, RotationFieldTests, TwistTests, TwistOnTheInkCanvasTests |
+    | FormatPanelTests | TypingIntoTheFormatPanelTests, ScrubbingAFieldTests, PanelChangesBesideADragTests, PanelOriginTests, NumberDraftTests, and the file's other `@Suite` structs |
+    | LayersPanelTests | LayersPanelWorkTests, and the file's other `@Suite` structs |
+    | SiriIntentsTests | ScreenBlueprintTests, EntityKeyTests, ColourTests, DesignLibraryTests, DesignIndexTests, OpeningDesignTests, DesignActionTests, ImagePlaygroundTests, StrokeScriptTests, LookWordTests, MovingTests |
+    | ScreenGenerationTests | ScreenStreamParsingTests, ScreenPromptTests, SketchHintTests, ScreenGenerationLifecycleTests |
+    | DrawingTests | DrawingElementTests, DrawingSyncTests, DrawingStoreTests, DrawingFileTests, TurnedDrawingTests, MagicPenPutAwayTests, InkFollowedAtTheEndTests |
+    | FreeformTests | SettingsTests, FreeformBehaviourTests, MoreMagicPenTests, MoreCodeTests, ScrubbingTests |
+    | MagicPenComponentTests | InnerMarkTests, SmallControlTests, SketchedLayoutTests, NewControlCodeTests |
+    | ZoomRulerTests | ZoomStopsTests |
+    | HostedModelTests | ModelChoiceTests, and the file's other `@Suite` structs |
+    | PerformanceTests | the XCTest classes DesignIndexerPerformanceTests and DesignFilePerformanceTests |
+    | GroupTests | GroupModelTests, GroupCommandTests ("Group commands"), SelectingGroupsTests, GroupGeometryTests ("Group geometry"), GroupAsOneThingTests ("A group as one thing"), LayerTreeTests |
+
+  - **Lanes B and C** run in their own worktrees (`.claude/worktrees/st2-lane-b`, `.claude/worktrees/st2-lane-c`). Their branches are `st2/lane-b` and `st2/lane-c`, cut from `feature/semantic-tree` when plan 2 starts (lane C may be cut from f306eed; see Starts when).
+    - They are never plan 1's `st-lane-b` and `st-lane-c` worktrees or `st/lane-*` branches (F1).
+    - Their commands are the same with:
+      - simulator `Layer iPad Pro 11 (st2-lane-b)` or `Layer iPad Pro 11 (st2-lane-c)`, each cloned from `iPad Pro 11-inch (M5)`;
+      - DerivedData `$HOME/Library/Developer/Xcode/DerivedData/Layer-st2-lane-b` or `-st2-lane-c`.
   - A lane's task is reviewed, then merged into `feature/semantic-tree`. Resolve `project.pbxproj` conflicts by re-running `xcodegen generate`.
-  - When the plan ends, delete the lane worktrees, their simulators and their DerivedData.
+  - When the plan ends, delete the lane worktrees, their simulators and their DerivedData. Lane C's simulator stays until Task 12 has measured in it (F14).
+- **Measuring (F14).** Task 1 Steps 3–4 and Task 12 Step 3 run only while no other lane or `xcodebuild` is running. Record in the ledger that the machine was quiet. Both workouts run in lane C's simulator.
+- **Comments (F18).** Comments and doc comments don't name the functions Task 12's grep looks for, so "the slot rule arrange used" rather than "rawOrder".
 
 ## Review Focus
 
@@ -203,9 +271,10 @@
 **Order and lanes:**
 - Lane A: Tasks 2, 3, 7, 8, 9, 10, 11, 12.
 - Lane B: Task 4.
-- Lane C: Tasks 1, 5, 6.
+- Lane C: Tasks 1, 5, 6. They may run as 5 → 6 → 1, so that Task 1 measures on a quiet machine (F14).
 - Waits:
   - Task 7 waits for Tasks 1–4 to be merged.
+  - Task 8 waits for Tasks 5 and 6 to be merged (F2).
   - Task 9 waits for Tasks 5 and 6.
   - Task 12 waits for everything.
 
@@ -213,7 +282,7 @@
 
 ### Task 1: The baseline, measured on main
 
-**Lane:** C (first in its lane; must be committed before Task 7 begins)
+**Lane:** C. It must be committed before Task 7 begins. It may come after Tasks 5 and 6 so that it measures on a quiet machine (F14).
 
 **Files:**
 - Create: `LayerTests/StoreChangeBenchmarkTests.swift`. It uses today's API only, so the same file builds on main and on the branch.
@@ -223,7 +292,7 @@
 - Consumes:
   - today's `DesignStore` API: `addScreen(_:at:)`, `setElements(_:on:replacing:)`, `update(_:_:)` and `delete(_:)`;
   - `CanvasBenchmarkUITests.testCanvasWorkout`;
-  - the p50 and p95 of plan 1's `TreeRulesTests.oneEditOnAHundredNodeScreenIsQuick`, from its ledger.
+  - the p50 and p95 of plan 1's `TreeRulesTests.oneEditOnAHundredNodeScreenIsQuick`, from its ledger: at 130a4f1 they are p50 0.957 ms and p95 1.292 ms (task-7-report).
 - Produces:
   - `@Suite struct StoreChangeBenchmarkTests`, enabled only when `ProcessInfo.processInfo.environment["LAYER_BENCHMARK"] != nil`;
   - `docs/benchmarks/semantic-tree.md`, with the spec §13 table and a filled "Before" column.
@@ -247,6 +316,7 @@
   - Copy the benchmark file in, and run `xcodegen generate` there.
 
 - [ ] **Step 3: Run the unit benchmark on main.**
+  - Steps 3 and 4 run only while no other lane or `xcodebuild` is running. Record that in the ledger (F14).
   - Use lane C's simulator, with DerivedData `$HOME/Library/Developer/Xcode/DerivedData/Layer-st2-bench-main`.
   - Run `TEST_RUNNER_LAYER_BENCHMARK=1` plus the test command with `-only-testing:LayerTests/StoreChangeBenchmarkTests`.
   - Expected: TEST SUCCEEDED, with four `BENCH` lines. Record them.
@@ -291,8 +361,11 @@
       /// What an element says, as a node. A `.group` element becomes a free container sized to fit (both axes);
       /// a leaf is `.fixed` on both axes. The frame is the element's, as given.
       init(element: DesignElement)
-      /// `element`'s mapped fields written over this node; tree-only fields kept. Lock and hide are written only
-      /// where `element` differs from `shown` (today's `DesignContent.written(_:over:groups:)` rule).
+      /// `element`'s mapped fields written over this node; tree-only fields kept (F9). Every mapped field is written
+      /// only where `element` differs from `shown`, this node's own lowering; for lock and hide that is today's
+      /// `DesignContent.written(_:over:groups:)` rule. With `shown` nil (a new node) every field is written. A
+      /// container's kind is never taken from a `.group` element: a card stays a card. A tint equal to the
+      /// lowered one leaves `style.tint` as it is, nil included.
       mutating func take(_ element: DesignElement, shown: DesignElement?)
   }
   extension DesignElement {
@@ -302,7 +375,7 @@
       struct Pose: Equatable, Sendable { var frame: CGRect; var rotation: Double?; var scale: CGFloat? }
       struct Lowered: Sendable {
           var elements: [DesignElement]           // raw: own flags, containers as .group items, block order
-          var screens: [DesignScreen]             // views: leaves only, shown flags, resolved device set when known
+          var screens: [DesignScreen]             // views: leaves only, shown flags; resolvedDevice left nil here, Task 9 sets it (F20)
           var floating: [FloatingElement]         // views
           var position: [UUID: Int]               // index in `elements`, first wins
           func children(of host: DesignScreen.ID?) -> [DesignElement]
@@ -312,7 +385,7 @@
       /// A node's pose in its host's points (canvas: its top-level node's own points) and that node's scale.
       static func pose(of id: UUID, in content: TreeContent) -> Pose?
       #if DEBUG
-      static var lowerings: Int { get }       // whole-design lowerings; counted under a lock
+      static var lowerings: Int { get }       // whole-design lowerings; counted on the main thread only, as ListWork is (F8)
       #endif
   }
   ```
@@ -340,7 +413,7 @@
   - **Poses** are composed top-down: the absolute centre comes from the parent's transform, the size stays the node's own, and the angle is the sum, through `Rotation.kept`.
     - Upright chains add origins.
     - On the canvas, the top-level node's `scale` is left out of the transform and reported as each descendant's `scale`.
-  - **Flags:** raw elements carry their own flags. View elements OR in their container ancestors' flags, but never the screen's lock.
+  - **Flags:** raw elements carry their own flags. View elements OR in their container ancestors' flags, but never the screen's lock. Work them out in the lowering's own walk: until Task 9, `TreeIndex.isLockedWithAncestors` folds the screen's lock in.
   - **Screens:** each view `DesignScreen` copies the screen's fields and `unknownKeys`. Its `elements` are the leaves of its host.
 
 - [ ] **Step 1: Write the failing tests** in `TreeProjectionTests`:
@@ -368,6 +441,9 @@
     - `DesignElement(node: LayerNode(element: e), frame: e.frame, rotation: e.rotation, parent: e.parent, scale: e.scale, group: e.group) == e`.
   - `aNodeWithoutATintTakesItsKindsTint`: a button node with `style.tint == nil` lowers with `tint == ElementKind.button.spec.tint`.
   - `aPendingPointerIsLoweredAsTheGroup`: for a top-level X, `lower(content, pending: [X: G])` gives `X.group == G`.
+  - `takingAnUnchangedElementChangesNothing` (F9):
+    - A card, and a button whose `style.tint` is nil, each take their own lowering with `shown` set to it.
+    - Each node is unchanged: the card is still `.card`, and the tint is still nil.
 
 - [ ] **Step 2: Run them.** Run `TreeProjectionTests`. Expected: FAIL (the types don't exist).
 
@@ -386,8 +462,10 @@
 **Files:**
 - Create: `Layer/Model/Projection/TreeLift.swift`, `Layer/Model/Projection/TreeProjection+Writes.swift`
 - Create: `Layer/Tree/ListWork.swift`. `ListWork` moves here from `Layer/Document/DesignFile.swift`.
-- Modify: `Layer/Document/DesignFile.swift` (remove `ListWork`), `Layer/Model/Groups.swift` (`gathered` moves to `TreeLift.gathered`, and `gatherMembers` calls it)
-- Test: `LayerTests/TreeProjectionWriteTests.swift`
+- Modify:
+  - `Layer/Document/DesignFile.swift`: remove `ListWork`. Today's flat list operations that W5 runs (the reorder slot logic, `placed(on:scale:)`) become shared static helpers on `[DesignElement]`, which `DesignContent` and the projection both call. Don't copy them (F15).
+  - `Layer/Model/Groups.swift`: `gathered` moves to `TreeLift.gathered`, and `gatherMembers` calls it.
+- Test: `LayerTests/TreeProjectionWriteTests.swift`. Tests that assert on `ListWork` are `@MainActor` and synchronous, because `ListWork` counts on the main thread only (F8).
 
 **Interfaces:**
 - Consumes: Task 2, `LayoutEngine` (plan 1), `TreeRules` (plan 1, used in tests only)
@@ -395,7 +473,7 @@
   ```swift
   // PROJECTION: deleted in plan 6
   enum TreeLift {
-      /// Today's gather (Groups.swift rule 3), moved unchanged.
+      /// Today's gather (Groups.swift rule 4), moved unchanged. It is given the non-drawings, as today.
       static func gathered(_ things: [DesignElement]) -> [DesignElement.ID]
       /// A host's flat list as its top-level nodes. Pointers it can't honour now are returned in `pending`.
       static func nodes(from elements: [DesignElement], host: TreeIndex.Host, keeping content: TreeContent)
@@ -420,13 +498,13 @@
   #endif
   ```
 - **The write rules:**
-  - **W1. Fields.** `projectedUpdate` lowers the node raw, runs `body`, and restores `id`, `parent` and `scale`. If nothing changed it returns. Otherwise it writes each changed mapped field onto the node with `take(_:shown:)` and calls `ListWork.wrote()` once.
+  - **W1. Fields.** `projectedUpdate` lowers the node raw, runs `body`, and restores `id`, `parent` and `scale`. If nothing changed it returns. Otherwise it writes each changed mapped field onto the node with `take(_:shown:)`, with `shown` set to the raw lowering it started from (F9), and calls `ListWork.wrote()` once.
   - **W2. Geometry under a free parent** (a free container, a free screen root, or the canvas top level). The new absolute pose goes into the parent's space through the inverse of the parent's host transform, and the angle becomes absolute minus the parent's summed angle.
     - If the node is a **free container (B)**, each child's absolute pose is recorded first and put back after, so nothing in it moves.
     - If it is a **laid-out container (A)**, its children ride along. A size change sets `.fixed` on the changed axes.
   - **W3. Geometry under a laid-out parent** (My call 20):
-    - **Origin changed, parent not a screen root:** the node goes to the end of its host's root children, or of the canvas's top level. It keeps its absolute pose, and becomes `.fixed` on both axes.
-    - **Origin changed under a laid-out screen root:** the origin is dropped.
+    - **Origin changed, host's root free (or on the canvas), parent not a screen root:** the node goes to the end of its host's root children, or of the canvas's top level. It keeps its absolute pose, and becomes `.fixed` on both axes.
+    - **Origin changed when the host's root isn't free:** the origin is dropped, and the engine lays the node back. That covers the laid-out root's own children and any deeper laid-out child, such as a row's child in a column root (F11).
     - **Size changed:** `.fixed` on each changed axis, with the new size.
     - **Angle:** absolute minus the parent's summed angle.
 
@@ -442,13 +520,15 @@
     `ListWork` counts them as today's flat operations did: one per add or move, the number removed, the slots changed, and nothing for a whole-host set.
   - **W6. The lift** (`TreeLift.nodes`):
     1. **Valid pointers.** `e.group` is kept when it names a `.group` element in the list, `e` isn't a drawing, and following pointers from it never comes back to `e`. Any other non-nil pointer that isn't a drawing's goes to `pending`.
-    2. **Order** is `gathered(list)`, with only valid pointers.
-    3. **Nodes.** Each is `content`'s node with that id, with its children emptied, or else `LayerNode(element:)`. Then `take(e, shown: <the shown element of that id in content's lowering>)`.
+    2. **Order** is `gathered` over the list's non-drawings, with only valid pointers. Each drawing keeps its slot in the list, which is today's slot rule for drawings. On the canvas it therefore stays between the same top-level nodes (F10).
+    3. **Nodes.** Each is `content`'s node with that id, with its children emptied, or else `LayerNode(element:)`. Then `take(e, shown: <the shown element of that id in content's lowering>)`, which writes only what differs (F9).
     4. **Nesting.** Each node is appended to its valid parent's children, in order. Those with no valid parent are the top level.
     5. **Geometry**, top-down: each child's local pose is its absolute pose seen from its parent's absolute pose (as in W2). A canvas child whose element `scale` differs from its top-level node's has its frame converted through canvas points into that scale, so its size scales.
     6. Containers new to the tree are free, and fit on both axes.
 
     Pending pointers whose target now exists in the same host are honoured in step 1. `pending` loses every id the lift honoured.
+
+    The lift doesn't apply W3 (My call 20). A laid-out child whose frame comes through a whole-host set is re-laid by the engine (F23).
 
 - [ ] **Step 1: Write the failing tests** in `TreeProjectionWriteTests`. Leaves are fixed unless the test says otherwise.
   - `writingAFieldWritesOnlyThatNode`:
@@ -468,6 +548,8 @@
     - Its parent is now the screen root, and it is the root's last child.
     - Its lowered frame starts at (5, 5), and it is `.fixed` on both axes.
   - `aPositionWrittenToAColumnRootsChildIsLaidBack`: after the write and `TreeRules.apply(to:after:)`, the child is still the root's child, with the frame it had before.
+  - `aPositionWrittenToARowChildInAColumnRootStaysInTheRow` (F11): after the write and `TreeRules.apply(to:after:)`, the text is still the row's child, with the frame it had before.
+  - `aDrawingKeepsItsPlaceThroughTheLift` (F10): for the canvas `[note, drawing, G[a, b]]`, `projectedSetHost(nil, to: <its raw lowering>)` keeps the drawing at index 1 among the canvas's nodes, between the note and G.
   - `aGroupPointerWriteGathersAsTheListDid`:
     - Root children are `[A, B, C, D, E]`. In one sequence, G is added, then `B.group = G` and `D.group = G`.
     - The raw ids are `[A, C, B, D, G, E]`, and G's children are `[B, D]`.
@@ -541,7 +623,7 @@
   - **`TreeChange`:**
     - `nodes` are the ids whose record differs. A pure reorder touches nothing, as today.
     - `screens` are the screens whose record differs, plus the hosts a node was added to, removed from or moved between.
-    - `board` is a change to the title, the settings, `unknownKeys`, `manifestUnknownKeys` or unread canvas nodes.
+    - `board` is a change to the title, the settings, `unknownKeys` or `manifestUnknownKeys`. Task 8 adds `unreadCanvas`, which doesn't exist yet (F3).
 - **The revert** (`reverting(after, to: before)`) is today's algorithm (`DesignContent.reverting`, DesignFile.swift:293–368), generalised:
 
   ```
@@ -575,12 +657,14 @@
   - a removed node comes back where it was, if its parent is still there;
   - screens go back the same way, and an added screen goes only once it is empty;
   - an order goes back only if it is still after's.
+- **A temporary duplicate (F15).** This lane may write its own version of the generic list revert (DesignFile.swift:308) in `Layer/Tree/`, beside today's. Task 7 deletes today's, and reviewers accept the duplicate until then.
 
 - [ ] **Step 1: Write the failing tests** in `TreeRevertTests`:
   - `fieldListNamesEveryField`:
     - `Mirror` over a `LayerNode` whose fields are all set, and over its `content` and `style`, gives labels (prefixed `content.` and `style.`, `children` excluded).
     - Every label is in `LayerNode.revertedFields`.
     - For each field, a step changing only that field, with another edit changing `name` since, reverts that field and keeps the new `name`. If it restored the whole node, the test fails and names the field.
+    - The per-field loop skips `id`, because a changed id is a removal and an addition. When the field under test is `name`, the other edit changes `isHidden` instead. Both are still in the label check (F25).
   - `aStepsOwnFieldGoesBackAndAnothersStays`:
     - Before: text "A", frame (0, 0, 10, 10).
     - The step changes the text to "B". Another edit then changes the frame to (5, 5, 10, 10).
@@ -632,9 +716,13 @@
 - Modify: `Layer/Model/Design.swift`. It changes:
   - `DeviceFrame` becomes `Codable`, gains new fields and the families `watch` and `other`;
   - `CanvasSettings` gains `customDevices`, `unreadDevices` and `device(named:)`, and `sketchDevice` goes through `device(named:)`;
+  - `CanvasSettings` gets its own `encode(to:)`, which leaves out an empty `customDevices` and writes the settings' unknown keys itself, as `TreeScreen` does. Then `TreeContent`, which encodes the settings unwrapped, keeps them in the file (F12);
   - `DesignScreen.resolvedDevice` is added.
-- Modify: every exhaustive `switch` on `DeviceFrame.Family` (`Layer/Model/ScreenTidy.swift`, `Layer/Tree/TreeRules.swift`, and any others the compiler finds). `watch` and `other` behave as `phone`. The Format panel's device picker shows only families that have devices.
-- Modify: `Layer/Tree/TreeRules.swift`. Screens resolve through `content.device(of:)`, `margin(for:)` returns `device.margin`, and the column limit reads `device.maxContentWidth`.
+- Modify: every exhaustive `switch` on `DeviceFrame.Family` (`Layer/Model/ScreenTidy.swift`, `Layer/Tree/TreeRules.swift`, `Family.name`, and any others the compiler finds). `watch` and `other` behave as `phone`, except for margins: ScreenTidy's margin reads `device.margin`, which equals today's numbers for every built-in (F21).
+- Modify: `Layer/Tree/TreeRules.swift`. The changes:
+  - screens resolve through `content.device(of:)`, both when padding a root and when deciding whether a screen's device changed since `previous`;
+  - `margin(for:)` returns `device.margin`;
+  - the column limit reads `device.maxContentWidth`.
 - Create: `Layer/Tree/TreeContent+Devices.swift`
 - Test: `LayerTests/DeviceFrameTests.swift`
 
@@ -709,10 +797,11 @@
     - The custom frame has margin 12 and `safeTop` 30, and a column root holds a text.
     - The text's minX is 12 + `safeLeading`, and its minY is 30 + 12.
   - `aCustomFramesMaxContentWidthLimitsTheColumn`: on a 1600-wide frame with `maxContentWidth` 900, a fill-width child is 900 wide, centred.
-  - `plan1sMarginsAreUnchanged`: `TreeRulesTests.aColumnRootIsInsetBySafeAreasAndMargin` passes unchanged. Run it in Step 4.
+  - Plan 1's margins are unchanged. This is not a test to write: Step 4 runs `TreeRulesTests`, whose `aColumnRootIsInsetBySafeAreasAndMargin` must pass unchanged (F16).
   - `anUnknownDeviceIDFallsBackToTheIPhone`.
+  - `aSettingThisBuildDoesNotKnowSurvivesTheFile` (F12): settings with an unknown key `"hologram": {"x": 1}` survive `TreeManifest.decode(TreeManifest.encode(…))`.
   - `aMalformedCustomFrameIsKeptButNotUsed`:
-    - A frame with size `[0, -5]` lands in `unreadDevices` and is written back byte-for-byte.
+    - A frame with size `[0, -5]` lands in `unreadDevices`, and is written back equal as JSON (`JSONValue ==`, not byte for byte) (F22).
     - A screen naming it is iPhone-sized after the rules.
   - `aCustomFrameCantTakeABuiltInsID`.
   - `theSketchDeviceCanBeCustom`: with `sketchDeviceID` set to the custom id, `settings.sketchDevice` is the custom frame.
@@ -722,7 +811,7 @@
 
 - [ ] **Step 3: Implement** the changes. Keep the built-in table's call sites unchanged.
 
-- [ ] **Step 4: Run them.** Run `DeviceFrameTests`, `TreeRulesTests`, `ScreenTidyTests` and `FormatPanelTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run `DeviceFrameTests`, `TreeRulesTests`, `ScreenTidyTests` and `FormatPanelTests` (its structs, per F7), then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Devices: custom device frames kept with the design, every frame's margin and widest column as tokens the rules read"`
 
@@ -739,7 +828,8 @@
   - `Layer/Tree/NaturalSize.swift`: font sizes come from `DesignTokens.standard.textSizes`;
   - `Layer/Components/Catalogue.swift`: `card`'s radius and tint come from `DesignTokens.standard.card`;
   - `Layer/Tree/Outline.swift`: a card's padding comes from `DesignTokens.standard.card.padding`;
-  - `Layer/Model/ElementLayout.swift`: `rhythm` reads `DesignTokens.standard.rhythm`.
+  - `Layer/Model/ElementLayout.swift`: `rhythm` reads `DesignTokens.standard.rhythm`;
+  - `Tools/SketchBenchmarkHarness/run.sh` and `Tools/ScreenBenchmarkHarness/run.sh`: compile `Layer/Tree/DesignTokens.swift`, because `Design.swift` and `Catalogue.swift` now need it. The screen harness also gets the missing `Layer/Tree/LookWords.swift` (F13).
 - Test: `LayerTests/DesignTokensTests.swift`
 
 **Interfaces:**
@@ -759,7 +849,7 @@
 - **Reading:**
   - Every number that isn't finite, or is 0 or less, reads as the standard's.
   - `rhythm` is sorted, made unique, and keeps only its finite, positive entries. If none are left, it reads as the standard's.
-  - A missing `tokens` reads as `.standard`. Unknown keys are kept.
+  - A missing `tokens` reads as `.standard`. Unknown keys are kept: `DesignTokens` writes its own, as `CanvasSettings` does from Task 5 (F12).
 
 - [ ] **Step 1: Write the failing tests** in `DesignTokensTests`:
   - `theStandardTokensAreTodaysNumbers`:
@@ -777,7 +867,9 @@
 
 - [ ] **Step 3: Implement** the type and the setting, and point plan 1's literals at `standard`.
 
-- [ ] **Step 4: Run them.** Run `DesignTokensTests`, `TextMeasureTests`, `OutlineTests`, `ComponentCatalogueTests`, `ScreenGenerationTests` (including `SketchHintTests`) and `DesignTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED. The prompts and the ComponentKinds golden are unchanged.
+- [ ] **Step 4: Run them.**
+  - Run `DesignTokensTests`, `TextMeasureTests`, `OutlineTests`, `ComponentCatalogueTests`, `ScreenGenerationTests` (including `SketchHintTests`) and `DesignTests` (their structs, per F7), then the full unit suite. Expected: PASS, and TEST SUCCEEDED. The prompts and the ComponentKinds golden are unchanged.
+  - Typecheck the sketch harness: its `run.sh` source list, run through `swiftc -typecheck -D DEBUG -parse-as-library -target arm64-apple-macos27.0`. Expected: no errors, and no binary written (F13).
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Design tokens: one editable set per design, saved with it, today's numbers as the standard that plan 1's constants now read"`
 
@@ -856,13 +948,13 @@
   - `theStoreHoldsTheTree`: after `addScreen(from:)` and `place(_:centeredAt:)` of a button on it, `store.content.tree.screens[0].root.children.map(\.kind) == [.button]`.
   - `aGroupOfOneMadeInAChangeIsGoneByItsEnd`: one `apply` adds a group and points one member at it. Afterwards the member is a root child, and there is one undo step.
   - `pendingPointersEndWithTheChange`: one `apply` adds a member pointing at a group that never comes. Afterwards the member is a root child, and `content.pendingPointers` is empty.
-  - `aLeafEditLaysOutOnlyItsScreen`: with two free screens, a leaf's frame changes on screen A. `LayoutEngine.containersLaidOut` rises by 1 (A's root).
-  - `theProjectionIsLoweredOncePerVersion`: reading `screens`, `floating` and `element(_:)` ten times each raises `TreeProjection.lowerings` by 1.
+  - `aLeafEditLaysOutOnlyItsScreen`: with two free screens, a leaf's frame changes on screen A. `LayoutEngine.timesLaidOut(A's root)` rises by 1, and `timesLaidOut(B's root)` by 0 (F8).
+  - `theProjectionIsLoweredOncePerVersion` (`@MainActor`, synchronous): reading `screens`, `floating` and `element(_:)` ten times each raises `TreeProjection.lowerings` by 1 (F8).
   - `undoAndRedoGoThroughTheTree`:
     - A free group G, turned 30 and holding two leaves, is moved 10 points right with `position`.
     - Undo gives the tree as it was before, with G's frame within 1e-6.
     - Redo gives the tree after the move, with G's frame within 1e-6.
-    - Neither leaf's local frame changes at any point.
+    - Neither leaf's local frame changes at any point, within 1e-6 (F24).
 
 - [ ] **Step 2: Run them.** Run `StoreOnTheTreeTests`. Expected: FAIL (`DesignContent` has no `tree`).
 
@@ -870,10 +962,12 @@
   - **encode:** today's keys (`screens`, `elements`, `title`, `canvas`), with `elements` the raw lowering and `legacyUnread` re-interleaved at their indices;
   - **decode:** today's reader, then a lift per host, with unread elements going to `legacyUnread`.
 
-- [ ] **Step 4: Move the store onto it**, as in the Interfaces. Delete `Views`, `rehostElementsOnMissingScreens`, `Touched` and the four group rules.
+- [ ] **Step 4: Move the store onto it**, as in the Interfaces.
+  - Delete `Views`, `rehostElementsOnMissingScreens`, `Touched` and the four group rules.
+  - Delete today's generic list revert (DesignFile.swift:308), which Task 4's revert replaces (F15).
 
-- [ ] **Step 5: Run the suites that must pass unchanged.** Run each:
-  - `ConcurrentEditTests`, `UndoNameTests`, `DesignTests`, `FlatStoreTests`, `MultiSelectionTests`;
+- [ ] **Step 5: Run the suites that must pass unchanged.** Names that are files run as their structs (F7). Run each:
+  - `ConcurrentEditTests`, `UndoNameTests`, `DesignTests`, `FlatStoreTests` (except the four Step 6 changes under (f)), `MultiSelectionTests`;
   - `CanvasHitTestTests`, `CanvasDragLandingTests`, `CanvasDragWorkTests`, `RotationTests`;
   - `FormatPanelTests`, `LayersPanelTests`, `LayerOrderTests`, `GroupFinalFixTests`, `PerformanceFixTests`, `PanelStepTests`;
   - `SiriIntentsTests`, `VoiceToolsTests`, `VoiceAgentTests`, `PencilVoiceTests`;
@@ -887,6 +981,14 @@
   - `aFloatingGroupsBoxHoldsMembersOfMixedScales`, `aGroupOnTheOpenCanvasTakesItsFrontmostMembersScale` and `aGroupLandingWhereThingsAreDrawnAtAnotherScaleArrivesWhole`, under (c): assert in canvas points instead of own points and own scales;
   - turned-group geometry, under (e), where an exact `==` now differs below 1e-9.
 
+  These `FlatStoreTests` cases are expected to change under (f) (F4):
+  - `everythingOnTheBoardIsInOneListAndSaysWhatItIsOn`;
+  - `movingToAnotherScreenChangesWhatItIsOnAndPutsItOnTopThere`;
+  - `arrangingReordersOnlyAmongWhatSharesItsScreen`;
+  - `deletingAScreenTakesWhatIsOnItOutOfTheList`.
+
+  Their whole-list lines (`content.elements.map(\.id)`, and its `parent` and `scale` twins) become per-host orders (`children(of:)`, `store.screens`, `store.floating`). Their per-host assertions stay as they are.
+
   If one of these passes unchanged, leave it. Record every change in the ledger with its clause.
 
 - [ ] **Step 7: Run everything.** Run `StoreOnTheTreeTests`, the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
@@ -897,7 +999,7 @@
 
 ### Task 8: The file, version 4
 
-**Lane:** A
+**Lane:** A (waits for Tasks 5 and 6 to be merged; F2)
 
 **Files:**
 - Modify: `Layer/Document/DesignFile.swift`. The changes:
@@ -905,13 +1007,17 @@
   - `DesignContent`'s `Codable` is the tree's content coding;
   - the v3 bridge, `legacyUnread`, `Manifest`, `SingleFile`, `SingleFileContent`, `forgetUnknownKeys`, the v<3 paths, the `drawing.data` adoption and `DesignFile.unknownKeys` are deleted.
 - Modify: `Layer/Tree/TreeContent.swift`. It gets `unreadCanvas` and `TreeManifest.encode(_:fileName:version:)`.
+- Modify, for `unreadCanvas` (F3):
+  - `Layer/Tree/TreeChange.swift`: `board` includes a change to `unreadCanvas`;
+  - `Layer/Tree/TreeRevert.swift`: `reverting` takes `unreadCanvas` back whole, as it does unknown keys, and `takeBack` does the same;
+  - `Layer/Tree/TreeRules.swift`: when the canvas tidy removes canvas nodes, the unread ones keep their places (`keepUnreadPlaces` for the canvas, instead of `_ = tidy(&content.canvas)`).
 - Modify: `Layer/Document/DesignPackage.swift`. `drawing` is deleted, so a stray `drawing.data` is now an unknown part, which is kept.
 - Modify: `Layer/Intents/DesignLibrary.swift` and its callers. A refused file is skipped.
 - Modify: the tests listed in Step 6.
 - Test: `LayerTests/DesignFileV4Tests.swift`
 
 **Interfaces:**
-- Consumes: `TreeManifest` and `TreeRules` (plan 1), Task 7
+- Consumes: `TreeManifest` and `TreeRules` (plan 1), Task 7, and Tasks 5 and 6 (`customDevices`, `unreadDevices`, `tokens`) (F2)
 - Produces:
   ```swift
   struct DesignFile: Sendable {
@@ -930,7 +1036,7 @@
   extension TreeManifest { static func encode(_ content: TreeContent, fileName: String?, version: Int) throws -> Data }
   extension DesignLibrary {
       nonisolated static func read(_ url: URL) -> DesignSummary?        // nil when the file is refused (TreeManifest.ReadError)
-      nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool) -> DesignSummary?
+      nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary?   // default kept (F5)
   }
   ```
 - **Reading:**
@@ -965,33 +1071,40 @@
     - `DesignFile.content(at:)` throws `.olderVersion(3)`, and `DesignLibrary.listed(url)` is nil.
     - The library's list of that folder doesn't include it.
   - `aCustomFrameAndTokensSurviveSaving`: Tasks 5 and 6's settings, through `DesignFile(wrapper:)`.
+  - `anUndoKeepsAnUnreadCanvasNodeInItsPlace` (F3):
+    - The canvas holds an unread node at index 1, and a change removes a canvas group in front of it.
+    - After the rules, the unread node keeps its place among those left.
+    - Undo brings the group back, and the unread node sits where it was before the change.
 
 - [ ] **Step 2: Run them.** Run `DesignFileV4Tests`. Expected: FAIL.
 
 - [ ] **Step 3: Implement** the reader, the writer, `unreadCanvas` (decoded one node at a time, like `LayerNode`'s children), the version parameter, and the library's skipping. Callers of `read` and `listed` drop nils.
 
-- [ ] **Step 4: Run** `DesignTests`, `FlatStoreTests`, `DrawingTests`, `GroupTests`, `HostedModelTests`, `FreeformTests`, `PerformanceTests` and `SiriIntentsTests`.
+- [ ] **Step 4: Run** `DesignTests`, `FlatStoreTests`, `DrawingTests`, `GroupTests`, `HostedModelTests`, `FreeformTests`, `PerformanceTests` and `SiriIntentsTests`. Names that are files run as their structs (F7).
 
 - [ ] **Step 5: Run the unchanged file tests.** These pass unchanged:
   - `aDesignSurvivesBeingSavedAndOpened`, `savingAgainLeavesThePartsThatHaveNotChangedAlone`, `picturesNothingShowsAreLeftOutOfTheSavedFile`;
   - `aFileFromANewerVersionIsRefusedRatherThanHalfRead`, `somethingThatIsNotADesignFailsToOpen`, `aDocumentSavesWhatTheModelLastToldIt`;
   - `aSavedDesignReadsBackAsItWas`, `newSettingsSurviveSavingAndOpening`, `theChoiceIsSavedInTheDesignFileAndReadBack`;
-  - every drawing-saving test except those in Step 6.
+  - every drawing-saving test except those in Step 6;
+  - `FlatStoreTests.elementsThatShareAnIdentifierAreLeftInTheirOrderRatherThanTrapping`. It is in-memory, with no file, so clause (a) doesn't apply. The v4 file case is the new `aFileWithTwoNodesOfOneIDOpensAndSavesBoth` (F5).
 
-- [ ] **Step 6: Change the tests the policy allows**, under clause (a):
+- [ ] **Step 6: Change the tests the policy allows**, under clause (a) unless the table says otherwise:
 
   | Test | What happens |
   |---|---|
   | `FlatStoreTests.aDesignIsSavedAsItsScreensAndOneListOfElements` | Rewritten as `aDesignIsSavedAsScreensHoldingTreesAndCanvasNodes` |
   | `FlatStoreTests.aDesignSavedBeforeElementsWereOneListStillOpens`, `aPackageSavedByTheVersionBeforeOpens` | Retired: they are refused now, as `anOlderDesignIsRefusedWithItsMessage` pins |
-  | `FlatStoreTests.anElementOfAKindThisVersionDoesNotKnowIsKeptAndWrittenBackWhereItWas`, `elementsThatShareAnIdentifierAreLeftInTheirOrderRatherThanTrapping` | Rewritten with v4 JSON (an unknown kind inside a container; two nodes sharing an id) |
+  | `FlatStoreTests.anElementOfAKindThisVersionDoesNotKnowIsKeptAndWrittenBackWhereItWas` | Rewritten with v4 JSON (an unknown kind inside a container) |
   | `DesignTests.aDesignSavedBeforeFloatingElementsAndSymbolsStillOpens`, `keysEarlierVersionsDroppedAreNotKeptFromAnOlderFile` | Retired |
   | `DesignTests.savingKeepsThePictureAndInkOfElementsThisVersionCannotRead`, `keysThisVersionDoesNotKnowSurviveASave` | Rewritten with v4 JSON |
   | `DesignTests.aDesignIsWrittenAsAPackageWithItsPartsApart` | Only the assertions on `design.json`'s keys change |
   | `DrawingTests.aPackageSavedWithAllItsInkAsOneDrawingOpensWithDrawings`, and `PerformanceTests`' test that builds a `drawing.data` package | Retired |
+  | `DrawingTests.aDrawingsInkIsSavedBesideTheDesignUnderItsIdentifier` | Its `DesignPackage.drawing` becomes the literal `"drawing.data"`. The assertion stays (F5) |
+  | `SiriIntentsTests` call sites of `DesignLibrary.read` and `listed` (lines 138, 161, 166, 170, 212, 223, 227) | Clause (g): each gains a `try #require(…)` unwrap. The assertions stay (F5) |
   | `HostedModelTests.aDesignSavedBeforeThereWasAChoiceUsesTheDefault`, `aChoiceFromANewerLayerStillOpens`, `FreeformTests.designsSavedBeforeTheNewSettingsStillOpen` | Their JSON becomes v4 content (`"settings"` for settings, `"canvas": []`), and their assertions stay |
   | `GroupTests`: `aMemberOfAMissingGroupIsUngrouped`, `aGroupOfADrawingOrALoopIsUndone`, `aDesignSavedByABuildThatKnowsNoGroupsKeepsThem`, `aDesignWhoseMembersLostTheirPointersOpensUngrouped` | Retired under (a) and (b): v4 nests children, so these states can't be written |
-  | `GroupTests.groupsSurviveTheFile` | Round-trips through v4, unchanged if it already does |
+  | `GroupTests.groupsSurviveTheFile` | Round-trips through v4. Expect it to change: its lines reading the `elements` key change under (a), and the rest stay (F5) |
 
 - [ ] **Step 7: Run everything.** Run `DesignFileV4Tests`, the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
@@ -1008,7 +1121,8 @@
 - Modify:
   - `Layer/Model/DesignStore.swift`: the memo is exposed as `index`, and `tree` is added;
   - `Layer/Tree/TreeIndex.swift`: a screen's lock is no longer folded into its nodes;
-  - `Layer/Model/Projection/TreeProjection.swift`: view screens get `resolvedDevice = settings.device(named:)`.
+  - `Layer/Model/Projection/TreeProjection.swift`: view screens get `resolvedDevice = settings.device(named:)`. Task 2 left it nil (F20);
+  - `Layer/A2UI/*.swift`, if plan 1's importer or exporter holds the card's padding, radius or fill, or a rhythm number, as a literal: they read `DesignTokens.standard` instead (F17). The values are equal, so the A2UI tests pass unchanged.
 - Test: `LayerTests/TreeVerbTests.swift`
 
 **Interfaces:**
@@ -1088,7 +1202,7 @@
     - Each child's angle is summed, and each child is locked.
   - `unwrappingIntoAColumnJoinsAtTheSlot`: unwrapping G in a column `[a, G[t1, t2], c]` gives `[a, t1, t2, c]`, laid out.
   - `settingAColumnOnAScreenRootSortsTopToBottom`: the root's children come out in minY order, fixed at their sizes.
-  - `reconcileIsOneChangeAndOneRulesPass`: one undo step, and `containersLaidOut` rises only by what changed.
+  - `reconcileIsOneChangeAndOneRulesPass`: one undo step. `LayoutEngine.timesLaidOut(id)` rises only for the containers that changed, and by 0 for the screen's unchanged containers (F8).
   - `aDuplicatedContainerHasNewIDsThroughout`: no id in the copy's subtree appears in the original's, and the copy's frame is the original's moved by (16, 16).
   - `deletingAContainerTakesItsSubtreeAndTellsTheLogOnce`: `CanvasWork.readingLogTasks` rises by 1.
   - `aLockedScreensNodesAreNotLockedByIt`: `index[leaf].isLockedWithAncestors == false` when only the screen is locked.
@@ -1096,7 +1210,7 @@
 
 - [ ] **Step 2: Run them.** Run `TreeVerbTests`. Expected: FAIL.
 
-- [ ] **Step 3: Implement** `TreeEdit` and the verbs, the screen-lock change in `TreeIndex`, and `resolvedDevice` in the projection.
+- [ ] **Step 3: Implement** `TreeEdit` and the verbs, the screen-lock change in `TreeIndex`, and `resolvedDevice` in the projection. Then move any `Layer/A2UI/` card or rhythm literals onto `DesignTokens.standard` (F17), and run `A2UIImportTests` and `A2UIExportTests`.
 
 - [ ] **Step 4: Run them.** Run `TreeVerbTests`, `TreeIndexTests` and `ScreenTidyTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
 
@@ -1135,8 +1249,8 @@
 
 - [ ] **Step 3: Move the verbs.**
 
-- [ ] **Step 4: Run them**, then these, which must pass unchanged:
-  - `GroupTests` (the suites "Group commands" and "A group as one thing"), `GroupFinalFixTests`, `FreeformTests`;
+- [ ] **Step 4: Run them**, then these, which must pass unchanged, meaning as left by the changes already recorded in the ledger (F6):
+  - `GroupCommandTests` ("Group commands", including Task 7's (c) change) and `GroupAsOneThingTests` ("A group as one thing"), `GroupFinalFixTests`, `FreeformTests` (its structs, per F7);
   - `FlatStoreTests.aCopiedScreenBringsCopiesOfWhatIsOnIt`;
   - `SiriIntentsTests`, `VoiceToolsTests`, `AssetLibraryTests`, `ConcurrentEditTests`, `PerformanceFixTests` (`deletingAGroupStartsOneTaskForTheReadingLog`).
 
@@ -1168,14 +1282,15 @@
 - Produces:
   ```swift
   extension TreeEdit {
-      /// `order` written into `children`, every drawing keeping its index (today's rawOrder rule, on nodes).
+      /// `order` written into `children`, every drawing keeping its index (the slot rule arrange used, on nodes).
+      /// Comments don't name the functions Task 12's grep looks for (F18).
       static func reordered(_ children: [LayerNode], to order: [UUID]) -> [LayerNode]
   }
   ```
 - **The rules:**
   - `position`:
     - a container moves by its own frame, in one write, and everything in it rides along;
-    - a leaf moves through its node frame, and My call 20 applies under a laid-out parent;
+    - a leaf moves through its node frame, and My call 20 applies under a laid-out parent, with W3's rule for a host whose root isn't free (F11);
     - locked things stay, as today.
   - `rehost(_:)` and `rehostGroup` use `move(_:to:at:)` across hosts, keeping the canvas centre and the size in own points:
     - a container goes whole, so its contents scale about its middle;
@@ -1202,9 +1317,10 @@
 
 - [ ] **Step 4: Change the tests the policy allows:**
   - `CanvasDragWorkTests.aDragFrameWritesOnlyWhatItMoves`, under (d): the group drag now expects `groupWrites == 60`, and its comment says the group is written alone. The line drag still expects 60.
-  - `LayerOrderTests.theRawOrderKeepsEachDrawingInItsSlot` is retired: `rawOrder` is gone, and `aDrawingKeepsItsIndexAmongTheCanvasNodes` covers its rule.
+  - `LayerOrderTests.theRawOrderKeepsEachDrawingInItsSlot` is retired under (f) and (g) (F5). `rawOrder` is gone, the test asserts the one list's order across hosts, and `aDrawingKeepsItsIndexAmongTheCanvasNodes` carries its rule.
 
-- [ ] **Step 5: Run the suites that must pass unchanged.** Run `LayerOrderTests` (the rest), `GroupTests` (the suite "Group geometry", and `aGroupArrangesAsOneBlock`), `RotationTests`, `CanvasDragLandingTests`, `MultiSelectionTests`, `FormatPanelTests`, `SiriIntentsTests`, `VoiceToolsTests` and `ConcurrentEditTests`. Then run the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
+- [ ] **Step 5: Run the suites that must pass unchanged.** "Unchanged" means as left by the changes already recorded in the ledger (F6), and names that are files run as their structs (F7).
+  - Run `LayerOrderTests` (the rest), `GroupGeometryTests` ("Group geometry", including Task 7's (c) change), `GroupCommandTests/aGroupArrangesAsOneBlock`, `RotationTests`, `CanvasDragLandingTests`, `MultiSelectionTests`, `FormatPanelTests`, `SiriIntentsTests`, `VoiceToolsTests` and `ConcurrentEditTests`. Then run the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
 - [ ] **Step 6: Commit.** `git add -A && git commit -m "Order, hosts and moves work on the tree: a container moves, lands, resizes and turns as one, and drawings keep their places"`
 
@@ -1227,13 +1343,14 @@
     - The screen has a column root holding 25 rows, each a row of a text, a body, a toggle and a divider.
     - It times 50 runs each of: move a leaf (through `update(ref)`), resize one, edit a text, and add a text to a row (`store.add(_:to: .node(row), at: nil)`).
     - Each p95 is under 16 ms. It prints `BENCH tree <op> p50 p95`.
-  - `aLeafDragLaysOutOnlyItsDirtyPath`: over a 60-frame drag of a leaf on a free screen, `LayoutEngine.containersLaidOut` rises by at most 60, which is the root alone each frame.
+  - `aLeafDragLaysOutOnlyItsDirtyPath`: over a 60-frame drag of a leaf on a free screen, `LayoutEngine.timesLaidOut(root)` rises by at most 60, which is the root alone each frame. Every other container on that screen rises by 0 (F8).
 
 - [ ] **Step 2: Run them.** Run `StoreChangeBudgetTests`. Expected: PASS. If the timing fails, profile the change pipeline before going on: the memo, the projection writes, `TreeRules`. The budget is the spec's.
 
 - [ ] **Step 3: Measure.**
   - Run `TEST_RUNNER_LAYER_BENCHMARK=1` with `StoreChangeBenchmarkTests`, and with `TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick`.
-  - Run the canvas workout exactly as Task 1 Step 4 did, on the branch, in lane A's simulator, with DerivedData `Layer-semantic-tree-release`.
+  - These measurements run only while no other lane or `xcodebuild` is running. Record that in the ledger (F14).
+  - Run the canvas workout exactly as Task 1 Step 4 did, on the branch, in lane C's simulator (the one Task 1 used), with DerivedData `Layer-semantic-tree-release`.
   - Fill the "After plan 2" column. The workout's CPU time must be no worse than main's by more than 5%.
   - If it is worse, profile with Instruments' Time Profiler on the workout, fix it, and measure again. Never record a better number than was measured.
 
@@ -1241,7 +1358,7 @@
   - The full unit suite passes.
   - The UI suite fails nothing outside the baseline set.
   - `scripts/check-generated-swiftui.sh` prints `N files typecheck` and exits 0.
-  - `grep -rn "fitGroupBoxes\|dissolveHollowGroups\|ungroupStrays\|rawOrder\|forgetUnknownKeys\|DesignPackage.drawing\|legacyUnread" Layer LayerTests` finds nothing.
+  - `grep -rn "fitGroupBoxes\|dissolveHollowGroups\|ungroupStrays\|rawOrder\|forgetUnknownKeys\|DesignPackage.drawing\|legacyUnread" Layer LayerTests` finds nothing, comments included (F18).
   - `grep -rln "PROJECTION: deleted in plan 6" Layer` lists only `Layer/Model/Projection/`, `DesignContent`, and the `keepGroupsSound` shim.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Benchmarks after the store cutover: a change within 16 ms, a drag laying out only its path, and the canvas workout against main"`
