@@ -24,20 +24,34 @@ extension DesignContent {
 
     /// The things that belong to a group directly, back to front.
     func members(of group: DesignElement.ID) -> [DesignElement] {
-        elements.filter { $0.group == group }
+        Self.members(of: group, in: elements)
     }
 
     /// The things in a group at any depth that aren't groups themselves, back to front.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
-        #if DEBUG
-        GroupWork.leafWalked()
-        #endif
-        return contents(of: group).filter { $0.kind != .group }
+        Self.leaves(of: group, in: elements)
     }
 
     /// Everything in a group at any depth, the groups inside it included, back to front.
     func contents(of group: DesignElement.ID) -> [DesignElement] {
-        let elements = elements
+        Self.contents(of: group, in: elements)
+    }
+
+    /// `members(of:)` in a list of the design's elements: the content's own, or the store's kept one.
+    static func members(of group: DesignElement.ID, in elements: [DesignElement]) -> [DesignElement] {
+        elements.filter { $0.group == group }
+    }
+
+    /// `leaves(of:)` in a list of the design's elements.
+    static func leaves(of group: DesignElement.ID, in elements: [DesignElement]) -> [DesignElement] {
+        #if DEBUG
+        GroupWork.leafWalked()
+        #endif
+        return contents(of: group, in: elements).filter { $0.kind != .group }
+    }
+
+    /// `contents(of:)` in a list of the design's elements.
+    static func contents(of group: DesignElement.ID, in elements: [DesignElement]) -> [DesignElement] {
         var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
         for element in elements {
             if let parentGroup = element.group { inside[parentGroup, default: []].append(element.id) }
@@ -147,6 +161,22 @@ extension DesignStore {
     /// holds it: group items included, and each thing with its own lock and hide.
     func children(on host: ElementRef.Host) -> [DesignElement] {
         projection.children(of: host.parent)
+    }
+
+    /// The things that belong to a group directly, back to front, read from the design as it is
+    /// kept for this version (`projection`) rather than lowered again: see `DesignContent.members(of:)`.
+    func members(of group: DesignElement.ID) -> [DesignElement] {
+        DesignContent.members(of: group, in: projection.elements)
+    }
+
+    /// The things in a group at any depth that aren't groups themselves, as `members(of:)` reads them.
+    func leaves(of group: DesignElement.ID) -> [DesignElement] {
+        DesignContent.leaves(of: group, in: projection.elements)
+    }
+
+    /// Everything in a group at any depth, the groups inside it included, as `members(of:)` reads them.
+    func contents(of group: DesignElement.ID) -> [DesignElement] {
+        DesignContent.contents(of: group, in: projection.elements)
     }
 
     /// The group items on a screen, or on the open canvas, back to front.
@@ -327,7 +357,7 @@ extension DesignStore {
     func groupPose(of ref: ElementRef) -> GroupPose? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
         var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
-        for element in content.contents(of: item.id) where element.kind != .group {
+        for element in contents(of: item.id) where element.kind != .group {
             pose.leaves[element.id] = element.frame
             let spec = element.kind.spec
             if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
@@ -419,7 +449,7 @@ extension DesignStore {
         let target = screen(at: middle)
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
         guard host != ref.host else { return ref }
-        let inside = content.contents(of: item.id)
+        let inside = contents(of: item.id)
         if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
         let moving = Set(inside.map(\.id) + [item.id])
         var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
@@ -497,7 +527,7 @@ extension DesignStore {
         // Every member of the group they are in would make that group again under a new id:
         // left with one member, the old group would dissolve into the new, and its name and
         // angle with it. A locked member, left out, keeps the rest from being all of it.
-        if let shared = first.element.group, content.members(of: shared).count == members.count { return nil }
+        if let shared = first.element.group, self.members(of: shared).count == members.count { return nil }
         return members
     }
 
@@ -508,7 +538,7 @@ extension DesignStore {
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        let members = content.members(of: item.id)
+        let members = self.members(of: item.id)
         apply { content in
             for member in members {
                 content.update(member.id) {

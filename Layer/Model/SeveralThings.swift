@@ -78,7 +78,7 @@ extension DesignStore {
     func canvasFrames(besides things: Set<CanvasSelection>) -> [CGRect] {
         var moving: Set<DesignElement.ID> = []
         for case .element(let ref) in things where groupItem(ref.element) != nil {
-            moving.formUnion(content.leaves(of: ref.element).map(\.id))
+            moving.formUnion(leaves(of: ref.element).map(\.id))
         }
         func isLeftOut(_ id: DesignElement.ID, on host: ElementRef.Host) -> Bool {
             moving.contains(id) || things.contains(.element(ElementRef(host: host, element: id)))
@@ -121,7 +121,7 @@ extension DesignStore {
                     elements[ref.element] = Self.origin(of: element, movedBy: box.origin, to: origin, in: placement)
                     continue
                 }
-                for leaf in content.leaves(of: element.id) {
+                for leaf in leaves(of: element.id) {
                     guard let own = self.placement(of: leaf) else { continue }
                     grouped[leaf.id] = Self.origin(of: leaf, movedBy: box.origin, to: origin, in: own)
                 }

@@ -55,9 +55,11 @@ struct DrawingSync {
     /// Each shown drawing's strokes as they were then, to tell which drawings changed.
     private var marks: [DesignElement.ID: [Mark]] = [:]
 
-    /// The drawings the canvas shows: those that can be drawn on.
+    /// The drawings the canvas shows: those that can be drawn on. Read from the open canvas's own
+    /// nodes, where the design keeps every drawing, rather than from the whole design lowered to its
+    /// list, which this runs on every change, each frame of a drag among them.
     private static func onCanvas(_ content: DesignContent) -> [DesignElement] {
-        content.elements.filter { $0.kind == .drawing && !$0.isLocked && !$0.isHidden }
+        TreeProjection.canvasDrawings(in: content.tree).filter { !$0.isLocked && !$0.isHidden }
     }
 
     private static func mark(_ stroke: PKStroke) -> Mark {

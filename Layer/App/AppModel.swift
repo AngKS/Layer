@@ -1192,7 +1192,7 @@ final class AppModel {
         var seen: Set<DesignElement.ID> = []
         return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
             guard selected.element.kind == .group else { return [selected] }
-            return store.content.leaves(of: selected.element.id).compactMap { leaf in
+            return store.leaves(of: selected.element.id).compactMap { leaf in
                 let ref = DesignStore.ElementRef(host: selected.ref.host, element: leaf.id)
                 return store.resolve(ref).map { (ref, $0.element, $0.placement) }
             }
@@ -1427,7 +1427,7 @@ final class AppModel {
             if case .screen(let id) = ref.host { holders.append(.screen(id)) }
             things.subtract(holders.filter(current.contains))
             if store.groupItem(ref.element) != nil {
-                let inside = Set(store.content.contents(of: ref.element).map(\.id))
+                let inside = Set(store.contents(of: ref.element).map(\.id))
                 things = things.filter { thing in
                     if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
                 }
@@ -1777,7 +1777,7 @@ final class AppModel {
     func toggleHidden(_ ref: DesignStore.ElementRef) {
         store.update(ref) { $0.isHidden.toggle() }
         guard let element = store.resolve(ref)?.element, element.isHidden, let selection else { return }
-        let inside = element.kind == .group ? Set(store.content.contents(of: element.id).map(\.id)) : []
+        let inside = element.kind == .group ? Set(store.contents(of: element.id).map(\.id)) : []
         let kept = selection.things.filter { thing in
             guard case .element(let selected) = thing else { return true }
             return selected.element != element.id && !inside.contains(selected.element)

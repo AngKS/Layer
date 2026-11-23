@@ -73,6 +73,18 @@ enum TreeProjection {
         return Lowered(elements: elements, screens: screens, floating: floating, position: position)
     }
 
+    /// The drawings among the canvas's top-level nodes, as `lower(_:pending:)` lowers them, in their order,
+    /// without lowering anything else: what the ink canvas follows on every change. `TreeRules` keeps every
+    /// drawing there, in no container, so each one's own lock and hide are how the views show it. Not counted
+    /// in `lowerings`.
+    static func canvasDrawings(in content: TreeContent) -> [DesignElement] {
+        content.canvas.compactMap { node in
+            guard node.kind == .drawing else { return nil }
+            let placed = Place.host.placing(node)
+            return DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: nil, scale: node.scale, group: nil)
+        }
+    }
+
     /// A screen as `lower(_:pending:)` shows it, without what is on it.
     static func view(of screen: TreeScreen) -> DesignScreen {
         var view = DesignScreen(id: screen.id, name: screen.name, origin: screen.origin, scale: screen.scale,

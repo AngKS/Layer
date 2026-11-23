@@ -70,7 +70,7 @@ struct TurnSession: Equatable {
             // Locked by itself or by a group above it, it stays where it is (F4), and so does
             // everything in it. Unlocked, a group turns all of it, whatever their own locks.
             let isLocked = store.isLocked(thing)
-            let turning = element.kind == .group ? [element] + store.content.contents(of: element.id) : [element]
+            let turning = element.kind == .group ? [element] + store.contents(of: element.id) : [element]
             for part in turning {
                 let partRef = DesignStore.ElementRef(host: ref.host, element: part.id)
                 guard let partPlacement = part.id == element.id ? placement : store.resolve(partRef)?.placement else { continue }
@@ -167,7 +167,7 @@ struct TurnSession: Equatable {
             guard case .element(let ref) = thing else { return nil }
             refs[ref.element] = ref
             guard store.groupItem(ref.element) != nil else { continue }
-            for part in store.content.contents(of: ref.element) {
+            for part in store.contents(of: ref.element) {
                 refs[part.id] = DesignStore.ElementRef(host: ref.host, element: part.id)
             }
         }

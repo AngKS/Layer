@@ -67,9 +67,16 @@ final class DesignStore {
     private struct Kept {
         let tree: TreeContent
         lazy var index = TreeIndex(tree)
-        lazy var lowered = TreeProjection.lower(tree)
+        /// Made by `projection` when it is first read.
+        var lowered: TreeProjection.Lowered?
     }
     @ObservationIgnored private var kept: Kept?
+
+    #if DEBUG
+    /// How many times this store has lowered its tree: at most once for each version of the content
+    /// that was read. For the tests that hold what is lowered on a change to the store's memo.
+    @ObservationIgnored private(set) var timesLowered = 0
+    #endif
 
     init(content: DesignContent = DesignContent()) {
         self.content = content
@@ -80,8 +87,14 @@ final class DesignStore {
     var projection: TreeProjection.Lowered {
         // Read first, so that whatever draws from a view is redrawn when the content changes.
         let content = content
+        if let lowered = kept?.lowered { return lowered }
+        let lowered = TreeProjection.lower(content.tree)
+        #if DEBUG
+        timesLowered += 1
+        #endif
         if kept == nil { kept = Kept(tree: content.tree) }
-        return kept!.lowered
+        kept?.lowered = lowered
+        return lowered
     }
 
     /// What can be touched on each host, for the groups that had been gone into when it was
@@ -298,7 +311,7 @@ final class DesignStore {
     /// Some elements, and everything in any group among them, at any depth.
     private func withWhatIsInThem(_ ids: Set<DesignElement.ID>) -> Set<DesignElement.ID> {
         var all = ids
-        for id in ids where groupItem(id) != nil { all.formUnion(content.contents(of: id).map(\.id)) }
+        for id in ids where groupItem(id) != nil { all.formUnion(contents(of: id).map(\.id)) }
         return all
     }
 
@@ -317,7 +330,7 @@ final class DesignStore {
     @discardableResult
     func duplicate(_ ref: ElementRef) -> ElementRef? {
         guard let (element, placement) = resolve(ref) else { return nil }
-        let originals = element.kind == .group ? content.contents(of: element.id) + [element] : [element]
+        let originals = element.kind == .group ? contents(of: element.id) + [element] : [element]
         var ids: [DesignElement.ID: DesignElement.ID] = [:]
         for original in originals { ids[original.id] = UUID() }
         let shift = 16 * placement.scale

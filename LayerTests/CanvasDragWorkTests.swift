@@ -92,6 +92,31 @@ struct CanvasDragWorkTests {
         #expect(!board.store.isEditing)
     }
 
+    #if DEBUG
+    /// Each frame of a drag is a new version of the design, and the tree is lowered to its list at most
+    /// once for each, by the store's memo. The ink canvas, which follows every change, reads the drawings
+    /// off the tree, and nothing else a change sets off lowers the tree again. Both counts are taken on
+    /// the main thread alone, in this one synchronous test, so no other test adds to them (F8).
+    @Test func aDragLowersTheTreeOnlyThroughTheStoresMemo() throws {
+        let board = BusyBoard()
+        let coordinator = InkCanvas.Coordinator(model: board.model)
+        board.model.ink = coordinator
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let owner = CanvasDrags.Owner()
+
+        let (version, byStore, everywhere) = (board.store.contentVersion, board.store.timesLowered, TreeProjection.lowerings)
+        for frame in 1...60 { board.drag(drags, board.lines[5], by: CGFloat(frame), owner: owner) }
+        let versions = board.store.contentVersion - version + 1
+        let lowered = board.store.timesLowered - byStore, all = TreeProjection.lowerings - everywhere
+        drags.dropElement(board.lines[5], findsNewHome: true, owner: owner, model: board.model)
+
+        #expect(versions > 1)
+        #expect(lowered <= versions, "lowered \(lowered) times over \(versions) versions")
+        #expect(all == lowered, "lowered \(all - lowered) times outside the store's memo during a 60-frame drag")
+    }
+    #endif
+
     /// A drawing dragged is shown where it goes on every frame, as before.
     @Test func aDragOfADrawingStillMovesItsInk() throws {
         let board = BusyBoard()

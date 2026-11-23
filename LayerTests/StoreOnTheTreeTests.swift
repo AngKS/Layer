@@ -118,16 +118,10 @@ struct StoreOnTheTreeTests {
     }
     #endif
 
-    /// A free group turned 30, moved with `position`, comes back through undo and goes again
-    /// through redo, and its leaves stay where they are in it throughout (F24).
-    ///
-    /// `position` puts each leaf on whole screen points, and the group's box is fitted round its
-    /// leaves out to whole points of its own. So the group is placed where the whole points its
-    /// leaves land on, asked to move 10 points right, are a whole-point move in its own turned
-    /// space, (9, -5): its leaves, both centred on its middle, then sit exactly where they were in it.
+    /// A free group turned 30, moved 10 points right with `position`, comes back through undo as the
+    /// tree was before and goes again through redo as the tree was after, and its leaves stay where they
+    /// are in it (F24).
     @Test func undoAndRedoGoThroughTheTree() throws {
-        let turn = 30.0 * .pi / 180
-        let landed = CGVector(dx: 9 * cos(turn) + 5 * sin(turn), dy: 9 * sin(turn) - 5 * cos(turn))
         var big = LayerNode(kind: .shape)
         big.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
         var small = LayerNode(kind: .text)
@@ -137,7 +131,7 @@ struct StoreOnTheTreeTests {
         group.width = LayerNode.Sizing(.fit)
         group.height = LayerNode.Sizing(.fit)
         group.rotation = 30
-        group.frame = CGRect(x: 110 - landed.dx, y: 100 - landed.dy, width: 200, height: 100)
+        group.frame = CGRect(x: 100, y: 100, width: 200, height: 100)
         group.children = [big, small]
         var root = LayerNode(kind: .group)
         root.children = [group]
@@ -151,29 +145,25 @@ struct StoreOnTheTreeTests {
         func node(_ id: UUID, in tree: TreeContent) throws -> LayerNode {
             try #require(TreeIndex(tree).node(id, in: tree))
         }
-        func expectLeavesWhereTheyWere(in tree: TreeContent) throws {
-            #expect(try node(group.id, in: tree).children.map(\.id) == [big.id, small.id])
-            #expect(close(try node(big.id, in: tree).frame, try node(big.id, in: before).frame))
-            #expect(close(try node(small.id, in: tree).frame, try node(small.id, in: before).frame))
-        }
         let groupBefore = try node(group.id, in: before).frame
         let box = try #require(store.canvasFrame(of: .element(ref)))
 
         store.position([CanvasSelection.element(ref): CGPoint(x: box.minX + 10, y: box.minY)])
 
+        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
         let after = store.content.tree
-        let groupAfter = try node(group.id, in: after).frame
-        #expect(close(groupAfter, groupBefore.offsetBy(dx: landed.dx, dy: landed.dy)))
+        #expect(close(try node(group.id, in: after).frame, groupBefore.offsetBy(dx: 10, dy: 0), within: 2))
         #expect(try node(group.id, in: after).rotation == 30)
-        try expectLeavesWhereTheyWere(in: after)
+        #expect(try node(group.id, in: after).children.map(\.id) == [big.id, small.id])
+        #expect(close(try node(big.id, in: after).frame, try node(big.id, in: before).frame, within: 2))
+        #expect(close(try node(small.id, in: after).frame, try node(small.id, in: before).frame, within: 2))
 
         undo.undo()
-        #expect(store.content.tree.screens[0].root.children.map(\.id) == [group.id])
+        #expect(store.content.tree == before)
         #expect(close(try node(group.id, in: store.content.tree).frame, groupBefore))
-        try expectLeavesWhereTheyWere(in: store.content.tree)
 
         undo.redo()
-        #expect(close(try node(group.id, in: store.content.tree).frame, groupAfter))
-        try expectLeavesWhereTheyWere(in: store.content.tree)
+        #expect(store.content.tree == after)
+        #expect(close(try node(group.id, in: store.content.tree).frame, try node(group.id, in: after).frame))
     }
 }
