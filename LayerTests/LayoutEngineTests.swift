@@ -273,6 +273,32 @@ import Testing
         #expect(laid.children.map(\.frame.minX) == [0, 80])
     }
 
+    @Test func anUnbreakableWordIsReportedTooWide() {
+        var word = LayerNode(kind: .body)
+        word.content.text = String(repeating: "x", count: 400)
+        word.width = LayerNode.Sizing(.fill(weight: 1))
+        word.height = LayerNode.Sizing(.fit)
+        var wrapping = word
+        wrapping.id = UUID()
+        wrapping.content.text = "Short words that wrap across several lines in a narrow column."
+        let column = stack(.vertical, spacing: 8, size: CGSize(width: 120, height: 2000), children: [word, wrapping])
+
+        let (laid, diagnostics) = laidOut(column)
+        #expect(diagnostics == [LayoutDiagnostic(node: word.id, kind: .textTooWide)])
+        #expect(laid.children[0].frame.width == 120)
+        #expect(laid.children[1].frame.width == 120)
+
+        // A sticky note's words wrap inside its 12-point inset.
+        var note = LayerNode(kind: .stickyNote)
+        note.frame = CGRect(x: 0, y: 0, width: 150, height: 150)
+        note.content.text = String(repeating: "x", count: 40)
+        var shortNote = note
+        shortNote.id = UUID()
+        shortNote.content.text = "A short note"
+        let notes = stack(.vertical, spacing: 8, size: CGSize(width: 150, height: 400), children: [note, shortNote])
+        #expect(laidOut(notes).diagnostics == [LayoutDiagnostic(node: note.id, kind: .textTooWide)])
+    }
+
     @Test func hiddenChildrenTakeNoSpace() {
         var hidden = shape(50, 30)
         hidden.frame.origin = CGPoint(x: 7, y: 9)

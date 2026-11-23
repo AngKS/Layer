@@ -9,7 +9,8 @@ struct ProposedSize: Equatable, Sendable {
 
 /// Something the layout engine noticed and left alone: it reports, it never corrects.
 struct LayoutDiagnostic: Equatable, Sendable {
-    enum Kind: Equatable, Sendable { case overflow, textTooWide, clipped, smallControl }
+    /// Only what the engine alone knows. Clipping and small controls are the validator's.
+    enum Kind: Equatable, Sendable { case overflow, textTooWide }
     var node: UUID
     var kind: Kind
 }
@@ -41,6 +42,9 @@ enum LayoutEngine {
                 node.children[index].frame = written(frame, for: node.children[index])
             }
             if placement.overflows { diagnostics.append(LayoutDiagnostic(node: node.id, kind: .overflow)) }
+            for index in visible where hasWordTooWide(node.children[index], measure: measure) {
+                diagnostics.append(LayoutDiagnostic(node: node.children[index].id, kind: .textTooWide))
+            }
         }
         for index in visible {
             layOut(&node.children[index], previous: nil, measure: measure, diagnostics: &diagnostics)
@@ -337,6 +341,33 @@ enum LayoutEngine {
         case .end: room - size
         }
     }
+
+    /// Whether a text leaf holds a word wider than the width its words wrap to, which Core Text
+    /// can only break mid-word. `TextMeasure` never measures wider than the width offered, so
+    /// when the text is wider than that on one line, each of its words is measured on its own.
+    private static func hasWordTooWide(_ node: LayerNode, measure: TextMeasure) -> Bool {
+        let inset: CGFloat
+        switch node.kind {
+        case .title, .body, .text: inset = 0
+        case .stickyNote: inset = 2 * stickyNoteTextInset
+        default: return false
+        }
+        let text = node.content.text
+        let width = max(0, clean(node.frame.size.width) - inset)
+        let fontSize = NaturalSize.fontSize(of: node), weight = NaturalSize.fontWeight(of: node)
+        func tooWide(_ words: String) -> Bool {
+            measure.size(of: words, fontSize: fontSize, weight: weight, width: nil).width > width + slack
+        }
+        guard !text.isEmpty, tooWide(text) else { return false }
+        var words = Set<String>()
+        text.enumerateSubstrings(in: text.startIndex..., options: .byWords) { word, _, _, _ in
+            if let word { words.insert(word) }
+        }
+        return words.contains(where: tooWide)
+    }
+
+    /// How far in from each side a sticky note's words sit, as the canvas draws them.
+    private static let stickyNoteTextInset: CGFloat = 12
 
     // MARK: - Grids
 
