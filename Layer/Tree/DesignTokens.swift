@@ -33,6 +33,18 @@ struct DesignTokens: Equatable, Sendable, Codable {
 
     static let standard = DesignTokens()
 
+    /// The rhythm step nearest `standard`, the smaller on a tie: how the standard 24, 12 and 8 carry over to a
+    /// design's own rhythm. Standard tokens give `standard` back.
+    func spacing(nearest standard: CGFloat) -> CGFloat {
+        var best = standard
+        var distance = CGFloat.infinity
+        for step in rhythm.sorted() {
+            let gap = abs(step - standard)
+            if gap < distance { best = step; distance = gap }
+        }
+        return best
+    }
+
     enum CodingKeys: String, CodingKey {
         case rhythm, cornerRadii, card, textSizes
     }

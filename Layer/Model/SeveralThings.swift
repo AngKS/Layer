@@ -101,30 +101,39 @@ extension DesignStore {
     /// Elements and screens land on whole points of their own, so that those that started
     /// on whole points keep their places relative to each other; a drawing, whose ink lies
     /// where it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
+    /// All of it is one change.
     ///
-    /// A group moves everything in it by the same distance across the canvas, in the same
-    /// change, those locked on their own included: a group is one thing. Its box is fitted
-    /// round them where they land (`keepGroupsSound()`).
+    /// A container moves by its own frame, in one write, and everything in it rides along,
+    /// those locked on their own included: it is one thing. In a row, column, grid or overlay
+    /// the engine lays it back. A thing that isn't a container moves through its frame as the
+    /// list shows it, so that in a row, column, grid or overlay a new place takes it out to the
+    /// top of its screen, or of the open canvas, unless what holds its screen's things is laid
+    /// out too, which lays it back (My call 20).
     func position(_ origins: [CanvasSelection: CGPoint]) {
         // Worked out first: the design can't be read while it is being changed.
         var elements: [DesignElement.ID: CGPoint] = [:]
-        // What moves with a group: put after the rest, it wins over the same thing given alone.
-        var grouped: [DesignElement.ID: CGPoint] = [:]
+        var containers: [(host: TreeIndex.Host, path: [Int], origin: CGPoint)] = []
         var screens: [DesignScreen.ID: CGPoint] = [:]
-        // A member given beside its group moves with the group, not on its own.
+        // A member given beside its container moves with it, not on its own.
         let alone = Set(things(in: CanvasSelection(origins.keys)))
         for (thing, origin) in origins where !isLocked(thing) && alone.contains(thing) {
             switch thing {
             case .element(let ref):
                 guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
+                let target = placement.localPoint(for: origin), current = placement.localPoint(for: box.origin)
+                let distance = CGSize(width: target.x - current.x, height: target.y - current.y)
                 guard element.kind == .group else {
-                    elements[ref.element] = Self.origin(of: element, movedBy: box.origin, to: origin, in: placement)
+                    let local = CGPoint(x: element.frame.minX + distance.width, y: element.frame.minY + distance.height)
+                    elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
                     continue
                 }
-                for leaf in leaves(of: element.id) {
-                    guard let own = self.placement(of: leaf) else { continue }
-                    grouped[leaf.id] = Self.origin(of: leaf, movedBy: box.origin, to: origin, in: own)
-                }
+                // Read only for a container: built again for each version of the design, the index
+                // would cost a drag of several things that aren't containers a walk of the tree a frame.
+                let memo = index
+                guard let entry = memo[ref.element], let moved = self.origin(of: ref.element, movedBy: distance),
+                      let node = memo.node(ref.element, in: tree) else { continue }
+                let landed = CGPoint(x: moved.x.rounded(), y: moved.y.rounded())
+                if landed != node.frame.origin { containers.append((entry.host, entry.path, landed)) }
             case .screen(let id):
                 guard screen(id) != nil else { continue }
                 screens[id] = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
@@ -132,20 +141,21 @@ extension DesignStore {
                 continue
             }
         }
-        elements.merge(grouped) { _, withItsGroup in withItsGroup }
-        guard !elements.isEmpty || !screens.isEmpty else { return }
+        guard !elements.isEmpty || !containers.isEmpty || !screens.isEmpty else { return }
+        #if DEBUG
+        let version = contentVersion
+        #endif
         apply { content in
+            // The containers first: a frame written changes no path, and a thing taken out of a row may.
+            for container in containers {
+                content.tree.changeNode(on: container.host, at: container.path) { $0.frame.origin = container.origin }
+            }
             for (id, origin) in elements { content.update(id) { $0.frame.origin = origin } }
             for (id, origin) in screens { content.updateScreen(id) { $0.origin = origin } }
         }
-    }
-
-    /// Where an element's frame goes, in its own points, when a box on the canvas with it is
-    /// moved from `from` to `to`: by the same distance, on whole points unless it is a drawing.
-    private static func origin(of element: DesignElement, movedBy from: CGPoint, to: CGPoint, in placement: Placement) -> CGPoint {
-        let target = placement.localPoint(for: to), current = placement.localPoint(for: from)
-        let local = CGPoint(x: element.frame.minX + target.x - current.x, y: element.frame.minY + target.y - current.y)
-        return element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
+        #if DEBUG
+        if contentVersion != version { ListWork.wrote(containers.count) }
+        #endif
     }
 
     /// Lines several things up with one another: by an edge, or through the middle, of
@@ -203,8 +213,8 @@ extension DesignStore {
     }
 
     /// Copies everything selected: each element a little down and to the right of its
-    /// original, a group whole with everything in it, and the screens together to the right
-    /// of them all, as one step. Returns the copies.
+    /// original, a container whole with everything in it (`duplicate(node:)`), and the screens
+    /// together to the right of them all, as one step. Returns the copies.
     @discardableResult
     func duplicate(_ selection: CanvasSelection) -> CanvasSelection? {
         let originals = things(in: selection)
@@ -218,7 +228,7 @@ extension DesignStore {
             for thing in originals {
                 switch thing {
                 case .element(let ref):
-                    if let copy = duplicate(ref) { copies.append(.element(copy)) }
+                    if let copy = duplicate(node: ref.element) { copies.append(.element(ElementRef(host: ref.host, element: copy))) }
                 case .screen(let id):
                     guard let original = screen(id), let copy = duplicateScreen(id) else { continue }
                     updateScreen(copy.id) { $0.origin.x = original.origin.x + shift }
@@ -232,22 +242,23 @@ extension DesignStore {
     }
 
     /// Deletes everything selected that isn't locked, by itself or by a group above it, as
-    /// one step. A group goes with everything in it, those locked on their own too.
+    /// one step. A container goes with everything in it, those locked on their own too
+    /// (`delete(nodes:)`).
     func delete(_ selection: CanvasSelection) {
         let things = things(in: selection).filter { !isLocked($0) }
         asOneStep {
-            delete(things.compactMap { thing -> ElementRef? in
-                if case .element(let ref) = thing { ref } else { nil }
-            })
+            delete(nodes: Set(things.compactMap { thing -> DesignElement.ID? in
+                if case .element(let ref) = thing { ref.element } else { nil }
+            }))
             for case .screen(let id) in things { deleteScreen(id) }
         }
     }
 
     /// Gives each element selected to whatever it now lies on, as after a drag: see
-    /// `rehost(_:)`. A group lands whole, in a change of its own (`rehostGroup(_:)`); each
-    /// lands in the design's order, back to front, on top of what is on its new host, so that
-    /// those landing together are stacked there as they were. Returns the selection as it now
-    /// stands.
+    /// `rehost(_:)`. Each moves on the tree in a change of its own, a container whole with
+    /// everything in it (`rehostGroup(_:)`), all of them one step; each lands in the design's
+    /// order, back to front, on top of what is on its new host, so that those landing together
+    /// are stacked there as they were. Returns the selection as it now stands.
     func rehost(_ selection: CanvasSelection) -> CanvasSelection? {
         var rehomed: [CanvasSelection] = []
         asOneStep {

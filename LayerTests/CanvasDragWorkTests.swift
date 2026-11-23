@@ -115,6 +115,59 @@ struct CanvasDragWorkTests {
         #expect(lowered <= versions, "lowered \(lowered) times over \(versions) versions")
         #expect(all == lowered, "lowered \(all - lowered) times outside the store's memo during a 60-frame drag")
     }
+
+    /// Where each node is in the tree (the store's index) is worked out again with every version of
+    /// the design, so a gesture's frames read it only when a container moves. A drag of several
+    /// lines, a twist of them, and a group's handle build it at most once, for the version the
+    /// gesture began on; a group dragged, which moves a container on every frame, builds it at most
+    /// once for each version. The count is this store's own, in this one synchronous test (F8).
+    @Test func aGesturesFramesBuildTheIndexOnlyWhenAContainerMoves() throws {
+        let board = BusyBoard()
+        let g = try #require(board.groupThreeLines())
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let lines = try #require(CanvasSelection(board.lines[10...12].map { CanvasSelection.element($0) }))
+
+        // Several lines dragged together, out and back.
+        board.model.selection = lines
+        let owner = CanvasDrags.Owner()
+        var built = board.store.timesIndexed
+        for dx in BusyBoard.outAndBack {
+            drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
+        }
+        let dragged = board.store.timesIndexed - built
+        drags.dropGroup(owner: owner, model: board.model)
+        #expect(dragged <= 1, "index built \(dragged) times during a 60-frame drag of three lines")
+
+        // The same lines twisted with two fingers, a degree a frame.
+        board.model.selection = lines
+        built = board.store.timesIndexed
+        #expect(board.model.beginTwist())
+        for degrees in 1...60 { board.model.twist(by: Double(degrees)) }
+        let twisted = board.store.timesIndexed - built
+        board.model.endTwist()
+        #expect(twisted <= 1, "index built \(twisted) times during a 60-frame twist of three lines")
+
+        // The group's corner handle, from the pose taken as it began, a point a frame.
+        built = board.store.timesIndexed
+        let pose = try #require(board.store.groupPose(of: g))
+        for width in 1...60 {
+            let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
+            board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
+        }
+        let resized = board.store.timesIndexed - built
+        #expect(resized <= 1, "index built \(resized) times during a 60-frame resize of a group")
+
+        // The group dragged: a container moves on every frame, and the store's memo is read for it.
+        let groupOwner = CanvasDrags.Owner()
+        let version = board.store.contentVersion
+        built = board.store.timesIndexed
+        for dx in BusyBoard.outAndBack { board.drag(drags, group: g, by: CGFloat(dx), owner: groupOwner) }
+        let versions = board.store.contentVersion - version + 1, groupDragged = board.store.timesIndexed - built
+        drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: groupOwner, model: board.model)
+        #expect(versions > 1)
+        #expect(groupDragged <= versions, "index built \(groupDragged) times over \(versions) versions of a group's drag")
+    }
     #endif
 
     /// A drawing dragged is shown where it goes on every frame, as before.
@@ -144,8 +197,8 @@ struct CanvasDragWorkTests {
     }
 
     /// With groups on the board every change puts them right as well, and a frame of a drag
-    /// writes only what it moves: a group's members and its box, or one element. Nothing that
-    /// stays as it was is written, so nothing is copied for it (C6, M6).
+    /// writes only what it moves: a group, or one element. Nothing that stays as it was is
+    /// written, so nothing is copied for it (C6, M6).
     @Test func aDragFrameWritesOnlyWhatItMoves() throws {
         let board = BusyBoard()
         let g = try #require(board.groupThreeLines())
@@ -157,9 +210,9 @@ struct CanvasDragWorkTests {
         for dx in BusyBoard.outAndBack { board.drag(drags, group: g, by: CGFloat(dx), owner: owner) }
         let groupWrites = ListWork.elementsWritten - start
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
-        // Three lines on each of 60 frames. The group's box is fitted round them by the tree's
-        // rules, whose frames aren't counted as written (plan 2, call 13).
-        #expect(groupWrites == 60 * 3, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
+        // The group is written alone on each of 60 frames, and its three lines ride along in it
+        // (plan 2, call 13).
+        #expect(groupWrites == 60, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
         #expect(!board.store.isEditing)
 
         // A line outside the group, dragged beside it: only the line is written.

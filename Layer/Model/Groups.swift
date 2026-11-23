@@ -179,6 +179,23 @@ extension DesignStore {
         DesignContent.contents(of: group, in: projection.elements)
     }
 
+    /// What is in a group, at any depth, that moves, turns and is resized with it as a part of
+    /// its own, back to front: everything in it, but a row, column, grid or overlay in it is one
+    /// part without what it holds, which the engine lays out in it. Empty for a group that is laid
+    /// out itself, which is one rigid part.
+    func parts(of group: DesignElement.ID) -> [DesignElement] {
+        guard let node = node(group), node.resolvedLayout == .free else { return [] }
+        var ids: Set<UUID> = []
+        func collect(_ node: LayerNode) {
+            for child in node.children {
+                ids.insert(child.id)
+                if child.isContainer, child.resolvedLayout == .free { collect(child) }
+            }
+        }
+        collect(node)
+        return contents(of: group).filter { ids.contains($0.id) }
+    }
+
     /// The group items on a screen, or on the open canvas, back to front.
     func groupItems(on host: ElementRef.Host) -> [DesignElement] {
         children(on: host).filter { $0.kind == .group }
@@ -351,13 +368,19 @@ extension DesignStore {
         /// The least the group can be scaled by: any less, and something in it would be smaller
         /// than its kind can be. Never more than 1: one that already is stops it shrinking.
         var smallestScale: CGFloat
+        /// Whether it is a row, column, grid or overlay itself, its own one leaf: resized by its
+        /// frame, with what is in it laid out by the engine.
+        var isLaidOut = false
     }
 
-    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group.
+    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group. A row, column, grid or
+    /// overlay in it counts as one leaf, and one resized itself is its own one leaf: what is in it
+    /// is laid out by the engine, never scaled (`parts(of:)`).
     func groupPose(of ref: ElementRef) -> GroupPose? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
-        for element in contents(of: item.id) where element.kind != .group {
+        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0, isLaidOut: isLaidOut(item.id))
+        let leaves = pose.isLaidOut ? [item] : parts(of: item.id).filter { $0.kind != .group || isLaidOut($0.id) }
+        for element in leaves {
             pose.leaves[element.id] = element.frame
             let spec = element.kind.spec
             if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
@@ -378,9 +401,13 @@ extension DesignStore {
     /// apart from the height of a kind that keeps its height, a divider. Their angles, and their
     /// text's size, stay as they are, so that a turned member is never sheared. A frame in
     /// proportion with the box, as the handles and the fields give, scales everything alike; the
-    /// box is then fitted round them again (`keepGroupsSound()`). Made smaller than something in
-    /// it can be, it is scaled only as far as that can go, about the same point. Nothing happens
-    /// to a group that is locked, by itself or by a group above it.
+    /// box is then fitted round them again by the tree's rules. Made smaller than something in it
+    /// can be, it is scaled only as far as that can go, about the same point. Nothing happens to a
+    /// group that is locked, by itself or by a group above it.
+    ///
+    /// A row, column, grid or overlay in it is one leaf, scaled as one and fixed at its new size,
+    /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
+    /// at that size, and the engine lays out what is in it.
     func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
         guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
@@ -403,7 +430,10 @@ extension DesignStore {
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
         var frames: [DesignElement.ID: CGRect] = [:]
-        if frame == pose.box {
+        // Read from the pose, not the design: on every frame of a handle's drag that would walk the whole tree.
+        if pose.isLaidOut {
+            frames[item.id] = frame
+        } else if frame == pose.box {
             // Back where it began: exactly as it was, with no arithmetic to round.
             frames = pose.leaves
         } else {
@@ -430,43 +460,22 @@ extension DesignStore {
         }
     }
 
-    /// Gives a group to whatever the middle of its box now lies on, as after a drag: the
-    /// screen there, or the open canvas when there is none. Everything in it, at any depth,
-    /// goes there in one change, back to front, so that it lands whole and stacked as it was,
-    /// on top of what is there; built over several, the groups would be put right in between
-    /// and come apart. It lands as one element does, keeping its middle where it is on the
-    /// canvas and its size in points: each thing in it keeps its size in its own points, and
-    /// its distance from the box's middle in them, so that on a screen drawn at another scale
-    /// the group arrives whole, scaled about its middle, rather than with its members spaced
-    /// as they were on the canvas, overlapping or apart. A group holding something that
-    /// doesn't go on screens, a sticky note, stays where it is instead of landing on a screen.
-    /// Returns where the group now lives.
+    /// Gives a container to whatever the middle of its box now lies on, as after a drag: the
+    /// screen there, or the open canvas when there is none. It goes whole, in one change, on top
+    /// of what is there (`move(_:to:at:)`): its middle stays where it is on the canvas and its
+    /// size in its own points, and what is in it keeps its own frames, so that on a screen drawn
+    /// at another scale it arrives scaled about its middle, rather than with its members spaced
+    /// as they were on the canvas, overlapping or apart. One holding something that doesn't go on
+    /// screens, a sticky note, stays where it is instead of landing on a screen. Returns where the
+    /// container now lives.
     @discardableResult
     func rehostGroup(_ ref: ElementRef) -> ElementRef {
         guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
-        // Worked out as a turn under way works it out (`TurnSession.rehosted`), to the last bit.
         let middle = placement.canvasPoint(for: CGPoint(x: item.frame.midX, y: item.frame.midY))
         let target = screen(at: middle)
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host else { return ref }
-        let inside = contents(of: item.id)
-        if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
-        let moving = Set(inside.map(\.id) + [item.id])
-        var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
-        for element in projection.elements where moving.contains(element.id) {
-            guard let own = self.placement(of: element) else { return ref }
-            // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-            let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)
-            let onCanvas = own.canvasPoint(for: CGPoint(x: element.frame.midX, y: element.frame.midY))
-            let centre = landing.localPoint(for: Self.landedMiddle(of: onCanvas, about: middle, from: own, to: landing))
-            var origin = CGPoint(x: centre.x - element.frame.width / 2, y: centre.y - element.frame.height / 2)
-            // A group's box is fitted round its members once they have landed.
-            if element.kind != .group, element.kind != .drawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
-            moves.append((element.id, landing.scale, CGRect(origin: origin, size: element.frame.size)))
-        }
-        apply { content in
-            for move in moves { content.move(move.id, to: target?.id, scale: move.scale, frame: move.frame) }
-        }
+        // Refused, as for a sticky note going onto a screen, it stays where it is.
+        guard host != ref.host, move(item.id, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
         let landed = ElementRef(host: host, element: item.id)
         return resolve(landed) != nil ? landed : ref
     }
@@ -489,28 +498,19 @@ extension DesignStore {
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
     /// things and drawings are left out of it; the rest are to be two or more, on one screen
-    /// or all on the open canvas, and in one group (or none) without being all of that group,
+    /// or all on the open canvas, and in one container (or none) without being all of it,
     /// with no screen among what is selected. Nil, and nothing changes, when they aren't.
     ///
-    /// The group is made in the group its members are in, and is built whole in one change:
-    /// an item added on its own, with no members, would be taken away at the end of that
-    /// change (see `DesignContent.keepGroupsSound()`), which also gathers the members, from
-    /// wherever they were, just behind the item, where the frontmost of them was, and fits
-    /// the item's box round them. On the open canvas the item is drawn at its frontmost
-    /// member's scale; members drawn at others are boxed in canvas points (L5). It is named
-    /// as its kind until it is renamed.
+    /// The group is a free one, wrapped round them in the container they are in, in the slot
+    /// of the frontmost of them, which a row or a column then lays out as one thing (`wrap`).
+    /// It fits round them on both axes, so nothing moves. On the open canvas it is drawn at its
+    /// frontmost member's scale; members drawn at others are boxed in canvas points (L5). It
+    /// is named as its kind until it is renamed.
     @discardableResult
     func group(_ selection: CanvasSelection) -> ElementRef? {
-        guard let members = groupable(selection), let front = members.last else { return nil }
-        var item = Self.newElement(.group)
-        item.group = front.element.group
-        let made = item
-        apply { content in
-            content.add(made, to: front.element.parent, scale: front.element.scale)
-            for member in members { content.update(member.element.id) { $0.group = made.id } }
-        }
-        let ref = ElementRef(host: front.ref.host, element: made.id)
-        return resolve(ref) != nil ? ref : nil
+        guard let members = groupable(selection), let front = members.last,
+              let made = wrap(members.map(\.element.id), in: .group, layout: .free) else { return nil }
+        return ElementRef(host: front.ref.host, element: made)
     }
 
     /// The things Group puts in a group, back to front, or nil when it can't: see `group(_:)`.
@@ -532,24 +532,15 @@ extension DesignStore {
     }
 
     /// Takes a group apart, as one step, and returns its members as a selection. They go to
-    /// the group the group was in (or to none), where they are in the order, and take on its
-    /// lock and hide, so that a hidden group's members don't reappear. Not its members'
-    /// groups: those stay whole. Nil, and nothing changes, when `ref` isn't a group.
+    /// the container the group was in (or to none), in the group's slot, so that a row they
+    /// join lays them out there (`unwrap`). Each stays where it is on screen, its turn and the
+    /// group's added up, and takes on the group's lock and hide, so that a hidden group's
+    /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
+    /// changes, when `ref` isn't a group, or holds something this build couldn't read.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        let members = self.members(of: item.id)
-        apply { content in
-            for member in members {
-                content.update(member.id) {
-                    $0.group = item.group
-                    $0.isLocked = $0.isLocked || item.isLocked
-                    $0.isHidden = $0.isHidden || item.isHidden
-                }
-            }
-            content.remove([item.id])
-        }
-        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0.id)) })
+        return CanvasSelection(unwrap(item.id).map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked group above it, as

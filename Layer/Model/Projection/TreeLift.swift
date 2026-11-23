@@ -260,3 +260,16 @@ extension TreeProjection.Place {
         return (CGRect(origin: origin, size: size), Rotation.kept(angle - degrees))
     }
 }
+
+// PROJECTION: deleted in plan 6
+private extension [DesignElement] {
+    /// The identifiers of what shares a host, `list`, back to front, with every drawing in the slot it holds
+    /// and the other slots filled, in turn, by `order`: the slot rule for drawings that arranging used on the
+    /// flat list, which the lift keeps (F10, F15).
+    static func order(of list: [DesignElement], withDrawingsKept order: [DesignElement.ID]) -> [DesignElement.ID] {
+        var next = order.makeIterator()
+        return list.compactMap { element in
+            element.kind == .drawing ? element.id : next.next()
+        }
+    }
+}

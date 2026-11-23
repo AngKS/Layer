@@ -1,55 +1,27 @@
 import Foundation
 
-/// Layer order: things brought to the front, forward, backward or sent to the back, one at
-/// a time or several at once.
+/// Layer order: things brought to the front, forward, backward or sent to the back, one at a
+/// time or several at once.
 ///
-/// Order only means something among siblings: the things that share a screen, or the open
-/// canvas, and a group, or no group (see `SiblingLists`). A group is one of its siblings, and
-/// stands among them for its whole block: itself and everything in it. Drawings are in no
-/// sibling set. Unlocked ink is drawn above every element, so a drawing keeps the place it
-/// has in the list whatever is arranged around it, and nothing steps past it or moves it (F7).
-extension DesignContent {
-    /// The whole order of what is on a screen, or on the open canvas when `parent` is nil,
-    /// back to front, with every drawing there in the slot it holds now and the other slots
-    /// filled, in turn, by `order`: the new back-to-front order of the things there that
-    /// aren't drawings. What `reorder(_:to:)` is given whenever things are put in a new
-    /// order, so that it is worked out in this one place.
-    ///
-    /// `order` is to hold every one of those things once. Given anything else, the result
-    /// doesn't hold exactly what is there, and `reorder` leaves the order as it is.
-    func rawOrder(on parent: DesignScreen.ID?, withDrawingsKept order: [DesignElement.ID]) -> [DesignElement.ID] {
-        [DesignElement].order(of: children(of: parent), withDrawingsKept: order)
-    }
-}
-
-extension [DesignElement] {
-    /// The identifiers of what shares a host, `list`, back to front, with every drawing in the slot
-    /// it holds and the other slots filled, in turn, by `order`. Shared with the projection's lift,
-    /// whose drawings keep their slots by this same rule (F10, F15).
-    static func order(of list: [DesignElement], withDrawingsKept order: [DesignElement.ID]) -> [DesignElement.ID] {
-        var next = order.makeIterator()
-        return list.compactMap { element in
-            element.kind == .drawing ? element.id : next.next()
-        }
-    }
-}
-
+/// Order only means something among siblings: the children of one parent, which is a screen's
+/// root, a container, or the open canvas's top level. A container is one of its siblings, and
+/// stands among them with everything in it. The children of a row, column or grid have one
+/// order, the layout's, so they aren't arranged (My call 15): their order changes by a drag,
+/// the Layers panel and voice. Drawings are in no sibling set. Unlocked ink is drawn above
+/// every element, so a drawing keeps its index among the canvas's nodes whatever is arranged
+/// around it, and nothing steps past it or moves it (F7).
 extension DesignStore {
-    /// Moves what is selected up or down among its siblings: the things it shares its screen,
-    /// or the open canvas, and its group with. A group moves as its whole block, and steps
-    /// past a sibling group whole. Things on different screens each move among their own, and
-    /// so do things in different groups. Several things that are siblings move as one block,
-    /// keeping their own order and closing the gaps between them. A screen in the selection is
-    /// left as it is, and so are a drawing and anything locked. One step to undo, however many
-    /// screens it reorders.
+    /// Moves what is selected up or down among its siblings: the children of its parent. A
+    /// container moves whole, and steps past a sibling container whole. Things with different
+    /// parents, on different screens or in different containers, each move among their own.
+    /// Several things that are siblings move as one block, keeping their own order and closing
+    /// the gaps between them. A screen in the selection is left as it is, and so are a drawing,
+    /// anything locked, and a child of a row, column or grid. One step to undo, however many
+    /// parents it reorders.
     func arrange(_ selection: CanvasSelection, _ arrangement: Arrangement) {
         let orders = arranged(selection, arrangement)
         guard !orders.isEmpty else { return }
-        apply { content in
-            for (parent, order) in orders {
-                content.reorder(parent, to: content.rawOrder(on: parent, withDrawingsKept: order))
-            }
-        }
+        reorder(orders)
     }
 
     /// Whether arranging what is selected would change the order of anything.
@@ -57,41 +29,49 @@ extension DesignStore {
         !arranged(selection, arrangement).isEmpty
     }
 
-    /// The new order, back to front and drawings left out, of each screen (or the open
-    /// canvas, nil) whose order arranging the selection changes.
-    private func arranged(_ selection: CanvasSelection, _ arrangement: Arrangement) -> [DesignScreen.ID?: [DesignElement.ID]] {
-        // What moves, by the screen it is on, or the open canvas. A drawing is in no sibling
-        // set, a screen is not arranged, and a locked thing stays where it is, whichever way
-        // it is asked: the popover, the Format panel, a shortcut or Siri. Locked means by
-        // itself or by a group above it, so a member of a locked group, gone into, stays too.
-        // The lock is checked on what is selected, not on what goes with it: a selected group
-        // moves as its whole block, and every member goes with it, whether locked on its own
-        // or only by a group inside it, as when the group is moved.
-        var moving: [DesignScreen.ID?: Set<DesignElement.ID>] = [:]
+    /// The new order, back to front and drawings left out, of each parent whose children arranging
+    /// the selection changes.
+    private func arranged(_ selection: CanvasSelection, _ arrangement: Arrangement) -> [NodeParent: [UUID]] {
+        // What moves, by its parent. A drawing is in no sibling set, a screen is not arranged, and a
+        // locked thing stays where it is, whichever way it is asked: the popover, the Format panel, a
+        // shortcut or Siri. Locked means by itself or by a container above it, so a member of a locked
+        // group, gone into, stays too. The lock is checked on what is selected, not on what goes with
+        // it: a selected container moves whole, everything in it with it, whatever its own locks.
+        var moving: [NodeParent: Set<UUID>] = [:]
         for case .element(let ref) in selection.things {
-            guard let (element, _) = resolve(ref), element.kind != .drawing, !isLocked(.element(ref)) else { continue }
-            moving[element.parent, default: []].insert(element.id)
+            guard let (element, _) = resolve(ref), element.kind != .drawing, !isLocked(.element(ref)),
+                  let parent = parent(of: element.id), !isOrderedByItsLayout(parent) else { continue }
+            moving[parent, default: []].insert(element.id)
         }
-        var orders: [DesignScreen.ID?: [DesignElement.ID]] = [:]
+        var orders: [NodeParent: [UUID]] = [:]
         for (parent, moved) in moving {
-            let things = content.children(of: parent)
-            var siblings = SiblingLists(things)
-            // Each sibling set its things are in moves on its own: the screen's top level and
-            // the inside of a group, say, both in this one step.
-            for (list, ids) in Dictionary(grouping: moved, by: siblings.list(of:)) {
-                siblings.lists[list] = Self.order(moving: Set(ids), among: siblings.lists[list] ?? [], arrangement)
-            }
-            let order = siblings.order
-            if order != things.compactMap({ $0.kind == .drawing ? nil : $0.id }) { orders[parent] = order }
+            guard let siblings = children(of: parent)?.compactMap({ $0.kind == .drawing ? nil : $0.id }) else { continue }
+            let order = Self.order(moving: moved, among: siblings, arrangement)
+            if order != siblings { orders[parent] = order }
         }
         return orders
+    }
+
+    /// Whether what `parent` holds has the one order its layout gives it: a row, column or grid
+    /// does; a free container, an overlay, which stacks what it holds, and the open canvas don't.
+    private func isOrderedByItsLayout(_ parent: NodeParent) -> Bool {
+        let layout: LayerNode.Layout?
+        switch parent {
+        case .canvas: return false
+        case .screen(let id): layout = tree.screens.first { $0.id == id }?.root.resolvedLayout
+        case .node(let id): layout = node(id)?.resolvedLayout
+        }
+        switch layout {
+        case .stack?, .grid?: return true
+        case .free?, .overlay?, nil: return false
+        }
     }
 
     /// Siblings, back to front, with some of them moved as one block: in their own order,
     /// their gaps closed, to the front or the back, or just in front of the first sibling
     /// in front of the block's frontmost member (forward), or just behind the first sibling
     /// behind its backmost member (backward).
-    private static func order(moving moved: Set<DesignElement.ID>, among siblings: [DesignElement.ID], _ arrangement: Arrangement) -> [DesignElement.ID] {
+    private static func order(moving moved: Set<UUID>, among siblings: [UUID], _ arrangement: Arrangement) -> [UUID] {
         let block = siblings.filter(moved.contains)
         guard let backmost = siblings.firstIndex(where: moved.contains),
               let frontmost = siblings.lastIndex(where: moved.contains) else { return siblings }
@@ -114,11 +94,11 @@ extension DesignStore {
     }
 }
 
-/// What is on one screen, or on the open canvas, as layers: the things at its top level, and
-/// those in each group, each list back to front. In a list a group stands for its whole
-/// block, the group's own list then the item, which is how the design keeps them once its
-/// groups are sound: each group's members gathered into one run, the item just in front.
-/// Drawings are in no list (F7).
+/// What is on one screen, or on the open canvas, as the Layers panel lists it: the things at
+/// its top level, and those in each group, each list back to front, read from the design's
+/// flat list, where each group's members are gathered into one run with the item just in
+/// front. Drawings are in no list (F7). Only `layerTree(on:)` reads it, until the Layers panel
+/// is built on the tree.
 struct SiblingLists {
     /// Each list's things, back to front: the top level's under nil, a group's under its id.
     var lists: [DesignElement.ID?: [DesignElement.ID]] = [:]
@@ -136,46 +116,41 @@ struct SiblingLists {
             lists[list, default: []].append(thing.id)
         }
     }
-
-    /// The list a thing is in: its group, or nil for the top level.
-    func list(of id: DesignElement.ID) -> DesignElement.ID? {
-        listOf[id] ?? nil
-    }
-
-    /// Everything in the lists, back to front: each list in its order, with each group's
-    /// block in its place in its list.
-    var order: [DesignElement.ID] {
-        var written: Set<DesignElement.ID> = []
-        func block(_ id: DesignElement.ID) -> [DesignElement.ID] {
-            guard written.insert(id).inserted else { return [] }
-            guard groups.contains(id) else { return [id] }
-            return (lists[id] ?? []).flatMap(block) + [id]
-        }
-        return (lists[nil] ?? []).flatMap(block)
-    }
 }
 
 // MARK: Moving a layer
 
-/// A list of layers the Layers panel shows, in which a row can be dropped: a screen's top
-/// level, or the open canvas's (`host`), or what is in one group.
-enum LayerList: Hashable, Sendable {
-    case host(DesignStore.ElementRef.Host)
-    case group(DesignElement.ID)
+/// A list of layers the Layers panel shows, in which a row can be dropped: what a parent holds,
+/// a screen's top level, the open canvas's, or what is in one group.
+typealias LayerList = NodeParent
+
+extension NodeParent {
+    /// A screen's top level, or the open canvas's, as the Layers panel names it.
+    static func host(_ host: DesignStore.ElementRef.Host) -> NodeParent {
+        switch host {
+        case .screen(let id): .screen(id)
+        case .canvas: .canvas
+        }
+    }
+
+    /// What is in a group, or in any other container.
+    static func group(_ id: UUID) -> NodeParent {
+        .node(id)
+    }
 }
 
 extension DesignStore {
     /// Moves a thing to a list on its own host: into a group, or out of one, or to another
     /// place in the list it is in. `before` is the row it lands above in the panel, so it
     /// lands just in front of that thing in the list; nil is the bottom of the list, the back.
-    /// The thing's `group` becomes the list's group, or none. One step to undo, and a group
-    /// left with one member dissolves in that same change.
+    /// Moved into another list it keeps its place on the canvas (`move(_:to:at:)`), and a group
+    /// it leaves with one thing in it dissolves. One step to undo.
     ///
     /// Refused, returning false and changing nothing: a drawing, which keeps its place; a
     /// locked thing (by itself or by a group above it), as when it is arranged; a list on
     /// another host, or one that is locked; a move into the thing itself or into what is in
-    /// it; and a `before` that isn't in the list. The order is written through
-    /// `rawOrder(on:withDrawingsKept:)`, so drawings keep their slots here too.
+    /// it; and a `before` that isn't in the list. Each drawing in the list keeps its index
+    /// among the nodes there (`TreeEdit.reordered`).
     @discardableResult
     func moveLayer(_ id: DesignElement.ID, to list: LayerList, before: DesignElement.ID?) -> Bool {
         moveLayer(id, to: list, landing: before.map(Landing.above) ?? .bottom)
@@ -194,39 +169,40 @@ extension DesignStore {
         case bottom
     }
 
-    private func moveLayer(_ id: DesignElement.ID, to list: LayerList, landing: Landing) -> Bool {
-        guard let element = element(id), element.kind != .drawing, !isLockedWithItsGroups(element) else { return false }
-        let newGroup: DesignElement.ID?
-        switch list {
-        case .host(let host):
-            guard host.parent == element.parent else { return false }
-            newGroup = nil
-        case .group(let groupID):
-            guard let group = groupItem(groupID), group.parent == element.parent, groupID != id,
-                  !content.ancestors(of: groupID).contains(id), !isLockedWithItsGroups(group)
-            else { return false }
-            newGroup = groupID
+    private func moveLayer(_ id: DesignElement.ID, to list: NodeParent, landing: Landing) -> Bool {
+        guard let element = element(id), element.kind != .drawing, !isLockedWithItsGroups(element),
+              let from = parent(of: id), let host = index[id]?.host, host == self.host(of: list),
+              let held = children(of: list) else { return false }
+        if case .node(let groupID) = list {
+            guard groupID != id, !index.ancestors(of: groupID).contains(id),
+                  let group = groupItem(groupID), !isLockedWithItsGroups(group) else { return false }
         }
-        var siblings = SiblingLists(content.children(of: element.parent))
-        let oldGroup = siblings.list(of: id)
-        siblings.lists[oldGroup]?.removeAll { $0 == id }
-        var target = siblings.lists[newGroup] ?? []
+        let siblings = held.compactMap { $0.kind == .drawing ? nil : $0.id }
+        var order = siblings.filter { $0 != id }
         switch landing {
         case .above(let row):
-            guard row != id, let index = target.firstIndex(of: row) else { return false }
-            target.insert(id, at: index + 1)
+            guard row != id, let place = order.firstIndex(of: row) else { return false }
+            order.insert(id, at: place + 1)
         case .top:
-            target.append(id)
+            order.append(id)
         case .bottom:
-            target.insert(id, at: 0)
+            order.insert(id, at: 0)
         }
-        siblings.lists[newGroup] = target
-        let order = siblings.order
-        let parent = element.parent
-        apply { content in
-            if element.group != newGroup { content.update(id) { $0.group = newGroup } }
-            content.reorder(parent, to: content.rawOrder(on: parent, withDrawingsKept: order))
+        guard list != from else {
+            reorder([list: order])
+            return true
         }
-        return true
+        // Into another list: in front of what is there first, which moves no drawing there, then to its
+        // place. A group it leaves with one thing in it dissolves into its slot, and in this list that
+        // thing takes the group's place in the order.
+        var moved = false
+        asOneStep {
+            moved = move(id, to: list)
+            guard moved, let now = children(of: list)?.compactMap({ $0.kind == .drawing ? nil : $0.id }),
+                  now.count == siblings.count + 1, now.last == id else { return }
+            let place = Dictionary(siblings.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            reorder([list: order.compactMap { $0 == id ? id : place[$0].map { now[$0] } }])
+        }
+        return moved
     }
 }

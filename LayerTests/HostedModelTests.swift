@@ -252,13 +252,13 @@ final class HostedModelTests {
     func aModelIsThinkingUntilItsAnswerStarts() async throws {
         StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Hi\n", "button: Go\n"], thinking: ["The user wants", " a short screen."])))
         var updates: [ScreenGenerator.Update] = []
-        for try await update in ScreenGenerator.stream("a tiny screen", using: .hosted(.openAI, model: "m")) {
+        for try await update in ScreenGenerator.stream(ScreenGenerator.Request(description: "a tiny screen", choice: .hosted(.openAI, model: "m"))) {
             updates.append(update)
         }
         // Its reasoning isn't the answer: writing starts with the first line, once.
         #expect(updates.first == .startedWriting)
         #expect(updates.filter { $0 == .startedWriting }.count == 1)
-        let counts = updates.compactMap { if case .screen(let blueprint) = $0 { blueprint.itemCount } else { nil } }
+        let counts = updates.compactMap { if case .screen(let root) = $0 { root.leafCount } else { nil } }
         #expect(counts.last == 2)
     }
 

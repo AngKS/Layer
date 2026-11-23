@@ -42,6 +42,29 @@ extension DesignStore {
         return node.isContainer && node.resolvedLayout != .free
     }
 
+    /// What a container, a screen's root or the canvas's top level holds, back to front. Nil when the design
+    /// doesn't have it, or it isn't a container.
+    func children(of parent: NodeParent) -> [LayerNode]? {
+        locate(parent).flatMap { tree.children(on: $0.host, at: $0.path) }
+    }
+
+    /// The host a parent is on. Nil when the design doesn't have it.
+    func host(of parent: NodeParent) -> TreeIndex.Host? {
+        locate(parent)?.host
+    }
+
+    /// A node's own origin, in its parent's space, once it has moved `distance` in its host's points: under
+    /// a turned container the distance is turned into that container's axes. Nil when the design doesn't
+    /// have the node.
+    func origin(of id: UUID, movedBy distance: CGSize) -> CGPoint? {
+        let memo = index
+        guard let entry = memo[id], let node = memo.node(id, in: tree) else { return nil }
+        let turn = entry.parent.flatMap { memo[$0]?.hostShape.degrees } ?? 0
+        var along = CGPoint(x: distance.width, y: distance.height)
+        if Rotation.normalized(turn) != 0 { along = along.applying(CGAffineTransform(rotationAngle: -turn * .pi / 180)) }
+        return CGPoint(x: node.frame.minX + along.x, y: node.frame.minY + along.y)
+    }
+
     // MARK: Adding
 
     /// Adds a whole subtree, ids as given. `index` nil = in front. Refused (false) for an unknown parent,
@@ -124,6 +147,30 @@ extension DesignStore {
             tree.changeChildren(on: holder.host, at: to) { $0.insert(landing, at: Self.slot(index, in: $0)) }
         }
         return true
+    }
+
+    /// What each parent holds put in the order given for it, back to front, all in one change: every drawing
+    /// keeps its index among the nodes there (`TreeEdit.reordered`). A parent the design doesn't have, and an
+    /// order that doesn't name exactly what the parent holds besides its drawings, are left as they are. Counted
+    /// in `ListWork` by the places that change.
+    func reorder(_ orders: [NodeParent: [UUID]]) {
+        var lists: [(holder: Holder, order: [UUID])] = []
+        var written = 0
+        for (parent, order) in orders {
+            guard let holder = locate(parent), let children = tree.children(on: holder.host, at: holder.path) else { continue }
+            let moved = zip(children, TreeEdit.reordered(children, to: order)).filter { $0.id != $1.id }.count
+            guard moved > 0 else { continue }
+            written += moved
+            lists.append((holder, order))
+        }
+        guard !lists.isEmpty else { return }
+        // The deepest first: a list reordered doesn't move what is above it, so each path still names its parent.
+        let deepestFirst = lists.sorted { $0.holder.path.count > $1.holder.path.count }
+        changeTree(writing: written) { tree in
+            for list in deepestFirst {
+                tree.changeChildren(on: list.holder.host, at: list.holder.path) { $0 = TreeEdit.reordered($0, to: list.order) }
+            }
+        }
     }
 
     /// Changes a node in place: any field but its id and what it holds, which stay as they were.

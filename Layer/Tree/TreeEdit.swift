@@ -37,6 +37,24 @@ enum TreeEdit {
         }
     }
 
+    /// `order` written into `children`, every drawing keeping its index (the slot rule arrange used, on nodes).
+    ///
+    /// `order` names each child that isn't a drawing once, back to front, and the slots that aren't drawings' are
+    /// filled by them in turn. Given anything else, or children that share an id, which only a damaged design has,
+    /// the children come back as they are.
+    static func reordered(_ children: [LayerNode], to order: [UUID]) -> [LayerNode] {
+        var byID: [UUID: LayerNode] = [:]
+        for child in children where child.kind != .drawing {
+            guard byID.updateValue(child, forKey: child.id) == nil else { return children }
+        }
+        guard order.count == byID.count, Set(order).count == order.count, order.allSatisfy({ byID[$0] != nil })
+        else { return children }
+        var next = order.makeIterator()
+        return children.map { child in
+            child.kind == .drawing ? child : next.next().flatMap { byID[$0] } ?? child
+        }
+    }
+
     /// The node and everything in it, each with a new id. Nothing else changes.
     static func copyWithNewIDs(_ node: LayerNode) -> LayerNode {
         var copy = node

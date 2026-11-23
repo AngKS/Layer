@@ -220,26 +220,6 @@ struct LayerOrderTests {
         #expect(!board.store.canArrange(mixed, .back))
     }
 
-    @Test func theRawOrderKeepsEachDrawingInItsSlot() throws {
-        var content = DesignContent()
-        let first = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 40, y: 40))]))
-        let second = try #require(DesignElement.drawing([OrderBoard.stroke(from: CGPoint(x: 100, y: 0), to: CGPoint(x: 140, y: 40))]))
-        let a = OrderBoard.element(.stickyNote, named: "a", CGRect(x: 0, y: 100, width: 140, height: 130))
-        let b = OrderBoard.element(.stickyNote, named: "b", CGRect(x: 200, y: 100, width: 140, height: 130))
-        let onScreen = OrderBoard.element(.button, named: "s", CGRect(x: 20, y: 20, width: 100, height: 40))
-        let screen = DesignScreen(name: "Screen 1", origin: CGPoint(x: 1000, y: 0), scale: 1, elements: [onScreen])
-        content.add(first, to: nil, scale: 1)
-        content.add(a, to: nil, scale: 1)
-        content.addScreen(screen)
-        content.add(second, to: nil, scale: 1)
-        content.add(b, to: nil, scale: 1)
-
-        // The open canvas's whole order, the drawings where they are and the notes swapped;
-        // what is on the screen, though between them in the list, is no part of it.
-        #expect(content.rawOrder(on: nil, withDrawingsKept: [b.id, a.id]) == [first.id, b.id, second.id, a.id])
-        #expect(content.rawOrder(on: screen.id, withDrawingsKept: [onScreen.id]) == [onScreen.id])
-    }
-
     @Test func lockedThingsStayWhereTheyAre() {
         let board = OrderBoard()
         board.store.setLocked(true, .element(board.b))

@@ -72,9 +72,7 @@ struct AddElementIntent: AppIntent, UndoableIntent {
         if let text, kind.element.hasText { element.text = text }
         if let colour { element.tint = colour.colour }
         if let look {
-            var item = ScreenBlueprint.Item(kind: kind.element, text: element.text)
-            ScreenBlueprint.applyLook(look.components(separatedBy: ","), to: &item)
-            item.applyLook(to: &element)
+            LookWords.look(from: look.components(separatedBy: ",")).apply(to: &element)
         }
 
         let model: AppModel
@@ -247,9 +245,7 @@ struct StyleElementIntent: AppIntent, UndoableIntent {
         DesignActions.edit(model, undoManager: undoManager, actionName: "Style \(found.kind.layerName)") {
             model.store.update(ref) { element in
                 if let look {
-                    var item = ScreenBlueprint.Item(kind: element.kind, text: element.text)
-                    ScreenBlueprint.applyLook(look.components(separatedBy: ","), to: &item)
-                    item.applyLook(to: &element)
+                    LookWords.look(from: look.components(separatedBy: ",")).apply(to: &element)
                 }
                 if let fill { element.tint = fill }
                 if let ink { element.textColor = ink }

@@ -854,13 +854,14 @@ struct GroupCommandTests {
 
         // On the open canvas a drawing can't be among a group's members: the group of the notes
         // either side of it sits beside it, in front, where its frontmost member was, and goes to
-        // the back as one block, the drawing keeping its slot outside the block, just behind it.
+        // the back as one block, the drawing keeping its index among the canvas's nodes, now just
+        // in front of the block.
         let canvas = OrderBoard()
         let note3 = canvas.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
         let notes = canvas.group(canvas.note1, note3)
         #expect(canvas.canvasOrder == ["note 2", "drawing", "note 1", "note 3", "G"])
         canvas.store.arrange(.element(notes), .back)
-        #expect(canvas.canvasOrder == ["drawing", "note 1", "note 3", "G", "note 2"])
+        #expect(canvas.canvasOrder == ["note 1", "note 3", "G", "drawing", "note 2"])
     }
 
     /// A thing next to a group steps past the whole group: stepped past a member alone, it
