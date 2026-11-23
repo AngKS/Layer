@@ -425,6 +425,28 @@ import UIKit
         #expect(read.diagnostics.isEmpty, "\(read.diagnostics)")
     }
 
+    @Test func aStrayQuoteCantHideADeepLine() async throws {
+        // Line 1 opens a string it never closes; line 2 is valid JSON 450 deep, which decoding on
+        // its own would run a thread out of stack. A string can't run past a newline, so line 2's
+        // nesting still counts, and each line is checked again before it is decoded on its own.
+        let deep = String(repeating: "[", count: 450) + String(repeating: "]", count: 450)
+        let payload = Data(("{\"a\":\"\n" + deep + "\n").utf8)
+        let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
+        #expect(result.screens.isEmpty)
+        #expect(result.diagnostics.map(\.reason) == [.parseFailed])
+
+        // Lines that are each fine still read as messages, a stray quote and all.
+        let lines = Data("""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"\(Self.basic)"}}
+            {"a":"
+            {"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Column","children":["t"]},{"id":"t","component":"Text","text":"Still here"}]}}
+            """.utf8)
+        let read = await Task.detached { A2UIImporter.importJSON(lines) }.value
+        #expect(read.screens.first?.root.child(0).content.text == "Still here")
+        #expect(read.diagnostics.map(\.reason) == [.parseFailed])
+        #expect(read.diagnostics.first?.path == "line 2")
+    }
+
     @Test func aVeryLongPathIsCapped() async throws {
         func messages(path: String) -> Data {
             var written = String(decoding: surface("""

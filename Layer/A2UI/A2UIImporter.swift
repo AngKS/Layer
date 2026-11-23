@@ -99,51 +99,78 @@ extension A2UIImporter {
     /// The messages as JSON: one message, an array of them or an object holding `messages` (as
     /// the official examples are written); or one message per line, as a model streams them.
     private static func items(in data: Data, into diagnostics: inout [A2UIDiagnostic]) -> [OrderedJSON.JSONValue] {
-        guard !nests(data, deeperThan: maximumJSONDepth) else {
+        switch read(data) {
+        case .tooDeep:
             diagnostics.append(A2UIDiagnostic(
                 reason: .parseFailed,
                 message: "This JSON is nested more than \(maximumJSONDepth) deep, deeper than any A2UI, so it isn't read."))
             return []
-        }
-        let decoder = JSONDecoder()
-        guard let whole = try? decoder.decode(OrderedJSON.JSONValue.self, from: data) else {
-            var items: [OrderedJSON.JSONValue] = []
-            var unread: [Int] = []
-            let lines = String(decoding: data, as: UTF8.self).split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            for (index, line) in lines.enumerated() where !line.allSatisfy(\.isWhitespace) {
-                if let item = try? decoder.decode(OrderedJSON.JSONValue.self, from: Data(line.utf8)) {
-                    items.append(item)
-                } else {
-                    unread.append(index + 1)
-                }
-            }
-            guard !items.isEmpty else {
-                diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This isn't JSON, so there's nothing to import."))
-                return []
-            }
-            for line in unread {
-                diagnostics.append(A2UIDiagnostic(reason: .parseFailed, path: "line \(line)", message: "This line isn't JSON, so it's skipped."))
-            }
+        case .value(.array(let items)):
             return items
-        }
-        switch whole {
-        case .array(let items):
-            return items
-        case .object(let fields):
-            return fields["messages"]?.arrayValue ?? [whole]
-        default:
+        case .value(let whole):
+            if case .object(let fields) = whole { return fields["messages"]?.arrayValue ?? [whole] }
             diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This JSON holds no A2UI messages."))
             return []
+        case .notJSON:
+            break
         }
+        // One message per line: lines end at a newline byte, which JSON never holds inside a string.
+        var items: [OrderedJSON.JSONValue] = []
+        var skipped: [A2UIDiagnostic] = []
+        var anyTooDeep = false
+        let whitespace: Set<UInt8> = [0x20, 0x09, 0x0D]
+        for (index, line) in data.split(separator: 0x0A, omittingEmptySubsequences: false).enumerated()
+        where !line.allSatisfy(whitespace.contains) {
+            switch read(Data(line)) {
+            case .value(let item):
+                items.append(item)
+            case .tooDeep:
+                anyTooDeep = true
+                skipped.append(A2UIDiagnostic(
+                    reason: .parseFailed, path: "line \(index + 1)",
+                    message: "This line is nested more than \(maximumJSONDepth) deep, deeper than any A2UI, so it's skipped."))
+            case .notJSON:
+                skipped.append(A2UIDiagnostic(
+                    reason: .parseFailed, path: "line \(index + 1)", message: "This line isn't JSON, so it's skipped."))
+            }
+        }
+        if items.isEmpty && !anyTooDeep {
+            diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This isn't JSON, so there's nothing to import."))
+            return []
+        }
+        diagnostics += skipped
+        return items
+    }
+
+    fileprivate enum Reading {
+        case value(OrderedJSON.JSONValue)
+        case tooDeep
+        case notJSON
+    }
+
+    /// JSON decoded, but only once its nesting is known to be within `maximumJSONDepth`: decoding
+    /// goes a call deeper for each level, and off the main actor a thread has little stack. This
+    /// is the only place the importer decodes a payload.
+    fileprivate static func read(_ data: Data) -> Reading {
+        guard !nests(data, deeperThan: maximumJSONDepth) else { return .tooDeep }
+        guard let value = try? JSONDecoder().decode(OrderedJSON.JSONValue.self, from: data) else { return .notJSON }
+        return .value(value)
     }
 
     /// Whether `data` opens more than `limit` arrays and objects inside one another, counted in
-    /// one pass over its bytes, outside strings, without decoding anything.
+    /// one pass over its bytes, outside strings, without decoding anything. A newline byte ends
+    /// any string, since JSON can't hold one inside a string, so a stray quote can't hide the
+    /// lines after it.
     private static func nests(_ data: Data, deeperThan limit: Int) -> Bool {
         var depth = 0
         var inString = false
         var escaped = false
         for byte in data {
+            if byte == 0x0A || byte == 0x0D {
+                inString = false
+                escaped = false
+                continue
+            }
             if inString {
                 if escaped {
                     escaped = false
@@ -256,8 +283,9 @@ extension A2UIImporter {
                 }
                 if let model = create.dataModel {
                     // As JSON, so it reads as `updateDataModel` leaves it.
-                    surfaces[index].dataModel = (try? JSONEncoder().encode(model))
-                        .flatMap { try? JSONDecoder().decode(OrderedJSON.JSONValue.self, from: $0) }
+                    if let encoded = try? JSONEncoder().encode(model), case .value(let value) = read(encoded) {
+                        surfaces[index].dataModel = value
+                    }
                 }
             case .updateComponents(let update):
                 let index = surfaceIndex(update.surfaceID, for: "updateComponents")
