@@ -211,24 +211,27 @@ private struct Merging {
         self.generatedRoot = generated
         self.currentRoot = current
         TreeReconciler.index(current, into: &self.current)
-        var byKey: [String: LayerNode] = [:]
+        var byKey: [String: LayerNode] = [:], repeated: Set<String> = []
         TreeReconciler.walk(below: generated) { node, _ in
-            if let key = TreeReconciler.key(of: node), byKey[key] == nil { byKey[key] = node }
+            guard let key = TreeReconciler.key(of: node) else { return }
+            if byKey[key] == nil { byKey[key] = node } else { repeated.insert(key) }
         }
         self.generated = byKey
         var writable: Set<String> = []
-        gatherWritable(below: generated, into: &writable)
+        gatherWritable(below: generated, repeated: repeated, into: &writable)
         self.writable = writable
     }
 
-    /// The keys below `node` that `build` reaches: it goes no further than a node with no key, a key already
-    /// reached, or one the person deleted.
-    private func gatherWritable(below node: LayerNode, into writable: inout Set<String>) {
+    /// The keys below `node` that `build` writes: it goes no further than a node with no key, a key already
+    /// reached, or one the person deleted. Nor does it go inside a key the generator repeats, since which of its
+    /// places is written depends on where the person has put it: what is listed there and is on the screen stays
+    /// where it is unless it is written first, so it is never lost.
+    private func gatherWritable(below node: LayerNode, repeated: Set<String>, into writable: inout Set<String>) {
         for child in node.children {
             guard let key = TreeReconciler.key(of: child), !writable.contains(key) else { continue }
             if case .gone = state(of: key) { continue }
             writable.insert(key)
-            gatherWritable(below: child, into: &writable)
+            if !repeated.contains(key) { gatherWritable(below: child, repeated: repeated, into: &writable) }
         }
     }
 

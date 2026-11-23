@@ -275,6 +275,26 @@ struct TreeReconcilerTests {
         #expect(again.deletedByUser.isEmpty)
     }
 
+    @Test func aNodeMovedUnderARepeatedKeyIsNeverLost() throws {
+        var reconciler = TreeReconciler()
+        let first = generatedRoot([keyedGroup("d", column, []), keyedGroup("t", column, []),
+                                   keyedGroup("c1", column, [keyed("x")])])
+        var current = update(first, over: emptyRoot(), by: &reconciler).committed
+        let x = try #require(node("x", in: current))
+        let moved = try #require(node("t", in: current))
+        // The person deletes d and moves t into c1, after x.
+        current = deleting("d", from: deleting("t", from: current))
+        current = editing(current, "c1") { $0.children.append(moved) }
+
+        // The generator lists t twice: under d, which is gone, and again holding x.
+        let merge = reconciler.merged(generatedRoot([keyedGroup("d", column, [keyedGroup("t", column, [])]),
+                                                     keyedGroup("c1", column, []),
+                                                     keyedGroup("t", column, [keyed("x")])]), over: current)
+
+        #expect(all(merge.root).filter { $0.id == x.id }.count == 1)
+        #expect(merge.deletedByUser == ["d"])
+    }
+
     @Test func aDeletedNodeIsNeverBroughtBack() {
         var reconciler = TreeReconciler()
         var current = update(outline("title: A\nbutton: Go"), over: emptyRoot(), by: &reconciler).committed
