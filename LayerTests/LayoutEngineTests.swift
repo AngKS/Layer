@@ -183,6 +183,27 @@ import Testing
         #expect(laid.children[2].frame.origin == CGPoint(x: 0, y: 50 + 8))
     }
 
+    @Test func aFittingGridWithFewerChildrenThanColumnsKeepsEveryColumn() {
+        var cells = fitting(grid(columns: 3, columnSpacing: 10, size: .zero, children: [shape(100, 30), shape(100, 30)]))
+        let ideal = LayoutEngine.size(of: cells, proposal: ProposedSize(width: nil, height: nil), measure: measure)
+        #expect(ideal == CGSize(width: 3 * 100 + 2 * 10, height: 30))
+
+        cells.frame.size = ideal
+        let (laid, diagnostics) = laidOut(cells)
+        #expect(laid.children.map(\.frame) == [
+            CGRect(x: 0, y: 0, width: 100, height: 30), CGRect(x: 110, y: 0, width: 100, height: 30)
+        ])
+        #expect(!laid.children[0].frame.intersects(laid.children[1].frame))
+        #expect(diagnostics.isEmpty)
+    }
+
+    @Test func aGridChildWiderThanItsColumnIsReported() {
+        let cells = grid(columns: 2, size: CGSize(width: 100, height: 40), children: [shape(80, 40), shape(80, 40)])
+        let (laid, diagnostics) = laidOut(cells)
+        #expect(diagnostics == [LayoutDiagnostic(node: cells.id, kind: .overflow)])
+        #expect(laid.children.map(\.frame.width) == [80, 80])
+    }
+
     @Test func anOverlayAlignsEveryChild() {
         let corner = overlay(.end, .end, size: CGSize(width: 200, height: 200), children: [shape(50, 50), shape(20, 10)])
         let laid = laidOut(corner).node

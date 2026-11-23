@@ -111,9 +111,10 @@ enum LayoutEngine {
             let widths = Self.widths(of: kids, in: stack, box: offered, stretching: false, measure: measure)
             return stack.axis == .vertical ? widths.max() ?? 0 : widths.reduce(0, +) + gaps(stack.spacing, kids.count)
         case .grid(let grid):
-            // Equal columns share the width offered; with none, each is as wide as the widest child.
+            // Equal columns share the width offered. With none, every column, empty ones included,
+            // is as wide as the widest child, so placing at this width gives each child its cell.
             if let offered { return offered }
-            let columns = min(columnCount(grid), kids.count)
+            let columns = columnCount(grid)
             let widest = kids.map { width(of: $0, offered: nil, measure: measure) }.max() ?? 0
             return CGFloat(columns) * widest + gaps(grid.columnSpacing, columns)
         case .overlay:
@@ -297,7 +298,8 @@ enum LayoutEngine {
             top += rowHeight + rowSpacing
         }
         let needed = rows.reduce(0, +) + gaps(rowSpacing, rows.count)
-        return Placement(frames: frames, overflows: needed > box.height + slack)
+        let tooWide = sizes.contains { $0.width > column + slack }
+        return Placement(frames: frames, overflows: needed > box.height + slack || tooWide)
     }
 
     private static func placeOverlay(_ kids: [LayerNode], _ alignment: LayerNode.Alignment, in box: CGRect,
