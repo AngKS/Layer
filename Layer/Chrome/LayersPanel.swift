@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 struct LayersPanel: View {
     @Environment(AppModel.self) private var model
     /// The screen whose code is shown; the first screen until another is picked.
-    @State private var codeScreenID: DesignScreen.ID?
+    @State private var codeScreenID: TreeScreen.ID?
     /// In a narrow window the panel fills a sheet rather than floating beside the canvas.
     var isSheet = false
     /// The room there is for the floating panel.
@@ -593,25 +593,25 @@ func rowValue(isGroup: Bool, isHidden: Bool, isDimmed: Bool, isLocked: Bool, isL
 struct CodePane: View {
     @Environment(AppModel.self) private var model
     /// The screen whose code is shown; the first screen until another is picked.
-    @Binding var screenID: DesignScreen.ID?
+    @Binding var screenID: TreeScreen.ID?
     @State private var preview = CodePreview()
 
     var body: some View {
-        let screens = model.store.screens
-        if let screen = screens.first(where: { $0.id == screenID }) ?? screens.first {
+        let tree = model.store.tree
+        if let screen = tree.screens.first(where: { $0.id == screenID }) ?? tree.screens.first {
             // Each view named as the shared files name it, so no two are the same.
-            let typeNames = SwiftUICodeGenerator.typeNames(for: screens)
-            let shown = CodePreview.Shown(screen: screen, typeName: typeNames[screen.id], settings: model.store.canvas.code)
+            let context = SwiftUICodeGenerator.Context(tree)
+            let shown = CodePreview.Shown(screen: screen, context: context, settings: tree.settings.code)
             HStack {
                 Menu {
-                    ForEach(screens) { other in
-                        Button((typeNames[other.id] ?? other.typeName) + ".swift") { screenID = other.id }
+                    ForEach(tree.screens) { other in
+                        Button(SwiftUICodeGenerator.fileName(for: other, in: context)) { screenID = other.id }
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text")
                             .foregroundStyle(.secondary)
-                        Text((typeNames[screen.id] ?? screen.typeName) + ".swift")
+                        Text(SwiftUICodeGenerator.fileName(for: screen, in: context))
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
@@ -636,13 +636,18 @@ struct CodePane: View {
 
 /// A screen's code as the Code tab shows it, and its lines coloured.
 @MainActor @Observable
-private final class CodePreview {
-    /// What the code is made from: the screen, the name its view is given among the
-    /// design's screens, and the code settings.
+final class CodePreview {
+    /// What the code is made from: the screen, what its code needs from the design (its view's
+    /// name among the design's screens, the tokens, the devices), and the code settings.
     struct Shown: Equatable {
-        var screen: DesignScreen
-        var typeName: String?
+        var screen: TreeScreen
+        var context: SwiftUICodeGenerator.Context
         var settings: CodeSettings
+
+        /// The code, as Share and Siri write it.
+        var source: String {
+            SwiftUICodeGenerator.code(for: screen, in: context, settings: settings)
+        }
     }
 
     /// How long a screen has to stay as it is before its code is made again.
@@ -661,7 +666,7 @@ private final class CodePreview {
             guard !Task.isCancelled else { return }
         }
         shown = wanted
-        source = SwiftUICodeGenerator.code(for: wanted.screen, typeName: wanted.typeName, settings: wanted.settings)
+        source = wanted.source
         lines = source.components(separatedBy: "\n").map(SwiftHighlighter.attributed)
         #if DEBUG
         LayersPanelWork.codeMade(source)

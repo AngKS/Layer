@@ -428,14 +428,20 @@ enum ButtonLookOption: String, AppEnum {
 }
 
 enum CodeLayoutOption: String, AppEnum {
+    /// Keeps the raw value it had when the layout was called Stack, so that saved Shortcuts still work.
     case stack, absolute
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Code Layout"
     static let caseDisplayRepresentations: [CodeLayoutOption: DisplayRepresentation] = [
-        .stack: "Stack", .absolute: "Exact Positions",
+        .stack: "Structure", .absolute: "Exact Positions",
     ]
 
-    var layout: CodeSettings.Layout { CodeSettings.Layout(rawValue: rawValue) ?? .stack }
+    var layout: CodeSettings.Layout {
+        switch self {
+        case .stack: .structure
+        case .absolute: .absolute
+        }
+    }
 }
 
 /// What strokes are drawn with: the Magic Pen, whose sketches become elements, or one of

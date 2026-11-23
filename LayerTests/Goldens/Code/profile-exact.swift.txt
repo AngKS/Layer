@@ -1,0 +1,85 @@
+import SwiftUI
+
+struct Profile: View {
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            Text("Profile")
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .frame(width: 85, height: 34, alignment: .center)
+                .offset(x: 20, y: 79)
+            Image("avatar")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 48, height: 48)
+                .clipShape(.circle)
+                .offset(x: 20, y: 137)
+            Text("Alex Tan")
+                .font(.body)
+                .frame(width: 64, height: 21, alignment: .leading)
+                .offset(x: 80, y: 151)
+            RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                .fill(.background.secondary)
+                .frame(width: 353, height: 79)
+                .offset(x: 20, y: 209)
+            Text("About me")
+                .font(.body)
+                .frame(width: 74, height: 21, alignment: .leading)
+                .offset(x: 36, y: 225)
+            Text("Designing better experiences.")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .frame(width: 321, height: 18, alignment: .center)
+                .offset(x: 36, y: 254)
+            Text("Posts")
+                .font(.body)
+                .frame(width: 43, height: 21, alignment: .leading)
+                .offset(x: 84, y: 312)
+            Text("Followers")
+                .font(.body)
+                .frame(width: 72, height: 21, alignment: .leading)
+                .offset(x: 252, y: 312)
+            Text("Following")
+                .font(.body)
+                .frame(width: 72, height: 21, alignment: .leading)
+                .offset(x: 69, y: 345)
+            Text("Likes")
+                .font(.body)
+                .frame(width: 40, height: 21, alignment: .leading)
+                .offset(x: 268, y: 345)
+            Button {
+            } label: {
+                Text("Edit profile")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 353, height: 50)
+                    .background(Color(red: 0.80, green: 0.42, blue: 0.34), in: .capsule)
+            }
+                .offset(x: 20, y: 390)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+    }
+}
+
+/// The numbers this design is laid out and styled by.
+enum DesignTokens {
+    /// The steps the space between things is made of, smallest first.
+    static let rhythm: [CGFloat] = [8, 12, 16, 24, 32]
+    static let cornerRadiusSmall: CGFloat = 8
+    static let cornerRadiusMedium: CGFloat = 12
+    static let cornerRadiusLarge: CGFloat = 16
+    static let cardPadding: CGFloat = 16
+    static let cardRadius: CGFloat = 16
+    static let cardFill = Color(red: 0.95, green: 0.95, blue: 0.97)
+    static let titleSize: CGFloat = 28
+    static let bodySize: CGFloat = 15
+    static let textSize: CGFloat = 17
+    /// The space kept round a screen's column, inside its safe area.
+    static let margin: CGFloat = 20
+}
+
+#Preview {
+    Profile()
+}

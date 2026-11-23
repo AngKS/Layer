@@ -44,7 +44,7 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
     @Parameter(title: "New Screen Device", description: "The device a tall rectangle drawn with the Magic Pen becomes.")
     var sketchDevice: DeviceChoice?
 
-    @Parameter(title: "Code Layout", description: "Whether generated SwiftUI is a stack, the way a person writes it, or uses each element's exact position.")
+    @Parameter(title: "Code Layout", description: "Whether generated SwiftUI follows the screen's structure, the way a person writes it, or uses each element's exact position.")
     var codeLayout: CodeLayoutOption?
 
     @Parameter(title: "Include Preview", description: "Whether each generated SwiftUI file ends with a #Preview.")

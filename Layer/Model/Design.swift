@@ -471,10 +471,13 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name
     /// that is one of the types the view's own code uses, or a Swift keyword, has "Screen"
     /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
-    var typeName: String {
+    var typeName: String { Self.typeName(forScreenNamed: name) }
+
+    /// The view a screen of this name is written as: see `typeName`. A screen of the tree is named by the same rule.
+    static func typeName(forScreenNamed name: String) -> String {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }
-        return Self.reservedTypeNames.contains(cleaned) ? cleaned + "Screen" : cleaned
+        return reservedTypeNames.contains(cleaned) ? cleaned + "Screen" : cleaned
     }
 
     /// The types generated code uses, and the keywords a name of letters alone can be.
@@ -483,6 +486,8 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
         "VStack", "HStack", "ZStack", "NavigationStack", "Rectangle", "RoundedRectangle", "Circle", "Capsule", "Ellipse",
         "StrokeStyle", "CGPoint", "CGSize", "CGFloat", "String", "Int", "Double", "Bool", "Optional", "SwiftUI",
         "Any", "Self", "Type", "Protocol", "Never",
+        // A laid-out screen's code uses a grid's rows and the design's tokens (F21).
+        "GridRow", "DesignTokens",
         // SwiftUI and Foundation types a screen is often named for, which a view of the
         // name would hide throughout the target it is added to.
         "Menu", "List", "Form", "Label", "Group", "Section", "Link", "Picker", "Slider", "Stepper", "Grid", "Table",
@@ -695,20 +700,34 @@ extension CanvasSettings: KeepsUnknownKeys {}
 /// How screens are written out as SwiftUI.
 struct CodeSettings: Equatable, Codable, Sendable {
     enum Layout: String, CaseIterable, Codable, Sendable {
-        /// A vertical stack, top to bottom, with the gaps as padding: the way a person writes it.
-        case stack
+        /// The screen as its tree is built: rows, columns, grids, overlays and cards as stacks, and
+        /// what is placed freely read in reading order, the gaps as padding, as a person writes it.
+        case structure
         /// Every element at its exact place on the screen: faithful to the canvas.
         case absolute
 
         var name: String {
             switch self {
-            case .stack: "Stack"
+            case .structure: "Structure"
             case .absolute: "Exact Positions"
+            }
+        }
+
+        /// "stack", which this was called before it followed the tree, reads as `.structure`.
+        init(from decoder: any Decoder) throws {
+            let value = try decoder.singleValueContainer().decode(String.self)
+            if value == "stack" {
+                self = .structure
+            } else if let layout = Layout(rawValue: value) {
+                self = layout
+            } else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                        debugDescription: "Cannot initialize Layout from invalid String value \(value)"))
             }
         }
     }
 
-    var layout = Layout.stack
+    var layout = Layout.structure
     /// Whether each file ends with a `#Preview`.
     var includesPreview = true
     /// Whether the screen's title becomes its navigation title inside a `NavigationStack`.
@@ -718,7 +737,7 @@ struct CodeSettings: Equatable, Codable, Sendable {
 extension CodeSettings {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        layout = try container.decodeIfPresent(Layout.self, forKey: .layout) ?? .stack
+        layout = try container.decodeIfPresent(Layout.self, forKey: .layout) ?? .structure
         includesPreview = try container.decodeIfPresent(Bool.self, forKey: .includesPreview) ?? true
         usesNavigationTitle = try container.decodeIfPresent(Bool.self, forKey: .usesNavigationTitle) ?? false
     }
