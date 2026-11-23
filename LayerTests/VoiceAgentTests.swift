@@ -65,11 +65,11 @@ struct VoiceAgentTests {
             Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#),
         ])])
         // Each screen is written a moment after it is asked for.
-        bench.app.screenStream = { description, _, _ in
+        bench.app.screenStream = { request in
             AsyncThrowingStream { feed in
                 Task {
                     try? await Task.sleep(for: .milliseconds(50))
-                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.yield(.screen(Outline.parse("title: \(request.description)\n", isComplete: true)))
                     feed.finish()
                 }
             }
@@ -102,11 +102,11 @@ struct VoiceAgentTests {
         ))
         turns.session = session
         // Each screen takes four times as long to write as a call waits for its turn.
-        app.screenStream = { description, _, _ in
+        app.screenStream = { request in
             AsyncThrowingStream { feed in
                 Task {
                     try? await Task.sleep(for: .milliseconds(400))
-                    feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                    feed.yield(.screen(Outline.parse("title: \(request.description)\n", isComplete: true)))
                     feed.finish()
                 }
             }
@@ -1191,9 +1191,9 @@ struct VoiceAgentTests {
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
     func aCorrectionInANewScreensFieldLeavesTheScreen() async throws {
         let bench = screenBench(["a settings screen": [Step(tool: "createScreen", arguments: #"{"name":"Settings","description":"a settings screen"}"#)]])
-        bench.app.screenStream = { description, _, _ in
+        bench.app.screenStream = { request in
             AsyncThrowingStream { feed in
-                feed.yield(.screen(ScreenGenerator.blueprint(ofFinishedLinesIn: "title: \(description)\n", isComplete: true)!))
+                feed.yield(.screen(Outline.parse("title: \(request.description)\n", isComplete: true)))
                 feed.finish()
             }
         }

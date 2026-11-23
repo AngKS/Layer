@@ -1849,7 +1849,7 @@ struct TurnedCodeTests {
 
     @Test func anUprightElementHasNoTurnInItsCode() {
         let screen = screen([element(.button, 40, 300, 200, 50)])
-        for layout in [CodeSettings.Layout.stack, .absolute] {
+        for layout in [CodeSettings.Layout.structure, .absolute] {
             let code = SwiftUICodeGenerator.code(for: screen, settings: CodeSettings(layout: layout, includesPreview: false))
             #expect(!code.contains(".rotationEffect"))
         }

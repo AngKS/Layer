@@ -964,7 +964,7 @@ struct VoiceToolsTests {
     @Test func aNewScreenGoesWhereItsCommandPointed() async throws {
         let bench = bench()
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        bench.app.screenStream = { _, _, _ in stream }
+        bench.app.screenStream = { _ in stream }
         let point = CGPoint(x: 9000, y: 9000)
         bench.box.newScreenAnchor = point
         let making = Task { try await bench.box.createScreen(name: "Settings", description: "a settings screen") }

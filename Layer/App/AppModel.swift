@@ -476,7 +476,7 @@ final class AppModel {
 
     // MARK: Generating screens
 
-    /// A screen being written by the design's model, element by element.
+    /// A screen being written by the design's model, line by line.
     struct ScreenGeneration: Equatable {
         enum Phase: Equatable {
             case writing
@@ -486,10 +486,14 @@ final class AppModel {
 
         var screenID: DesignScreen.ID
         var description: String
+        /// The leaves of the screen as the model last wrote it.
         var elementCount = 0
         var phase = Phase.writing
         /// True until the model starts writing its answer.
         var isThinking = true
+        /// How many parts of what the model wrote couldn't be brought in: every diagnostic but a button's action,
+        /// which Layer never runs. Said once the answer is complete.
+        var leftOut = 0
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
@@ -501,6 +505,11 @@ final class AppModel {
 
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
+    ///
+    /// The screen is a column, as the outline lays one out. Each update the model writes is
+    /// merged by the generation's reconciler over the screen as it is now, laid out off the
+    /// main actor, and committed as one change (`GenerationWriter`): a node keeps its id
+    /// through every update, and what the person changes or adds meanwhile stays theirs.
     ///
     /// `name` is what to call the screen; without one it is named from the description.
     /// `device` is what it is a screen of; without one, the canvas's own device.
@@ -527,39 +536,51 @@ final class AppModel {
         let ownsEdit = joined == nil
         let edit = joined ?? store.beginEditOfItsOwn(by: .app)
         store.name(edit, String(localized: "Generate Screen"))
+        let tokens = store.canvas.tokens
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
-        let screen = store.act(for: edit) { () -> DesignScreen in
-            let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
-            store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
-            return screen
+        let placement = DesignActions.placementForNewScreen(device, in: self, near: anchor)
+        // An empty column, as the outline of nothing is: the model's lines fill it.
+        let screenID = store.act(for: edit) {
+            store.addScreen(TreeScreen(name: name ?? ScreenGenerator.name(for: prompt), origin: placement.origin,
+                                       scale: placement.scale, deviceID: device == .iPhone ? nil : device.id,
+                                       root: Outline.parse("", isComplete: true, tokens: tokens)))
         }
         // Shown, not selected: a new screen comes in without selection handles round it.
-        DesignActions.reveal(.screen(screen.id), in: self, selecting: false)
-        generation = ScreenGeneration(screenID: screen.id, description: prompt)
+        DesignActions.reveal(.screen(screenID), in: self, selecting: false)
+        generation = ScreenGeneration(screenID: screenID, description: prompt)
 
-        let choice = modelChoice
-        let stream = screenStream(prompt, board, choice)
+        let request = ScreenGenerator.Request(description: prompt, board: board, choice: modelChoice, tokens: tokens)
+        let stream = screenStream(request)
+        // One writer for the whole generation, so that each key keeps its id through every update.
+        let writer = GenerationWriter(screenID: screenID)
+        #if DEBUG
+        writer.beforeCommit = { [weak self] in self?.beforeGenerationCommit?() }
+        #endif
         generationWasStopped = false
         generationTask = Task { [weak self] in
-            // What the generation has written, by place in its latest version.
-            var written: [DesignElement?] = []
             do {
                 for try await update in stream {
                     guard let self else { return }
                     // The screen was taken away, by undo or by hand: there is nothing left to
                     // write on, but the generation still finishes, or it is stuck writing.
-                    guard let current = store.screen(screen.id) else { break }
+                    guard store.root(of: screenID) != nil else { break }
                     switch update {
                     case .startedWriting:
                         generation?.isThinking = false
-                    case .screen(let blueprint):
-                        withAnimation(.snappy(duration: 0.25)) {
-                            written = store.act(for: edit) {
-                                store.writeGenerated(blueprint.layout(on: current.device), on: screen.id, over: written)
+                    case .screen(let root):
+                        // Merged and laid out off the main actor; then one change, part of the
+                        // generation's step. The commit alone is animated: `withAnimation` takes
+                        // no asynchronous work, so this is `writer.write(_:to:in:)` with the
+                        // animation round its commit. Nothing is written once the design closes.
+                        if let prepared = await writer.prepare(root, from: store), !isClosed {
+                            withAnimation(.snappy(duration: 0.25)) {
+                                _ = store.act(for: edit) { writer.commit(prepared, to: store) }
                             }
                         }
                         generation?.isThinking = false
-                        generation?.elementCount = blueprint.itemCount
+                        generation?.elementCount = root.leafCount
+                    case .leftOut(let diagnostics):
+                        generation?.leftOut = diagnostics.count { $0.reason != .actionNotRun }
                     }
                 }
                 self?.finishGeneration(error: nil, edit: edit, ownsEdit: ownsEdit)
@@ -592,9 +613,15 @@ final class AppModel {
     }
 
     /// Where a generated screen's updates come from. A test puts its own in.
-    @ObservationIgnored var screenStream: (String, String?, ModelChoice) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
-        ScreenGenerator.stream($0, board: $1, using: $2)
+    @ObservationIgnored var screenStream: (ScreenGenerator.Request) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
+        ScreenGenerator.stream($0)
     }
+
+    #if DEBUG
+    /// Runs while a generated update waits for its commit, laid out but not yet written: a test edits the screen
+    /// here, as the person might meanwhile.
+    @ObservationIgnored var beforeGenerationCommit: (@MainActor () -> Void)?
+    #endif
 
     /// Ends a generation, and the screen's undo step if it has one of its own (`ownsEdit`):
     /// that and nothing else, so a drag still under way goes on as its own step (G4).

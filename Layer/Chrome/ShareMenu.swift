@@ -14,17 +14,26 @@ struct ShareMenu: View {
     var body: some View {
         Menu {
             // The code of the selected screen, or of the first one.
-            if let screen = model.selectedScreen ?? model.store.screens.first {
+            let tree = model.store.tree
+            if let screen = sharedScreen(in: tree) {
+                let context = SwiftUICodeGenerator.Context(tree)
                 ShareLink(
-                    item: SharedSwiftUICode(screen: screen, among: model.store.screens, settings: model.store.canvas.code),
-                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, among: model.store.screens))
+                    item: SharedSwiftUICode(screen: screen, context: context, settings: tree.settings.code),
+                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, in: context))
                 ) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
-            if model.store.screens.count > 1 {
+            if let screen = sharedScreen(in: tree) {
+                let typeName = SwiftUICodeGenerator.typeNames(for: tree.screens)[screen.id] ?? SwiftUICodeGenerator.typeName(of: screen)
+                let shared = SharedA2UI(screen: screen, typeName: typeName)
+                ShareLink(item: shared, preview: SharePreview(shared.fileName)) {
+                    Label("A2UI JSON", systemImage: "curlybraces")
+                }
+            }
+            if tree.screens.count > 1 {
                 Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
-                    if let urls = CodeFiles.write(model.store.screens, settings: model.store.canvas.code) {
+                    if let urls = CodeFiles.write(model.store.tree) {
                         picture = SharedPicture(urls: urls)
                     }
                 }
@@ -48,6 +57,12 @@ struct ShareMenu: View {
         }
     }
 
+    /// The screen whose code is shared: the selected one, or the first.
+    private func sharedScreen(in tree: TreeContent) -> TreeScreen? {
+        if case .screen(let id) = model.selection, let screen = tree.screens.first(where: { $0.id == id }) { return screen }
+        return tree.screens.first
+    }
+
     /// Makes what `item` shares from the design as it is now, and hands it to the share sheet.
     private func share(_ item: ShareItem) {
         Task {
@@ -68,26 +83,54 @@ struct ShareMenu: View {
 
 /// A screen's SwiftUI code, written when it is shared and not before: the menu is made again
 /// on every change to the design, a frame of a drag among them, and the code is as long as
-/// the screen is full. It shares what `SwiftUICodeGenerator.code(for:among:settings:)` gives
+/// the screen is full. It shares what `SwiftUICodeGenerator.code(for:in:settings:)` gives
 /// for the design as it was when the menu was made, as text.
 struct SharedSwiftUICode: Transferable, Sendable {
-    let screen: DesignScreen
-    let screens: [DesignScreen]
+    let screen: TreeScreen
+    let context: SwiftUICodeGenerator.Context
     let settings: CodeSettings
 
-    init(screen: DesignScreen, among screens: [DesignScreen], settings: CodeSettings) {
+    init(screen: TreeScreen, context: SwiftUICodeGenerator.Context, settings: CodeSettings) {
         self.screen = screen
-        self.screens = screens
+        self.context = context
         self.settings = settings
     }
 
     /// The code itself.
     var source: String {
-        SwiftUICodeGenerator.code(for: screen, among: screens, settings: settings)
+        SwiftUICodeGenerator.code(for: screen, in: context, settings: settings)
     }
 
     static var transferRepresentation: some TransferRepresentation {
         ProxyRepresentation(exporting: \.source)
+    }
+}
+
+/// A screen's A2UI, written when it is shared and not before, like `SharedSwiftUICode`: the menu is
+/// made again on every change to the design, and the file is as long as the screen is full.
+struct SharedA2UI: Transferable, Sendable {
+    let screen: TreeScreen
+    let typeName: String
+
+    init(screen: TreeScreen, typeName: String) {
+        self.screen = screen
+        self.typeName = typeName
+    }
+
+    /// The file's contents: the screen's messages as one JSON array.
+    var data: Data { A2UIExporter.document(for: screen, surfaceID: typeName) }
+
+    /// "<TypeName>.a2ui.json".
+    var fileName: String { typeName + ".a2ui.json" }
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .json) { shared in
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("A2UI-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(shared.fileName)
+            try shared.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
     }
 }
 
@@ -164,13 +207,14 @@ private struct SharedPicture: Identifiable {
     var whenClosed: (@Sendable () -> Void)?
 }
 
-/// The generated SwiftUI for every screen, written out as files to share.
+/// The generated SwiftUI for every screen, written out as files to share: `DesignTokens.swift`
+/// too when the views use the design's tokens.
 enum CodeFiles {
-    static func write(_ screens: [DesignScreen], settings: CodeSettings) -> [URL]? {
+    static func write(_ design: TreeContent) -> [URL]? {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftUI-\(UUID().uuidString)")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            return try SwiftUICodeGenerator.files(for: screens, settings: settings).map { file in
+            return try SwiftUICodeGenerator.files(for: design, settings: design.settings.code).map { file in
                 let url = folder.appendingPathComponent(file.name)
                 try Data(file.source.utf8).write(to: url, options: .atomic)
                 return url

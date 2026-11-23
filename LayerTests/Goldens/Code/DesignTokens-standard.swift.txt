@@ -1,0 +1,18 @@
+import SwiftUI
+
+/// The numbers this design is laid out and styled by.
+enum DesignTokens {
+    /// The steps the space between things is made of, smallest first.
+    static let rhythm: [CGFloat] = [8, 12, 16, 24, 32]
+    static let cornerRadiusSmall: CGFloat = 8
+    static let cornerRadiusMedium: CGFloat = 12
+    static let cornerRadiusLarge: CGFloat = 16
+    static let cardPadding: CGFloat = 16
+    static let cardRadius: CGFloat = 16
+    static let cardFill = Color(red: 0.95, green: 0.95, blue: 0.97)
+    static let titleSize: CGFloat = 28
+    static let bodySize: CGFloat = 15
+    static let textSize: CGFloat = 17
+    /// The space kept round a screen's column, inside its safe area.
+    static let margin: CGFloat = 20
+}

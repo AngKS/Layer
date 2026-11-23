@@ -148,15 +148,16 @@ extension HostedWindowSuites {
 extension PerformanceFixTests {
     @Test func theSharedCodeIsWhatTheGeneratorGivesForTheScreen() async throws {
         let board = OrderBoard()
-        let screens = board.store.screens
-        let screen = try #require(screens.first)
-        let settings = board.store.canvas.code
-        let shared = SharedSwiftUICode(screen: screen, among: screens, settings: settings)
+        let tree = board.store.tree
+        let screen = try #require(tree.screens.first)
+        let settings = tree.settings.code
+        let context = SwiftUICodeGenerator.Context(tree)
+        let shared = SharedSwiftUICode(screen: screen, context: context, settings: settings)
 
         // The counter is shared with suites that run alongside this one across an await, so it
         // is the share menu's own test that holds the count to nothing.
         let data = try await shared.exported(as: .utf8PlainText)
-        #expect(data == Data(SwiftUICodeGenerator.code(for: screen, among: screens, settings: settings).utf8))
+        #expect(data == Data(SwiftUICodeGenerator.code(for: screen, in: context, settings: settings).utf8))
         let asString = try await "x".exported(as: .utf8PlainText)
         #expect(asString == Data("x".utf8), "as a String shares it")
     }

@@ -46,7 +46,7 @@ struct AssetLibraryTests {
             #expect(AssetLibrary.element(forComponent: component.id)?.kind == component.kind)
         }
         for template in AssetLibrary.templates {
-            #expect((AssetLibrary.template(named: template.name)?.itemCount ?? 0) >= 4, "\(template.name)")
+            #expect((AssetLibrary.template(named: template.name)?.sections.flatMap(\.items).count ?? 0) >= 4, "\(template.name)")
         }
     }
 
