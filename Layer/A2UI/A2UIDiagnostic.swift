@@ -1,7 +1,7 @@
 /// Something an A2UI import couldn't bring in as it was written, and why. Imports never fail
 /// on one bad part: each problem becomes one of these and the rest still comes in.
 struct A2UIDiagnostic: Equatable, Sendable {
-    enum Reason: String, Sendable {
+    enum Reason: String, CaseIterable, Sendable {
         /// A message isn't A2UI 1.0: no `version`, or another one.
         case notVersion1
         /// A message, or the whole file, can't be read as A2UI.

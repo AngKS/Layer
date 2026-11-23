@@ -156,8 +156,10 @@ private struct TitleBar: View {
 private struct ToolsBar: View {
     @Environment(AppModel.self) private var model
     @State private var isLibraryOpen = false
-    @State private var isAttaching = false
+    @State private var files = FilesPicker()
     @State private var isPickingPhoto = false
+    /// What the last A2UI imported from here made, and left out, until its sheet is put away (F19).
+    @State private var report: A2UIImportReport?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -185,7 +187,8 @@ private struct ToolsBar: View {
                     LibraryPopover(isPresented: $isLibraryOpen)
                 }
                 Menu {
-                    ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
+                    ImageSources(files: $files, isPickingPhoto: $isPickingPhoto)
+                    A2UISources(files: $files, report: $report)
                 } label: {
                     ToolIcon(symbol: "paperclip")
                 }
@@ -193,7 +196,8 @@ private struct ToolsBar: View {
             }
         }
         .buttonStyle(.plain)
-        .modifier(ImageAttaching(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto))
+        .modifier(ImageAttaching(files: $files, isPickingPhoto: $isPickingPhoto, report: $report))
+        .a2uiImportSheet($report)
     }
 }
 
@@ -201,8 +205,10 @@ private struct ToolsBar: View {
 private struct ToolsMenu: View {
     @Environment(AppModel.self) private var model
     @State private var isLibraryOpen = false
-    @State private var isAttaching = false
+    @State private var files = FilesPicker()
     @State private var isPickingPhoto = false
+    /// What the last A2UI imported from here made, and left out, until its sheet is put away (F19).
+    @State private var report: A2UIImportReport?
 
     var body: some View {
         @Bindable var model = model
@@ -224,7 +230,8 @@ private struct ToolsMenu: View {
             }
             Button("Library", systemImage: "square.on.circle") { isLibraryOpen = true }
             Menu("Add Image", systemImage: "paperclip") {
-                ImageSources(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto)
+                ImageSources(files: $files, isPickingPhoto: $isPickingPhoto)
+                A2UISources(files: $files, report: $report)
             }
         } label: {
             ToolIcon(symbol: "ellipsis")
@@ -233,7 +240,8 @@ private struct ToolsMenu: View {
         .popover(isPresented: $isLibraryOpen) {
             LibraryPopover(isPresented: $isLibraryOpen)
         }
-        .modifier(ImageAttaching(isAttaching: $isAttaching, isPickingPhoto: $isPickingPhoto))
+        .modifier(ImageAttaching(files: $files, isPickingPhoto: $isPickingPhoto, report: $report))
+        .a2uiImportSheet($report)
     }
 }
 
@@ -268,7 +276,7 @@ private struct LibraryPopover: View {
 private struct ImageSources: View {
     @Environment(AppModel.self) private var model
     @Environment(\.supportsImagePlayground) private var supportsImagePlayground
-    @Binding var isAttaching: Bool
+    @Binding var files: FilesPicker
     @Binding var isPickingPhoto: Bool
 
     var body: some View {
@@ -278,23 +286,69 @@ private struct ImageSources: View {
             }
         }
         Button("Photos", systemImage: "photo.on.rectangle") { isPickingPhoto = true }
-        Button("Files", systemImage: "folder") { isAttaching = true }
+        Button("Files", systemImage: "folder") { files.open(for: .image) }
     }
 }
 
-/// Picking an image from Photos or from a file and adding it to the board, wherever the
-/// button for it is.
+/// A2UI, from a file or pasted: each becomes new screens in one undo step (calls 17 and 18). The system's Paste button
+/// reads what was copied without asking first.
+private struct A2UISources: View {
+    @Environment(AppModel.self) private var model
+    @Binding var files: FilesPicker
+    @Binding var report: A2UIImportReport?
+
+    var body: some View {
+        Section("A2UI") {
+            Button("Import A2UI…", systemImage: "square.and.arrow.down") { files.open(for: .a2ui) }
+            PasteButton(payloadType: String.self) { strings in
+                // Whatever was copied: what isn't A2UI is said so by the import.
+                let data = Data(strings.joined(separator: "\n").utf8)
+                Task { @MainActor in report = await model.importA2UI(data) }
+            }
+        }
+    }
+}
+
+/// Files, open to pick an image to add to the board or A2UI to import as screens. One picker serves both, since a
+/// view shows only one of two `fileImporter`s.
+private struct FilesPicker {
+    enum Pick {
+        case image, a2ui
+    }
+
+    var isOpen = false
+    var pick = Pick.image
+
+    var contentTypes: [UTType] {
+        switch pick {
+        case .image: [.png, .jpeg, .heic]
+        case .a2ui: [.json, .plainText]
+        }
+    }
+
+    mutating func open(for pick: Pick) {
+        self.pick = pick
+        isOpen = true
+    }
+}
+
+/// Picking an image from Photos or from a file and adding it to the board, or A2UI from a
+/// file and importing it, wherever the button for it is.
 private struct ImageAttaching: ViewModifier {
     @Environment(AppModel.self) private var model
-    @Binding var isAttaching: Bool
+    @Binding var files: FilesPicker
     @Binding var isPickingPhoto: Bool
+    @Binding var report: A2UIImportReport?
     @State private var photo: PhotosPickerItem?
     @State private var hasFailed = false
 
     func body(content: Content) -> some View {
         content
-            .fileImporter(isPresented: $isAttaching, allowedContentTypes: [.png, .jpeg, .heic]) { result in
-                attach(result)
+            .fileImporter(isPresented: $files.isOpen, allowedContentTypes: files.contentTypes) { result in
+                switch files.pick {
+                case .image: attach(result)
+                case .a2ui: importA2UI(result)
+                }
             }
             .photosPicker(isPresented: $isPickingPhoto, selection: $photo, matching: .images, preferredItemEncoding: .compatible)
             .onChange(of: photo) { _, item in
@@ -317,6 +371,20 @@ private struct ImageAttaching: ViewModifier {
             return
         }
         withAnimation(.smooth(duration: 0.3)) { model.addImage(prepared) }
+    }
+
+    /// A file of A2UI, read while it can be, then imported. One that can't be read says so in the import's sheet.
+    private func importA2UI(_ result: Result<URL, any Error>) {
+        guard case .success(let url) = result else { return }
+        let isScoped = url.startAccessingSecurityScopedResource()
+        let data = try? Data(contentsOf: url)
+        if isScoped { url.stopAccessingSecurityScopedResource() }
+        guard let data else {
+            report = A2UIImportReport(screens: [], diagnostics: [A2UIDiagnostic(
+                reason: .parseFailed, message: "\(url.lastPathComponent) couldn't be read.")])
+            return
+        }
+        Task { report = await model.importA2UI(data) }
     }
 
     /// The picker hands over the photo's data; nothing in Photos needs permission to read.
