@@ -171,7 +171,8 @@ struct GeneratedCommitTests {
         again.root.children = [base]
         var withANote = TreeScreen(name: "Note", origin: CGPoint(x: 1000, y: 0), scale: 1, deviceID: "iphone")
         withANote.root.children = [LayerNode(kind: .stickyNote)]
-        let fine = TreeScreen(name: "Fine", origin: CGPoint(x: 1500, y: 0), scale: 1, deviceID: "iphone")
+        var fine = TreeScreen(name: "Fine", origin: CGPoint(x: 1500, y: 0), scale: 1, deviceID: "iphone")
+        fine.root = TreeRules.laidOut(fine.root, deviceID: "iphone", settings: store.tree.settings, previous: nil)
         let before = store.tree.screens.map(\.id)
 
         let ids = store.addLaidOutScreens([again, withANote, fine, fine])

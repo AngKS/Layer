@@ -37,6 +37,9 @@ extension DesignStore {
     /// New screens whose roots were laid out off the main actor, added in one change after the others. The rules lay
     /// nothing out for them. Returns the ids of those added.
     ///
+    /// Each root must be as `TreeRules.laidOut` gave it for the screen's device and this design's settings: the rules
+    /// trust it, and a root that wasn't laid out stays as it was given.
+    ///
     /// A screen is left out, as `addScreen(_:)` refuses one, when the design already has its id or one of its nodes'
     /// (or a screen before it does), when it holds a drawing or a sticky note, a node deeper than 32, or would take
     /// the design past 5,000 nodes.

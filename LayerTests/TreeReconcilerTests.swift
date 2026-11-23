@@ -219,6 +219,62 @@ struct TreeReconcilerTests {
         #expect(merge.dropped == ["a"])
     }
 
+    @Test func whatADroppedContainerHeldCanBeWrittenAgain() throws {
+        func written(withK: Bool) -> LayerNode {
+            generatedRoot((withK ? [keyedGroup("k", column, [keyed("a")])] : []) + [keyed("b")])
+        }
+        var reconciler = TreeReconciler()
+        let first = update(written(withK: true), over: emptyRoot(), by: &reconciler).committed
+
+        let (drop, second) = update(written(withK: false), over: first, by: &reconciler)
+        #expect(drop.dropped == ["k", "a"])
+        #expect(drop.root.children.map(\.source?.key) == ["b"])
+
+        let merge = reconciler.merged(written(withK: true), over: second)
+        #expect(merge.deletedByUser.isEmpty)
+        #expect(merge.root.children.map(\.source?.key) == ["k", "b"])
+        #expect(node("k", in: merge.root)?.children.map(\.source?.key) == ["a"])
+    }
+
+    @Test func aDragOfAContainerSizedToFitInAFreeParentIsAnEdit() throws {
+        func written(text: String) -> LayerNode {
+            var line = keyedGroup("r", .stack(LayerNode.Stack(axis: .horizontal, spacing: 8)), [keyed("t", text: text)])
+            line.width = LayerNode.Sizing(.fit)
+            line.height = LayerNode.Sizing(.fit)
+            line.frame = CGRect(x: 20, y: 100, width: 0, height: 0)
+            return generatedRoot([line], layout: nil)
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(text: "Old"), over: emptyRoot(), by: &reconciler).committed
+        let size = try #require(node("r", in: current)?.frame.size)
+        current = editing(current, "r") { $0.frame.origin = CGPoint(x: 60, y: 200) }
+
+        let merge = reconciler.merged(written(text: "New"), over: current)
+
+        #expect(node("r", in: merge.root)?.frame == CGRect(origin: CGPoint(x: 60, y: 200), size: size))
+        #expect(node("t", in: merge.root)?.content.text == "New")
+    }
+
+    @Test func aNodeMovedUnderADeletedNodeStaysWhereItWas() throws {
+        func written(xInFirst: Bool) -> LayerNode {
+            let x = keyed("x")
+            return generatedRoot([keyedGroup("c1", column, xInFirst ? [x] : []),
+                                  keyedGroup("c2", column, xInFirst ? [] : [x])])
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(xInFirst: true), over: emptyRoot(), by: &reconciler).committed
+        let x = try #require(node("x", in: current))
+        current = deleting("c2", from: current)
+
+        let (merge, committed) = update(written(xInFirst: false), over: current, by: &reconciler)
+
+        #expect(node("c1", in: merge.root)?.children.map(\.id) == [x.id])
+        #expect(merge.deletedByUser == ["c2"])
+        let again = reconciler.merged(written(xInFirst: false), over: committed)
+        #expect(node("c1", in: again.root)?.children.map(\.id) == [x.id])
+        #expect(again.deletedByUser.isEmpty)
+    }
+
     @Test func aDeletedNodeIsNeverBroughtBack() {
         var reconciler = TreeReconciler()
         var current = update(outline("title: A\nbutton: Go"), over: emptyRoot(), by: &reconciler).committed

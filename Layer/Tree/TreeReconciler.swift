@@ -12,6 +12,9 @@ import Foundation
 struct TreeReconciler: Sendable {
     /// A node as compared to see whether the person changed it: every field but `children`, `frame` only where it
     /// is the truth (under a free parent, and not a container sized to fit), and its parent's id (call 2).
+    ///
+    /// A container sized to fit under a free parent keeps its origin in the record, and only its size, which the rules
+    /// work out, is left out: the rules keep its corner where it is, so a drag of it is the person's change.
     struct Record: Equatable, Sendable {
         /// The node's own fields, with what it holds left out, and its frame too where the rules write it.
         private var fields: LayerNode
@@ -21,8 +24,11 @@ struct TreeReconciler: Sendable {
             var fields = node
             fields.children = []
             fields.unreadChildren = []
-            let hugged = node.isContainer && (node.width.mode == .fit || node.height.mode == .fit)
-            if !parentIsFree || hugged { fields.frame = .zero }
+            if !parentIsFree {
+                fields.frame = .zero
+            } else if node.isContainer && (node.width.mode == .fit || node.height.mode == .fit) {
+                fields.frame.size = .zero
+            }
             self.fields = fields
             self.parent = parent
         }
@@ -74,8 +80,9 @@ struct TreeReconciler: Sendable {
     ///
     /// Within each parent the generator's nodes take its order. Everything else there (added by hand, or the
     /// person's and not listed there) stays just after the generator's node it followed, or first (call 4).
-    /// A written node that is unchanged and that the generator no longer lists anywhere goes, unless it holds
-    /// something that isn't the generator's.
+    /// A written node that is unchanged and that the generator no longer lists anywhere goes, with everything inside
+    /// it that the generator no longer lists, unless it holds something that isn't the generator's. One the generator
+    /// lists only where nothing is written (under a node the person deleted, say) stays where it is.
     func merged(_ generated: LayerNode, over current: LayerNode) -> Merge {
         var merging = Merging(written: written, generated: generated, current: current)
         return merging.merge()
@@ -187,6 +194,10 @@ private struct Merging {
     var current: [UUID: TreeReconciler.Placed] = [:]
     /// The first generated node of each key, in reading order.
     var generated: [String: LayerNode] = [:]
+    /// The generated keys that can be written: those not inside a node that won't be, as one the person deleted,
+    /// one with no key, or the second of a key repeated. A node of the screen the generator moves is moved only
+    /// when its key is among them.
+    var writable: Set<String> = []
     /// Keys written, so that a key repeated is written once.
     var placedKeys: Set<String> = [TreeReconciler.rootKey]
     /// Ids in the merged root, so that no node is in it twice.
@@ -205,6 +216,20 @@ private struct Merging {
             if let key = TreeReconciler.key(of: node), byKey[key] == nil { byKey[key] = node }
         }
         self.generated = byKey
+        var writable: Set<String> = []
+        gatherWritable(below: generated, into: &writable)
+        self.writable = writable
+    }
+
+    /// The keys below `node` that `build` reaches: it goes no further than a node with no key, a key already
+    /// reached, or one the person deleted.
+    private func gatherWritable(below node: LayerNode, into writable: inout Set<String>) {
+        for child in node.children {
+            guard let key = TreeReconciler.key(of: child), !writable.contains(key) else { continue }
+            if case .gone = state(of: key) { continue }
+            writable.insert(key)
+            gatherWritable(below: child, into: &writable)
+        }
     }
 
     mutating func merge() -> TreeReconciler.Merge {
@@ -273,11 +298,13 @@ private struct Merging {
             guard !usedIDs.contains(child.id) else { continue }
             if let key = oursKey(child) {
                 // Moved: written where the generator now puts it, with its id (F8).
-                if self.generated[key] != nil { continue }
-                if !holdsOthers(child) {
-                    dropped.insert(key)
+                if writable.contains(key) { continue }
+                // No longer listed: it goes, with everything inside it, unless something in it has to stay.
+                if self.generated[key] == nil, !holdsOthers(child) {
+                    drop(child)
                     continue
                 }
+                // Listed only where nothing is written, or holding what isn't the generator's: it stays here.
             }
             let kept = keep(child)
             if let anchor {
@@ -311,8 +338,22 @@ private struct Merging {
         return key
     }
 
-    /// Whether anything inside `node` isn't the generator's own and unchanged: added by hand, or the person's.
+    /// Whether anything inside `node` has to stay where it is: something added by hand or changed by the person, or
+    /// the generator's own node listed only where nothing is written. One the generator moves takes what it holds.
     func holdsOthers(_ node: LayerNode) -> Bool {
-        !node.unreadChildren.isEmpty || node.children.contains { oursKey($0) == nil || holdsOthers($0) }
+        !node.unreadChildren.isEmpty || node.children.contains { child in
+            guard let key = oursKey(child) else { return true }
+            if writable.contains(key) { return false }
+            return generated[key] != nil || holdsOthers(child)
+        }
+    }
+
+    /// An unchanged node that goes, and everything inside it, which `holdsOthers` has found is all the generator's
+    /// own: their keys are forgotten, so that a later update listing one writes it anew. What the generator moves
+    /// elsewhere goes there, with what it holds.
+    mutating func drop(_ node: LayerNode) {
+        guard let key = oursKey(node), !writable.contains(key) else { return }
+        dropped.insert(key)
+        for child in node.children { drop(child) }
     }
 }
