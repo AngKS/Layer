@@ -1,0 +1,251 @@
+{
+  "content": {
+    "canvas": [],
+    "screens": [
+      {
+        "id": "FA42944C-BFDE-4EA2-AEBA-3A7D812C0120",
+        "name": "Profile",
+        "origin": [
+          0,
+          0
+        ],
+        "root": {
+          "children": [
+            {
+              "height": {
+                "mode": "fit"
+              },
+              "id": "378BCF33-AF96-4BD6-885C-06022752EA4A",
+              "kind": "title",
+              "text": "Profile",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "010DA520-B824-4980-BCDE-7F48A93DA4D1",
+                  "kind": "avatar",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "4A8676C4-8C42-44A5-B6E6-DED5C1CFEE46",
+                  "kind": "text",
+                  "text": "Alex Tan",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "EF970174-0B61-4CC5-A216-816B2FAA0941",
+              "kind": "group",
+              "layout": {
+                "alignment": "center",
+                "axis": "horizontal",
+                "spacing": 12,
+                "type": "stack"
+              },
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "height": {
+                        "mode": "fit"
+                      },
+                      "id": "E7BE69EF-73CE-4306-9C43-992F6DB4A329",
+                      "kind": "text",
+                      "text": "About me",
+                      "width": {
+                        "mode": "fit"
+                      }
+                    },
+                    {
+                      "height": {
+                        "mode": "fit"
+                      },
+                      "id": "40CFBBBD-F7A0-4E49-A3B4-FA5B0A05BB69",
+                      "kind": "body",
+                      "text": "Designing better experiences.",
+                      "width": {
+                        "mode": "fill",
+                        "weight": 1
+                      }
+                    }
+                  ],
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "0878DF71-9A6E-42CF-B471-2284378488BE",
+                  "kind": "group",
+                  "layout": {
+                    "alignment": "start",
+                    "axis": "vertical",
+                    "spacing": 8,
+                    "type": "stack"
+                  },
+                  "width": {
+                    "mode": "fill",
+                    "weight": 1
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "F41217CD-2318-4141-B0A6-90BD37BAF254",
+              "kind": "card",
+              "layout": {
+                "alignment": "start",
+                "axis": "vertical",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "padding": {
+                "bottom": 16,
+                "leading": 16,
+                "top": 16,
+                "trailing": 16
+              },
+              "style": {
+                "cornerRadius": 16
+              },
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "3C11D69A-EB50-4905-A36C-2BE616306D0B",
+                  "kind": "text",
+                  "text": "Posts",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "CBE79AE2-C983-4989-B5E8-9250F73AB965",
+                  "kind": "text",
+                  "text": "Followers",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "52B060F8-D210-478E-BD04-44CDB91B68AF",
+                  "kind": "text",
+                  "text": "Following",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "9C502338-7251-4620-8636-023097D8DFA7",
+                  "kind": "text",
+                  "text": "Likes",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "D4A60FB7-A106-4885-A0F9-78A75ABE85A3",
+              "kind": "group",
+              "layout": {
+                "columnSpacing": 12,
+                "columns": 2,
+                "rowSpacing": 12,
+                "type": "grid"
+              },
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "buttonLook": "filled",
+              "height": {
+                "mode": "fit"
+              },
+              "id": "69F80E5E-496C-4D5D-BA47-19FF9B1FBFEB",
+              "kind": "button",
+              "text": "Edit profile",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            }
+          ],
+          "frame": [
+            [
+              0,
+              0
+            ],
+            [
+              393,
+              852
+            ]
+          ],
+          "height": {
+            "mode": "fixed"
+          },
+          "id": "A45A3425-5CEB-4696-81D3-D4AD258507E5",
+          "kind": "group",
+          "layout": {
+            "alignment": "start",
+            "axis": "vertical",
+            "spacing": 24,
+            "type": "stack"
+          },
+          "name": "Profile root",
+          "padding": {
+            "bottom": 34,
+            "leading": 20,
+            "top": 59,
+            "trailing": 20
+          },
+          "width": {
+            "mode": "fixed"
+          }
+        },
+        "scale": 1
+      }
+    ],
+    "settings": {}
+  },
+  "fileName": "Profile",
+  "version": 4
+}
