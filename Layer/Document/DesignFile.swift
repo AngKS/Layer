@@ -153,7 +153,7 @@ struct DesignContent: Equatable, Sendable {
     /// already there. Returns the element as it is kept.
     @discardableResult
     mutating func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
-        let placed = element.placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
+        let placed = [DesignElement].placed(element, on: parent, scale: scale)
         elements.append(placed)
         #if DEBUG
         ListWork.wrote()
@@ -192,7 +192,7 @@ struct DesignContent: Equatable, Sendable {
     /// goes on top of what is already there.
     mutating func move(_ id: DesignElement.ID, to parent: DesignScreen.ID?, scale: CGFloat? = nil, frame: CGRect) {
         guard let index = elements.firstIndex(where: { $0.id == id }) else { return }
-        var element = elements.remove(at: index).placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
+        var element = [DesignElement].placed(elements.remove(at: index), on: parent, scale: scale)
         element.frame = frame
         elements.append(element)
         #if DEBUG
@@ -204,19 +204,7 @@ struct DesignContent: Equatable, Sendable {
     /// front. `order` holds the same identifiers they have now. Elements elsewhere keep
     /// their places in the list.
     mutating func reorder(_ parent: DesignScreen.ID?, to order: [DesignElement.ID]) {
-        let slots = elements.indices.filter { elements[$0].parent == parent }
-        let siblings = Dictionary(slots.map { (elements[$0].id, elements[$0]) }, uniquingKeysWith: { first, _ in first })
-        // Two with one identifier, which only a damaged file has, can't be told apart: they stay as they are.
-        guard siblings.count == slots.count, order.count == slots.count, Set(order) == Set(siblings.keys) else { return }
-        // Only the slots whose element changes are written.
-        for (slot, id) in zip(slots, order) where elements[slot].id != id {
-            if let element = siblings[id] {
-                elements[slot] = element
-                #if DEBUG
-                ListWork.wrote()
-                #endif
-            }
-        }
+        [DesignElement].reorder(&elements, slots: elements.indices.filter { elements[$0].parent == parent }, to: order)
     }
 
     /// Replaces what is on a screen. Its group items that `children` doesn't hold stay on it,
@@ -454,6 +442,39 @@ private extension DesignElement {
         element.parent = parent
         element.scale = scale
         return element
+    }
+}
+
+/// The list operations that `DesignContent` runs on its one list, and the projection's writes run
+/// on a host's lowered list, shared so that both do exactly the same (F15).
+extension [DesignElement] {
+    /// `element` as `add` and `move` put it on a screen, or on the open canvas when `parent` is nil:
+    /// said to be there, drawn `scale` canvas points to each of its own on the open canvas (1 when
+    /// not given), and with no scale of its own on a screen, which has one.
+    static func placed(_ element: DesignElement, on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
+        element.placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
+    }
+
+    /// Puts the elements at `slots` in a new order, back to front: `order` holds the identifiers
+    /// they have now. The rest of the list keeps its places. Only the slots whose element changes
+    /// are written, and counted as written; their number is returned. Two with one identifier, which
+    /// only a damaged file has, can't be told apart: then, as when `order` doesn't hold exactly what
+    /// is at `slots`, nothing changes.
+    @discardableResult
+    static func reorder(_ list: inout [DesignElement], slots: [Int], to order: [DesignElement.ID]) -> Int {
+        let siblings = Dictionary(slots.map { (list[$0].id, list[$0]) }, uniquingKeysWith: { first, _ in first })
+        guard siblings.count == slots.count, order.count == slots.count, Set(order) == Set(siblings.keys) else { return 0 }
+        var written = 0
+        for (slot, id) in zip(slots, order) where list[slot].id != id {
+            if let element = siblings[id] {
+                list[slot] = element
+                written += 1
+            }
+        }
+        #if DEBUG
+        ListWork.wrote(written)
+        #endif
+        return written
     }
 }
 
@@ -800,21 +821,3 @@ enum PackagePart: Equatable, Sendable {
         return wrapper
     }
 }
-
-#if DEBUG
-/// How much of the design's list its changes write: for the tests that hold a change, and
-/// the groups put right after it, to writing only what it changes (audit C6, M6). Writing an
-/// element that is shared with the design as it was, which undo keeps, copies the list.
-/// Counted on the main thread alone, where the store makes its changes, so that a design read
-/// elsewhere meanwhile doesn't add to a test's count. The count only grows: a test measures
-/// the difference it makes. Bulk rewrites, through the `screens` and `floating` setters or
-/// `setChildren`, aren't counted.
-enum ListWork {
-    nonisolated(unsafe) private(set) static var elementsWritten = 0
-
-    static func wrote(_ count: Int = 1) {
-        guard count > 0, Thread.isMainThread else { return }
-        elementsWritten += count
-    }
-}
-#endif

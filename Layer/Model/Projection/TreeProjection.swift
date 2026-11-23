@@ -108,7 +108,7 @@ enum TreeProjection {
     }
 
     /// The child indices from `node` down to the node with `id`, `node` itself first in reading order.
-    private static func path(to id: UUID, in node: LayerNode) -> [Int]? {
+    static func path(to id: UUID, in node: LayerNode) -> [Int]? {
         if node.id == id { return [] }
         for (index, child) in node.children.enumerated() {
             if let rest = path(to: id, in: child) { return [index] + rest }
@@ -127,8 +127,10 @@ enum TreeProjection {
     }
 
     // PROJECTION: deleted in plan 6
-    /// Where a node's own space sits in its host's: what its children are placed by.
-    private struct Place {
+    /// Where a node's own space sits in its host's: what its children are placed by. The writes
+    /// (`TreeProjection+Writes.swift`, `TreeLift`) place through it too, so that what they write
+    /// lowers back to exactly what was written.
+    struct Place {
         /// The node's own space to the host's.
         var toHost: CGAffineTransform
         /// Its frame's origin in the host's space, which its children's origins are added to while

@@ -18,10 +18,18 @@ extension DesignContent {
     /// `order` is to hold every one of those things once. Given anything else, the result
     /// doesn't hold exactly what is there, and `reorder` leaves the order as it is.
     func rawOrder(on parent: DesignScreen.ID?, withDrawingsKept order: [DesignElement.ID]) -> [DesignElement.ID] {
+        [DesignElement].order(of: children(of: parent), withDrawingsKept: order)
+    }
+}
+
+extension [DesignElement] {
+    /// The identifiers of what shares a host, `list`, back to front, with every drawing in the slot
+    /// it holds and the other slots filled, in turn, by `order`. Shared with the projection's lift,
+    /// whose drawings keep their slots by this same rule (F10, F15).
+    static func order(of list: [DesignElement], withDrawingsKept order: [DesignElement.ID]) -> [DesignElement.ID] {
         var next = order.makeIterator()
-        return elements.compactMap { element in
-            guard element.parent == parent else { return nil }
-            return element.kind == .drawing ? element.id : next.next()
+        return list.compactMap { element in
+            element.kind == .drawing ? element.id : next.next()
         }
     }
 }

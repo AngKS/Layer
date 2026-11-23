@@ -207,7 +207,7 @@ enum TreeRules {
     /// Keeps each unread child at its place among those left when the children at `removed`
     /// (indices into `node.children`, not yet taken out) go. A file lists the unread ones at
     /// their indices among all of them (see `LayerNode`'s coding).
-    private static func keepUnreadPlaces(in node: inout LayerNode, removing removed: [Int]) {
+    static func keepUnreadPlaces(in node: inout LayerNode, removing removed: [Int]) {
         guard !node.unreadChildren.isEmpty, !removed.isEmpty else { return }
         let unread = Set(node.unreadChildren.map(\.index))
         var places: [Int] = [], place = 0
