@@ -93,12 +93,12 @@ Carried to dispatch:
 cd /Users/angks/projects/personal/Layer/.claude/worktrees/zoom-screen-edits
 SIM=$(xcrun simctl list devices | grep "Layer iPad Pro 11 (zoom-screen-edits)" | grep -oE '[0-9A-F-]{36}')   # D5171895-0033-412E-9F1A-ADF6E1CD299B
 # one unit suite (Swift Testing: the suite's type name)
-xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan CI \
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI \
   -destination "platform=iOS Simulator,id=$SIM" -only-testing:LayerTests/<SuiteType> 2>&1 | tail -30
 # all unit tests
-xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan CI -destination "platform=iOS Simulator,id=$SIM" 2>&1 | tail -30
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI -destination "platform=iOS Simulator,id=$SIM" 2>&1 | tail -30
 # one UI test
-xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan Layer \
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan Layer \
   -destination "platform=iOS Simulator,id=$SIM" -only-testing:LayerUITests/<Class>/<testMethod> 2>&1 | tail -30
 ```
 

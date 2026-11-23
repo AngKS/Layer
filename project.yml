@@ -13,6 +13,14 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # Kah Shin Ang's team. iCloud and TestFlight both need one.
     DEVELOPMENT_TEAM: 2A24G6YRY3
+# The official A2UI Swift SDK, used only where designs are imported and exported as A2UI 1.0.
+# Pinned by revision (tag v0.11.0+swift): its Swift API is pre-1.0 and changes by minor version.
+# Its build-tool plugin needs Xcode's one-time "Trust & Enable"; xcodebuild needs
+# -skipPackagePluginValidation.
+packages:
+  A2UI:
+    url: https://github.com/a2ui-project/a2ui
+    revision: 07735d6a654ae3ba25951a8753ddd57b344b1169
 targets:
   Layer:
     type: application
@@ -84,6 +92,11 @@ targets:
           - iCloud.kahshin.Layer
     dependencies:
       - target: LayerThumbnails
+      # Parsing and validation only: never A2UISwiftUI, BasicCatalogSwiftUI or MessageProcessor.
+      - package: A2UI
+        product: A2UISwiftCore
+      - package: A2UI
+        product: BasicCatalog
   # Draws each design's picture in Files and in Layer's own document browser.
   LayerThumbnails:
     type: app-extension
