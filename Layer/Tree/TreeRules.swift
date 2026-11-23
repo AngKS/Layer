@@ -16,7 +16,8 @@ import Foundation
 ///    children out, with any number of children: a row of one is still a row.
 ///
 /// Then each screen that changed is laid out at its device's size, and each container on the
-/// canvas's top level that changed at its own size. Applying them again changes nothing.
+/// canvas's top level that changed at its own size, which it fits on each axis sized to fit, as
+/// in a free container. Applying them again changes nothing.
 ///
 /// What this build can't read inside a node counts as a child: a group holding only that isn't
 /// empty, and it keeps its place among the children when one of the others goes.
@@ -226,8 +227,9 @@ enum TreeRules {
     // MARK: - Layout
 
     /// Lays out each screen whose root or device changed since `previous`, at its device's size,
-    /// and each canvas top-level container that changed, at its own size. What didn't change
-    /// was laid out with `previous`, and the engine leaves alone what is the same inside the rest.
+    /// and each canvas top-level container that changed, at its own size once fitted (see
+    /// `fitOnCanvas`). What didn't change was laid out with `previous`, and the engine leaves
+    /// alone what is the same inside the rest.
     private static func layOut(_ content: inout TreeContent, after previous: TreeContent?,
                                measure: TextMeasure) -> [LayoutDiagnostic] {
         var diagnostics: [LayoutDiagnostic] = []
@@ -242,8 +244,39 @@ enum TreeRules {
         for index in content.canvas.indices where content.canvas[index].isContainer {
             let before = canvas[content.canvas[index].id]
             if before == content.canvas[index] { continue }
+            fitOnCanvas(&content.canvas[index], measure: measure)
             LayoutEngine.layOut(&content.canvas[index], previous: before, measure: measure, diagnostics: &diagnostics)
         }
         return diagnostics
     }
+
+    /// The canvas places its top-level nodes freely, so a row, column, grid or overlay there that
+    /// is sized to fit takes its fitting size on that axis, as it does in a free container (the
+    /// engine's `fittedInFreeParent`, whose numbers these are): its other axis keeps its frame's
+    /// size, and its top-left corner stays where it is, turned or not. A free container sized to
+    /// fit hugs what it holds in the engine instead.
+    private static func fitOnCanvas(_ node: inout LayerNode, measure: TextMeasure) {
+        let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
+        guard node.resolvedLayout != .free, fitsWidth || fitsHeight else { return }
+        // Measured with the axis that doesn't fit held at the frame's size, as a free parent holds it.
+        var held = node
+        if !fitsWidth { held.width = LayerNode.Sizing(.fixed) }
+        if !fitsHeight { held.height = LayerNode.Sizing(.fixed) }
+        let fitting = LayoutEngine.size(of: held, proposal: ProposedSize(width: nil, height: nil), measure: measure)
+        let size = CGSize(width: fitsWidth ? snapped(fitting.width) : fitting.width,
+                          height: fitsHeight ? snapped(fitting.height) : fitting.height)
+        guard size != node.frame.size else { return }
+        // The point that was its top-left corner, wherever its turn put it, is its new one.
+        let corner = CGPoint.zero.applying(node.transformToParent)
+        var resized = node
+        resized.frame = CGRect(origin: .zero, size: size)
+        let offset = CGPoint.zero.applying(resized.transformToParent)
+        node.frame = CGRect(x: finite(corner.x - offset.x), y: finite(corner.y - offset.y),
+                            width: size.width, height: size.height)
+    }
+
+    /// Whole points, half up, as the engine writes them.
+    private static func snapped(_ value: CGFloat) -> CGFloat { (value + 0.5).rounded(.down) }
+
+    private static func finite(_ value: CGFloat) -> CGFloat { value.isFinite ? value : 0 }
 }

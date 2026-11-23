@@ -326,6 +326,31 @@ import Testing
         #expect(after == Self.applied(edited))
     }
 
+    @Test func aFittingCanvasRowTakesItsContentsSize() {
+        func fittingRow(turned degrees: Double? = nil) -> LayerNode {
+            var row = Self.node(.group, CGRect(x: 100, y: 100, width: 999, height: 999), turned: degrees,
+                                children: [Self.node(.shape, CGRect(x: 0, y: 0, width: 50, height: 20)),
+                                           Self.node(.shape, CGRect(x: 0, y: 0, width: 50, height: 20))])
+            row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 10))
+            row.width = LayerNode.Sizing(.fit)
+            row.height = LayerNode.Sizing(.fit)
+            return row
+        }
+        let once = Self.applied(Self.design(canvas: [fittingRow()]))
+        #expect(once.canvas[0].frame == CGRect(x: 100, y: 100, width: 110, height: 20))
+        #expect(once.canvas[0].children.map(\.frame)
+            == [CGRect(x: 0, y: 0, width: 50, height: 20), CGRect(x: 60, y: 0, width: 50, height: 20)])
+        #expect(Self.applied(once, after: once) == once)
+        #expect(Self.applied(once) == once)
+
+        // Turned, it keeps its top-left corner where it was, as the same row does in a free screen.
+        let turned = fittingRow(turned: 30)
+        let onCanvas = Self.applied(Self.design(canvas: [turned]))
+        let onScreen = Self.applied(Self.design(screens: [Self.screen([turned])]))
+        #expect(onCanvas.canvas[0].frame.size == CGSize(width: 110, height: 20))
+        #expect(onCanvas.canvas[0].frame == onScreen.screens[0].root.children[0].frame)
+    }
+
     /// A screen in a column, a free one turned and scaled, and canvas containers, each with
     /// something the rules change.
     private static func messyDesign() -> TreeContent {
