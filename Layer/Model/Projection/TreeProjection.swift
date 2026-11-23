@@ -25,8 +25,9 @@ enum TreeProjection {
     struct Lowered: Sendable {
         /// The list as it is kept: each element with its own flags, containers as `.group` items, block order.
         var elements: [DesignElement]
-        /// Each screen with its leaves, each locked or hidden as it is with its containers. `resolvedDevice`
-        /// is left nil here.
+        /// Each screen with its leaves, each locked or hidden as it is with its containers, and its device
+        /// as the design's settings resolve it (`resolvedDevice`, set where that isn't the one `deviceID`
+        /// names alone: a custom frame).
         var screens: [DesignScreen]
         /// The canvas's leaves, shown as the screens' are.
         var floating: [FloatingElement]
@@ -58,6 +59,8 @@ enum TreeProjection {
             elements += lowering.raw
             var view = Self.view(of: screen)
             view.elements = lowering.shown
+            let device = content.device(of: screen)
+            if device != view.device { view.resolvedDevice = device }
             screens.append(view)
         }
         var canvas = Lowering(host: nil, pending: pending)

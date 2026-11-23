@@ -88,16 +88,9 @@ extension DesignElement {
     /// key. A copy needs this, or its strokes would be taken for the original's once
     /// both are on the ink canvas.
     func withStrokesOfItsOwn() -> DesignElement {
-        guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink) else { return self }
-        let strokes = drawing.strokes.map { stroke in
-            PKStroke(
-                ink: stroke.ink,
-                path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: InkGeometry.newStrokeDate()),
-                transform: stroke.transform, mask: stroke.mask
-            )
-        }
+        guard kind == .drawing, let ink, let own = InkGeometry.strokesOfTheirOwn(ink) else { return self }
         var copy = self
-        copy.ink = PKDrawing(strokes: strokes).dataRepresentation()
+        copy.ink = own
         return copy
     }
 
@@ -106,6 +99,17 @@ extension DesignElement {
     /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
     var isPickedByItsFrame: Bool {
         kind != .drawing || isLocked
+    }
+}
+
+extension LayerNode {
+    /// The same drawing with strokes of its own, as `DesignElement.withStrokesOfItsOwn()` makes
+    /// one: what a copied drawing's ink needs. Anything else is returned as it is.
+    func withStrokesOfItsOwn() -> LayerNode {
+        guard kind == .drawing, let ink = content.ink, let own = InkGeometry.strokesOfTheirOwn(ink) else { return self }
+        var copy = self
+        copy.content.ink = own
+        return copy
     }
 }
 
@@ -164,6 +168,19 @@ enum InkGeometry {
             last = date
             return date
         }
+    }
+
+    /// Ink with each stroke made again with a new key, or nil when it isn't a drawing's ink.
+    static func strokesOfTheirOwn(_ ink: Data) -> Data? {
+        guard let drawing = try? PKDrawing(data: ink) else { return nil }
+        let strokes = drawing.strokes.map { stroke in
+            PKStroke(
+                ink: stroke.ink,
+                path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: newStrokeDate()),
+                transform: stroke.transform, mask: stroke.mask
+            )
+        }
+        return PKDrawing(strokes: strokes).dataRepresentation()
     }
 
     /// The area strokes cover, their thickness included. Nil for no strokes.

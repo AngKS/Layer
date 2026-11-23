@@ -97,6 +97,18 @@ final class DesignStore {
         return lowered
     }
 
+    /// The design's tree. Read through `content`, so that whatever reads it is redrawn when it changes.
+    var tree: TreeContent { content.tree }
+
+    /// Where every node of the tree is, worked out once per version of the content, when it is
+    /// first asked for: see `TreeIndex`.
+    var index: TreeIndex {
+        // Read first, so that whatever reads it is redrawn when the content changes.
+        let content = content
+        if kept == nil { kept = Kept(tree: content.tree) }
+        return kept!.index
+    }
+
     /// What can be touched on each host, for the groups that had been gone into when it was
     /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
     /// for it on every move of the pen.
@@ -299,7 +311,7 @@ final class DesignStore {
     }
 
     /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
-    private func tellTheReadingLogOfDeleted(_ ids: Set<DesignElement.ID>) {
+    func tellTheReadingLogOfDeleted(_ ids: Set<DesignElement.ID>) {
         // One task for them all: a group of 200 is not 200 hops to the log's actor.
         guard !ids.isEmpty else { return }
         #if DEBUG

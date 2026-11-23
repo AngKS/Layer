@@ -131,14 +131,9 @@ enum TreeLift {
         return (nodes, pending)
     }
 
-    /// Gives `node` `children` in place of those it has. Each child this build couldn't read keeps its
-    /// place among those of the others that stay, so that it is written back where it was.
+    /// Gives `node` `children` in place of those it has, as `TreeEdit.give(_:to:)` does.
     static func give(_ children: [LayerNode], to node: inout LayerNode) {
-        if !node.unreadChildren.isEmpty {
-            let staying = Set(children.map(\.id))
-            TreeRules.keepUnreadPlaces(in: &node, removing: node.children.indices.filter { !staying.contains(node.children[$0].id) })
-        }
-        node.children = children
+        TreeEdit.give(children, to: &node)
     }
 
     /// Gives the canvas `nodes` in place of those it has, as `give(_:to:)` gives a node its children:

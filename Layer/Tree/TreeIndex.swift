@@ -3,7 +3,8 @@ import Foundation
 
 /// A lookup over a `TreeContent`, built in one walk over every node (O(N)): where each
 /// node sits, its place in the tree, how it maps to its host, and whether it is locked or
-/// hidden through an ancestor. It holds no nodes: `node(_:in:)` finds one by its path.
+/// hidden through an ancestor (a screen's own lock isn't one). It holds no nodes: `node(_:in:)`
+/// finds one by its path.
 struct TreeIndex: Sendable {
     enum Host: Hashable, Sendable { case screen(TreeScreen.ID), canvas }
 
@@ -30,9 +31,9 @@ struct TreeIndex: Sendable {
         for screen in content.screens { count += screen.root.children.count }
         entries.reserveCapacity(count)
         for screen in content.screens {
+            // A screen's own lock keeps the screen where it is; what is on it stays editable.
             walk(screen.root, host: .screen(screen.id), parent: nil, siblingIndex: 0, path: [],
-                 parentToHost: nil, parentScale: 1, parentDegrees: 0,
-                 locked: screen.isLocked ?? false, hidden: false)
+                 parentToHost: nil, parentScale: 1, parentDegrees: 0, locked: false, hidden: false)
         }
         for (index, node) in content.canvas.enumerated() {
             walk(node, host: .canvas, parent: nil, siblingIndex: index, path: [index],
@@ -86,24 +87,10 @@ struct TreeIndex: Sendable {
         return result
     }
 
-    /// The node itself, found by walking its path through `content`.
+    /// The node itself, found by walking its path through `content` (`TreeContent.node(on:at:)`).
     func node(_ id: UUID, in content: TreeContent) -> LayerNode? {
         guard let entry = entries[id] else { return nil }
-        var path = entry.path[...]
-        var current: LayerNode
-        switch entry.host {
-        case .screen(let screenID):
-            guard let screen = content.screens.first(where: { $0.id == screenID }) else { return nil }
-            current = screen.root
-        case .canvas:
-            guard let first = path.popFirst(), content.canvas.indices.contains(first) else { return nil }
-            current = content.canvas[first]
-        }
-        for index in path {
-            guard current.children.indices.contains(index) else { return nil }
-            current = current.children[index]
-        }
-        return current.id == id ? current : nil
+        return content.node(on: entry.host, at: entry.path).flatMap { $0.id == id ? $0 : nil }
     }
 
     /// Its shape on the canvas: a screen's nodes go through the screen's placement.
