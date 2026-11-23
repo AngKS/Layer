@@ -526,7 +526,7 @@ final class VoiceToolbox: VoiceActing {
                 case .success(let current): host = current
                 }
             }
-            guard let kind = ScreenBlueprint.kind(named: kind), kind.belongsOnScreens else {
+            guard let kind = LookWords.kind(named: kind), kind.belongsOnScreens else {
                 return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
             }
             let words = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1046,7 +1046,7 @@ final class VoiceToolbox: VoiceActing {
     /// Whether what the person called something fits an element: by what its kind is
     /// called, by the words on it, or by its own name.
     private static func fits(_ named: String, _ element: DesignElement) -> Bool {
-        var kindNames = (ScreenBlueprint.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
+        var kindNames = (LookWords.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
         // "Email field" and the like say what a field is for, not what it is. That is for
         // the words on the field to bear out, or any field would answer to "password field".
         if element.kind == .textField { kindNames.removeAll { ["search field", "email field", "password field"].contains($0) } }
@@ -1058,11 +1058,9 @@ final class VoiceToolbox: VoiceActing {
     /// Gives an element the look some words describe. False if none of them meant anything.
     @discardableResult
     private static func apply(look: String, to element: inout DesignElement) -> Bool {
-        let blank = ScreenBlueprint.Item(kind: element.kind, text: element.text)
-        var item = blank
-        ScreenBlueprint.applyLook(look.components(separatedBy: ","), to: &item)
-        guard item != blank else { return false }
-        item.applyLook(to: &element)
+        let words = LookWords.look(from: look.components(separatedBy: ","))
+        guard words != Look() else { return false }
+        words.apply(to: &element)
         return true
     }
 

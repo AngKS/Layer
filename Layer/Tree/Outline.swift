@@ -29,7 +29,13 @@ enum Outline {
     /// Each node's `source.key` is its path of `kind:ordinal` steps from the root, where a
     /// container's kind is `row`, `column`, `grid`, `card` or, for an implicit section, `group`.
     static func parse(_ text: String, isComplete: Bool) -> LayerNode {
-        var builder = Builder()
+        parse(text, isComplete: isComplete, tokens: .standard)
+    }
+
+    /// As `parse(_:isComplete:)`, with the spacings the design's tokens give: the screen root 24, sections, `column:`,
+    /// rows and grids 12, and cards 8 each become `tokens.spacing(nearest:)`, and a card's padding is `tokens.card.padding`.
+    static func parse(_ text: String, isComplete: Bool, tokens: DesignTokens) -> LayerNode {
+        var builder = Builder(tokens: tokens)
         var lines = text.replacingOccurrences(of: ";", with: "\n").components(separatedBy: .newlines)
         if !isComplete, !lines.isEmpty { lines.removeLast() }
         for line in lines { builder.add(line) }
@@ -47,10 +53,16 @@ enum Outline {
     }
 
     private struct Builder {
-        var frames = [Frame(node: Outline.root(), depth: -1)]
+        let tokens: DesignTokens
+        var frames: [Frame]
         /// The run of top-level leaves being collected, not yet in the root.
         var section: LayerNode?
         var breakPending = false
+
+        init(tokens: DesignTokens) {
+            self.tokens = tokens
+            frames = [Frame(node: Outline.root(tokens), depth: -1)]
+        }
 
         mutating func add(_ rawLine: String) {
             var (steps, line) = Outline.indent(of: rawLine)
@@ -69,7 +81,7 @@ enum Outline {
             defer { breakPending = false }
             if steps == 0, breakPending { closeSection() }
 
-            if let opener = Outline.container(from: line) {
+            if let opener = Outline.container(from: line, tokens: tokens) {
                 guard frames.count <= Outline.maxNesting else { return }
                 if frames.count == 1, opener.inlineItems == nil { closeSection() }
                 var container = opener.node
@@ -79,7 +91,7 @@ enum Outline {
                 frames.append(Frame(node: container, depth: steps, isInline: opener.inlineItems != nil))
             } else if let leaf = Outline.leaf(line) {
                 if frames.count == 1 {
-                    section = section ?? Outline.section()
+                    section = section ?? Outline.section(tokens)
                     section?.children.append(leaf)
                 } else {
                     frames[frames.count - 1].node.children.append(leaf)
@@ -93,7 +105,7 @@ enum Outline {
             guard !frame.node.children.isEmpty else { return }
             if frames.count == 1 {
                 if frame.isInline {
-                    section = section ?? Outline.section()
+                    section = section ?? Outline.section(tokens)
                     section?.children.append(frame.node)
                 } else {
                     closeSection()
@@ -130,20 +142,22 @@ enum Outline {
     }
 
     /// A container opener, with the items an inline row carries.
-    private static func container(from line: String) -> (node: LayerNode, inlineItems: [String]?)? {
+    private static func container(from line: String, tokens: DesignTokens) -> (node: LayerNode, inlineItems: [String]?)? {
         let lower = line.lowercased()
-        if lower == "column:" { return (makeColumn(spacing: 12), nil) }
-        if lower == "card:" { return (makeCard(), nil) }
+        if lower == "column:" { return (makeColumn(spacing: tokens.spacing(nearest: 12)), nil) }
+        if lower == "card:" { return (makeCard(tokens), nil) }
         if lower.hasPrefix("grid"), lower.hasSuffix(":") {
             let count = lower.dropFirst(4).dropLast().trimmingCharacters(in: .whitespaces)
-            if count.isEmpty { return (makeGrid(columns: 2), nil) }
-            if let columns = Int(count) { return (makeGrid(columns: columns), nil) }
+            if count.isEmpty { return (makeGrid(columns: 2, tokens), nil) }
+            if let columns = Int(count) { return (makeGrid(columns: columns, tokens), nil) }
             return nil
         }
-        if lower.hasPrefix("row:") {
-            let rest = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+        // The blueprint's other spellings of a row: `row - …` and `side by side: …`.
+        let rowPrefix = ["row:", "row -", "side by side:"].first { lower.hasPrefix($0) }
+        if let rowPrefix {
+            let rest = String(line.dropFirst(rowPrefix.count)).trimmingCharacters(in: .whitespaces)
             let items = rest.isEmpty ? nil : rest.split(separator: "|").map(String.init)
-            return (makeRow(), items)
+            return (makeRow(tokens), items)
         }
         return nil
     }
@@ -196,23 +210,26 @@ enum Outline {
         .stack(LayerNode.Stack(axis: .vertical, spacing: spacing, alignment: alignment))
     }
 
-    private static func root() -> LayerNode { container(kind: .group, layout: column(spacing: 24)) }
-    private static func section() -> LayerNode { makeColumn(spacing: 12) }
+    private static func root(_ tokens: DesignTokens) -> LayerNode {
+        container(kind: .group, layout: column(spacing: tokens.spacing(nearest: 24)))
+    }
+    private static func section(_ tokens: DesignTokens) -> LayerNode { makeColumn(spacing: tokens.spacing(nearest: 12)) }
     private static func makeColumn(spacing: CGFloat) -> LayerNode { container(kind: .group, layout: column(spacing: spacing)) }
 
-    private static func makeRow() -> LayerNode {
-        container(kind: .group, layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .center)))
+    private static func makeRow(_ tokens: DesignTokens) -> LayerNode {
+        container(kind: .group, layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: tokens.spacing(nearest: 12), alignment: .center)))
     }
 
-    private static func makeGrid(columns: Int) -> LayerNode {
-        container(kind: .group, layout: .grid(LayerNode.Grid(
-            columns: min(max(columns, 1), 12), columnSpacing: 12, rowSpacing: 12,
+    private static func makeGrid(columns: Int, _ tokens: DesignTokens) -> LayerNode {
+        let gap = tokens.spacing(nearest: 12)
+        return container(kind: .group, layout: .grid(LayerNode.Grid(
+            columns: min(max(columns, 1), 12), columnSpacing: gap, rowSpacing: gap,
             alignment: LayerNode.Alignment(horizontal: .start, vertical: .start))))
     }
 
-    private static func makeCard() -> LayerNode {
-        var node = container(kind: .card, layout: column(spacing: 8))
-        node.padding = LayerNode.Padding(all: DesignTokens.standard.card.padding)
+    private static func makeCard(_ tokens: DesignTokens) -> LayerNode {
+        var node = container(kind: .card, layout: column(spacing: tokens.spacing(nearest: 8)))
+        node.padding = LayerNode.Padding(all: tokens.card.padding)
         return node
     }
 
@@ -232,7 +249,14 @@ enum Outline {
     private static func keyAndPolish(_ root: inout LayerNode) {
         root.source?.key = ""
         key(&root)
+        root = withOnePrimaryAction(root)
+    }
+
+    /// Plan 1's one-primary-action rule, on any tree.
+    static func withOnePrimaryAction(_ root: LayerNode) -> LayerNode {
+        var root = root
         onePrimaryAction(in: &root)
+        return root
     }
 
     private static func key(_ node: inout LayerNode) {

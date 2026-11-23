@@ -73,19 +73,33 @@ enum A2UIImporter {
     /// Nonisolated; never throws. One screen per surface that has a resolvable root, and no more
     /// than 5,000 nodes in all, as a design holds.
     static func importJSON(_ data: Data) -> A2UIImport {
+        importJSON(data, tokens: .standard, trustsLayerLook: true)
+    }
+
+    /// Whether text is meant as A2UI JSON rather than an outline: once trimmed, it starts with `{` or `[`.
+    static func looksLikeA2UI(_ text: String) -> Bool {
+        guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else { return false }
+        return first == "{" || first == "["
+    }
+
+    /// `tokens` give the importer's starting spacings: each one that isn't 0 goes through `spacing(nearest:)`. With
+    /// `trustsLayerLook` false (a model's output), these are all ignored: every component's `@metadata.extensions.layer`,
+    /// `createSurface`'s `metadata.extensions.layer` (so the screen's name and deviceID are nil), and `LayerGrid`'s
+    /// `columnSpacing` and `rowSpacing`, which take the tokens' nearest-12 instead.
+    static func importJSON(_ data: Data, tokens: DesignTokens, trustsLayerLook: Bool) -> A2UIImport {
         let (items, read) = guardedMessages(from: data)
         var diagnostics = read
         let messages = parse(items, into: &diagnostics)
         var screens: [A2UIImport.Screen] = []
         var budget = ScreenBuilder.Budget(nodes: TreeRules.maximumNodes, childRequests: maximumChildRequests)
-        for surface in gather(messages, into: &diagnostics) {
+        for surface in gather(messages, trustsLayerLook: trustsLayerLook, into: &diagnostics) {
             guard budget.nodes > 0 else {
                 diagnostics.append(A2UIDiagnostic(
                     reason: .invalidComponent,
                     message: "The import has \(TreeRules.maximumNodes) nodes already, so surface \(surface.id) and any after it aren't imported."))
                 break
             }
-            var builder = ScreenBuilder(surface: surface, budget: budget)
+            var builder = ScreenBuilder(surface: surface, budget: budget, tokens: tokens, trustsLayerLook: trustsLayerLook)
             if let root = builder.build() {
                 screens.append(A2UIImport.Screen(surfaceID: surface.id, root: root, name: surface.name, deviceID: surface.deviceID))
             }
@@ -327,7 +341,7 @@ private struct Surface {
 
 extension A2UIImporter {
     /// Each surface the messages leave, in the order each was first named.
-    fileprivate static func gather(_ messages: [AgentToRendererMessage], into diagnostics: inout [A2UIDiagnostic]) -> [Surface] {
+    fileprivate static func gather(_ messages: [AgentToRendererMessage], trustsLayerLook: Bool, into diagnostics: inout [A2UIDiagnostic]) -> [Surface] {
         // A deleted surface leaves a gap, so the others keep their places in `index`.
         var surfaces: [Surface?] = []
         var index: [String: Int] = [:]
@@ -381,7 +395,7 @@ extension A2UIImporter {
                 }
                 surfaces[found]?.wasCreated = true
                 surfaces[found]?.catalogID = create.catalogID
-                let layer = create.metadata?["extensions"]?.objectValue?["layer"]?.objectValue
+                let layer = trustsLayerLook ? create.metadata?["extensions"]?.objectValue?["layer"]?.objectValue : nil
                 surfaces[found]?.name = layer?["name"]?.stringValue
                 surfaces[found]?.deviceID = layer?["deviceID"]?.stringValue
                 if let components = create.components {
@@ -433,13 +447,21 @@ extension A2UIImporter {
 
 // MARK: - Building a screen
 
-/// The spacings an import starts from, which A2UI doesn't give: steps of Layer's rhythm in the
-/// standard tokens. A screen root's sections are 24 apart, as the outline spaces them; a section's
-/// lines, and a grid's cells, 12; and what is in a card, a list, or a row of a mark and its label, 8.
-private enum Rhythm {
-    static let screen = DesignTokens.standard.rhythm[3]
-    static let section = DesignTokens.standard.rhythm[1]
-    static let tight = DesignTokens.standard.rhythm[0]
+/// The spacings an import starts from, which A2UI doesn't give: steps of the design's rhythm, the standard's by
+/// default. A screen root's sections are 24 apart (nearest the tokens' rhythm), as the outline spaces them; a
+/// section's lines, and a grid's cells, 12; and what is in a card, a list, or a row of a mark and its label, 8.
+private struct Rhythm {
+    let screen: CGFloat
+    let section: CGFloat
+    let tight: CGFloat
+    let cardPadding: CGFloat
+
+    init(_ tokens: DesignTokens) {
+        screen = tokens.spacing(nearest: 24)
+        section = tokens.spacing(nearest: 12)
+        tight = tokens.spacing(nearest: 8)
+        cardPadding = tokens.card.padding
+    }
 }
 
 /// Where a component is built: how deep in the graph below root, under which components, in
@@ -522,9 +544,14 @@ private struct ScreenBuilder {
     /// A caption's colour: iOS's secondary label as it shows on white.
     private static let secondaryText = RGBColor(hex: 0x8A8A8E)
 
-    init(surface: Surface, budget: Budget) {
+    private let rhythm: Rhythm
+    private let trustsLayerLook: Bool
+
+    init(surface: Surface, budget: Budget, tokens: DesignTokens, trustsLayerLook: Bool) {
         self.surface = surface
         self.budget = budget
+        self.rhythm = Rhythm(tokens)
+        self.trustsLayerLook = trustsLayerLook
     }
 
     mutating func build() -> LayerNode? {
@@ -746,7 +773,7 @@ private struct ScreenBuilder {
         case _ where Self.containerTypes.contains(type):
             var node = make(.group, id, at: place)
             // A screen's root column is spaced as the outline spaces one, and a column in it as a section.
-            node.layout = layout(of: id, component, spacing: place.depth == 0 && type == "Column" ? Rhythm.screen : Rhythm.section)
+            node.layout = layout(of: id, component, spacing: place.depth == 0 && type == "Column" ? rhythm.screen : rhythm.section)
             let requests = childRequests(of: id, component, at: place.inside(id, axis: node.layout?.stackAxis))
             return .container(OpenContainer(node: node, id: id, component: component, place: place, requests: requests))
         case "Card":
@@ -896,8 +923,8 @@ private struct ScreenBuilder {
         case "LayerGrid":
             return .grid(LayerNode.Grid(
                 columns: component["columns"]?.intValue ?? 2,
-                columnSpacing: component["columnSpacing"]?.doubleValue.map { CGFloat($0) } ?? Rhythm.section,
-                rowSpacing: component["rowSpacing"]?.doubleValue.map { CGFloat($0) } ?? Rhythm.section,
+                columnSpacing: (trustsLayerLook ? component["columnSpacing"]?.doubleValue.map { CGFloat($0) } : nil) ?? rhythm.section,
+                rowSpacing: (trustsLayerLook ? component["rowSpacing"]?.doubleValue.map { CGFloat($0) } : nil) ?? rhythm.section,
                 alignment: LayerNode.Alignment(horizontal: .start, vertical: .start)))
         case "LayerOverlay":
             return .overlay(LayerNode.Alignment(
@@ -974,13 +1001,13 @@ private struct ScreenBuilder {
     /// holding anything else stacks it.
     private mutating func card(_ id: String, _ component: Component, at place: Place) -> OpenContainer {
         var card = make(.card, id, at: place)
-        card.padding = LayerNode.Padding(all: DesignTokens.standard.card.padding)
-        card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.tight))
+        card.padding = LayerNode.Padding(all: rhythm.cardPadding)
+        card.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: rhythm.tight))
         var requests: [Request] = []
         let inside = place.inside(id)
         if let childID = component["child"]?.stringValue, let child = admit(childID, from: id, field: "child", at: inside) {
             if let type = child["component"]?.stringValue, Self.containerTypes.contains(type) {
-                card.layout = look(of: childID, child).layout ?? layout(of: childID, child, spacing: Rhythm.tight)
+                card.layout = look(of: childID, child).layout ?? layout(of: childID, child, spacing: rhythm.tight)
                 requests = childRequests(of: childID, child, at: inside.inside(childID, axis: card.layout?.stackAxis))
             } else {
                 requests = [Request(id: childID, parent: id, field: "child", place: inside)]
@@ -1079,7 +1106,7 @@ private struct ScreenBuilder {
             return node
         }
         var row = make(.group, id, at: place)
-        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: Rhythm.tight, alignment: .center))
+        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: rhythm.tight, alignment: .center))
         var box = make(.checkbox, id, part: "box", at: place)
         box.content.isOn = isOn
         var label = make(.text, id, part: "label", at: place)
@@ -1094,7 +1121,7 @@ private struct ScreenBuilder {
         let mark: ElementKind = component["variant"]?.stringValue == "multipleSelection" ? .checkbox : .radio
         let chosen = Set(strings(component["value"], of: id, field: "value", at: place) ?? [])
         var column = make(.group, id, at: place)
-        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.tight))
+        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: rhythm.tight))
         if let label = Self.nonEmpty(string(component["label"], of: id, field: "label", at: place)) {
             var text = make(.text, id, part: "label", at: place)
             text.content.text = label
@@ -1103,7 +1130,7 @@ private struct ScreenBuilder {
         for (index, option) in (component["options"]?.arrayValue ?? []).enumerated() {
             guard madeNodes <= budget.nodes else { break }
             var row = make(.group, id, part: "\(index)", at: place)
-            row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: Rhythm.tight, alignment: .center))
+            row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: rhythm.tight, alignment: .center))
             var box = make(mark, id, part: "\(index)/mark", at: place)
             box.content.isOn = option.objectValue?["value"]?.stringValue.map { chosen.contains($0) } ?? false
             var text = make(.text, id, part: "\(index)/label", at: place)
@@ -1191,6 +1218,7 @@ private struct ScreenBuilder {
     /// Layer's own look from a component's `@metadata.extensions.layer`. Each key that can't be
     /// read is reported and left out; the rest still apply.
     private mutating func look(of id: String, _ component: Component) -> LayerLook {
+        guard trustsLayerLook else { return LayerLook() }
         guard let written = component["@metadata"]?.objectValue?["extensions"]?.objectValue?["layer"] else { return LayerLook() }
         guard let fields = written.objectValue else {
             report(.invalidComponent, id, "@metadata.extensions.layer", "Layer's look here isn't an object, so it's ignored.")
@@ -1227,7 +1255,7 @@ private struct ScreenBuilder {
         if !isScreen {
             root = LayerNode(kind: .group)
             (root.width, root.height) = NaturalSize.defaultSizing(for: .group)
-            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: Rhythm.screen, alignment: .fill))
+            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: rhythm.screen, alignment: .fill))
             root.source = LayerNode.Source(origin: .imported, key: nil)
             root.children = [mapped]
         }
