@@ -474,6 +474,208 @@ import UIKit
         #expect(kept.diagnostics.isEmpty, "\(kept.diagnostics)")
     }
 
+    @Test func oneTooDeepLineIsSkippedNotTheWholeStream() async throws {
+        let good = """
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"\(Self.basic)"}}
+            {"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Column","children":["t"]},{"id":"t","component":"Text","text":"Still here"}]}}
+            """
+        let lines = good.split(separator: "\n").map(String.init)
+        let deep = String(repeating: "[", count: 450) + String(repeating: "]", count: 450)
+        let stream = Data([lines[0], deep, lines[1]].joined(separator: "\n").utf8)
+        let read = await Task.detached { A2UIImporter.importJSON(stream) }.value
+        #expect(read.screens.first?.root.child(0).content.text == "Still here")
+        #expect(read.diagnostics.map(\.reason) == [.parseFailed])
+        #expect(read.diagnostics.first?.path == "line 2")
+
+        // Stray opening braces, each on its own line, don't add up against the lines after them.
+        let strays = Array(repeating: "{", count: A2UIImporter.maximumJSONDepth + 6).joined(separator: "\n")
+        let afterStrays = Data((strays + "\n" + good).utf8)
+        let streamed = await Task.detached { A2UIImporter.importJSON(afterStrays) }.value
+        #expect(streamed.screens.first?.root.child(0).content.text == "Still here")
+        #expect(streamed.diagnostics.count == A2UIImporter.maximumJSONDepth + 6)
+        #expect(streamed.diagnostics.allSatisfy { $0.reason == .parseFailed })
+    }
+
+    @Test func everyA2UIReadGoesThroughTheGuard() async throws {
+        // The guarded reader other code uses to read A2UI text, a line at a time or whole.
+        let deep = Data((String(repeating: "[", count: 450) + String(repeating: "]", count: 450)).utf8)
+        let deepRead = await Task.detached { A2UIImporter.decodeJSON(deep) }.value
+        guard case .tooDeep = deepRead else {
+            Issue.record("A payload 450 deep should be refused unread, not \(deepRead)")
+            return
+        }
+        guard case .notJSON = A2UIImporter.decodeJSON(Data("{\"a\":".utf8)) else {
+            Issue.record("Half an object isn't JSON")
+            return
+        }
+        guard case .value(let value) = A2UIImporter.decodeJSON(Data(#"{"version":"1.0"}"#.utf8)) else {
+            Issue.record("A small object should be read")
+            return
+        }
+        #expect(value.objectValue?["version"]?.stringValue == "1.0")
+
+        let stream = Data("""
+            {"version":"1.0","createSurface":{"surfaceId":"s"}}
+            \(String(decoding: deep, as: UTF8.self))
+            not JSON
+            {"version":"1.0","deleteSurface":{"surfaceId":"s"}}
+            """.utf8)
+        let (messages, diagnostics) = await Task.detached { A2UIImporter.guardedMessages(from: stream) }.value
+        #expect(messages.count == 2)
+        #expect(diagnostics.map(\.path) == ["line 2", "line 3"])
+        #expect(diagnostics.allSatisfy { $0.reason == .parseFailed })
+    }
+
+    @Test func importedRootsKeepTheOutlinesRhythm() throws {
+        // Ruling M3: a screen's root column is spaced 24, as the outline's is; a column in it 12.
+        let components = """
+            {"id":"root","component":"Column","children":["section"]},
+            {"id":"section","component":"Column","children":["a","b"]},
+            {"id":"a","component":"Text","text":"A"},
+            {"id":"b","component":"Text","text":"B"}
+            """
+        let root = try #require(A2UIImporter.importJSON(surface(components)).screens.first?.root)
+        #expect(stack(root)?.spacing == 24)
+        #expect(stack(root.child(0))?.spacing == 12)
+
+        // A root that isn't a column is held in one spaced the same.
+        let row = #"{"id":"root","component":"Row","children":["a"]},{"id":"a","component":"Text","text":"A"}"#
+        let wrapped = try #require(A2UIImporter.importJSON(surface(row)).screens.first?.root)
+        #expect(stack(wrapped)?.spacing == 24)
+        #expect(stack(wrapped.child(0))?.spacing == 12)
+    }
+
+    @Test func everyNodesKeyIsItsOwn() throws {
+        // A Divider two parents share, a Text whose id is a CheckBox's part, and an id with an @.
+        let components = """
+            {"id":"root","component":"Column","children":["line","a","a/box","line","b@x","row"]},
+            {"id":"line","component":"Divider"},
+            {"id":"a","component":"CheckBox","label":"Agree","value":true},
+            {"id":"a/box","component":"Text","text":"Slash"},
+            {"id":"b@x","component":"Text","text":"At"},
+            {"id":"row","component":"Row","children":["line"]}
+            """
+        let root = try #require(A2UIImporter.importJSON(surface(components)).screens.first?.root)
+        let keys = all(root).compactMap { $0.source?.key }
+        #expect(Set(keys).count == keys.count, "\(keys)")
+        // A shared component keeps its id the first time it's met in reading order; later ones are numbered.
+        #expect(root.child(0).source?.key == "line")
+        #expect(root.child(3).source?.key == "line#2")
+        #expect(root.child(5).child(0).source?.key == "line#3")
+        #expect(root.child(1).children.map { $0.source?.key } == ["a/box", "a/label"])
+        #expect(root.child(2).source?.key == "a~1box")
+        #expect(root.child(4).source?.key == "b~2x")
+        // The same file gives the same keys.
+        let again = try #require(A2UIImporter.importJSON(surface(components)).screens.first?.root)
+        #expect(all(again).compactMap { $0.source?.key } == keys)
+    }
+
+    @Test func aHostileDataModelCantGrowPastItsLimits() async throws {
+        func update(_ path: String, _ value: String) -> String {
+            #"{"version":"1.0","updateDataModel":{"surfaceId":"s","path":"\#(path)","value":\#(value)}}"#
+        }
+        func stream(bound path: String, _ updates: [String]) -> Data {
+            let start = """
+                {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"\(Self.basic)"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Column","children":["t"]},{"id":"t","component":"Text","text":{"@path":"\(path)"}}]}}
+                """
+            return Data(([start] + updates).joined(separator: "\n").utf8)
+        }
+
+        // An index past 1,000 would grow an array to it, so the update is skipped and said so.
+        let indexed = stream(bound: "/x/1000", [update("/x/1000", #""Kept""#), update("/y/1001", "1"),
+                                                update("/z/10000/10000/10000/10000", "1")])
+        let read = await Task.detached { A2UIImporter.importJSON(indexed) }.value
+        #expect(read.screens.first?.root.child(0).content.text == "Kept")
+        #expect(read.diagnostics.filter { $0.reason == .binding && $0.path == "updateDataModel.path" }.count == 2,
+                "\(read.diagnostics)")
+
+        // Past 50,000 values in all, the updates left are skipped, said once.
+        let thousand = "[" + (0..<1_000).map(String.init).joined(separator: ",") + "]"
+        let many = stream(bound: "/last", (0..<60).map { update("/list\($0)", thousand) } + [update("/last", #""Late""#)])
+        let bounded = await Task.detached { A2UIImporter.importJSON(many) }.value
+        #expect(bounded.screens.first?.root.child(0).content.text == ElementKind.text.placeholder)
+        #expect(bounded.diagnostics.filter { $0.reason == .binding && $0.path == "updateDataModel.value" }.count == 1,
+                "\(bounded.diagnostics)")
+    }
+
+    @Test func hugeNumbersInAFileAreBroughtIntoRange() throws {
+        // Schema-valid, and every number finite: but laid out as written, the grid's third cell
+        // and the frame's far edge are infinite, and the design couldn't be saved.
+        let components = """
+            {"id":"root","component":"Column","children":["grid","free"]},
+            {"id":"grid","component":"LayerGrid","children":["a","b","c"],"columns":3,"columnSpacing":1e308,"rowSpacing":1e308},
+            {"id":"a","component":"Text","text":"A","@metadata":{"extensions":{"layer":{"style":{"fontSize":1e308}}}}},
+            {"id":"b","component":"Text","text":"B"},
+            {"id":"c","component":"Text","text":"C"},
+            {"id":"free","component":"LayerFree","children":["far"],
+             "@metadata":{"extensions":{"layer":{"padding":{"top":1e308,"leading":1e308,"bottom":1e308,"trailing":1e308},
+               "width":{"mode":"fit"},"height":{"mode":"fit"}}}}},
+            {"id":"far","component":"Text","text":"Far",
+             "@metadata":{"extensions":{"layer":{"frame":[1e308,0,1e308,10],"width":{"mode":"fixed"},"height":{"mode":"fixed"}}}}}
+            """
+        let result = A2UIImporter.importJSON(surface(components, catalog: LayerCatalog.id))
+        let root = try #require(result.screens.first?.root)
+        #expect(shape(root) == "group(column)[group(grid3)[text,text,text],group(free)[text]]")
+        #expect(root.child(0).layout == .grid(LayerNode.Grid(
+            columns: 3, columnSpacing: LayoutEngine.maximumGap, rowSpacing: LayoutEngine.maximumGap,
+            alignment: LayerNode.Alignment(horizontal: .start, vertical: .start))))
+        #expect(root.child(0).child(0).style.fontSize == 1_000)
+        #expect(root.child(1).padding == LayerNode.Padding(all: LayoutEngine.maximumGap))
+        #expect(root.child(1).child(0).frame
+            == CGRect(x: LayoutEngine.maximumLength, y: 0, width: LayoutEngine.maximumLength, height: 10))
+        #expect(result.diagnostics.contains { $0.reason == .invalidComponent && $0.componentID == "grid" })
+
+        // On a screen, laid out by the rules, every frame is finite and the design can be saved.
+        var content = TreeContent()
+        content.screens = [TreeScreen(name: "Imported", origin: .zero, scale: 1, deviceID: nil, root: root)]
+        TreeRules.apply(to: &content, after: nil)
+        let frames = all(content.screens[0].root).map(\.frame)
+        #expect(frames.allSatisfy { [$0.minX, $0.minY, $0.width, $0.height].allSatisfy(\.isFinite) }, "\(frames)")
+        #expect(throws: Never.self) { _ = try JSONEncoder().encode(content.screens[0].root) }
+    }
+
+    @Test func surfacesShareOneNodeLimit() throws {
+        // Three surfaces, each a tree of 4,095 nodes: one import keeps 5,000 nodes in all.
+        func lines(_ surfaceID: String) -> String {
+            let components = (0..<11).map { index in
+                let id = index == 0 ? "root" : "level\(index)"
+                return #"{"id":"\#(id)","component":"Column","children":["level\#(index + 1)","level\#(index + 1)"]}"#
+            }.joined(separator: ",") + #",{"id":"level11","component":"Text","text":"Leaf"}"#
+            return """
+                {"version":"1.0","createSurface":{"surfaceId":"\(surfaceID)","catalogId":"\(Self.basic)"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"\(surfaceID)","components":[\(components)]}}
+                """
+        }
+        let result = A2UIImporter.importJSON(Data(["one", "two", "three"].map(lines).joined(separator: "\n").utf8))
+        #expect(result.screens.map(\.surfaceID) == ["one", "two"])
+        #expect(result.screens.map { all($0.root).count } == [4_095, TreeRules.maximumNodes - 4_095])
+        #expect(result.diagnostics.count == 2, "\(result.diagnostics)")
+    }
+
+    @Test func aFanOutPayloadIsReadQuickly() async throws {
+        // A column reached 4,096 times over, each time holding 1,000 references: half to nothing,
+        // half back up to an ancestor. Each is turned away, but each costs time, so an import
+        // considers no more than `maximumChildRequests` children in all. (Validating one component
+        // with 10,000 children takes the SDK's validator about 0.4 s in a debug build on its own,
+        // so the payload is kept to 1,000 in the one component, to time only the fan-out.)
+        let levels = 12
+        var components = (0..<levels).map { index in
+            let id = index == 0 ? "root" : "level\(index)"
+            return #"{"id":"\#(id)","component":"Column","children":["level\#(index + 1)","level\#(index + 1)"]}"#
+        }
+        let references = Array(repeating: #""nowhere""#, count: 500) + Array(repeating: #""level1""#, count: 500)
+        components.append(#"{"id":"level\#(levels)","component":"Column","children":[\#(references.joined(separator: ","))]}"#)
+        let payload = surface(components.joined(separator: ","))
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
+        let took = clock.now - started
+        #expect(took < .seconds(1), "\(took)")
+        #expect(result.screens.count == 1)
+    }
+
     @Test func componentsWithoutCreateSurfaceStillImport() throws {
         let data = Data("""
             {"version":"1.0","updateComponents":{"surfaceId":"loose","components":[

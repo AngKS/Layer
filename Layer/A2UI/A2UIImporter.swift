@@ -10,6 +10,10 @@ struct A2UIImport: Sendable {
     struct Screen: Sendable {
         var surfaceID: String
         var root: LayerNode
+        /// The screen's name and device, as Layer's export writes them in the surface's
+        /// `createSurface.metadata.extensions.layer`; nil when the surface doesn't say.
+        var name: String?
+        var deviceID: String?
     }
 
     var screens: [Screen] = []
@@ -17,15 +21,22 @@ struct A2UIImport: Sendable {
 }
 
 /// Reads A2UI 1.0 into the tree (spec §6, "A2UI import"):
-/// 1. Each message is parsed on its own with the SDK's `parseAll`, so one bad message doesn't
-///    stop the rest. Anything that isn't version 1.0 is refused.
+/// 1. The text is decoded only through `decodeJSON`, and each message is parsed on its own with
+///    the SDK's `parseAll`, so one bad message doesn't stop the rest. Anything that isn't version
+///    1.0 is refused.
 /// 2. Each surface keeps its components by id, the last write of each winning, and its data model.
-/// 3. Each component is validated, strictly, against its catalogue with `PayloadValidator`.
-/// 4. The graph is walked from `root` over the child slots `GraphTopologyValidator.extractReferences`
+/// 3. The graph is walked from `root` over the child slots `GraphTopologyValidator.extractReferences`
 ///    finds. The walk collects every problem; the SDK's own validators stop at the first.
+/// 4. Each component the walk reached is validated, strictly, against its catalogue with
+///    `PayloadValidator`.
 /// 5. Components map to nodes (the spec's table), and Layer's own look in
 ///    `@metadata.extensions.layer` wins over the mapping.
 /// 6. The tree is fixed as every generated tree is, with `TreeValidator.fixGenerated`.
+///
+/// What a payload can make it do is bounded, however it's written: nesting (`maximumJSONDepth`),
+/// data-model paths (`maximumPathSteps`, `maximumPathIndex`) and values (`maximumDataModelValues`),
+/// nodes (5,000 for the whole import, as for a design) and the children it considers
+/// (`maximumChildRequests`). Only components reached from a root are validated.
 ///
 /// It is all plain values and the SDK's nonisolated, Sendable API, so it runs off the main actor.
 /// Nothing is ever run: there is no processor and no action handler here. Actions, function
@@ -46,17 +57,40 @@ enum A2UIImporter {
     /// How many steps a data-model path may take. Writing one goes a call deeper for each step.
     static let maximumPathSteps = 64
 
-    /// Nonisolated; never throws. One screen per surface that has a resolvable root.
+    /// The farthest into a list a data-model path may reach. Writing a path grows each list it
+    /// passes through to the index it names, so one reaching further is skipped.
+    static let maximumPathIndex = 1_000
+
+    /// How many values the data models of one import may hold in all, the lists that paths
+    /// grow counted too. Updates past it are skipped.
+    static let maximumDataModelValues = 50_000
+
+    /// How many children one import considers making, across every container and template,
+    /// whether they're made or turned away. A component reached many times over asks for its
+    /// children each time; past this, what is left isn't looked at.
+    static let maximumChildRequests = 10 * TreeRules.maximumNodes
+
+    /// Nonisolated; never throws. One screen per surface that has a resolvable root, and no more
+    /// than 5,000 nodes in all, as a design holds.
     static func importJSON(_ data: Data) -> A2UIImport {
-        var diagnostics: [A2UIDiagnostic] = []
-        let messages = readMessages(data, into: &diagnostics)
+        let (items, read) = guardedMessages(from: data)
+        var diagnostics = read
+        let messages = parse(items, into: &diagnostics)
         var screens: [A2UIImport.Screen] = []
+        var budget = ScreenBuilder.Budget(nodes: TreeRules.maximumNodes, childRequests: maximumChildRequests)
         for surface in gather(messages, into: &diagnostics) {
-            var builder = ScreenBuilder(surface: surface)
+            guard budget.nodes > 0 else {
+                diagnostics.append(A2UIDiagnostic(
+                    reason: .invalidComponent,
+                    message: "The import has \(TreeRules.maximumNodes) nodes already, so surface \(surface.id) and any after it aren't imported."))
+                break
+            }
+            var builder = ScreenBuilder(surface: surface, budget: budget)
             if let root = builder.build() {
-                screens.append(A2UIImport.Screen(surfaceID: surface.id, root: root))
+                screens.append(A2UIImport.Screen(surfaceID: surface.id, root: root, name: surface.name, deviceID: surface.deviceID))
             }
             diagnostics += builder.diagnostics
+            budget = builder.budget
         }
         return A2UIImport(screens: screens, diagnostics: diagnostics)
     }
@@ -65,10 +99,38 @@ enum A2UIImporter {
 // MARK: - Reading the messages
 
 extension A2UIImporter {
-    /// The A2UI 1.0 messages in `data`, each read on its own.
-    fileprivate static func readMessages(_ data: Data, into diagnostics: inout [A2UIDiagnostic]) -> [AgentToRendererMessage] {
+    /// JSON as Layer reads A2UI text: decoded, nested too deep to decode safely, or not JSON.
+    enum Reading: Sendable {
+        case value(OrderedJSON.JSONValue)
+        case tooDeep
+        case notJSON
+    }
+
+    /// The one way Layer decodes A2UI text, wherever it comes from (a file, a paste, a drop, a
+    /// line a model streams): JSON, decoded only once its nesting is known to be within
+    /// `maximumJSONDepth`. Decoding goes a call deeper for each level, and off the main actor a
+    /// thread has little stack, so nothing that reads A2UI decodes it any other way.
+    static func decodeJSON(_ data: Data) -> Reading {
+        guard !nests(data, deeperThan: maximumJSONDepth) else { return .tooDeep }
+        guard let value = try? JSONDecoder().decode(OrderedJSON.JSONValue.self, from: data) else { return .notJSON }
+        return .value(value)
+    }
+
+    /// The A2UI messages in `data`, as JSON, each decoded as `decodeJSON` decodes: one message, an
+    /// array of them or an object holding `messages` (as the official examples are written); or
+    /// one message per line, as a model streams them. Read line by line, each line is checked on
+    /// its own, so a line nested too deep, or a stray bracket, costs only that line: it's skipped,
+    /// said so, and the lines round it are still read.
+    static func guardedMessages(from data: Data) -> (messages: [OrderedJSON.JSONValue], diagnostics: [A2UIDiagnostic]) {
+        var diagnostics: [A2UIDiagnostic] = []
+        let messages = items(in: data, into: &diagnostics)
+        return (messages, diagnostics)
+    }
+
+    /// Each message parsed on its own as A2UI 1.0, so one bad message doesn't stop the rest.
+    fileprivate static func parse(_ items: [OrderedJSON.JSONValue], into diagnostics: inout [A2UIDiagnostic]) -> [AgentToRendererMessage] {
         var messages: [AgentToRendererMessage] = []
-        for (index, item) in items(in: data, into: &diagnostics).enumerated() {
+        for (index, item) in items.enumerated() {
             let place = "messages[\(index)]"
             guard let fields = item.objectValue else {
                 diagnostics.append(A2UIDiagnostic(reason: .parseFailed, path: place, message: "A message must be a JSON object."))
@@ -96,32 +158,29 @@ extension A2UIImporter {
         return messages
     }
 
-    /// The messages as JSON: one message, an array of them or an object holding `messages` (as
-    /// the official examples are written); or one message per line, as a model streams them.
+    /// The messages as JSON (see `guardedMessages`). When the whole can't be read, as one value
+    /// or because it nests too deep counted end to end, it's read line by line.
     private static func items(in data: Data, into diagnostics: inout [A2UIDiagnostic]) -> [OrderedJSON.JSONValue] {
-        switch read(data) {
-        case .tooDeep:
-            diagnostics.append(A2UIDiagnostic(
-                reason: .parseFailed,
-                message: "This JSON is nested more than \(maximumJSONDepth) deep, deeper than any A2UI, so it isn't read."))
-            return []
+        let whole = decodeJSON(data)
+        switch whole {
         case .value(.array(let items)):
             return items
-        case .value(let whole):
-            if case .object(let fields) = whole { return fields["messages"]?.arrayValue ?? [whole] }
+        case .value(let value):
+            if case .object(let fields) = value { return fields["messages"]?.arrayValue ?? [value] }
             diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This JSON holds no A2UI messages."))
             return []
-        case .notJSON:
+        case .tooDeep, .notJSON:
             break
         }
-        // One message per line: lines end at a newline byte, which JSON never holds inside a string.
+        // One message per line: lines end at a newline byte, which JSON never holds inside a
+        // string. Each line's nesting is counted from nothing, so no line adds to the next.
         var items: [OrderedJSON.JSONValue] = []
         var skipped: [A2UIDiagnostic] = []
         var anyTooDeep = false
         let whitespace: Set<UInt8> = [0x20, 0x09, 0x0D]
         for (index, line) in data.split(separator: 0x0A, omittingEmptySubsequences: false).enumerated()
         where !line.allSatisfy(whitespace.contains) {
-            switch read(Data(line)) {
+            switch decodeJSON(Data(line)) {
             case .value(let item):
                 items.append(item)
             case .tooDeep:
@@ -134,27 +193,21 @@ extension A2UIImporter {
                     reason: .parseFailed, path: "line \(index + 1)", message: "This line isn't JSON, so it's skipped."))
             }
         }
-        if items.isEmpty && !anyTooDeep {
-            diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This isn't JSON, so there's nothing to import."))
-            return []
+        guard items.isEmpty else {
+            diagnostics += skipped
+            return items
         }
-        diagnostics += skipped
-        return items
-    }
-
-    fileprivate enum Reading {
-        case value(OrderedJSON.JSONValue)
-        case tooDeep
-        case notJSON
-    }
-
-    /// JSON decoded, but only once its nesting is known to be within `maximumJSONDepth`: decoding
-    /// goes a call deeper for each level, and off the main actor a thread has little stack. This
-    /// is the only place the importer decodes a payload.
-    fileprivate static func read(_ data: Data) -> Reading {
-        guard !nests(data, deeperThan: maximumJSONDepth) else { return .tooDeep }
-        guard let value = try? JSONDecoder().decode(OrderedJSON.JSONValue.self, from: data) else { return .notJSON }
-        return .value(value)
+        // Nothing in it could be read: one diagnostic says why.
+        if case .tooDeep = whole {
+            diagnostics.append(A2UIDiagnostic(
+                reason: .parseFailed,
+                message: "This JSON is nested more than \(maximumJSONDepth) deep, deeper than any A2UI, so it isn't read."))
+        } else if anyTooDeep {
+            diagnostics += skipped
+        } else {
+            diagnostics.append(A2UIDiagnostic(reason: .parseFailed, message: "This isn't JSON, so there's nothing to import."))
+        }
+        return []
     }
 
     /// Whether `data` opens more than `limit` arrays and objects inside one another, counted in
@@ -201,6 +254,30 @@ extension A2UIImporter {
     fileprivate static func isTooLong(_ path: String) -> Bool {
         path.split(separator: "/", maxSplits: maximumPathSteps, omittingEmptySubsequences: true).count > maximumPathSteps
     }
+
+    /// How many values writing `path` could add by growing lists: each step that is a list index
+    /// (as the SDK reads one: digits, without a leading zero) can grow a list to it. Nil when a step
+    /// reaches past `maximumPathIndex`. The path is no more than `maximumPathSteps` long.
+    fileprivate static func listGrowth(of path: String) -> Int? {
+        var growth = 0
+        for step in path.split(separator: "/", omittingEmptySubsequences: true)
+        where !step.isEmpty && step.allSatisfy({ $0.isASCII && $0.isNumber }) && !(step.count > 1 && step.hasPrefix("0")) {
+            guard step.count <= 9, let index = Int(step), index <= maximumPathIndex else { return nil }
+            growth += index + 1
+        }
+        return growth
+    }
+
+    /// How many values a JSON value holds, itself included. It walks with a list, not recursion.
+    fileprivate static func count(_ value: OrderedJSON.JSONValue) -> Int {
+        var total = 0
+        var pending = [value]
+        while let next = pending.popLast() {
+            total += 1
+            if let items = next.arrayValue { pending += items } else if let fields = next.objectValue { pending += fields.values }
+        }
+        return total
+    }
 }
 
 // MARK: - Surfaces
@@ -219,6 +296,9 @@ private struct Surface {
     var order: [String] = []
     /// Nil when no data model was sent.
     var dataModel: OrderedJSON.JSONValue?
+    /// The screen's name and device, from `createSurface.metadata.extensions.layer`.
+    var name: String?
+    var deviceID: String?
 
     init(id: String) {
         self.id = id
@@ -248,61 +328,95 @@ private struct Surface {
 extension A2UIImporter {
     /// Each surface the messages leave, in the order each was first named.
     fileprivate static func gather(_ messages: [AgentToRendererMessage], into diagnostics: inout [A2UIDiagnostic]) -> [Surface] {
-        var surfaces: [Surface] = []
+        // A deleted surface leaves a gap, so the others keep their places in `index`.
+        var surfaces: [Surface?] = []
+        var index: [String: Int] = [:]
+        var valuesLeft = maximumDataModelValues
 
         /// The surface a message names. One no createSurface made first is made now, and reported.
         func surfaceIndex(_ id: String, for action: String) -> Int {
-            if let index = surfaces.firstIndex(where: { $0.id == id }) { return index }
+            if let found = index[id] { return found }
             diagnostics.append(A2UIDiagnostic(
                 reason: .unresolved, path: "\(action).surfaceId",
                 message: "Surface \(id) wasn't created before this \(action), so it's imported as it is."))
+            return made(id)
+        }
+
+        func made(_ id: String) -> Int {
             surfaces.append(Surface(id: id))
+            index[id] = surfaces.count - 1
             return surfaces.count - 1
+        }
+
+        /// Whether the data models have room for `values` more. Once one doesn't fit, nothing
+        /// more is written, and that is said once.
+        func fits(_ values: Int, at path: String) -> Bool {
+            guard values > valuesLeft else {
+                valuesLeft -= values
+                return true
+            }
+            if valuesLeft >= 0 {
+                diagnostics.append(A2UIDiagnostic(
+                    reason: .binding, path: path,
+                    message: "The data model passes \(maximumDataModelValues) values here, so this and what comes after it isn't written."))
+            }
+            valuesLeft = -1
+            return false
         }
 
         for message in messages {
             switch message {
             case .createSurface(let create):
-                let index: Int
-                if let found = surfaces.firstIndex(where: { $0.id == create.surfaceID }) {
-                    guard !surfaces[found].wasCreated else {
+                let found: Int
+                if let known = index[create.surfaceID] {
+                    guard surfaces[known]?.wasCreated == false else {
                         diagnostics.append(A2UIDiagnostic(
                             reason: .duplicateID, path: "createSurface.surfaceId",
                             message: "Surface \(create.surfaceID) is created twice, so the second createSurface is ignored."))
                         continue
                     }
-                    index = found
+                    found = known
                 } else {
-                    surfaces.append(Surface(id: create.surfaceID))
-                    index = surfaces.count - 1
+                    found = made(create.surfaceID)
                 }
-                surfaces[index].wasCreated = true
-                surfaces[index].catalogID = create.catalogID
+                surfaces[found]?.wasCreated = true
+                surfaces[found]?.catalogID = create.catalogID
+                let layer = create.metadata?["extensions"]?.objectValue?["layer"]?.objectValue
+                surfaces[found]?.name = layer?["name"]?.stringValue
+                surfaces[found]?.deviceID = layer?["deviceID"]?.stringValue
                 if let components = create.components {
-                    surfaces[index].write(components, in: "createSurface", into: &diagnostics)
+                    surfaces[found]?.write(components, in: "createSurface", into: &diagnostics)
                 }
-                if let model = create.dataModel {
+                if let model = create.dataModel, fits(1 + model.values.map(count).reduce(0, +), at: "createSurface.dataModel") {
                     // As JSON, so it reads as `updateDataModel` leaves it.
-                    if let encoded = try? JSONEncoder().encode(model), case .value(let value) = read(encoded) {
-                        surfaces[index].dataModel = value
+                    if let encoded = try? JSONEncoder().encode(model), case .value(let value) = decodeJSON(encoded) {
+                        surfaces[found]?.dataModel = value
                     }
                 }
             case .updateComponents(let update):
-                let index = surfaceIndex(update.surfaceID, for: "updateComponents")
-                surfaces[index].write(update.components, in: "updateComponents", into: &diagnostics)
+                let found = surfaceIndex(update.surfaceID, for: "updateComponents")
+                surfaces[found]?.write(update.components, in: "updateComponents", into: &diagnostics)
             case .updateDataModel(let update):
-                let index = surfaceIndex(update.surfaceID, for: "updateDataModel")
+                let found = surfaceIndex(update.surfaceID, for: "updateDataModel")
                 guard !isTooLong(update.path) else {
                     diagnostics.append(A2UIDiagnostic(
                         reason: .binding, path: "updateDataModel.path",
                         message: "Its path is more than \(maximumPathSteps) steps long, so this update is skipped."))
                     continue
                 }
-                var model = surfaces[index].dataModel ?? [:]
+                guard let growth = listGrowth(of: update.path) else {
+                    diagnostics.append(A2UIDiagnostic(
+                        reason: .binding, path: "updateDataModel.path",
+                        message: "Its path reaches past item \(maximumPathIndex) of a list, so this update is skipped."))
+                    continue
+                }
+                guard fits(1 + growth + (update.value.map(count) ?? 0), at: "updateDataModel.value") else { continue }
+                var model = surfaces[found]?.dataModel ?? [:]
+                surfaces[found]?.dataModel = nil
                 model[update.path] = update.value
-                surfaces[index].dataModel = model
+                surfaces[found]?.dataModel = model
             case .deleteSurface(let delete):
-                surfaces.removeAll { $0.id == delete.surfaceID }
+                if let found = index.removeValue(forKey: delete.surfaceID) { surfaces[found] = nil }
             case .callRendererFunction(let call):
                 diagnostics.append(A2UIDiagnostic(
                     reason: .functionNotRun, path: "callRendererFunction",
@@ -313,7 +427,7 @@ extension A2UIImporter {
                     message: "Layer never calls an agent's functions, so this answer is ignored."))
             }
         }
-        return surfaces
+        return surfaces.compactMap { $0 }
     }
 }
 
@@ -362,16 +476,30 @@ private enum Start {
     case nothing
 }
 
-/// Builds one surface's screen: checks its components, walks its graph, maps it to nodes and fixes them.
+/// Builds one surface's screen: walks its graph, checks the components it reaches, maps them to
+/// nodes and fixes them.
 private struct ScreenBuilder {
+    /// What is left of the import's limits: the nodes it may still make, and the children it may
+    /// still consider.
+    struct Budget {
+        var nodes: Int
+        var childRequests: Int
+        /// Whether running out of children to consider has been said, which is said once an import.
+        var saidChildRequestsAreSpent = false
+    }
+
     let surface: Surface
     private(set) var diagnostics: [A2UIDiagnostic] = []
+    /// What the import has left once this screen is built.
+    private(set) var budget: Budget
 
-    /// The catalogue each component is read against, by id.
+    /// The catalogue each component is read against, by id, found as the walk reaches it.
     private var catalogs: [String: AnyCatalog] = [:]
     /// The component each node was made from, by node, for the fixes' diagnostics.
     private var componentOfNode: [UUID: String] = [:]
     private var madeNodes = 0
+    /// How many nodes so far have each key, so a key met again is numbered (see `make`).
+    private var keysMade: [String: Int] = [:]
     /// Each diagnostic given so far, so a template's items don't repeat them.
     private var given: Set<String> = []
 
@@ -385,39 +513,60 @@ private struct ScreenBuilder {
     /// A caption's colour: iOS's secondary label as it shows on white.
     private static let secondaryText = RGBColor(hex: 0x8A8A8E)
 
-    init(surface: Surface) {
+    init(surface: Surface, budget: Budget) {
         self.surface = surface
+        self.budget = budget
     }
 
     mutating func build() -> LayerNode? {
-        check()
         guard let rootComponent = surface.components["root"] else {
             report(.missingRoot, nil, nil, "Surface \(surface.id) has no component with the id root, so it makes no screen.")
             return nil
         }
-        walk()
+        let reached = walk()
+        check(reached)
         guard let mapped = tree(from: "root") else { return nil }
         let rootType = rootComponent["component"]?.stringValue
         var root = screenRoot(mapped, isScreen: rootType == "Column" || rootType == "LayerFree")
         fix(&root)
+        budget.nodes -= Self.count(root)
         return root
     }
 
+    /// How many nodes a tree holds.
+    private static func count(_ root: LayerNode) -> Int {
+        var total = 0
+        var pending = [root]
+        while let node = pending.popLast() {
+            total += 1
+            pending += node.children
+        }
+        return total
+    }
+
     private mutating func report(_ reason: A2UIDiagnostic.Reason, _ id: String?, _ path: String?, _ message: String) {
-        guard given.insert("\(reason)|\(id ?? "")|\(path ?? "")|\(message)").inserted else { return }
+        guard given.insert(reason.rawValue + "|" + (id ?? "") + "|" + (path ?? "") + "|" + message).inserted else { return }
         diagnostics.append(A2UIDiagnostic(reason: reason, componentID: id, path: path, message: message))
     }
 
     // MARK: Catalogues and validation
 
-    /// Finds each component's catalogue and validates the component against it, strictly.
-    private mutating func check() {
-        for id in surface.order {
-            guard let component = surface.components[id] else { continue }
-            let isBasic = readsAsBasic(component, id: id)
-            catalogs[id] = isBasic ? Self.basicCatalog : LayerCatalog.catalog
+    /// The catalogue a component is read against, found the first time it's asked for.
+    private mutating func catalog(of id: String) -> AnyCatalog? {
+        if let known = catalogs[id] { return known }
+        guard let component = surface.components[id] else { return nil }
+        let found = readsAsBasic(component, id: id) ? Self.basicCatalog : LayerCatalog.catalog
+        catalogs[id] = found
+        return found
+    }
+
+    /// Validates each component the walk reached against its catalogue, strictly. One nothing
+    /// reaches isn't imported, so it isn't validated: it's only said to be unreachable.
+    private mutating func check(_ reached: Set<String>) {
+        for id in surface.order where reached.contains(id) {
+            guard let component = surface.components[id], let catalog = catalog(of: id) else { continue }
             do {
-                try (isBasic ? Self.basicValidator : Self.layerValidator).validateComponent(component)
+                try (catalog.id == LayerCatalog.id ? Self.layerValidator : Self.basicValidator).validateComponent(component)
             } catch let error as A2UIValidationError {
                 if error.details.contains(where: { $0.code == "unknown_component" }) {
                     let type = component["component"]?.stringValue ?? ""
@@ -451,8 +600,9 @@ private struct ScreenBuilder {
     // MARK: The graph
 
     /// Walks every child slot from root, each component once, and reports each reference to a
-    /// component that isn't there, each one back to an ancestor, and each component nothing reaches.
-    private mutating func walk() {
+    /// component that isn't there, each one back to an ancestor, and each component nothing
+    /// reaches. Returns the components it reached.
+    private mutating func walk() -> Set<String> {
         var open: Set<String> = ["root"]
         var done: Set<String> = []
         var stack: [(id: String, references: [GraphTopologyValidator.Reference], next: Int)] = [("root", references(of: "root"), 0)]
@@ -478,13 +628,14 @@ private struct ScreenBuilder {
         for id in surface.order where !done.contains(id) {
             report(.unreachable, id, nil, "Nothing reaches it from root, so it isn't imported.")
         }
+        return done
     }
 
     /// The ids a component holds in its child slots, in a steady order.
-    private func references(of id: String) -> [GraphTopologyValidator.Reference] {
+    private mutating func references(of id: String) -> [GraphTopologyValidator.Reference] {
         guard let component = surface.components[id] else { return [] }
         let found: [GraphTopologyValidator.Reference]
-        if let type = component["component"]?.stringValue, let schema = catalogs[id]?.components[type]?.schema.jsonValue {
+        if let type = component["component"]?.stringValue, let schema = catalog(of: id)?.components[type]?.schema.jsonValue {
             found = GraphTopologyValidator.extractReferences(from: component, schema: schema)
         } else {
             // Unknown, so there's no schema to say where its children are: the Basic Catalog's names.
@@ -498,7 +649,13 @@ private struct ScreenBuilder {
             }
             found = plain
         }
-        return found.sorted { $0.field.compare($1.field, options: .numeric) == .orderedAscending }
+        // A component's properties come in no steady order, but the references in each come in
+        // the order they're written: so by property, and in each as written.
+        let properties: [Substring] = found.map { reference in reference.field.prefix { $0 != "[" && $0 != "." } }
+        let order = found.indices.sorted { a, b in
+            properties[a] != properties[b] ? properties[a] < properties[b] : a < b
+        }
+        return order.map { found[$0] }
     }
 
     private mutating func reportCycle(from id: String, field: String, to ancestor: String) {
@@ -508,8 +665,8 @@ private struct ScreenBuilder {
     // MARK: Mapping
 
     /// The component `id`, if it can be built at `place`: it's there, it isn't one of its own
-    /// ancestors, it's no more than 50 below root, its catalogue knows it, and the node limit
-    /// isn't passed. Each reason it can't is reported once, here or in the walk or the check.
+    /// ancestors, it's no more than 50 below root, its catalogue knows it, and the import's node
+    /// limit isn't passed. Each reason it can't is reported once, here or in the walk or the check.
     private mutating func admit(_ id: String, from parent: String?, field: String?, at place: Place) -> Component? {
         guard let component = surface.components[id] else { return nil }
         if place.ancestors.contains(id) {
@@ -522,8 +679,21 @@ private struct ScreenBuilder {
         }
         guard let type = component["component"]?.stringValue, catalogs[id]?.components[type] != nil else { return nil }
         // One past the limit is made, so the fixes cut it and say so.
-        guard madeNodes <= TreeRules.maximumNodes else { return nil }
+        guard madeNodes <= budget.nodes else { return nil }
         return component
+    }
+
+    /// How many of the `count` children component `id` asks for the import may still consider.
+    /// Once it may consider no more, that's said once, and nothing more is asked for.
+    private mutating func considered(_ count: Int, by id: String) -> Int {
+        let allowed = min(count, max(0, budget.childRequests))
+        budget.childRequests -= allowed
+        if allowed < count, !budget.saidChildRequestsAreSpent {
+            budget.saidChildRequestsAreSpent = true
+            report(.invalidComponent, id, "children",
+                   "The import asks for more than \(A2UIImporter.maximumChildRequests) children in all, so from here on what it holds isn't imported.")
+        }
+        return allowed
     }
 
     /// The tree from component `id` down. It's built with a stack of open containers rather than
@@ -566,7 +736,8 @@ private struct ScreenBuilder {
         switch type {
         case _ where Self.containerTypes.contains(type):
             var node = make(.group, id, at: place)
-            node.layout = layout(of: id, component, spacing: 12)
+            // A screen's root column is spaced as the outline spaces one, and a column in it as a section.
+            node.layout = layout(of: id, component, spacing: place.depth == 0 && type == "Column" ? 24 : 12)
             let requests = childRequests(of: id, component, at: place.inside(id, axis: node.layout?.stackAxis))
             return .container(OpenContainer(node: node, id: id, component: component, place: place, requests: requests))
         case "Card":
@@ -657,14 +828,22 @@ private struct ScreenBuilder {
         return node
     }
 
-    /// A new node of `kind` made from component `id`, at its kind's starting size. `part` names
-    /// a further node made from the same component, and a template item's pointer follows `@`,
-    /// so every node's key is its own.
+    /// A new node of `kind` made from component `id`, at its kind's starting size, keyed so that
+    /// every node's key is its own and the same file always gives the same keys: the id, with
+    /// `/` and `part` for a further node made from the same component, and `@` and the item's
+    /// pointer inside a template. The id is escaped (`~0` `~`, `~1` `/`, `~2` `@`, `~3` `#`), and
+    /// the pointer too but for its slashes, so none of those marks can come from either. A key
+    /// already made, as for a component two parents share, is numbered from the second time on
+    /// in reading order: `line`, `line#2`, `line#3`.
     private mutating func make(_ kind: ElementKind, _ id: String, part: String? = nil, at place: Place) -> LayerNode {
         var node = LayerNode(kind: kind)
         (node.width, node.height) = NaturalSize.defaultSizing(for: kind)
-        var key = part.map { "\(id)/\($0)" } ?? id
-        if !place.scope.isEmpty { key += "@" + place.scope }
+        var key = Self.escaped(id, keepingSlashes: false)
+        if let part { key += "/" + part }
+        if !place.scope.isEmpty { key += "@" + Self.escaped(place.scope, keepingSlashes: true) }
+        let made = keysMade[key, default: 0] + 1
+        keysMade[key] = made
+        if made > 1 { key += "#\(made)" }
         node.source = LayerNode.Source(origin: .imported, key: key)
         componentOfNode[node.id] = id
         madeNodes += 1
@@ -692,6 +871,13 @@ private struct ScreenBuilder {
             node.accessibility = LayerNode.Accessibility(label: words)
         }
         look.apply(to: &node)
+    }
+
+    /// `text` with the marks a key is built with escaped, as a JSON pointer escapes `~` and `/`.
+    private static func escaped(_ text: String, keepingSlashes: Bool) -> String {
+        var escaped = text.replacingOccurrences(of: "~", with: "~0")
+        if !keepingSlashes { escaped = escaped.replacingOccurrences(of: "/", with: "~1") }
+        return escaped.replacingOccurrences(of: "@", with: "~2").replacingOccurrences(of: "#", with: "~3")
     }
 
     /// How a row, column, list, grid, overlay or free group lays out its children. A2UI gives
@@ -744,7 +930,8 @@ private struct ScreenBuilder {
         if let template = component["children"]?.objectValue {
             return repeated(template["componentId"]?.stringValue, over: template["path"]?.stringValue, of: id, at: place)
         }
-        return (component["children"]?.arrayValue ?? []).enumerated().compactMap { index, item in
+        let children = component["children"]?.arrayValue ?? []
+        return children.prefix(considered(children.count, by: id)).enumerated().compactMap { index, item in
             item.stringValue.map { Request(id: $0, parent: id, field: "children[\(index)]", place: place) }
         }
     }
@@ -760,13 +947,13 @@ private struct ScreenBuilder {
             count = 1
         } else if let list = surface.dataModel?[pointer]?.arrayValue {
             // Each item makes a node at least, so no more are asked for than can be kept.
-            count = min(list.count, TreeRules.maximumNodes + 1)
+            count = min(list.count, max(0, budget.nodes) + 1)
         } else {
             let why = surface.dataModel == nil ? "no data model was sent" : "the data model has no list there"
             report(.template, id, "children", "Its children repeat over \(path), but \(why), so one is shown.")
             count = 1
         }
-        return (0..<count).map { index in
+        return (0..<considered(count, by: id)).map { index in
             var each = place
             each.scope = "\(pointer)/\(index)"
             return Request(id: item, parent: id, field: "children.componentId", place: each)
@@ -904,7 +1091,8 @@ private struct ScreenBuilder {
             text.content.text = label
             column.children.append(text)
         }
-        for (index, option) in (component["options"]?.arrayValue ?? []).enumerated() where madeNodes <= TreeRules.maximumNodes {
+        for (index, option) in (component["options"]?.arrayValue ?? []).enumerated() {
+            guard madeNodes <= budget.nodes else { break }
             var row = make(.group, id, part: "\(index)", at: place)
             row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 8, alignment: .center))
             var box = make(mark, id, part: "\(index)/mark", at: place)
@@ -1023,14 +1211,14 @@ private struct ScreenBuilder {
 
     /// A root Column is the screen root, as is a root LayerFree, which is how Layer writes a free
     /// screen, its children placed by their frames in Layer's look. Anything else is held in a
-    /// column that is the screen root. Either way it's a group with no padding: TreeRules writes
-    /// a screen root's padding.
+    /// column that is the screen root, spaced 24 as the outline spaces one. Either way it's a
+    /// group with no padding: TreeRules writes a screen root's padding.
     private func screenRoot(_ mapped: LayerNode, isScreen: Bool) -> LayerNode {
         var root = mapped
         if !isScreen {
             root = LayerNode(kind: .group)
             (root.width, root.height) = NaturalSize.defaultSizing(for: .group)
-            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 12, alignment: .fill))
+            root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 24, alignment: .fill))
             root.source = LayerNode.Source(origin: .imported, key: nil)
             root.children = [mapped]
         }
@@ -1039,31 +1227,23 @@ private struct ScreenBuilder {
         return root
     }
 
-    /// Fixes the tree as generated trees are fixed, and reports each fix against its component.
+    /// Fixes the tree as generated trees are fixed, keeping it to the nodes the import has left,
+    /// and reports each fix against its component.
     private mutating func fix(_ root: inout LayerNode) {
-        // A control the layout sizes gets its natural height, never under 44, so the check for
-        // short controls only means something for one whose height is fixed.
-        var laidOutHeights: Set<UUID> = []
-        var pending = [root]
-        while let node = pending.popLast() {
-            if node.height.mode != .fixed { laidOutHeights.insert(node.id) }
-            pending += node.children
-        }
-        for issue in TreeValidator.fixGenerated(&root) {
+        for issue in TreeValidator.fixGenerated(&root, keepingAtMost: budget.nodes) {
             let id = issue.node.flatMap { componentOfNode[$0] }
             switch issue.kind {
             case .tooDeep:
                 report(.tooDeep, id, nil, "It's at the deepest level a design can have, \(TreeRules.maximumDepth), so what it holds is moved up beside it.")
             case .tooMany:
-                report(.invalidComponent, id, nil, "The screen passes \(TreeRules.maximumNodes) nodes here, so this one and the rest aren't imported.")
+                report(.invalidComponent, id, nil, "The import passes \(TreeRules.maximumNodes) nodes here, so this one and the rest aren't imported.")
             case .notAllowedHere:
                 report(.invalidComponent, id, nil, "It can't be where it is, so it isn't imported.")
             case .badGeometry:
-                report(.invalidComponent, id, nil, "A size, spacing or padding that isn't 0 or more is read as 0.")
+                report(.invalidComponent, id, nil, "A number in it that a design can't hold (not a number, negative where a size is meant, or far too large) is brought into range.")
             case .smallText:
                 report(.nearestKind, id, nil, "Its text is raised to 11 points, the smallest Layer uses.")
             case .smallControl:
-                if let node = issue.node, laidOutHeights.contains(node) { continue }
                 report(.nearestKind, id, nil, "It's raised to 44 points high, the least a control can be.")
             case .clipped:
                 report(.nearestKind, id, nil, "It goes past its screen.")
