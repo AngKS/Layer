@@ -639,13 +639,17 @@ the kinds A2UI lacks, using the SDK's `derive(id:components:functions:)`.
 | Grid | `Grid(horizontalSpacing:verticalSpacing:)` with `GridRow`s |
 | Overlay | `ZStack(alignment:)` |
 | Card | its layout's stack, `.padding(16)`, `.background(.background.secondary, in: .rect(cornerRadius: 16))` |
-| Free container | `ZStack(alignment: .topLeading)` with each child `.frame(width:height:)`, `.rotationEffect` and `.offset(x:y:)`, inside `.frame(width:height:)`. This is the absolute-position fallback. |
-| Free screen root | today's exact-positions output |
+| Free container | **Structure:** today's reading-order inference, its children read at their host-space frames and angles. Rows by vertical overlap become `HStack`s, gaps become `.padding(.top, …)`, the side margin is inferred, and the numbers stay literal. A free group inside it is transparent: its members join the inference. A card or a laid-out container is one item, and its own code follows this table. Below the screen root, the inference runs inside the container's content box, with no safe areas and no bottom `Spacer()`, framed `.frame(width:height:alignment: .topLeading)`. **Exact positions:** `ZStack(alignment: .topLeading)` with each child `.frame(width:height:)`, `.rotationEffect` and `.offset(x:y:)`, the absolute-position fallback. |
+| Free screen root | **Structure:** today's reading-order inference, as above, with today's safe areas and bottom `Spacer()`. A sketched screen of leaves exports byte for byte as today. **Exact positions:** today's exact-positions output. |
 | Column screen root | a `VStack` that respects the safe area, with the root's padding |
 | Leaves | today's native views and styling, `.rotationEffect`, names as comments |
 
 `CodeSettings.layout` becomes **Structure** (the default, which follows the tree) or **Exact
 positions** (everything absolute, as today's mode).
+- In Structure, free containers, sketched screens included, are written by today's reading-order
+  inference, so a sketched screen's code doesn't regress. Laid-out containers, cards and column
+  roots follow the table and use the design's token names. (Amended 2026-11-23 by plan 3's call
+  12, the controller's ruling for the user's priority of structural design on sketched screens.)
 - Hidden nodes and drawings are left out, and so is the open canvas.
 - View names stay unique.
 - Share, the code panel and Siri still produce the same code.
@@ -953,6 +957,11 @@ tokens". I proposed the design below to the user, who may correct it.
     - Layer's catalogue id is `urn:layer:a2ui:catalog:1`, and Layer's look travels in
       `@metadata.extensions.layer`.
 11. **Code settings:** "Stack" is renamed "Structure", and "Exact positions" stays.
+    - In Structure, free containers (a sketched screen's root included) are written by today's
+      reading-order inference, read from the tree. Laid-out containers, cards and column roots
+      follow §7's table.
+    - Exact positions is absolute for everything.
+    - Amended 2026-11-23 by plan 3's call 12.
 12. **Limits:** depth 32, 5,000 nodes per design, and grid columns 1–12.
 13. **Generation still always makes a new screen.** Siri's Build Screen of an existing screen
     reconciles rather than replacing it.

@@ -19,6 +19,32 @@
 
 **Starts when:** plan 2 is complete and merged into `feature/semantic-tree`, its Task 12 has filled the "After plan 2" column of `docs/benchmarks/semantic-tree.md`, and plan 1's `scripts/check-generated-swiftui.sh` passes on the branch.
 
+## Pre-flight amendments 2026-11-23
+
+The pre-flight scan is in `.superpowers/sdd/2026-11-23-semantic-tree-3-structured-generation/preflight.md`. The controller accepted every ruling, and each is written into the tasks below. Plan 1's fix wave names the guarded decode `A2UIImporter.decodeJSON(_:)` / `guardedMessages(from:)`, the screen's name and device `A2UIImport.Screen.name` / `.deviceID`, and the exporter's screen form `A2UIExporter.messages(for: TreeScreen, surfaceID:)` / `jsonLines(for: TreeScreen, surfaceID:)`. If they merge under other names, use the merged ones.
+
+- **F1.** Every A2UI decode goes through plan 1's guarded entry point, never the SDK's `parseAll` on text. `A2UIStream` hands the importer its good lines one message per line, not re-wrapped in an array, and T13 greps `parseAll`.
+- **F2.** A good stream line is a guarded decode that gives a JSON object yielding at least one A2UI 1.0 message. When the whole-answer read makes the screen, the per-line failures are dropped.
+- **F3.** M2: Layer's own A2UI carries the screen's name and device. T8's `document` takes the screen. T10 and T11 use them when trusted. An untrusted import ignores `createSurface`'s `extensions.layer` too.
+- **F4.** Round trips (T8, T10) compare as plan 1's `A2UIExportTests.expectSame` does, so the root's padding, which `TreeRules` writes, is left out.
+- **F5.** No new waits. T8's tests use plan 1's `importJSON(_:)`, and T10's tests use plan 1's exporter, not T8's `document`.
+- **F6.** A stack's cross-axis `.fill` exports as its leading (or top) alignment, plus a filling frame on each child the engine stretches. Toggles, checkboxes, radios, avatars and symbols get none (M3/A10).
+- **F7.** T1's tests use laid-out groups where a container holds no child or one, and a free group of two where it must stay free. T7's fixture adds an empty row (A7: only empty free groups go).
+- **F8.** `merge.dropped` is the written keys absent from the whole generated tree. A node the generator moved to another parent is moved, never dropped.
+- **F9.** An untrusted import also ignores `LayerGrid`'s `columnSpacing` and `rowSpacing`, and uses the tokens instead.
+- **F10.** The A2UI prompt says `LayerGrid`'s `columns` is required. The harness package depends on swift-json-schema (`JSONSchema`, `OrderedJSON`), has stubs for `SystemSymbol` and `ModelPreferences.serverURL`, and copies `ScreenDrawing.swift` when it exists. `laidOut`'s counting is DEBUG only.
+- **F11.** `-only-testing` takes struct names: see the table in the Global Constraints. Nested `HostedWindowSuites` suites, and a run of 0 tests counts as a failure.
+- **F12.** Clause (f) gains `ScreenGenerator.stream(_:board:using:)`. T13 ports `OutlineTests:198`, renames `ScreenBlueprintTests` and edits `LookWords.swift`'s comment. T3 drops `SystemSymbolTests`. `CodeOfElements` keeps every signature today's tests call.
+- **F13.** No test asserts an exact value of a global counter. Template previews and A2UI documents are counted per name and per surface.
+- **F14.** Build Screen: H is compared by its record, frame left out. The `nothingInA2UI` payload has a `createSurface`, and the error carries the missing root's message. Call 7's re-lay and the outline's polish are accepted.
+- **F15.** The spec's §7 and My call 11 record call 12. "Leaf code moved over unchanged" means the view; its sized frame and placement tail split off.
+- **F16.** `Look.apply(to element:)` goes through `Look.apply(to node:)`, so the rule lives once.
+- **F17.** Lane B runs the check script with its own simulator and DerivedData after T7, T8 and T9. T12's and T13's measurements run on a quiet machine.
+- **F18.** Only `ScreenDrawing` and `DesignScreen.drawing` carry the projection marker. `ElementView`'s additions don't.
+- **F19.** T10 keeps the import report in view state, not in `AppModel.swift`, which is lane A's. Its UI test inlines the login JSON.
+- **F20.** Spec §9's reporting of unfixable issues in generated and imported trees is deferred to plan 6, and recorded in the ledger in T13.
+- **F21.** `DesignTokens` and `GridRow` join the reserved view names.
+
 ## Calls made in this plan
 
 1. **Merge and lay out off the main actor from a snapshot; commit only over that snapshot.** For each update, the writer takes the screen's root, its device id and the design's settings (values). It merges and lays out in a detached task, and commits with the hint (call 6) only if all three are still as they were. If the person changed the screen, its device or the tokens meanwhile, the merge is done again on the main actor over the screen as it is now, and the rules lay out what that changed.
@@ -34,17 +60,26 @@
 6. **The commit lays nothing out.** `commitGenerated` and `addLaidOutScreens` set a one-shot hint: for that change, `TreeRules` is given a `previous` in which that screen already has the committed root. So the rules find nothing dirty there (spec §4, "so the commit finds nothing dirty"). `TreeRules` itself is unchanged.
 7. **Build Screen over an existing screen** starts a reconciler by *adopting* the screen: each node with a `source.key` counts as written, as it is now (the first one in pre-order when two share a key). The root takes the generated layout. Hand-made nodes (no key) stay, at their place in the order (call 4).
    - Why: My call 13 says Build Screen reconciles rather than replaces, and "hand-added nodes are never touched". The person asked for this rebuild, so the built nodes take the new layout.
+   - "Never touched" means the reconciler never writes them. Under a root that becomes a column, the engine re-lays them with it (F14).
 8. **Hosted format.** `ScreenGenerator.hostedFormat = .a2ui` is one constant. "The outline as the hosted fallback" means flipping it; there's no retry at run time. On-device always writes the outline. Plan 6 measures and may flip it (My call 17).
    - Why: a retry doubles a paid request, and the user decided the default.
 9. **A2UI streams one message per line.** The prompt asks for one JSON object per line, and each `updateComponents` adds the next part of the screen.
-   - A line that doesn't parse is skipped and reported. A partial graph imports what resolves from `root`.
-   - If, once the answer is complete, no line parsed on its own, the whole answer is read as one payload. A model that pretty-printed its JSON still gets its screen, just not streamed.
+   - Every line is decoded through plan 1's guarded entry point (B7), never the SDK's `parseAll` on text (F1).
+   - A line is good when it decodes to a JSON object that yields at least one A2UI 1.0 message (F2). A bare string, number or `null` is not good, though the SDK parses it to nothing without an error.
+   - A line that isn't good is skipped and reported once. A partial graph imports what resolves from `root`.
+   - If, once the answer is complete, no line was good, the whole answer is read as one payload, and the per-line failures are dropped. A model that pretty-printed its JSON still gets its screen, just not streamed.
    - Diagnostics are shown only when the answer is complete.
    - Why: half-written JSON can't be parsed, and the SDK parses whole messages.
-10. **A model never sets a number.** A generated A2UI screen's `@metadata.extensions.layer` is ignored (`trustsLayerLook: false`). The outline's and the importer's starting spacings come from the design's tokens: the rhythm step nearest each standard value, and the card's padding. Drops, paste, Files and Siri do trust Layer's look, so Layer → A2UI → Layer stays lossless.
+10. **A model never sets a number.** A generated A2UI screen's Layer look is ignored (`trustsLayerLook: false`). That covers:
+    - every component's `@metadata.extensions.layer`;
+    - `createSurface`'s `metadata.extensions.layer`, the screen's name and device (F3);
+    - `LayerGrid`'s `columnSpacing` and `rowSpacing`, which take the tokens' spacing instead (F9).
+
+    The outline's and the importer's starting spacings come from the design's tokens: the rhythm step nearest each standard value, and the card's padding. Drops, paste, Files and Siri do trust Layer's look, so Layer → A2UI → Layer stays lossless, its name and device included.
     - Why: §14 says "no model ever picks a number". Plan 2 call 15 hands tokens to generation here.
-11. **One primary action** applies to every generated screen, whether outline or A2UI (`Outline.withOnePrimaryAction`). It doesn't apply to imports.
+11. **One primary action** applies to every generated screen, whether outline or A2UI (`Outline.withOnePrimaryAction`). It doesn't apply to A2UI imports.
     - Why: it's a rule about generation quality. An import says what its author meant.
+    - Build Screen's outline keeps `Outline.parse`'s built-in polish. "Imports" here means A2UI (F14).
 12. **Controller amendment: call 12.** In **Structure** mode, a free container (a free screen root included) is exported by today's reading-order inference, moved to read the tree:
     - Its children are read at their host-space frames and angles (`TreeIndex`), in place of `DesignElement`s.
     - The inference is today's: rows by vertical overlap become `HStack`s, gaps become `.padding(.top, …)`, the side margin is inferred, and a last row near the bottom becomes a `Spacer()`.
@@ -56,6 +91,7 @@
     **Exact positions** is absolute for everything, as today.
     - Why: sketched (free) screens are Layer's main path, and the user's priority is better structural design. So the export must not regress for them between plans 3 and 5, or after wherever a free root remains.
     - The tests that pin today's inference pass unchanged. Two goldens recorded from today's generator before the rewrite pin it byte for byte (Task 3).
+    - The spec records this in §7's table and in My call 11 (F15).
 13. **The export's tokens.**
     - Tokens are written only when some code uses a token name. So a sketched screen's code is today's, byte for byte, and its file list doesn't change.
     - When code does use one, `files(for:)` writes one `DesignTokens.swift` first. One screen's code (Share's SwiftUI Code, the code panel, Siri) is the view followed by the same `enum DesignTokens`, so it compiles on its own as today's does.
@@ -78,6 +114,7 @@
 18. **Imports.**
     - Imported screens are made on the canvas's new-screen device, side by side from the drop point or where new screens go.
     - Each is named from its first title (its words, at most 40 characters), else "A2UI Screen".
+    - Exception (F3, M2): a surface that carries Layer's own name and device keeps them, since a trusted import reads `createSurface.metadata.extensions.layer`. The device resolves through `settings.device(named:)`, and is the new-screen device when this design doesn't have it.
     - The whole import is one undo step, "Import A2UI".
     - An import with no screen makes no undo step.
     - Why: generation already treats a new screen this way (the device, the placement, and naming from the words). An undo step that changes nothing would be one Undo that seems to do nothing, which today's generation already avoids.
@@ -106,6 +143,8 @@
   - Products **`A2UISwiftCore` and `BasicCatalog` only**.
   - Never use `MessageProcessor`, `SurfaceGroupModel`, `A2UISwiftUI` or `BasicCatalogSwiftUI`.
 - **Running A2UI content:** an A2UI `action`, `@call` or `callRendererFunction` is never evaluated or run. It is only reported.
+- **Decoding A2UI (F1):** every A2UI text is decoded through plan 1's guarded entry point (`A2UIImporter.decodeJSON(_:)` / `guardedMessages(from:)`) or through `importJSON`, which uses it. That covers a file, a paste, a drop, a streamed line and Siri's text. Nothing calls the SDK's `parseAll` on text.
+- **Counters (F13):** no test asserts an exact value of a global counter that other suites also raise while they run in parallel. Count per id, name or surface: `LayoutEngine.timesLaidOut(id)`, `GenerationWork.commits(on:)` and `layoutsAhead(of:)`, `CodeWork` per screen, `AssetLibrary.templatePreviewsMade(named:)`, `A2UIExporter.documentsWritten(for:)`.
 - **Every `xcodebuild` command** (in this plan, in scripts and in docs) passes `-skipPackagePluginValidation`, and `-skipMacroValidation` too if plan 1's ledger says so.
 - **Limits:**
   - tree depth 32;
@@ -141,7 +180,14 @@
   - the full unit suite passes;
   - the UI suite fails no test outside plan 1's recorded baseline set (spec My call 19).
 
-  The UI suite runs in Tasks 3, 4, 5, 7, 8, 9, 10 and 13. From Task 7 on, `scripts/check-generated-swiftui.sh` passes after every lane B task and at the end.
+  The UI suite runs in Tasks 3, 4, 5, 7, 8, 9, 10 and 13. From Task 7 on, `scripts/check-generated-swiftui.sh` passes after every lane B task and at the end. Lane B runs it with its own simulator and DerivedData (F17):
+
+  ```
+  LAYER_SIMULATOR="Layer iPad Pro 11 (st3-lane-b)" \
+  LAYER_DERIVED_DATA="$HOME/Library/Developer/Xcode/DerivedData/Layer-st3-lane-b" \
+    scripts/check-generated-swiftui.sh
+  ```
+- **Measuring (F17).** Task 12 Step 2 (on-device latencies) and Task 13 Step 5 (store-change p95s) run only while no other lane or `xcodebuild` is running. Record in the ledger that the machine was quiet.
 - **The test-fallout policy.** A test written before this plan may be changed or retired only if it asserts one of these:
   - (a) the v1–v3 file or its readers: the JSON keys `elements` or `floating`, a top-level `canvas` object of settings, `drawing.data`, or a version below 4;
   - (b) a flat-list state the tree can't hold:
@@ -154,7 +200,7 @@
   - New in plan 3:
   - (f) it calls an API this plan replaces, and only the call changes, to its replacement. What it asserts stays. The APIs are:
     - `ScreenBlueprint` (`parse`, `layout(on:)`, `Item`, `applyLook`, `kindWords`, `kind(named:)`);
-    - `ScreenGenerator.blueprint(ofFinishedLinesIn:isComplete:)`, `itemCount`, `Update.screen(ScreenBlueprint)`, and `screenStream`'s three arguments;
+    - `ScreenGenerator.blueprint(ofFinishedLinesIn:isComplete:)`, `itemCount`, `Update.screen(ScreenBlueprint)`, `screenStream`'s three arguments, and `ScreenGenerator.stream(_:board:using:)`, which becomes `stream(_: Request)` (F12);
     - `writeGenerated`, `setElements(_:on:replacing:)`, `CodeSettings.Layout.stack`, and the export's `DesignScreen` input (`SharedSwiftUICode`, `CodePreview.Shown`).
   - (g) a stubbed hosted model answers in the written form, which hosted models no longer write (call 8). The stubbed answer becomes A2UI lines, and the assertions stay.
   - (h) a record of something this plan deletes: the `ComponentKinds.txt` lines on blueprint sizes are recorded again from the outline.
@@ -174,6 +220,25 @@
 
   - The full unit suite is the same command without `-only-testing`.
   - The UI suite is the same command with `-testPlan Layer -only-testing:LayerUITests`.
+  - **Suite names (F11).** Where this plan names a test file rather than a suite struct, run every struct below, each with its own `-only-testing:LayerTests/<Struct>`. A suite nested in `HostedWindowSuites` runs as `-only-testing:LayerTests/HostedWindowSuites/<Struct>`. Check once that this form runs more than 0 tests; if it doesn't, run `HostedWindowSuites` whole. A run that executes 0 tests counts as a failure.
+
+    | Name in this plan | Structs to run |
+    |---|---|
+    | SiriIntentsTests | ScreenBlueprintTests (renamed in Task 13), EntityKeyTests, ColourTests, DesignLibraryTests, DesignIndexTests, OpeningDesignTests, DesignActionTests, ImagePlaygroundTests, StrokeScriptTests, LookWordTests, MovingTests |
+    | ScreenGenerationTests | ScreenStreamParsingTests, ScreenPromptTests, SketchHintTests, ScreenGenerationLifecycleTests (LMStudioLiveTests is gated) |
+    | DesignTests | ElementLayoutTests, ViewportTests, DesignStoreTests, AppModelTests, DesignFileTests, CodeGenerationTests, SymbolCatalogTests, DesignFileNameTests, CloudFileTests, ResourceTests, ClosingTests, FormatPanelEditTests, FileCheckTests, TurnedCodeTests |
+    | FreeformTests | SettingsTests, FreeformBehaviourTests, MoreMagicPenTests, MoreCodeTests, ScrubbingTests |
+    | MagicPenComponentTests | InnerMarkTests, SmallControlTests, SketchedLayoutTests, NewControlCodeTests |
+    | GroupTests | GroupModelTests, GroupCommandTests, SelectingGroupsTests, GroupGeometryTests, GroupAsOneThingTests, LayerTreeTests |
+    | LayersPanelTests | HostedWindowSuites/LayersPanelWorkTests |
+    | CanvasHitTestTests | HiddenHitTestTests, InkOverAnElementTests, GlideAndFingerTests, PaletteStateInTestsTests, SelectionAreaTapTests, HostedWindowSuites/CanvasFocusTests, HostedWindowSuites/PaletteAndTypingTests |
+    | CanvasDragWorkTests | CanvasDragWorkTests, HostedWindowSuites/CanvasTargetsWorkTests |
+    | PerformanceFixTests | PerformanceFixTests, HostedWindowSuites/ShareMenuWorkTests, HostedWindowSuites/PencilBridgeWorkTests |
+    | HostedModelTests | HostedModelTests, ModelChoiceTests |
+    | ConcurrentEditTests | ConcurrentEditTests, ConcurrentEditsGroupedByEventTests |
+    | ScreenTidyTests | ScreenTidyTests, VoiceScreenLayoutTests |
+    | VoiceToolsTests | VoiceHandlesTests, CanvasPictureTests, VoiceToolsTests |
+    | AssetLibraryTests | AssetLibraryTests, AddingAssetsTests, ShapeTests |
   - **Lanes B and C** run in their own worktrees (`.claude/worktrees/st3-lane-b`, `.claude/worktrees/st3-lane-c`). Their branches are `st3/lane-b` and `st3/lane-c`, cut from `feature/semantic-tree` when plan 3 starts. Their commands are the same with:
     - simulator `Layer iPad Pro 11 (st3-lane-b)` or `Layer iPad Pro 11 (st3-lane-c)`, each cloned from `iPad Pro 11-inch (M5)`;
     - DerivedData `$HOME/Library/Developer/Xcode/DerivedData/Layer-st3-lane-b` or `-st3-lane-c`.
@@ -212,6 +277,11 @@
   - Tasks 10 and 11 wait for Tasks 1 and 2.
   - Task 13 waits for every other task.
 - No two lanes edit the same file before Task 13. Task 13 edits test files of every lane, which is why it waits.
+- Lane boundaries (F5, F19):
+  - Task 8's tests use plan 1's `importJSON(_:)` (which Task 2 defines as `.standard, true`), not Task 2's overload.
+  - Task 10's tests use plan 1's exporter (`jsonLines(for: TreeScreen, surfaceID:)`), not Task 8's `document`.
+  - So neither waits across lanes.
+  - Task 10 keeps its import report in view state, never in `AppModel.swift`.
 
 ---
 
@@ -245,7 +315,7 @@
       struct Merge: Sendable {
           var root: LayerNode
           var deletedByUser: Set<String>         // keys found missing since their commit
-          var dropped: Set<String>               // written keys the generator no longer has, removed (unchanged by the person)
+          var dropped: Set<String>               // written keys absent from the whole generated tree, removed (unchanged by the person) (F8)
       }
       static let rootKey = ""                   // the screen root's key, as `Outline` writes it
       private(set) var written: [String: Written]
@@ -312,9 +382,12 @@
       for c in cs in order, where c isn't in seq and isn't ours (hand-added, or the person's and not listed here):
         anchor = the nearest earlier sibling of c in cs that is in seq
         insert c just after anchor (after any others already put there), or first when there is none
-      ours nodes in cs that aren't in seq go: they are dropped
+      ours nodes in cs that aren't in seq leave P:
+        their key is somewhere else in G → they were moved: built where G puts them, with their id (never dropped)
+        their key is nowhere in G         → they are dropped, and their key goes in `dropped`           (F8)
     root: id = C.id; layout and source from G; every other root field from C; children = children(of: root, G.children, C.children)
   ```
+  `dropped` is decided against the whole of G (all its keys, gathered in the walk), never against one parent's list. Otherwise a node the generator moved would be forgotten, given a new id on the next update, and kept twice (F8).
   `record` walks the merged root:
   - a key whose id is in `committed` becomes `.node(id, Record(that node))`;
   - a key whose id isn't becomes `.removedByRules(id)`;
@@ -349,13 +422,15 @@
     - Again, but with b's text changed by the person before the merge: ids `[a, b, c]`, with b's text the person's.
   - `aLaidOutFrameIsNotAnEdit`: commit `"title: A\nbutton: Go"`, set the title's frame to (0, 0, 10, 10) in the current root, then merge `"title: B\nbutton: Go"`. The title's text is "B".
   - `aFrameInAFreeContainerIsAnEdit`:
-    - A free group "f" holds a fixed child "x" at (10, 10, 50, 20). Commit.
+    - A free group "f" holds two fixed children, "x" at (10, 10, 50, 20) and "y" at (80, 10, 50, 20). It holds two so that the rules don't dissolve it (F7). Commit.
     - Move x to (30, 10, 50, 20) in the current root, then merge with x's text changed.
     - x's frame is (30, 10, 50, 20), and its text is the old one.
   - `theGeneratorsOrderIsKeptAndHandNodesKeepTheirPlace`: the current root is `[a, H, b]` (H hand-made). Merge `[b, a]`, and the order is `[b, a, H]`.
   - `aNodeTheGeneratorMovesGoesWithItUnlessChanged`:
-    - Commit `root[c1[x], c2[]]`, then merge `root[c1[], c2[x]]`: x is under c2 with the same id.
-    - Again with x's text changed by the person: x stays under c1.
+    - c1 and c2 are laid-out groups (columns). Laid-out groups persist empty or with one child, where free groups would be removed or dissolved at commit (F7, A7).
+    - Commit `root[c1[x], c2[]]`, then merge `root[c1[], c2[x]]`: x is under c2 with the same id, and `merge.dropped` is empty (F8).
+    - Record, then merge `root[c1[], c2[x]]` again: x keeps its id, and no second x appears.
+    - Again from the start, with x's text changed by the person: x stays under c1.
   - `aRepeatedKeyIsWrittenOnce`: generated children keyed `["k", "k"]` merge to one child with that key, the first.
   - `aNodeTheRulesRemovedIsWrittenAgainWithItsID`:
     - A free group "g" of one child is merged. The rules dissolve it in the commit, so after `record`, `written["g"] == .removedByRules(id: g.id)`.
@@ -381,10 +456,10 @@
 
 - [ ] **Step 3: Implement.**
   - `TreeReconciler` follows the merge above, with one walk to index C and one to build. It is O(N) with dictionaries.
-  - `laidOut` builds a one-screen `TreeContent` with `settings` and the device id, applies `TreeRules` after a copy holding `previous`, returns the root, and counts in `GenerationWork`.
+  - `laidOut` builds a one-screen `TreeContent` with `settings` and the device id, applies `TreeRules` after a copy holding `previous`, returns the root, and counts in `GenerationWork`. The counting is under `#if DEBUG`, since the screen harness builds this file for release (F10).
   - The two store verbs set `laidOutAhead` and make one change each: `commitGenerated` through `reconcile(_:_:)`, and `addLaidOutScreens` by appending every screen in one change. So each is one undo step, or part of the acting edit, as plan 2's verbs are; never a step of its own inside a generation's edit. `applying` substitutes `previous` per call 6.
 
-- [ ] **Step 4: Run them.** Run both suites, then `TreeVerbTests`, `StoreOnTheTreeTests`, `ConcurrentEditTests` and the full unit suite. Expected: PASS, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run both suites, then `TreeVerbTests`, `StoreOnTheTreeTests`, `ConcurrentEditTests` and `ConcurrentEditsGroupedByEventTests`, and the full unit suite. Expected: PASS, and TEST SUCCEEDED.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "TreeReconciler: generated trees merged by key over the screen as it is, the person's changes and hand-added nodes left alone, laid out ahead and committed once"`
 
@@ -402,14 +477,16 @@
 
 **Interfaces:**
 - Consumes:
-  - from plan 1: `Look`, `LookWords.look(from:)`, `LookWords.kind(named:)`, `LookWords.kindWords`, `ColourWords`, `Outline.parse(_:isComplete:)`, `A2UIImporter.importJSON(_:)` and `A2UIImport`;
+  - from plan 1: `Look`, `LookWords.look(from:)`, `LookWords.kind(named:)`, `LookWords.kindWords`, `ColourWords`, `Outline.parse(_:isComplete:)`, `A2UIImporter.importJSON(_:)` and `A2UIImport`, including the fix wave's `A2UIImport.Screen.name` and `.deviceID` (M2);
   - from plan 2: `DesignTokens`, `LayerNode(element:)`.
 - Produces:
   ```swift
   // PROJECTION: deleted in plan 6
   extension Look {
       /// What `ScreenBlueprint.Item.applyLook(to:)` wrote, field for field: border width 1 when only a colour is
-      /// given, opacity of 99.5% or more read as none, value clamped to 0…1.
+      /// given, opacity of 99.5% or more read as none, value clamped to 0…1. Implemented through
+      /// `apply(to: inout LayerNode)` on a scratch node holding the element's style and content fields, which are then
+      /// written back, so the rule lives once (F16).
       func apply(to element: inout DesignElement)
   }
   extension DesignTokens {
@@ -425,8 +502,10 @@
       static func withOnePrimaryAction(_ root: LayerNode) -> LayerNode
   }
   extension A2UIImporter {
-      /// `tokens` give the importer's starting spacings: each one that isn't 0 goes through `spacing(nearest:)`. With `trustsLayerLook` false,
-      /// every `@metadata.extensions.layer` is ignored (a model's output). `importJSON(_:)` is `.standard`, true.
+      /// `tokens` give the importer's starting spacings: each one that isn't 0 goes through `spacing(nearest:)`. With
+      /// `trustsLayerLook` false (a model's output), these are all ignored: every component's `@metadata.extensions.layer`,
+      /// `createSurface`'s `metadata.extensions.layer` (so the screen's name and deviceID are nil) (F3), and `LayerGrid`'s
+      /// `columnSpacing` and `rowSpacing`, which take the tokens' nearest-12 instead (F9). `importJSON(_:)` is `.standard`, true.
       static func importJSON(_ data: Data, tokens: DesignTokens, trustsLayerLook: Bool) -> A2UIImport
       /// Whether text is meant as A2UI JSON rather than an outline: once trimmed, it starts with `{` or `[`.
       static func looksLikeA2UI(_ text: String) -> Bool
@@ -457,18 +536,22 @@
     - `"   \n---\n"` gives a root with no children.
   - `onePrimaryActionWorksOnAnyTree`: a hand-built column of two buttons with `buttonLook == nil` gives `[nil, .bordered]`.
   - `importedSpacingComesFromTheTokens`: with rhythm `[4, 10, 20, 40]`, every stack spacing that isn't 0 in the login fixture's import is in that rhythm. With `.standard`, the import equals `importJSON(_:)`'s.
-  - `aModelsLayerLookIsIgnored`: a Text whose `@metadata.extensions.layer.style.fontSize` is 60 imports with `fontSize == nil` when `trustsLayerLook` is false, and 60 when it is true.
+  - `aModelsLayerLookIsIgnored`:
+    - A Text whose `@metadata.extensions.layer.style.fontSize` is 60 imports with `fontSize == nil` when `trustsLayerLook` is false, and 60 when it is true.
+    - A `createSurface` whose `metadata.extensions.layer` names the screen "Mine" on `"ipad"` gives nil name and deviceID when `trustsLayerLook` is false, and "Mine" and `"ipad"` when it is true (F3).
+    - A `LayerGrid` with `columnSpacing` 37 and `rowSpacing` 5 gets spacings of `tokens.spacing(nearest: 12)` when `trustsLayerLook` is false, and 37 and 5 when it is true (F9).
   - `a2uiIsToldFromAnOutline`: `looksLikeA2UI` is true for `"  {\"version\":\"1.0\"}"` and `"[{}]"`, and false for `"title: Hi"` and `""`.
 
 - [ ] **Step 2: Run them.** Run both suites. Expected: FAIL.
 
 - [ ] **Step 3: Implement.**
   - Point `AddElementIntent`, `StyleElementIntent`, `VoiceToolbox.addElement`, `apply(look:to:)` and `fits` at `LookWords.kind(named:)`, `LookWords.kindWords` and `LookWords.look(from:).apply(to:)`.
-  - Thread `tokens` through `Outline` and the importer.
+  - `Look.apply(to element:)` goes through `Look.apply(to node:)`, with no second copy of the field rules (F16).
+  - Thread `tokens` and `trustsLayerLook` through `Outline` and the importer, as the Interfaces say (F3, F9).
   - Make `onePrimaryAction(in:)` reachable as `withOnePrimaryAction`.
   - `grep -n "ScreenBlueprint" Layer/Intents/ElementIntents.swift Layer/Voice/VoiceToolbox.swift` finds nothing.
 
-- [ ] **Step 4: Run them.** Run both suites, then `SiriIntentsTests`, `VoiceToolsTests`, `VoiceAgentTests`, `OutlineTests`, `A2UIImportTests`, `A2UIExportTests` and the full unit suite. Expected: PASS unchanged, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run both suites, then `SiriIntentsTests` and `VoiceToolsTests` (their structs, per F11), `VoiceAgentTests`, `OutlineTests`, `A2UIImportTests`, `A2UIExportTests` and the full unit suite. Expected: PASS unchanged, and TEST SUCCEEDED.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Look words: Siri and voice read looks and kinds from LookWords; the outline and the A2UI importer take the design's tokens, and a model's Layer look is ignored"`
 
@@ -485,13 +568,13 @@
   - `Layer/Code/SwiftUICodeGenerator+Inference.swift`: today's reading-order inference (`rows(of:)`, `sharesRow`, margins, gaps, the bottom `Spacer()`), reading items at host-space frames (call 12);
   - `Layer/Code/CodeTokens.swift`: the `DesignTokens` file and the names views use.
 - Modify:
-  - `Layer/Model/Design.swift`: `CodeSettings.Layout` (call 15);
+  - `Layer/Model/Design.swift`: `CodeSettings.Layout` (call 15), and `DesignTokens` and `GridRow` added to the reserved view names (F21);
   - `Layer/Intents/LayerEntities.swift`: `CodeLayoutOption` shows "Structure";
   - `Layer/Chrome/ShareMenu.swift`: `SharedSwiftUICode` and `CodeFiles` on the tree;
   - `Layer/Chrome/LayersPanel.swift`: `CodePane` and `CodePreview.Shown` on the tree;
   - `Layer/Intents/DesignIntents.swift`: `GenerateSwiftUICodeIntent` on `content.tree`, through a static `code(for:in:)`.
 - Create: `LayerTests/Support/CodeOfElements.swift` (call 14), `LayerTests/SwiftUIExportTests.swift`, `LayerTests/Goldens/Code/profile-structure.swift.txt`, `profile-exact.swift.txt`, `DesignTokens-standard.swift.txt`, and `sketch-structure.swift.txt`, which is recorded from today's generator before the rewrite (Step 1)
-- Modify (fallout f only): `SystemSymbolTests` (:134), `DesignTests` (:1899), `PerformanceFixTests` (:138–159).
+- Modify (fallout f only): `DesignTests` (:1898), `PerformanceFixTests` (:138–159). `SystemSymbolTests` iterates `Layout.allCases` and needs no change (F12).
 
 **Interfaces:**
 - Consumes:
@@ -528,6 +611,8 @@
     - Leaves are today's.
     - Below the screen root, the inference runs inside the container's content box, with no safe areas and no bottom `Spacer()`, and the block is framed `.frame(width:height:alignment: .topLeading)` to its size.
   - **Row or column:** `HStack`/`VStack(alignment:spacing:)`. Padding is `.padding(…)`. `justify` becomes `Spacer()`s, and only when no child fills. Fill sizing is `.frame(maxWidth/maxHeight: .infinity)`, fixed is `.frame(width:height:)`, and fit writes no frame.
+    - A cross-axis `.fill` alignment (F6, M3/A10) is written as the stack's `.leading` (column) or `.top` (row). Each child the engine stretches gets `.frame(maxWidth: .infinity, alignment: .leading)` (column) or `.frame(maxHeight: .infinity, alignment: .top)` (row).
+    - A toggle, checkbox, radio, avatar or symbol is never stretched, as in the engine, so it gets no such frame.
   - **Grid:** `Grid(horizontalSpacing:verticalSpacing:)` with one `GridRow` per row of `columns`.
   - **Overlay:** `ZStack(alignment:)`.
   - **Card:** its layout's code (a free card's inside is inferred, as above), `.padding(…)` and the background of call 13.
@@ -544,6 +629,9 @@
   - Trees are built in code unless a fixture is named. "Contains" means a line equal to the quoted text, trimmed.
   - `aRowOrColumnIsAStack`: a column root (spacing 16, alignment `.start`) holds a row (spacing 12, alignment `.center`) of two texts. The code contains `VStack(alignment: .leading, spacing: DesignTokens.rhythm[2]) {` and `HStack(alignment: .center, spacing: DesignTokens.rhythm[1]) {`.
   - `aSpacingOffTheRhythmIsANumber`: spacing 10 gives `spacing: 10)`.
+  - `crossAxisFillStretchesAllButFixedShapes` (F6): a column with alignment `.fill` holds a text field and a toggle.
+    - It contains `VStack(alignment: .leading, spacing:`.
+    - The text field's lines include `.frame(maxWidth: .infinity, alignment: .leading)`, and the toggle's lines don't.
   - `justifyBecomesSpacers`:
     - A row with `spaceBetween` and three fixed children has exactly 2 `Spacer()` lines.
     - With `center`, its first and last lines inside are `Spacer()`.
@@ -586,7 +674,9 @@
     - The sketch's contains no `DesignTokens`, and ends with its `#Preview` block, as today.
     - `files(for:)` of the profile names `DesignTokens.swift` first, and no other file contains `enum DesignTokens`.
     - `files(for:)` of a design holding only the sketch's screen has no `DesignTokens.swift`.
-  - `viewNamesStayUnique`: screens named "Sign In", "Sign-In" and "Sign in" are named `SignIn`, `SignIn2` and `Signin3` (today's rule).
+  - `viewNamesStayUnique`:
+    - Screens named "Sign In", "Sign-In" and "Sign in" are named `SignIn`, `SignIn2` and `Signin3` (today's rule).
+    - Screens named "Design Tokens" and "Grid Row" are named `DesignTokensScreen` and `GridRowScreen`, so they don't clash with the code's `enum DesignTokens` or SwiftUI's `GridRow` (F21).
   - `theNavigationTitleComesFromTheFirstTitle`: the profile with `usesNavigationTitle` contains `NavigationStack {` and `.navigationTitle("Profile")`, and no `Text("Profile")`.
   - `structureIsTheDefaultAndStackStillReads`:
     - `CodeSettings().layout == .structure`, and `{"layout":"stack"}` decodes as `.structure`.
@@ -601,16 +691,22 @@
 
 - [ ] **Step 3: Implement** the walk, the inference on host-space items, `CodeTokens` and `Context`.
   - Move today's inference over unchanged in what it decides. It now reads items (a leaf, or a laid-out or carded container) with a host-space frame and angle, in place of `DesignElement`s.
-  - Move each leaf's view code over unchanged, reading `LayerNode` fields with the same resolved defaults as `DesignElement`'s.
+  - Move each leaf's view code over unchanged, reading `LayerNode` fields with the same resolved defaults as `DesignElement`'s (F15).
+    - "Unchanged" means the view.
+    - Today's sized frame and placement tail are split off it. The inference and Exact positions use them as today.
+    - Inside a stack, the child's sizing writes the frame instead.
+  - Add `DesignTokens` and `GridRow` to the reserved view names (F21).
   - Point the four callers at the tree.
-  - Write `CodeOfElements.swift`, whose functions lift `screen.elements` through `TreeLift.nodes(from:host:keeping:)` into a free root and call the tree export. It covers:
-    - `code(for:among:typeName:settings:)`, `files(for:settings:)`, `typeNames(for:)` and `fileName(for:among:)`;
-    - `GenerateSwiftUICodeIntent.code(for: DesignScreen, in: DesignContent)`.
+  - Write `CodeOfElements.swift`, whose functions lift `screen.elements` through `TreeLift.nodes(from:host:keeping:)` into a free root and call the tree export. It keeps every signature today's tests call, with today's defaults (F12):
+    - `code(for:typeName:settings:)` and `code(for:among:settings:)`;
+    - `fileName(for:)` (DesignTests:970) and `fileName(for:among:)`;
+    - `files(for:settings:)` and `typeNames(for:)`;
+    - `GenerateSwiftUICodeIntent.code(for: DesignScreen, in: DesignContent) -> String`.
   - Record the profile and tokens goldens, read them by eye against §7, and commit them.
 
 - [ ] **Step 4: Run them.** Run `SwiftUIExportTests`. Expected: PASS.
 
-- [ ] **Step 5: Run the suites that use the export.** Run `DesignTests`, `FreeformTests`, `MagicPenComponentTests`, `SystemSymbolTests`, `AssetLibraryTests`, `GroupTests`, `PerformanceFixTests`, `LayersPanelTests` and `SiriIntentsTests`.
+- [ ] **Step 5: Run the suites that use the export.** Run `DesignTests`, `FreeformTests`, `MagicPenComponentTests`, `SystemSymbolTests`, `AssetLibraryTests`, `GroupTests`, `PerformanceFixTests` (with the nested `ShareMenuWorkTests`), `LayersPanelTests` (the nested `LayersPanelWorkTests`) and `SiriIntentsTests`. Names that are files run as their structs (F11).
   - Every test written for elements passes unchanged through the adapter, including those that pin today's inference whole:
     - `theDemoScreenBecomesAVerticalStackInReadingOrder`, `elementsSideBySideTurnInTheirRow` and `aScreenOfAnotherDeviceUsesThatDevicesEdges`;
     - `buttonsSideBySideBecomeAHorizontalStack`;
@@ -619,7 +715,7 @@
   - A failure is a bug in the export, never a test to change (call 12).
 
 - [ ] **Step 6: Change only the tests the policy allows**, all under (f):
-  - `SystemSymbolTests` (:134) and `DesignTests` (:1899): `.stack` becomes `.structure`.
+  - `DesignTests` (:1898): `.stack` becomes `.structure`. `SystemSymbolTests` stays as it is (F12).
   - `PerformanceFixTests` (:138–159): `SharedSwiftUICode` and the expected code are made from `store.tree`.
 
   Record each in the ledger with its clause.
@@ -643,7 +739,7 @@
   - `ScreenGeneration.elementCount` counts leaves;
   - a DEBUG `beforeGenerationCommit` hook.
 - Modify: `Layer/Model/DesignStore.swift` (`writeGenerated` deleted)
-- Modify (fallout f): `ScreenGenerationTests` (the stream suite and the lifecycle suite's helpers), `ConcurrentEditTests` (:29–50, :393–424), `VoiceAgentTests` (:72, :109, :1196), `VoiceToolsTests` (:966), `ScreenTidyTests` (:595), `HostedModelTests` (:254–262)
+- Modify (fallout f): `ScreenGenerationTests` (the stream suite and the lifecycle suite's helpers), `ConcurrentEditTests` (:29–50; and :393–424, which is in `ConcurrentEditsGroupedByEventTests`), `VoiceAgentTests` (:72, :109, :1196), `VoiceToolsTests` (:966), `ScreenTidyTests` (:595, in `VoiceScreenLayoutTests`), `HostedModelTests` (:254–262, including :255's `ScreenGenerator.stream(_:using:)` call, now in clause (f) (F12))
 - Test: `LayerTests/GenerationThroughTheReconcilerTests.swift`
 
 **Interfaces:**
@@ -705,7 +801,7 @@
   - The stream suite's six tests call `OutlineStream.take` with the same inputs and assertions. A button's look reads `nil` as filled, so `aScreenHasOnePrimaryAction` still expects `[filled, .bordered, .plain, .plain, .plain]`.
   - Each `written(_:)` helper becomes `.screen(Outline.parse(text, isComplete: true))`.
   - `{ _, _, _ in stream }` becomes `{ _ in stream }`, and `{ description, _, _ in … }` becomes `{ request in … request.description … }`.
-  - `HostedModelTests` (:254–262) counts `leafCount`.
+  - `HostedModelTests` (:254–262) calls `ScreenGenerator.stream(Request(description: "a tiny screen", choice: .hosted(.openAI, model: "m")))` and counts `leafCount`.
 
 - [ ] **Step 2: Write the failing tests** in `GenerationThroughTheReconcilerTests` (`@MainActor`, `.serialized`; the feed is the lifecycle suite's):
   - `eachUpdateIsOneCommitLaidOutOffTheMainActor`: three updates are fed (a title; plus a text field; plus a button), awaiting the leaf count after each. Counting from just after `generateScreen` returns (it made the screen):
@@ -729,7 +825,7 @@
   - `generateScreen`: one writer per generation; `write(…, in: edit)` inside today's `withAnimation(.snappy(duration: 0.25))`; `elementCount = root.leafCount`.
   - Delete `writeGenerated`.
 
-- [ ] **Step 5: Run them.** Run `GenerationThroughTheReconcilerTests`, then the ported suites (`ScreenStreamParsingTests`, `ScreenGenerationLifecycleTests`, `ConcurrentEditTests`, `VoiceAgentTests`, `VoiceToolsTests`, `ScreenTidyTests`, `HostedModelTests`), then the full unit suite and the UI suite. Expected: PASS, every lifecycle assertion unchanged, TEST SUCCEEDED, and no UI failure outside the baseline set.
+- [ ] **Step 5: Run them.** Run `GenerationThroughTheReconcilerTests`, then the ported suites (`ScreenStreamParsingTests`, `ScreenGenerationLifecycleTests`, `ConcurrentEditTests`, `ConcurrentEditsGroupedByEventTests`, `VoiceAgentTests`, the `VoiceToolsTests` structs, `ScreenTidyTests`, `VoiceScreenLayoutTests`, `HostedModelTests` and `ModelChoiceTests`), then the full unit suite and the UI suite. Expected: PASS, every lifecycle assertion unchanged, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
 - [ ] **Step 6: Commit.** `git add -A && git commit -m "Generation: each streamed outline merged by the reconciler and laid out off the main actor, one commit per update; writeGenerated deleted"`
 
@@ -762,6 +858,10 @@
       static func template(named name: String) -> LayerNode?
       /// Its thumbnail's elements: laid out on the iPhone and lowered once per name.  // PROJECTION: deleted in plan 6
       static func templatePreview(named name: String) -> [DesignElement]
+      #if DEBUG
+      /// Previews made for this name, counted under a lock: tests count per name (F13).
+      static func templatePreviewsMade(named name: String) -> Int
+      #endif
   }
   ```
 - **What the grammar teaches:**
@@ -790,7 +890,9 @@
   - `aTemplateKeepsItsStructure`:
     - `AssetLibrary.template(named: "Product")` holds a card, and every node's `source?.origin == .template`.
     - After `model.addAsset` of `template:Product`, the screen's root is a vertical stack holding a card.
-  - `aTemplatePreviewIsMadeOnce`: two calls of `templatePreview(named: "Settings")` are equal, and `AssetLibrary.templatePreviewsMade` (DEBUG) rose by 1.
+  - `aTemplatePreviewIsMadeOnce`: two calls of `templatePreview(named: "Settings")` are equal.
+    - The first call raises `AssetLibrary.templatePreviewsMade(named: "Settings")` by at most 1: another test may already have made it.
+    - The second adds 0, and afterwards the count is exactly 1 (F13).
 
   Port, under (f):
   - `everyKindThatGoesOnScreensIsNamedAndReadsBack` uses `LookWords.kind(named:)`;
@@ -803,7 +905,7 @@
 
 - [ ] **Step 3: Implement** the grammar, the rules' two edits, the library, `template(named:)` (parse with `.standard`, then mark `.template`), the memoised preview, and `addTemplate` (`addScreen(TreeScreen(name:origin:scale:deviceID:root:))` inside today's `asOwnStep`).
 
-- [ ] **Step 4: Run them.** Run `OutlinePromptTests`, `ScreenPromptTests`, `AssetLibraryTests` and `ScreenGenerationLifecycleTests`, then the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set. `theOnDeviceModelIsToldLess` still holds: compact is under 4,000 characters.
+- [ ] **Step 4: Run them.** Run `OutlinePromptTests`, `ScreenPromptTests`, `AssetLibraryTests`, `AddingAssetsTests` (which holds `aTemplateIsAWholeScreenInOneUndoStep`) and `ScreenGenerationLifecycleTests`, then the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set. `theOnDeviceModelIsToldLess` still holds: compact is under 4,000 characters.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Screen prompt: the grammar and the example library written in the outline, and the library's templates added with their rows, cards and grids"`
 
@@ -820,7 +922,7 @@
 - Test: `LayerTests/A2UIGenerationTests.swift`
 
 **Interfaces:**
-- Consumes: Task 2 (`importJSON(_:tokens:trustsLayerLook:)`, `withOnePrimaryAction`), Task 4 (the stream and writer), plan 1 (`LayerCatalog`, `A2UIDiagnostic`), and the SDK's `AgentToRendererMessage.parseAll(from:protocolVersion:)`.
+- Consumes: Task 2 (`importJSON(_:tokens:trustsLayerLook:)`, `withOnePrimaryAction`), Task 4 (the stream and writer), and plan 1 (`LayerCatalog`, `A2UIDiagnostic`, and the fix wave's guarded entry point `A2UIImporter.decodeJSON(_:)` / `guardedMessages(from:)`, B7). Never the SDK's `parseAll` on text (F1).
 - Produces:
   ```swift
   extension ScreenGenerator {
@@ -852,6 +954,7 @@
   - Write A2UI 1.0 messages, one JSON object per line and nothing else.
   - First a `createSurface` with `surfaceId` `"screen"` and `catalogId` `urn:layer:a2ui:catalog:1`. Then `updateComponents`, each adding the next part of the screen from top to bottom, the root (a `Column`) first.
   - Use only the components that map well: `Column`, `Row`, `Card`, `Text` (`#`/`##` for headings), `Image` (variant `avatar`), `Icon`, `Button` (child `Text`, variant `primary`/`default`/`borderless`), `TextField`, `CheckBox`, `Divider`, `LayerGrid`, `LayerToggle`, `LayerRadio`, `LayerProgress` and `LayerSymbol`.
+  - `LayerGrid` must have `columns`, a whole number from 1 to 12: it is required (F10). The prompt names no spacing property, since Layer's tokens set spacing (F9).
   - Every value is a literal: no `@path`, no `@call`. A button's action is `{"event":{"name":"<verb>"}}`.
   - The rules are today's, in A2UI's words. For example, the one primary action is the only Button with variant `primary`.
 - **The stream:**
@@ -860,14 +963,19 @@
   take(text, isComplete):
     lines = text split at "\n"; when not complete, the last is left for later
     for each line not looked at yet: trim; skip blanks and code fences
-      parseAll(from: line) succeeds → good += line;  else → broken += .parseFailed (with its line number)
-    complete and no good line → read the whole answer, fences stripped, as one payload      // pretty-printed JSON
+      A2UIImporter.decodeJSON(line) gives a JSON object that yields ≥ 1 A2UI 1.0 message
+                                     → good += line                                         (F1, F2)
+      else (not JSON, too deep, a bare string/number/null, not an A2UI 1.0 message)
+                                     → broken += .parseFailed (with its line number)
+    complete and no good line → read the whole answer, fences stripped, as one payload,       // pretty-printed JSON
+                                and drop `broken`: those lines were parts of that payload        (F2)
     no new good line → nil
-    imported = A2UIImporter.importJSON(Data("[" + good.joined(",") + "]"), tokens:, trustsLayerLook: false)
+    imported = A2UIImporter.importJSON(Data(good.joined("\n")), tokens:, trustsLayerLook: false)
+                                     // one message per line, never re-wrapped in an array (F1)
     root = imported.screens.first?.root → withOnePrimaryAction → nil unless its leafCount grew
   ```
 
-  The stream yields `.leftOut(diagnostics)` once complete, when there are any other than `actionNotRun`.
+  Each broken line is reported once: by the stream, never again by the importer, since only good lines reach it. The stream yields `.leftOut(diagnostics)` once complete, when there are any other than `actionNotRun`.
 
 - [ ] **Step 1: Write the failing tests** in `A2UIGenerationTests`:
   - `aScreenGrowsMessageByMessage`:
@@ -876,7 +984,11 @@
     - The keys are `"title"`, `"email"` and `"go"`.
   - `aHalfWrittenLastLineWaits`.
   - `aBrokenLineIsSkippedAndReported`: when the second of four lines is `{"version":"1.0","updateComponents":{`, the screen comes from the others, and `diagnostics` holds exactly one `.parseFailed`.
-  - `aPrettyPrintedAnswerStillMakesAScreenAtTheEnd`: the login example pretty-printed gives nil until complete, then 4 leaves.
+  - `aPrettyPrintedAnswerStillMakesAScreenAtTheEnd` (F2):
+    - The login example is pretty-printed, so it has lines that are bare strings on their own, such as a children array's last id `"go"`.
+    - It gives nil until complete, then 4 leaves.
+    - `diagnostics` holds no `.parseFailed`.
+  - `aBareValueLineIsNotAMessage` (F2): a line `"go"`, `1` or `null` is not good. Alone and complete, it makes no screen and reports `.parseFailed`.
   - `fencesAroundTheLinesAreIgnored`.
   - `aGeneratedScreenHasOnePrimaryAction`: two Buttons with variant primary give filled, then `.bordered`.
   - `aGeneratedScreensLayerLookIsIgnoredWhenStreamed`: `@metadata.extensions.layer.style.fontSize` 60 gives `fontSize == nil`.
@@ -888,7 +1000,7 @@
   - `everyA2UIExampleImportsCleanlyAndMatchesItsOutline`:
     - Each `A2UIPrompt.library` example imports to one screen, with diagnostics only `.actionNotRun`.
     - Its leaf kinds, in reading order, are the same-named outline example's. `.body` and `.text` count as one, because A2UI has only `Text` and the importer tells them apart by length.
-  - `theA2UIPromptNamesLayersCatalogue`: it contains `urn:layer:a2ui:catalog:1`, `"version":"1.0"`, `createSurface`, `updateComponents`, `LayerGrid` and `LayerToggle`.
+  - `theA2UIPromptNamesLayersCatalogue`: it contains `urn:layer:a2ui:catalog:1`, `"version":"1.0"`, `createSurface`, `updateComponents`, `LayerGrid` and `LayerToggle`. It says `LayerGrid`'s `columns` is required (F10), and it contains neither `columnSpacing` nor `rowSpacing` (F9).
   - `aGenerationSaysWhatItLeftOut`: feeding `.screen(root)`, then `.leftOut([functionNotRun])`, then finishing gives `generation?.leftOut == 1`.
 
   Port the two `HostedModelTests` under (g). Their answers become A2UI lines for the same 4 and 2 elements, and every assertion stays.
@@ -897,7 +1009,7 @@
 
 - [ ] **Step 3: Implement** `A2UIPrompt`, `A2UIStream`, the format choice, `.leftOut` handling in `generateScreen`, and the status line ("Finished. 2 parts couldn't be brought in.").
 
-- [ ] **Step 4: Run them.** Run `A2UIGenerationTests`, `HostedModelTests`, `ScreenGenerationTests` and `GenerationThroughTheReconcilerTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run `A2UIGenerationTests`, `HostedModelTests` and `ScreenGenerationTests` (their structs, per F11), and `GenerationThroughTheReconcilerTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "A2UI generation: hosted models write A2UI 1.0 a message per line, streamed through the importer and the reconciler, with what was left out said at the end"`
 
@@ -924,7 +1036,9 @@
     - a free group with a child turned 30 and a hidden child;
     - a card holding a card;
     - a text named `Say "hi" 👋`;
-    - a filled, a bordered and a plain button.
+    - a filled, a bordered and a plain button;
+    - a column with alignment `.fill` holding a text field and a toggle (F6);
+    - an empty row, which persists, since only empty free groups go (F7).
   - **Screen 2** is a custom watch frame "Watch 45", 198×242, margin 8, with a column root of a title and a toggle.
   - **Screen 3** is an iPhone with a **free** root, the sketched path (call 12). At asymmetric places it holds:
     - a title;
@@ -940,6 +1054,7 @@
     - `DesignTests`' demo screen on a free root, whose code uses no token (so its folders hold no `DesignTokens.swift`);
     - one screen per built-in device family, each with a free root and with a column root;
     - two screens named "Sign In" and "Sign-In";
+    - screens named "Design Tokens" and "Grid Row", each with a column root, the second holding a grid, so their code uses `DesignTokens` and `GridRow` beside views of those names (F21);
   - for both layouts × navigation title on and off × preview on and off:
     - `files(for:)` into one folder;
     - each screen's `code(for:in:settings:)` alone into a folder of its own.
@@ -947,7 +1062,7 @@
 - [ ] **Step 1: Write the failing tests** in `SwiftUIExportTests`:
   - `theStructuresFixtureReadsAndHoldsEachStructure`:
     - It decodes.
-    - Screen 1's root holds a row, a grid of 3 columns, an overlay, a free group, a card in a card and a hidden node.
+    - Screen 1's root holds a row, a grid of 3 columns, an overlay, a free group, a card in a card, a hidden node, a `.fill` column and an empty row.
     - Screen 2's device `isCustom`.
     - Screen 3's root is free and holds a free group, a laid-out row and a free card.
   - `aFreeScreenWithStructureInsideReadsInReadingOrder`: screen 3's Structure code has today's root `VStack(alignment: .leading, spacing:` and no `ZStack(alignment: .topLeading)` at all.
@@ -963,7 +1078,7 @@
   - It exits non-zero on any failure, or when no file was written.
   - Record the two goldens, and read screen 3's by eye against today's inference.
 
-- [ ] **Step 4: Run the check.** Run `scripts/check-generated-swiftui.sh`. Expected: `N files typecheck`, with N ≥ 100, and exit 0.
+- [ ] **Step 4: Run the check.** Run `scripts/check-generated-swiftui.sh` with lane B's `LAYER_SIMULATOR` and `LAYER_DERIVED_DATA` (Global Constraints, F17). Expected: `N files typecheck`, with N ≥ 100, and exit 0.
   - If it fails, fix the generator, add a `SwiftUIExportTests` case asserting the corrected line, and run it again.
   - Then run `SwiftUIExportTests`, the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
 
@@ -980,29 +1095,33 @@
 - Test: `LayerTests/ShareA2UITests.swift`; UI: `LayerUITests/ShareA2UIUITests.swift`
 
 **Interfaces:**
-- Consumes: plan 1's `A2UIExporter.messages(for:surfaceID:)`; Task 3's `typeNames(for:)`; Task 2's `importJSON(_:tokens:trustsLayerLook:)` (tests).
+- Consumes: plan 1's `A2UIExporter.messages(for: TreeScreen, surfaceID:)` (the fix wave's screen form, which writes the screen's name and deviceID in `createSurface.metadata.extensions.layer`, M2); Task 3's `typeNames(for:)`; plan 1's `importJSON(_:)` and `A2UIImport.Screen.name` / `.deviceID` (tests). Not Task 2's overload, which is lane C's (F5).
 - Produces:
   ```swift
   extension A2UIExporter {
-      /// The messages as one JSON array, pretty-printed: a file the importer, and other A2UI tools, read whole.
-      static func document(for root: LayerNode, surfaceID: String) -> Data
+      /// The screen's messages as one JSON array, pretty-printed: a file the importer, and other A2UI tools, read
+      /// whole. It carries the screen's name and deviceID (F3).
+      static func document(for screen: TreeScreen, surfaceID: String) -> Data
       #if DEBUG
-      static var documentsWritten: Int { get }
+      /// Documents written for this surface id, counted under a lock: tests count per surface (F13).
+      static func documentsWritten(for surfaceID: String) -> Int
       #endif
   }
   /// A screen's A2UI, written when shared and not before, like `SharedSwiftUICode`.
   struct SharedA2UI: Transferable, Sendable {
       init(screen: TreeScreen, typeName: String)
-      var data: Data { get }            // A2UIExporter.document(for: screen.root, surfaceID: typeName)
+      var data: Data { get }            // A2UIExporter.document(for: screen, surfaceID: typeName)
       var fileName: String { get }      // "<TypeName>.a2ui.json"
       static var transferRepresentation: some TransferRepresentation   // FileRepresentation(exportedContentType: .json)
   }
   ```
 
 - [ ] **Step 1: Write the failing tests** in `ShareA2UITests`:
-  - `theSharedFileIsTheScreensA2UI`: for the profile fixture's screen, `importJSON(SharedA2UI(…).data, tokens: .standard, trustsLayerLook: true)` gives one screen. Its root matches the original in every node's `kind`, `layout`, `padding`, sizing, `content`, `style` and `name`, ignoring ids and `source`, with no diagnostics.
+  - `theSharedFileIsTheScreensA2UI`: for the profile fixture's screen, `importJSON(SharedA2UI(…).data)` gives one screen, with no diagnostics.
+    - Its root matches the original as plan 1's `A2UIExportTests.expectSame` compares (F4). That is every node's `kind`, `layout`, padding (except the root's, which `TreeRules` writes), sizing, `content`, `style` and `name`, ignoring ids and `source`.
+    - The imported screen's `name` and `deviceID` are the original's (F3).
   - `theFileIsNamedForTheScreensView`: a screen named "Sign In" gives `"SignIn.a2ui.json"`.
-  - `nothingIsWrittenUntilShared`: making a `SharedA2UI` leaves `documentsWritten` unchanged, and reading `data` raises it by 1.
+  - `nothingIsWrittenUntilShared`: making a `SharedA2UI` leaves `documentsWritten(for: typeName)` unchanged, and reading `data` raises it by exactly 1. The surface id is this test's own (F13).
 
   `ShareA2UIUITests.testTheShareMenuOffersTheScreensA2UI`: add a screen from the library, open Share, and "A2UI JSON" exists.
 
@@ -1010,7 +1129,7 @@
 
 - [ ] **Step 3: Implement** `document(for:surfaceID:)` and `SharedA2UI`, and add the menu item (symbol `curlybraces`) for the selected screen or the first.
 
-- [ ] **Step 4: Run them.** Run `ShareA2UITests`, `A2UIExportTests`, the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
+- [ ] **Step 4: Run them.** Run `ShareA2UITests`, `A2UIExportTests`, the full unit suite and the UI suite. Then run `scripts/check-generated-swiftui.sh` with lane B's simulator and DerivedData (F17). Expected: PASS, TEST SUCCEEDED, no UI failure outside the baseline set, and `N files typecheck`.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Share: a screen's A2UI JSON, written when shared, that Layer and other A2UI tools read back whole"`
 
@@ -1040,7 +1159,8 @@
       /// Leaves whose parent is a row, column, grid or overlay: drawn in their engine frame (My call 18).
       var laidOut: Set<DesignElement.ID> = []
   }
-  extension DesignScreen { var drawing: ScreenDrawing }   // stored; not coded
+  extension DesignScreen { var drawing: ScreenDrawing }   // stored; not coded. PROJECTION-marked too
+  // Not marked: canvas code that plan 4 rewrites. Only ScreenDrawing and DesignScreen.drawing carry the marker (F18).
   extension ElementView {
       init(element: DesignElement, isLaidOut: Bool = false)
       struct TextFit: Equatable { var lineLimit: Int?; var shrinks: Bool; var vertical: VerticalAlignment }
@@ -1069,7 +1189,7 @@
   - `PhoneScreenView` draws `drawing.cards` with each element's frame, rotation and offset before the leaves, and passes `isLaidOut`.
   - `ElementView`'s `.card` case draws a `RoundedRectangle` filled with its tint. The border, shadow and opacity come from today's modifiers.
 
-- [ ] **Step 4: Run them.** Run `CardDrawingTests`, `TreeProjectionTests`, `CanvasHitTestTests`, `CanvasDragWorkTests` and `LayersPanelTests`, then the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set.
+- [ ] **Step 4: Run them.** Run `CardDrawingTests`, `TreeProjectionTests`, `CanvasHitTestTests`, `CanvasDragWorkTests` and `LayersPanelTests` (their structs, nested ones included, per F11), then the full unit suite and the UI suite. Then run `scripts/check-generated-swiftui.sh` with lane B's simulator and DerivedData (F17). Expected: PASS, TEST SUCCEEDED, no UI failure outside the baseline set, and `N files typecheck`.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Canvas: cards draw their look under what they hold, and laid-out text draws whole in its engine frame"`
 
@@ -1091,7 +1211,7 @@
 - Consumes:
   - Task 1: `TreeRules.laidOut`, `addLaidOutScreens`, `GenerationWork`;
   - Task 2: `importJSON(_:tokens:trustsLayerLook:)`, `looksLikeA2UI`;
-  - plan 1: `A2UIDiagnostic`, `A2UIExporter.messages`;
+  - plan 1: `A2UIDiagnostic`, `A2UIImport.Screen.name` / `.deviceID` (M2), and `A2UIExporter.jsonLines(for: TreeScreen, surfaceID:)` (tests). Not Task 8's `document`, which is lane B's (F5);
   - today: `DesignActions.placementForNewScreen`, `AssetLibrary.asset(id:)`.
 - Produces:
   ```swift
@@ -1105,7 +1225,9 @@
   }
   extension AppModel {
       /// Imported and laid out off the main actor, then committed as new screens in one step ("Import A2UI"), as
-      /// call 18 says. Trusts Layer's look. No screen means no step.
+      /// call 18 says. Trusts Layer's look, so a surface carrying Layer's name and deviceID keeps them; the device
+      /// resolves through `settings.device(named:)`, and is the new-screen device when unknown here (F3). No screen
+      /// means no step. The caller keeps the report in its own view state, not in AppModel (F19).
       func importA2UI(_ data: Data, near point: CGPoint? = nil) async -> A2UIImportReport
   }
   enum CanvasDrop {
@@ -1125,26 +1247,29 @@
   - `everyReasonHasWords`: every `Reason.allCases` entry has a non-empty `title(for:)`.
   - `twoSurfacesBecomeTwoScreensSideBySide`: the second screen's canvas minX is greater than the first's maxX.
   - `anImportedScreenIsNamedFromItsTitle`: the login form gives "Login", and a surface without a title gives "A2UI Screen".
-  - `layersOwnExportComesBackAsItWas`: `A2UIExporter.document` of the profile fixture's screen is imported. Its root matches in every node's `kind`, `layout`, `padding`, sizing, `content`, `style`, `name`, and the frames of free containers' children.
+  - `layersOwnExportComesBackAsItWas`: `A2UIExporter.jsonLines(for:surfaceID:)` (plan 1) of the profile fixture's screen is imported (F5).
+    - Its root matches as plan 1's `A2UIExportTests.expectSame` compares (F4). That is every node's `kind`, `layout`, padding (except the root's, which `TreeRules` writes), sizing, `content`, `style`, `name`, and the frames of free containers' children.
+    - The new screen has the original's name and deviceID (F3). To tell them from call 18's defaults, the test renames the screen and puts it on `"ipad"` before exporting, while the canvas's new-screen device is the iPhone.
   - `dropsAreToldApart`:
     - `payload(of: ["symbol:star"]) == .assets(["symbol:star"])`.
     - A2UI text gives `.a2ui`.
     - `["hello"]` gives nil.
 
   `A2UIImportUITests.testPastingA2UIMakesAScreenAndSaysWhatWasLeftOut`:
-  - Set `UIPasteboard.general.string` to the login fixture, then tap "Add Image" and then "Paste" in its "A2UI" section.
+  - Set `UIPasteboard.general.string` to the login fixture's JSON, then tap "Add Image" and then "Paste" in its "A2UI" section. The JSON is written in the UI test as a literal, since the fixture is in the LayerTests bundle (F19).
   - "Actions aren't run in Layer" appears, and "Done" closes the sheet.
 
 - [ ] **Step 2: Run them.** Run `A2UIImportFlowTests`. Expected: FAIL.
 
 - [ ] **Step 3: Implement.**
-  - `importA2UI` imports in `Task.detached`, then lays out each screen root with `TreeRules.laidOut`. Back on the main actor it computes the placements and calls `addLaidOutScreens` inside one named step.
+  - `importA2UI` imports in `Task.detached`, then lays out each screen root with `TreeRules.laidOut`, on the surface's own device when it names one this design has, else the new-screen device (F3). Back on the main actor it computes the placements and calls `addLaidOutScreens` inside one named step.
   - If the design's settings changed while it worked, it lays the roots out again first.
-  - The canvas drop becomes one handler that reads strings or JSON file data and calls `CanvasDrop.payload`.
+  - The canvas drop becomes one handler that reads strings or JSON file data and calls `CanvasDrop.payload`. `CanvasDrop.payload` tells A2UI by `looksLikeA2UI`, a prefix test, and never decodes. Only `importA2UI` decodes, through `importJSON` and the guarded entry point (F1).
   - The Files picker allows `.json` and `.plainText`, reading inside the security scope as `ImageAttaching` does.
   - The sheet lists each group's title, count and component ids.
+  - The report lives in view state: TopBar and CanvasScreen each keep an `@State var report: A2UIImportReport?` with its own `.a2uiImportSheet($report)`. `AppModel.swift` is lane A's file, and this task doesn't edit it (F19).
 
-- [ ] **Step 4: Run them.** Run `A2UIImportFlowTests`, `A2UIImportTests` and `AssetLibraryTests`, then the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set. Try ⌘V on the canvas in the simulator with a hardware keyboard, and record the result in the ledger (call 17).
+- [ ] **Step 4: Run them.** Run `A2UIImportFlowTests`, `A2UIImportTests` and `AssetLibraryTests` (its structs, per F11), then the full unit suite and the UI suite. Expected: PASS, TEST SUCCEEDED, and no UI failure outside the baseline set. Try ⌘V on the canvas in the simulator with a hardware keyboard, and record the result in the ledger (call 17).
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "A2UI in: drop, paste or pick A2UI JSON to make screens off the main actor in one step, with what wasn't brought in listed by reason"`
 
@@ -1170,9 +1295,11 @@
                                    in model: AppModel, undoManager: UndoManager?) async throws -> TreeScreen.ID
   }
   enum BuildScreenError: LocalizedError, Equatable {
-      case nothingInA2UI(String)    // the importer's first diagnostic's message
+      case nothingInA2UI(String)    // the `.missingRoot` diagnostic's message when there is one, else the first diagnostic's (F14)
   }
   ```
+- **A2UI here trusts Layer's look** (call 10): `importJSON(_:tokens:trustsLayerLook: true)`. A new screen with no `name` from Siri takes the surface's name when it carries one (F3).
+- **The outline keeps its polish.** `Outline.parse` gives Build Screen's outline one primary action, as call 11 says (F14).
 - **Refusals:**
   - an outline with no leaves throws `LayerIntentError.invalidBlueprint`, whose message is unchanged;
   - A2UI that makes no screen throws `.nothingInA2UI`;
@@ -1185,10 +1312,11 @@
   - `aNewScreenIsBuiltFromA2UI`: the login fixture's text gives `[.title, .textField, .textField, .button]`.
   - `rebuildingKeepsWhatWasBuiltAndWhatWasAddedByHand`:
     - Build `"title: A\nbutton: Go"` (ids T and B), then add a hand-made text H with `store.add(_:to: .screen(id))`.
-    - Rebuild with `"title: B\nbutton: Go\ntext: More"`. T's text is "B", B keeps its id, a text "More" is new, and H is unchanged.
+    - Rebuild with `"title: B\nbutton: Go\ntext: More"`. T's text is "B", B keeps its id, and a text "More" is new.
+    - H keeps its id and its place, still the root's child just after the section. Its record (every field but `frame`) is unchanged. The column re-lays its frame below the grown section, which is the engine's work, not the reconciler's (F14, call 7).
     - One undo gives back the title "A", no "More", and H.
   - `rebuildingALockedScreenIsRefused`: it throws `.locked`, and `store.content` is unchanged.
-  - `nothingToBuildIsRefused`: `"   \n---\n"` throws `.invalidBlueprint`. An `updateComponents` with no root throws `.nothingInA2UI`, whose message names the root.
+  - `nothingToBuildIsRefused`: `"   \n---\n"` throws `.invalidBlueprint`. A `createSurface` followed by an `updateComponents` with no `root` component throws `.nothingInA2UI`, whose message names the root (F14).
   - `aBuildLaysOutOffTheMainActor`: a new screen and a rebuild each leave `layoutsAhead(of: rootID).onMainThread == 0`.
   - `shortcutsWrittenForTheBlueprintStillBuild`: `"heading: Settings\n\nrow: button: Cancel | button: Done [blue, bold, radius 12]\n---\nbody: Tap a row to change it [text #333333, 15pt]"` builds leaves `[.title, .button, .button, .body]`, and Done's tint is `ColourWords.named["blue"]`.
 
@@ -1199,7 +1327,7 @@
   - If the screen's root is no longer the snapshot when the edit runs, merge again over the root as it is now, on the main actor, and commit without the hint (call 1).
   - The dialog is "Built \<name\> with N elements", where N is the screen's leaf count.
 
-- [ ] **Step 4: Run them.** Run `BuildScreenTests` and `SiriIntentsTests`, then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
+- [ ] **Step 4: Run them.** Run `BuildScreenTests` and `SiriIntentsTests` (its structs, per F11), then the full unit suite. Expected: PASS, and TEST SUCCEEDED.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Build Screen: the outline or A2UI JSON builds a new screen, or rebuilds one through the reconciler, keeping what was added by hand"`
 
@@ -1228,21 +1356,24 @@
     - copied example lines;
     - first content p50/p95 and completion p50/p95 in ms;
     - output tokens (hosted, from `.usage`).
-- **`Package.swift`:** `// swift-tools-version: 6.1`, platform macOS 27, one executable target. Its dependencies are the A2UI package (pinned by revision `07735d6a654ae3ba25951a8753ddd57b344b1169`; products `A2UISwiftCore` and `BasicCatalog`). It uses Swift 6 language mode.
+- **`Package.swift`:** `// swift-tools-version: 6.1`, platform macOS 27, one executable target, Swift 6 language mode. Its dependencies:
+  - the A2UI package, pinned by revision `07735d6a654ae3ba25951a8753ddd57b344b1169`, with the products `A2UISwiftCore` and `BasicCatalog`;
+  - `https://github.com/ajevans99/swift-json-schema`, at the version the A2UI package resolves (0.13.x), as a direct dependency with the products `JSONSchema` and `OrderedJSON` (F10). `LayerCatalog` imports `JSONSchema`, and the importer and exporter import `OrderedJSON`.
 - **`run.sh`** copies these into `Sources/ScreenBenchmarkHarness/App/`:
   - `Layer/Tree/*.swift` and `Layer/A2UI/*.swift`;
-  - `Layer/Model/Design.swift`, `ShapeKind.swift`, and the projection files `Design.swift` now needs;
+  - `Layer/Model/Design.swift`, `ShapeKind.swift`, and the projection files `Design.swift` now needs. That includes `Layer/Model/Projection/ScreenDrawing.swift` whenever it exists, whether Task 9 lands before or after this task (F10);
   - `Layer/Components/ComponentSpec.swift` and `Catalogue.swift`;
   - `Layer/Document/JSONValue.swift`;
   - `Layer/Sketch/PromptOverrides.swift`, `ScreenPrompt.swift`, `ScreenStream.swift` and `A2UIPrompt.swift`;
   - `Layer/Providers/HostedModelClient.swift` and `HostedProvider.swift`;
-  - the stubs in `Tools/SketchBenchmarkHarness/Stubs.swift` and `Tools/Shared/`.
+  - the stubs in `Tools/SketchBenchmarkHarness/Stubs.swift` and `Tools/Shared/`. `Tools/Shared/` gains a `SystemSymbol` stub (`resolve(_:)` and `placeholder`, which `A2UIIcons`, the importer and the exporter use) and whatever `HostedProvider.swift` needs (`ModelPreferences.serverURL(for:)`) (F10).
 
   Then it runs `swift run -c release --package-path Tools/ScreenBenchmarkHarness ScreenBenchmarkHarness "$@"`. A file that won't compile on macOS gets a stub in `Tools/Shared/`; no app file changes to suit the harness.
 
 - [ ] **Step 1: Build it.** Run `Tools/ScreenBenchmarkHarness/run.sh check`. Expected: `harness ok: outline 1/1 valid, a2ui 1/1 valid`, and exit 0.
 
 - [ ] **Step 2: Measure the on-device outline prompt.**
+  - Run only while no other lane or `xcodebuild` is running, and record in the ledger that the machine was quiet (F17).
   - Run `run.sh outline 3` (24 screens).
   - The bar is today's `docs/benchmarks/screen-prompt.md` numbers:
     - valid 24/24;
@@ -1283,10 +1414,12 @@
 - Modify:
   - `Layer/Model/DesignStore.swift`: `setElements(_:on:)` appends only, and `DesignContent.setChildren(of:to:)` is deleted if nothing calls it;
   - its callers: `Layer/Intents/ElementIntents.swift`, `Layer/Voice/VoiceToolbox.swift`, `Layer/Canvas/ImagePlaygroundSupport.swift` and `Layer/Debug/VoiceDemo.swift`;
-  - `Layer/Model/ScreenTidy.swift`: comments only ("where the outline's column root starts").
+  - `Layer/Model/ScreenTidy.swift`: comments only ("where the outline's column root starts");
+  - `Layer/Tree/LookWords.swift`: its doc comment ("Shared by `ScreenBlueprint` and the outline") names the outline, Siri and voice instead (F12).
 - Modify (fallout):
   - under (f), every test file that passes `replacing:`: `PanelStepTests`, `UndoNameTests`, `CanvasDragWorkTests`, `VoiceToolsTests`, `LayerOrderTests`, `VoiceCallTests`, `CanvasDragLandingTests`, `MultiSelectionTests`, `CanvasHitTestTests`, `GroupTests` (:710), `LayersPanelTests`, `RotationTests`, `FormatPanelTests`, `ConcurrentEditTests`, `ScreenGenerationTests` and `SiriIntentsTests`;
-  - `SiriIntentsTests`' suites "Screen blueprints" and "Look words";
+  - `SiriIntentsTests`' suites "Screen blueprints" (struct `ScreenBlueprintTests`, renamed `WrittenScreenTests`, since the grep in Step 4 would find its name) and "Look words";
+  - under (f), `OutlineTests.theBlueprintStillReadsItsLooks` (:198): the same assertions on the leaf of `Outline.parse("button: Go [bordered, 20pt]", isComplete: true)`. That is kind `.button`, text "Go", `.bordered`, font size 20, and no tint (F12);
   - `ComponentCatalogueTests` and `LayerTests/Goldens/ComponentKinds.txt` (h).
 - Modify: `docs/benchmarks/semantic-tree.md` (the "After plan 3" column, completed)
 
@@ -1305,7 +1438,7 @@
   - **"Look words":**
     - `controlsTakeTheirState` reads the same outline, with the same assertions on the laid-out leaves.
     - `aLookCanBeGivenToAnElementAlone` uses `LookWords.look(from:).apply(to:)`.
-  - **`DesignActionTests`' setups** (:616, :917, :1175) put an outline's sections on the screen with `store.replaceChildren(of: .screen(id), with: Outline.parse(…, isComplete: true).children)`. Their assertions stay.
+  - **The setups at `SiriIntentsTests` :616 (`DesignActionTests`), :917 (`ImagePlaygroundTests`) and :1175 (`MovingTests`)** put an outline's sections on the screen with `store.replaceChildren(of: .screen(id), with: Outline.parse(…, isComplete: true).children)`. Their assertions stay (F11).
   - **`ComponentCatalogueTests`:**
     - `ScreenBlueprint.kindWords` and `kind(named:)` become `LookWords`'.
     - The "in a blueprint" line becomes "in an outline: \<`NaturalSize.of` at width 353\> | in a row: \<at 170\> | at 40pt: \<…\>" (h).
@@ -1322,6 +1455,7 @@
 - [ ] **Step 4: Verify the plan's end state.**
   - `grep -rn "ScreenBlueprint\|writeGenerated\|blueprint(ofFinishedLinesIn\|itemCount" Layer LayerTests Tools` finds nothing, and neither does `grep -rnE "setElements\(.*replacing:" Layer LayerTests` (a bare `replacing:` would also match `wrapper(replacing:)`).
   - `grep -rn "withOnePrimaryAction" Layer` finds only `Outline`'s and its callers.
+  - `grep -rn "parseAll" Layer` finds only the importer's own message parsing, behind its guarded decode (F1).
   - The full unit suite passes.
   - The UI suite fails nothing outside the baseline set.
   - `scripts/check-generated-swiftui.sh` prints `N files typecheck` and exits 0.
@@ -1329,12 +1463,14 @@
   - `grep -rln "PROJECTION: deleted in plan 6" Layer` lists only:
     - `Layer/Model/Projection/` (plan 3's `Look+Element.swift` and `ScreenDrawing.swift` are there);
     - `DesignContent`, and the `keepGroupsSound` shim;
-    - `DesignScreen.drawing` in `Design.swift`, and `AssetLibrary.templatePreview`.
+    - `DesignScreen.drawing` in `Design.swift`, and `AssetLibrary.templatePreview`. `PhoneScreenView.swift` is not among them (F18).
   - `grep -rln "PROJECTION: deleted in plan 6" LayerTests` lists only `LayerTests/Support/CodeOfElements.swift`.
 
 - [ ] **Step 5: Measure.**
+  - Run only while no other lane or `xcodebuild` is running, and record in the ledger that the machine was quiet (F17).
   - Run `StoreChangeBudgetTests` and `GenerationThroughTheReconcilerTests`.
   - Complete the "After plan 3" column: the store-change p95s, and the streaming row.
+  - Record in the ledger, for plan 6's finish, the open spec §9 item (F20). Spec §9 says what can't be fixed in generated and imported trees is "reported in the import sheet or the generation's status", and plan 3 doesn't show those issues, such as clipping by the screen.
   - Record in the ledger the iPad checks plan 6's checklist must carry:
     - a hosted generation streaming on the device;
     - A2UI from Files and a paste;
