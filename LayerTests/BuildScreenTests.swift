@@ -114,6 +114,24 @@ private final class BuildBundleMarker {}
         #expect(back.children.map(\.id) == [section.id, hand.id])
     }
 
+    @Test func rebuildingIsLaidOutForTheScreensOwnDeviceNotSiris() async throws {
+        let (model, _) = makeModel()
+        let id = try await build("title: A", in: model)
+
+        let rootID = try #require(model.store.root(of: id)?.id)
+        _ = try await BuildScreenIntent.build("title: B\nbutton: Go", on: id, name: nil, device: DeviceFrame.named("ipad"), in: model, undoManager: nil)
+
+        let screen = try #require(model.store.tree.screens.first { $0.id == id })
+        #expect(screen.deviceID == nil)
+        #expect(screen.root.frame.size == DeviceFrame.iPhone.size)
+        let widest = leaves(of: screen.root).map(\.frame.maxX).max() ?? 0
+        #expect(widest <= DeviceFrame.iPhone.size.width, "the layout is the iPhone's, not the iPad's")
+        #if DEBUG
+        let ahead = GenerationWork.layoutsAhead(of: rootID)
+        #expect(LayoutEngine.timesLaidOut(rootID) == ahead.total, "the commit laid nothing out again: the layout ahead was the right one")
+        #endif
+    }
+
     @Test func rebuildingALockedScreenIsRefused() async throws {
         let (model, _) = makeModel()
         let id = try await build("title: A", in: model)

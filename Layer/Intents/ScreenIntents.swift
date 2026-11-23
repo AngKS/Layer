@@ -163,8 +163,12 @@ extension BuildScreenIntent {
         repeat {
             let settings = model.store.tree.settings
             let snapshot = target.flatMap { model.store.root(of: $0) }
-            let deviceID = target.flatMap { id in model.store.tree.screens.first { $0.id == id }?.deviceID }
-                ?? (device == .iPhone ? nil : device.id)
+            // A rebuild is laid out for the screen's own device (nil is the iPhone); Siri's `device` is for a new screen.
+            let deviceID: String? = if let target, let screen = model.store.tree.screens.first(where: { $0.id == target }) {
+                screen.deviceID
+            } else {
+                device == .iPhone ? nil : device.id
+            }
             prepared = try await Task.detached {
                 try Prepared.make(layout, snapshot: snapshot, deviceID: deviceID, settings: settings)
             }.value
