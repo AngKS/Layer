@@ -1058,37 +1058,47 @@ From the builder check:
 ## How the work is split (for the plans)
 
 All of it happens on `feature/semantic-tree`. Each plan ends with the app building, the unit
-suite and UI suite green (apart from the known failures), and the compile check passing.
+suite and the UI suite green (apart from the recorded baseline failures), and the compile check
+passing.
 
-1. **The tree, the engine, the file.**
-   - `LayerNode`, the layout engine, the index and the validator.
+On 2026-11-23 the user said: "the important part i want built is the screenblueprint removal for
+a better, more enhanced structural design implementations". So structured generation comes
+straight after the store cutover. That works because the projection already draws every leaf of a
+laid-out tree at its resolved place, even before the canvas is rebuilt.
+
+1. **The tree, the engine and the file.**
+   - `LayerNode`, the layout engine, the index, the rules and the validator.
    - Version 4 encoding and decoding.
    - The outline parser.
    - The A2UI package with its importer and exporter.
+   - The compile check.
 
-   All of it is pure, and tested beside the old model, which is still in use.
+   All of it is pure, and tested beside the old model.
 2. **The store cutover.**
    - The tree becomes `content`, with the rules and undo on the tree.
    - The temporary projection keeps every caller working.
    - Saving and loading use version 4, and the baseline benchmark is recorded first.
-3. **The canvas and panels on the tree.**
+3. **Structured generation, and `ScreenBlueprint` removed.**
+   - The outline and A2UI generators, with the prompts rewritten and measured.
+   - The reconciler, streaming into the store.
+   - Siri's Build Screen and the library's templates moved to the outline.
+   - A2UI import and export in the UI.
+   - The SwiftUI export rewritten to follow the tree.
+   - `ScreenBlueprint`, its grammar and `writeGenerated` deleted.
+4. **The canvas and panels on the tree.**
    - Rendering, hit-testing and selection.
    - Move, resize and rotate, including layout-aware drags.
    - The Format panel's Layout and sizing, and the Layers panel.
+   - Group as Row, Column, Grid or Card.
    - These callers leave the projection.
-4. **The sketch path.**
+5. **The sketch path.**
    - Nodes with `SketchIntent`.
    - The structure pass and its pill.
    - Device changes by placement intent.
-   - Removing `ScreenTidy`.
-5. **Generation, Siri, voice and the export.**
-   - The outline and A2UI generators and the reconciler.
-   - Import and export in the UI.
-   - Siri and voice on the tree.
-   - The SwiftUI export rewritten.
-   - Removing `ScreenBlueprint`, the projection and `DesignElement`.
-6. **Measuring and the device checklist.**
-   - The benchmarks after the change, and the report.
-   - The iPad checklist.
+   - `ScreenTidy` deleted.
+6. **Siri, voice, the last of the projection, and measuring.**
+   - Siri and voice on the tree, with the new voice tools.
+   - The projection and `DesignElement` deleted.
+   - The benchmarks after the change, the report, and the iPad checklist.
 
 Merging to main waits until all six are done and green. Pushing waits for the user's word.
