@@ -55,32 +55,25 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
     abs(a.minX - b.minX) < tolerance && abs(a.minY - b.minY) < tolerance && abs(a.width - b.width) < tolerance && abs(a.height - b.height) < tolerance
 }
 
-/// Whether `box`, a box fitted at `degrees`, holds `exact`, at that angle, with each of its sides at most
-/// `slack` points out from `exact`'s along the box's own axes: policy clause (h), a box fitted out to whole points.
-private func holds(_ box: CGRect, _ exact: CGRect, at degrees: Double, within slack: CGFloat) -> Bool {
+/// The box a free container that fits what it holds takes round `corners`, the corners of what it holds turned as they
+/// are, in its parent's points: turned to `degrees`, its own points starting at `origin`. Spec §4: its frame is on whole
+/// points of its own, so each side is taken out to the next whole point along its own axes, as the engine fits it (the
+/// hug in `LayoutEngine`), a thousandth of a point being a turn's rounding and no reason to take a whole point more. An
+/// upright frame in the parent's points, centred on the box's turned centre, as a turned element's frame is kept.
+private func wholePointBox(round corners: [CGPoint], at degrees: Double, ownPointsFrom origin: CGPoint) -> CGRect {
     let turn = degrees * .pi / 180
-    func sides(_ rect: CGRect) -> [CGFloat] {
-        let across = rect.midX * cos(turn) + rect.midY * sin(turn), down = rect.midY * cos(turn) - rect.midX * sin(turn)
-        return [across - rect.width / 2, across + rect.width / 2, down - rect.height / 2, down + rect.height / 2]
+    let across = CGVector(dx: cos(turn), dy: sin(turn)), down = CGVector(dx: -sin(turn), dy: cos(turn))
+    let own = corners.map { point in
+        let (x, y) = (point.x - origin.x, point.y - origin.y)
+        return CGPoint(x: x * across.dx + y * across.dy, y: x * down.dx + y * down.dy)
     }
-    let (fitted, held) = (sides(box), sides(exact))
-    let out = [held[0] - fitted[0], fitted[1] - held[1], held[2] - fitted[2], fitted[3] - held[3]]
-    return out.allSatisfy { $0 > -0.001 && $0 <= slack }
-}
-
-/// Whether two designs are the same but for their elements' frames, each within `slack` points
-/// either way: policy clause (h), a group's box fitted out to whole points.
-private func alike(_ a: DesignContent, _ b: DesignContent, framesWithin slack: CGFloat) -> Bool {
-    let (mine, theirs) = (a.elements, b.elements)
-    guard a.screenFrames == b.screenFrames, a.title == b.title, a.canvas == b.canvas, mine.count == theirs.count else { return false }
-    return zip(mine, theirs).allSatisfy { one, other in
-        var (unplaced, otherUnplaced) = (one, other)
-        unplaced.frame = .zero
-        otherUnplaced.frame = .zero
-        let (f, g) = (one.frame, other.frame)
-        return unplaced == otherUnplaced && abs(f.minX - g.minX) <= slack && abs(f.minY - g.minY) <= slack
-            && abs(f.width - g.width) <= slack && abs(f.height - g.height) <= slack
-    }
+    let rounding: CGFloat = 0.001
+    let left = (own.map(\.x).min()! + rounding).rounded(.down), top = (own.map(\.y).min()! + rounding).rounded(.down)
+    let right = max(left, (own.map(\.x).max()! - rounding).rounded(.up)), bottom = max(top, (own.map(\.y).max()! - rounding).rounded(.up))
+    let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
+    let centre = CGPoint(x: origin.x + across.dx * middle.x + down.dx * middle.y, y: origin.y + across.dy * middle.x + down.dy * middle.y)
+    let size = CGSize(width: right - left, height: bottom - top)
+    return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
 }
 
 /// The group item itself: an element of the kind `.group` in the one list, its members
@@ -122,8 +115,10 @@ struct GroupModelTests {
         }
         let box = try #require(TurnedRect.enclosing(shapes, at: 30))
         let item = try #require(content.element(g))
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(holds(item.frame, screen.placement.localRect(for: box.rect), at: 30, within: 1))
+        // That box, taken out to whole points of the group's own (spec §4). Its own points start where its item was
+        // put: at the screen's origin, the frame of a new item being zero.
+        let corners = box.corners.map(screen.placement.localPoint(for:))
+        #expect(close(item.frame, wholePointBox(round: corners, at: 30, ownPointsFrom: .zero)))
         #expect(item.rotation == 30)
         // Not the upright box round them.
         let upright = try #require(TurnedRect.enclosing(shapes, at: 0))
@@ -1720,8 +1715,7 @@ struct GroupGeometryTests {
         board.model.beginTurn()
         board.model.turnSelection(by: -30, snaps: false)
         board.model.endTurn()
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(alike(board.store.content, before, framesWithin: 2))
+        #expect(board.store.content == before)
 
         // Reset stands it upright: turned to 50 from 20, it goes back to 0.
         board.model.rotateSelection(by: 20)
@@ -1805,8 +1799,7 @@ struct GroupGeometryTests {
                 #expect(board.store.element(button.element)?.rotation == 66)
             }
         }
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(alike(board.store.content, before, framesWithin: 2))
+        #expect(board.store.content == before)
     }
 
     // MARK: Resizing
@@ -1937,11 +1930,16 @@ struct GroupGeometryTests {
             let now = try #require(board.frame(of: ref))
             #expect(abs(now.width - was.width * s) < 0.000_1 && abs(now.height - was.height * s) < 0.000_1)
         }
-        // Fitted round them again, the box is the one asked for: in proportion, with its
-        // top-left corner where it was on the canvas.
+        // Fitted round them again, the box is the one asked for, taken out to whole points of its own (spec §4): in
+        // proportion, with its top-left corner where it was on the canvas, where its own points start.
         let now = try #require(board.store.canvasShape(of: .element(g)))
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(close(now.rect, placement.canvasRect(for: frame), within: 1))
+        let shapes = try [board.b, board.d].map { ref in
+            let element = try #require(board.store.element(ref.element))
+            return TurnedRect(rect: element.frame, degrees: element.resolvedRotation)
+        }
+        let exact = try #require(TurnedRect.enclosing(shapes, at: 30))
+        let start = TurnedRect(rect: frame, degrees: 30).corner(.topLeft)
+        #expect(close(now.rect, placement.canvasRect(for: wholePointBox(round: exact.corners, at: 30, ownPointsFrom: start))))
         #expect(isNear(now.corner(.topLeft), fixed, within: 0.001))
     }
 }

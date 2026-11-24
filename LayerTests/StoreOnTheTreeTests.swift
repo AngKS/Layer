@@ -150,13 +150,12 @@ struct StoreOnTheTreeTests {
 
         store.position([CanvasSelection.element(ref): CGPoint(x: box.minX + 10, y: box.minY)])
 
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
         let after = store.content.tree
-        #expect(close(try node(group.id, in: after).frame, groupBefore.offsetBy(dx: 10, dy: 0), within: 2))
+        #expect(close(try node(group.id, in: after).frame, groupBefore.offsetBy(dx: 10, dy: 0)))
         #expect(try node(group.id, in: after).rotation == 30)
         #expect(try node(group.id, in: after).children.map(\.id) == [big.id, small.id])
-        #expect(close(try node(big.id, in: after).frame, try node(big.id, in: before).frame, within: 2))
-        #expect(close(try node(small.id, in: after).frame, try node(small.id, in: before).frame, within: 2))
+        #expect(close(try node(big.id, in: after).frame, try node(big.id, in: before).frame))
+        #expect(close(try node(small.id, in: after).frame, try node(small.id, in: before).frame))
 
         undo.undo()
         #expect(store.content.tree == before)
