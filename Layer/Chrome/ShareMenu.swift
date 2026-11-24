@@ -13,21 +13,14 @@ struct ShareMenu: View {
 
     var body: some View {
         Menu {
-            // The code of the selected screen, or of the first one.
+            // The code and the A2UI of the selected screen, or of the first one.
             let tree = model.store.tree
             if let screen = sharedScreen(in: tree) {
-                let context = SwiftUICodeGenerator.Context(tree)
-                ShareLink(
-                    item: SharedSwiftUICode(screen: screen, context: context, settings: tree.settings.code),
-                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, in: context))
-                ) {
+                let shared = SharedScreen(screen, in: tree)
+                ShareLink(item: shared.code, preview: SharePreview(shared.codeFileName)) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
-            }
-            if let screen = sharedScreen(in: tree) {
-                let typeName = SwiftUICodeGenerator.typeNames(for: tree.screens)[screen.id] ?? SwiftUICodeGenerator.typeName(of: screen)
-                let shared = SharedA2UI(screen: screen, typeName: typeName)
-                ShareLink(item: shared, preview: SharePreview(shared.fileName)) {
+                ShareLink(item: shared.a2ui, preview: SharePreview(shared.a2ui.fileName)) {
                     Label("A2UI JSON", systemImage: "curlybraces")
                 }
             }
@@ -78,6 +71,22 @@ struct ShareMenu: View {
                 problem = item.problem
             }
         }
+    }
+}
+
+/// What the Share menu offers of one screen: its SwiftUI code and its A2UI, both named from one context's view names,
+/// made once each time the menu is.
+struct SharedScreen {
+    let code: SharedSwiftUICode
+    /// "<TypeName>.swift".
+    let codeFileName: String
+    let a2ui: SharedA2UI
+
+    init(_ screen: TreeScreen, in tree: TreeContent) {
+        let context = SwiftUICodeGenerator.Context(tree)
+        code = SharedSwiftUICode(screen: screen, context: context, settings: tree.settings.code)
+        codeFileName = SwiftUICodeGenerator.fileName(for: screen, in: context)
+        a2ui = SharedA2UI(screen: screen, typeName: context.typeName(of: screen))
     }
 }
 

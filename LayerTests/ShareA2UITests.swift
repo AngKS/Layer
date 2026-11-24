@@ -26,6 +26,23 @@ import Testing
         #expect(SharedA2UI(screen: screen, typeName: DesignScreen.typeName(forScreenNamed: screen.name)).fileName == "SignIn.a2ui.json")
     }
 
+    /// The Share menu names a screen's A2UI file and its SwiftUI file from one set of view names, so a second "Sign In"
+    /// is `SignIn2` in both (final review B-m2).
+    @Test func theA2UIFileIsNamedAsTheSwiftUIViewIs() throws {
+        let first = try Self.profileScreen(named: "Sign In", deviceID: nil)
+        var second = try Self.profileScreen(named: "Sign-In", deviceID: nil)
+        second.id = UUID()
+        var tree = TreeContent()
+        tree.screens = [first, second]
+
+        let shared = SharedScreen(second, in: tree)
+
+        #expect(shared.codeFileName == "SignIn2.swift")
+        #expect(shared.a2ui.fileName == "SignIn2.a2ui.json")
+        #expect(shared.code.source.contains("struct SignIn2: View"))
+        #expect(SharedScreen(first, in: tree).a2ui.fileName == "SignIn.a2ui.json")
+    }
+
     @Test func nothingIsWrittenUntilShared() throws {
         let screen = try Self.profileScreen(named: "Profile", deviceID: nil)
         // This test's own surface id: other suites write documents too (F13).
