@@ -54,13 +54,13 @@ struct GroupFinalFixTests {
     @Test func aGroupWithEveryMemberHiddenIsNoTarget() {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
-        #expect(board.store.targets(on: .screen(board.screen), entered: []).contains(g))
+        #expect(board.store.treeTargets(entered: []).refs(on: .screen(board.screen)).contains(g))
 
         board.store.update([board.b, board.d]) { $0.isHidden = true }
 
         #expect(board.store.element(g.element)?.isHidden == false)
-        #expect(!board.store.targets(on: .screen(board.screen), entered: []).contains(g))
-        #expect(!board.store.targetElements(entered: [])[.screen(board.screen), default: []].contains { $0.id == g.element })
+        #expect(!board.store.treeTargets(entered: []).refs(on: .screen(board.screen)).contains(g))
+        #expect(!board.store.treeTargets(entered: []).byHost[.screen(board.screen), default: []].contains { $0.id == g.element })
     }
 
     @Test func siriShowingAMemberHiddenByItsGroupShowsTheGroupToo() throws {

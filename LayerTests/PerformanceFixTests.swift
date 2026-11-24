@@ -189,7 +189,7 @@ extension PerformanceFixTests {
         board.group(board.a, board.e)
 
         let walks = GroupWork.leafWalks
-        let found = board.store.targetElements(entered: [])
+        let found = board.store.treeTargets(entered: []).byHost
         #expect(GroupWork.leafWalks - walks == 0, "leaves walked \(GroupWork.leafWalks - walks) times for 4 groups")
         #expect(found.values.joined().count > 0)
     }
@@ -202,7 +202,7 @@ extension PerformanceFixTests {
         let empty = board.group(board.a, board.e, named: "empty")
 
         func same(_ label: String, entered: Set<DesignElement.ID> = []) {
-            let now = board.store.targetElements(entered: entered).mapValues { $0.map(\.id) }
+            let now = board.store.treeTargets(entered: entered).byHost.mapValues { $0.map(\.id) }
             let was = referenceTargets(board.store, entered: entered)
             #expect(now == was, "\(label)")
         }
@@ -227,8 +227,8 @@ extension PerformanceFixTests {
         same("a hidden group over a shown member", entered: [empty.element])
         // Per host as well.
         for host in [DesignStore.ElementRef.Host.screen(board.screen), .canvas] {
-            let per = board.store.targets(on: host, entered: [outer.element]).map(\.element)
-            let all = board.store.targetElements(entered: [outer.element])[host]?.map(\.id) ?? []
+            let per = board.store.treeTargets(entered: [outer.element]).refs(on: host).map(\.element)
+            let all = board.store.treeTargets(entered: [outer.element]).byHost[host]?.map(\.id) ?? []
             #expect(Set(per) == Set(all))
         }
     }

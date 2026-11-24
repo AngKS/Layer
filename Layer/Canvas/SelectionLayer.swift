@@ -221,11 +221,11 @@ struct SelectionLayer: View {
 
 /// What is selected and its size, for VoiceOver and automation rather than the eye. A view
 /// of its own, so that it isn't worked out again on every frame of a pan, as the outlines are.
-private struct SelectionSummary: View {
+struct SelectionSummary: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let summary {
+        if let summary = Self.value(for: model) {
             Color.clear
                 .frame(width: 1, height: 1)
                 .accessibilityElement()
@@ -241,26 +241,28 @@ private struct SelectionSummary: View {
                 }
         }
     }
+}
 
-    private var summary: String? {
+extension SelectionSummary {
+    /// "W × H"; "Row · W × H", "Column", "Grid", "Overlay", "Card" or "Group · W × H" (F7's words); "Drawing · N
+    /// strokes"; "N items · W × H"; "<screen> · W × H". Read from the tree.
+    @MainActor static func value(for model: AppModel) -> String? {
         if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
             return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
         }
-        if let selected = model.selectedElement {
-            let size = "\(Int(selected.element.frame.width)) × \(Int(selected.element.frame.height))"
-            switch selected.element.kind {
-            case .drawing:
-                let strokes = selected.element.strokeCount
+        if let selected = model.selectedNode {
+            let node = selected.node
+            let size = "\(Int(selected.frame.width)) × \(Int(selected.frame.height))"
+            if node.kind == .drawing {
+                let strokes = node.content.ink.flatMap { DecodedInk.drawing(node.id, ink: $0) }?.strokes.count ?? 0
                 return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
-            case .group, .card:
-                // Told apart from an element, by VoiceOver and the UI tests.
-                return "Group · \(size)"
-            default:
-                return size
             }
+            // A container is told apart from a thing, by VoiceOver and the UI tests, by what it is.
+            return node.isContainer ? "\(node.kindName) · \(size)" : size
         }
-        if let screen = model.selectedScreen {
-            return "\(screen.name) · \(Int(screen.size.width)) × \(Int(screen.size.height))"
+        if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) {
+            let size = model.store.tree.device(of: screen).size
+            return "\(screen.name) · \(Int(size.width)) × \(Int(size.height))"
         }
         return nil
     }
@@ -824,43 +826,46 @@ private struct CanvasDragModifier<G: Gesture>: ViewModifier {
 /// targets of what it moved, where every target, with its tap and its drag, was built again
 /// for every change, each frame of a drag among them (audit C6).
 ///
-/// A group that hasn't been gone into (`AppModel.enteredGroups`) is one target, its box,
-/// and what is in it has none; selecting something in it swaps its target for theirs.
+/// A container that hasn't been gone into (`AppModel.enteredGroups`) is one target, its box,
+/// and what is in it has none; selecting something in it swaps its target for theirs. Built
+/// from the tree's targets (`TreeTargets`).
 private struct ElementTargets: View {
     @Environment(AppModel.self) private var model
     let drags: CanvasDrags
 
     var body: some View {
         let store = model.store
-        let targets = store.targetElements(entered: model.enteredGroups)
+        let targets = store.treeTargets(entered: model.enteredGroups)
+        let tree = store.tree
         // A finger's worth of target at the zoom the canvas comes to rest at: following the
         // zoom itself, every target was built again on every frame of a pinch (audit C8).
         let minimum = 30 / max(model.settledScale, 0.01)
         ZStack(alignment: .topLeading) {
-            ForEach(store.screens) { screen in
+            ForEach(tree.screens) { screen in
                 if store.canvas.showsFrameNames {
-                    ScreenNameTarget(id: screen.id, frame: screen.labelFrame, isLocked: screen.isLocked == true, minimum: minimum, model: model, drags: drags)
+                    ScreenNameTarget(id: screen.id, frame: screen.labelFrame(on: tree.device(of: screen)), isLocked: screen.isLocked == true,
+                                     minimum: minimum, model: model, drags: drags)
                         .equatable()
                 }
-                ForEach(targets[.screen(screen.id)] ?? []) { element in
-                    target(for: element, on: .screen(screen.id), placement: screen.placement, minimum: minimum)
+                ForEach(targets.hosts[.screen(screen.id)] ?? [], id: \.id) { target in
+                    self.target(target, on: .screen(screen.id), minimum: minimum)
                 }
             }
             // A drawing on the ink canvas has no target here: a tap on its ink picks it, and
             // a drag across it is free to pan the canvas.
-            ForEach(targets[.canvas] ?? []) { element in
-                target(for: element, on: .canvas, placement: Placement(origin: .zero, scale: element.scale ?? 1), minimum: minimum)
+            ForEach(targets.hosts[.canvas] ?? [], id: \.id) { target in
+                self.target(target, on: .canvas, minimum: minimum)
             }
         }
         .frame(width: Viewport.canvasSize.width, height: Viewport.canvasSize.height, alignment: .topLeading)
     }
 
-    /// A thing's target, or a group's: its box. Locked by itself or by a group above it, it
-    /// doesn't drag; a group's members' own locks don't stop the group.
-    private func target(for element: DesignElement, on host: DesignStore.ElementRef.Host, placement: Placement, minimum: CGFloat) -> some View {
+    /// A thing's target, or a container's: its box. Locked by itself or by a container above it,
+    /// it doesn't drag; what is in a container, locked on its own, doesn't stop the container.
+    private func target(_ target: TreeTargets.Target, on host: DesignStore.ElementRef.Host, minimum: CGFloat) -> some View {
         ElementTarget(
-            ref: .init(host: host, element: element.id), frame: placement.canvasRect(for: element.frame),
-            degrees: element.resolvedRotation, isLocked: model.store.isLockedWithItsGroups(element), minimum: minimum, model: model, drags: drags
+            ref: .init(host: host, element: target.id), shape: target.shape, isLocked: target.isLocked,
+            minimum: minimum, model: model, drags: drags
         )
         .equatable()
     }
@@ -880,8 +885,8 @@ private func targetArea(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -
 /// a tap or a drag acts on is looked up as it happens.
 private struct ElementTarget: View, Equatable {
     let ref: DesignStore.ElementRef
-    let frame: CGRect
-    let degrees: Double
+    /// Its turned shape, in canvas points.
+    let shape: TurnedRect
     let isLocked: Bool
     let minimum: CGFloat
     /// For what a tap and a drag do; not part of where the target lies.
@@ -889,14 +894,14 @@ private struct ElementTarget: View, Equatable {
     let drags: CanvasDrags
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.ref == b.ref && a.frame == b.frame && a.degrees == b.degrees && a.isLocked == b.isLocked && a.minimum == b.minimum
+        a.ref == b.ref && a.shape == b.shape && a.isLocked == b.isLocked && a.minimum == b.minimum
     }
 
     var body: some View {
         #if DEBUG
-        let _ = CanvasWork.targetsBuilt += 1
+        let _ = CanvasWork.builtTarget(ref.element)
         #endif
-        targetArea(frame, degrees: degrees, minimum: minimum)
+        targetArea(shape.rect, degrees: shape.degrees, minimum: minimum)
             // Ink lies over the element: where it does, a tap or a drag is the drawing's.
             .onTapGesture(coordinateSpace: .named(SelectionLayer.space)) { [model, ref] in model.targetTapped(.element(ref), at: $0) }
             .canvasDrag(drags, model: model, isEnabled: !isLocked) { [drags, model, ref] owner in
@@ -1015,8 +1020,9 @@ enum CanvasWork {
     static var strokesRead = 0
     /// Checks put off until after a change, of whether what a drag moves is still there.
     static var dragChecks = 0
-    /// Element targets built, each with its tap and drag.
-    static var targetsBuilt = 0
+    /// Element targets built, each with its tap and drag, by the id of what each is the target of: what a test
+    /// reads for its own board's things, so that other suites' canvases drawn meanwhile don't add to it (F9).
+    private static var targets: [UUID: Int] = [:]
     /// Drag owners made: one each time a view carrying a drag is made.
     static var ownersMade = 0
     /// Passes over the design's list to work out what can be touched on the canvas.
@@ -1028,5 +1034,13 @@ enum CanvasWork {
     static var thingsListed = 0
     /// Tasks started to tell the sketch reading log of elements deleted.
     static var readingLogTasks = 0
+
+    /// How many times the target of the thing with `id` has been built, with its tap and drag. It only grows.
+    static func targetsBuilt(of id: UUID) -> Int { targets[id] ?? 0 }
+
+    /// Counts one build of the target of the thing with `id`.
+    static func builtTarget(_ id: UUID) {
+        targets[id, default: 0] += 1
+    }
 }
 #endif

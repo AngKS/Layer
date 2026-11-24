@@ -11,9 +11,10 @@ import Foundation
 ///
 /// What draws, exports, describes and hit-tests elements reads the design's views
 /// (`screens`, `floating`), which leave group items out and give each member the lock and
-/// hide of the groups above it. What shows the tree, the Layers panel and the canvas
-/// targets, reads the list itself (`children(of:)`): group items included, with each
-/// thing's own flags.
+/// hide of the groups above it. What shows the tree, the Layers panel, reads the list itself
+/// (`children(of:)`): group items included, with each thing's own flags. What can be touched
+/// on the canvas is read from the tree itself, any container standing for what it holds
+/// (`TreeTargets`).
 extension DesignContent {
     /// Whether any element is a group item or says it belongs to a group: a member left
     /// pointing at a group that has gone still needs `keepGroupsSound()`. One scan of the
@@ -212,29 +213,27 @@ extension DesignStore {
         element.isLocked || element.group != nil && DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
     }
 
-    // MARK: Selecting with groups
+    // MARK: Selecting with containers
 
-    /// The groups above an element on its host, the nearest first, looked up in the store's
-    /// index rather than the list.
-    private func groups(above element: DesignElement) -> [DesignElement] {
-        Array(DesignContent.groups(above: element, find: self.element(_:)).prefix { $0.parent == element.parent })
-    }
-
-    /// The groups that hold something, at any depth, the nearest first.
+    /// The containers that hold something, at any depth, the nearest first: a card, row, column, grid or
+    /// overlay as much as a group. A screen's root isn't one: it is the screen. Read from the index.
     func groups(holding ref: ElementRef) -> [ElementRef] {
-        guard let element = element(ref.element) else { return [] }
-        return groups(above: element).map { ElementRef(host: ref.host, element: $0.id) }
+        let memo = index
+        return memo.ancestors(of: ref.element).compactMap { id in
+            guard let entry = memo[id], !entry.path.isEmpty else { return nil }
+            return ElementRef(host: ref.host, element: id)
+        }
     }
 
-    /// What a tap on `leaf` picks while the groups in `entered` have been gone into (something
-    /// in each is selected): the outermost of it and the groups above it that hasn't been,
-    /// which is `leaf` itself once all of them have. A group item stands for a tap in the gap
-    /// between its members.
+    /// What a tap on `leaf` picks while the containers in `entered` have been gone into (something
+    /// in each is selected): the outermost of it and the containers above it that hasn't been,
+    /// which is `leaf` itself once all of them have. A container stands for a tap in the gap
+    /// between what it holds.
     func pickTarget(for leaf: ElementRef, entered: Set<DesignElement.ID>) -> ElementRef {
         groups(holding: leaf).last { !entered.contains($0.element) } ?? leaf
     }
 
-    /// One level in from `outer` towards `leaf`: the group just inside `outer` on the way to
+    /// One level in from `outer` towards `leaf`: the container just inside `outer` on the way to
     /// `leaf`, or `leaf` itself. `leaf` when `outer` is `leaf`, or doesn't hold it.
     func nextLevel(in outer: ElementRef, towards leaf: ElementRef) -> ElementRef {
         let path = [leaf] + groups(holding: leaf)
@@ -242,108 +241,16 @@ extension DesignStore {
         return path[index - 1]
     }
 
-    /// The topmost thing in a group, at any depth, that isn't a group itself and is shown,
-    /// whose turned frame holds a point on the canvas: what a tap on the group's target there
-    /// is on. Nil in a gap between its members.
-    ///
-    /// Only the group's own block is looked at. Kept sound, a group's members, and theirs,
-    /// are one run just behind its item among the things on its host, drawings apart, so the
-    /// block is read from the item back, front to back, to the first thing on the host that
-    /// isn't in the group.
-    func leaf(at point: CGPoint, in group: DesignElement.ID) -> ElementRef? {
-        guard let item = groupItem(group), let end = indexInList(of: group) else { return nil }
-        let host: ElementRef.Host = item.parent.map { .screen($0) } ?? .canvas
-        let onScreen = item.parent.flatMap { screen($0)?.placement }
-        let elements = projection.elements
-        for element in elements[..<end].reversed() where element.parent == item.parent && element.kind != .drawing {
-            let above = groups(above: element)
-            guard above.contains(where: { $0.id == group }) else { break }
-            guard element.kind != .group, !element.isHidden, !above.contains(where: \.isHidden),
-                  let placement = onScreen ?? (element.parent == nil ? Placement(origin: .zero, scale: element.scale ?? 1) : nil),
-                  TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point)
-            else { continue }
-            return ElementRef(host: host, element: element.id)
-        }
-        return nil
-    }
-
-    /// What can be touched on a screen, or on the open canvas, back to front as it is drawn,
-    /// while the groups in `entered` have been gone into:
-    /// - each thing that isn't in a group, or is only in groups gone into;
-    /// - each group that hasn't been gone into but whose groups above it have, in its block's
-    ///   place, standing for its members, which have none of their own.
-    ///
-    /// What is hidden, by itself or with a group above it, has none. Nor has a drawing that
-    /// isn't locked: its ink is picked, not its frame.
-    ///
-    /// On the open canvas a locked drawing comes after the other floating things, as the canvas
-    /// draws it above them (C3, L10): hit order is draw order. This is the one place that
-    /// order lives, and what is built from the targets, and hover, follow it.
-    func targets(on host: ElementRef.Host, entered: Set<DesignElement.ID>) -> [ElementRef] {
-        let showing = groupsWithSomethingShowing()
-        var found = children(on: host).filter { isTarget($0, entered: entered, showing: showing) }
-        if host == .canvas { found = Self.drawnOrder(found) }
-        return found.map { ElementRef(host: host, element: $0.id) }
-    }
-
-    /// Floating things as the canvas draws them, back to front: a drawing, which can only be
-    /// touched while it is locked, above everything else on the open canvas.
-    private static func drawnOrder(_ things: [DesignElement]) -> [DesignElement] {
-        guard things.contains(where: { $0.kind == .drawing }) else { return things }
-        return things.filter { $0.kind != .drawing } + things.filter { $0.kind == .drawing }
-    }
-
-    /// `targets(on:entered:)` for every screen and the open canvas at once, as the elements
-    /// themselves, each with its own lock and hide: one pass over the list, where a pass for
-    /// each host went over all of it once a screen. Kept until the content changes, or other
-    /// groups are gone into: hover asks on every move of the pen.
-    func targetElements(entered: Set<DesignElement.ID>) -> [ElementRef.Host: [DesignElement]] {
+    /// What can be touched on each screen and the open canvas while the containers in `entered` have been
+    /// gone into: see `TreeTargets`. Memoised per design version and entered set: hover asks on every move
+    /// of the pen. `CanvasWork.targetPasses` counts each build.
+    func treeTargets(entered: Set<UUID>) -> TreeTargets {
         keptTargets(entered: entered) {
             #if DEBUG
             CanvasWork.targetPasses += 1
             #endif
-            var found: [ElementRef.Host: [DesignElement]] = [:]
-            let showing = groupsWithSomethingShowing()
-            for element in projection.elements where isTarget(element, entered: entered, showing: showing) {
-                found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
-            }
-            if let floating = found[.canvas] { found[.canvas] = Self.drawnOrder(floating) }
-            return found
+            return TreeTargets(tree, index: index, entered: entered)
         }
-    }
-
-    /// The groups that have something showing in them, at any depth: a member that isn't a
-    /// group, hidden neither by itself nor by a group above it. One pass over the list, the
-    /// groups above each member that shows marked as it goes, where asking each group for its
-    /// leaves went over the list for every group.
-    private func groupsWithSomethingShowing() -> Set<DesignElement.ID> {
-        // A design without groups costs one scan, and no dictionary.
-        let elements = projection.elements
-        guard elements.contains(where: { $0.kind == .group }) else { return [] }
-        var byID: [DesignElement.ID: DesignElement] = [:]
-        for element in elements where byID[element.id] == nil { byID[element.id] = element }
-        var showing: Set<DesignElement.ID> = []
-        for leaf in elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
-            guard !DesignContent.groups(above: leaf, find: { byID[$0] }).contains(where: \.isHidden) else { continue }
-            // Up the chain of groups it says it is in; what is above one already marked is too.
-            var seen: Set<DesignElement.ID> = [leaf.id]
-            var next = leaf.group
-            while let id = next, seen.insert(id).inserted, showing.insert(id).inserted {
-                next = byID[id]?.group
-            }
-        }
-        return showing
-    }
-
-    private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>, showing: Set<DesignElement.ID>) -> Bool {
-        guard !element.isHidden, element.isPickedByItsFrame else { return false }
-        // A group with nothing showing in it has nothing to touch.
-        if element.kind == .group, !showing.contains(element.id) { return false }
-        if element.group != nil {
-            guard groups(above: element).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) else { return false }
-        }
-        // A group gone into is stood for by what is in it.
-        return element.kind != .group || !entered.contains(element.id)
     }
 
     // MARK: Moving, landing and resizing a group
@@ -556,28 +463,27 @@ extension DesignStore {
         return CanvasSelection(unwrap(item.id).map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
-    /// Unlocks what is selected and, so that it is unlocked, every locked group above it, as
-    /// one step. A thing locked only by its group would otherwise stay locked (conflict D).
+    /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as
+    /// one step: a thing locked only by its container would otherwise stay locked (Ruling D). Each
+    /// one's own flag is written; the containers are found through the index.
     func unlock(_ selection: CanvasSelection) {
-        let present = things(in: selection)
-        var groups: [DesignElement.ID] = []
-        for case .element(let ref) in present {
-            guard let element = resolve(ref)?.element else { continue }
-            groups += DesignContent.groups(above: element, find: self.element(_:)).filter(\.isLocked).map(\.id)
-        }
-        apply { content in
-            for thing in present {
-                switch thing {
-                case .element(let ref):
-                    content.update(ref.element) { $0.isLocked = false }
-                case .screen(let id):
-                    content.updateScreen(id) { $0.isLocked = nil }
-                case .several:
-                    continue
+        let memo = index, tree = tree
+        var nodes: [UUID] = []
+        var screens: [TreeScreen.ID] = []
+        for thing in things(in: selection) {
+            switch thing {
+            case .element(let ref):
+                nodes.append(ref.element)
+                nodes += memo.ancestors(of: ref.element).filter { id in
+                    memo[id].map { !$0.path.isEmpty } == true && memo.node(id, in: tree)?.isLocked == true
                 }
+            case .screen(let id):
+                screens.append(id)
+            case .several:
+                continue
             }
-            for id in groups { content.update(id) { $0.isLocked = false } }
         }
+        setOwnLocks(false, nodes: nodes, screens: screens)
     }
 }
 
@@ -637,17 +543,3 @@ extension DesignStore {
         children(on: .canvas).filter { $0.kind == .drawing }.reversed().map { ElementRef(host: .canvas, element: $0.id) }
     }
 }
-
-#if DEBUG
-/// How much of the design the groups' own questions walk: for the tests that hold working out
-/// what can be touched to a pass over the list. Counted on the main thread alone, where the
-/// store works it out. The count only grows: a test measures the difference it makes.
-enum GroupWork {
-    nonisolated(unsafe) private(set) static var leafWalks = 0
-
-    static func leafWalked() {
-        guard Thread.isMainThread else { return }
-        leafWalks += 1
-    }
-}
-#endif

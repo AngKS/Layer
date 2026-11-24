@@ -121,14 +121,14 @@ final class DesignStore {
         return index
     }
 
-    /// What can be touched on each host, for the groups that had been gone into when it was
-    /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
-    /// for it on every move of the pen.
-    @ObservationIgnored private var targets: (entered: Set<DesignElement.ID>, found: [ElementRef.Host: [DesignElement]])?
+    /// What can be touched on each host, for the containers that had been gone into when it was
+    /// worked out (see `treeTargets(entered:)`), for the content as it is now. Hover asks for it
+    /// on every move of the pen.
+    @ObservationIgnored private var targets: (entered: Set<UUID>, found: TreeTargets)?
 
-    /// What `make` works out about what can be touched while the groups in `entered` have been
-    /// gone into: kept until the content changes, or other groups are gone into.
-    func keptTargets(entered: Set<DesignElement.ID>, _ make: () -> [ElementRef.Host: [DesignElement]]) -> [ElementRef.Host: [DesignElement]] {
+    /// What `make` works out about what can be touched while the containers in `entered` have been
+    /// gone into: kept until the content changes, or other containers are gone into.
+    func keptTargets(entered: Set<UUID>, _ make: () -> TreeTargets) -> TreeTargets {
         // Read first, so that whatever draws from it is redrawn when the content changes.
         _ = content
         if let targets, targets.entered == entered { return targets.found }

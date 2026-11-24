@@ -1306,25 +1306,37 @@ final class AppModel {
         // With the palette up, a finger tap reaches the canvas for elements too: their own
         // handles stay out of the Pencil's way while it draws. A drawing has no handle
         // of its own until it is selected, so a tap on its ink always reaches here.
-        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.resolve(ref)?.element.kind == .drawing {
+        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.node(ref.element)?.kind == .drawing {
             pick(target)
-        } else if case .screen(let id)? = target, let screen = store.screen(id), !screen.canvasFrame.contains(point) {
+        } else if case .screen(let id)? = target, let frame = screenFrame(id), !frame.contains(point) {
             // `hoverTarget` gives the screen for its name strip as well as for itself.
             pick(.screen(id))
-        } else if selection == nil, let screen = store.screen(at: point) {
-            pick(.screen(screen.id))
-        } else if let screen = store.screen(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen.id)) {
+        } else if selection == nil, let screen = screenID(at: point) {
+            pick(.screen(screen))
+        } else if let screen = screenID(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen)) {
             // The finger that rested on the screen's empty area, lifting. What it rested
             // on was the screen, but the tap would reach `pick` as a clearing, which its
             // guard wouldn't know for the lift.
             rested = nil
-        } else if let screen = store.screen(at: point), isSecondTap(on: .screen(screen.id)) {
+        } else if let screen = screenID(at: point), isSecondTap(on: .screen(screen)) {
             // A double-tap on the screen's empty area, whose first tap selected the screen:
             // a double-tap never takes a thing out.
-            pick(.screen(screen.id))
+            pick(.screen(screen))
         } else if !isNearMiss(viewPoint) {
             pick(nil)
         }
+    }
+
+    /// A screen's frame on the canvas, as the tree has it. Nil when it is gone.
+    private func screenFrame(_ id: TreeScreen.ID) -> CGRect? {
+        let tree = store.tree
+        return tree.screens.first { $0.id == id }.map { $0.canvasFrame(on: tree.device(of: $0)) }
+    }
+
+    /// The topmost screen covering a point on the canvas, as the tree has it.
+    private func screenID(at point: CGPoint) -> TreeScreen.ID? {
+        let tree = store.tree
+        return tree.screens.last { $0.canvasFrame(on: tree.device(of: $0)).contains(point) }?.id
     }
 
     /// How far from a selected thing's outline, on either side, a tap that hits nothing
@@ -1338,7 +1350,7 @@ final class AppModel {
     /// to spare.
     private func isNearMiss(_ viewPoint: CGPoint) -> Bool {
         selectedThings.contains { thing in
-            if case .element(let ref) = thing, store.resolve(ref)?.element.kind == .drawing { return false }
+            if case .element(let ref) = thing, store.node(ref.element)?.kind == .drawing { return false }
             guard let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) else { return false }
             return Self.distance(from: viewPoint, toEdgeOf: shape) <= Self.nearMiss
         }
@@ -1355,17 +1367,19 @@ final class AppModel {
         return min(back.x - rect.minX, rect.maxX - back.x, back.y - rect.minY, rect.maxY - back.y)
     }
 
-    /// A tap on the target of an element, a group or a screen's name, or on something among
+    /// A tap on the target of an element, a container or a screen's name, or on something among
     /// several selected, at a point in the view. Ink is drawn over every element and screen,
     /// so where a drawing's ink lies over the target the tap picks the drawing, as hover and
-    /// a tap with the palette up do. On a group's target it is on the thing in the group
-    /// under it, or on the group itself in a gap between them: both taps of a double-tap find
-    /// the same one, and `pick` works out what it picks.
+    /// a tap with the palette up do. On a container's target it is on the thing in it under
+    /// the tap, at any depth, or on the container itself in a gap between them: both taps of a
+    /// double-tap find the same one, and `pick` works out what it picks.
     func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
         if let drawing = inkTarget(at: viewPoint) {
             pick(.element(drawing))
-        } else if case .element(let ref) = thing, store.groupItem(ref.element) != nil {
-            pick(.element(store.leaf(at: viewport.canvasPoint(for: viewPoint), in: ref.element) ?? ref))
+        } else if case .element(let ref) = thing, store.node(ref.element)?.isContainer == true {
+            let point = viewport.canvasPoint(for: viewPoint)
+            let leaf = TreeTargets.leaf(at: point, in: ref.element, content: store.tree, index: store.index)
+            pick(.element(leaf.map { DesignStore.ElementRef(host: ref.host, element: $0) } ?? ref))
         } else {
             pick(thing)
         }
@@ -1398,9 +1412,9 @@ final class AppModel {
     /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
     @ObservationIgnored private var lastTap: (thing: CanvasSelection, at: ContinuousClock.Instant, before: CanvasSelection?, after: CanvasSelection?)?
 
-    /// Every group that holds something selected, at any depth: those that have been gone
-    /// into. A tap picks what is inside them, one level at a time, and their members have
-    /// targets of their own in place of theirs.
+    /// Every container that holds something selected, at any depth: those that have been gone
+    /// into. A tap picks what is inside them, one level at a time, and what they hold has
+    /// targets of its own in place of theirs. Read from the index (`groups(holding:)`).
     var enteredGroups: Set<DesignElement.ID> {
         enteredGroups(in: selection)
     }
@@ -1496,8 +1510,8 @@ final class AppModel {
             var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
             if case .screen(let id) = ref.host { holders.append(.screen(id)) }
             things.subtract(holders.filter(current.contains))
-            if store.groupItem(ref.element) != nil {
-                let inside = Set(store.contents(of: ref.element).map(\.id))
+            if let node = store.node(ref.element), node.isContainer {
+                let inside = Set(TreeEdit.ids(in: node).dropFirst())
                 things = things.filter { thing in
                     if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
                 }
@@ -1690,30 +1704,33 @@ final class AppModel {
     var isHoveringList = false
 
     /// The topmost element or screen at a point in the view, for hover, and for a tap or a
-    /// resting finger that reaches the model. Only what is drawn there: a hidden element is
+    /// resting finger that reaches the model. Only what is drawn there: a hidden thing is
     /// looked through, as is a screen's name strip while names aren't shown. Each screen's
-    /// things, and the open canvas's, are looked at as their targets lie
-    /// (`DesignStore.targets(on:entered:)`): a group that hasn't been gone into is hit
-    /// anywhere in its box, giving the thing in it there, or the group itself in a gap
-    /// between them; `pickTarget(_:)` makes either what a tap picks.
+    /// things, and the open canvas's, are looked at as their targets lie (`TreeTargets`): a
+    /// container that hasn't been gone into is hit anywhere in its box, giving the thing in it
+    /// there, at any depth, or the container itself in a gap between them; `pickTarget(_:)`
+    /// makes either what a tap picks. Read from the tree.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing; and through a group's gaps, so that voice sees elements, not groups.
+    /// change a drawing; and through the gaps of a container with no look of its own, so that
+    /// voice sees elements, not groups. A card's fill is something to point at.
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         // A hidden drawing's ink isn't on the canvas.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        let targets = store.targetElements(entered: enteredGroups)
-        if let hit = topmost(at: point, among: targets[.canvas] ?? [], on: .canvas, placement: nil, skippingDrawings: skippingDrawings) {
+        let targets = store.treeTargets(entered: enteredGroups)
+        if let hit = topmost(at: point, among: targets.hosts[.canvas] ?? [], on: .canvas, skippingDrawings: skippingDrawings) {
             return .element(hit)
         }
+        let tree = store.tree
         let showsNames = store.canvas.showsFrameNames
-        for screen in store.screens.reversed() {
-            if let hit = topmost(at: point, among: targets[.screen(screen.id)] ?? [], on: .screen(screen.id), placement: screen.placement, skippingDrawings: skippingDrawings) {
+        for screen in tree.screens.reversed() {
+            if let hit = topmost(at: point, among: targets.hosts[.screen(screen.id)] ?? [], on: .screen(screen.id), skippingDrawings: skippingDrawings) {
                 return .element(hit)
             }
-            if screen.canvasFrame.contains(point) || (showsNames && screen.labelFrame.contains(point)) {
+            let device = tree.device(of: screen)
+            if screen.canvasFrame(on: device).contains(point) || (showsNames && screen.labelFrame(on: device).contains(point)) {
                 return .screen(screen.id)
             }
         }
@@ -1721,22 +1738,20 @@ final class AppModel {
     }
 
     /// The topmost of one host's targets, given back to front, that holds a canvas point: see
-    /// `hoverTarget(at:skippingDrawings:)`. `placement` is the screen's; on the open canvas,
-    /// where each thing has its own, it is nil.
+    /// `hoverTarget(at:skippingDrawings:)`.
     private func topmost(
-        at point: CGPoint, among targets: [DesignElement], on host: DesignStore.ElementRef.Host,
-        placement: Placement?, skippingDrawings: Bool
+        at point: CGPoint, among targets: [TreeTargets.Target], on host: DesignStore.ElementRef.Host, skippingDrawings: Bool
     ) -> DesignStore.ElementRef? {
-        for element in targets.reversed() {
-            let placement = placement ?? Placement(origin: .zero, scale: element.scale ?? 1)
-            guard TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) else { continue }
-            if element.kind == .group {
-                if let leaf = store.leaf(at: point, in: element.id) { return leaf }
-                if skippingDrawings { continue }
-            } else if skippingDrawings, element.kind == .drawing {
+        for target in targets.reversed() where target.shape.contains(point) {
+            if target.isContainer {
+                if let leaf = TreeTargets.leaf(at: point, in: target.id, content: store.tree, index: store.index) {
+                    return .init(host: host, element: leaf)
+                }
+                if skippingDrawings, store.node(target.id)?.kind != .card { continue }
+            } else if skippingDrawings, store.node(target.id)?.kind == .drawing {
                 continue
             }
-            return .init(host: host, element: element.id)
+            return .init(host: host, element: target.id)
         }
         return nil
     }
@@ -1841,28 +1856,29 @@ final class AppModel {
         setSelectionLocked(!isSelectionLocked)
     }
 
-    /// Hides or shows an element, or a group with everything in it, by its own flag. Hiding
-    /// one lets go of it, and of anything selected in a group hidden, since none of it can be
-    /// touched.
+    /// Hides or shows a thing, or a container with everything in it, by its own flag. Hiding
+    /// one lets go of it, and of anything selected inside it, at any depth, since none of it
+    /// can be touched: found through the index.
     func toggleHidden(_ ref: DesignStore.ElementRef) {
-        store.update(ref) { $0.isHidden.toggle() }
-        guard let element = store.resolve(ref)?.element, element.isHidden, let selection else { return }
-        let inside = element.kind == .group ? Set(store.contents(of: element.id).map(\.id)) : []
+        guard store.placed(ref) != nil else { return }
+        store.update(ref.element) { $0.isHidden.toggle() }
+        guard store.node(ref.element)?.isHidden == true, let selection else { return }
+        let index = store.index
         let kept = selection.things.filter { thing in
             guard case .element(let selected) = thing else { return true }
-            return selected.element != element.id && !inside.contains(selected.element)
+            return selected.element != ref.element && !index.ancestors(of: selected.element).contains(ref.element)
         }
         if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
-    /// Locks an element, or unlocks it, which also unlocks the locked groups above it, so that
-    /// a thing locked only by its group, which offers Unlock, is unlocked and never locked.
+    /// Locks a thing, or unlocks it, which also unlocks the locked containers above it, so that
+    /// a thing locked only by its container, which offers Unlock, is unlocked and never locked.
     func toggleLock(_ ref: DesignStore.ElementRef) {
-        guard let element = store.resolve(ref)?.element else { return }
-        if store.isLockedWithItsGroups(element) {
+        guard let placed = store.placed(ref) else { return }
+        if placed.isLocked {
             store.unlock(.element(ref))
         } else {
-            store.update(ref) { $0.isLocked = true }
+            store.update(ref.element) { $0.isLocked = true }
         }
     }
 
