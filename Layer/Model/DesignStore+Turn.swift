@@ -59,16 +59,19 @@ extension DesignStore {
     /// parent, whose own points are no whole points on the canvas; a drawing, whose ink lies where it was drawn, goes
     /// exactly where it is put. An angle the node already has, as an element keeps one, leaves its own as it is.
     ///
-    /// Each of `starts` instead takes the own frame and angle given, as they are: a turn come back round to where it
-    /// began (`TurnSession.startsPutBack(turnedBy:)`). A node and something in it aren't both given: each is put through
-    /// its parent as it was. Ids the design doesn't have, a screen's root, and poses that aren't finite are passed over.
+    /// Each of `starts` whose parent's space is exactly as it was then instead takes the own frame and angle given, as
+    /// they are: a turn come back round to where it began (`TurnSession.startsPutBack(turnedBy:)`). One whose parent has
+    /// moved since, as a group sized to fit moves its box while what it holds turns past its edges, is posed where its
+    /// parent is now, and the group fits round it as it began. A node and something in it aren't both given: each is
+    /// put through its parent as it was. Ids the design doesn't have, a screen's root, and poses that aren't finite are
+    /// passed over.
     func setCanvasPoses(_ poses: [UUID: TurnSession.Pose], puttingBack starts: [UUID: TurnSession.Start] = [:]) {
         let memo = index, tree = tree
         var writes: [(host: TreeIndex.Host, path: [Int], frame: CGRect?, rotation: Double??)] = []
         for (id, pose) in poses {
             guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree) else { continue }
             let node = posed.node
-            if let start = starts[id] {
+            if let start = starts[id], start.parentSpace == posed.parentSpace {
                 let frame = start.frame == node.frame ? nil : start.frame
                 let rotation: Double?? = start.rotation == node.rotation ? nil : .some(start.rotation)
                 if frame != nil || rotation != nil { writes.append((entry.host, entry.path, frame, rotation)) }

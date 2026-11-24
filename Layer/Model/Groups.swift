@@ -199,15 +199,19 @@ extension DesignStore {
         /// Whether it is a row, column, grid or overlay itself, its own one leaf: resized by its
         /// frame, with what is in it laid out by the engine.
         var isLaidOut = false
+        /// Where what holds it sat: its own frame is put back as it was only while that is so. A group sized to fit
+        /// moves its box, and every frame in it, as what it holds grows past its edges.
+        var parentSpace: TreeIndex.OwnSpace = .host
     }
 
     /// A container as it is now, read from the tree: see `GroupPose`. Nil when `ref` isn't a container
     /// where the ref says. A row, column, grid or overlay in it counts as one leaf, and one resized
     /// itself is its own one leaf: what is in it is laid out by the engine, never scaled.
     func groupPose(of ref: ElementRef) -> GroupPose? {
-        guard let placed = placed(ref), placed.node.isContainer else { return nil }
+        guard let placed = placed(ref), placed.node.isContainer,
+              let parentSpace = index.posed(ref.element, in: tree)?.parentSpace else { return nil }
         let isLaidOut = placed.node.resolvedLayout != .free
-        var pose = GroupPose(box: placed.frame, node: placed.node, smallestScale: 0, isLaidOut: isLaidOut)
+        var pose = GroupPose(box: placed.frame, node: placed.node, smallestScale: 0, isLaidOut: isLaidOut, parentSpace: parentSpace)
         func consider(_ leaf: LayerNode) {
             let spec = leaf.kind.spec
             var smallest = leaf.frame.width > 0 ? spec.minimumSize.width / leaf.frame.width : 1
@@ -266,8 +270,8 @@ extension DesignStore {
         guard let entry = index[ref.element], let posed = index.posed(ref.element, in: tree) else { return }
         // Read from the pose, not the design: each frame of a handle's drag scales what was there as it began.
         var resized = posed.node
-        // Back where it began, exactly as it was, with no arithmetic to round.
-        resized.frame = frame == pose.box ? pose.node.frame : posed.parentSpace.local(of: frame)
+        // Back where it began, in a parent where it was, exactly as it was, with no arithmetic to round.
+        resized.frame = frame == pose.box && posed.parentSpace == pose.parentSpace ? pose.node.frame : posed.parentSpace.local(of: frame)
         if pose.isLaidOut {
             (resized.width, resized.height) = (pose.node.width, pose.node.height)
             Self.fix(&resized, from: pose.node.frame.size, to: frame.size)

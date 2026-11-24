@@ -38,10 +38,13 @@ struct TurnSession: Equatable {
     }
 
     /// A part's own frame, in its parent's space, and its own angle, as the session formed: what a turn that comes
-    /// back round to where it began puts back as it was, so that the arithmetic of going round leaves no trace.
+    /// back round to where it began puts back as it was, so that the arithmetic of going round leaves no trace. Put
+    /// back only while its parent's space is `parentSpace` still: a group sized to fit moves its box, and every frame
+    /// in it, as what it holds turns past its edges.
     struct Start: Equatable, Sendable {
         var frame: CGRect
         var rotation: Double?
+        var parentSpace: TreeIndex.OwnSpace
     }
 
     let selection: CanvasSelection
@@ -87,7 +90,9 @@ struct TurnSession: Equatable {
                 continue
             }
             parts.append(Part(id: ref.element, base: Pose(centre: shape.centre, degrees: placed.degrees), turnsInPlace: placed.isLaidOut))
-            starts[ref.element] = Start(frame: placed.node.frame, rotation: placed.node.rotation)
+            if let parentSpace = store.index.posed(ref.element, in: store.tree)?.parentSpace {
+                starts[ref.element] = Start(frame: placed.node.frame, rotation: placed.node.rotation, parentSpace: parentSpace)
+            }
         }
         // Things all at one angle turn from that angle. One thing's outline is its own shape, so that it turns
         // about its own middle exactly.

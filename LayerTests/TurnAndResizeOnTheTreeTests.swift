@@ -315,6 +315,80 @@ struct TurnAndResizeOnTheTreeTests {
         #expect(!undo.canUndo, "a twist that changed nothing is no step")
     }
 
+    /// A screen holding A and B grouped by Group, a free group sized to fit them, at (100, 100), A at its left edge,
+    /// and C on the screen's root at (300, 300): A and C selected, turning about (225, 225). Turned 90°, A goes round
+    /// past the group's left edge, and the group, hugging what it holds, moves its box and every member's frame in it.
+    private func memberOfAGroupAndAThingBeside() throws -> (model: AppModel, before: TreeContent, a: UUID, b: UUID, c: UUID) {
+        let a = leaf(.text, CGRect(x: 100, y: 100, width: 50, height: 50), text: "A")
+        let b = leaf(.text, CGRect(x: 200, y: 100, width: 50, height: 50), text: "B")
+        let c = leaf(.text, CGRect(x: 300, y: 300, width: 50, height: 50), text: "C")
+        let (model, _) = makeModel(design([screen([a, b, c])]))
+        let pair = try #require(CanvasSelection([.element(try model.ref(a.id)), .element(try model.ref(b.id))]))
+        let g = try #require(model.store.group(pair))
+        #expect(model.store.node(g.element)?.frame == CGRect(x: 100, y: 100, width: 150, height: 50))
+        #expect(model.store.node(g.element)?.width.mode == .fit, "Group makes a group sized to fit")
+        #expect(model.ownFrame(of: a.id) == CGRect(x: 0, y: 0, width: 50, height: 50))
+        model.selection = CanvasSelection([.element(try model.ref(a.id)), .element(try model.ref(c.id))])
+        return (model, model.store.tree, a.id, b.id, c.id)
+    }
+
+    /// Final review A2-I1: several things turned and brought back round to where they began, by the knob's Reset, a
+    /// twist that snaps back to 0, steps that add up to a whole turn, or the knob turned there and back, are exactly
+    /// as they were, though the group one of them is in has moved its box since the turn began. A start is put back
+    /// only into a parent as it was; otherwise its frame is worked out where its parent is now.
+    @Test func severalThingsTurnedBackRoundLandAsTheyWereThoughTheirGroupMoved() throws {
+        // The knob's Reset (its double tap).
+        var board = try memberOfAGroupAndAThingBeside()
+        let canvasA = try board.model.canvasCentre(of: board.a)
+        board.model.rotateSelection(by: 90)
+        #expect(board.model.store.tree != board.before)
+        #expect(distance(try board.model.canvasCentre(of: board.a), CGPoint(x: 325, y: 125)) < 1e-9)
+        board.model.resetSelectionTurn()
+        #expect(try board.model.canvasCentre(of: board.a) == canvasA, "Reset: A is back where it began")
+        #expect(board.model.store.tree == board.before, "Reset")
+
+        // A twist out past the group's edge and back, snapping to 0 on its last frame.
+        board = try memberOfAGroupAndAThingBeside()
+        #expect(board.model.beginTwist())
+        for degrees in [20.0, 60, 100, 2] { board.model.twist(by: degrees) }
+        board.model.endTwist()
+        #expect(board.model.store.tree == board.before, "a twist that snaps back to 0")
+
+        // Steps that add up to a whole turn: 90° clockwise, which moves the group's box, then 270°.
+        board = try memberOfAGroupAndAThingBeside()
+        for degrees in [90.0, 270] { board.model.rotateSelection(by: degrees) }
+        #expect(board.model.store.tree == board.before, "steps that add up to a whole turn")
+
+        // The knob turned 90° and back to 0 in one turn.
+        board = try memberOfAGroupAndAThingBeside()
+        board.model.knobTurn(90, 0)
+        #expect(board.model.store.tree == board.before, "the knob there and back")
+    }
+
+    /// Final review A2-I1, for a handle: a container in a group sized to fit, at the group's left edge, resized out past
+    /// it and back to exactly the box it began as, is exactly as it was, though the group moved its box meanwhile.
+    @Test func aContainerInAFitGroupResizedBackToWhereItBeganIsAsItWas() throws {
+        let card = container(.card, frame: CGRect(x: 100, y: 100, width: 100, height: 50),
+                             [leaf(.text, CGRect(x: 10, y: 10, width: 60, height: 20))])
+        let k = leaf(.text, CGRect(x: 250, y: 100, width: 50, height: 50), text: "K")
+        let (model, _) = makeModel(design([screen([card, k])]))
+        let pair = try #require(CanvasSelection([.element(try model.ref(card.id)), .element(try model.ref(k.id))]))
+        let g = try #require(model.store.group(pair))
+        #expect(model.store.node(g.element)?.frame == CGRect(x: 100, y: 100, width: 200, height: 50))
+        let before = model.store.tree
+        let ref = try model.ref(card.id)
+        let pose = try #require(model.store.groupPose(of: ref))
+        #expect(pose.box == CGRect(x: 100, y: 100, width: 100, height: 50))
+
+        // Half as large again about its bottom-right corner: out past the group's left and top edges.
+        model.store.resizeGroup(ref, to: CGRect(x: 50, y: 75, width: 150, height: 75), from: pose)
+        #expect(model.store.node(g.element)?.frame.origin == CGPoint(x: 50, y: 75), "the group hugs it")
+        model.store.resizeGroup(ref, to: pose.box, from: pose)
+
+        #expect(model.store.placed(card.id)?.frame == pose.box)
+        #expect(model.store.tree == before)
+    }
+
     /// Fix round 1 (I1), for ink: a drawing, which goes exactly where it is put, off whole points on the open canvas
     /// drawn at seven tenths (the rules keep drawings off screens), turned alone through several angles and back.
     @Test func aDrawingTurnedAloneOnAScaledCanvasComesBackExactly() throws {

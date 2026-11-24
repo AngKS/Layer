@@ -11,8 +11,9 @@ import Foundation
 
 extension TreeIndex {
     /// Where a node's own space sits in its host's own points: what its children are placed by, and
-    /// what an own frame is put back into their parent's space through.
-    struct OwnSpace: Sendable {
+    /// what an own frame is put back into their parent's space through. Two are equal when the node sits exactly
+    /// where it did, as a turn or a resize that comes back to where it began asks before putting an own frame back.
+    struct OwnSpace: Equatable, Sendable {
         /// The node's own space to its host's own points.
         var toHost: CGAffineTransform
         /// Its frame's origin in its host's own points, which its children's origins are added to
