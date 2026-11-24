@@ -113,11 +113,51 @@ import Testing
             #expect(previous.isSubset(of: Set(now)), "keys changed adding line \(count)")
             previous = Set(now)
         }
-        let root = Outline.parse("title: A\nrow:\n  avatar\n  text: T", isComplete: true)
+        let root = Outline.parse("title: A\n\nrow:\n  avatar\n  text: T", isComplete: true)
         #expect(root.child(0).source?.key == "group:0")
         #expect(root.child(1).child(0).source?.key == "row:0/avatar:0")
+        let joined = Outline.parse("title: A\nrow:\n  avatar\n  text: T", isComplete: true)
+        #expect(joined.child(0).child(1).child(0).source?.key == "group:0/row:0/avatar:0")
         let inline = Outline.parse("title: A\nrow: avatar | text: T", isComplete: true)
         #expect(inline.child(0).child(1).child(0).source?.key == "group:0/row:0/avatar:0")
+    }
+
+    /// A container written straight after a section's lines, with no blank line between, joins that section: a form's
+    /// fields stay together round the row among them, and a heading stays with the grid under it, 12 points apart rather
+    /// than 24. A container that starts a section, first or after a blank line, is still a section of its own.
+    @Test func aContainerWrittenStraightAfterASectionsLinesJoinsIt() {
+        let form = """
+            title: Delivery address
+
+            text field: Full name
+            text field: Street and number
+            row:
+              text field: Postcode
+              text field: City
+            text field: Phone, for the courier
+
+            button: Continue to payment
+            """
+        let root = Outline.parse(form, isComplete: true)
+        #expect(shape(root) == "group(column)[group(column)[title],group(column)[textField,textField,group(row)[textField,textField],textField],group(column)[button]]")
+        #expect(stack(root.child(1))?.spacing == 12)
+        #expect(root.child(1).child(2).source?.key == "group:1/row:0")
+
+        let profile = Outline.parse("avatar\ntitle: Maya Okafor\n\ntext: Recent work [semibold]\ngrid 3:\n  image\n  image\n  image", isComplete: true)
+        #expect(shape(profile) == "group(column)[group(column)[avatar,title],group(column)[text,group(grid3)[image,image,image]]]")
+
+        let cardFirst = Outline.parse("title: A\n\ncard:\n  text: B\nbutton: C", isComplete: true)
+        #expect(shape(cardFirst) == "group(column)[group(column)[title],card(column)[text],group(column)[button]]")
+
+        // Decided as the container opens, so streaming the form a line at a time never changes a key.
+        let lines = form.components(separatedBy: "\n")
+        var previous = Set<String>()
+        for count in 1...lines.count {
+            let now = keys(Outline.parse(lines.prefix(count).joined(separator: "\n"), isComplete: false))
+            #expect(Set(now).count == now.count, "keys are unique at \(count) lines")
+            #expect(previous.isSubset(of: Set(now)), "keys changed adding line \(count)")
+            previous = Set(now)
+        }
     }
 
     @Test func awkwardIndentationIsTolerated() {

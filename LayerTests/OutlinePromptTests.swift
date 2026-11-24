@@ -28,16 +28,22 @@ struct OutlinePromptTests {
         let product = outline(try example("product").lines)
         #expect(product.children.contains { $0.kind == .card })
 
+        // The heading is written straight above the grid, and so is in its section (Task 12's ruling).
         let profile = outline(try example("profile").lines)
-        #expect(profile.children.contains { child in
-            if case .grid(let grid) = child.resolvedLayout { return grid.columns == 3 }
-            return false
+        #expect(profile.children.contains { section in
+            section.children.first?.content.text == "Recent work" && section.children.dropFirst().contains { child in
+                if case .grid(let grid) = child.resolvedLayout { return grid.columns == 3 }
+                return false
+            }
         })
 
+        // The row is written among the fields, and so is in their section.
         let form = try example("form")
-        #expect(outline(form.lines).children.contains { child in
-            guard case .stack(let stack) = child.resolvedLayout, stack.axis == .horizontal else { return false }
-            return child.children.map(\.kind) == [.textField, .textField]
+        #expect(outline(form.lines).children.contains { section in
+            section.children.map(\.kind) == [.textField, .textField, .group, .textField] && section.children.contains { child in
+                guard case .stack(let stack) = child.resolvedLayout, stack.axis == .horizontal else { return false }
+                return child.children.map(\.kind) == [.textField, .textField]
+            }
         })
         #expect(form.lines.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "row:" },
                 "the form's row is written indented, on lines of its own")

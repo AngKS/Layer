@@ -23,8 +23,11 @@ enum Outline {
     static let maxNesting = 30
 
     /// The screen root: a column with spacing 24 holding the outline's sections. A run of lines
-    /// at the top level that aren't containers is a section (a column, spacing 12), ended by a
-    /// blank line or by an explicit container; an explicit container is itself a section.
+    /// at the top level is a section (a column, spacing 12), ended by a blank line. A container
+    /// written straight after a section's lines, with no blank line between, joins that section,
+    /// so a heading stays with the grid under it and a form's fields with the row among them. A
+    /// container that starts a section, first or after a blank line, is a section of its own,
+    /// and the lines after it start the next one.
     /// When `isComplete` is false the last line is ignored, since it may be half written.
     /// Each node's `source.key` is its path of `kind:ordinal` steps from the root, where a
     /// container's kind is `row`, `column`, `grid`, `card` or, for an implicit section, `group`.
@@ -48,8 +51,9 @@ enum Outline {
         var node: LayerNode
         /// The indent step its line was written at; the root is -1.
         var depth: Int
-        /// A one-line `row: a | b`: at the top level it belongs to the section being collected.
-        var isInline = false
+        /// At the top level: it belongs to the section being collected, as a one-line `row: a | b`
+        /// does, and a container written straight after the section's lines.
+        var joinsSection = false
     }
 
     private struct Builder {
@@ -83,12 +87,13 @@ enum Outline {
 
             if let opener = Outline.container(from: line, tokens: tokens) {
                 guard frames.count <= Outline.maxNesting else { return }
-                if frames.count == 1, opener.inlineItems == nil { closeSection() }
+                // Decided as it opens, so its key never changes as the lines after it come.
+                let joinsSection = frames.count == 1 && (opener.inlineItems != nil || section != nil)
                 var container = opener.node
                 if let items = opener.inlineItems {
                     container.children = items.compactMap(Outline.leaf)
                 }
-                frames.append(Frame(node: container, depth: steps, isInline: opener.inlineItems != nil))
+                frames.append(Frame(node: container, depth: steps, joinsSection: joinsSection))
             } else if let leaf = Outline.leaf(line) {
                 if frames.count == 1 {
                     section = section ?? Outline.section(tokens)
@@ -104,7 +109,7 @@ enum Outline {
             let frame = frames.removeLast()
             guard !frame.node.children.isEmpty else { return }
             if frames.count == 1 {
-                if frame.isInline {
+                if frame.joinsSection {
                     section = section ?? Outline.section(tokens)
                     section?.children.append(frame.node)
                 } else {

@@ -23,6 +23,11 @@ private final class BuildBundleMarker {}
         node.children.flatMap { $0.isContainer ? leaves(of: $0) : [$0] }
     }
 
+    /// `node` and everything under it.
+    private func nodes(in node: LayerNode) -> [LayerNode] {
+        [node] + node.children.flatMap(nodes(in:))
+    }
+
     private func fixture(_ name: String) throws -> String {
         let url = try #require(Bundle(for: BuildBundleMarker.self).url(forResource: name, withExtension: "json"))
         return try String(contentsOf: url, encoding: .utf8)
@@ -42,7 +47,9 @@ private final class BuildBundleMarker {}
         guard case .stack(let stack) = root.resolvedLayout else { Issue.record("the root is a stack"); return }
         #expect(stack.axis == .vertical)
         #expect(leaves(of: root).map(\.kind) == [.title, .text, .body, .button])
-        let card = try #require(root.children.first { $0.kind == .card })
+        // Written straight after the title, the card is in the title's section (Task 12's ruling), so it is looked for
+        // anywhere under the root.
+        let card = try #require(nodes(in: root).first { $0.kind == .card })
         #expect(card.children.map(\.kind) == [.text, .body])
         #expect(model.store.tree.screens.map(\.id) == [id])
         undo.undo()
