@@ -79,9 +79,10 @@ enum SketchFixtureCorpus {
     static func load(from directory: URL) throws -> [SketchFixture] {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             // Other tests' files are bundled beside these: whole designs (`design-`), A2UI
-            // examples (`a2ui-`) and the structure fixtures (`structure-`).
+            // examples (`a2ui-`), the structure fixtures (`structure-`) and Get Design Layout's
+            // goldens (`DesignLayout-`).
             .filter { url in
-                url.pathExtension == "json" && !["design-", "a2ui-", "structure-"].contains { url.lastPathComponent.hasPrefix($0) }
+                url.pathExtension == "json" && !["design-", "a2ui-", "structure-", "DesignLayout-"].contains { url.lastPathComponent.hasPrefix($0) }
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let decoder = JSONDecoder()

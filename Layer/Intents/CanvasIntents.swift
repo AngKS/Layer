@@ -280,7 +280,7 @@ struct DrawStrokesIntent: AppIntent {
     @MainActor
     private static func contents(of model: AppModel) -> String {
         let snapshot = DesignActions.snapshot(of: model)
-            ?? DesignSnapshot(id: "", name: model.store.title ?? "The design", content: model.store.content, modified: nil)
+            ?? DesignSnapshot(id: "", name: model.store.title ?? "The design", content: model.store.tree, modified: nil)
         return DesignDescriber.describe(snapshot)
     }
 }

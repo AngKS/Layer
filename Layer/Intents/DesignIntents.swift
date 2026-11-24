@@ -200,8 +200,8 @@ struct GenerateSwiftUICodeIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let source: (screen: TreeScreen.ID, name: String, design: TreeContent)
         if let screen, let id = screen.screenID, let snapshot = await DesignActions.snapshot(design: screen.designID),
-           let found = snapshot.content.tree.screens.first(where: { $0.id == id }) {
-            source = (found.id, found.name, snapshot.content.tree)
+           let found = snapshot.content.screens.first(where: { $0.id == id }) {
+            source = (found.id, found.name, snapshot.content)
         } else if screen == nil {
             let current = try await DesignActions.screenOrCurrent(nil)
             source = (current.screen.id, current.screen.name, current.model.store.tree)

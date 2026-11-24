@@ -127,7 +127,7 @@ struct DesignEntity: IndexedEntity {
         modified = summary.modified
     }
 
-    init(id: String, content: DesignContent, fallbackName: String, modified: Date? = nil) {
+    init(id: String, content: TreeContent, fallbackName: String, modified: Date? = nil) {
         self.id = id
         name = content.title ?? fallbackName
         screenCount = content.screens.count
@@ -169,6 +169,11 @@ struct ScreenEntity: IndexedEntity {
     @Property(title: "Device")
     var device: DeviceChoice
 
+    /// The name of the design's own device for a screen on one, else the built-in's name as Siri and Shortcuts show it
+    /// ("Phone", "Tablet"…), never the built-in's own name, which is a trademark (F23).
+    @Property(title: "Device Name")
+    var deviceName: String
+
     @Property(title: "Design")
     var designName: String
 
@@ -182,13 +187,17 @@ struct ScreenEntity: IndexedEntity {
     var designID: String { EntityKey.parseScreen(id)?.design ?? "" }
     var screenID: UUID? { EntityKey.parseScreen(id)?.screen }
 
-    init(design: String, designName: String, screen: DesignScreen) {
+    /// A screen of a design whose canvas is set up as `settings` says, which hold the design's own devices. Its elements
+    /// are its leaves (My call 9).
+    init(design: String, designName: String, screen: TreeScreen, settings: CanvasSettings) {
+        let frame = settings.device(named: screen.deviceID)
         id = EntityKey.screen(design: design, screen: screen.id)
         name = screen.name
-        device = DeviceChoice(screen.device)
+        device = DeviceChoice(frame)
+        deviceName = DeviceChoice(rawValue: frame.id)?.displayName ?? frame.name
         self.designName = designName
-        elementCount = screen.elements.count
-        summary = DesignDescriber.summary(of: screen)
+        elementCount = screen.root.leaves.count
+        summary = DesignDescriber.summary(of: screen, on: frame)
     }
 
     var displayRepresentation: DisplayRepresentation {
@@ -238,15 +247,19 @@ struct ElementEntity: AppEntity {
     var designID: String { EntityKey.parseElement(id)?.design ?? "" }
     var ref: DesignStore.ElementRef? { EntityKey.parseElement(id)?.ref }
 
-    init(design: String, host: DesignStore.ElementRef.Host, hostName: String, element: DesignElement) {
-        id = EntityKey.element(design: design, host: host, element: element.id)
-        kind = ElementKindChoice(element.kind)
-        text = element.text
-        name = element.name ?? element.kind.layerName
+    /// A leaf on `host`, called `hostName`, locked or hidden as `isLocked` and `isHidden` say: with the containers
+    /// above it, as the design's index has it.
+    init(design: String, host: TreeIndex.Host, hostName: String, node: LayerNode, isLocked: Bool, isHidden: Bool) {
+        // Until plan 6's Task 11 renames the ref, the index's host and a ref's are two enums of one shape, converted
+        // here alone (F29).
+        id = EntityKey.element(design: design, host: DesignStore.ElementRef.Host(host), element: node.id)
+        kind = ElementKindChoice(node.kind)
+        text = node.content.text
+        name = node.name ?? node.kind.layerName
         screenName = hostName
-        colourHex = element.tint.hex
-        isHidden = element.isHidden
-        isLocked = element.isLocked
+        colourHex = node.resolvedTint.hex
+        self.isHidden = isHidden
+        self.isLocked = isLocked
     }
 
     var displayRepresentation: DisplayRepresentation {
@@ -324,6 +337,12 @@ enum DeviceChoice: String, AppEnum {
 
     var frame: DeviceFrame { DeviceFrame.named(rawValue) }
     var name: String { frame.name }
+
+    /// What Siri and Shortcuts call it ("Phone", "Tablet"…): its display representation's title, which names no
+    /// trademark, where `name` does.
+    var displayName: String {
+        Self.caseDisplayRepresentations[self].map { String(localized: $0.title) } ?? rawValue
+    }
 }
 
 enum FontWeightOption: String, AppEnum {
@@ -442,6 +461,15 @@ enum CodeLayoutOption: String, AppEnum {
     var layout: CodeSettings.Layout {
         switch self {
         case .stack: .structure
+        case .absolute: .absolute
+        }
+    }
+
+    /// The option a code layout is chosen by, which Get Design Layout writes, so that a shortcut can hand it back as it
+    /// was given: "stack" for the structure, as before the layout was renamed.
+    init(_ layout: CodeSettings.Layout) {
+        self = switch layout {
+        case .structure: .stack
         case .absolute: .absolute
         }
     }

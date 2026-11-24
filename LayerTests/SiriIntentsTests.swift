@@ -130,7 +130,7 @@ struct EntityKeyTests {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         let notes = board.group(board.note1, board.note2, named: "N")
-        let content = board.store.content
+        let content = board.store.tree
 
         // Siri's elements are the members too.
         let entities = DesignSnapshot(id: "design", name: "Design", content: content, modified: nil).elements
@@ -160,16 +160,15 @@ struct DesignLibraryTests {
 
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1, elements: [
-            DesignStore.newElement(.title),
-        ])]
+        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil,
+                                                root: .container(children: [.standard(.title)]))]
         let url = folder.appendingPathComponent("Travel.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
         let summary = try #require(DesignLibrary.read(url))
         #expect(summary.title == "Travel")
         #expect(summary.content.screens.map(\.name) == ["Login"])
-        #expect(summary.content.screens[0].elements.count == 1)
+        #expect(summary.content.leaves(on: summary.content.screens[0].id).count == 1)
     }
 
     /// A folder with one design in it, named "Trip" on disk and "Travel" inside.
@@ -178,7 +177,7 @@ struct DesignLibraryTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1)]
+        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil)]
         let url = folder.appendingPathComponent("Trip.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
         return url
@@ -383,9 +382,9 @@ struct DesignIndexTests {
     }
 
     private func snapshot(_ id: String, screens names: [String]) -> DesignSnapshot {
-        var content = DesignContent()
+        var content = TreeContent()
         for (index, name) in names.enumerated() {
-            content.addScreen(DesignScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1))
+            content.screens.append(TreeScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1, deviceID: nil))
         }
         return DesignSnapshot(id: id, name: name(of: id), content: content, modified: nil)
     }
@@ -419,9 +418,9 @@ struct DesignIndexTests {
         // The next: Kept has lost a screen, Away is in iCloud and not on this iPad, and
         // Gone has been deleted.
         var fewer = kept.content
-        fewer.removeScreen(kept.content.screens[1].id)
+        fewer.screens.removeAll { $0.id == kept.content.screens[1].id }
         let keptNow = DesignSnapshot(id: kept.id, name: kept.name, content: fewer, modified: nil)
-        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: DesignContent(), modified: nil, isRead: false)
+        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: TreeContent(), modified: nil, isRead: false)
         await DesignIndexer.reindex([keptNow, awayNow])
 
         let designs = await index.designs, screens = await index.screens
@@ -731,7 +730,7 @@ struct DesignActionTests {
         let both = try #require(CanvasSelection(refs.map(CanvasSelection.element)))
         let g = try #require(model.store.group(both))
         // What Siri is offered, as the design's snapshot lists it: the title, then the button.
-        let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.content, modified: nil).elements
+        let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.tree, modified: nil).elements
         #expect(entities.compactMap(\.ref) == refs)
         func isNotFound(_ error: LayerIntentError?) -> Bool {
             error.map { if case .elementNotFound = $0 { true } else { false } } == true
@@ -923,7 +922,7 @@ struct DesignActionTests {
             content.screens = [DesignScreen(name: "Checkout", origin: .zero, scale: 1, elements: [button])]
             return content
         }()
-        let snapshot = DesignSnapshot(id: "local:Shop.layer", name: "Shop", content: content, modified: nil)
+        let snapshot = DesignSnapshot(id: "local:Shop.layer", name: "Shop", content: content.tree, modified: nil)
         #expect(snapshot.entity.screenNames == ["Checkout"])
         #expect(snapshot.screens.first?.summary == "button “Buy now”")
         let element = snapshot.elements.first
@@ -1196,7 +1195,7 @@ struct MovingTests {
         let written = Outline.parse("title: Hello\ntoggle [off]", isComplete: true)
         model.store.replaceChildren(of: .screen(screen.id), with: written.children)
         model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 0.5)
-        let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.content, modified: nil)
+        let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.tree, modified: nil)
 
         let json = DesignLayoutWriter.json(for: snapshot, ink: (count: 3, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)))
         let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])

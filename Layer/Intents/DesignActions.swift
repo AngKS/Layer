@@ -7,7 +7,7 @@ import Foundation
 struct DesignSnapshot: Sendable {
     let id: String
     let name: String
-    let content: DesignContent
+    let content: TreeContent
     let modified: Date?
     /// False for a design listed by its name alone, which iCloud hasn't downloaded: see
     /// `DesignSummary.isRead`.
@@ -18,13 +18,23 @@ struct DesignSnapshot: Sendable {
     }
 
     var screens: [ScreenEntity] {
-        content.screens.map { ScreenEntity(design: id, designName: name, screen: $0) }
+        content.screens.map { ScreenEntity(design: id, designName: name, screen: $0, settings: content.settings) }
     }
 
+    /// Every screen's leaves, then the open canvas's, each depth first and back to front: Siri sees leaves, never the
+    /// containers that hold them (My call 9). Each is locked or hidden as it is with the containers above it, though
+    /// not with its screen's lock.
     var elements: [ElementEntity] {
-        content.screens.flatMap { screen in
-            screen.elements.map { ElementEntity(design: id, host: .screen(screen.id), hostName: screen.name, element: $0) }
-        } + content.floating.map { ElementEntity(design: id, host: .canvas, hostName: "Canvas", element: $0.element) }
+        let index = TreeIndex(content)
+        func entity(_ leaf: LayerNode, on host: TreeIndex.Host, called hostName: String) -> ElementEntity {
+            let entry = index[leaf.id]
+            return ElementEntity(design: id, host: host, hostName: hostName, node: leaf,
+                                 isLocked: entry?.isLockedWithAncestors ?? leaf.isLocked,
+                                 isHidden: entry?.isHiddenWithAncestors ?? leaf.isHidden)
+        }
+        return content.screens.flatMap { screen in
+            screen.root.leaves.map { entity($0, on: .screen(screen.id), called: screen.name) }
+        } + content.canvasLeaves.map { entity($0, on: .canvas, called: "Canvas") }
     }
 }
 
@@ -38,7 +48,7 @@ enum DesignActions {
     static func snapshot(of model: AppModel) -> DesignSnapshot? {
         guard let id = model.designID else { return nil }
         let name = model.store.title ?? model.fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
-        return DesignSnapshot(id: id, name: name, content: model.store.content, modified: .now)
+        return DesignSnapshot(id: id, name: name, content: model.store.tree, modified: .now)
     }
 
     /// A design by the identifier Siri or Shortcuts holds for it, which may be one it had
@@ -135,10 +145,57 @@ enum DesignActions {
         return selected
     }
 
-    /// The elements of a design as Siri offers them: the one selected first (see
-    /// `selectedElement(in:)`), then the rest as `elements` has them.
+    // MARK: Finding nodes
+
+    /// The node an entity names, with where it is. Throws `elementNotFound` when it is gone, or has gone to another
+    /// host since.
+    static func node(_ entity: ElementEntity) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+        guard let ref = entity.ref else { throw LayerIntentError.elementNotFound }
+        let model = try await model(for: entity.designID)
+        guard let placed = model.store.placed(ref) else { throw LayerIntentError.elementNotFound }
+        return (model, ref, placed.node)
+    }
+
+    /// The node named, or else the one leaf selected: see `selectedLeaf(in:)`. Throws `elementNotFound` when nothing
+    /// is named and no one leaf is selected.
+    static func nodeOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+        if let entity { return try await node(entity) }
+        let model = try await model(for: nil as String?)
+        guard let selected = selectedLeaf(in: model) else { throw LayerIntentError.elementNotFound }
+        return (model, selected.ref, selected.node)
+    }
+
+    /// The one leaf selected. Nil for a container, several things or nothing: Siri sees what is in a container, never
+    /// the container itself (My call 9). Taken as one element, a container would be moved or changed without what it
+    /// holds. A leaf selected inside a container is one like any other.
+    static func selectedLeaf(in model: AppModel) -> PlacedNode? {
+        guard let selected = model.selectedNode, !selected.node.isContainer else { return nil }
+        return selected
+    }
+
+    /// The screen named, or the selected one, or the one a thing is selected on, or the design's newest screen, as the
+    /// tree holds it.
+    static func treeScreenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: TreeScreen) {
+        if let entity {
+            guard let id = entity.screenID else { throw LayerIntentError.screenNotFound }
+            let model = try await model(for: entity.designID)
+            guard let screen = model.store.treeScreen(id) else { throw LayerIntentError.screenNotFound }
+            return (model, screen)
+        }
+        let model = try await model(for: nil as String?)
+        if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) { return (model, screen) }
+        if let selected = model.selectedNode, case .screen(let id) = selected.ref.host, let screen = model.store.treeScreen(id) {
+            return (model, screen)
+        }
+        guard let screen = model.store.tree.screens.last else { throw LayerIntentError.screenNotFound }
+        return (model, screen)
+    }
+
+    /// The elements of a design as Siri offers them: the one leaf selected first (see `selectedLeaf(in:)`), then the
+    /// rest as `elements` has them.
     static func suggested(_ elements: [ElementEntity], in model: AppModel) -> [ElementEntity] {
-        guard let selected = selectedElement(in: model), let index = elements.firstIndex(where: { $0.ref?.element == selected.ref.element }) else {
+        guard let selected = selectedLeaf(in: model),
+              let index = elements.firstIndex(where: { $0.ref?.element == selected.node.id }) else {
             return elements
         }
         var elements = elements
@@ -146,18 +203,25 @@ enum DesignActions {
         return elements
     }
 
+    /// The entity of the leaf a ref points at, locked or hidden as it is with the containers above it. Nil when it is
+    /// gone, has gone to another host, or is a container, which Siri doesn't see (My call 9).
     static func entity(for ref: DesignStore.ElementRef, in model: AppModel) -> ElementEntity? {
-        guard let id = model.designID, let found = model.store.resolve(ref) else { return nil }
-        let hostName = switch ref.host {
-        case .screen(let screenID): model.store.screen(screenID)?.name ?? "Screen"
+        guard let id = model.designID, let placed = model.store.placed(ref), !placed.node.isContainer,
+              let host = model.store.index[ref.element]?.host else { return nil }
+        let hostName = switch host {
+        case .screen(let screenID): model.store.treeScreen(screenID)?.name ?? "Screen"
         case .canvas: "Canvas"
         }
-        return ElementEntity(design: id, host: ref.host, hostName: hostName, element: found.element)
+        return ElementEntity(design: id, host: host, hostName: hostName, node: placed.node,
+                             isLocked: placed.isLocked, isHidden: placed.isHidden)
     }
 
-    static func entity(for screen: DesignScreen, in model: AppModel) -> ScreenEntity? {
-        guard let snapshot = snapshot(of: model) else { return nil }
-        return ScreenEntity(design: snapshot.id, designName: snapshot.name, screen: screen)
+    /// The entity of a screen in the design. Nil when the design has no such screen, or isn't saved anywhere yet.
+    static func entity(for screenID: TreeScreen.ID, in model: AppModel) -> ScreenEntity? {
+        guard let snapshot = snapshot(of: model), let screen = snapshot.content.screens.first(where: { $0.id == screenID }) else {
+            return nil
+        }
+        return ScreenEntity(design: snapshot.id, designName: snapshot.name, screen: screen, settings: snapshot.content.settings)
     }
 
     // MARK: Changing designs
@@ -187,15 +251,19 @@ enum DesignActions {
         return try model.store.act(for: edit, body)
     }
 
-    /// Selects something and glides the canvas to show it.
-    /// `selecting` false shows it without selecting it, as for a screen just made.
+    /// Selects something and glides the canvas to show it: a node by the box round its turned shape on the canvas, a
+    /// screen with its name. `selecting` false shows it without selecting it, as for a screen just made.
     static func reveal(_ target: CanvasSelection, in model: AppModel, selecting: Bool = true) {
         model.tool = .select
         if selecting { model.selection = target }
         let area: CGRect? = switch target {
-        case .element(let ref): model.store.resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
-        case .screen(let id): model.store.screen(id).map { $0.canvasFrame.union($0.labelFrame) }
-        case .several: model.store.canvasFrame(of: target)
+        case .element, .several:
+            model.store.canvasFrame(of: target)
+        case .screen(let id):
+            model.store.treeScreen(id).map { screen in
+                let device = model.store.tree.device(of: screen)
+                return screen.canvasFrame(on: device).union(screen.labelFrame(on: device))
+            }
         }
         if let area { model.ink?.glide(toShow: area) }
     }
@@ -385,26 +453,55 @@ struct ElementQuery: EntityStringQuery {
 
 /// Designs and screens in words, for Siri to read out and for Spotlight to index.
 enum DesignDescriber {
-    static func summary(of screen: DesignScreen) -> String {
-        let visible = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
-        guard !visible.isEmpty else { return "An empty \(screen.device.name) screen." }
-        return visible.map(describe).joined(separator: ", ")
+    /// What a screen shows, top to bottom: its visible leaves by the tops of their frames in screen points, each as
+    /// `describe(_:)` says it, or that it is empty. A leaf in a hidden container isn't visible.
+    static func summary(of screen: TreeScreen, in content: TreeContent) -> String {
+        summary(of: screen, on: content.device(of: screen))
     }
 
+    /// `summary(of:in:)` for a screen drawn as `device`: what a screen's entity says, which has the design's settings
+    /// but not the rest of it.
+    static func summary(of screen: TreeScreen, on device: DeviceFrame) -> String {
+        // The screen alone is indexed: its leaves' frames don't depend on anything else in the design.
+        var alone = TreeContent()
+        alone.screens = [screen]
+        let index = TreeIndex(alone)
+        let visible = screen.root.leaves
+            .compactMap { leaf -> (leaf: LayerNode, top: CGFloat)? in
+                guard let entry = index[leaf.id], !entry.isHiddenWithAncestors else { return nil }
+                return (leaf, entry.hostShape.rect.minY)
+            }
+            .sorted { $0.top < $1.top }
+        guard !visible.isEmpty else { return "An empty \(device.name) screen." }
+        return visible.map { describe($0.leaf) }.joined(separator: ", ")
+    }
+
+    /// A leaf in a few words: its kind and its words, or a symbol's name.
+    static func describe(_ node: LayerNode) -> String {
+        describe(kind: node.kind, text: node.content.text, symbol: node.content.symbol)
+    }
+
+    /// The same for a flat element, which voice and Siri's actions still hand over until plan 6's Tasks 5 and 7.
     static func describe(_ element: DesignElement) -> String {
-        let words = element.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let kind = element.kind.layerName.lowercased()
-        if element.kind == .symbol, let symbol = element.symbol { return "\(symbol) symbol" }
-        return words.isEmpty ? kind : "\(kind) “\(words)”"
+        describe(kind: element.kind, text: element.text, symbol: element.symbol)
+    }
+
+    private static func describe(kind: ElementKind, text: String, symbol: String?) -> String {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = kind.layerName.lowercased()
+        if kind == .symbol, let symbol { return "\(symbol) symbol" }
+        return words.isEmpty ? name : "\(name) “\(words)”"
     }
 
     static func describe(_ snapshot: DesignSnapshot) -> String {
-        let screens = snapshot.content.screens
+        let content = snapshot.content
+        let screens = content.screens
         var lines = ["\(snapshot.name) has \(screens.count == 1 ? "1 screen" : "\(screens.count) screens")."]
         for screen in screens {
-            lines.append("\(screen.name) (\(screen.device.name)): \(summary(of: screen))")
+            let device = content.device(of: screen)
+            lines.append("\(screen.name) (\(device.name)): \(summary(of: screen, on: device))")
         }
-        let loose = snapshot.content.floating.count
+        let loose = content.canvasLeaves.count
         if loose > 0 { lines.append("Plus \(loose == 1 ? "1 element" : "\(loose) elements") on the open canvas.") }
         return lines.joined(separator: "\n")
     }
@@ -414,34 +511,36 @@ enum DesignDescriber {
 
 /// A design as JSON, with every position and size, for a model or a shortcut that edits a
 /// design and needs to see exactly where things are. Screens give their canvas position and
-/// scale; their elements give frames in the screen's own points. Loose elements give frames
-/// in canvas points. Each element's `id` is the identifier its entity goes by.
+/// scale; the leaves on them give frames in the screen's own points. Leaves on the open canvas
+/// give frames in canvas points. Each leaf's `id` is the identifier its entity goes by. Read
+/// from the tree: a leaf's frame is its host shape, the upright frame centred on what is seen,
+/// and it is locked or hidden as it is with the containers above it.
 enum DesignLayoutWriter {
     static func json(for snapshot: DesignSnapshot, ink: (count: Int, bounds: CGRect?)? = nil, hasUnreadSketch: Bool = false) -> String {
         let content = snapshot.content
+        let index = TreeIndex(content)
         var root: [String: Any] = [
             "design": snapshot.name,
             "id": snapshot.id,
-            "canvas": canvas(content.canvas),
+            "canvas": canvas(content.settings),
             "screens": content.screens.map { screen in
-                [
+                let device = content.device(of: screen)
+                return [
                     "id": EntityKey.screen(design: snapshot.id, screen: screen.id),
                     "name": screen.name,
-                    "device": DeviceChoice(screen.device).rawValue,
-                    "width": number(screen.size.width),
-                    "height": number(screen.size.height),
+                    "device": DeviceChoice(device).rawValue,
+                    "width": number(device.size.width),
+                    "height": number(device.size.height),
                     "x": number(screen.origin.x),
                     "y": number(screen.origin.y),
                     "scale": number(screen.scale * 100),
                     "locked": screen.isLocked == true,
-                    "safeAreaTop": number(screen.device.safeTop),
-                    "safeAreaBottom": number(screen.device.safeBottom),
-                    "elements": screen.elements.map { element(design: snapshot.id, host: .screen(screen.id), $0, frame: $0.frame) },
+                    "safeAreaTop": number(device.safeTop),
+                    "safeAreaBottom": number(device.safeBottom),
+                    "elements": screen.root.leaves.map { leaf(design: snapshot.id, host: .screen(screen.id), $0, in: index) },
                 ] as [String: Any]
             },
-            "canvasElements": content.floating.map { floating in
-                element(design: snapshot.id, host: .canvas, floating.element, frame: floating.canvasFrame)
-            },
+            "canvasElements": content.canvasLeaves.map { leaf(design: snapshot.id, host: .canvas, $0, in: index) },
         ]
         if let ink {
             var drawing: [String: Any] = ["strokes": ink.count]
@@ -453,37 +552,43 @@ enum DesignLayoutWriter {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static func element(design: String, host: DesignStore.ElementRef.Host, _ element: DesignElement, frame: CGRect) -> [String: Any] {
+    /// A leaf's entry: its host shape's frame (screen points on a screen, canvas points on the canvas), and its lock and
+    /// hide with the containers above it.
+    private static func leaf(design: String, host: DesignStore.ElementRef.Host, _ node: LayerNode, in index: TreeIndex) -> [String: Any] {
+        let entry = index[node.id]
+        let frame = entry?.hostShape.rect ?? node.frame
+        let traits = node.kind.spec.traits
         var info: [String: Any] = [
-            "id": EntityKey.element(design: design, host: host, element: element.id),
-            "kind": element.kind.rawValue,
-            "name": element.displayName,
+            "id": EntityKey.element(design: design, host: host, element: node.id),
+            "kind": node.kind.rawValue,
+            "name": node.displayName,
             "x": number(frame.minX),
             "y": number(frame.minY),
             "width": number(frame.width),
             "height": number(frame.height),
-            "colour": element.tint.hex,
+            "colour": node.resolvedTint.hex,
         ]
-        if element.kind.hasText { info["text"] = element.text }
-        if let symbol = element.symbol { info["symbol"] = symbol }
-        if element.kind == .shape { info["shape"] = (element.shape ?? .rectangle).rawValue }
-        if element.imageID != nil { info["hasPicture"] = true }
-        if let fontSize = element.fontSize { info["fontSize"] = number(fontSize) }
-        if let weight = element.fontWeight { info["fontWeight"] = weight.rawValue }
-        if let textColor = element.textColor { info["textColour"] = textColor.hex }
-        if let alignment = element.textAlignment { info["textAlignment"] = alignment.rawValue }
-        if let radius = element.cornerRadius { info["cornerRadius"] = number(radius) }
-        if let opacity = element.opacity { info["opacity"] = opacity }
-        if let width = element.borderWidth, width > 0 {
+        let style = node.style, content = node.content
+        if node.kind.hasText { info["text"] = content.text }
+        if let symbol = content.symbol { info["symbol"] = symbol }
+        if node.kind == .shape { info["shape"] = (content.shape ?? .rectangle).rawValue }
+        if content.imageID != nil { info["hasPicture"] = true }
+        if let fontSize = style.fontSize { info["fontSize"] = number(fontSize) }
+        if let weight = style.fontWeight { info["fontWeight"] = weight.rawValue }
+        if let textColor = style.textColor { info["textColour"] = textColor.hex }
+        if let alignment = style.textAlignment { info["textAlignment"] = alignment.rawValue }
+        if let radius = style.cornerRadius { info["cornerRadius"] = number(radius) }
+        if let opacity = style.opacity { info["opacity"] = opacity }
+        if let width = style.borderWidth, width > 0 {
             info["borderWidth"] = number(width)
-            if let colour = element.borderColor { info["borderColour"] = colour.hex }
+            if let colour = style.borderColor { info["borderColour"] = colour.hex }
         }
-        if element.hasShadow { info["shadow"] = true }
-        if element.isLocked { info["locked"] = true }
-        if element.isHidden { info["hidden"] = true }
-        if element.hasOnState { info["on"] = element.isOn }
-        if element.hasValue { info["progress"] = element.value ?? 0.5 }
-        if element.hasButtonLooks { info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue }
+        if style.hasShadow { info["shadow"] = true }
+        if entry?.isLockedWithAncestors ?? node.isLocked { info["locked"] = true }
+        if entry?.isHiddenWithAncestors ?? node.isHidden { info["hidden"] = true }
+        if traits.contains(.onState) { info["on"] = content.isOn }
+        if traits.contains(.value) { info["progress"] = content.value ?? 0.5 }
+        if traits.contains(.buttonLooks) { info["buttonStyle"] = (content.buttonLook ?? .filled).rawValue }
         return info
     }
 
@@ -498,7 +603,8 @@ enum DesignLayoutWriter {
             "showsMeasurements": settings.showsMeasurements,
             "showsFrameNames": settings.showsFrameNames,
             "newScreenDevice": DeviceChoice(settings.sketchDevice).rawValue,
-            "codeLayout": settings.code.layout.rawValue,
+            // The option's value, which Update Canvas Settings takes, not the layout's own name.
+            "codeLayout": CodeLayoutOption(settings.code.layout).rawValue,
             "codeIncludesPreview": settings.code.includesPreview,
             "codeUsesNavigationTitle": settings.code.usesNavigationTitle,
         ]

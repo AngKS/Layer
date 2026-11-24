@@ -57,7 +57,7 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
             return screen
         }
         DesignActions.reveal(.screen(screen.id), in: model, selecting: false)
-        guard let entity = DesignActions.entity(for: screen, in: model) else { throw LayerIntentError.screenNotFound }
+        guard let entity = DesignActions.entity(for: screen.id, in: model) else { throw LayerIntentError.screenNotFound }
         return .result(value: entity, dialog: "Added \(screen.name).")
     }
 }
@@ -121,7 +121,7 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
         }
         let id = try await Self.build(layout, on: target, name: name, device: device.frame, in: model, undoManager: undoManager)
         DesignActions.reveal(.screen(id), in: model, selecting: false)
-        guard let built = model.store.screen(id), let entity = DesignActions.entity(for: built, in: model) else {
+        guard let built = model.store.screen(id), let entity = DesignActions.entity(for: id, in: model) else {
             throw LayerIntentError.screenNotFound
         }
         let count = model.store.root(of: id)?.leafCount ?? 0
@@ -372,7 +372,7 @@ struct DuplicateScreenIntent: AppIntent, UndoableIntent {
         let copy = DesignActions.edit(model, undoManager: undoManager, actionName: "Duplicate Screen") {
             model.store.duplicateScreen(target.id)
         }
-        guard let copy, let entity = DesignActions.entity(for: copy, in: model) else { throw LayerIntentError.screenNotFound }
+        guard let copy, let entity = DesignActions.entity(for: copy.id, in: model) else { throw LayerIntentError.screenNotFound }
         DesignActions.reveal(.screen(copy.id), in: model)
         return .result(value: entity, dialog: "Made \(copy.name).")
     }

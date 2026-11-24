@@ -125,8 +125,8 @@ private func describe(_ kind: ElementKind) throws -> [String] {
         + " | shaded to 0.42 \(marked(.other, at: CGRect(x: 0, y: 0, width: 0.42, height: 1)))")
 
     // What a design's layout, written out as data, says of it.
-    var content = DesignContent()
-    content.screens = [DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [new])]
+    var content = TreeContent()
+    content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: .container(children: [.standard(kind)]))]
     let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Design", content: content, modified: nil))
     let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     let screens = try #require(root["screens"] as? [[String: Any]])
