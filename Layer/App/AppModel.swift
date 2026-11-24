@@ -2416,11 +2416,12 @@ final class AppModel {
         }
     }
 
-    /// Adds a ready-made screen from the library, with its rows, cards and grids, laid out on
-    /// the design's usual device as one undo step. It is placed and sized as `addFrame` places
-    /// an empty frame, and comes in unselected as one does.
+    /// Adds a ready-made screen from the library, with its rows, cards and grids, spaced and
+    /// padded by the design's own tokens and laid out on the design's usual device, as one undo
+    /// step. It is placed and sized as `addFrame` places an empty frame, and comes in unselected
+    /// as one does.
     func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
-        guard let root = AssetLibrary.template(named: name) else { return }
+        guard let root = AssetLibrary.template(named: name, tokens: store.canvas.tokens) else { return }
         let device = store.canvas.sketchDevice
         let placement = framePlacement(device, centeredAt: point)
         // Its own step even in the middle of a drag, which it leaves open (M3).

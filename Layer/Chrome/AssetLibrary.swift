@@ -132,12 +132,13 @@ enum AssetLibrary {
         ("Product", "product"), ("Form", "form"), ("Empty State", "empty"),
     ]
 
-    /// A library screen as an outline root, with its rows, cards and grids; every node's source is `.template`.
-    static func template(named name: String) -> LayerNode? {
+    /// A library screen as an outline root, with its rows, cards and grids, spaced and padded by `tokens`: a design's
+    /// own when it goes on the design, the standard ones for its thumbnail. Every node's source is `.template`.
+    static func template(named name: String, tokens: DesignTokens = .standard) -> LayerNode? {
         guard let example = templates.first(where: { $0.name == name })?.example,
               let lines = ScreenPrompt.library.first(where: { $0.name == example })?.lines
         else { return nil }
-        var root = Outline.parse(lines, isComplete: true, tokens: .standard)
+        var root = Outline.parse(lines, isComplete: true, tokens: tokens)
         markAsTemplate(&root)
         return root
     }
@@ -453,7 +454,7 @@ extension AssetLibrary {
     static func templatePreview(named name: String) -> [DesignElement] {
         previews.withLock { previews in
             if let made = previews.elements[name] { return made }
-            guard let root = template(named: name) else { return [] }
+            guard let root = template(named: name, tokens: .standard) else { return [] }
             var content = TreeContent()
             content.screens = [TreeScreen(name: name, origin: .zero, scale: 1, deviceID: nil,
                                           root: TreeRules.laidOut(root, deviceID: nil, settings: content.settings, previous: nil))]

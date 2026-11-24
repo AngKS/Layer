@@ -177,6 +177,30 @@ struct AddingAssetsTests {
         #expect(model.store.screens.isEmpty)
     }
 
+    /// A template comes in on the design's own numbers, as a generated or imported screen does; its thumbnail stays on
+    /// the standard ones (final review B-m1).
+    @Test func aTemplateTakesTheDesignsTokens() throws {
+        let model = makeModel()
+        model.store.updateCanvas { $0.tokens.rhythm = [4, 10, 20, 40] }
+
+        model.addTemplate("Settings")
+
+        let root = try #require(model.store.tree.screens.first?.root)
+        let tokens = model.store.canvas.tokens
+        guard case .stack(let screen) = root.resolvedLayout, case .stack(let section)? = root.children.first?.resolvedLayout else {
+            Issue.record("the template is a column of sections")
+            return
+        }
+        #expect(screen.spacing == tokens.spacing(nearest: 24))
+        #expect(section.spacing == tokens.spacing(nearest: 12))
+        #expect(screen.spacing != DesignTokens.standard.spacing(nearest: 24))
+        guard case .stack(let standard)? = AssetLibrary.template(named: "Settings")?.resolvedLayout else {
+            Issue.record("the standard template is a column")
+            return
+        }
+        #expect(standard.spacing == 24)
+    }
+
     @Test func aMacFrameHasAMenuBarsWorthOfRoomAtTheTop() throws {
         let model = makeModel()
         let iMac = try #require(AssetLibrary.asset(id: "frame:imac"))
