@@ -155,9 +155,7 @@ struct DesignContent: Equatable, Sendable {
     /// member locked or hidden as it is with its groups. `children(of:)` has the list as it is.
     func screen(_ id: DesignScreen.ID) -> DesignScreen? {
         guard let screen = tree.screens.first(where: { $0.id == id }) else { return nil }
-        var view = TreeProjection.view(of: screen)
-        let device = tree.device(of: screen)
-        if device != view.device { view.resolvedDevice = device }
+        var view = view(of: screen)
         view.elements = TreeProjection.lowerHostNodes(.screen(id), in: tree, pending: pendingPointers)
             .filter { !$0.node.isContainer }.map(\.shown)
         return view
@@ -228,7 +226,7 @@ struct DesignContent: Equatable, Sendable {
     mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
         guard let index = tree.screens.firstIndex(where: { $0.id == id }) else { return }
         let before = children(of: id)
-        var screen = TreeProjection.view(of: tree.screens[index])
+        var screen = view(of: tree.screens[index])
         screen.elements = before
         body(&screen)
         Self.write(screen, to: &tree.screens[index])
@@ -260,7 +258,16 @@ struct DesignContent: Equatable, Sendable {
     // MARK: Taking a change back
 
     /// The screens themselves, without what is on them.
-    var screenFrames: [DesignScreen] { tree.screens.map(TreeProjection.view(of:)) }
+    var screenFrames: [DesignScreen] { tree.screens.map(view(of:)) }
+
+    /// A screen as `screens` shows it, without what is on it: its device a built-in or one of the design's own, as
+    /// the design's settings resolve it (`resolvedDevice`).
+    private func view(of screen: TreeScreen) -> DesignScreen {
+        var view = TreeProjection.view(of: screen)
+        let device = tree.device(of: screen)
+        if device != view.device { view.resolvedDevice = device }
+        return view
+    }
 
     /// Elements that say they are on a screen the design doesn't have. The tree can't hold
     /// any: what an undo leaves on a screen that has gone lands on the open canvas.

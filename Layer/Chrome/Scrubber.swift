@@ -8,9 +8,11 @@ import UIKit
 @MainActor @Observable
 final class Scrubber {
     /// A field that can be scrubbed: where it is, and how to read and change its value.
-    /// Who the ruler is for: the Format panel's fields (a scrub is an edit), or the zoom
-    /// control (it isn't).
-    enum Owner: Hashable { case panel, zoom }
+    /// Who the ruler is for: the Format panel's fields (a scrub is an edit), the zoom
+    /// control (it isn't), or the fields of a form shown over the canvas in a presentation of
+    /// its own, the board menu's design tokens or a device's form (a scrub is an edit, as on
+    /// the panel). Each draws its own ruler, and a squeeze over any of them scrubs.
+    enum Owner: Hashable { case panel, zoom, form }
 
     struct Target {
         var label: String
@@ -71,6 +73,8 @@ final class Scrubber {
     /// the panel keeps current (`reportsPanelOrigin(to:)`). A panel field's tick is felt there
     /// plus its frame's middle.
     @ObservationIgnored var panelOrigin: CGPoint = .zero
+    /// The same for the form showing over the canvas (`reportsFormOrigin(to:)`).
+    @ObservationIgnored var formOrigin: CGPoint = .zero
 
     @ObservationIgnored private var start: CGFloat = 0
     @ObservationIgnored private var steps = 0
@@ -82,13 +86,16 @@ final class Scrubber {
 
     func begin(_ target: Target) {
         guard self.target == nil else { return }
-        start = target.get().rounded()
+        // Within the field's range before anything works with it as a whole number: a value from a file can be any
+        // size, or none, and the ruler says it in whole units.
+        let shown = target.get()
+        start = Self.typed(shown.isFinite ? shown.rounded() : target.range.lowerBound, in: target.range, wraps: target.wraps)
         value = start
         steps = 0
         lastRoll = nil
         rolled = .zero
         self.target = target
-        if target.owner == .panel { onBegin() }
+        if target.owner != .zoom { onBegin() }
     }
 
     /// Moves the value `steps` units from where it was when scrubbing began.
@@ -100,8 +107,12 @@ final class Scrubber {
         value = new
         target.set(new)
         if Int(new.rounded()).isMultiple(of: target.ticksEvery) {
-            // In the window: a panel field's frame is in the panel's space.
-            let origin = target.owner == .panel ? panelOrigin : .zero
+            // In the window: a panel or form field's frame is in its panel's or form's space.
+            let origin = switch target.owner {
+            case .panel: panelOrigin
+            case .form: formOrigin
+            case .zoom: CGPoint.zero
+            }
             onStep(CGPoint(x: origin.x + target.frame.midX, y: origin.y + target.frame.midY))
         }
     }
@@ -109,7 +120,7 @@ final class Scrubber {
     func end() {
         guard let ended = target else { return }
         target = nil
-        if ended.owner == .panel { onEnd() }
+        if ended.owner != .zoom { onEnd() }
     }
 
     /// Ends the ruler only if it is this owner's.
@@ -142,7 +153,7 @@ final class Scrubber {
 
     private static func isAnother(_ field: Target, than target: Target) -> Bool {
         guard target.owner == field.owner else { return true }
-        return field.owner == .panel && (target.label != field.label || target.frame != field.frame)
+        return field.owner != .zoom && (target.label != field.label || target.frame != field.frame)
     }
 
     /// A finger holding a field has dragged this far sideways since it was held: the field
@@ -294,13 +305,16 @@ struct ScrubberRuler: View {
     }
 }
 
-/// Puts the ruler above the field being scrubbed, across the width of the panel.
+/// Puts the ruler above the field being scrubbed, across the width of the panel, or of the
+/// form for `.form`.
 struct ScrubberOverlay: View {
     @Environment(Scrubber.self) private var scrubber
+    /// Whose fields' ruler it draws.
+    var owner = Scrubber.Owner.panel
 
     var body: some View {
         GeometryReader { proxy in
-            if let target = scrubber.target, target.owner == .panel {
+            if let target = scrubber.target, target.owner == owner {
                 ScrubberRuler(
                     value: scrubber.value, text: target.shown(scrubber.value),
                     spacing: target.pointsPerStep, isMajor: target.isMajor
@@ -322,25 +336,33 @@ extension View {
     /// step's tick to be felt at its field. Measured by UIKit: in a sheet, SwiftUI's global
     /// space is the sheet's, not the window's.
     func reportsPanelOrigin(to scrubber: Scrubber) -> some View {
-        modifier(PanelOriginReporting(scrubber: scrubber))
+        modifier(PanelOriginReporting(scrubber: scrubber, owner: .panel))
+    }
+
+    /// The same for a form's fields: keeps `scrubber.formOrigin` at this view's top left.
+    func reportsFormOrigin(to scrubber: Scrubber) -> some View {
+        modifier(PanelOriginReporting(scrubber: scrubber, owner: .form))
     }
 }
 
 private struct PanelOriginReporting: ViewModifier {
     let scrubber: Scrubber
+    let owner: Scrubber.Owner
     /// Where SwiftUI has the view: it changes as the view moves, which has UIKit measure again.
     @State private var moved = CGPoint.zero
 
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGPoint.self, of: { $0.frame(in: .global).origin }) { moved = $0 }
-            .background { PanelOriginReporter(scrubber: scrubber, moved: moved) }
+            .background { PanelOriginReporter(scrubber: scrubber, owner: owner, moved: moved) }
     }
 }
 
-/// Tells the scrubber where it is in its window, as `WindowFrameReporter` tells the model.
+/// Tells the scrubber where it is in its window, as `WindowFrameReporter` tells the model: the
+/// panel's origin, or the form's for `.form`.
 struct PanelOriginReporter: UIViewRepresentable {
     let scrubber: Scrubber
+    var owner = Scrubber.Owner.panel
     /// Not read: a new value has the view measure again.
     var moved = CGPoint.zero
 
@@ -348,11 +370,13 @@ struct PanelOriginReporter: UIViewRepresentable {
         let view = ReportingView()
         view.isUserInteractionEnabled = false
         view.scrubber = scrubber
+        view.owner = owner
         return view
     }
 
     func updateUIView(_ view: ReportingView, context: Context) {
         view.scrubber = scrubber
+        view.owner = owner
         view.report()
         // And again once laid out where it now is.
         view.setNeedsLayout()
@@ -360,6 +384,7 @@ struct PanelOriginReporter: UIViewRepresentable {
 
     final class ReportingView: UIView {
         weak var scrubber: Scrubber?
+        var owner = Scrubber.Owner.panel
 
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -374,9 +399,18 @@ struct PanelOriginReporter: UIViewRepresentable {
         func report() {
             guard let window, let scrubber else { return }
             let origin = convert(bounds.origin, to: window)
-            if scrubber.panelOrigin != origin { scrubber.panelOrigin = origin }
+            if owner == .form {
+                if scrubber.formOrigin != origin { scrubber.formOrigin = origin }
+            } else if scrubber.panelOrigin != origin {
+                scrubber.panelOrigin = origin
+            }
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Whose fields the number fields here are: the Format panel's, or a form's (`Scrubber.Owner`).
+    @Entry var scrubberOwner = Scrubber.Owner.panel
 }
 
 // MARK: Apple Pencil

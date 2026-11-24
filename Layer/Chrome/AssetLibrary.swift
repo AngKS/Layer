@@ -63,11 +63,15 @@ struct Asset: Identifiable, Hashable, Sendable {
     }
 
     /// The name VoiceOver reads, and UI tests look for. A symbol goes by its own name.
-    var accessibilityName: String {
+    var accessibilityName: String { accessibilityName(among: []) }
+
+    /// As `accessibilityName`, with the design's own frames named by their sizes as the built-in ones are.
+    func accessibilityName(among custom: [DeviceFrame]) -> String {
         switch content {
         case .symbol(let name): name
         case .frame(let id):
-            DeviceFrame.all.first { $0.id == id }.map { "\($0.name)  \(Int($0.size.width)) × \(Int($0.size.height))" } ?? name
+            // A design's own frame can come from a file at any size: said in whole points, as the device picker says it.
+            (DeviceFrame.all + custom).first { $0.id == id }.map { "\($0.name)  \($0.size.width.wholePoints) × \($0.size.height.wholePoints)" } ?? name
         default: name
         }
     }
@@ -157,13 +161,41 @@ enum AssetLibrary {
     /// Each tab's assets, in order.
     private static let byTab: [AssetTab: [Asset]] = Dictionary(grouping: all, by: \.tab)
 
-    private static func assets(in tab: AssetTab) -> [Asset] { byTab[tab] ?? [] }
+    private static func assets(in tab: AssetTab, including extras: [Asset] = []) -> [Asset] {
+        (byTab[tab] ?? []) + extras.filter { $0.tab == tab }
+    }
+
+    /// The design's own frames as assets, under "Custom" in the Wireframes tab, after everything already there.
+    static func customFrames(_ devices: [DeviceFrame]) -> [Asset] {
+        devices.map(customFrame)
+    }
+
+    private static func customFrame(_ device: DeviceFrame) -> Asset {
+        Asset(content: .frame(device.id), name: device.name, tab: .wireframes, section: "Custom",
+              terms: words(in: device.name) + ["custom", "frame", "device", "screen", "blank", "empty", "artboard"])
+    }
+
+    /// The assets a recents list names, in its order, for a design that holds `custom` frames: a custom frame it doesn't
+    /// hold is left out, since the design would turn it into an iPhone (F17).
+    static func recents(from stored: String, among custom: [DeviceFrame]) -> [Asset] {
+        recentIDs(from: stored).compactMap { id in
+            if id.hasPrefix("frame:" + DeviceFrame.customPrefix) {
+                return custom.first { "frame:\($0.id)" == id }.map(customFrame)
+            }
+            return asset(id: id)
+        }
+    }
 
     /// The asset a drag carried, from its id. A symbol that isn't in the catalogue is still
     /// one, as long as SF Symbols has it.
     static func asset(id: String) -> Asset? {
         if let known = byID[id] { return known }
         if id.hasPrefix("symbol:") { return customSymbol(String(id.dropFirst("symbol:".count))) }
+        // A custom frame belongs to a design, which resolves it when the asset is added (F17).
+        if id.hasPrefix("frame:" + DeviceFrame.customPrefix) {
+            return Asset(content: .frame(String(id.dropFirst("frame:".count))), name: "Custom Frame", tab: .wireframes,
+                         section: "Custom", terms: ["custom", "frame"])
+        }
         return nil
     }
 
@@ -217,9 +249,9 @@ enum AssetLibrary {
     /// The assets in `tab` that match `search`, best first: every word searched for must
     /// start one of an asset's words. A word that is a whole word of its name counts for
     /// most. With nothing searched, everything in the tab, in order.
-    static func matching(_ search: String, in tab: AssetTab) -> [Asset] {
-        guard !words(in: search).isEmpty else { return assets(in: tab) }
-        return matching(search, in: tab, scored: scored(search, among: assets(in: tab)), exactSymbol: tab == .icons ? customSymbol(search) : nil)
+    static func matching(_ search: String, in tab: AssetTab, including extras: [Asset] = []) -> [Asset] {
+        guard !words(in: search).isEmpty else { return assets(in: tab, including: extras) }
+        return matching(search, in: tab, scored: scored(search, among: assets(in: tab, including: extras)), exactSymbol: tab == .icons ? customSymbol(search) : nil)
     }
 
     private static func matching(_ search: String, in tab: AssetTab, scored: [(asset: Asset, score: Int)], exactSymbol: Asset?) -> [Asset] {
@@ -263,13 +295,13 @@ enum AssetLibrary {
     /// What `search` finds in every tab at once, the tab with the strongest match first:
     /// "mac" is an icon and a family of wireframes, and the library shows both. Tabs that
     /// find nothing are left out.
-    static func searchEverywhere(_ search: String) -> [ResultGroup] {
+    static func searchEverywhere(_ search: String, including extras: [Asset] = []) -> [ResultGroup] {
         guard !words(in: search).isEmpty else { return [] }
         // Looked up once: asking SF Symbols for a name loads its image.
         let exactSymbol = customSymbol(search)
         let groups: [(group: ResultGroup, score: Int)] = AssetTab.allCases.compactMap { tab in
             // Each tab is scored once, for both what it finds and how well.
-            let scored = scored(search, among: assets(in: tab))
+            let scored = scored(search, among: assets(in: tab, including: extras))
             let assets = matching(search, in: tab, scored: scored, exactSymbol: exactSymbol)
             guard !assets.isEmpty else { return nil }
             var score = scored.first?.score ?? 0
@@ -447,23 +479,19 @@ enum AssetLibrary {
     }()
 }
 
-// PROJECTION: deleted in plan 6
 extension AssetLibrary {
-    /// A template's thumbnail: its screen laid out on the iPhone and lowered to the elements the thumbnail
-    /// draws. Made once per name and kept, since the library's tiles ask for it whenever they are drawn.
-    static func templatePreview(named name: String) -> [DesignElement] {
+    /// A template laid out on the iPhone with the standard tokens, for its thumbnail. Made once per name and kept,
+    /// since the library's tiles ask for it whenever they are drawn.
+    static func templateRoot(named name: String) -> LayerNode? {
         previews.withLock { previews in
-            if let made = previews.elements[name] { return made }
-            guard let root = template(named: name, tokens: .standard) else { return [] }
-            var content = TreeContent()
-            content.screens = [TreeScreen(name: name, origin: .zero, scale: 1, deviceID: nil,
-                                          root: TreeRules.laidOut(root, deviceID: nil, settings: content.settings, previous: nil))]
-            let elements = TreeProjection.lower(content).screens.first?.elements ?? []
-            previews.elements[name] = elements
+            if let made = previews.roots[name] { return made }
+            guard let root = template(named: name, tokens: .standard) else { return nil }
+            let laidOut = TreeRules.laidOut(root, deviceID: nil, settings: CanvasSettings(), previous: nil)
+            previews.roots[name] = laidOut
             #if DEBUG
             previews.made[name, default: 0] += 1
             #endif
-            return elements
+            return laidOut
         }
     }
 
@@ -475,7 +503,7 @@ extension AssetLibrary {
     #endif
 
     private struct Previews: Sendable {
-        var elements: [String: [DesignElement]] = [:]
+        var roots: [String: LayerNode] = [:]
         #if DEBUG
         var made: [String: Int] = [:]
         #endif
@@ -508,8 +536,11 @@ struct AssetLibraryView: View {
     @State private var lastSearch = LastSearch()
     @FocusState private var isSearchFocused: Bool
 
+    /// The design's own frames.
+    private var customDevices: [DeviceFrame] { model.store.tree.settings.customDevices }
+
     var body: some View {
-        let groups = lastSearch.groups(for: search)
+        let groups = lastSearch.groups(for: search, custom: customDevices)
         VStack(spacing: 0) {
             searchField(firstResult: groups.first?.assets.first)
             // The tabs stay where they are while searching, so the layout doesn't jump, but
@@ -621,14 +652,13 @@ struct AssetLibraryView: View {
 
     @ViewBuilder
     private var browsing: some View {
-        let recents = AssetLibrary.recentIDs(from: storedRecents)
-            .compactMap(AssetLibrary.asset(id:))
+        let recents = AssetLibrary.recents(from: storedRecents, among: customDevices)
             .filter { $0.tab == tab }
         if !recents.isEmpty {
             sectionHeader("Recent")
             grid(recents, in: tab)
         }
-        let assets = AssetLibrary.matching("", in: tab)
+        let assets = AssetLibrary.matching("", in: tab, including: AssetLibrary.customFrames(customDevices))
         ForEach(sections(of: assets), id: \.name) { section in
             sectionHeader(section.name)
             grid(section.assets, in: tab)
@@ -660,19 +690,19 @@ struct AssetLibraryView: View {
                 Button {
                     onPick(asset)
                 } label: {
-                    AssetTile(asset: asset)
+                    AssetTile(asset: asset, custom: customDevices)
                         .contentShape(.rect(cornerRadius: 8))
                         .contentShape(.hoverEffect, .rect(cornerRadius: 8))
                         .hoverEffect(.highlight)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(asset.accessibilityName)
+                .accessibilityLabel(asset.accessibilityName(among: customDevices))
                 .accessibilityHint("Adds it to the canvas. Drag it to put it somewhere.")
                 .onDrag {
                     onDragStart()
                     return NSItemProvider(object: asset.id as NSString)
                 } preview: {
-                    AssetTile(asset: asset, isDragPreview: true)
+                    AssetTile(asset: asset, custom: customDevices, isDragPreview: true)
                         .environment(images)
                 }
             }
@@ -779,6 +809,7 @@ private struct GenerateEmptyState: View {
 /// One asset's picture in the library: the thing itself, drawn as it will be on the canvas.
 private struct AssetTile: View {
     let asset: Asset
+    var custom: [DeviceFrame] = []
     var isDragPreview = false
 
     var body: some View {
@@ -804,7 +835,7 @@ private struct AssetTile: View {
 
         case .frame(let id):
             labelled(asset.name) {
-                if let device = DeviceFrame.all.first(where: { $0.id == id }) {
+                if let device = (DeviceFrame.all + custom).first(where: { $0.id == id }) {
                     let scale = 52 / max(device.size.width, device.size.height)
                     RoundedRectangle(cornerRadius: device.cornerRadius * scale + 2, style: .continuous)
                         .strokeBorder(.secondary, lineWidth: 1.5)
@@ -814,7 +845,9 @@ private struct AssetTile: View {
 
         case .template(let name):
             labelled(asset.name) {
-                TemplatePreview(elements: AssetLibrary.templatePreview(named: name), device: .iPhone, height: 52)
+                if let root = AssetLibrary.templateRoot(named: name) {
+                    TemplatePreview(root: root, device: .iPhone, height: 52)
+                }
             }
         }
     }
@@ -852,31 +885,25 @@ private struct ScaledElement: View {
     }
 }
 
-/// A ready-made screen in miniature: its elements on a white phone.
+/// A ready-made screen in miniature: its laid-out root on a phone.
 private struct TemplatePreview: View {
-    let elements: [DesignElement]
+    let root: LayerNode
     let device: DeviceFrame
     let height: CGFloat
 
     var body: some View {
         let scale = height / device.size.height
-        ZStack(alignment: .topLeading) {
-            Color.white
-            ForEach(elements) { element in
-                ElementView(element: element)
-                    .frame(width: element.frame.width, height: element.frame.height)
-                    .offset(x: element.frame.minX, y: element.frame.minY)
+        ScreenView(screen: TreeScreen(name: "", origin: .zero, scale: 1, deviceID: nil, root: root),
+                   device: device, tokens: .standard, showsName: false)
+            .equatable()
+            .clipShape(.rect(cornerRadius: device.cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
+                    .strokeBorder(.black.opacity(0.25), lineWidth: 6)
             }
-        }
-        .frame(width: device.size.width, height: device.size.height, alignment: .topLeading)
-        .clipShape(.rect(cornerRadius: device.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
-                .strokeBorder(.black.opacity(0.25), lineWidth: 6)
-        }
-        .scaleEffect(scale, anchor: .topLeading)
-        .frame(width: device.size.width * scale, height: height, alignment: .topLeading)
-        .allowsHitTesting(false)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: device.size.width * scale, height: height, alignment: .topLeading)
+            .allowsHitTesting(false)
     }
 }
 
@@ -884,12 +911,14 @@ private struct TemplatePreview: View {
 @MainActor
 private final class LastSearch {
     private var search: String?
+    private var custom: [DeviceFrame] = []
     private var found: [AssetLibrary.ResultGroup] = []
 
-    func groups(for search: String) -> [AssetLibrary.ResultGroup] {
-        if search != self.search {
+    func groups(for search: String, custom: [DeviceFrame]) -> [AssetLibrary.ResultGroup] {
+        if search != self.search || custom != self.custom {
             self.search = search
-            found = AssetLibrary.searchEverywhere(search)
+            self.custom = custom
+            found = AssetLibrary.searchEverywhere(search, including: AssetLibrary.customFrames(custom))
         }
         return found
     }

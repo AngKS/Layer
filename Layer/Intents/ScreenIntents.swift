@@ -348,7 +348,7 @@ struct ChangeScreenDeviceIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Change Device") {
-            model.store.updateScreen(target.id) { $0.deviceID = device == .iPhone ? nil : device.rawValue }
+            model.store.changeDevice(of: target.id, to: DeviceFrame.named(device.rawValue))
         }
         return .result(dialog: "\(target.name) is now an \(device.name) screen.")
     }

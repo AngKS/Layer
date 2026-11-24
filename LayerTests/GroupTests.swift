@@ -55,32 +55,26 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
     abs(a.minX - b.minX) < tolerance && abs(a.minY - b.minY) < tolerance && abs(a.width - b.width) < tolerance && abs(a.height - b.height) < tolerance
 }
 
-/// Whether `box`, a box fitted at `degrees`, holds `exact`, at that angle, with each of its sides at most
-/// `slack` points out from `exact`'s along the box's own axes: policy clause (h), a box fitted out to whole points.
-private func holds(_ box: CGRect, _ exact: CGRect, at degrees: Double, within slack: CGFloat) -> Bool {
+/// The box a free container that fits what it holds takes round `corners`, the corners of what it holds turned as they
+/// are, in its parent's points: turned to `degrees`, its own points starting at `origin`. The engine's rule
+/// (`LayoutEngine.shapesBox`, with its `roundingError`): the box round what it holds is taken out to whole points of its
+/// own, each side to the next whole point along its own axes, a thousandth of a point being a turn's rounding and no
+/// reason to take a whole point more. An upright frame in the parent's points, centred on the box's turned centre, as a
+/// turned element's frame is kept.
+private func wholePointBox(round corners: [CGPoint], at degrees: Double, ownPointsFrom origin: CGPoint) -> CGRect {
     let turn = degrees * .pi / 180
-    func sides(_ rect: CGRect) -> [CGFloat] {
-        let across = rect.midX * cos(turn) + rect.midY * sin(turn), down = rect.midY * cos(turn) - rect.midX * sin(turn)
-        return [across - rect.width / 2, across + rect.width / 2, down - rect.height / 2, down + rect.height / 2]
+    let across = CGVector(dx: cos(turn), dy: sin(turn)), down = CGVector(dx: -sin(turn), dy: cos(turn))
+    let own = corners.map { point in
+        let (x, y) = (point.x - origin.x, point.y - origin.y)
+        return CGPoint(x: x * across.dx + y * across.dy, y: x * down.dx + y * down.dy)
     }
-    let (fitted, held) = (sides(box), sides(exact))
-    let out = [held[0] - fitted[0], fitted[1] - held[1], held[2] - fitted[2], fitted[3] - held[3]]
-    return out.allSatisfy { $0 > -0.001 && $0 <= slack }
-}
-
-/// Whether two designs are the same but for their elements' frames, each within `slack` points
-/// either way: policy clause (h), a group's box fitted out to whole points.
-private func alike(_ a: DesignContent, _ b: DesignContent, framesWithin slack: CGFloat) -> Bool {
-    let (mine, theirs) = (a.elements, b.elements)
-    guard a.screenFrames == b.screenFrames, a.title == b.title, a.canvas == b.canvas, mine.count == theirs.count else { return false }
-    return zip(mine, theirs).allSatisfy { one, other in
-        var (unplaced, otherUnplaced) = (one, other)
-        unplaced.frame = .zero
-        otherUnplaced.frame = .zero
-        let (f, g) = (one.frame, other.frame)
-        return unplaced == otherUnplaced && abs(f.minX - g.minX) <= slack && abs(f.minY - g.minY) <= slack
-            && abs(f.width - g.width) <= slack && abs(f.height - g.height) <= slack
-    }
+    let rounding: CGFloat = 0.001
+    let left = (own.map(\.x).min()! + rounding).rounded(.down), top = (own.map(\.y).min()! + rounding).rounded(.down)
+    let right = max(left, (own.map(\.x).max()! - rounding).rounded(.up)), bottom = max(top, (own.map(\.y).max()! - rounding).rounded(.up))
+    let middle = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
+    let centre = CGPoint(x: origin.x + across.dx * middle.x + down.dx * middle.y, y: origin.y + across.dy * middle.x + down.dy * middle.y)
+    let size = CGSize(width: right - left, height: bottom - top)
+    return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
 }
 
 /// The group item itself: an element of the kind `.group` in the one list, its members
@@ -122,8 +116,10 @@ struct GroupModelTests {
         }
         let box = try #require(TurnedRect.enclosing(shapes, at: 30))
         let item = try #require(content.element(g))
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(holds(item.frame, screen.placement.localRect(for: box.rect), at: 30, within: 1))
+        // That box, taken out to whole points of the group's own, by the engine's rule (`LayoutEngine.shapesBox`). Its own
+        // points start where its item was put: at the screen's origin, the frame of a new item being zero.
+        let corners = box.corners.map(screen.placement.localPoint(for:))
+        #expect(close(item.frame, wholePointBox(round: corners, at: 30, ownPointsFrom: .zero)))
         #expect(item.rotation == 30)
         // Not the upright box round them.
         let upright = try #require(TurnedRect.enclosing(shapes, at: 0))
@@ -1720,8 +1716,7 @@ struct GroupGeometryTests {
         board.model.beginTurn()
         board.model.turnSelection(by: -30, snaps: false)
         board.model.endTurn()
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(alike(board.store.content, before, framesWithin: 2))
+        #expect(board.store.content == before)
 
         // Reset stands it upright: turned to 50 from 20, it goes back to 0.
         board.model.rotateSelection(by: 20)
@@ -1779,7 +1774,9 @@ struct GroupGeometryTests {
 
         let after = try #require(board.model.selectionShape)
         #expect(after.rect == before.rect && after.degrees == 30)
-        #expect(board.store.canvasShape(of: .element(g)) != after, "the box fitted round the turned members is not quite the outline")
+        // Turning a group sets only its angle (plan 2's must-do, done in plan 4 Task 5): its box goes round
+        // rigidly with it, so it is the outline.
+        #expect(board.store.canvasShape(of: .element(g)) == after, "the group's box is the outline, turned as one piece")
     }
 
     /// Review fix 6: turned in many steps, one after another, and back to where it started, a
@@ -1803,8 +1800,7 @@ struct GroupGeometryTests {
                 #expect(board.store.element(button.element)?.rotation == 66)
             }
         }
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(alike(board.store.content, before, framesWithin: 2))
+        #expect(board.store.content == before)
     }
 
     // MARK: Resizing
@@ -1935,11 +1931,17 @@ struct GroupGeometryTests {
             let now = try #require(board.frame(of: ref))
             #expect(abs(now.width - was.width * s) < 0.000_1 && abs(now.height - was.height * s) < 0.000_1)
         }
-        // Fitted round them again, the box is the one asked for: in proportion, with its
-        // top-left corner where it was on the canvas.
+        // Fitted round them again, the box is the one asked for, taken out to whole points of its own by the engine's rule
+        // (`LayoutEngine.shapesBox`): in proportion, with its top-left corner where it was on the canvas, where its own
+        // points start.
         let now = try #require(board.store.canvasShape(of: .element(g)))
-        // Clause (h): the box is fitted out to whole points; plan 4's group-turn rewrite restores exact equality.
-        #expect(close(now.rect, placement.canvasRect(for: frame), within: 1))
+        let shapes = try [board.b, board.d].map { ref in
+            let element = try #require(board.store.element(ref.element))
+            return TurnedRect(rect: element.frame, degrees: element.resolvedRotation)
+        }
+        let exact = try #require(TurnedRect.enclosing(shapes, at: 30))
+        let start = TurnedRect(rect: frame, degrees: 30).corner(.topLeft)
+        #expect(close(now.rect, placement.canvasRect(for: wholePointBox(round: exact.corners, at: 30, ownPointsFrom: start))))
         #expect(isNear(now.corner(.topLeft), fixed, within: 0.001))
     }
 }
@@ -2300,45 +2302,55 @@ struct GroupAsOneThingTests {
 @MainActor
 @Suite("The layers tree")
 struct LayerTreeTests {
-    private func names(_ nodes: [LayerListNode]) -> [String] {
-        nodes.map { $0.element.name ?? "" }
+    /// The rows of a host with every container open, as `LayerRows` lists them: clause (i) re-expresses the old
+    /// nested layers tree on them (the list's, deleted in plan 4's Task 12). Each line's depth says what it is under, and its flags are read from
+    /// `isDimmed` (was `isHiddenWithItsGroups`) and `isLocked || isLockedByAncestor` (was `isLockedWithItsGroups`).
+    private func rows(_ board: OrderBoard, on host: TreeIndex.Host) -> [LayerLine] {
+        let tree = board.store.tree
+        func containers(_ node: LayerNode) -> [UUID] { (node.isContainer ? [node.id] : []) + node.children.flatMap(containers) }
+        let open = Set((tree.screens.map(\.root) + tree.canvas).flatMap(containers))
+        return LayerRows.lines(on: host, in: tree, index: board.store.index, open: open)
+    }
+
+    private func names(_ lines: [LayerLine]) -> [String] {
+        lines.map(\.name)
     }
 
     @Test func theTreeListsTopmostFirstWithMembersUnderTheirGroup() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         let outer = board.group(board.a, g, named: "H")
-        let tree = board.store.layerTree(on: .screen(board.screen))
-        #expect(names(tree) == ["E", "H", "C"])
-        let h = try #require(tree.first { $0.ref == outer })
-        #expect(names(h.children) == ["G", "A"])
-        let node = try #require(h.children.first { $0.ref == g })
-        #expect(names(node.children) == ["D", "B"])
-        #expect(board.store.layerTree(on: .canvas).map(\.element.name) == ["note 2", "note 1"])
+        let lines = rows(board, on: .screen(board.screen))
+        // Was: top level ["E", "H", "C"]; under H ["G", "A"]; under G ["D", "B"]: each under its container by depth.
+        #expect(names(lines) == ["E", "H", "G", "D", "B", "A", "C"])
+        #expect(lines.map(\.depth) == [0, 0, 1, 2, 2, 1, 0])
+        #expect(lines.map(\.id) == [board.e, outer, g, board.d, board.b, board.a, board.c].map(\.element))
+        // Was: the canvas's tree's names.
+        #expect(names(rows(board, on: .canvas)) == ["note 2", "note 1"])
     }
 
     @Test func rowsKnowWhatIsHiddenAndLockedAboveThem() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         board.store.update(g) { $0.isLocked = true; $0.isHidden = true }
-        let tree = board.store.layerTree(on: .screen(board.screen))
-        let node = try #require(tree.first { $0.ref == g })
-        #expect(node.isHiddenWithItsGroups && node.isLockedWithItsGroups)
-        for child in node.children {
-            #expect(child.isHiddenWithItsGroups && child.isLockedWithItsGroups)
-            #expect(!child.element.isHidden && !child.element.isLocked, "its own flags are its own")
+        let lines = rows(board, on: .screen(board.screen))
+        let node = try #require(lines.first { $0.ref == g })
+        #expect(node.isDimmed && (node.isLocked || node.isLockedByAncestor))
+        for child in lines.filter({ $0.list == .node(g.element) }) {
+            #expect(child.isDimmed && (child.isLocked || child.isLockedByAncestor))
+            #expect(!child.isHidden && !child.isLocked, "its own flags are its own")
         }
-        let other = try #require(tree.first { $0.element.name == "E" })
-        #expect(!other.isHiddenWithItsGroups && !other.isLockedWithItsGroups)
+        #expect(lines.filter { $0.list == .node(g.element) }.count == 2)
+        let other = try #require(lines.first { $0.name == "E" })
+        #expect(!other.isDimmed && !(other.isLocked || other.isLockedByAncestor))
     }
 
     @Test func drawingsAreNotInTheTree() {
         let board = OrderBoard()
-        let tree = board.store.layerTree(on: .canvas)
-        #expect(!tree.contains { $0.ref == board.drawing })
-        #expect(board.store.drawings == [board.drawing])
+        #expect(!rows(board, on: .canvas).contains { $0.ref == board.drawing })
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
         board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
-        #expect(board.store.drawings == [board.drawing])
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
     }
 
     @Test func aRowTapAddsOrTakesOutExactlyThatThing() {

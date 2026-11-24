@@ -24,12 +24,13 @@ struct CanvasScreen: View {
                     let tree = model.store.tree
                     let tokens = tree.settings.tokens
                     let showsNames = tree.settings.showsFrameNames
+                    let raised = model.screensBeingDraggedFrom
                     ForEach(tree.screens) { screen in
                         ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: showsNames)
                             .equatable()
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
-                            .zIndex(screensBeingDraggedFrom.contains(screen.id) ? 1 : 0)
+                            .zIndex(raised.contains(screen.id) ? 1 : 0)
                             .transition(.blurReplace)
                     }
                     ForEach(tree.canvas) { node in
@@ -195,14 +196,6 @@ struct CanvasScreen: View {
             set: { model[keyPath: isOpen] = $0 }
         )
     }
-
-    /// The screens that hold elements being dragged, one or several of them.
-    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
-        guard model.isAdjusting, let selection = model.selection else { return [] }
-        return Set(selection.things.compactMap { thing in
-            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
-        })
-    }
 }
 
 /// What the canvas takes. Things dragged out of the library land where they are dropped: on a screen when dropped over
@@ -335,7 +328,7 @@ private struct PanelSheet<Content: View>: View {
 
 /// Tells the model where a view is in its window's points, for a view that may sit in a
 /// presentation of its own, such as a sheet, where SwiftUI's global space is the sheet's.
-private struct WindowFrameReporter: UIViewRepresentable {
+struct WindowFrameReporter: UIViewRepresentable {
     let name: String
     let model: AppModel
 
@@ -444,7 +437,7 @@ private struct SheetSqueeze: View {
 /// is set. While off, the action is not there at all: an action that is there, even one that
 /// ignores the squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the
 /// iPad), and the system's own squeeze action elsewhere.
-private struct Squeezable: ViewModifier {
+struct Squeezable: ViewModifier {
     let router: SqueezeRouter
     let isOn: Bool
     /// Where the view is in the window, which its points are counted from.

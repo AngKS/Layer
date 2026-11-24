@@ -6,6 +6,7 @@
 // Usage:
 //   SketchBenchmarkHarness generate <fixtures-dir>        write the fixture corpus as JSON
 //   SketchBenchmarkHarness run <fixtures-dir> [--model] [--out <report.json>]
+//   SketchBenchmarkHarness check [<fixtures-dir>]         builds, reads every fixture with the rules (no model)
 //   SketchBenchmarkHarness healthcheck                    one small Apple Intelligence call
 import CoreGraphics
 import Foundation
@@ -46,6 +47,11 @@ struct SketchBenchmarkHarness {
             explain(fixturesDir: arguments[2], idSubstring: arguments[3])
         case "handwritingtest":
             await handwritingTest()
+        case "structure":
+            guard arguments.count > 2 else { printUsage(); exit(1) }
+            structure(fixturesDir: arguments[2], verbose: arguments.contains("--verbose"))
+        case "check":
+            await check(fixturesDir: arguments.count > 2 ? arguments[2] : "LayerTests/Fixtures")
         case "healthcheck":
             await healthcheck()
         default:
@@ -59,6 +65,8 @@ struct SketchBenchmarkHarness {
         Usage:
           SketchBenchmarkHarness generate <fixtures-dir>
           SketchBenchmarkHarness run <fixtures-dir> [--model] [--out <report.json>]
+          SketchBenchmarkHarness check [<fixtures-dir>]
+          SketchBenchmarkHarness structure <fixtures-dir> [--verbose]
           SketchBenchmarkHarness healthcheck
         """)
     }
@@ -93,7 +101,71 @@ struct SketchBenchmarkHarness {
             guard let data = try? encoder.encode(fixture) else { continue }
             try? data.write(to: directory.appendingPathComponent("\(fixture.id).json"))
         }
-        print("Wrote \(fixtures.count) fixtures to \(directory.path)")
+        let structure = StructureFixtureGenerator.all()
+        for fixture in structure {
+            guard let data = try? encoder.encode(fixture) else { continue }
+            try? data.write(to: directory.appendingPathComponent("\(fixture.id).json"))
+        }
+        print("Wrote \(fixtures.count) fixtures and \(structure.count) structure fixtures to \(directory.path)")
+    }
+
+    // MARK: check
+
+    /// Reads every fixture with the rules alone, and the one outline round two things that
+    /// makes a card, so that a build that compiles but can't read fails here. Needs no model.
+    static func check(fixturesDir: String) async {
+        guard let fixtures = try? SketchFixtureCorpus.load(from: URL(fileURLWithPath: fixturesDir)), !fixtures.isEmpty else {
+            print("harness FAILED: couldn't load fixtures from \(fixturesDir)")
+            exit(1)
+        }
+        let cases = await SketchBenchmarkRunner.runRulesOnly(fixtures)
+        guard cases.count == fixtures.count else {
+            print("harness FAILED: \(cases.count) of \(fixtures.count) fixtures read")
+            exit(1)
+        }
+        let outline = SketchSamples.strokes([SketchSamples.box(CGRect(x: 10, y: 100, width: 373, height: 130), radius: 16)])
+        let title = ExistingElement(kind: .title, frame: CGRect(x: 96, y: 120, width: 200, height: 40))
+        let body = ExistingElement(kind: .body, frame: CGRect(x: 20, y: 170, width: 353, height: 40))
+        guard let observation = SketchAnalyzer.observe(outline),
+              RuleInterpreter().reading(for: SketchRequest(
+                  observation: observation,
+                  placement: .onScreen(local: observation.bounds, existing: [title, body]),
+                  strokes: []
+              )) == .element(.card)
+        else {
+            print("harness FAILED: an outline round two things didn't read as a card")
+            exit(1)
+        }
+        print("harness ok: \(fixtures.count) fixtures read")
+    }
+
+    // MARK: structure
+
+    /// Runs every `structure-` fixture through the rules, `SketchedNode` and the structure pass, and prints how many came
+    /// out as expected, how many near misses grouped, and the pass's p50 and p95.
+    static func structure(fixturesDir: String, verbose: Bool) {
+        guard let fixtures = try? StructureBenchmark.load(from: URL(fileURLWithPath: fixturesDir)), !fixtures.isEmpty else {
+            print("structure FAILED: couldn't load structure fixtures from \(fixturesDir)")
+            exit(1)
+        }
+        var asExpected = 0, nearMissesGrouped = 0
+        var times: [Double] = []
+        for fixture in fixtures {
+            let found = StructureBenchmark.run(fixture)
+            times.append(found.passSeconds)
+            let right = fixture.isAsExpected(label: found.label, decision: found.decision)
+            if right { asExpected += 1 }
+            if fixture.variant == .nearMiss, found.decision != "none" { nearMissesGrouped += 1 }
+            if verbose || !right {
+                print("  \(right ? "ok  " : "WRONG") \(fixture.id): \(found.label) \(found.decision) (expected \(fixture.label) \(fixture.expected))")
+            }
+        }
+        print("structure: \(fixtures.count) fixtures, \(asExpected) as expected, near misses grouped \(nearMissesGrouped)")
+        let sorted = times.sorted()
+        func percentile(_ fraction: Double) -> Double {
+            sorted[min(sorted.count - 1, max(0, Int((Double(sorted.count) * fraction).rounded(.up)) - 1))]
+        }
+        print(String(format: "pass p50/p95: %.4fms / %.4fms", percentile(0.5) * 1000, percentile(0.95) * 1000))
     }
 
     // MARK: run

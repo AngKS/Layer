@@ -181,6 +181,10 @@ extension PerformanceFixTests {
         return found
     }
 
+    /// Whether a group has something showing is found from the first leaf showing in it, not by walking every leaf it
+    /// holds: one leaf for each of the three groups on top, the nested one's included, where its seven leaves were each
+    /// walked before (final review A1 m2: `TreeTargets` never records a leaf walk, so the count it read before was
+    /// nothing by construction).
     @Test func workingOutWhatCanBeTouchedWalksNoGroupsLeaves() {
         let board = OrderBoard()
         let inner = board.group(board.b, board.c)
@@ -188,9 +192,9 @@ extension PerformanceFixTests {
         board.group(board.note1, board.note2)
         board.group(board.a, board.e)
 
-        let walks = GroupWork.leafWalks
-        let found = board.store.treeTargets(entered: []).byHost
-        #expect(GroupWork.leafWalks - walks == 0, "leaves walked \(GroupWork.leafWalks - walks) times for 4 groups")
+        let looked = GroupWork.leavesLookedAt
+        let found = TreeTargets(board.store.tree, index: board.store.index, entered: []).byHost
+        #expect(GroupWork.leavesLookedAt - looked == 3, "leaves looked at for 4 groups holding 7: \(GroupWork.leavesLookedAt - looked)")
         #expect(found.values.joined().count > 0)
     }
 
@@ -208,6 +212,14 @@ extension PerformanceFixTests {
         }
         same("nothing hidden")
         same("outer gone into", entered: [outer.element])
+        // Per host as well: each host's targets, in order, are the reference walk's (final review A1 m2: the loop
+        // compared the targets with themselves, and ran once nothing on either host could be touched).
+        let reference = referenceTargets(board.store, entered: [outer.element])
+        for host in [DesignStore.ElementRef.Host.screen(board.screen), .canvas] {
+            let per = board.store.treeTargets(entered: [outer.element]).refs(on: host).map(\.element)
+            #expect(!per.isEmpty, "\(host) has things to touch")
+            #expect(per == reference[host] ?? [], "\(host)")
+        }
         same("outer and inner gone into", entered: [outer.element, inner.element])
         board.store.update(board.b) { $0.isHidden = true }
         same("one of two members hidden", entered: [])
@@ -225,12 +237,6 @@ extension PerformanceFixTests {
         board.store.update(empty) { $0.isHidden = true }
         board.store.update(board.a) { $0.isHidden = false }
         same("a hidden group over a shown member", entered: [empty.element])
-        // Per host as well.
-        for host in [DesignStore.ElementRef.Host.screen(board.screen), .canvas] {
-            let per = board.store.treeTargets(entered: [outer.element]).refs(on: host).map(\.element)
-            let all = board.store.treeTargets(entered: [outer.element]).byHost[host]?.map(\.id) ?? []
-            #expect(Set(per) == Set(all))
-        }
     }
 }
 

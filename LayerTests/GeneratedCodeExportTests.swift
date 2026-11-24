@@ -138,6 +138,19 @@ struct GeneratedCodeExportTests {
                                    (1...4).map { Tests.text("Cell \($0)") })
         designs.append(("names-of-things-the-code-uses", screens([("Design Tokens", nil, column, [Tests.leaf(.title, "Tokens"), Tests.leaf(.button, "Go")]),
                                                                   ("Grid Row", nil, column, [grid])])))
+
+        // A design's own text sizes, which aren't SwiftUI's text styles' sizes: its text is written at them.
+        var ownSizes = DesignTokens.standard
+        ownSizes.textSizes = DesignTokens.TextSizes(title: 30, body: 20, text: 21)
+        let words = [Tests.leaf(.title, "Title"), Tests.leaf(.body, "Body"), Tests.text("Text")]
+        let placed = zip(words, [CGRect(x: 20, y: 80, width: 300, height: 44), CGRect(x: 20, y: 140, width: 300, height: 40),
+                                 CGRect(x: 20, y: 200, width: 300, height: 24)]).map { word, frame -> LayerNode in
+            var node = word
+            node.frame = frame
+            (node.width, node.height) = (LayerNode.Sizing(.fixed), LayerNode.Sizing(.fixed))
+            return node
+        }
+        designs.append(("own-text-sizes", screens([("Column", nil, column, words), ("Free", nil, .free, placed)], tokens: ownSizes)))
         return designs
     }
 

@@ -21,6 +21,9 @@ extension TreeContent {
     /// a laid-out one's go with it.
     mutating func projectedUpdate(_ id: UUID, pending: inout [UUID: UUID], _ body: (inout DesignElement) -> Void) {
         guard let found = found(id) else { return }
+        #if DEBUG
+        TreeProjection.countHostLowering(on: found.host)
+        #endif
         let before = found.lowered(pending: pending)
         var element = before
         body(&element)

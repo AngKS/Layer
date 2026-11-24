@@ -98,6 +98,28 @@ extension DesignElement {
     /// toggle's knob is at, whether a checkbox is ticked or a radio button has its dot,
     /// and how far a progress bar is shaded.
     mutating func adoptMarks(of observation: SketchObservation) {
+        let marks = SketchMarks(of: observation, for: kind)
+        if let on = marks.isOn { isOn = on }
+        if let shaded = marks.value { value = shaded }
+    }
+}
+
+extension LayerNode {
+    /// Takes what the marks inside an outline say about the node drawn, into its `content`: which end a toggle's knob is
+    /// at, whether a checkbox is ticked or a radio button has its dot, and how far a progress bar is shaded.
+    mutating func adoptMarks(of observation: SketchObservation) {
+        let marks = SketchMarks(of: observation, for: kind)
+        if let on = marks.isOn { content.isOn = on }
+        if let shaded = marks.value { content.value = shaded }
+    }
+}
+
+/// What the marks inside an outline say about a thing of `kind`: nil for what they say nothing of.
+private struct SketchMarks {
+    var isOn: Bool?
+    var value: Double?
+
+    init(of observation: SketchObservation, for kind: ElementKind) {
         guard case .enclosure(_, let inner) = observation.form, let marks = kind.spec.marks else { return }
         switch marks {
         case .knob:
@@ -225,6 +247,13 @@ enum SketchConventions {
     /// `progressHeight` screen points, is a progress bar.
     static let progressRatio: CGFloat = 7
     static let progressHeight: CGFloat = 28
+
+    /// An outline round two or more things already on the screen: the card's score…
+    static let cardAroundSeveral = 0.95
+    /// …and every other reading of that outline is scaled by this.
+    static let cardElsewhere = 0.5
+    /// An outline round one thing: the card's score. The other readings are unchanged.
+    static let cardAroundOne = 0.6
 
     /// Below this score, the winning reading isn't confident even on its own — the low end
     /// of a close call. Matches the upper edge of the 35–65% "gray area" the Lenovo gesture

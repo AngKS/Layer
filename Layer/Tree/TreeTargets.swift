@@ -72,7 +72,12 @@ struct TreeTargets: Equatable, Sendable {
     /// Whether a node that isn't hidden has something showing: a leaf, a card's look, an empty row, column, grid or
     /// overlay's box (F14), or any of these inside it. A free group with nothing showing in it has nothing to touch.
     private static func isShowing(_ node: LayerNode) -> Bool {
-        guard node.isContainer else { return true }
+        guard node.isContainer else {
+            #if DEBUG
+            GroupWork.leafLookedAt()
+            #endif
+            return true
+        }
         if node.kind == .card || (node.resolvedLayout != .free && node.children.isEmpty) { return true }
         return node.children.contains { !$0.isHidden && isShowing($0) }
     }
@@ -118,10 +123,18 @@ struct TreeTargets: Equatable, Sendable {
 /// main thread alone, where the canvas asks. The count only grows: a test measures the difference it makes.
 enum GroupWork {
     nonisolated(unsafe) private(set) static var leafWalks = 0
+    /// Leaves that working out what can be touched looked at to find whether a container has something showing
+    /// (`TreeTargets.isShowing`): the first that shows in each, not every one it holds.
+    nonisolated(unsafe) private(set) static var leavesLookedAt = 0
 
     static func leafWalked() {
         guard Thread.isMainThread else { return }
         leafWalks += 1
+    }
+
+    static func leafLookedAt() {
+        guard Thread.isMainThread else { return }
+        leavesLookedAt += 1
     }
 }
 #endif
