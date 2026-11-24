@@ -2300,45 +2300,55 @@ struct GroupAsOneThingTests {
 @MainActor
 @Suite("The layers tree")
 struct LayerTreeTests {
-    private func names(_ nodes: [LayerListNode]) -> [String] {
-        nodes.map { $0.element.name ?? "" }
+    /// The rows of a host with every container open, as `LayerRows` lists them: clause (i) re-expresses the old
+    /// nested `layerTree(on:)` on them. Each line's depth says what it is under, and its flags are read from
+    /// `isDimmed` (was `isHiddenWithItsGroups`) and `isLocked || isLockedByAncestor` (was `isLockedWithItsGroups`).
+    private func rows(_ board: OrderBoard, on host: TreeIndex.Host) -> [LayerLine] {
+        let tree = board.store.tree
+        func containers(_ node: LayerNode) -> [UUID] { (node.isContainer ? [node.id] : []) + node.children.flatMap(containers) }
+        let open = Set((tree.screens.map(\.root) + tree.canvas).flatMap(containers))
+        return LayerRows.lines(on: host, in: tree, index: board.store.index, open: open)
+    }
+
+    private func names(_ lines: [LayerLine]) -> [String] {
+        lines.map(\.name)
     }
 
     @Test func theTreeListsTopmostFirstWithMembersUnderTheirGroup() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         let outer = board.group(board.a, g, named: "H")
-        let tree = board.store.layerTree(on: .screen(board.screen))
-        #expect(names(tree) == ["E", "H", "C"])
-        let h = try #require(tree.first { $0.ref == outer })
-        #expect(names(h.children) == ["G", "A"])
-        let node = try #require(h.children.first { $0.ref == g })
-        #expect(names(node.children) == ["D", "B"])
-        #expect(board.store.layerTree(on: .canvas).map(\.element.name) == ["note 2", "note 1"])
+        let lines = rows(board, on: .screen(board.screen))
+        // Was: top level ["E", "H", "C"]; under H ["G", "A"]; under G ["D", "B"]: each under its container by depth.
+        #expect(names(lines) == ["E", "H", "G", "D", "B", "A", "C"])
+        #expect(lines.map(\.depth) == [0, 0, 1, 2, 2, 1, 0])
+        #expect(lines.map(\.id) == [board.e, outer, g, board.d, board.b, board.a, board.c].map(\.element))
+        // Was: the canvas's tree's names.
+        #expect(names(rows(board, on: .canvas)) == ["note 2", "note 1"])
     }
 
     @Test func rowsKnowWhatIsHiddenAndLockedAboveThem() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         board.store.update(g) { $0.isLocked = true; $0.isHidden = true }
-        let tree = board.store.layerTree(on: .screen(board.screen))
-        let node = try #require(tree.first { $0.ref == g })
-        #expect(node.isHiddenWithItsGroups && node.isLockedWithItsGroups)
-        for child in node.children {
-            #expect(child.isHiddenWithItsGroups && child.isLockedWithItsGroups)
-            #expect(!child.element.isHidden && !child.element.isLocked, "its own flags are its own")
+        let lines = rows(board, on: .screen(board.screen))
+        let node = try #require(lines.first { $0.ref == g })
+        #expect(node.isDimmed && (node.isLocked || node.isLockedByAncestor))
+        for child in lines.filter({ $0.list == .node(g.element) }) {
+            #expect(child.isDimmed && (child.isLocked || child.isLockedByAncestor))
+            #expect(!child.isHidden && !child.isLocked, "its own flags are its own")
         }
-        let other = try #require(tree.first { $0.element.name == "E" })
-        #expect(!other.isHiddenWithItsGroups && !other.isLockedWithItsGroups)
+        #expect(lines.filter { $0.list == .node(g.element) }.count == 2)
+        let other = try #require(lines.first { $0.name == "E" })
+        #expect(!other.isDimmed && !(other.isLocked || other.isLockedByAncestor))
     }
 
     @Test func drawingsAreNotInTheTree() {
         let board = OrderBoard()
-        let tree = board.store.layerTree(on: .canvas)
-        #expect(!tree.contains { $0.ref == board.drawing })
-        #expect(board.store.drawings == [board.drawing])
+        #expect(!rows(board, on: .canvas).contains { $0.ref == board.drawing })
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
         board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
-        #expect(board.store.drawings == [board.drawing])
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
     }
 
     @Test func aRowTapAddsOrTakesOutExactlyThatThing() {

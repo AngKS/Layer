@@ -66,162 +66,184 @@ struct LayersPanel: View {
 
 // MARK: Layers
 
-/// The design's layers, topmost first under each screen, groups with their members nested
-/// beneath, then those on the open canvas, drawings in a section of their own. Only this reads
-/// the design, the selection and the hover, which change on every frame of a drag and every
-/// move of the pencil: each row is given what it shows, never a `LayerListNode` or element, whose
-/// frames change on every frame, and is built again only when that changes.
+/// The design's layers, topmost first under each screen, containers with what is in them nested beneath
+/// (rows, columns and grids in layout order), then those on the open canvas, drawings in a section of their
+/// own. Only this reads the design, the selection and the hover, which change on every frame of a drag and
+/// every move of the pencil: each row is given what it shows, never a node, whose frame changes on every
+/// frame, and is built again only when that changes. Read from the tree and its index, never the projection.
 private struct LayersList: View {
     @Environment(AppModel.self) private var model
-    /// The groups left open, for this session. One with something selected in it is open
+    /// The containers left open, for this session. One with something selected in it is open
     /// whatever this says.
-    @State private var openGroups: Set<DesignElement.ID> = []
+    @State private var openContainers: Set<UUID> = []
 
-    /// One row of the list: a thing, how far in it is, and whether it is open, for a group.
-    private struct Line: Identifiable {
-        var node: LayerListNode
-        var depth: Int
-        var isOpen: Bool
-        var id: DesignElement.ID { node.id }
+    /// A row and what is under it, when it is open.
+    private struct Branch {
+        var line: LayerLine
+        var children: [Branch]
+    }
+
+    /// The flat rows of a host as nested branches, by depth.
+    private static func branches(_ lines: [LayerLine]) -> [Branch] {
+        var position = 0
+        func level(_ depth: Int) -> [Branch] {
+            var result: [Branch] = []
+            while position < lines.count, lines[position].depth >= depth {
+                let line = lines[position]
+                position += 1
+                result.append(Branch(line: line, children: line.depth == depth ? level(depth + 1) : []))
+            }
+            return result
+        }
+        return level(0)
     }
 
     var body: some View {
         let store = model.store
+        let tree = store.tree, index = store.index
         let selection = model.selection
         let hovered = model.hovered
-        let entered = model.enteredGroups
+        let open = Self.entered(in: selection, index: index).union(openContainers)
         ScrollView {
             // Not lazy: a lazy stack built every row in view again on every change to the
             // design, whether or not what the row shows had changed.
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(store.screens) { screen in
+                ForEach(tree.screens) { screen in
                     let target = CanvasSelection.screen(screen.id)
                     LayerHeadingRow(
-                        model: model, name: screen.name, symbol: screen.device.size.width > 600 ? "ipad" : "iphone", target: target,
-                        isSelected: selection?.contains(target) == true, isHovered: hovered == target
+                        model: model, countedAs: screen.id, name: screen.name, symbol: tree.device(of: screen).size.width > 600 ? "ipad" : "iphone",
+                        target: target, isSelected: selection?.contains(target) == true, isHovered: hovered == target
                     )
                     .equatable()
-                    branch(store.layerTree(on: .screen(screen.id)), in: .host(.screen(screen.id)), parent: nil, depth: 0, entered: entered, selection: selection, hovered: hovered)
+                    branch(Self.branches(LayerRows.lines(on: .screen(screen.id), in: tree, index: index, open: open)),
+                           open: open, parent: nil, selection: selection, hovered: hovered)
                 }
-                let drawings = store.drawings.compactMap { ref in store.element(ref.element).map { (ref, $0) } }
-                let floating = store.layerTree(on: .canvas)
-                if !drawings.isEmpty || !floating.isEmpty {
-                    LayerHeadingRow(model: model, name: "Canvas", symbol: "square.dashed", target: nil, isSelected: false, isHovered: false)
+                let drawings = LayerRows.drawings(in: tree).compactMap { id in
+                    index.node(id, in: tree).flatMap { LayerRows.line(for: $0, in: .canvas, index: index) }
+                }
+                let floating = Self.branches(LayerRows.lines(on: .canvas, in: tree, index: index, open: open))
+                if let first = drawings.first?.id ?? floating.first?.line.id {
+                    LayerHeadingRow(model: model, countedAs: first, name: "Canvas", symbol: "square.dashed", target: nil, isSelected: false, isHovered: false)
                         .equatable()
                     if !drawings.isEmpty {
                         LayerSubheading(name: "Drawings")
-                        ForEach(drawings, id: \.0.element) { ref, drawing in
-                            let target = CanvasSelection.element(ref)
-                            plainRow(drawing, ref: ref, depth: 0, isDimmed: drawing.isHidden, isLockedByGroup: false, isSelected: selection?.contains(target) == true, isHovered: hovered == target)
+                        ForEach(drawings) { line in
+                            plainRow(line, selection: selection, hovered: hovered)
                         }
                     }
                     if !drawings.isEmpty && !floating.isEmpty { LayerSubheading(name: "Elements") }
-                    branch(floating, in: .host(.canvas), parent: nil, depth: 0, entered: entered, selection: selection, hovered: hovered)
+                    branch(floating, open: open, parent: nil, selection: selection, hovered: hovered)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 14)
         }
         // The container is outside the scroll view, as in the spike. Its drag container is what
-        // lets a closed group's row take a drop.
+        // lets a closed container's row take a drop.
         .reorderContainer(for: LayerItem.self, in: LayerDropList.self) { difference in
             move(difference)
         }
         .dragContainer(for: LayerItem.self) { ids in ids.map(LayerItem.init) }
     }
 
+    /// Every container that holds something selected, at any depth: those that have been gone
+    /// into, which are open while it is.
+    private static func entered(in selection: CanvasSelection?, index: TreeIndex) -> Set<UUID> {
+        var entered: Set<UUID> = []
+        for case .element(let ref) in selection?.things ?? [] {
+            entered.formUnion(index.ancestors(of: ref.element).filter { index[$0]?.path.isEmpty == false })
+        }
+        return entered
+    }
+
     /// What a drop in the list does: each row dragged lands where it was dropped, the whole
     /// drop one step to undo. A refused move leaves the list as it was, which is rebuilt from
     /// the design, so the row goes back.
-    private func move(_ difference: ReorderDifference<DesignElement.ID, LayerDropList>) {
+    private func move(_ difference: ReorderDifference<UUID, LayerDropList>) {
         let list = difference.destination.collectionID
-        let before: DesignElement.ID? = switch difference.destination.position {
+        let row: UUID? = switch difference.destination.position {
         case .before(let id): list.landing(before: id)
         case .end: list.landing(before: nil)
         }
         let store = model.store
         store.asOneStep {
+            let siblings = list.isLayoutOrder ? LayerRows.lines(in: list.list, content: store.tree, index: store.index) : []
             for id in difference.sources {
-                store.moveLayer(id, to: list.list, before: before)
+                Self.drop(id, in: list.list, above: row, among: siblings, layoutOrder: list.isLayoutOrder, store: store)
             }
         }
     }
 
-    /// One list of rows: a screen's top level, the canvas's, or what is in a group, topmost
-    /// first, each an open group's own list under its row. Its rows can be dragged to reorder
-    /// them, and into and out of the groups.
+    /// Lands a layer in a list just above `row`; nil is below the last row, which is the back of a topmost-first
+    /// list and the front of one in layout order (F22).
+    @discardableResult
+    static func drop(_ id: UUID, in list: LayerList, above row: UUID?, among siblings: [LayerLine], layoutOrder: Bool, store: DesignStore) -> Bool {
+        if layoutOrder, row == nil { return store.moveLayerToTop(id, of: list) }
+        return store.moveLayer(id, to: list, before: LayerRows.before(row, in: siblings, layoutOrder: layoutOrder))
+    }
+
+    /// One list of rows: a screen's top level, the canvas's, or what is in a container, each an open
+    /// container's own list under its row. Its rows can be dragged to reorder them, and into and out of
+    /// the containers.
     private func branch(
-        _ nodes: [LayerListNode], in list: LayerList, parent: (list: LayerList, group: DesignElement.ID)?, depth: Int,
-        entered: Set<DesignElement.ID>, selection: CanvasSelection?, hovered: CanvasSelection?
+        _ nodes: [Branch], open: Set<UUID>, parent: (list: LayerList, container: LayerLine)?,
+        selection: CanvasSelection?, hovered: CanvasSelection?
     ) -> AnyView {
-        // An open group's own list sits between its row and the rows after it, so a list is
-        // shown in runs, each ending at an open group, as separate `ForEach`s of one collection.
-        var runs: [[(index: Int, node: LayerListNode)]] = [[]]
+        // An open container's own list sits between its row and the rows after it, so a list is
+        // shown in runs, each ending at an open container, as separate `ForEach`s of one collection.
+        var runs: [[(index: Int, node: Branch)]] = [[]]
         for (index, node) in nodes.enumerated() {
             runs[runs.count - 1].append((index, node))
-            if isOpen(node, entered: entered) { runs.append([]) }
+            if node.line.isOpen { runs.append([]) }
         }
+        let lines = nodes.map(\.line)
+        let isLayoutOrder = lines.first?.isLayoutOrder ?? false
         return AnyView(Group {
             ForEach(Array(runs.enumerated()), id: \.offset) { runIndex, run in
-                // The end of a run that an open group's members come between and the rows after
+                // The end of a run that an open container's members come between and the rows after
                 // them is not the end of the list: dropped there, a row lands before the next run's.
-                let dropList = LayerDropList(list: list, endsBefore: runs[(runIndex + 1)...].first?.first?.node.id)
-                ForEach(run, id: \.node.id) { index, node in
-                    row(Line(node: node, depth: depth, isOpen: isOpen(node, entered: entered)), selection: selection, hovered: hovered)
-                        .modifier(MoveActions(
-                            model: model, id: node.id,
-                            up: index > 0 ? .before(nodes[index - 1].id) : nil,
-                            down: index + 1 < nodes.count ? .before(index + 2 < nodes.count ? nodes[index + 2].id : nil) : nil,
-                            list: list,
-                            intoGroupAbove: index > 0 && nodes[index - 1].element.kind == .group ? nodes[index - 1].id : nil,
-                            outOf: parent
-                        ))
+                if let list = lines.first?.list {
+                    let dropList = LayerDropList(list: list, endsBefore: runs[(runIndex + 1)...].first?.first?.node.line.id, isLayoutOrder: isLayoutOrder)
+                    ForEach(run, id: \.node.line.id) { index, node in
+                        row(node.line, selection: selection, hovered: hovered)
+                            .modifier(MoveActions(
+                                model: model, id: node.line.id, list: list, siblings: lines, index: index,
+                                intoContainerAbove: index > 0 && lines[index - 1].isContainer ? lines[index - 1] : nil,
+                                outOf: parent
+                            ))
+                    }
+                    .reorderable(collectionID: dropList)
                 }
-                .reorderable(collectionID: dropList)
-                if let last = run.last, isOpen(last.node, entered: entered) {
-                    branch(last.node.children, in: .group(last.node.id), parent: (list, last.node.id), depth: depth + 1, entered: entered, selection: selection, hovered: hovered)
+                if let last = run.last, last.node.line.isOpen {
+                    branch(last.node.children, open: open, parent: (last.node.line.list, last.node.line), selection: selection, hovered: hovered)
                 }
             }
         })
     }
 
-    private func isOpen(_ node: LayerListNode, entered: Set<DesignElement.ID>) -> Bool {
-        node.element.kind == .group && (entered.contains(node.id) || openGroups.contains(node.id))
-    }
-
     @ViewBuilder
-    private func row(_ line: Line, selection: CanvasSelection?, hovered: CanvasSelection?) -> some View {
-        let node = line.node
-        let target = CanvasSelection.element(node.ref)
-        let isSelected = selection?.contains(target) == true
-        let isHovered = hovered == target
-        let isLockedByGroup = node.isLockedWithItsGroups && !node.element.isLocked
-        if node.element.kind == .group {
-            GroupLayerRow(
-                model: model, ref: node.ref, name: node.element.displayName, isLocked: node.element.isLocked, isHidden: node.element.isHidden,
-                isLockedByGroup: isLockedByGroup, isDimmed: node.isHiddenWithItsGroups, depth: line.depth, isOpen: line.isOpen,
-                isHeldOpen: line.isOpen && !openGroups.contains(node.id),
-                isSelected: isSelected, isHovered: isHovered,
+    private func row(_ line: LayerLine, selection: CanvasSelection?, hovered: CanvasSelection?) -> some View {
+        if line.isContainer {
+            let target = CanvasSelection.element(line.ref)
+            ContainerLayerRow(
+                model: model, line: line,
+                isHeldOpen: line.isOpen && !openContainers.contains(line.id),
+                isSelected: selection?.contains(target) == true, isHovered: hovered == target,
                 toggleOpen: { id in
-                    if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
+                    if openContainers.contains(id) { openContainers.remove(id) } else { openContainers.insert(id) }
                 }
             )
             .equatable()
-            .modifier(DropIntoGroup(isClosed: !line.isOpen, model: model, group: node.id))
+            .modifier(DropIntoContainer(isClosed: !line.isOpen, model: model, container: line.id))
         } else {
-            plainRow(node.element, ref: node.ref, depth: line.depth, isDimmed: node.isHiddenWithItsGroups, isLockedByGroup: isLockedByGroup, isSelected: isSelected, isHovered: isHovered)
+            plainRow(line, selection: selection, hovered: hovered)
         }
     }
 
-    private func plainRow(
-        _ element: DesignElement, ref: DesignStore.ElementRef, depth: Int, isDimmed: Bool, isLockedByGroup: Bool, isSelected: Bool, isHovered: Bool
-    ) -> some View {
-        LayerRow(
-            model: model, ref: ref, symbol: element.symbol.map(SystemSymbol.resolve) ?? element.kind.symbol, name: element.displayName,
-            isLocked: element.isLocked, isHidden: element.isHidden, isLockedByGroup: isLockedByGroup, isDimmed: isDimmed,
-            depth: depth, isSelected: isSelected, isHovered: isHovered
-        )
-        .equatable()
+    private func plainRow(_ line: LayerLine, selection: CanvasSelection?, hovered: CanvasSelection?) -> some View {
+        let target = CanvasSelection.element(line.ref)
+        return LayerRow(model: model, line: line, isSelected: selection?.contains(target) == true, isHovered: hovered == target)
+            .equatable()
     }
 }
 
@@ -229,13 +251,16 @@ private struct LayersList: View {
 struct LayerDropList: Hashable, Sendable {
     var list: LayerList
     /// The row after this run's last in the list, which a row dropped at the run's end lands
-    /// before: the first row of the next run, past an open group's own members. Nil when the
+    /// before: the first row of the next run, past an open container's own members. Nil when the
     /// run is the last, and a row dropped at its end goes to the back of the list.
-    var endsBefore: DesignElement.ID?
+    var endsBefore: UUID?
+    /// Whether the list is a row's, column's or grid's, first at the top: a drop's `before` is then the row
+    /// above (`LayerRows.before`), and a drop at the last run's end is the front.
+    var isLayoutOrder = false
 
-    /// The row a drop lands before: the row dropped before, or for the end of this run, the
-    /// next run's first (nil: the back of the list).
-    func landing(before id: DesignElement.ID?) -> DesignElement.ID? {
+    /// The row a drop lands above: the row dropped before, or for the end of this run, the
+    /// next run's first (nil: below the last row).
+    func landing(before id: UUID?) -> UUID? {
         id ?? endsBefore
     }
 }
@@ -243,45 +268,49 @@ struct LayerDropList: Hashable, Sendable {
 /// What a row's VoiceOver actions are: each only where it applies, and run as a drag's drop
 /// is, animated.
 private struct MoveActions: ViewModifier {
-    enum Spot { case before(DesignElement.ID?) }
-
     let model: AppModel
-    let id: DesignElement.ID
-    let up: Spot?
-    let down: Spot?
+    let id: UUID
     let list: LayerList
-    let intoGroupAbove: DesignElement.ID?
-    let outOf: (list: LayerList, group: DesignElement.ID)?
+    /// The rows of the list, as the panel shows them.
+    let siblings: [LayerLine]
+    let index: Int
+    let intoContainerAbove: LayerLine?
+    let outOf: (list: LayerList, container: LayerLine)?
 
     func body(content: Content) -> some View {
         content.accessibilityActions {
-            if let up { Button("Move Up") { run(up) } }
-            if let down { Button("Move Down") { run(down) } }
-            if let group = intoGroupAbove {
-                Button("Move Into Group Above") {
-                    withAnimation(.snappy) { _ = model.store.moveLayerToTop(id, of: .group(group)) }
+            if index > 0 { Button("Move Up") { run(above: siblings[index - 1].id) } }
+            if index + 1 < siblings.count { Button("Move Down") { run(above: index + 2 < siblings.count ? siblings[index + 2].id : nil) } }
+            if let container = intoContainerAbove {
+                Button("Move Into \(container.name) Above") {
+                    withAnimation(.snappy) { _ = model.store.moveLayerToTop(id, of: .node(container.id)) }
                 }
             }
             if let outOf {
-                Button("Move Out of Group") {
-                    withAnimation(.snappy) { _ = model.store.moveLayer(id, to: outOf.list, before: outOf.group) }
+                Button("Move Out of \(outOf.container.name)") {
+                    // Just above the container, in the list it is in: its own row's place.
+                    let among = LayerRows.lines(in: outOf.list, content: model.store.tree, index: model.store.index)
+                    withAnimation(.snappy) {
+                        _ = LayersList.drop(id, in: outOf.list, above: outOf.container.id, among: among, layoutOrder: outOf.container.isLayoutOrder, store: model.store)
+                    }
                 }
             }
         }
     }
 
-    private func run(_ spot: Spot?) {
-        guard case .before(let before)? = spot else { return }
-        withAnimation(.snappy) { _ = model.store.moveLayer(id, to: list, before: before) }
+    private func run(above row: UUID?) {
+        withAnimation(.snappy) {
+            _ = LayersList.drop(id, in: list, above: row, among: siblings, layoutOrder: siblings.first?.isLayoutOrder ?? false, store: model.store)
+        }
     }
 }
 
-/// A closed group's row takes a row dropped on it: it goes inside, at the top. An open group's
+/// A closed container's row takes a row dropped on it: it goes inside, at the top. An open container's
 /// row takes none, so that a drop on it is a reorder, above or below it.
-private struct DropIntoGroup: ViewModifier {
+private struct DropIntoContainer: ViewModifier {
     let isClosed: Bool
     let model: AppModel
-    let group: DesignElement.ID
+    let container: UUID
 
     func body(content: Content) -> some View {
         if isClosed {
@@ -289,7 +318,7 @@ private struct DropIntoGroup: ViewModifier {
                 let store = model.store
                 var moved = false
                 store.asOneStep {
-                    for item in items { moved = store.moveLayerToTop(item.id, of: .group(group)) || moved }
+                    for item in items { moved = store.moveLayerToTop(item.id, of: .node(container)) || moved }
                 }
                 return moved
             }
@@ -301,7 +330,7 @@ private struct DropIntoGroup: ViewModifier {
 
 /// A row being dragged in the Layers panel: the thing it stands for.
 struct LayerItem: Identifiable, Sendable, Codable, Transferable {
-    var id: DesignElement.ID
+    var id: UUID
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .json)
@@ -355,6 +384,8 @@ private struct LayerSubheading: View {
 private struct LayerHeadingRow: View, Equatable {
     /// For what a tap and hover do; not part of what the heading shows.
     let model: AppModel
+    /// What its builds are counted under: its screen, or for the canvas's heading the first thing under it.
+    let countedAs: UUID
     let name: String
     let symbol: String
     /// What the heading picks: its screen, or nothing for the open canvas.
@@ -363,12 +394,12 @@ private struct LayerHeadingRow: View, Equatable {
     let isHovered: Bool
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.name == b.name && a.symbol == b.symbol && a.target == b.target && a.isSelected == b.isSelected && a.isHovered == b.isHovered
+        a.countedAs == b.countedAs && a.name == b.name && a.symbol == b.symbol && a.target == b.target && a.isSelected == b.isSelected && a.isHovered == b.isHovered
     }
 
     var body: some View {
         #if DEBUG
-        let _ = LayersPanelWork.rowBuilt()
+        let _ = LayersPanelWork.rowBuilt(countedAs)
         #endif
         Button {
             if let target { pickLayer(target, in: model) }
@@ -437,122 +468,101 @@ private func rowToggles(
 private struct LayerRow: View, Equatable {
     /// For what a tap, the lock, the eye and hover do; not part of what the row shows.
     let model: AppModel
-    let ref: DesignStore.ElementRef
-    let symbol: String
-    let name: String
-    /// Its own lock and hide.
-    let isLocked: Bool
-    let isHidden: Bool
-    /// Locked, though not by itself: by a group above it.
-    let isLockedByGroup: Bool
-    /// Hidden, by itself or by a group above it.
-    let isDimmed: Bool
-    let depth: Int
+    let line: LayerLine
     let isSelected: Bool
     let isHovered: Bool
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.ref == b.ref && a.symbol == b.symbol && a.name == b.name && a.isLocked == b.isLocked
-            && a.isHidden == b.isHidden && a.isLockedByGroup == b.isLockedByGroup && a.isDimmed == b.isDimmed
-            && a.depth == b.depth && a.isSelected == b.isSelected && a.isHovered == b.isHovered
+        a.line == b.line && a.isSelected == b.isSelected && a.isHovered == b.isHovered
     }
 
     var body: some View {
         #if DEBUG
-        let _ = LayersPanelWork.rowBuilt()
+        let _ = LayersPanelWork.rowBuilt(line.id)
         #endif
         HStack(spacing: 0) {
             Button {
                 // A hidden layer can still be picked here, its outline showing where it is.
-                pickLayer(.element(ref), in: model)
+                pickLayer(.element(line.ref), in: model)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: symbol)
+                    Image(systemName: line.symbol)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
-                    Text(name)
+                    Text(line.name)
                         .font(.system(size: 14))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                 }
-                .padding(.leading, 12 + CGFloat(depth) * layerIndent)
+                .padding(.leading, 12 + CGFloat(line.depth) * layerIndent)
                 .padding(.vertical, 10)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(name)
-            .accessibilityValue(rowValue(isGroup: false, isHidden: isHidden, isDimmed: isDimmed, isLocked: isLocked, isLockedByGroup: isLockedByGroup))
+            .accessibilityLabel(line.name)
+            .accessibilityValue(rowValue(isGroup: false, isHidden: line.isHidden, isDimmed: line.isDimmed, isLocked: line.isLocked, isLockedByGroup: line.isLockedByAncestor))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            rowToggles(model: model, ref: ref, name: name, isLocked: isLocked, isHidden: isHidden, isLockedByGroup: isLockedByGroup, isSelected: isSelected)
+            rowToggles(model: model, ref: line.ref, name: line.name, isLocked: line.isLocked, isHidden: line.isHidden, isLockedByGroup: line.isLockedByAncestor, isSelected: isSelected)
             Spacer().frame(width: 4)
         }
-        .opacity(isDimmed ? 0.5 : 1)
+        .opacity(line.isDimmed ? 0.5 : 1)
         .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
-        .onHover { hoverLayer(.element(ref), $0, in: model) }
-        .onDisappear { hoverLayer(.element(ref), false, in: model) }
+        .onHover { hoverLayer(.element(line.ref), $0, in: model) }
+        .onDisappear { hoverLayer(.element(line.ref), false, in: model) }
     }
 }
 
-/// A group's row: a chevron that opens it to show its members, its icon and name, and the lock
-/// and eye that act on the group, and so on everything in it. Built from what it shows alone,
-/// like `LayerRow`.
-private struct GroupLayerRow: View, Equatable {
+/// A container's row: a chevron that opens it to show what is in it, the icon of its layout and its name, and the
+/// lock and eye that act on the container, and so on everything in it. Built from what it shows alone, like
+/// `LayerRow`.
+private struct ContainerLayerRow: View, Equatable {
     let model: AppModel
-    let ref: DesignStore.ElementRef
-    let name: String
-    let isLocked: Bool
-    let isHidden: Bool
-    let isLockedByGroup: Bool
-    let isDimmed: Bool
-    let depth: Int
-    let isOpen: Bool
+    let line: LayerLine
     /// Open because something in it is selected or gone into, not because it was opened: it
     /// closes when that does, and its chevron has nothing to do.
     let isHeldOpen: Bool
     let isSelected: Bool
     let isHovered: Bool
-    /// Opens or closes the group; not part of what the row shows.
-    let toggleOpen: (DesignElement.ID) -> Void
+    /// Opens or closes the container; not part of what the row shows.
+    let toggleOpen: (UUID) -> Void
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.ref == b.ref && a.name == b.name && a.isLocked == b.isLocked && a.isHidden == b.isHidden
-            && a.isLockedByGroup == b.isLockedByGroup && a.isDimmed == b.isDimmed && a.depth == b.depth
-            && a.isOpen == b.isOpen && a.isHeldOpen == b.isHeldOpen && a.isSelected == b.isSelected && a.isHovered == b.isHovered
+        a.line == b.line && a.isHeldOpen == b.isHeldOpen && a.isSelected == b.isSelected && a.isHovered == b.isHovered
     }
 
     var body: some View {
         #if DEBUG
-        let _ = LayersPanelWork.rowBuilt()
+        let _ = LayersPanelWork.rowBuilt(line.id)
         #endif
         HStack(spacing: 0) {
             Button {
-                withAnimation(.snappy(duration: 0.2)) { toggleOpen(ref.element) }
+                withAnimation(.snappy(duration: 0.2)) { toggleOpen(line.id) }
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .rotationEffect(.degrees(line.isOpen ? 90 : 0))
                     .frame(width: 28, height: 36)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .disabled(isHeldOpen)
             .accessibilityLabel("Contents")
-            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
-            .padding(.leading, 2 + CGFloat(depth) * layerIndent)
+            .accessibilityValue(line.isOpen ? "Expanded" : "Collapsed")
+            .padding(.leading, 2 + CGFloat(line.depth) * layerIndent)
 
             Button {
-                pickLayer(.element(ref), in: model)
+                pickLayer(.element(line.ref), in: model)
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "rectangle.3.group")
+                    Image(systemName: line.symbol)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
-                    Text(name)
+                    Text(line.name)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -562,17 +572,17 @@ private struct GroupLayerRow: View, Equatable {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(name)
-            .accessibilityValue(rowValue(isGroup: true, isHidden: isHidden, isDimmed: isDimmed, isLocked: isLocked, isLockedByGroup: isLockedByGroup))
+            .accessibilityLabel(line.name)
+            .accessibilityValue(rowValue(isGroup: true, isHidden: line.isHidden, isDimmed: line.isDimmed, isLocked: line.isLocked, isLockedByGroup: line.isLockedByAncestor))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            rowToggles(model: model, ref: ref, name: name, isLocked: isLocked, isHidden: isHidden, isLockedByGroup: isLockedByGroup, isSelected: isSelected)
+            rowToggles(model: model, ref: line.ref, name: line.name, isLocked: line.isLocked, isHidden: line.isHidden, isLockedByGroup: line.isLockedByAncestor, isSelected: isSelected)
             Spacer().frame(width: 4)
         }
-        .opacity(isDimmed ? 0.5 : 1)
+        .opacity(line.isDimmed ? 0.5 : 1)
         .background(rowFill(isSelected: isSelected, isHovered: isHovered), in: .rect(cornerRadius: 10))
-        .onHover { hoverLayer(.element(ref), $0, in: model) }
-        .onDisappear { hoverLayer(.element(ref), false, in: model) }
+        .onHover { hoverLayer(.element(line.ref), $0, in: model) }
+        .onDisappear { hoverLayer(.element(line.ref), false, in: model) }
     }
 }
 
@@ -669,7 +679,7 @@ final class CodePreview {
         source = wanted.source
         lines = source.components(separatedBy: "\n").map(SwiftHighlighter.attributed)
         #if DEBUG
-        LayersPanelWork.codeMade(source)
+        LayersPanelWork.codeMade(source, for: wanted.screen.id)
         #endif
     }
 }
@@ -753,25 +763,29 @@ private struct CodeView: View {
 
 #if DEBUG
 /// How often the panel builds a layer's row and generates a screen's code: for the tests
-/// that hold it to doing so only when what it shows has changed.
+/// that hold it to doing so only when what it shows has changed. Counted per id, since suites run side by
+/// side and each panel its own: a row under its node's id (a heading under its screen's, or for the canvas's
+/// under the first thing below it), code under its screen's. A test sums over its own board's ids (F9).
 @MainActor
 enum LayersPanelWork {
-    static var rows = 0
-    static var codes = 0
+    private static var rowCounts: [UUID: Int] = [:]
+    private static var codeCounts: [UUID: Int] = [:]
+    private static var codesMade: [UUID: String] = [:]
 
-    static func rowBuilt() { rows += 1 }
-    /// The code last made.
-    static var lastCode = ""
+    static func rowBuilt(_ id: UUID) { rowCounts[id, default: 0] += 1 }
 
-    static func codeMade(_ code: String) {
-        codes += 1
-        lastCode = code
+    /// How many times the row for `id` has been built.
+    static func rows(of id: UUID) -> Int { rowCounts[id] ?? 0 }
+
+    static func codeMade(_ code: String, for screen: UUID) {
+        codeCounts[screen, default: 0] += 1
+        codesMade[screen] = code
     }
 
-    static func reset() {
-        rows = 0
-        codes = 0
-        lastCode = ""
-    }
+    /// How many times the code for a screen has been made.
+    static func codes(for screen: UUID) -> Int { codeCounts[screen] ?? 0 }
+
+    /// The code last made for a screen.
+    static func lastCode(for screen: UUID) -> String { codesMade[screen] ?? "" }
 }
 #endif
