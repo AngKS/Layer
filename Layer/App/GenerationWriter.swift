@@ -19,6 +19,8 @@ final class GenerationWriter {
         let merge: TreeReconciler.Merge
         /// `merge.root` laid out as the rules would lay it out on the screen.
         let laidOut: LayerNode
+        /// What is still wrong with what the generator wrote, as laid out: not what the person made on the screen.
+        let unfixed: [UnfixedIssue: [UUID]]
         /// The screen's device and the design's settings it was laid out for.
         fileprivate let deviceID: String?
         fileprivate let settings: CanvasSettings
@@ -45,8 +47,10 @@ final class GenerationWriter {
         let reconciler = reconciler
         let prepared = await Task.detached(priority: .userInitiated) {
             let merge = reconciler.merged(generated, over: base)
-            let laidOut = TreeRules.laidOut(merge.root, deviceID: deviceID, settings: settings, previous: base)
-            return Prepared(generated: generated, base: base, merge: merge, laidOut: laidOut,
+            let made = TreeRules.laidOutReporting(merge.root, deviceID: deviceID, settings: settings, previous: base)
+            let unfixed = UnfixedIssue.found(in: made.root, on: settings.device(named: deviceID),
+                                             diagnostics: made.diagnostics, among: merge.generatedIDs)
+            return Prepared(generated: generated, base: base, merge: merge, laidOut: made.root, unfixed: unfixed,
                             deviceID: deviceID, settings: settings)
         }.value
         #if DEBUG

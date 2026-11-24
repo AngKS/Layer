@@ -16,19 +16,23 @@ struct A2UIImportReport: Identifiable, Equatable, Sendable {
     var screens: [TreeScreen.ID]
     /// One for each reason present, in `Reason.allCases` order, each holding that reason's diagnostics as they came.
     var groups: [Group]
+    /// What is still wrong with the screens made after the fix and the layout, by kind, with the nodes it is said of.
+    var unfixed: [UnfixedIssue: [UUID]]
 
-    init(id: UUID = UUID(), screens: [TreeScreen.ID], diagnostics: [A2UIDiagnostic]) {
+    init(id: UUID = UUID(), screens: [TreeScreen.ID], diagnostics: [A2UIDiagnostic],
+         unfixed: [UnfixedIssue: [UUID]] = [:]) {
         self.id = id
         self.screens = screens
+        self.unfixed = unfixed
         let byReason = Dictionary(grouping: diagnostics, by: \.reason)
         groups = A2UIDiagnostic.Reason.allCases.compactMap { reason in
             byReason[reason].map { Group(reason: reason, title: Self.title(for: reason), diagnostics: $0) }
         }
     }
 
-    /// Whether the person needs to see it: something was left out or stands in for what was written, or no screen
-    /// was made. A clean import says nothing: its screens are there to see.
-    var needsShowing: Bool { screens.isEmpty || !groups.isEmpty }
+    /// Whether the person needs to see it: something was left out or stands in for what was written, or something
+    /// still runs off its screen or doesn't fit, or no screen was made. A clean import says nothing: its screens are there to see.
+    var needsShowing: Bool { screens.isEmpty || !groups.isEmpty || !unfixed.isEmpty }
 
     /// What a reason says, as the sheet's heading for its diagnostics.
     static func title(for reason: A2UIDiagnostic.Reason) -> String {
@@ -151,6 +155,10 @@ extension AppModel {
 
         // A screen the design can't take is said, with why, as the importer says what it leaves out.
         var diagnostics = imported.diagnostics
+        var unfixed: [UnfixedIssue: [UUID]] = [:]
+        for (made, screen) in zip(laidOut, screens) where added.contains(screen.id) {
+            unfixed.merge(made.unfixed) { $0 + $1 }
+        }
         for (surface, screen) in zip(imported.screens, screens) where !added.contains(screen.id) {
             diagnostics.append(A2UIDiagnostic(
                 reason: .invalidComponent,
@@ -159,13 +167,15 @@ extension AppModel {
         if let shown = CanvasSelection(added.map(CanvasSelection.screen)) {
             DesignActions.reveal(shown, in: self, selecting: false)
         }
-        return A2UIImportReport(screens: added, diagnostics: diagnostics)
+        return A2UIImportReport(screens: added, diagnostics: diagnostics, unfixed: unfixed)
     }
 
     /// An imported screen's root, laid out on its device.
     fileprivate struct LaidOutImport: Sendable {
         var device: DeviceFrame
         var root: LayerNode
+        /// What the fix and the layout left wrong in it.
+        var unfixed: [UnfixedIssue: [UUID]]
     }
 
     /// Each imported screen's root laid out as the rules would lay it out on its screen: on the surface's own device
@@ -174,9 +184,10 @@ extension AppModel {
         screens.map { screen in
             let named = screen.deviceID.map(settings.device(named:))
             let device = named.flatMap { $0.id == screen.deviceID ? $0 : nil } ?? settings.sketchDevice
-            let root = TreeRules.laidOut(screen.root, deviceID: device == .iPhone ? nil : device.id, settings: settings,
-                                         previous: nil)
-            return LaidOutImport(device: device, root: root)
+            let made = TreeRules.laidOutReporting(screen.root, deviceID: device == .iPhone ? nil : device.id,
+                                                  settings: settings, previous: nil)
+            return LaidOutImport(device: device, root: made.root,
+                                 unfixed: UnfixedIssue.found(in: made.root, on: device, diagnostics: made.diagnostics))
         }
     }
 

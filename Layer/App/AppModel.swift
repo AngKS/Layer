@@ -494,6 +494,11 @@ final class AppModel {
         /// How many parts of what the model wrote couldn't be brought in: every diagnostic but a button's action,
         /// which Layer never runs. Said once the answer is complete.
         var leftOut = 0
+        /// What is still wrong with what the model wrote after the fix and the layout, by kind, with the nodes it is
+        /// said of. The person's own nodes on the screen are never in it.
+        var unfixedIssues: [UnfixedIssue: [UUID]] = [:]
+        /// How many nodes have an issue, as of the last update: said once the answer is complete.
+        var unfixed: Int { UnfixedIssue.nodes(in: unfixedIssues) }
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
@@ -578,13 +583,15 @@ final class AppModel {
                         // generation's step. The commit alone is animated: `withAnimation` takes
                         // no asynchronous work, so this is `writer.write(_:to:in:)` with the
                         // animation round its commit. Nothing is written once the design closes.
-                        if let prepared = await writer.prepare(root, from: store), !isClosed {
+                        let prepared = await writer.prepare(root, from: store)
+                        if let prepared, !isClosed {
                             withAnimation(.snappy(duration: 0.25)) {
                                 _ = store.act(for: edit) { writer.commit(prepared, to: store) }
                             }
                         }
                         generation?.isThinking = false
                         generation?.elementCount = root.leafCount
+                        if let prepared { generation?.unfixedIssues = prepared.unfixed }
                     case .leftOut(let diagnostics):
                         generation?.leftOut = diagnostics.count { $0.reason != .actionNotRun }
                     }
