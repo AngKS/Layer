@@ -194,7 +194,7 @@ struct ScreenEntity: IndexedEntity {
         id = EntityKey.screen(design: design, screen: screen.id)
         name = screen.name
         device = DeviceChoice(frame)
-        deviceName = DeviceChoice(rawValue: frame.id)?.displayName ?? frame.name
+        deviceName = DeviceChoice.displayName(of: frame)
         self.designName = designName
         elementCount = screen.root.leaves.count
         summary = DesignDescriber.summary(of: screen, on: frame)
@@ -342,6 +342,12 @@ enum DeviceChoice: String, AppEnum {
     /// trademark, where `name` does.
     var displayName: String {
         Self.caseDisplayRepresentations[self].map { String(localized: $0.title) } ?? rawValue
+    }
+
+    /// What Siri and Shortcuts call a device: one of the design's own by its name, a built-in by its `displayName`
+    /// (F23). A screen's entity and Get Design Layout both say it.
+    static func displayName(of device: DeviceFrame) -> String {
+        DeviceChoice(rawValue: device.id)?.displayName ?? device.name
     }
 }
 

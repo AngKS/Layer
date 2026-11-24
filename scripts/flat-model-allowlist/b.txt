@@ -11,7 +11,6 @@ Layer/Intents/ElementIntents.swift
 Layer/Intents/ImageIntents.swift
 Layer/Intents/ScreenIntents.swift
 LayerTests/BuildScreenTests.swift
-LayerTests/ComponentCatalogueTests.swift         # Task 3 (F10)
 LayerTests/LookWordsEverywhereTests.swift        # Task 5 (F24)
 LayerTests/SiriIntentsLiveTests.swift
 LayerTests/SiriIntentsTests.swift
@@ -23,6 +22,7 @@ LayerTests/SiriOnTheTreeTests.swift              # (s): readingDoesNotLower's st
 # Task 10: the sketch, generation, code and panel tests.
 LayerTests/A2UIImportFlowTests.swift
 LayerTests/AssetLibraryTests.swift
+LayerTests/ComponentCatalogueTests.swift         # newElement, addFloating, resolve, adoptMarks (the controller's ruling on Task 3)
 LayerTests/CorrectedReadingTests.swift
 LayerTests/FormatPanelTests.swift
 LayerTests/FreeformTests.swift

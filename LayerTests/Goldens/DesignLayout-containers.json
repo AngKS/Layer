@@ -1,0 +1,234 @@
+{
+  "canvas" : {
+    "background" : "#F4F3EC",
+    "codeIncludesPreview" : true,
+    "codeLayout" : "stack",
+    "codeUsesNavigationTitle" : false,
+    "gridSpacing" : 24,
+    "gridStyle" : "dots",
+    "newScreenDevice" : "iphone",
+    "showsFrameNames" : true,
+    "showsGrid" : true,
+    "showsMeasurements" : true,
+    "snapsToGrid" : false,
+    "snapsToGuides" : true
+  },
+  "canvasContainers" : [
+
+  ],
+  "canvasElements" : [
+    {
+      "colour" : "#FCE38A",
+      "height" : 75,
+      "id" : "fixture|canvas|note",
+      "kind" : "stickyNote",
+      "name" : "Sticky Note",
+      "sizing" : {
+        "height" : {
+          "mode" : "fixed"
+        },
+        "width" : {
+          "mode" : "fixed"
+        }
+      },
+      "text" : "Idea",
+      "width" : 75,
+      "x" : 300,
+      "y" : 50
+    }
+  ],
+  "design" : "Untitled",
+  "id" : "fixture",
+  "screens" : [
+    {
+      "containers" : [
+        {
+          "children" : [
+            "fixture|screen|about",
+            "fixture|screen|body"
+          ],
+          "height" : 160,
+          "id" : "fixture|screen|card",
+          "kind" : "card",
+          "layout" : {
+            "type" : "free"
+          },
+          "name" : "Card",
+          "padding" : {
+            "bottom" : 16,
+            "leading" : 16,
+            "top" : 16,
+            "trailing" : 16
+          },
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "width" : 353,
+          "x" : 20,
+          "y" : 140
+        },
+        {
+          "children" : [
+            "fixture|screen|label",
+            "fixture|screen|toggle"
+          ],
+          "height" : 31,
+          "id" : "fixture|screen|row",
+          "kind" : "group",
+          "layout" : {
+            "alignment" : "center",
+            "axis" : "horizontal",
+            "justify" : "start",
+            "spacing" : 12,
+            "type" : "stack"
+          },
+          "name" : "Row",
+          "padding" : {
+            "bottom" : 0,
+            "leading" : 0,
+            "top" : 0,
+            "trailing" : 0
+          },
+          "sizing" : {
+            "height" : {
+              "mode" : "fit"
+            },
+            "width" : {
+              "mode" : "fit"
+            }
+          },
+          "width" : 143,
+          "x" : 20,
+          "y" : 320
+        }
+      ],
+      "device" : "iphone",
+      "deviceName" : "Phone",
+      "elements" : [
+        {
+          "colour" : "#CD6C57",
+          "height" : 40,
+          "id" : "fixture|screen|title",
+          "kind" : "title",
+          "name" : "Title",
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "text" : "Welcome",
+          "width" : 228,
+          "x" : 20,
+          "y" : 80
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 24,
+          "id" : "fixture|screen|about",
+          "kind" : "text",
+          "name" : "Text",
+          "parent" : "fixture|screen|card",
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "text" : "About me",
+          "width" : 200,
+          "x" : 36,
+          "y" : 156
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 40,
+          "id" : "fixture|screen|body",
+          "kind" : "body",
+          "name" : "Body",
+          "parent" : "fixture|screen|card",
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "text" : "Designing better experiences.",
+          "width" : 321,
+          "x" : 36,
+          "y" : 188
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 24,
+          "id" : "fixture|screen|label",
+          "kind" : "text",
+          "name" : "Text",
+          "parent" : "fixture|screen|row",
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "text" : "Wi-Fi",
+          "width" : 80,
+          "x" : 20,
+          "y" : 324
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 31,
+          "id" : "fixture|screen|toggle",
+          "kind" : "toggle",
+          "name" : "Toggle",
+          "on" : true,
+          "parent" : "fixture|screen|row",
+          "sizing" : {
+            "height" : {
+              "mode" : "fixed"
+            },
+            "width" : {
+              "mode" : "fixed"
+            }
+          },
+          "width" : 51,
+          "x" : 112,
+          "y" : 320
+        }
+      ],
+      "height" : 852,
+      "id" : "fixture|screen",
+      "layout" : {
+        "type" : "free"
+      },
+      "locked" : false,
+      "name" : "Login",
+      "padding" : {
+        "bottom" : 0,
+        "leading" : 0,
+        "top" : 0,
+        "trailing" : 0
+      },
+      "safeAreaBottom" : 34,
+      "safeAreaTop" : 59,
+      "scale" : 100,
+      "width" : 393,
+      "x" : 0,
+      "y" : 0
+    }
+  ]
+}

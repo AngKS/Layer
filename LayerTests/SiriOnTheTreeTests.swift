@@ -5,15 +5,8 @@ import Testing
 @testable import Layer
 
 // Siri reads the tree (plan 6, Task 3): a design's snapshot holds its tree, Siri's elements are its leaves under the ids
-// they always had, a container is invisible to Siri, and Get Design Layout writes today's JSON from the tree.
-//
-// `todaysJSONIsUnchangedWithoutContainers` compares the JSON with `Goldens/DesignLayout-sketch.json`, recorded from the
-// writer as it was before this task (F9), except in one value: the canvas's `codeLayout` is "stack" where that writer
-// wrote "structure", the value main wrote and Update Canvas Settings takes (`theCodeLayoutIsWrittenAsItsOption`). To
-// record it again, run this suite with the environment variable TEST_RUNNER_LAYER_RECORD_LAYOUT set to a folder on this
-// Mac, then copy the file written there into `Goldens/`.
-
-private final class SiriOnTheTreeBundleMarker {}
+// they always had, a container is invisible to Siri, and Get Design Layout is read from the tree. What Get Design Layout
+// writes, and that every key it wrote before keeps its value, is `DesignLayoutTreeTests`' (Task 4).
 
 @Suite("Siri on the tree")
 @MainActor
@@ -141,24 +134,6 @@ struct SiriOnTheTreeTests {
         let read = try #require(DesignActions.snapshots(with: [summary]).first { $0.id == login.designID })
         #expect(read.isRead)
         #expect(read.elements.map(\.id) == open)
-    }
-
-    /// The Shortcuts contract before containers are written: every key and value as the writer gave them (F9). Task 4
-    /// replaces it with `todaysKeysKeepTheirValues`, as its new keys break exact equality.
-    @Test func todaysJSONIsUnchangedWithoutContainers() throws {
-        let bundle = Bundle(for: SiriOnTheTreeBundleMarker.self)
-        let fixture = try #require(bundle.url(forResource: "design-sketch", withExtension: "json"))
-        var content = try TreeManifest.decode(try Data(contentsOf: fixture)).content
-        TreeRules.apply(to: &content, after: nil)
-        let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "local:Sketch.layer", name: "Sketch", content: content, modified: nil))
-
-        if let folder = ProcessInfo.processInfo.environment["LAYER_RECORD_LAYOUT"] {
-            try json.write(to: URL(fileURLWithPath: folder).appendingPathComponent("DesignLayout-sketch.json"), atomically: true,
-                           encoding: .utf8)
-            return
-        }
-        let golden = try #require(bundle.url(forResource: "DesignLayout-sketch", withExtension: "json"))
-        #expect(json == (try String(contentsOf: golden, encoding: .utf8)))
     }
 
     /// The code layout is written as the option Update Canvas Settings takes, so that a shortcut can hand it back:
