@@ -51,7 +51,11 @@ import Testing
 
     /// A design of `count` such screens side by side, laid out, each thing then remembering its sketch where it was laid
     /// out; opened as a document, so that making them is no step. An undo manager takes each reading's step.
-    private static func makeModel(screens count: Int) -> (model: AppModel, screens: [TreeScreen], undo: UndoManager) {
+    ///
+    /// `loose`: the 100 things straight on the free root instead, each where its row put it and fixed at that size, as
+    /// readings on a free screen land. Every one is then the pass's to take, and each is within its reach of the next, so
+    /// the pass's neighbourhood grows from what is drawn over the whole root.
+    private static func makeModel(screens count: Int, loose: Bool = false) -> (model: AppModel, screens: [TreeScreen], undo: UndoManager) {
         var tree = TreeContent()
         tree.screens = (0..<count).map { sketchedScreen("Settings \($0 + 1)", at: CGPoint(x: 500 * CGFloat($0), y: 0)) }
         TreeRules.apply(to: &tree, after: nil)
@@ -64,6 +68,19 @@ import Testing
                         intent(frame.offsetBy(dx: origin.x, dy: origin.y))
                 }
             }
+        }
+        if loose {
+            for screen in tree.screens.indices {
+                tree.screens[screen].root.children = tree.screens[screen].root.children.flatMap { row in
+                    row.children.map { leaf in
+                        var leaf = leaf
+                        leaf.frame = leaf.frame.offsetBy(dx: row.frame.minX, dy: row.frame.minY)
+                        (leaf.width, leaf.height) = (LayerNode.Sizing(.fixed), LayerNode.Sizing(.fixed))
+                        return leaf
+                    }
+                }
+            }
+            TreeRules.apply(to: &tree, after: nil)
         }
         let model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
         let undo = UndoManager()
@@ -133,44 +150,89 @@ import Testing
         return [node.id] + node.children.flatMap(containers)
     }
 
-    // MARK: Budgets
+    /// What one measuring of the corpus's readings found.
+    private struct Measured {
+        /// Each attempt's p95, in milliseconds.
+        var p95s: [Double]
+        /// How many readings became a thing on the screen, in the last attempt.
+        var landed: Int
+        /// In the last attempt, how many things the pass looked at in the screen's root, for each reading it ran there.
+        var neighbourhoods: [Int]
+    }
 
-    /// Every corpus sketch placed on a screen that the rules read as a thing there, read on the 100-thing screen and
-    /// converted with its pass, then undone (untimed), so each lands on the same screen. The p95 is under 100 ms (§13),
-    /// measured again while it is over, up to three times, failing only if all three are (F19).
-    @Test func aReadingLandsWithinBudget() throws {
-        let onScreen = Self.fixtures.filter { $0.placementKind == .onScreen }
-        try #require(Self.fixtures.count == 156, "the sketch corpus")
-        let (model, screens, undo) = Self.makeModel(screens: 1)
-        let screen = try #require(screens.first)
-        let before = model.store.tree
-        try #require(before.screens[0].root.children.flatMap(\.children).count(where: { $0.sketch != nil }) == 100)
-
-        var attempts: [(p50: Double, p95: Double)] = []
-        var landed = 0
+    /// Every corpus sketch placed on a screen that the rules read as a thing there, read on `screen` and converted with
+    /// its pass, then undone (untimed), so each lands on the same screen. Measured again while the p95 is over 100 ms, up to
+    /// three times (F19). Prints `BENCH sketch reading` and `BENCH structure pass` lines, each named `name` when it has one.
+    private static func measureReadings(_ name: String = "", on screen: TreeScreen, in model: AppModel,
+                                        undo: UndoManager) throws -> Measured {
+        let onScreen = fixtures.filter { $0.placementKind == .onScreen }
+        let label = name.isEmpty ? "" : " \(name)"
+        var measured = Measured(p95s: [], landed: 0, neighbourhoods: [])
         for attempt in 1...3 {
             var readings: [Double] = [], passes: [Double] = []
-            landed = 0
+            measured.landed = 0
+            measured.neighbourhoods = []
             for fixture in onScreen {
-                guard let timed = Self.convert(fixture.strokePaths, on: screen.id, in: model) else { continue }
-                readings.append(Self.milliseconds(timed.total))
-                passes.append(Self.milliseconds(timed.pass))
+                let looked = StructureInference.neighbourhoodSizes(of: screen.root.id).count
+                guard let timed = convert(fixture.strokePaths, on: screen.id, in: model) else { continue }
+                readings.append(milliseconds(timed.total))
+                passes.append(milliseconds(timed.pass))
+                let sizes = StructureInference.neighbourhoodSizes(of: screen.root.id)
+                if sizes.count > looked, let size = sizes.last { measured.neighbourhoods.append(size) }
                 guard timed.id != nil else { continue }
-                landed += 1
+                measured.landed += 1
                 // Untimed: the reading and its pass are one step, taken back, and nothing stays on offer or may grow.
                 undo.undo()
                 model.dismissStructureOffer()
                 model.builtStructures = [:]
             }
             try #require(!readings.isEmpty)
-            let reading = Self.percentiles(readings), pass = Self.percentiles(passes)
-            print(String(format: "BENCH sketch reading p50=%.3f p95=%.3f n=%d attempt=%d", reading.p50, reading.p95, readings.count, attempt))
-            print(String(format: "BENCH structure pass p50=%.3f p95=%.3f n=%d attempt=%d", pass.p50, pass.p95, passes.count, attempt))
-            attempts.append(reading)
+            let reading = percentiles(readings), pass = percentiles(passes)
+            print(String(format: "BENCH sketch reading%@ p50=%.3f p95=%.3f max=%.3f n=%d attempt=%d",
+                         label, reading.p50, reading.p95, readings.max() ?? 0, readings.count, attempt))
+            print(String(format: "BENCH structure pass%@ p50=%.3f p95=%.3f max=%.3f n=%d attempt=%d",
+                         label, pass.p50, pass.p95, passes.max() ?? 0, passes.count, attempt))
+            measured.p95s.append(reading.p95)
             if reading.p95 < 100 { break }
         }
-        #expect(landed >= 100, "readings that became a thing on the screen: \(landed) of \(onScreen.count)")
-        #expect(attempts.contains { $0.p95 < 100 }, "p95 per attempt: \(attempts.map(\.p95)) ms")
+        return measured
+    }
+
+    // MARK: Budgets
+
+    /// The corpus's readings on the 100-thing screen, whose rows are the person's: a sketch on a row lands in it, and one
+    /// off them lands on the root beside nothing the pass may take. The p95 is under 100 ms (§13), failing only if three
+    /// measurings in a row are over (F19).
+    @Test func aReadingLandsWithinBudget() throws {
+        try #require(Self.fixtures.count == 156, "the sketch corpus")
+        let (model, screens, undo) = Self.makeModel(screens: 1)
+        let screen = try #require(screens.first)
+        let before = model.store.tree
+        try #require(before.screens[0].root.children.flatMap(\.children).count(where: { $0.sketch != nil }) == 100)
+
+        let measured = try Self.measureReadings(on: screen, in: model, undo: undo)
+        #expect(measured.landed >= 100, "readings that became a thing on the screen: \(measured.landed)")
+        #expect(measured.p95s.contains { $0 < 100 }, "p95 per attempt: \(measured.p95s) ms")
+        #expect(model.store.tree == before, "each reading was one step, and undone")
+    }
+
+    /// The same readings with the 100 sketched things straight on the free root, where the pass may take every one and
+    /// its neighbourhood grows over the whole root: the pass's worst case on a busy screen. The p95 is under 100 ms all
+    /// the same (§13), failing only if three measurings in a row are over (F19).
+    @Test func aReadingWhosePassTakesInTheWholeScreenLandsWithinBudget() throws {
+        try #require(Self.fixtures.count == 156, "the sketch corpus")
+        let (model, screens, undo) = Self.makeModel(screens: 1, loose: true)
+        let screen = try #require(screens.first)
+        let before = model.store.tree
+        try #require(screen.root.children.count == 100 && screen.root.children.allSatisfy { !$0.isContainer && $0.isArrangeable })
+
+        let measured = try Self.measureReadings("loose", on: screen, in: model, undo: undo)
+        let neighbourhoods = measured.neighbourhoods.sorted()
+        #expect(measured.landed >= 100, "readings that became a thing on the screen: \(measured.landed)")
+        #expect(neighbourhoods.count == measured.landed, "the pass ran in the root for every reading")
+        #expect(neighbourhoods.isEmpty ? false : neighbourhoods[neighbourhoods.count / 2] > 90,
+                "the pass took in most of the root for most readings: \(neighbourhoods)")
+        #expect(measured.p95s.contains { $0 < 100 }, "p95 per attempt: \(measured.p95s) ms")
         #expect(model.store.tree == before, "each reading was one step, and undone")
     }
 
