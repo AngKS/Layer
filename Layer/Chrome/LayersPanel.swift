@@ -103,7 +103,7 @@ private struct LayersList: View {
         let tree = store.tree, index = store.index
         let selection = model.selection
         let hovered = model.hovered
-        let open = Self.entered(in: selection, index: index).union(openContainers)
+        let open = model.enteredGroups.union(openContainers)
         ScrollView {
             // Not lazy: a lazy stack built every row in view again on every change to the
             // design, whether or not what the row shows had changed.
@@ -144,16 +144,6 @@ private struct LayersList: View {
             move(difference)
         }
         .dragContainer(for: LayerItem.self) { ids in ids.map(LayerItem.init) }
-    }
-
-    /// Every container that holds something selected, at any depth: those that have been gone
-    /// into, which are open while it is.
-    private static func entered(in selection: CanvasSelection?, index: TreeIndex) -> Set<UUID> {
-        var entered: Set<UUID> = []
-        for case .element(let ref) in selection?.things ?? [] {
-            entered.formUnion(index.ancestors(of: ref.element).filter { index[$0]?.path.isEmpty == false })
-        }
-        return entered
     }
 
     /// What a drop in the list does: each row dragged lands where it was dropped, the whole

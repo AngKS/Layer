@@ -622,7 +622,7 @@ final class AppModel {
     /// a reasoning model can think for tens of seconds, a paid request, before it writes
     /// the line that would find the screen gone (G11).
     private func stopGeneratingForAScreenThatIsGone() {
-        guard isGenerating, let generation, store.screen(generation.screenID) == nil else { return }
+        guard isGenerating, let generation, store.treeScreen(generation.screenID) == nil else { return }
         generationTask?.cancel()
     }
 
@@ -1632,18 +1632,22 @@ final class AppModel {
         self.selection = selection.removing(thing)
     }
 
+    // PROJECTION: deleted in plan 6
+    // The Format panel writes the tree (`update(_:_:)`); these element-typed writes are left to the tests of the projection.
     /// Makes one change to every selected element that `applies` to, as one step: a
     /// colour, for instance, to each that has a fill.
     func changeSelectedElements(where applies: (DesignElement) -> Bool = { _ in true }, _ body: (inout DesignElement) -> Void) {
         store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
     }
 
+    // PROJECTION: deleted in plan 6
     /// The elements selected that aren't locked, by themselves or by a group above them:
     /// what corners, opacity and angle change for several things (F4).
     var unlockedSelectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
         selectedElements.filter { !store.isLocked(.element($0.ref)) }
     }
 
+    // PROJECTION: deleted in plan 6
     /// Changes those of `refs` that `applies` to, in the Format panel's own edit (see
     /// `adjusting`): the elements a field was showing, even if it is set once the selection
     /// has moved on. With `unlockedOnly`, only those that aren't locked, by themselves or by
@@ -1820,21 +1824,22 @@ final class AppModel {
         selection.map { store.canArrange($0, arrangement) } ?? false
     }
 
-    /// Puts what is selected in a new group and selects the group: see `DesignStore.group(_:)`.
+    /// Puts what is selected in a new group and selects the group: Group as a group (`groupSelection(as:)`).
     func groupSelection() {
-        guard let selection, let group = store.group(selection) else { return }
-        self.selection = .element(group)
+        groupSelection(as: .group)
     }
 
-    /// Whether Group would make a group of what is selected (L7).
+    /// Whether Group would make a group of what is selected (L7): `canGroupSelection(as: .group)`.
     var canGroupSelection: Bool {
-        selection.map(store.canGroup) ?? false
+        canGroupSelection(as: .group)
     }
 
-    /// Whether the elements selected are on more than one screen, or on a screen and the open
-    /// canvas: why Group is off, when it is.
+    /// Whether the things selected are on more than one screen, or on a screen and the open
+    /// canvas: why Group is off, when it is. Read from the index.
     var groupSelectionSpansHosts: Bool {
-        Set(selectedElements.map(\.ref.host)).count > 1
+        Set(selectedThings.compactMap { thing -> DesignStore.ElementRef.Host? in
+            if case .element(let ref) = thing { ref.host } else { nil }
+        }).count > 1
     }
 
     /// Takes the selected group apart and selects its members: see `DesignStore.ungroup(_:)`.
@@ -1843,13 +1848,15 @@ final class AppModel {
         selection = members
     }
 
-    /// Whether one group is selected, and it isn't locked.
+    /// Whether one container is selected, a group, card, row, column, grid or overlay, and it isn't locked, by itself or
+    /// by one above it. Read from the tree.
     var canUngroupSelection: Bool {
-        guard let selected = selectedElement else { return false }
-        return selected.element.kind == .group && !store.isLocked(.element(selected.ref))
+        guard let selected = selectedNode else { return false }
+        return selected.node.isContainer && !selected.isLocked
     }
 
-    /// Lines up what is selected: one element with its screen, several things with each other.
+    /// Lines up what is selected: one element with its screen, several things with each other. Reached through
+    /// `lineUpSelection(_:)`, which leaves what a row, column, grid or overlay places to it.
     func alignSelection(_ alignment: ElementLayout.Alignment) {
         guard let selection, !isSelectionLocked else { return }
         switch selection {
@@ -1859,12 +1866,7 @@ final class AppModel {
         }
     }
 
-    /// Spaces the selected things evenly, across or down. It takes three to have a gap to even out.
-    func distributeSelection(_ distribution: ElementLayout.Distribution) {
-        guard let selection, canDistributeSelection else { return }
-        store.distribute(selection, distribution)
-    }
-
+    /// Whether there are things enough to space evenly: it takes three to have a gap to even out (`lineUpSelection(_:)`).
     var canDistributeSelection: Bool {
         (selection?.things.count ?? 0) >= 3 && !isSelectionLocked
     }
@@ -1909,7 +1911,11 @@ final class AppModel {
         case .element, .several:
             area = selectionShape.map { viewport.viewShape(for: $0).bounds }
         case .screen:
-            area = selectedScreen.map { viewport.viewRect(for: $0.canvasFrame.union($0.labelFrame)) }
+            // Read from the tree: the popover places itself against this on every frame of a screen's drag.
+            area = selectedScreenID.flatMap(store.treeScreen).map { screen in
+                let device = store.tree.device(of: screen)
+                return viewport.viewRect(for: screen.canvasFrame(on: device).union(screen.labelFrame(on: device)))
+            }
         case nil:
             return nil
         }

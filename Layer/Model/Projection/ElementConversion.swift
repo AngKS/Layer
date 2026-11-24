@@ -29,8 +29,8 @@ extension LayerNode {
     }
 
     /// `element`'s mapped fields written over this node; tree-only fields kept (F9). Every mapped field is written
-    /// only where `element` differs from `shown`, this node's own lowering; for lock and hide that is today's
-    /// `DesignContent.written(_:over:groups:)` rule. With `shown` nil (a new node) every field is written. A
+    /// only where `element` differs from `shown`, this node's own lowering; for lock and hide that is the list's
+    /// old rule for a view written back (a flag as it was shown keeps the node's own). With `shown` nil (a new node) every field is written. A
     /// container's kind is never taken from a `.group` element: a card stays a card. A tint equal to the
     /// lowered one leaves `style.tint` as it is, nil included.
     ///

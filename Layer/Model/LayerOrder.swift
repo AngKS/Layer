@@ -36,12 +36,13 @@ extension DesignStore {
         // locked thing stays where it is, whichever way it is asked: the popover, the Format panel, a
         // shortcut or Siri. Locked means by itself or by a container above it, so a member of a locked
         // group, gone into, stays too. The lock is checked on what is selected, not on what goes with
-        // it: a selected container moves whole, everything in it with it, whatever its own locks.
+        // it: a selected container moves whole, everything in it with it, whatever its own locks. Read from the
+        // tree: the Format panel and the popover ask on every frame of a drag.
         var moving: [NodeParent: Set<UUID>] = [:]
         for case .element(let ref) in selection.things {
-            guard let (element, _) = resolve(ref), element.kind != .drawing, !isLocked(.element(ref)),
-                  let parent = parent(of: element.id), !isOrderedByItsLayout(parent) else { continue }
-            moving[parent, default: []].insert(element.id)
+            guard let placed = placed(ref), placed.node.kind != .drawing, !placed.isLocked,
+                  let parent = parent(of: ref.element), !isOrderedByItsLayout(parent) else { continue }
+            moving[parent, default: []].insert(ref.element)
         }
         var orders: [NodeParent: [UUID]] = [:]
         for (parent, moved) in moving {
@@ -91,30 +92,6 @@ extension DesignStore {
         }
         rest.insert(contentsOf: block, at: place)
         return rest
-    }
-}
-
-/// What is on one screen, or on the open canvas, as the Layers panel lists it: the things at
-/// its top level, and those in each group, each list back to front, read from the design's
-/// flat list, where each group's members are gathered into one run with the item just in
-/// front. Drawings are in no list (F7). Only `layerTree(on:)` reads it, until the Layers panel
-/// is built on the tree.
-struct SiblingLists {
-    /// Each list's things, back to front: the top level's under nil, a group's under its id.
-    var lists: [DesignElement.ID?: [DesignElement.ID]] = [:]
-    private var groups: Set<DesignElement.ID> = []
-    private var listOf: [DesignElement.ID: DesignElement.ID?] = [:]
-
-    /// The lists of things that share a host, given back to front. A thing whose group isn't
-    /// among them, which only a design not yet put right has, is taken as at the top level.
-    init(_ things: [DesignElement]) {
-        let things = things.filter { $0.kind != .drawing }
-        for thing in things where thing.kind == .group { groups.insert(thing.id) }
-        for thing in things where listOf[thing.id] == nil {
-            let list = thing.group.flatMap { groups.contains($0) ? $0 : nil }
-            listOf[thing.id] = list
-            lists[list, default: []].append(thing.id)
-        }
     }
 }
 
@@ -169,13 +146,14 @@ extension DesignStore {
         case bottom
     }
 
+    /// Read from the tree and its index: a drop in the Layers panel lowers nothing.
     private func moveLayer(_ id: DesignElement.ID, to list: NodeParent, landing: Landing) -> Bool {
-        guard let element = element(id), element.kind != .drawing, !isLockedWithItsGroups(element),
+        guard let thing = placed(id), thing.node.kind != .drawing, !thing.isLocked,
               let from = parent(of: id), let host = index[id]?.host, host == self.host(of: list),
               let held = children(of: list) else { return false }
         if case .node(let groupID) = list {
             guard groupID != id, !index.ancestors(of: groupID).contains(id),
-                  let group = groupItem(groupID), !isLockedWithItsGroups(group) else { return false }
+                  let group = placed(groupID), group.node.isContainer, !group.isLocked else { return false }
         }
         let siblings = held.compactMap { $0.kind == .drawing ? nil : $0.id }
         var order = siblings.filter { $0 != id }

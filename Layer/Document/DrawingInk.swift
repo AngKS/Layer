@@ -60,6 +60,8 @@ enum DrawingInk {
     }
 }
 
+// PROJECTION: deleted in plan 6
+// A drawing as an element, for what still holds elements: plan 5's sketch path, voice and Siri, and the projection's tests.
 extension DesignElement {
     /// A drawing made of these strokes, given where they lie on the canvas. Its frame is
     /// the area they cover. Nil when there are no strokes.
@@ -262,12 +264,19 @@ enum InkGeometry {
     }
 }
 
-extension DesignContent {
-    /// The ink of the design's drawings where it lies on the canvas, as one PencilKit
-    /// drawing: for pictures of the board. Hidden drawings are left out.
+extension TreeContent {
+    /// The ink of the design's drawings where it lies on the canvas, as one PencilKit drawing: for pictures of the
+    /// board. Hidden drawings are left out. Read from the open canvas's own nodes, where `TreeRules` keeps every
+    /// drawing, in no container, so each one's own hide is how it shows.
     var visibleInk: PKDrawing {
-        PKDrawing(strokes: elements.filter { $0.kind == .drawing && !$0.isHidden }.flatMap(\.canvasStrokes))
+        PKDrawing(strokes: canvas.filter { $0.kind == .drawing && !$0.isHidden }.flatMap(\.canvasStrokes))
     }
+}
+
+// PROJECTION: deleted in plan 6
+extension DesignContent {
+    /// `TreeContent.visibleInk`, for the file's picture and the tests that hold a `DesignContent`.
+    var visibleInk: PKDrawing { tree.visibleInk }
 
     /// Takes in ink for the whole board as one drawing: strokes that touch become one
     /// drawing each, on the open canvas.

@@ -679,6 +679,36 @@ struct LayoutDragTests {
         #expect(!board.store.isEditing)
     }
 
+    /// A container in a row, dragged with other things, is taken out of the row where it is let go, as a thing that
+    /// isn't a container is (My call 20; plan 4 Task 4's carry). It goes whole, what it holds riding in it.
+    @Test func aContainerInARowDraggedWithOtherThingsIsTakenOut() throws {
+        var card = LayerNode(kind: .card)
+        card.frame = CGRect(x: 0, y: 0, width: 100, height: 60)
+        card.children = [fixed(.text, "In", CGRect(x: 16, y: 16, width: 60, height: 20))]
+        let e = fixed(.text, "E", CGRect(x: 0, y: 0, width: 80, height: 40))
+        let other = holding(rowLayout(), at: CGPoint(x: 20, y: 300), [card, e])
+        let d = fixed(.text, "D", CGRect(x: 20, y: 500, width: 80, height: 40))
+        let board = RowBoard([other, d])
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        let cardRef = try #require(board.store.ref(of: card.id)), dRef = try #require(board.store.ref(of: d.id))
+        let (cardWas, dWas) = (board.centre(card.id), board.centre(d.id))
+        board.model.selection = CanvasSelection([.element(cardRef), .element(dRef)])
+        let mark = board.store.historyMark
+        let owner = CanvasDrags.Owner()
+
+        for dy in [20.0, 60.0, 100.0] {
+            board.drags.moveGroup(by: CGSize(width: 0, height: dy), startingAt: dWas, owner: owner, model: board.model)
+        }
+        board.drags.dropGroup(owner: owner, model: board.model)
+
+        #expect(board.store.parent(of: card.id) == .screen(board.screen), "the card is taken out of its row")
+        #expect(board.children(of: other.id) == [e.id])
+        #expect(board.children(of: card.id) == card.children.map(\.id), "what it holds rides in it")
+        #expect(board.centre(card.id) == CGPoint(x: cardWas.x, y: cardWas.y + 100), "it lands where it was let go")
+        #expect(board.centre(d.id) == CGPoint(x: dWas.x, y: dWas.y + 100))
+        #expect(board.store.historyMark == mark + 1, "the drag is one step")
+    }
+
     /// F13: a screen dragged snaps among the tree's screens and writes the tree, so its frames lower nothing.
     @Test func aScreenDragReadsTheTree() throws {
         let board = RowBoard()

@@ -424,6 +424,7 @@
 		E9879E1FAA75A7EB65990CE4 /* ShareA2UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05EE13043675A1AA42C79EF0 /* ShareA2UITests.swift */; };
 		E9C80F1D3D2799B8D559E1E1 /* InkCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70DA431B14684CFAD675461D /* InkCanvas.swift */; };
 		E9D88200B2AD65429300CB56 /* textField_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 82E6603F533B80E3402F70EE /* textField_noisy_1.json */; };
+		EA90247DC5A65494A08FAE3D /* CanvasNeverLowersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25EEAE1CAEB2E4A2512D072 /* CanvasNeverLowersTests.swift */; };
 		EB2BD5345F2BE29AC7B7AC46 /* OpenDesigns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE9428C3E252A6211C8A7C7 /* OpenDesigns.swift */; };
 		EC320670E7337DC8E2CDE1C7 /* DesignFileV4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4EA6E5140652F40C930FD25 /* DesignFileV4Tests.swift */; };
 		ED03AEFBB91DB401B2FD1298 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2452B50A25ACD85E727421 /* AppModel.swift */; };
@@ -943,6 +944,7 @@
 		F18877DD363D1D2CC6BAA933 /* toggle_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_jittered_2a.json; sourceTree = "<group>"; };
 		F1BCDE14055D63163F05C937 /* TurnAndResizeOnTheTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnAndResizeOnTheTreeTests.swift; sourceTree = "<group>"; };
 		F25855A74EEB164BC40B54CA /* DrawingSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSync.swift; sourceTree = "<group>"; };
+		F25EEAE1CAEB2E4A2512D072 /* CanvasNeverLowersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNeverLowersTests.swift; sourceTree = "<group>"; };
 		F3D4915B74569167B85F1CC7 /* unknown_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_noisy_2.json; sourceTree = "<group>"; };
 		F4EA6E5140652F40C930FD25 /* DesignFileV4Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignFileV4Tests.swift; sourceTree = "<group>"; };
 		F4F72AEAB164D2EB607ECFBA /* checkbox_radio_checkbox_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_checkbox_1.json; sourceTree = "<group>"; };
@@ -1269,6 +1271,7 @@
 				A1550A22E1500191461C4B68 /* CanvasDragLandingTests.swift */,
 				212F7CCE94FC2C4A4065FCDA /* CanvasDragWorkTests.swift */,
 				DBC34B46661E4E975767AA7C /* CanvasHitTestTests.swift */,
+				F25EEAE1CAEB2E4A2512D072 /* CanvasNeverLowersTests.swift */,
 				E8C5158C8C675FAC7691FC36 /* CanvasOnTheTreeTests.swift */,
 				80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */,
 				7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */,
@@ -2032,6 +2035,7 @@
 				F376F8FE5D328F8D44244A6B /* CanvasDragLandingTests.swift in Sources */,
 				257248133E2329DD0AEB9B21 /* CanvasDragWorkTests.swift in Sources */,
 				AF4C99B81F7284071AF36346 /* CanvasHitTestTests.swift in Sources */,
+				EA90247DC5A65494A08FAE3D /* CanvasNeverLowersTests.swift in Sources */,
 				236DADBFD8A61E1CB0BF15BC /* CanvasOnTheTreeTests.swift in Sources */,
 				5181C5BE1B16E9E5B28426C9 /* CodeOfElements.swift in Sources */,
 				AE217498FB6664260CE3D179 /* ComponentCatalogueTests.swift in Sources */,

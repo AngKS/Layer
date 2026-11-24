@@ -142,8 +142,10 @@ final class DesignStore {
         projection.position[id]
     }
 
+    // PROJECTION: deleted in plan 6
     /// Each screen with what is on it.
     var screens: [DesignScreen] { projection.screens }
+    // PROJECTION: deleted in plan 6
     /// The elements on the open canvas.
     var floating: [FloatingElement] { projection.floating }
     var title: String? { content.title }
@@ -151,6 +153,7 @@ final class DesignStore {
 
     // MARK: Looking things up
 
+    // PROJECTION: deleted in plan 6
     func screen(_ id: DesignScreen.ID) -> DesignScreen? {
         screens.first { $0.id == id }
     }
@@ -165,12 +168,14 @@ final class DesignStore {
         screen(at: CGPoint(x: sketch.midX, y: sketch.midY))
     }
 
+    // PROJECTION: deleted in plan 6
     /// An element, wherever it is.
     func element(_ id: DesignElement.ID) -> DesignElement? {
         let lowered = projection
         return lowered.position[id].map { lowered.elements[$0] }
     }
 
+    // PROJECTION: deleted in plan 6
     /// An element together with the placement that turns its frame into canvas points.
     /// Nil when the element is gone, or no longer where `ref` says it is.
     func resolve(_ ref: ElementRef) -> (element: DesignElement, placement: Placement)? {
@@ -362,8 +367,16 @@ final class DesignStore {
     /// screen is gone, or the copy would take the design past 5,000 things.
     @discardableResult
     func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen? {
+        duplicateTreeScreen(id).flatMap { screen($0) }
+    }
+
+    /// `duplicateScreen(_:)` read from the tree, giving the copy's identifier: what the popover's Duplicate does, so
+    /// that a tap lowers nothing.
+    @discardableResult
+    func duplicateTreeScreen(_ id: TreeScreen.ID) -> TreeScreen.ID? {
         let tree = tree
-        guard let original = tree.screens.first(where: { $0.id == id }), let frame = screen(id)?.canvasFrame else { return nil }
+        guard let original = tree.screens.first(where: { $0.id == id }) else { return nil }
+        let frame = original.canvasFrame(on: tree.device(of: original))
         var copy = original
         copy.id = UUID()
         copy.root = TreeEdit.copyWithNewIDs(original.root)
@@ -372,7 +385,7 @@ final class DesignStore {
         copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
         copy.origin.x = frame.maxX + 60
-        return addScreen(copy).flatMap { screen($0) }
+        return addScreen(copy)
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
@@ -881,6 +894,7 @@ final class DesignStore {
         try act(for: heldEdit, body)
     }
 
+    // PROJECTION: deleted in plan 6
     func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {
         guard resolve(ref) != nil else { return }
         change { $0.update(ref.element, body) }

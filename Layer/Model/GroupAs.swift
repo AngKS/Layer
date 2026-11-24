@@ -66,35 +66,22 @@ extension DesignStore {
 
     // MARK: Lining up among several things
 
-    /// Today's Align among several things (`align(_:_:)`), moving only what sits in a free parent (spec §10).
+    /// Today's Align among several things (`align(_:_:)`), moving only what sits in a free parent (spec §10): what a row,
+    /// column, grid or overlay places stays where it is, and the others line up with it all the same, as they do with a
+    /// locked thing.
     func alignInFreeParents(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) {
-        lineUpInFreeParents(selection) { ElementLayout.aligned($0, alignment) }
+        lineUp(selection, moving: isInAFreeParent) { ElementLayout.aligned($0, alignment) }
     }
 
     /// Today's Distribute among several things (`distribute(_:_:)`), moving only what sits in a free parent (spec §10).
     func distributeInFreeParents(_ selection: CanvasSelection, _ distribution: ElementLayout.Distribution) {
-        lineUpInFreeParents(selection) { ElementLayout.distributed($0, distribution) }
+        lineUp(selection, moving: isInAFreeParent) { ElementLayout.distributed($0, distribution) }
     }
 
     /// Whether something selected sits in a free parent, a screen's or the open canvas's top level among them, or is a
     /// screen: something `alignInFreeParents` and `distributeInFreeParents` can move.
     func holdsSomethingInAFreeParent(_ selection: CanvasSelection) -> Bool {
         things(in: selection).contains(where: isInAFreeParent)
-    }
-
-    /// Lines up what is selected as `rule` lines up their boxes on the canvas, as today's align and distribute do. What
-    /// a row, column, grid or overlay places stays where it is, and the others line up with it all the same, as they do
-    /// with a locked thing. What is already in place is left exactly where it is. One change.
-    private func lineUpInFreeParents(_ selection: CanvasSelection, _ rule: ([CGRect]) -> [CGRect]) {
-        let placed = things(in: selection).compactMap { thing in canvasFrame(of: thing).map { (thing, $0) } }
-        guard placed.count > 1 else { return }
-        let arranged = rule(placed.map(\.1))
-        var origins: [CanvasSelection: CGPoint] = [:]
-        for (index, (thing, frame)) in placed.enumerated() where isInAFreeParent(thing) {
-            let origin = arranged[index].origin
-            if abs(origin.x - frame.minX) >= 0.01 || abs(origin.y - frame.minY) >= 0.01 { origins[thing] = origin }
-        }
-        position(origins)
     }
 
     /// Whether a thing goes where it is put: a screen, or a thing in a free container, a free root or the open canvas.

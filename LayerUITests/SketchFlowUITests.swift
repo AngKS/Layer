@@ -1385,6 +1385,152 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Screen 1 · 300 × 500'", timeout: 5), "the screen should take the new size")
     }
 
+    /// Held, the popover's Group button offers Row, Column, Grid and Card: Row wraps the two notes in a row, which is
+    /// selected and listed in Layers by what it is (plan 4, Task 6, run here once Tasks 2 and 3 are in: F6).
+    func testGroupAsRowFromThePopoverMenu() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+
+        point(centre).tap()
+        point(other).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["Row"].waitForExistence(timeout: 5), "a hold on Group should offer Row")
+        app.buttons["Row"].tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Row'", timeout: 5), "Row should select the new row, not \(String(describing: selectionElement.value))")
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Row"), "the Layers panel should list the row")
+    }
+
+    /// The first milestone (spec, Verification), with the card and the grid made by Group as, since sketching them is
+    /// plan 5's: two texts held as a card and two as a grid, each listed in Layers by what it is, and the screen's code
+    /// laying the grid out with `Grid` and giving the card its background.
+    func testTheFirstMilestoneACardAndAGridSeenInLayersAndExported() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let places = [onScreen((120, 200)), onScreen((120, 240)), onScreen((110, 400)), onScreen((290, 400))]
+        for place in places { addText(movedTo: place) }
+        attach("milestone-four-texts")
+
+        // The first two held in a card. The second is tapped right of its middle: the first's turning knob, which shows
+        // once it is selected, hangs below its middle, over the second's.
+        clearSelection()
+        tapEach(places[0], onScreen((190, 240)))
+        groupAs("Card")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Card'", timeout: 5), "Card should select the new card, not \(String(describing: selectionElement.value))")
+
+        // The other two in a grid.
+        clearSelection()
+        tapEach(places[2], places[3])
+        groupAs("Grid")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Grid'", timeout: 5), "Grid should select the new grid, not \(String(describing: selectionElement.value))")
+        attach("milestone-card-and-grid")
+
+        // Layers lists each by what it is, and the code lays the grid out and gives the card its background.
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Card") != nil }, "the Layers panel should list the card")
+        XCTAssertNotNil(layerRow("Grid"), "the Layers panel should list the grid")
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.staticTexts.matching(labelContaining("Grid(")).firstMatch.waitForExistence(timeout: 5), "the code should lay the grid out with Grid")
+        XCTAssertTrue(app.staticTexts.matching(labelContaining(".background(.background.secondary")).firstMatch.exists, "the code should give the card its background")
+        attach("milestone-code")
+    }
+
+    /// A thing in a column dragged over the lower half of the thing after it is lifted, and lands after it: the column's
+    /// order, which Layers lists first at the top, changes (plan 4, call 3).
+    func testDraggingAThingInAColumnReordersIt() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let text = onScreen((200, 200)), heart = onScreen((200, 300))
+
+        addText(movedTo: text)
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("heart fill")
+        let symbol = app.buttons["heart.fill"]
+        XCTAssertTrue(symbol.waitForExistence(timeout: 5))
+        symbol.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        stroke(centre, heart)
+
+        // The two in a column: the text keeps its top-left, and the symbol, centred under it, follows a step below.
+        clearSelection()
+        point(text).tap()
+        point(heart).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        groupAs("Column")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Column'", timeout: 5), "Column should select the new column, not \(String(describing: selectionElement.value))")
+        attach("column-made")
+
+        // Gone into with two quick presses on the text, and the text dragged onto the symbol's lower half. The symbol is
+        // a 44-point square 24 to 32 points under the text's 24-point height: its lower half is 270 to 290 down.
+        clearSelection()
+        point(text).press(forDuration: 0.02)
+        point(text).press(forDuration: 0.02)
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "two quick presses should select the text in the column, not \(String(describing: selectionElement.value))")
+        stroke(text, onScreen((200, 280)))
+        attach("column-reordered")
+
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Symbol") != nil && self.layerRow("Text") != nil }, "the column's rows should be listed")
+        guard let symbolRow = layerRow("Symbol"), let textRow = layerRow("Text") else { return }
+        XCTAssertLessThan(symbolRow.frame.minY, textRow.frame.minY, "the text, dropped after the symbol, should be listed below it")
+    }
+
+    /// Adds a text, which lands selected in the middle of the view, and drags it so that its middle is at `place`.
+    private func addText(movedTo place: CGPoint) {
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a new text should be selected")
+        // Its popover, for typing, is put away, and the text picked again.
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a tap should pick the new text")
+        stroke(centre, place)
+    }
+
+    /// Taps one text, then another, each added to the selection.
+    private func tapEach(_ first: CGPoint, _ second: CGPoint) {
+        point(first).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a tap should pick the text")
+        point(second).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on each text should add it, not \(String(describing: selectionElement.value))")
+    }
+
+    /// Holds the popover's Group button and picks `shape` from the menu it opens.
+    private func groupAs(_ shape: String) {
+        control("Group").press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons[shape].waitForExistence(timeout: 5), "a hold on Group should offer \(shape)")
+        app.buttons[shape].tap()
+    }
+
     /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
     private func clearSelection() {
         let empty = emptyCanvasPoint

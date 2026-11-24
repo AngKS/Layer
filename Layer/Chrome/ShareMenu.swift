@@ -305,7 +305,7 @@ enum BoardSnapshot {
     }
 
     private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
-        let drawing = model.store.content.visibleInk
+        let drawing = model.store.tree.visibleInk
         let ink = drawing.strokes.isEmpty ? nil : drawing.bounds
         let design = model.store.contentBounds
         guard var area = (design.map { ink?.union($0) ?? $0 } ?? ink)?.insetBy(dx: -40, dy: -40).integral else { return nil }

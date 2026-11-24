@@ -48,8 +48,8 @@ extension AppModel {
         return store.layoutAligned(selection, alignment) != nil
     }
 
-    /// Today's `distributeSelection`, moving only what sits in a free parent (spec §10): what a row, column, grid or
-    /// overlay places stays where it is, and the rest are spaced about it all the same.
+    /// Today's Distribute (`DesignStore.distribute`), moving only what sits in a free parent (spec §10): what a row,
+    /// column, grid or overlay places stays where it is, and the rest are spaced about it all the same.
     func lineUpSelection(_ distribution: ElementLayout.Distribution) {
         guard let selection, canLineUpSelection(distribution) else { return }
         store.distributeInFreeParents(selection, distribution)

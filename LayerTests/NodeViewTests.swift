@@ -60,7 +60,7 @@ private struct Picture {
 
 /// The tree drawn: each screen's root through recursive node views, the open canvas's nodes at their scale, and the
 /// board's picture through the same views. Ported from plan 3's `CardDrawingTests`, whose cases that asserted
-/// `ScreenDrawing`'s own data retired with it under clause (l): `aScreensCardsComeWithItsView` beside
+/// the screen drawing's own data retired with it under clause (l): `aScreensCardsComeWithItsView` beside
 /// `aCardDrawsItsLookUnderWhatItHolds` (a card drawn under what it holds, in order),
 /// `nestedCardsComeOutermostFirstAndHiddenOnesNot` beside `hiddenNodesAreNotDrawnAndNothingClips` and
 /// `aChildIsDrawnFrameThenTurnThenOffsetInItsParent`, and `laidOutLeavesAreMarked` beside

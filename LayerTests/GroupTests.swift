@@ -2303,7 +2303,7 @@ struct GroupAsOneThingTests {
 @Suite("The layers tree")
 struct LayerTreeTests {
     /// The rows of a host with every container open, as `LayerRows` lists them: clause (i) re-expresses the old
-    /// nested `layerTree(on:)` on them. Each line's depth says what it is under, and its flags are read from
+    /// nested layers tree on them (the list's, deleted in plan 4's Task 12). Each line's depth says what it is under, and its flags are read from
     /// `isDimmed` (was `isHiddenWithItsGroups`) and `isLocked || isLockedByAncestor` (was `isLockedWithItsGroups`).
     private func rows(_ board: OrderBoard, on host: TreeIndex.Host) -> [LayerLine] {
         let tree = board.store.tree

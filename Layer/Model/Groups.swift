@@ -15,14 +15,9 @@ import Foundation
 /// (`children(of:)`): group items included, with each thing's own flags. What can be touched
 /// on the canvas is read from the tree itself, any container standing for what it holds
 /// (`TreeTargets`).
+// PROJECTION: deleted in plan 6
+// The list's group pointers, read by tests of the projection and by plan 6's callers (voice, Siri).
 extension DesignContent {
-    /// Whether any element is a group item or says it belongs to a group: a member left
-    /// pointing at a group that has gone still needs `keepGroupsSound()`. One scan of the
-    /// list, so that a design without groups costs no more than that.
-    var hasGroups: Bool {
-        elements.contains { $0.kind == .group || $0.group != nil }
-    }
-
     /// The things that belong to a group directly, back to front.
     func members(of group: DesignElement.ID) -> [DesignElement] {
         Self.members(of: group, in: elements)
@@ -31,11 +26,6 @@ extension DesignContent {
     /// The things in a group at any depth that aren't groups themselves, back to front.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
         Self.leaves(of: group, in: elements)
-    }
-
-    /// Everything in a group at any depth, the groups inside it included, back to front.
-    func contents(of group: DesignElement.ID) -> [DesignElement] {
-        Self.contents(of: group, in: elements)
     }
 
     /// `members(of:)` in a list of the design's elements: the content's own, or the store's kept one.
@@ -98,42 +88,6 @@ extension DesignContent {
         return found
     }
 
-    // MARK: The views
-
-    /// The group items, by identifier: where the views look up the groups above a member.
-    /// Empty for a design without groups.
-    var groupItemsByID: [DesignElement.ID: DesignElement] {
-        var items: [DesignElement.ID: DesignElement] = [:]
-        for element in elements where element.kind == .group && items[element.id] == nil {
-            items[element.id] = element
-        }
-        return items
-    }
-
-    /// An element as the views show it: locked when it or a group above it is, and hidden
-    /// likewise, so that what reads the views, unaware of groups, leaves it alone or out.
-    static func shown(_ element: DesignElement, groups: [DesignElement.ID: DesignElement]) -> DesignElement {
-        guard element.group != nil, !groups.isEmpty, !(element.isLocked && element.isHidden) else { return element }
-        var shown = element
-        for group in Self.groups(above: element, find: { groups[$0] }) {
-            shown.isLocked = shown.isLocked || group.isLocked
-            shown.isHidden = shown.isHidden || group.isHidden
-        }
-        return shown
-    }
-
-    /// An element given to a view's setter, as it is to be kept. A lock or hide that is as
-    /// the view showed it (`shown`) keeps the element's own flag, so that writing a view
-    /// back as it was read changes nothing; one that differs is written.
-    static func written(_ given: DesignElement, over stored: DesignElement?, groups: [DesignElement.ID: DesignElement]) -> DesignElement {
-        guard let stored, !groups.isEmpty else { return given }
-        let shown = shown(stored, groups: groups)
-        var written = given
-        if given.isLocked == shown.isLocked { written.isLocked = stored.isLocked }
-        if given.isHidden == shown.isHidden { written.isHidden = stored.isHidden }
-        return written
-    }
-
     // MARK: Keeping groups sound
 
     // PROJECTION: deleted in plan 6
@@ -157,6 +111,9 @@ extension DesignContent {
     }
 }
 
+// PROJECTION: deleted in plan 6
+// The list's groups read from the store's kept projection: for `AppModel.selectedLeaves` (voice) and the tests of
+// the projection's groups. The canvas and panels read the tree.
 extension DesignStore {
     /// What is on a screen, or on the open canvas, back to front, as the design's own list
     /// holds it: group items included, and each thing with its own lock and hide.
@@ -164,20 +121,10 @@ extension DesignStore {
         projection.children(of: host.parent)
     }
 
-    /// The things that belong to a group directly, back to front, read from the design as it is
-    /// kept for this version (`projection`) rather than lowered again: see `DesignContent.members(of:)`.
-    func members(of group: DesignElement.ID) -> [DesignElement] {
-        DesignContent.members(of: group, in: projection.elements)
-    }
-
-    /// The things in a group at any depth that aren't groups themselves, as `members(of:)` reads them.
+    /// The things in a group at any depth that aren't groups themselves, read from the design as it is kept for this
+    /// version (`projection`) rather than lowered again: see `DesignContent.leaves(of:)`.
     func leaves(of group: DesignElement.ID) -> [DesignElement] {
         DesignContent.leaves(of: group, in: projection.elements)
-    }
-
-    /// Everything in a group at any depth, the groups inside it included, as `members(of:)` reads them.
-    func contents(of group: DesignElement.ID) -> [DesignElement] {
-        DesignContent.contents(of: group, in: projection.elements)
     }
 
     /// The group items on a screen, or on the open canvas, back to front.
@@ -190,12 +137,13 @@ extension DesignStore {
         element(id).flatMap { $0.kind == .group ? $0 : nil }
     }
 
-    /// Whether an element is locked: by itself, or by a group above it. Looked up in the
-    /// store's index rather than the list.
+    /// Whether an element is locked: by itself, or by a group above it.
     func isLockedWithItsGroups(_ element: DesignElement) -> Bool {
         element.isLocked || element.group != nil && DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
     }
+}
 
+extension DesignStore {
     // MARK: Selecting with containers
 
     /// The containers that hold something, at any depth, the nearest first: a card, row, column, grid or
@@ -237,13 +185,6 @@ extension DesignStore {
     }
 
     // MARK: Moving, landing and resizing a group
-
-    /// What turns an element's frame into canvas points, where it is: its screen's placement,
-    /// or on the open canvas its own scale. Nil when its screen is gone.
-    func placement(of element: DesignElement) -> Placement? {
-        guard let parent = element.parent else { return Placement(origin: .zero, scale: element.scale ?? 1) }
-        return screen(parent)?.placement
-    }
 
     /// A container as a handle drag on it began: what each frame of the drag resizes it from, so
     /// that the frames don't compound and drift.
@@ -378,7 +319,7 @@ extension DesignStore {
 
     /// Whether Group would make a group of what is selected: see `group(_:)`.
     func canGroup(_ selection: CanvasSelection) -> Bool {
-        groupable(selection, minimum: 2, refusingAllOfAFreeGroup: true) != nil
+        canGroup(selection, as: .group)
     }
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
@@ -390,13 +331,11 @@ extension DesignStore {
     /// of the frontmost of them, which a row or a column then lays out as one thing (`wrap`).
     /// It fits round them on both axes, so nothing moves. On the open canvas it is drawn at its
     /// frontmost member's scale; members drawn at others are boxed in canvas points (L5). It
-    /// is named as its kind until it is renamed.
+    /// is named as its kind until it is renamed. Group as a group (`group(_:as:)`), which also refuses a wrap past the
+    /// store's depth and node limits (F15).
     @discardableResult
     func group(_ selection: CanvasSelection) -> ElementRef? {
-        guard let members = groupable(selection, minimum: 2, refusingAllOfAFreeGroup: true),
-              let host = members.last.flatMap(ref(of:))?.host,
-              let made = wrap(members, in: .group, layout: .free) else { return nil }
-        return ElementRef(host: host, element: made)
+        group(selection, as: .group)
     }
 
     /// Today's Group rules, on node ids (F4): the unlocked things selected, with no drawings or screens, sharing one
@@ -430,11 +369,12 @@ extension DesignStore {
     /// join lays them out there (`unwrap`). Each stays where it is on screen, its turn and the
     /// group's added up, and takes on the group's lock and hide, so that a hidden group's
     /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
-    /// changes, when `ref` isn't a group, or holds something this build couldn't read.
+    /// changes, when `ref` isn't a container where it says, or holds something this build couldn't read. A card, row,
+    /// column, grid or overlay is taken apart as a group is. Read from the tree.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
-        guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        return CanvasSelection(unwrap(item.id).map { .element(ElementRef(host: ref.host, element: $0)) })
+        guard let item = placed(ref), item.node.isContainer else { return nil }
+        return CanvasSelection(unwrap(ref.element).map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as
@@ -465,55 +405,5 @@ extension DesignStore.ElementRef.Host {
     /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
     var parent: DesignScreen.ID? {
         if case .screen(let id) = self { id } else { nil }
-    }
-}
-
-// MARK: The Layers tree
-
-/// One row of the Layers panel's tree: a thing and what is in it, with the lock and hide it
-/// has through the groups above it. Never given to a row itself: a frame changes on every
-/// frame of a drag.
-struct LayerListNode: Identifiable {
-    var element: DesignElement
-    var ref: DesignStore.ElementRef
-    /// What is in it, topmost first: empty for anything but a group.
-    var children: [LayerListNode]
-    /// Hidden by its own flag or a group above it.
-    var isHiddenWithItsGroups: Bool
-    /// Locked by its own flag or a group above it.
-    var isLockedWithItsGroups = false
-
-    var id: DesignElement.ID { element.id }
-}
-
-extension DesignStore {
-    /// What is on a screen, or on the open canvas, as the Layers panel shows it: the things at
-    /// the top level, topmost first, each group's members under it, topmost first, and no
-    /// drawings (see `drawings`). Built from `SiblingLists`, which holds the rule for which
-    /// list a thing is in. Each node has its own flags for the toggles, and the effective
-    /// ones, worked down from the top once, not looked up for each row.
-    func layerTree(on host: ElementRef.Host) -> [LayerListNode] {
-        let things = children(on: host)
-        let lists = SiblingLists(things).lists
-        let byID = Dictionary(things.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var seen: Set<DesignElement.ID> = []
-        func nodes(in list: DesignElement.ID?, hidden: Bool, locked: Bool) -> [LayerListNode] {
-            (lists[list] ?? []).reversed().compactMap { id in
-                guard let element = byID[id], seen.insert(id).inserted else { return nil }
-                let isHidden = hidden || element.isHidden
-                let isLocked = locked || element.isLocked
-                return LayerListNode(
-                    element: element, ref: ElementRef(host: host, element: id),
-                    children: element.kind == .group ? nodes(in: id, hidden: isHidden, locked: isLocked) : [],
-                    isHiddenWithItsGroups: isHidden, isLockedWithItsGroups: isLocked
-                )
-            }
-        }
-        return nodes(in: nil, hidden: false, locked: false)
-    }
-
-    /// The drawings on the open canvas, topmost first: listed in a section of their own.
-    var drawings: [ElementRef] {
-        children(on: .canvas).filter { $0.kind == .drawing }.reversed().map { ElementRef(host: .canvas, element: $0.id) }
     }
 }

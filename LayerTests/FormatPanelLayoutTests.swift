@@ -290,7 +290,7 @@ struct FormatPanelLayoutTests {
         let before = TreeProjection.lowerings(of: id)
         _ = model.selectedThings
         _ = model.selectedLeafNodes
-        #expect(model.canTurnSelectionOnTheTree)
+        #expect(model.canTurnSelection)
         _ = ElementLayout.Alignment.allCases.map(model.canLineUpSelection)
         _ = ElementLayout.Distribution.allCases.map(model.canLineUpSelection)
         _ = model.groupShapesOffered

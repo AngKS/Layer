@@ -25,11 +25,11 @@ struct SelectionLayer: View {
         let viewport = model.viewport
         let tree = store.tree
         // Read from the tree: the canvas never lowers the design to its list (F12, F13).
-        let selectedScreen = model.selectedScreenID.flatMap(store.treeScreen)
+        let selectedTreeScreen = model.selectedScreenID.flatMap(store.treeScreen)
         let selected = model.selectedNode
         ZStack(alignment: .topLeading) {
             SelectionSummary()
-            if let screen = selectedScreen {
+            if let screen = selectedTreeScreen {
                 dragArea(viewport.viewRect(for: screen.canvasFrame(on: tree.device(of: screen))))
                     // A tap reaches what it would without the area: the screen's empty area,
                     // which lets go of it as the canvas does, or, with the palette up, an
@@ -98,7 +98,7 @@ struct SelectionLayer: View {
                 }
             }
 
-            if let screen = selectedScreen {
+            if let screen = selectedTreeScreen {
                 let device = tree.device(of: screen)
                 outline(viewport.viewRect(for: screen.canvasFrame(on: device)), radius: device.cornerRadius * screen.scale * viewport.scale)
             }

@@ -488,7 +488,7 @@ private struct SeveralSettings: View {
         }
         let refs = nodes.map(\.ref)
         let first = nodes.first { !$0.isLocked }
-        let turnable = model.canTurnSelectionOnTheTree && first != nil
+        let turnable = model.canTurnSelection && first != nil
         LeafStyleSections(leaves: model.selectedLeafNodes, showsAngle: turnable) {
             if turnable, let first {
                 NumberField("°", label: "Rotation", value: Binding(
