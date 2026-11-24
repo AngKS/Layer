@@ -131,32 +131,41 @@ struct CanvasDragWorkTests {
         // Several lines dragged together, out and back.
         board.model.selection = lines
         let owner = CanvasDrags.Owner()
+        let dragStart = board.store.contentVersion
         var built = board.store.timesIndexed
         for dx in BusyBoard.outAndBack {
             drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
         }
-        let dragged = board.store.timesIndexed - built
+        let dragVersions = board.store.contentVersion - dragStart + 1, dragged = board.store.timesIndexed - built
         drags.dropGroup(owner: owner, model: board.model)
-        #expect(dragged <= 1, "index built \(dragged) times during a 60-frame drag of three lines")
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(dragVersions > 1)
+        #expect(dragged <= dragVersions, "index built \(dragged) times over \(dragVersions) versions of a 60-frame drag of three lines")
 
         // The same lines twisted with two fingers, a degree a frame.
         board.model.selection = lines
+        let twistStart = board.store.contentVersion
         built = board.store.timesIndexed
         #expect(board.model.beginTwist())
         for degrees in 1...60 { board.model.twist(by: Double(degrees)) }
-        let twisted = board.store.timesIndexed - built
+        let twistVersions = board.store.contentVersion - twistStart + 1, twisted = board.store.timesIndexed - built
         board.model.endTwist()
-        #expect(twisted <= 1, "index built \(twisted) times during a 60-frame twist of three lines")
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(twistVersions > 1)
+        #expect(twisted <= twistVersions, "index built \(twisted) times over \(twistVersions) versions of a 60-frame twist of three lines")
 
         // The group's corner handle, from the pose taken as it began, a point a frame.
+        let resizeStart = board.store.contentVersion
         built = board.store.timesIndexed
         let pose = try #require(board.store.groupPose(of: g))
         for width in 1...60 {
             let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
             board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
         }
-        let resized = board.store.timesIndexed - built
-        #expect(resized <= 1, "index built \(resized) times during a 60-frame resize of a group")
+        let resizeVersions = board.store.contentVersion - resizeStart + 1, resized = board.store.timesIndexed - built
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(resizeVersions > 1)
+        #expect(resized <= resizeVersions, "index built \(resized) times over \(resizeVersions) versions of a 60-frame resize of a group")
 
         // The group dragged: a container moves on every frame, and the store's memo is read for it.
         let groupOwner = CanvasDrags.Owner()
