@@ -49,6 +49,29 @@ struct OutlinePromptTests {
                 "the form's row is written indented, on lines of its own")
     }
 
+    /// The compact rules forbid colour words, so the compact prompt's example shows none, while the full prompt and
+    /// the Settings template keep the settings example's red Turn off button (Task 12's fix round). "text grey" is a
+    /// text colour, not the element's, and stays.
+    @Test func theCompactPromptsExampleShowsNoColour() {
+        let colours = ColourWords.named.keys
+        for example in ScreenPrompt.library {
+            let description = example.keywords.first ?? example.name
+            #expect(ScreenPrompt.examples(for: description, count: 1).first?.name == example.name, "\(description)")
+            let compact = ScreenPrompt.instructions(.compact, for: description)
+            let looks = compact.split(separator: "[").dropFirst().map { $0.prefix { $0 != "]" } }
+            let coloured = looks.filter { look in
+                look.split(separator: ",").contains { colours.contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }
+            }
+            #expect(coloured.isEmpty, "\(example.name): \(coloured)")
+        }
+        let compact = ScreenPrompt.instructions(.compact, for: "a settings screen")
+        #expect(compact.contains("button: Turn off all notifications [plain]\n"))
+        #expect(compact.contains("row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]"))
+        #expect(ScreenPrompt.instructions(.full, for: "a settings screen").contains("button: Turn off all notifications [plain, red]"))
+        let template = AssetLibrary.template(named: "Settings")
+        #expect(template.map { nodes(in: $0).contains { $0.kind == .button && $0.style.tint == ColourWords.parse("red") } } == true)
+    }
+
     @Test func everyExampleFitsAPhone() {
         for example in ScreenPrompt.library {
             let laidOut = TreeRules.laidOut(outline(example.lines), deviceID: "iphone", settings: CanvasSettings(), previous: nil)

@@ -27,7 +27,8 @@ enum ScreenPrompt {
 
     static func instructions(_ room: Room, for description: String) -> String {
         let examples = examples(for: description, count: room == .compact ? 1 : 2)
-        let shown = examples.map(\.lines).joined(separator: "\n\n---\n\n")
+        // The compact rules forbid colour words, so the compact prompt's example shows none.
+        let shown = examples.map { room == .compact ? withoutColour($0.lines) : $0.lines }.joined(separator: "\n\n---\n\n")
         let heading = examples.count == 1
             ? "An example of the form. Write your own content; don't copy it:"
             : "Examples of the form, one screen each. Write your own content; don't copy them:"
@@ -38,6 +39,15 @@ enum ScreenPrompt {
             "\(heading)\n\n\(shown)",
             rules(room),
         ].joined(separator: "\n\n")
+    }
+
+    /// `lines` without the colours their looks give elements: each look word that names a colour is left out, and a
+    /// look left empty goes. "text grey" stays, since it colours the words, not the element.
+    private static func withoutColour(_ lines: String) -> String {
+        lines.replacing(#/( ?)\[([^\]]*)\]/#) { match in
+            let kept = match.output.2.split(separator: ",").filter { ColourWords.parse(String($0)) == nil }
+            return kept.isEmpty ? "" : "\(match.output.1)[\(kept.joined(separator: ","))]"
+        }
     }
 
     /// How a screen is written down: the outline `Outline.parse` reads. Shown with real lines
@@ -111,7 +121,7 @@ enum ScreenPrompt {
                 - Real, specific words such as "Card number" or "Save address". Never "Placeholder", \
                 "Submit" or lorem ipsum. No invented claims or ratings.
                 - No colour words, not even blue, red or grey, unless the description names a colour. \
-                Quieter words are text grey.
+                For quieter words use text grey, which isn't one.
                 - Use 6 to 12 elements.
                 """)
         }

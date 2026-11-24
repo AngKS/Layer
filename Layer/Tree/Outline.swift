@@ -27,7 +27,8 @@ enum Outline {
     /// written straight after a section's lines, with no blank line between, joins that section,
     /// so a heading stays with the grid under it and a form's fields with the row among them. A
     /// container that starts a section, first or after a blank line, is a section of its own,
-    /// and the lines after it start the next one.
+    /// and the lines after it start the next one; a one-line row aside, which begins a section
+    /// the lines after it join.
     /// When `isComplete` is false the last line is ignored, since it may be half written.
     /// Each node's `source.key` is its path of `kind:ordinal` steps from the root, where a
     /// container's kind is `row`, `column`, `grid`, `card` or, for an implicit section, `group`.

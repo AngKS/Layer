@@ -46,14 +46,14 @@ import Testing
         divider
         row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]
 
-        button: Turn off all notifications [plain, red]
+        button: Turn off all notifications [plain]
 
         Rules:
         - Write words for this exact product, not the example's.
         - Shape the screen for its job: settings are rows of text and a toggle, a profile starts with an avatar, an article starts with an image, a form is fields then one button. Details that belong together, such as a summary or a set of figures, go in a card: or a grid 2:.
         - The main action is one button with no look, so it is filled. Other buttons are [bordered] or [plain].
         - Real, specific words such as "Card number" or "Save address". Never "Placeholder", "Submit" or lorem ipsum. No invented claims or ratings.
-        - No colour words, not even blue, red or grey, unless the description names a colour. Quieter words are text grey.
+        - No colour words, not even blue, red or grey, unless the description names a colour. For quieter words use text grey, which isn't one.
         - Use 6 to 12 elements.
         """
 

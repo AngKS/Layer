@@ -15,7 +15,8 @@ struct ScreenScore {
     var valid = false
     /// Why it isn't valid.
     var problems: [String] = []
-    /// Buttons that would be filled as the model wrote them, and after `Outline.withOnePrimaryAction`.
+    /// Buttons that would be filled as the model wrote them, and after `Outline.withOnePrimaryAction`. For A2UI the
+    /// first is read by importing the whole answer, broken lines and all, so an answer that import can't read reads 0.
     var filledBeforePolish = 0
     var filledAfterPolish = 0
     /// Nodes given a colour (a tint; "text grey" isn't one).
@@ -201,7 +202,7 @@ struct Summary {
     var line: String {
         let count = scores.count + errors.count
         func perScreen(_ value: (ScreenScore) -> Int) -> String {
-            count == 0 ? "-" : String(format: "%.1f", Double(scores.map(value).reduce(0, +)) / Double(count))
+            count == 0 ? "-" : String(format: "%.2f", Double(scores.map(value).reduce(0, +)) / Double(count))
         }
         var parts = [
             "screens=\(count)",

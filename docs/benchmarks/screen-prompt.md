@@ -63,7 +63,8 @@ the session's instructions, the description as the message, `streamResponse` wit
 
 The machine was quiet: no other lane and no `xcodebuild` ran during any run (checked before each, and sampled every
 15 seconds). The 1-minute load stayed between 3.8 and 9.5 in every run but round 1's second, where something outside
-the project raised it to between 12.9 and 17.8; its latencies are no slower than the others'.
+the project raised it to between 12.9 and 17.8; its latencies are no slower than the others'. Round 3 ran later the
+same morning, after waiting for Spotlight's indexing to settle, at 1-minute loads of 7.3 to 9.4.
 
 What each number is, from the whole answer:
 
@@ -80,24 +81,26 @@ What each number is, from the whole answer:
 - **First content**: from the request until `OutlineStream` first hands on a screen, what the canvas first shows.
   **Completion**: until the answer ends.
 
-| Per 24 screens | 2026-11-18 (new prompt, blueprint) | Round 0: today's prompt and parser | (a) `column:` taught | (b) the parser joins | Round 1 (2 runs) | **Round 2, final (3 runs)** |
-|---|---|---|---|---|---|---|
-| Valid | 24 (parsed) | 24 | 24 | 24 | 24, 24 | **24, 24, 24** |
-| More than one filled button, before polish | 0 | 0 | 0 | 0 | 0, 0 | **0, 0, 0** |
-| More than one filled button, after polish | 0 | 0 | 0 | 0 | 0, 0 | **0, 0, 0** |
-| Coloured nodes | 5 | 7 | 6 | 10 | 3, 3 | **0, 5, 1** |
-| Kinds per screen | 5.3 | 5.3 | 5.0 | 5.4 | 5.0, 4.8 | **5.6, 5.0, 5.1** |
-| Leaves per screen | 8.5 | 8.8 | 8.0 | 8.4 | 8.1, 8.2 | **8.9, 8.1, 8.4** |
-| Rows / cards / grids per screen | not measured | 1.7 / 0.0 / 0.2 | 1.9 / 0.0 / 0.0 | 1.5 / 0.0 / 0.2 | 1.9 / 0.0 / 0.0, 2.0 / 0.0 / 0.0 | **1.5 / 0.7 / 0.1, 1.5 / 0.6 / 0.0, 1.4 / 0.8 / 0.1** |
-| Split sections | not measured | 7 | 0 | 0 | 0, 0 | **0, 0, 1** |
-| Copied example lines | not measured | 10 | 7 | 8 | 6, 7 | **7, 12, 11** |
-| First content p50 / p95 ms | not measured | 1013 / 1121 | 987 / 1209 | 996 / 1077 | 968 / 1129, 975 / 1080 | **1041 / 1163, 1041 / 1167, 1037 / 1225** |
-| Completion p50 / p95 ms | not measured | 1701 / 2451 | 1655 / 2450 | 1731 / 2350 | 1669 / 2214, 1653 / 2245 | **1866 / 2596, 1809 / 2584, 1935 / 2598** |
+| Per 24 screens | 2026-11-18 (new prompt, blueprint) | Round 0: today's prompt and parser | (a) `column:` taught | (b) the parser joins | Round 1 (2 runs) | Round 2 (3 runs) | **Round 3, final (the fix round)** |
+|---|---|---|---|---|---|---|---|
+| Valid | 24 (parsed) | 24 | 24 | 24 | 24, 24 | 24, 24, 24 | **24** |
+| More than one filled button, before polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | **0** |
+| More than one filled button, after polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | **0** |
+| Coloured nodes | 5 | 7 | 6 | 10 | 3, 3 | 0, 5, 1 | **0** |
+| Kinds per screen | 5.3 | 5.33 | 4.96 | 5.38 | 5.04, 4.83 | 5.58, 5.00, 5.12 | **5.42** |
+| Leaves per screen | 8.5 | 8.79 | 8.00 | 8.42 | 8.12, 8.17 | 8.92, 8.12, 8.42 | **8.67** |
+| Rows / cards / grids per screen | not measured | 1.71 / 0 / 0.17 | 1.92 / 0 / 0 | 1.50 / 0 / 0.25 | 1.92 / 0 / 0.04, 1.96 / 0.04 / 0.04 | 1.46 / 0.67 / 0.12, 1.46 / 0.62 / 0, 1.38 / 0.75 / 0.08 | **1.38 / 0.62 / 0.08** |
+| Split sections | not measured | 7 | 0 | 0 | 0, 0 | 0, 0, 1 | **0** |
+| Copied example lines | not measured | 10 | 7 | 8 | 6, 7 | 7, 12, 11 | **8** |
+| First content p50 / p95 ms | not measured | 1013 / 1121 | 987 / 1209 | 996 / 1077 | 968 / 1129, 975 / 1080 | 1041 / 1163, 1041 / 1167, 1037 / 1225 | **1000 / 1129** |
+| Completion p50 / p95 ms | not measured | 1701 / 2451 | 1655 / 2450 | 1731 / 2350 | 1669 / 2214, 1653 / 2245 | 1866 / 2596, 1809 / 2584, 1935 / 2598 | **2090 / 2904** |
 
 The bar was the 2026-11-18 column: 24 valid, no screen with more than one filled button after the polish, at most 5
-coloured nodes, at least 5 kinds and 5 to 14 leaves per screen. Round 2's wording meets it in all three runs. Its 72
-screens together: 72 valid, 6 coloured nodes (2 per 24), 5.2 kinds and 8.5 leaves per screen, 0.7 cards per screen,
-first content p50 1041 ms and p95 1225 ms, completion p50 1936 ms and p95 2598 ms.
+coloured nodes, at least 5 kinds and 5 to 14 leaves per screen. Round 2's wording met it in all three runs; its 72
+screens together: 72 valid, 6 coloured nodes (2 per 24), 5.24 kinds and 8.49 leaves per screen, 0.68 cards per
+screen, first content p50 1041 ms and p95 1225 ms, completion p50 1936 ms and p95 2598 ms. Round 3, the final wording,
+meets it too (one run, as the fix round asked). Its completion is slower, p50 2090 ms: the settings screens came out
+longer (13 to 14 leaves), and more lines use "text grey" (23, against 13 to 18 in round 2's runs).
 
 ### A heading with its container: the parser, not the prompt
 
@@ -109,9 +112,9 @@ profiles' headings over their grids, a habit tracker's divider over its grid.
 - (a) taught `column:` in the grammar ("a column keeps them together in one section", with a heading over a grid shown
   in one), and wrapped the form's and the profile's examples in `column:`. Only 3 of 24 screens wrote `column:`, all
   checkouts copying the form's shape; every profile stopped after its first section, with no grid (5 leaves each), and
-  kinds and leaves per screen fell to 5.0 and 8.0.
+  kinds and leaves per screen fell to 4.96 and 8.00.
 - (b) changed the parser: a container written straight after a section's lines, with no blank line between, joins that
-  section. With the prompt as it was, the run was 24 valid with 5.4 kinds and 8.4 leaves per screen and no split
+  section. With the prompt as it was, the run was 24 valid with 5.38 kinds and 8.42 leaves per screen and no split
   section; the 7 of round 0 are each of this kind, and the parser now joins them whatever the model writes.
 
 (b) is kept: it needs no prompt change, takes nothing from what the model writes, and fixes every case measured. It is
@@ -130,11 +133,21 @@ a section once lines follow it, which changes its key mid-stream.
 - Round 2 kept that and changed two more compact rules: the shape rule gains "Details that belong together, such as a
   summary or a set of figures, go in a card: or a grid 2:.", and "Use 5 to 12 elements." became "Use 6 to 12
   elements." Cards went from none to 0.7 per screen, kinds to 5.0 to 5.6, colour to 0 to 5. Three runs all meet the bar.
+- Round 3, the fix round, after review: the compact prompt contradicted itself twice. Its settings example showed
+  `button: Turn off all notifications [plain, red]` under a rule that says "not even blue, red or grey", and that rule
+  banned grey, then prescribed text grey. Now the compact prompt shows its example without the colours its looks give
+  elements (`ScreenPrompt.withoutColour`: a look word that names a colour is left out, "text grey" stays), so the
+  settings example's button is `[plain]`; and the rule's last sentence, "Quieter words are text grey.", became "For
+  quieter words use text grey, which isn't one." The example library itself is unchanged, so the full prompt and the
+  Settings template keep the red Turn off button, which the full rules allow ("red only for something destructive").
+  One run: 24 valid, no colour, 5.42 kinds and 8.67 leaves per screen.
 
-Only the compact rules changed; the grammar, the examples and the full rules are as they were, so hosted models' outline
-prompt is unchanged. Indentation cost nothing: every screen of every run was valid, and none needed a fix, so the
-compact grammar keeps teaching `row:`, `card:` and `grid 2:`. `ScreenPromptWordingTests` pins the final wording of
-both outline prompts and of the A2UI prompt, word for word.
+The grammar, the example library and the full rules are as they were, so hosted models' outline prompt is word for word
+unchanged; only the compact prompt changed, in its rules and in how it shows its example. Indentation cost nothing:
+every screen of every run was valid, and none needed a fix, so the compact grammar keeps teaching `row:`, `card:` and
+`grid 2:`. `ScreenPromptWordingTests` pins the final wording of both outline prompts and of the A2UI prompt, word for
+word, and `OutlinePromptTests.theCompactPromptsExampleShowsNoColour` checks that no example the compact prompt can show
+carries a colour, while the full prompt and the Settings template keep theirs.
 
 ### Hosted models: LM Studio, smoke only
 

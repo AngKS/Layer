@@ -30,10 +30,12 @@ import Foundation
 
     // MARK: Check
 
-    /// Scores the canned answers, each streamed a line at a time as a model would write it. No model runs.
+    /// Scores the canned answers, each streamed a line at a time as a model would write it. No model runs. Each passes
+    /// when its reader handed on a screen and the whole answer is valid.
     private static func check() -> Bool {
         var outline = Summary(label: "check outline")
         var a2ui = Summary(label: "check a2ui")
+        var handedOn = true
         for (format, text) in [(Format.outline, Briefs.cannedOutline), (.a2ui, Briefs.cannedA2UI)] {
             var reader = Reader(format)
             var shown = 0
@@ -46,13 +48,17 @@ import Foundation
             let score = format == .outline ? Score.outline(written) : Score.a2ui(written)
             print("=== check \(format.rawValue): \(shown) screens handed on\n\(score.line)")
             if format == .outline { outline.scores.append(score) } else { a2ui.scores.append(score) }
-            if shown == 0 { print("ERR check \(format.rawValue): the stream handed on nothing") }
+            if shown == 0 {
+                print("ERR check \(format.rawValue): the stream handed on nothing")
+                handedOn = false
+            }
         }
         print(outline.line)
         print(a2ui.line)
         let outlineValid = outline.scores.filter(\.valid).count, a2uiValid = a2ui.scores.filter(\.valid).count
-        print("harness \(outlineValid == 1 && a2uiValid == 1 ? "ok" : "FAILED"): outline \(outlineValid)/1 valid, a2ui \(a2uiValid)/1 valid")
-        return outlineValid == 1 && a2uiValid == 1
+        let ok = handedOn && outlineValid == 1 && a2uiValid == 1
+        print("harness \(ok ? "ok" : "FAILED"): outline \(outlineValid)/1 valid, a2ui \(a2uiValid)/1 valid")
+        return ok
     }
 
     // MARK: Models
@@ -124,13 +130,15 @@ import Foundation
         var reader = Reader(format)
         var text = ""
         var firstContent: Duration?
+        var completion = Duration.zero
         do {
             let tokens = try await answer { soFar in
                 text = soFar
                 if reader.take(soFar, isComplete: false) != nil, firstContent == nil { firstContent = clock.now - start }
             }
             if reader.take(text, isComplete: true) != nil, firstContent == nil { firstContent = clock.now - start }
-            summary.completion.append(clock.now - start)
+            completion = clock.now - start
+            summary.completion.append(completion)
             if let firstContent { summary.firstContent.append(firstContent) }
             if let tokens { summary.outputTokens.append(tokens) }
         } catch {
@@ -139,7 +147,7 @@ import Foundation
             return
         }
         let score = format == .outline ? Score.outline(text) : Score.a2ui(text)
-        let timing = "firstContent=\(firstContent.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms completion=\(Int(((clock.now - start) / .milliseconds(1)).rounded()))ms"
+        let timing = "firstContent=\(firstContent.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms completion=\(Int((completion / .milliseconds(1)).rounded()))ms"
         print("=== \(summary.label) · \(brief)\n\(text)\n\(score.line) \(timing)\n")
         summary.scores.append(score)
     }
