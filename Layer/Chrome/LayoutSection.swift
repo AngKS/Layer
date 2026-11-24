@@ -93,9 +93,10 @@ struct LayoutSection: View, Equatable {
         }
     }
 
-    /// A grid's or overlay's horizontal and vertical alignment.
+    /// A grid's or overlay's horizontal and vertical alignment. "Across" is the horizontal row's label: "Horizontal"
+    /// is wider than the panel's label column and wrapped, as "Alignment" did. Its picker keeps the full words.
     @ViewBuilder private func edgePickers(_ alignment: LayerNode.Alignment, set: @escaping (LayerNode.Alignment) -> Void) -> some View {
-        PanelRow("Horizontal") {
+        PanelRow("Across") {
             Picker("Horizontal alignment", selection: Binding(get: { alignment.horizontal }, set: { edge in
                 var made = alignment
                 made.horizontal = edge
