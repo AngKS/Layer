@@ -493,7 +493,7 @@ extension DesignStore {
 
     /// Whether Group would make a group of what is selected: see `group(_:)`.
     func canGroup(_ selection: CanvasSelection) -> Bool {
-        groupable(selection) != nil
+        groupable(selection, minimum: 2, refusingAllOfAFreeGroup: true) != nil
     }
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
@@ -508,26 +508,35 @@ extension DesignStore {
     /// is named as its kind until it is renamed.
     @discardableResult
     func group(_ selection: CanvasSelection) -> ElementRef? {
-        guard let members = groupable(selection), let front = members.last,
-              let made = wrap(members.map(\.element.id), in: .group, layout: .free) else { return nil }
-        return ElementRef(host: front.ref.host, element: made)
+        guard let members = groupable(selection, minimum: 2, refusingAllOfAFreeGroup: true),
+              let host = members.last.flatMap(ref(of:))?.host,
+              let made = wrap(members, in: .group, layout: .free) else { return nil }
+        return ElementRef(host: host, element: made)
     }
 
-    /// The things Group puts in a group, back to front, or nil when it can't: see `group(_:)`.
-    private func groupable(_ selection: CanvasSelection) -> [(ref: ElementRef, element: DesignElement)]? {
-        var members: [(ref: ElementRef, element: DesignElement)] = []
+    /// Today's Group rules, on node ids (F4): the unlocked things selected, with no drawings or screens, sharing one
+    /// parent, at least `minimum` of them, back to front. All of a free group is refused when
+    /// `refusingAllOfAFreeGroup`. Nil when they can't be grouped.
+    ///
+    /// A thing locked by itself or a container above it, a drawing, and a thing that is gone or no longer where the
+    /// selection says are left out; a screen among them refuses them all. One parent is one container, one screen's
+    /// root, or the canvas's top level. Every child of a free group, grouped, would make that group again under a new
+    /// id: left with one child, the old group would dissolve into the new, and its name and angle with it. A locked
+    /// child, left out, keeps the rest from being all of it. A row, column, grid or card doesn't dissolve, so all of
+    /// what one holds can be wrapped.
+    func groupable(_ selection: CanvasSelection, minimum: Int, refusingAllOfAFreeGroup: Bool) -> [UUID]? {
+        var members: [UUID] = []
         for thing in things(in: selection) {
             guard case .element(let ref) = thing else { return nil }
-            guard let element = resolve(ref)?.element, element.kind != .drawing, !isLocked(thing) else { continue }
-            members.append((ref, element))
+            guard let placed = placed(ref), placed.node.kind != .drawing, !placed.isLocked else { continue }
+            members.append(ref.element)
         }
-        guard members.count > 1, let first = members.first,
-              members.allSatisfy({ $0.ref.host == first.ref.host && $0.element.group == first.element.group })
-        else { return nil }
-        // Every member of the group they are in would make that group again under a new id:
-        // left with one member, the old group would dissolve into the new, and its name and
-        // angle with it. A locked member, left out, keeps the rest from being all of it.
-        if let shared = first.element.group, self.members(of: shared).count == members.count { return nil }
+        guard members.count >= max(minimum, 1), let first = members.first, let shared = parent(of: first),
+              members.allSatisfy({ parent(of: $0) == shared }) else { return nil }
+        if refusingAllOfAFreeGroup, case .node(let id) = shared, let group = node(id), group.kind == .group,
+           group.resolvedLayout == .free, group.children.count == members.count {
+            return nil
+        }
         return members
     }
 

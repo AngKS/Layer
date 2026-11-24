@@ -504,7 +504,7 @@ extension DesignStore {
     }
 
     /// One change to the tree, one step; `written` nodes counted in `ListWork` when it changed anything.
-    private func changeTree(writing written: Int, _ body: (inout TreeContent) -> Void) {
+    func changeTree(writing written: Int, _ body: (inout TreeContent) -> Void) {
         #if DEBUG
         let version = contentVersion
         #endif

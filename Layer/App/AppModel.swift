@@ -1185,16 +1185,32 @@ final class AppModel {
 
     // MARK: Selection
 
+    // PROJECTION: deleted in plan 6
     /// The one element that is selected. Nil when several things are: see `selectedElements`.
+    /// The canvas reads `selectedNode`.
     var selectedElement: (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
         guard case .element(let ref) = selection, let found = store.resolve(ref) else { return nil }
         return (ref, found.element, found.placement)
     }
 
-    /// The one screen that is selected. Nil when several things are.
+    // PROJECTION: deleted in plan 6
+    /// The one screen that is selected. Nil when several things are. The canvas reads `selectedScreenID`.
     var selectedScreen: DesignScreen? {
         guard case .screen(let id) = selection else { return nil }
         return store.screen(id)
+    }
+
+    /// The one thing on a screen or the open canvas that is selected, where it is. Nil when several
+    /// things are, or it is gone.
+    var selectedNode: PlacedNode? {
+        guard case .element(let ref) = selection else { return nil }
+        return store.placed(ref)
+    }
+
+    /// The one screen that is selected. Nil when several things are, or it is gone.
+    var selectedScreenID: TreeScreen.ID? {
+        guard case .screen(let id) = selection, store.treeScreen(id) != nil else { return nil }
+        return id
     }
 
     /// Everything selected, one thing at a time, in the design's own order.
@@ -1210,6 +1226,7 @@ final class AppModel {
     /// for by several views on every frame of a drag or a pan.
     @ObservationIgnored private var thingsKept: (selection: CanvasSelection?, version: Int, things: [CanvasSelection])?
 
+    // PROJECTION: deleted in plan 6
     /// Every element selected, alone or among other things, from the back to the front.
     var selectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
         selectedThings.compactMap { thing in
@@ -1218,9 +1235,11 @@ final class AppModel {
         }
     }
 
+    // PROJECTION: deleted in plan 6
     /// Every element selected, with each group among them standing for what is in it, at any
     /// depth, that isn't a group itself: what the Format panel styles, and what voice is told
     /// is selected, neither of which knows of groups (F6). From the back to the front.
+    /// The canvas reads `selectedLeafNodes`.
     var selectedLeaves: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
         var seen: Set<DesignElement.ID> = []
         return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
@@ -1230,6 +1249,24 @@ final class AppModel {
                 return store.resolve(ref).map { (ref, $0.element, $0.placement) }
             }
         }.filter { seen.insert($0.ref.element).inserted }
+    }
+
+    /// What is selected, each container standing for its leaves at any depth; back to front, once each.
+    /// Hidden and locked ones included: what the Format panel styles, and what voice is told is selected.
+    var selectedLeafNodes: [PlacedNode] {
+        var seen: Set<UUID> = []
+        return selectedThings.flatMap { thing -> [PlacedNode] in
+            guard case .element(let ref) = thing, let selected = store.placed(ref) else { return [] }
+            guard selected.node.isContainer else { return [selected] }
+            var leaves: [UUID] = []
+            func collect(_ node: LayerNode) {
+                for child in node.children {
+                    if child.isContainer { collect(child) } else { leaves.append(child.id) }
+                }
+            }
+            collect(selected.node)
+            return leaves.compactMap(store.placed)
+        }.filter { seen.insert($0.node.id).inserted }
     }
 
     /// A tap that landed on the canvas itself rather than on an element's target: it picks
@@ -2235,12 +2272,14 @@ final class AppModel {
         self.selection = nil
     }
 
+    /// Read from the store's index on every change: what is selected is still there where the selection
+    /// says, and a suggestion's element where it was offered.
     private func dropSelectionOfMissingThings() {
         if let selection {
             let present = selection.things.filter { thing in
                 switch thing {
-                case .element(let ref): store.resolve(ref) != nil
-                case .screen(let id): store.screen(id) != nil
+                case .element(let ref): store.ref(of: ref.element) == ref
+                case .screen(let id): store.treeScreen(id) != nil
                 case .several: false
                 }
             }
@@ -2259,7 +2298,7 @@ final class AppModel {
     }
 
     private func place(of suggestion: KindSuggestion) -> SuggestedPlace? {
-        store.resolve(suggestion.ref).map { SuggestedPlace(frame: $0.element.frame, rotation: $0.element.resolvedRotation, placement: $0.placement) }
+        store.placed(suggestion.ref).map { SuggestedPlace(frame: $0.frame, rotation: $0.degrees, placement: $0.placement) }
     }
 
     // MARK: Did you mean
@@ -2409,7 +2448,9 @@ final class AppModel {
             add(element, at: point)
             if element.kind == .stickyNote { isEditingText = true }
         case .frame(let id):
-            guard let device = DeviceFrame.all.first(where: { $0.id == id }) else { return }
+            // A built-in, or one of the design's own; a frame this design doesn't have adds nothing.
+            let device = store.tree.settings.device(named: id)
+            guard device.id == id else { return }
             addFrame(device, centeredAt: point)
         case .template(let name):
             addTemplate(name, centeredAt: point)
