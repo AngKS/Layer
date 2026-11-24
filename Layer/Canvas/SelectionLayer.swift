@@ -192,7 +192,9 @@ struct SelectionLayer: View {
 
     /// A corner handle just outside the thing's turned box, in the view. Dragged, the
     /// thing is resized in its own axes, and the corner across from it stays put. A container
-    /// is resized in proportion, everything in it scaled alike (see `DesignStore.resizeGroup`).
+    /// placed freely is resized in proportion, everything in it scaled alike (see
+    /// `DesignStore.resizeGroup`); one a row, column, grid or overlay lays out, on each axis
+    /// the handle moved (`CanvasDrags.handleRule`).
     private func handle(_ corner: ElementLayout.Corner, on shape: TurnedRect, for selected: PlacedNode) -> some View {
         let point = TurnedRect(rect: shape.rect.insetBy(dx: -6, dy: -6), degrees: shape.degrees).corner(corner)
         return Circle()
@@ -204,7 +206,7 @@ struct SelectionLayer: View {
             .position(point)
             .canvasDrag(drags, model: model) { owner in
                 drags.adjust(selected.ref, findsNewHome: false, model: model, owner: owner) { placed in
-                    CanvasDrags.resizeRule(for: placed.node.isContainer ? .group : placed.node.kind, degrees: placed.degrees, corner: corner)
+                    CanvasDrags.handleRule(for: placed, corner: corner)
                 }
             }
     }
@@ -617,6 +619,21 @@ final class CanvasDrags {
                 ? ElementLayout.resizedProportionally(origin, degrees: degrees, from: corner, by: translation)
                 : ElementLayout.resizedTurned(origin, degrees: degrees, from: corner, by: translation, kind: kind)
             return (frame, [])
+        }
+    }
+
+    /// How a corner handle resizes the thing it is on, as the drag begins: a container placed freely in proportion,
+    /// what is in it scaling alike (`resizeRule(for: .group…)`); anything a row, column, grid or overlay lays out, a
+    /// container included, on each axis the handle moved along and by as much, as the Format panel sizes one axis at
+    /// a time (`DesignStore.resizeLaidOut` fixes only an axis that changed); anything else in its own axes.
+    static func handleRule(for placed: PlacedNode, corner: ElementLayout.Corner) -> Rule {
+        let kind = placed.node.kind, degrees = placed.degrees
+        guard placed.node.isContainer, placed.isLaidOut else {
+            return resizeRule(for: placed.node.isContainer ? .group : kind, degrees: degrees, corner: corner)
+        }
+        // A group or a card: neither keeps a shape of its own, so each axis goes as far as the handle does.
+        return { origin, translation in
+            (ElementLayout.resizedTurned(origin, degrees: degrees, from: corner, by: translation, kind: kind), [])
         }
     }
 

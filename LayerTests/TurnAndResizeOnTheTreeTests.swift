@@ -63,6 +63,10 @@ private func row(spacing: CGFloat = 8) -> LayerNode.Layout {
     .stack(LayerNode.Stack(axis: .horizontal, spacing: spacing))
 }
 
+private func column(spacing: CGFloat = 12) -> LayerNode.Layout {
+    .stack(LayerNode.Stack(axis: .vertical, spacing: spacing))
+}
+
 private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
     hypot(a.x - b.x, a.y - b.y)
 }
@@ -82,6 +86,24 @@ private extension AppModel {
     /// The node's own frame, in its parent's space.
     func ownFrame(of id: UUID) -> CGRect? {
         store.node(id)?.frame
+    }
+
+    /// One drag of a corner handle on the node `id`, selected, `translation` across the glass at the canvas's zoom, in
+    /// a few frames, through the rule the handle itself takes (`CanvasDrags.handleRule`).
+    func dragHandle(of id: UUID, _ corner: ElementLayout.Corner, by translation: CGSize) throws {
+        let ref = try ref(id)
+        selection = .element(ref)
+        let drags = CanvasDrags()
+        self.drags = drags
+        let owner = CanvasDrags.Owner()
+        let start = try #require(store.placed(id)).canvasShape.corner(corner)
+        for step in 1...4 {
+            let part = CGSize(width: translation.width * CGFloat(step) / 4, height: translation.height * CGFloat(step) / 4)
+            drags.moveNode(ref, by: part, startingAt: start, findsNewHome: false, owner: owner, model: self) { placed in
+                CanvasDrags.handleRule(for: placed, corner: corner)
+            }
+        }
+        drags.dropElement(ref, findsNewHome: false, owner: owner, model: self)
     }
 
     /// One turn of the knob, by `degrees`, unsnapped.
@@ -373,6 +395,68 @@ struct TurnAndResizeOnTheTreeTests {
         #expect(undo.canUndo)
         undo.undo()
         #expect(store.node(b.id)?.width.mode == .fit)
+    }
+
+    /// Final review A1-I1: a card a column lays out is a laid-out child, so its corner handle dragged straight down
+    /// makes it taller and nothing else. Its width keeps filling the column, and only its height becomes fixed.
+    @Test func aCardInAColumnDraggedDownByItsHandleChangesOnlyItsHeight() throws {
+        var card = container(.card, frame: CGRect(x: 0, y: 0, width: 353, height: 120), [leaf(.text, CGRect(x: 16, y: 16, width: 100, height: 24))])
+        card.width = LayerNode.Sizing(.fill(weight: 1))
+        let below = leaf(.text, CGRect(x: 0, y: 0, width: 353, height: 24))
+        let column = container(.group, column(), frame: CGRect(x: 20, y: 100, width: 353, height: 600), [card, below])
+        let (model, undo) = makeModel(design([screen([column])]))
+        let start = try #require(model.store.node(card.id))
+        #expect(start.frame.size == CGSize(width: 353, height: 120))
+
+        try model.dragHandle(of: card.id, .bottomRight, by: CGSize(width: 0, height: 50))
+
+        let resized = try #require(model.store.node(card.id))
+        #expect(resized.frame.height == 170)
+        #expect(resized.height.mode == .fixed)
+        #expect(resized.width == start.width, "it still fills the column across")
+        #expect(resized.frame.width == 353)
+        #expect(model.store.parent(of: card.id) == .node(column.id))
+        #expect(undo.undoActionName == "Resize")
+    }
+
+    /// Final review A1-I1: a row a column lays out resizes on each axis its handle moved, by as much as it moved, and
+    /// the axis it didn't keeps its sizing.
+    @Test func aRowInAColumnResizesOnlyTheAxesItsHandleMoved() throws {
+        let r = container(.group, row(), frame: .zero, fits: true, [fittingText("One"), fittingText("Two")])
+        let column = container(.group, column(), frame: CGRect(x: 20, y: 100, width: 353, height: 600), [r])
+        let (model, _) = makeModel(design([screen([column])]))
+        let start = try #require(model.store.node(r.id))
+
+        try model.dragHandle(of: r.id, .bottomRight, by: CGSize(width: 30, height: 0))
+
+        let across = try #require(model.store.node(r.id))
+        #expect(across.frame.width == start.frame.width + 30)
+        #expect(across.width.mode == .fixed)
+        #expect(across.height == start.height, "its height wasn't changed, so it still fits what it holds")
+        #expect(across.frame.height == start.frame.height)
+
+        // Both ways from the corner across: each axis by as much as the handle moved along it, not in proportion.
+        let now = across.frame.size
+        try model.dragHandle(of: r.id, .topLeft, by: CGSize(width: -10, height: -20))
+
+        let both = try #require(model.store.node(r.id))
+        #expect(both.frame.size == CGSize(width: now.width + 10, height: now.height + 20))
+        #expect(both.width.mode == .fixed)
+        #expect(both.height.mode == .fixed)
+        #expect(model.store.parent(of: r.id) == .node(column.id))
+    }
+
+    /// Final review A1-I1: a container placed freely keeps its handles' rule, scaling in proportion.
+    @Test func aFreeGroupsHandleStillResizesInProportion() throws {
+        let a = leaf(.text, CGRect(x: 0, y: 0, width: 100, height: 40))
+        let b = leaf(.text, CGRect(x: 100, y: 60, width: 100, height: 40))
+        let g = container(frame: CGRect(x: 20, y: 100, width: 200, height: 100), [a, b])
+        let (model, _) = makeModel(design([screen([g])]))
+
+        try model.dragHandle(of: g.id, .bottomRight, by: CGSize(width: 0, height: 50))
+
+        #expect(model.store.node(g.id)?.frame == CGRect(x: 20, y: 100, width: 300, height: 150))
+        #expect(model.store.node(b.id)?.frame == CGRect(x: 150, y: 90, width: 150, height: 60), "what it holds scales with it")
     }
 
     @Test func aFreeCardResizesWhatItHoldsAsAGroupDoes() throws {
