@@ -119,16 +119,16 @@ extension CGFloat {
 /// The design's own device frames (`CanvasSettings.customDevices`), added, edited and deleted, and the device each
 /// screen is drawn as.
 extension DesignStore {
-    /// One step, "Add Device"; returns its id. With `forScreen`, that screen takes it in the same step.
+    /// One step, "Add Device"; returns its id. With `forScreen`, that screen takes it in the same step, as any device
+    /// change does (`changeDevice(of:to:)`).
     ///
     /// A device whose id isn't a custom one, or is one the design already has, is added under a new id. One with
     /// problems (`DeviceFrame.problems`: no usable size, or no room left by its safe areas and margin) isn't added:
     /// the id is empty, and nothing changes.
     @discardableResult
     func addCustomDevice(_ device: DeviceFrame, forScreen screen: TreeScreen.ID? = nil) -> String {
-        addDevice(device) { content, id in
-            guard let screen, let index = content.tree.screens.firstIndex(where: { $0.id == screen }) else { return }
-            content.tree.screens[index].deviceID = id
+        addDevice(device) { added in
+            if let screen { changeDevice(of: screen, to: added) }
         }
     }
 
@@ -136,19 +136,24 @@ extension DesignStore {
     /// empty for a device with problems, which isn't added.
     @discardableResult
     func addCustomDeviceForNewScreens(_ device: DeviceFrame) -> String {
-        addDevice(device) { content, id in content.tree.settings.sketchDeviceID = id }
+        addDevice(device) { added in apply { $0.tree.settings.sketchDeviceID = added.id } }
     }
 
-    /// Replaces the design's device with `device`'s id, as one step, "Edit Device". Allowed while screens use it:
-    /// the rules lay them out again on it. A device the design doesn't have, or one with problems
+    /// Replaces the design's device with `device`'s id, as one step, "Edit Device". Allowed while screens use it, and
+    /// each changes with it: what a free one holds follows its placement intent from the device as it was
+    /// (`DeviceReflow`), and the rules lay any other out again. A device the design doesn't have, or one with problems
     /// (`DeviceFrame.problems`), changes nothing.
     func updateCustomDevice(_ device: DeviceFrame) {
-        guard device.problems.isEmpty, tree.settings.customDevices.contains(where: { $0.id == device.id }) else { return }
+        let tree = tree
+        guard device.problems.isEmpty, let old = tree.settings.customDevices.first(where: { $0.id == device.id }) else { return }
+        let reflows = tree.screens.filter { tree.device(of: $0) == old }
+            .map { (screen: $0.id, frames: DeviceReflow.frames(for: $0.root, from: old, to: device)) }
         asStep(named: String(localized: "Edit Device")) {
             apply { content in
                 guard let index = content.tree.settings.customDevices.firstIndex(where: { $0.id == device.id }) else { return }
                 content.tree.settings.customDevices[index] = device
             }
+            for each in reflows { reflow(each.screen, to: each.frames) }
         }
     }
 
@@ -168,29 +173,56 @@ extension DesignStore {
         return true
     }
 
-    /// Draws the screen as the device with the id, a built-in or one of the design's own; nil is the iPhone. An id the
-    /// design has no device for changes nothing, and so does a device of its own with problems (`DeviceFrame.problems`),
-    /// as a file can hold. The rules keep its root to the device and lay it out again.
+    /// Draws the screen as the device with the id, a built-in or one of the design's own; nil is the iPhone. It is a
+    /// device change (`changeDevice(of:to:)`), which the device picker makes. An id the design has no device for
+    /// changes nothing.
     func setDevice(of screen: TreeScreen.ID, to deviceID: String?) {
         let device = tree.settings.device(named: deviceID)
-        guard deviceID == nil || device.id == deviceID, device.problems.isEmpty else { return }
-        updateTreeScreen(screen) { $0.deviceID = device.id == DeviceFrame.iPhone.id ? nil : device.id }
+        guard deviceID == nil || device.id == deviceID else { return }
+        changeDevice(of: screen, to: device)
+    }
+
+    /// One step: the screen's device, and its contents by placement intent (a free root) or re-laid by the rules (any
+    /// other root). An iPhone is kept as no device, as today. Nothing happens for the same device.
+    ///
+    /// The device picker, Siri, voice and a device added for the screen all change a device through this (spec §5).
+    /// A device the design has no frame for changes nothing, and so does one of its own with problems
+    /// (`DeviceFrame.problems`), as a file can hold: the screen takes the design's own frame under `device`'s id.
+    func changeDevice(of screenID: TreeScreen.ID, to device: DeviceFrame) {
+        let tree = tree
+        guard let screen = tree.screens.first(where: { $0.id == screenID }) else { return }
+        let new = tree.settings.device(named: device.id)
+        guard new.id == device.id, new.problems.isEmpty, new.id != (screen.deviceID ?? DeviceFrame.iPhone.id) else { return }
+        // Worked out from the device it was drawn as, before the change.
+        let frames = DeviceReflow.frames(for: screen.root, from: tree.device(of: screen), to: new)
+        asOneStep {
+            updateTreeScreen(screenID) { $0.deviceID = new.id == DeviceFrame.iPhone.id ? nil : new.id }
+            reflow(screenID, to: frames)
+        }
     }
 
     // MARK: How the writes work
 
-    /// Adds `device`, under an id of its own, and lets `use` put it to use, in one change made as one step. Nothing, and
+    /// Puts a screen root's children at `frames`, by id, in one change through `reconcile`. Nothing for none.
+    private func reflow(_ screenID: TreeScreen.ID, to frames: [UUID: CGRect]) {
+        guard !frames.isEmpty else { return }
+        reconcile(screenID) { root in
+            for index in root.children.indices {
+                if let frame = frames[root.children[index].id] { root.children[index].frame = frame }
+            }
+        }
+    }
+
+    /// Adds `device`, under an id of its own, then lets `use` put the device added to use, as one step. Nothing, and
     /// an empty id, for a device with problems.
-    private func addDevice(_ device: DeviceFrame, _ use: (inout DesignContent, String) -> Void) -> String {
+    private func addDevice(_ device: DeviceFrame, then use: (DeviceFrame) -> Void) -> String {
         guard device.problems.isEmpty else { return "" }
         let settings = tree.settings
         let taken = Set(DeviceFrame.all.map(\.id) + settings.customDevices.map(\.id))
         let added = device.isCustom && !taken.contains(device.id) ? device : device.identified(as: DeviceFrame.customPrefix + UUID().uuidString)
         asStep(named: String(localized: "Add Device")) {
-            apply { content in
-                content.tree.settings.customDevices.append(added)
-                use(&content, added.id)
-            }
+            apply { $0.tree.settings.customDevices.append(added) }
+            use(added)
         }
         return added.id
     }

@@ -375,10 +375,16 @@ extension DesignStore {
     /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
     /// changes, when `ref` isn't a container where it says, or holds something this build couldn't read. A card, row,
     /// column, grid or overlay is taken apart as a group is. Read from the tree.
+    ///
+    /// Taking apart a row, column or grid the structure pass made declines what it held, so
+    /// that the pass never puts it back (plan 5, call 11). The marks are no step of their own.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = placed(ref), item.node.isContainer else { return nil }
-        return CanvasSelection(unwrap(ref.element).map { .element(ElementRef(host: ref.host, element: $0)) })
+        let wasThePasses = item.node.sketch?.decidedBy == .structure
+        let members = unwrap(ref.element)
+        if wasThePasses { declineStructure(members) }
+        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as

@@ -21,6 +21,8 @@ struct SketchFixture: Codable, Sendable, Identifiable {
     struct ExistingFixture: Codable, Sendable, Equatable {
         var kind: ElementKind
         var frame: [Double] // x, y, width, height
+        /// Set only by the structure fixtures, for a thing the pass never touches; absent from the sketch corpus's files.
+        var locked: Bool?
     }
 
     enum PlacementKind: String, Codable, Sendable { case openCanvas, onScreen }
@@ -76,10 +78,10 @@ extension SketchFixture {
 enum SketchFixtureCorpus {
     static func load(from directory: URL) throws -> [SketchFixture] {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            // Other tests' files are bundled beside these: whole designs (`design-`) and A2UI
-            // examples (`a2ui-`).
+            // Other tests' files are bundled beside these: whole designs (`design-`), A2UI
+            // examples (`a2ui-`) and the structure fixtures (`structure-`).
             .filter { url in
-                url.pathExtension == "json" && !["design-", "a2ui-"].contains { url.lastPathComponent.hasPrefix($0) }
+                url.pathExtension == "json" && !["design-", "a2ui-", "structure-"].contains { url.lastPathComponent.hasPrefix($0) }
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let decoder = JSONDecoder()

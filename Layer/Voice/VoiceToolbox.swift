@@ -384,26 +384,27 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    /// Lays a whole screen out again with design sense: see `ScreenTidy`. One change, so
-    /// one undo puts it back.
+    /// Lays a whole screen out again with design sense: the structure pass in its tidy mode
+    /// (`DesignStore.tidy(_:)`). One change, so one undo puts it back.
     func tidyScreen(screen: String?) -> String {
         forCommand {
             guard let model else { return gone }
             switch screenMeant(screen, in: model) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                let frames = ScreenTidy.frames(for: found.elements, on: found.device)
                 let handle = handles.handle(forScreen: found.id)
-                guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+                let built = model.store.tidy(found.id)
+                guard !built.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+                model.rememberBuiltStructures(built)
                 reveal(.screen(found.id), in: model)
-                model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
                 return done("Tidied the layout of \(handle).")
             }
         }
     }
 
-    /// Makes a screen another device's and lays what is on it out again for that size,
-    /// so that it looks made for it rather than a phone's layout in a tablet's corner.
+    /// Makes a screen another device's, as the device picker and Siri do (`changeDevice(of:to:)`):
+    /// what is on it follows where it was put, so that it looks made for the new size rather
+    /// than a phone's layout in a tablet's corner.
     func changeScreenDevice(screen: String?, device: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -414,23 +415,12 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 let handle = handles.handle(forScreen: found.id)
-                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(Int(frame.size.width)) × \(Int(frame.size.height)))"
+                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(frame.size.width.wholePoints) × \(frame.size.height.wholePoints))"
                 guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
-                let frames = ScreenTidy.frames(for: found.elements, on: frame, from: found.device)
-                model.store.updateScreen(found.id) { screen in
-                    // An iPhone is kept as no device at all, as the Siri action keeps it.
-                    screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
-                    Self.apply(frames, to: &screen)
-                }
+                model.store.changeDevice(of: found.id, to: frame)
                 reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
-        }
-    }
-
-    private static func apply(_ frames: [DesignElement.ID: CGRect], to screen: inout DesignScreen) {
-        for index in screen.elements.indices {
-            if let frame = frames[screen.elements[index].id] { screen.elements[index].frame = frame }
         }
     }
 
