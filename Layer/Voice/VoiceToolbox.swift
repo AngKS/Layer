@@ -393,7 +393,9 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 let handle = handles.handle(forScreen: found.id)
-                guard model.store.tidy(found.id) else { return failed("There is nothing on \(handle) that can be tidied.") }
+                let built = model.store.tidy(found.id)
+                guard !built.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+                model.rememberBuiltStructures(built)
                 reveal(.screen(found.id), in: model)
                 return done("Tidied the layout of \(handle).")
             }

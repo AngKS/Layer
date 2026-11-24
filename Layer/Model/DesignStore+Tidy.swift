@@ -7,14 +7,15 @@ import Foundation
 extension DesignStore {
     /// Voice's "tidy up" (§5, call 10): the pass in tidy mode over the screen's free root and its sketched free cards,
     /// every arrangeable child new, every container the pass made growing; each structure built. Inside the caller's
-    /// step, or a step of its own when there is none. False when nothing qualified.
+    /// step, or a step of its own when there is none. Returns what it built: each row, column and grid, and a card whose
+    /// column it built, by the card's id; none when nothing qualified.
     ///
     /// Inside out, as the pass after a batch goes: a card's column is built before the root it lies on is looked at.
     /// What the tidy builds keeps where it lies: a column starts where its first member is, so a screen tidied keeps its
     /// top where it was rather than moving it to a margin of its own.
-    @discardableResult func tidy(_ screenID: TreeScreen.ID) -> Bool {
+    @discardableResult func tidy(_ screenID: TreeScreen.ID) -> [UUID] {
         let tokens = tree.settings.tokens
-        var built = false
+        var built: [UUID] = []
         asOwnStep {
             for id in tidiedContainers(on: screenID) {
                 guard let parent = node(id), let depth = index[id]?.depth else { continue }
@@ -25,7 +26,7 @@ extension DesignStore {
                 let sure = decisions.compactMap { decision in
                     if case .apply(let structure) = decision { structure } else { nil }
                 }
-                if !build(sure).isEmpty { built = true }
+                built += build(sure)
             }
         }
         return built

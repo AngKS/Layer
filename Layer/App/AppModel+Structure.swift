@@ -78,6 +78,16 @@ extension AppModel {
         if let built, offer.structure.kind != .cardColumn { builtStructures[built] = store.node(built) }
     }
 
+    /// Remembers each of `ids` that is a container the pass made, as it is now, so that it grows as more is drawn just as
+    /// what the pass builds after a batch does (call 2): voice's tidy is the pass too (call 10). A card whose column was
+    /// built is the person's drawing, not one of them.
+    func rememberBuiltStructures(_ ids: [UUID]) {
+        for id in ids {
+            guard let node = store.node(id), node.kind == .group, node.sketch?.decidedBy == .structure else { continue }
+            builtStructures[id] = node
+        }
+    }
+
     /// "Keep them as drawn": what was offered is declined, so that the pass never offers it again (call 11). No step.
     func declineStructureOffer() {
         guard let offer = structureOffer else { return }
