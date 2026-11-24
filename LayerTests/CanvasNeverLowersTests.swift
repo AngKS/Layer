@@ -281,7 +281,9 @@ extension HostedWindowSuites {
     /// views built, over 60 frames of a line, a free group of three lines and a row's child, for the benchmark doc's
     /// "drag frame" row. It runs only when `LAYER_BENCHMARK` is set (`TEST_RUNNER_LAYER_BENCHMARK=1`), alone, so that no
     /// other suite writes or builds views meanwhile, and prints a `BENCH drag <what> frames=60 writes=… targets=…
-    /// nodeViews=…` line for each. Each count is summed over the board's own ids, as the counters' tests sum them (F9).
+    /// nodeViews=…` line for each. Targets and node views are summed over the board's own ids, as the counters' tests
+    /// sum them (F9); writes are read from the process-wide `ListWork.elementsWritten`, which only this suite adds to
+    /// as it runs alone.
     @MainActor
     @Suite("Drag frame benchmark", .serialized, .enabled(if: ProcessInfo.processInfo.environment["LAYER_BENCHMARK"] != nil))
     struct DragFrameBenchmarkTests {

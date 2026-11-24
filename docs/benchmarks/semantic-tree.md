@@ -231,8 +231,9 @@ UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47, with the commands above, from 02:08 t
     0.854, 0.860 / 0.895 / 0.934.
   - On the tree with the next read, medians: move 0.872 / 0.971, resize 0.841 / 0.880, text 0.972 / 1.014, add 1.064 /
     1.120.
-  - A drag frame, with `CanvasScreen` shown and the Layers and Format panels open, each count summed over the board's
-    own ids, the same in all three runs: `BENCH drag line frames=60 writes=60 targets=60 nodeViews=120`, `BENCH drag
+  - A drag frame, with `CanvasScreen` shown and the Layers and Format panels open, the targets and node views summed
+    over the board's own ids and the writes read from the process-wide `ListWork.elementsWritten`, which only this
+    benchmark adds to as it runs alone, the same in all three runs: `BENCH drag line frames=60 writes=60 targets=60 nodeViews=120`, `BENCH drag
     group frames=60 writes=60 targets=60 nodeViews=120`, `BENCH drag rowChild frames=60 writes=0 targets=0 nodeViews=1`.
   - The counter tests, run once after them (`HostedWindowSuites/NodeViewWorkTests/oneEditRebuildsOnlyTheViewsOnItsPath()`,
     `CanvasDragWorkTests`, `HostedWindowSuites/CanvasTargetsWorkTests`,
