@@ -89,7 +89,9 @@ import Testing
         }
     }
 
-    @Test func shortcutsWrittenForTheBlueprintReadTheSame() throws {
+    /// Read as a hand-written outline is read, every look number and all. Build Screen reads the same lines as a
+    /// model's outline and passes the numbers over (`BuildScreenTests.shortcutsWrittenForTheBlueprintStillBuild`).
+    @Test func aHandWrittenOutlineReadsWhatTheBlueprintRead() throws {
         let login = Outline.parse("title: Welcome back\ntext field: Email\ntext field: Password\nbutton: Sign in", isComplete: true)
         #expect(leaves(login).map(\.kind) == [.title, .textField, .textField, .button])
         #expect(leaves(login).map(\.content.text) == ["Welcome back", "Email", "Password", "Sign in"])
@@ -107,6 +109,11 @@ import Testing
         let body = try #require(all(settings).first { $0.kind == .body })
         #expect(body.style.textColor == RGBColor(hex: 0x333333))
         #expect(body.style.fontSize == 15)
+        let built = Outline.parse(
+            "heading: Settings\n\nrow: button: Cancel | button: Done [blue, bold, radius 12]\n---\nbody: Tap a row to change it [text #333333, 15pt]",
+            isComplete: true, tokens: .standard, readsLookNumbers: false)
+        #expect(all(built).first { $0.content.text == "Done" }?.style.cornerRadius == nil)
+        #expect(all(built).first { $0.kind == .body }?.style.fontSize == nil)
 
         let mixed = Outline.parse("icon: heart.fill; switch; separator; Just some words", isComplete: true)
         #expect(leaves(mixed).map(\.kind) == [.symbol, .toggle, .divider, .text])

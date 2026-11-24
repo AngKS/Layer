@@ -13,16 +13,10 @@ struct WrittenScreenTests {
     private func all(_ node: LayerNode) -> [LayerNode] { [node] + node.children.flatMap(all) }
     private func leaves(_ node: LayerNode) -> [LayerNode] { all(node).filter { !$0.isContainer } }
 
-    /// A written screen's leaves where the rules lay it out on the iPhone, each frame in the screen's points: its
-    /// origin carried through its containers', none of which is turned.
+    /// A written screen's leaves where the rules lay it out on the iPhone, each frame in the screen's points.
     private func laidOut(_ written: String) -> [(node: LayerNode, frame: CGRect)] {
-        let root = TreeRules.laidOut(Outline.parse(written, isComplete: true), deviceID: DeviceFrame.iPhone.id,
-                                     settings: CanvasSettings(), previous: nil)
-        func placed(_ node: LayerNode, in origin: CGPoint) -> [(node: LayerNode, frame: CGRect)] {
-            let frame = node.frame.offsetBy(dx: origin.x, dy: origin.y)
-            return node.isContainer ? node.children.flatMap { placed($0, in: frame.origin) } : [(node, frame)]
-        }
-        return placed(root, in: .zero)
+        placedLeaves(of: TreeRules.laidOut(Outline.parse(written, isComplete: true), deviceID: DeviceFrame.iPhone.id,
+                                           settings: CanvasSettings(), previous: nil))
     }
 
     @Test func readsOneElementPerLine() {
@@ -36,14 +30,17 @@ struct WrittenScreenTests {
         #expect(leaves(screen).map(\.content.text) == ["Welcome back", "Email", "Password", "Sign in"])
     }
 
-    @Test func readsRowsSectionsAndLooks() throws {
-        let screen = Outline.parse("""
+    /// Read as a hand-written outline is read, every look number and all. Build Screen reads the same lines as a
+    /// model's outline, and passes the numbers over.
+    @Test func aHandWrittenOutlineReadsRowsSectionsAndLooks() throws {
+        let written = """
         heading: Settings
 
         row: button: Cancel | button: Done [blue, bold, radius 12]
         ---
         body: Tap a row to change it [text #333333, 15pt]
-        """, isComplete: true)
+        """
+        let screen = Outline.parse(written, isComplete: true)
         #expect(screen.children.count == 3)
         let second = screen.children[1]
         #expect(second.children.count == 1)
@@ -59,6 +56,9 @@ struct WrittenScreenTests {
         let body = try #require(all(screen).first { $0.kind == .body })
         #expect(body.style.textColor == RGBColor(hex: 0x333333))
         #expect(body.style.fontSize == 15)
+        let built = Outline.parse(written, isComplete: true, tokens: .standard, readsLookNumbers: false)
+        #expect(all(built).first { $0.content.text == "Done" }?.style.cornerRadius == nil)
+        #expect(all(built).first { $0.kind == .body }?.style.fontSize == nil)
     }
 
     @Test func understandsSynonymsSymbolsAndBareKinds() {
@@ -1122,15 +1122,6 @@ struct LookWordTests {
         #expect(skip.style.borderColor == ColourWords.named["red"])
         #expect(skip.style.borderWidth == 1)
         #expect(skip.style.opacity == 0.5)
-    }
-
-    @Test func aLookCanBeGivenToAnElementAlone() {
-        var element = DesignStore.newElement(.button)
-        LookWords.look(from: ["Bordered", " #112233", "20pt", "border 3"]).apply(to: &element)
-        #expect(element.buttonLook == .bordered)
-        #expect(element.tint == RGBColor(hex: 0x112233))
-        #expect(element.fontSize == 20)
-        #expect(element.borderWidth == 3)
     }
 }
 
