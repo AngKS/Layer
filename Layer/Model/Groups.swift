@@ -437,10 +437,16 @@ extension DesignStore {
     /// group's added up, and takes on the group's lock and hide, so that a hidden group's
     /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
     /// changes, when `ref` isn't a group, or holds something this build couldn't read.
+    ///
+    /// Taking apart a row, column or grid the structure pass made declines what it held, so
+    /// that the pass never puts it back (plan 5, call 11). The marks are no step of their own.
     @discardableResult
     func ungroup(_ ref: ElementRef) -> CanvasSelection? {
         guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        return CanvasSelection(unwrap(item.id).map { .element(ElementRef(host: ref.host, element: $0)) })
+        let wasThePasses = node(item.id)?.sketch?.decidedBy == .structure
+        let members = unwrap(item.id)
+        if wasThePasses { declineStructure(members) }
+        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as

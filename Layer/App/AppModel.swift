@@ -971,6 +971,7 @@ final class AppModel {
         generationDismissal?.cancel()
         settle?.cancel()
         suggestionExpiry?.cancel()
+        structureOfferExpiry?.cancel()
         for conversion in conversions { conversion.cancel() }
         conversions.removeAll()
         // A rename under way finishes: stopping it halfway would leave the file misnamed.
@@ -2319,8 +2320,23 @@ final class AppModel {
             if present.count != selection.things.count { self.selection = CanvasSelection(present) }
         }
         // Taking an offer lays the element out again from its sketch: once it, or its
-        // screen, has been moved, resized or turned, that would undo the move.
-        if suggestion != nil, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+        // screen, has been moved, resized or turned, that would undo the move. The structure
+        // pass lining it up is the app's own doing, and leaves it (`keepingTheSuggestion`).
+        if suggestion != nil, !isKeepingTheSuggestion, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+        // "Make a row?" goes too once one of its members, or their screen, has changed (call 12).
+        if structureOfferIsStale { dismissStructureOffer() }
+    }
+
+    /// Makes the structure pass's own changes without taking a "Did you mean" away: lining its node up in a row is the
+    /// app's doing, not the person's, and taking the offer still lays the node out from its sketch in what holds it.
+    /// Its place is read again once they are made, and it goes only if its node has.
+    func keepingTheSuggestion(_ body: () -> Void) {
+        let outer = isKeepingTheSuggestion
+        isKeepingTheSuggestion = true
+        body()
+        isKeepingTheSuggestion = outer
+        guard !outer, let suggestion else { return }
+        if let place = place(of: suggestion) { suggestedPlace = place } else { dismissSuggestion() }
     }
 
     /// Where a suggestion's element is: its frame and turn, and where its screen is.
@@ -2343,6 +2359,25 @@ final class AppModel {
     @ObservationIgnored private var suggestedPlace: SuggestedPlace?
     /// How long a suggestion stays up when it is left alone.
     static let suggestionLifetime: Duration = .seconds(8)
+
+    // MARK: The structure pass's state (its work is in AppModel+Structure.swift)
+
+    /// What the last structure pass offered, while that is on offer: shown once no "Did you mean" is up (call 12).
+    /// Set only by the pass's own methods, which live in another file and so can't be given a private setter.
+    var structureOffer: StructureOffer?
+    /// Takes the offer away once it has shown for `StructureConventions.offerLifetime`.
+    @ObservationIgnored var structureOfferExpiry: Task<Void, Never>?
+    /// Where each member of the offer was when it was offered: see `OfferedPlace`.
+    @ObservationIgnored var structureOfferPlaces: [UUID: OfferedPlace] = [:]
+    /// The nodes the readings have made since the batch began, for the pass once it settles (call 1).
+    @ObservationIgnored var sketchBatch: [UUID] = []
+    /// Each row, column and grid the pass built in this session, as it was once built (F10). One that is still exactly
+    /// that, everything in it included, may grow; any change by the person stops it. Kept in memory only.
+    @ObservationIgnored var builtStructures: [UUID: LayerNode] = [:]
+    /// True while the pass makes its own changes: see `keepingTheSuggestion(_:)`.
+    @ObservationIgnored private var isKeepingTheSuggestion = false
+    /// Readings begun (`convertNow`, `convertSelection`) and not yet finished: the batch ends at the commit of the last.
+    @ObservationIgnored private var conversionsUnderWay = 0
 
     /// Offers to make what a sketch became into what it nearly was. One offer shows at a
     /// time, and goes by itself after a while.
@@ -2377,6 +2412,8 @@ final class AppModel {
         suggestionExpiry = nil
         suggestion = nil
         suggestedPlace = nil
+        // A structure offer that waited for it shows now, and its time starts (call 12).
+        startStructureOfferClock()
     }
 
     /// True while a number field is being scrubbed.
@@ -2608,6 +2645,7 @@ final class AppModel {
         let zoom = viewport.scale
         for group in unreadGroups(zoom: zoom) {
             inFlight.formUnion(group.map(\.key))
+            conversionsUnderWay += 1
             let conversion = Task { [weak self] () -> Void in await self?.convert(group, zoom: zoom) }
             conversions.append(conversion)
             Task { [weak self] in
@@ -2625,6 +2663,7 @@ final class AppModel {
         guard !strokes.isEmpty else { return }
         selection = nil
         let zoom = viewport.scale
+        conversionsUnderWay += 1
         let conversion = Task { [weak self] () -> Void in
             guard let self else { return }
             await convert(onScreen(strokes, zoom: zoom), zoom: zoom, drawing: selected.ref, prompt: prompt)
@@ -2684,8 +2723,11 @@ final class AppModel {
         let keys = Set(group.map(\.key))
         let isDrawing = drawing != nil
         defer { if !isDrawing { inFlight.subtract(keys) } }
+        defer { conversionsUnderWay -= 1 }
         guard let observation = SketchAnalyzer.observe(group) else {
             if !isDrawing { reject(keys) }
+            // The last of a batch that made nothing: the pass over what the batch made is a step of its own (call 1).
+            if conversionsUnderWay == 1 { endSketchBatch() }
             return
         }
 
@@ -2796,6 +2838,11 @@ final class AppModel {
                 } else if !isDrawing {
                     reject(keys)
                 }
+                // What a reading made on a screen joins the batch, and the last reading of the batch ends it: the pass
+                // over what it made is part of this step, so that a structure it is sure of undoes with this reading,
+                // or is the step itself when this reading made nothing (call 1).
+                if let added, case .screen = added.host { sketchBatch.append(added.element) }
+                if conversionsUnderWay == 1 { endSketchBatch() }
             }
         }
     }

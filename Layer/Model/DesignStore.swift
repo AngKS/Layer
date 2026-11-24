@@ -957,10 +957,35 @@ final class DesignStore {
             register(step)
         }
         step.record(from: before, to: content, change: changeCount)
+        declineWhatLeftAStructure(since: before)
         // Told only now that it is recorded. Whatever the notice sets off, such as the ink
         // canvas following an eraser, is a change of its own, recorded in its own step: told
         // before, it went into this step as well (review I-1).
         onChange?(content)
+    }
+
+    /// Plan 5's call 11 (F4): a node a change took out of a container the structure pass made, into another parent, is
+    /// declined, whichever verb moved it: the canvas's drops and lifts, the Layers panel, several things dragged, Siri
+    /// and voice. Not after an undo or a redo, which never come through here anyway, and not for a container that is gone,
+    /// so that a structure grown into another, undone or ungrouped declines nothing this way (`ungroup` declines on its
+    /// own). The marks are written after the change's step is recorded, outside it, and told with the change.
+    private func declineWhatLeftAStructure(since before: DesignContent) {
+        if let undoManager, undoManager.isUndoing || undoManager.isRedoing { return }
+        let leaving = Self.takenOutOfStructures(from: before.tree, to: content.tree)
+        guard !leaving.isEmpty else { return }
+        isChanging = true
+        defer { isChanging = false }
+        markDeclinedOutsideTheHistory(leaving)
+    }
+
+    /// Writes the structure pass's declines (`declining(_:in:)`) outside every step, as a suggested title is written
+    /// (`setTitle(undoable: false)`): undo never takes one back, and no Undo lights for one. False when none changed.
+    @discardableResult
+    func markDeclinedOutsideTheHistory(_ ids: [UUID]) -> Bool {
+        let marked = Self.declining(Set(ids), in: content.tree)
+        guard marked != content.tree else { return false }
+        content.tree = marked
+        return true
     }
 
     /// Makes a change, then cuts the pointers it left that the tree can't hold and runs the
