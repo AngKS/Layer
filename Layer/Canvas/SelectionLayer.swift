@@ -351,6 +351,9 @@ final class CanvasDrags {
     /// The boxes on the canvas, as the drag began, of the free containers round the one thing placed freely: while
     /// the finger is in one, it keeps the thing (`TreeDrop`). Its box grows round the thing as it is dragged.
     @ObservationIgnored private var startBoxes: [UUID: TurnedRect] = [:]
+    /// Whether the finger, as last seen, is in one of those boxes: the thing stays in its free group when let go there,
+    /// even over a screen it would otherwise go to (fix round 2, N2).
+    @ObservationIgnored private var isInItsGroupsBox = false
 
     var isDragging: Bool { session != nil }
 
@@ -475,13 +478,15 @@ final class CanvasDrags {
     /// (audit C4). `keeping` is what a new touch on the same view goes on to move.
     private func endAbandoned(model: AppModel, keeping: Set<CanvasSelection> = []) {
         let landing = findsNewHome ? dragged.filter { !keeping.contains($0) } : []
-        let drop = oneThing.map { _ in (lift: lift, target: dropTarget) }
+        let drop = oneThing.map { _ in (lift: lift, target: dropTarget, staying: isInItsGroupsBox) }
         let step = edit ?? handedOver
         finish(model: model)
         if !landing.isEmpty {
             model.store.act(for: step) {
                 if let drop {
-                    model.rehost(landing) { Self.land($0, lift: drop.lift, at: drop.target, in: model.store) }
+                    model.rehost(landing) {
+                        Self.land($0, lift: drop.lift, at: drop.target, stayingInItsGroup: drop.staying, in: model.store)
+                    }
                 } else {
                     model.rehost(landing)
                 }
@@ -513,6 +518,7 @@ final class CanvasDrags {
         rule = nil
         oneThing = nil
         startBoxes = [:]
+        isInItsGroupsBox = false
         lifted = nil
         if lift != nil { lift = nil }
         if dropTarget != nil { dropTarget = nil }
@@ -550,15 +556,18 @@ final class CanvasDrags {
         let target = TreeDrop.target(for: ref.element, at: finger, centre: centre, in: model.store.tree, index: model.store.index,
                                      startBoxes: startBoxes)
         if dropTarget != target { dropTarget = target }
+        isInItsGroupsBox = startBoxes.values.contains { $0.contains(finger) }
         if case .insert = target { return true }
         return false
     }
 
     /// Lands one thing a drag moved, as it is let go: a lift into the slot its line shows, or out where it was let go,
     /// at the top of the host under it (`takeOut`); a thing placed freely into the row, column or grid whose line
-    /// shows, or onto whatever it lies on (`rehost`). Back in the slot it was in, it stays as it is. A move the store
-    /// refuses changes nothing (F15).
-    private static func land(_ ref: DesignStore.ElementRef, lift: Lift?, at target: TreeDrop.Target?, in store: DesignStore) {
+    /// shows, or onto whatever it lies on (`rehost`), unless it is `stayingInItsGroup`, let go in its free group's box
+    /// as the drag began, which keeps it as a free move. Back in the slot it was in, it stays as it is. A move the
+    /// store refuses changes nothing (F15).
+    private static func land(_ ref: DesignStore.ElementRef, lift: Lift?, at target: TreeDrop.Target?,
+                             stayingInItsGroup: Bool = false, in store: DesignStore) {
         switch target {
         case .insert(let parent, let index, _)?:
             let isWhereItIs = store.parent(of: ref.element) == parent && store.index[ref.element]?.siblingIndex == index
@@ -568,16 +577,17 @@ final class CanvasDrags {
             let letGo = CGPoint(x: lift.start.midX + lift.translation.width, y: lift.start.midY + lift.translation.height)
             store.takeOut(ref.element, to: host, centredAt: placement.canvasPoint(for: letGo))
         case .free?, nil:
-            store.rehost(ref)
+            if !stayingInItsGroup { store.rehost(ref) }
         }
     }
 
-    /// The boxes on the canvas of the free containers round a thing, as a drag of it begins: see `startBoxes`.
+    /// The boxes on the canvas of the free containers round a thing, as a drag of it begins: see `startBoxes`. A
+    /// screen's root isn't one: it is the screen.
     private static func freeBoxes(round id: UUID, in store: DesignStore) -> [UUID: TurnedRect] {
         let index = store.index, tree = store.tree
         var boxes: [UUID: TurnedRect] = [:]
         for holder in index.ancestors(of: id) {
-            guard let node = index.node(holder, in: tree), node.resolvedLayout == .free,
+            guard index[holder]?.path.isEmpty == false, let node = index.node(holder, in: tree), node.resolvedLayout == .free,
                   let shape = index.canvasShape(of: holder, in: tree) else { continue }
             boxes[holder] = shape
         }
@@ -750,11 +760,11 @@ final class CanvasDrags {
     /// on. Selected where it lands.
     func dropElement(_ ref: DesignStore.ElementRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
         guard ends(owner) else { return }
-        let (lift, target) = (lift, dropTarget)
+        let (lift, target, staying) = (lift, dropTarget, isInItsGroupsBox)
         finish(model: model)
         if findsNewHome {
             let store = model.store
-            store.act(for: edit) { Self.land(ref, lift: lift, at: target, in: store) }
+            store.act(for: edit) { Self.land(ref, lift: lift, at: target, stayingInItsGroup: staying, in: store) }
             model.selection = .element(store.ref(of: ref.element) ?? ref)
         }
         endEdit(model: model)
@@ -917,11 +927,13 @@ final class CanvasDrags {
 
     func dropGroup(owner: Owner, model: AppModel) {
         guard ends(owner) else { return }
-        let drop = oneThing.map { _ in (things: dragged, lift: lift, target: dropTarget) }
+        let drop = oneThing.map { _ in (things: dragged, lift: lift, target: dropTarget, staying: isInItsGroupsBox) }
         finish(model: model)
         model.store.act(for: edit) {
             if let drop {
-                model.rehost(drop.things) { Self.land($0, lift: drop.lift, at: drop.target, in: model.store) }
+                model.rehost(drop.things) {
+                    Self.land($0, lift: drop.lift, at: drop.target, stayingInItsGroup: drop.staying, in: model.store)
+                }
             } else {
                 model.rehostSelection()
             }

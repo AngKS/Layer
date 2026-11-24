@@ -730,6 +730,32 @@ struct LayoutDragTests {
         #expect(board.store.parent(of: q.id) == .screen(board.screen))
     }
 
+    /// A member of a free group on the open canvas, lying over a column screen, nudged within the group's box, stays
+    /// in the group on the canvas: it isn't given to the screen under it. Let go outside the box, the column under the
+    /// finger takes it (fix round 2, N2).
+    @Test func aFreeCanvasGroupOverAScreenKeepsItsMemberInItsBox() throws {
+        let p = fixed(.text, "P", CGRect(x: 0, y: 0, width: 80, height: 40))
+        let q = fixed(.text, "Q", CGRect(x: 100, y: 0, width: 80, height: 40))
+        let group = holding(nil, at: CGPoint(x: 30, y: 400), [p, q])
+        let board = RowBoard(canvas: [group], root: .stack(LayerNode.Stack(axis: .vertical, spacing: 12)))
+        board.store.updateCanvas { $0.snapsToGuides = false }
+        try #require(board.store.parent(of: group.id) == .canvas)
+        try #require(board.store.treeScreen(at: board.centre(q.id))?.id == board.screen, "the group lies over the screen")
+
+        let start = board.centre(q.id), owner = CanvasDrags.Owner()
+        board.drag(q.id, by: CGSize(width: 1.5, height: 0), from: start, owner: owner)
+        board.drag(q.id, by: CGSize(width: 3, height: 0), from: start, owner: owner)
+        #expect(board.drags.dropTarget == .free(on: .canvas))
+        board.drop(q.id, from: start, owner: owner)
+
+        #expect(board.store.parent(of: q.id) == .node(group.id))
+        #expect(board.store.parent(of: group.id) == .canvas)
+        #expect(board.centre(q.id) == CGPoint(x: start.x + 3, y: start.y))
+
+        board.drag(q.id, to: CGPoint(x: start.x, y: start.y + 150))
+        #expect(board.store.parent(of: q.id) == .screen(board.screen))
+    }
+
     /// Carried from plan 2: a container is taken out of a row as a leaf is. Its target's drag moves it as what is
     /// selected moves, and on its own it is lifted, then let go where it lands; dropped freely on a row, it joins it.
     @Test func aContainerIsLiftedTakenOutAndMovedInAsAThingIs() throws {

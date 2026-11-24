@@ -101,7 +101,8 @@ struct TreeReconciler: Sendable {
     ///   keeps what a newer Layer saved on it;
     /// - one the person changed is left as it is, where it is, and what the generator puts inside it goes in it;
     /// - one the person moved (to another parent, or out of the order the generator wrote it in) is the person's too,
-    ///   from then on: only the fewest moves that explain the order now count, so its neighbours stay the generator's;
+    ///   from then on: only the fewest moves that explain the order now count, so its neighbours stay the generator's,
+    ///   but for one swapped with it, which order alone can't tell from it;
     /// - one the person deleted isn't written, nor anything inside it.
     ///
     /// Within each parent the generator's nodes take its order. Everything else there (added by hand, moved by the
@@ -215,10 +216,12 @@ struct TreeReconciler: Sendable {
     }
 
     /// The written keys the person has moved, as `current` shows them: each in `moved` already, each now under
-    /// another parent than its commit left it, and, among each parent's other written children, those outside the
-    /// longest run still in the order the commit left them (`longestInOrder`). That is the fewest moves that explain
-    /// the order now, so what was only gone round, or left behind by what moved, isn't counted. A child deleted or
-    /// moved out leaves the others in order, and a child added by hand has no key, so neither moves anything.
+    /// another parent than its commit left it, and, among each parent's other written children, each not on every
+    /// longest run still in the order the commit left them (`onEveryLongestRun`). The fewest moves that explain the
+    /// order now are counted, so what was only gone round, or left behind by what moved, isn't. Where order can't tell
+    /// which of two moved, as when neighbours are swapped, both are counted, so that the one the person moved is
+    /// always among them. A child deleted or moved out leaves the others in order, and a child added by hand has no
+    /// key, so neither moves anything.
     fileprivate static func moves(in current: LayerNode, written: [String: Written], moved: Set<String>) -> Set<String> {
         var found = moved
         func visit(_ parent: LayerNode) {
@@ -228,7 +231,7 @@ struct TreeReconciler: Sendable {
                       !found.contains(key) else { continue }
                 if record.parent == parent.id { staying.append((key, record.place)) } else { found.insert(key) }
             }
-            let kept = longestInOrder(staying.map(\.place))
+            let kept = onEveryLongestRun(staying.map(\.place))
             for (index, entry) in staying.enumerated() where !kept.contains(index) { found.insert(entry.key) }
             parent.children.forEach(visit)
         }
@@ -236,28 +239,34 @@ struct TreeReconciler: Sendable {
         return found
     }
 
-    /// The indices of the longest run of `places`, first to last, that is in increasing order. Of several such runs,
-    /// the one whose places are smallest, first to last: of two neighbours swapped, the one now first, which went up,
-    /// is the one taken for moved.
-    fileprivate static func longestInOrder(_ places: [Int]) -> Set<Int> {
+    /// The indices of `places` that lie on every longest run of them, first to last, in increasing order (plan 4 Task 4,
+    /// fix round 2).
+    ///
+    /// Each index on a longest run sits at one level on it, the length of the longest run that ends there, and every
+    /// longest run has one index at each level. So an index lies on all of them exactly when it is the only one at its
+    /// level among the indices on any. Two neighbours swapped are two at one level, and neither is kept; one thing
+    /// moved two places or more, the rest in order, is on no longest run, and everything else is on all of them.
+    fileprivate static func onEveryLongestRun(_ places: [Int]) -> Set<Int> {
         let count = places.count
         guard count > 1 else { return Set(places.indices) }
-        // The longest increasing run that starts at each index.
-        var length = Array(repeating: 1, count: count)
-        for start in stride(from: count - 2, through: 0, by: -1) {
-            for next in (start + 1)..<count where places[next] > places[start] {
-                length[start] = max(length[start], length[next] + 1)
+        // The longest run in increasing order that ends at each index, and the longest that starts at it.
+        var ending = Array(repeating: 1, count: count), starting = Array(repeating: 1, count: count)
+        for last in 1..<count {
+            for earlier in 0..<last where places[earlier] < places[last] {
+                ending[last] = max(ending[last], ending[earlier] + 1)
             }
         }
-        var kept: Set<Int> = []
-        var needed = length.max() ?? 0, last = Int.min, from = 0
-        while needed > 0 {
-            let candidates = (from..<count).filter { length[$0] == needed && places[$0] > last }
-            guard let pick = candidates.min(by: { places[$0] < places[$1] }) else { break }
-            kept.insert(pick)
-            (last, from, needed) = (places[pick], pick + 1, needed - 1)
+        for first in stride(from: count - 2, through: 0, by: -1) {
+            for later in (first + 1)..<count where places[later] > places[first] {
+                starting[first] = max(starting[first], starting[later] + 1)
+            }
         }
-        return kept
+        let longest = ending.max() ?? 0
+        var atLevel: [Int: [Int]] = [:]
+        for index in 0..<count where ending[index] + starting[index] - 1 == longest {
+            atLevel[ending[index], default: []].append(index)
+        }
+        return Set(atLevel.values.compactMap { $0.count == 1 ? $0[0] : nil })
     }
 }
 
