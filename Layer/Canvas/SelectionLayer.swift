@@ -343,8 +343,11 @@ final class CanvasDrags {
     /// How the dragged element moves, worked out as its drag begins rather than whenever
     /// the targets are drawn.
     @ObservationIgnored private var rule: Rule?
-    /// A group a handle resizes, as the drag began: every frame resizes it from there.
+    /// A container a handle resizes, as the drag began: every frame resizes it from there.
     @ObservationIgnored private var groupPose: DesignStore.GroupPose?
+    /// Whether a handle resizes a thing a row, column, grid or overlay lays out: only the axes it changes are written,
+    /// fixed at their new sizes, and the engine places it (`resizeLaidOut`).
+    @ObservationIgnored private var resizesLaidOut = false
     /// The one thing a drag moves on its own, and how its host's points sit on the canvas, read from the tree as the
     /// drag began. Nil while several things are dragged together, and for a screen.
     @ObservationIgnored private var oneThing: (ref: DesignStore.ElementRef, placement: Placement)?
@@ -515,6 +518,7 @@ final class CanvasDrags {
         screenOrigin = nil
         groupOrigins = nil
         groupPose = nil
+        resizesLaidOut = false
         rule = nil
         oneThing = nil
         startBoxes = [:]
@@ -693,7 +697,8 @@ final class CanvasDrags {
     /// Moved (`findsNewHome`), a thing in a row, column, grid or overlay is lifted (`lift`): nothing is written on any
     /// frame, and the line shows where it would go. A thing placed freely goes where `rule` puts it, written through its
     /// parent (`place`), and the line shows when a row, column or grid would take it, with no guides beside it.
-    /// Resized, it takes `rule`'s frame, a container from its pose as the drag began (`resizeGroup`).
+    /// Resized, it takes `rule`'s frame: a thing laid out only the size of each axis it changed (`resizeLaidOut`), a
+    /// container from its pose as the drag began (`resizeGroup`), and anything else through its parent (`resize`).
     func moveNode(
         _ ref: DesignStore.ElementRef, by glassTranslation: CGSize, startingAt start: CGPoint, findsNewHome: Bool = true,
         owner: Owner, model: AppModel, rule makeRule: (PlacedNode) -> Rule
@@ -719,9 +724,10 @@ final class CanvasDrags {
                 beginLift(of: placed)
             } else {
                 if findsNewHome { startBoxes = Self.freeBoxes(round: ref.element, in: model.store) }
-                // A container's frame is the box round what is in it: they are resized, from where they
-                // were as the drag began, and the box is fitted round them.
-                groupPose = !findsNewHome && placed.node.isContainer ? model.store.groupPose(of: ref) : nil
+                // Laid out, only its size is written, and the engine places it. A container's frame is the box round what
+                // is in it: they are resized, from where they were as the drag began, and the box is fitted round them.
+                resizesLaidOut = !findsNewHome && placed.isLaidOut
+                groupPose = !findsNewHome && !resizesLaidOut && placed.node.isContainer ? model.store.groupPose(of: ref) : nil
                 elementOrigin = groupPose?.box ?? placed.frame
                 rule = makeRule(placed)
             }
@@ -740,12 +746,14 @@ final class CanvasDrags {
         // Set only when it differs: each setting tells whatever draws the guides to draw again.
         if guidePlacement != placement { guidePlacement = placement }
         model.store.act(for: edit) {
-            if let groupPose {
+            if self.resizesLaidOut {
+                model.store.resizeLaidOut(ref.element, to: frame.size, from: elementOrigin.size)
+            } else if let groupPose {
                 model.store.resizeGroup(ref, to: frame, from: groupPose)
             } else if self.findsNewHome {
                 model.store.place(ref.element, at: frame)
             } else {
-                model.store.update(ref) { $0.frame = frame }
+                model.store.resize(ref.element, to: frame)
             }
         }
         let showsLine = self.findsNewHome

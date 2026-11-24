@@ -1921,13 +1921,14 @@ final class AppModel {
     // MARK: Turning
 
     /// Whether what is selected can be turned: something is, no screen is among it, and
-    /// at least one element of it isn't locked, by itself or by a group above it (F4).
+    /// at least one thing of it isn't locked, by itself or by a container above it (F4). Read
+    /// from the tree.
     var canTurnSelection: Bool {
         var hasUnlocked = false
         for thing in selectedThings {
             // Screens never turn.
             guard case .element(let ref) = thing else { return false }
-            if store.resolve(ref) != nil, !store.isLocked(thing) { hasUnlocked = true }
+            if let placed = store.placed(ref), !placed.isLocked { hasUnlocked = true }
         }
         return hasUnlocked
     }
@@ -1943,7 +1944,7 @@ final class AppModel {
 
     /// What the turn under way turns, and how far it was turned when the turn began.
     private enum TurnStart {
-        /// One element, and its angle.
+        /// One thing, and its angle on the canvas.
         case element(DesignStore.ElementRef, degrees: Double)
         /// Several things, and how far their session had turned them.
         case several(turned: Double)
@@ -1954,25 +1955,26 @@ final class AppModel {
     /// That session as it was when the drag moving them began, if it held then.
     @ObservationIgnored private var moveStart: TurnSession?
 
-    /// The one element selected, unless it is locked, by itself or by a group above it, or is
-    /// a group, which turns as several things do: what a turn turns.
-    private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
-        guard let selected = selectedElement, selected.element.kind != .group, !store.isLocked(.element(selected.ref)) else { return nil }
-        return (selected.ref, selected.element)
+    /// The one thing selected, unless it is locked, by itself or by a container above it: what a
+    /// turn turns, about its own middle. A container turns as one rigid piece, everything in it
+    /// going round with it: only its angle changes. Read from the tree.
+    private var turnableNode: PlacedNode? {
+        guard let selected = selectedNode, !selected.isLocked else { return nil }
+        return selected
     }
 
-    /// Whether what is selected is one group, which turns as one rigid piece of several
-    /// things: its members, and the groups in it, go round its middle with it.
-    private var selectsOneGroup: Bool {
-        selectedElement?.element.kind == .group
+    /// Turns one thing to `degrees` on the canvas, about its own middle, as one change: only its
+    /// angle is written, less the angles of what holds it.
+    private func setCanvasAngle(of placed: PlacedNode, to degrees: Double) {
+        store.setCanvasPoses([placed.ref.element: TurnSession.Pose(centre: placed.canvasShape.centre, degrees: degrees)])
     }
 
-    /// What turns several things selected, or one group: the session kept from their last
-    /// turn or move, while it is for what is selected and each of them is as it left them;
-    /// otherwise one formed from where they are now. Reading it keeps nothing. Nil unless
-    /// several things or a group are selected, or when a screen is among them.
+    /// What turns several things selected: the session kept from their last turn or move,
+    /// while it is for what is selected and each of them is as it left them; otherwise one
+    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
+    /// are selected, or when a screen is among them.
     private var severalTurn: TurnSession? {
-        guard let selection, selection.isSeveral || selectsOneGroup else { return nil }
+        guard let selection, selection.isSeveral else { return nil }
         if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
         // Formed once for the selection and design as they are, not for each read.
         let version = store.contentVersion
@@ -1992,9 +1994,9 @@ final class AppModel {
     func beginTurn(cuttingDragShort: Bool = false) -> Bool {
         guard !isTurning, canTurnSelection else { return false }
         let start: Double
-        if let turnable = turnableElement {
-            turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
-            start = turnable.element.resolvedRotation
+        if let turnable = turnableNode {
+            turnStart = .element(turnable.ref, degrees: turnable.degrees)
+            start = turnable.degrees
         } else if let session = severalTurn {
             turnSession = session
             turnStart = .several(turned: session.turned)
@@ -2028,9 +2030,9 @@ final class AppModel {
         let snapped: Double?
         switch turnStart {
         case .element(let ref, let start)?:
-            guard selection == .element(ref) else { return false }
+            guard selection == .element(ref), let placed = store.placed(ref) else { return false }
             let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
-            store.act(for: turnEdit) { store.update(ref) { $0.setRotation(angle) } }
+            store.act(for: turnEdit) { setCanvasAngle(of: placed, to: angle) }
             snapped = isSnapped ? angle : nil
         case .several(let start)?:
             // Changed by something else meanwhile, they are left as that left them.
@@ -2114,21 +2116,21 @@ final class AppModel {
 
     /// Turns what is selected `degrees` clockwise in one step, without snapping.
     func rotateSelection(by degrees: Double) {
-        if let turnable = turnableElement {
-            store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+        if let turnable = turnableNode {
+            setCanvasAngle(of: turnable, to: turnable.degrees + degrees)
         } else if canTurnSelection, var session = severalTurn {
             turn(&session, to: Rotation.normalized(session.turned + degrees))
         }
     }
 
     /// Stands what is selected upright again, in one step. Several things go back exactly
-    /// to where they were, and to the angles they had, when they were selected. A group is
+    /// to where they were, and to the angles they had, when they were selected. A container is
     /// turned about its middle until it is upright, everything in it going round with it.
     func resetSelectionTurn() {
-        if let turnable = turnableElement {
-            store.update(turnable.ref) { $0.setRotation(0) }
+        if let turnable = turnableNode {
+            setCanvasAngle(of: turnable, to: 0)
         } else if canTurnSelection, var session = severalTurn {
-            turn(&session, to: selectsOneGroup ? Rotation.normalized(-session.outline.degrees) : 0)
+            turn(&session, to: 0)
         }
     }
 
@@ -2138,47 +2140,51 @@ final class AppModel {
     /// set to 0 does: an action that did nothing would read as broken.
     func resetSelectionRotation() {
         if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
-            turnEach(unlockedSelectedElements.map(\.ref), to: 0)
+            turnEach(selectedThings.compactMap { thing in
+                guard case .element(let ref) = thing, store.placed(ref)?.isLocked == false else { return nil }
+                return ref
+            }, to: 0)
         } else {
             resetSelectionTurn()
         }
     }
 
     /// The Format panel's Rotation for several things: each of `refs` that isn't locked, by
-    /// itself or by a group above it, turned to `degrees` on its own pivot, in the panel's own
-    /// edit. A group among them turns as one piece about its middle.
+    /// itself or by a container above it, turned to `degrees` on its own pivot, in the panel's own
+    /// edit. A container among them turns as one piece about its middle.
     func setAngle(of refs: [DesignStore.ElementRef], to degrees: Double) {
         adjusting { turnEach(refs.filter { !store.isLocked(.element($0)) }, to: degrees) }
     }
 
-    /// The Format panel's Rotation for a group: turns it as one piece about its middle,
-    /// everything in it going round with it, to `degrees`, in the panel's own edit. Only while
-    /// it is still the one thing selected, as a turn goes by the selection: a field set once
-    /// the selection has moved on changes nothing (M5).
+    /// The Format panel's Rotation for a container, a group, card, row, column, grid or overlay:
+    /// turns it as one piece about its middle, everything in it going round with it, to `degrees`
+    /// on the canvas, in the panel's own edit. Only while it is still the one thing selected, as a
+    /// turn goes by the selection: a field set once the selection has moved on changes nothing (M5).
     func setGroupRotation(_ ref: DesignStore.ElementRef, to degrees: Double) {
-        guard selection == .element(ref), let group = store.resolve(ref)?.element, group.kind == .group else { return }
-        adjusting { rotateSelection(by: degrees - group.resolvedRotation) }
+        guard selection == .element(ref), let container = store.placed(ref), container.node.isContainer else { return }
+        adjusting { rotateSelection(by: degrees - container.degrees) }
     }
 
-    /// The Format panel's X, Y, W and H for a group, the one way its fields change it (D3), in
-    /// the panel's own edit. The values are in its host's points, as the panel shows them: the
-    /// box's X and Y, and its width and height, in its own axes when it is turned.
+    /// The Format panel's X, Y, W and H for a container, a group, card, row, column, grid or
+    /// overlay: the one way its fields change it (D3), in the panel's own edit. The values are in
+    /// its host's points, as the panel shows them: the box's X and Y, and its width and height,
+    /// in its own axes when it is turned.
     /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the
     ///   change is in the host's points, and `position` takes canvas points.
     /// - W or H scales everything in it in proportion, both sides by the side typed, from its
-    ///   top-left: a group is scaled by the ratio of its widths, so an H given alone would
+    ///   top-left: a container is scaled by the ratio of its widths, so an H given alone would
     ///   scale nothing (L8).
     ///
-    /// Nothing happens to a group that is locked, by itself or by a group above it.
+    /// Nothing happens to a container that is locked, by itself or by one above it. Read from the tree.
     func setGroupBox(_ ref: DesignStore.ElementRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
         adjusting {
-            if x != nil || y != nil, let (item, placement) = store.resolve(ref), item.kind == .group,
-               let box = store.canvasShape(of: .element(ref))?.bounds {
-                let across = ((x ?? item.frame.minX) - item.frame.minX) * placement.scale
-                let down = ((y ?? item.frame.minY) - item.frame.minY) * placement.scale
+            if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
+                let box = item.canvasShape.bounds
+                let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
+                let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
                 store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
             }
-            if width != nil || height != nil, let item = store.resolve(ref)?.element, item.kind == .group,
+            if width != nil || height != nil, let item = store.placed(ref), item.node.isContainer,
                item.frame.width > 0, item.frame.height > 0 {
                 // The side typed exactly; given both, the width, as the ratio is the widths'.
                 let box = item.frame
@@ -2189,77 +2195,43 @@ final class AppModel {
         }
     }
 
-    /// Turns each of `refs` to `degrees`, in one step: an element on its own pivot, and a
-    /// group as one piece about the middle of its box, as a group selected alone turns, unless
-    /// it is locked, by itself or by a group above it. A row, column, grid or overlay is one
-    /// rigid part, whose frame is written with its angle.
+    /// Turns each of `refs` to `degrees` on the canvas, in one step, each about its own middle:
+    /// a container as one piece, everything in it going round with it, as one selected alone
+    /// turns, and a laid-out child in place. Only their angles are written.
     private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
-        var angles: [DesignElement.ID: Double] = [:]
-        var frames: [DesignElement.ID: CGRect] = [:]
+        var poses: [UUID: TurnSession.Pose] = [:]
         for ref in refs {
-            guard let element = store.resolve(ref)?.element else { continue }
-            guard element.kind == .group else {
-                angles[ref.element] = degrees
-                continue
-            }
-            guard let session = TurnSession.form(for: .element(ref), in: store) else { continue }
-            for (part, place) in session.placed(turnedBy: degrees - element.resolvedRotation) {
-                angles[part.element] = place.rotation ?? 0
-                frames[part.element] = place.frame
-            }
+            guard let placed = store.placed(ref) else { continue }
+            poses[ref.element] = TurnSession.Pose(centre: placed.canvasShape.centre, degrees: degrees)
         }
-        guard !angles.isEmpty else { return }
-        // A free group's box is fitted round what is in it; any other part's frame is written.
-        let framed = Set(frames.keys.filter { store.element($0)?.kind != .group || store.isLaidOut($0) })
-        store.apply { content in
-            for (id, angle) in angles {
-                content.update(id) {
-                    if framed.contains(id), let frame = frames[id] { $0.frame = frame }
-                    $0.setRotation(angle)
-                }
-            }
-        }
+        store.setCanvasPoses(poses)
     }
 
     /// Puts several things where their session turned `degrees` places them, as one change,
-    /// and keeps the session. A group's angle is written in the same change as its members'
-    /// places, so that its box, fitted round them at the end of it, goes round as one with
-    /// them: a group selected alone has the outline's angle. A row, column, grid or overlay is
-    /// one rigid part, whose frame is written with its angle, and what is in it goes with it.
+    /// and keeps the session. Each is written through its parent's inverse transform; a
+    /// container goes round as one piece, and what is in it with it. Come back round to where
+    /// the session formed, each is put back exactly as it was.
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
-        let placed = session.placed(turnedBy: degrees)
-        // A free group's box is fitted round what is in it, as the session found when it formed:
-        // asked of the design on every frame, that would walk the whole tree each time.
-        let fitted = Set(session.baseline.compactMap { ref, member in member.isGroup ? ref : nil })
-        store.apply { content in
-            for (ref, place) in placed {
-                content.update(ref.element) {
-                    if !fitted.contains(ref) { $0.frame = place.frame }
-                    $0.rotation = place.rotation
-                }
-            }
-        }
+        store.setCanvasPoses(session.placed(turnedBy: degrees), puttingBack: session.startsPutBack(turnedBy: degrees))
         session.expect(store)
         turnSession = session
     }
 
-    /// How far what is selected is turned, for the readout beside the knob: one element's
-    /// angle, a group's among them, or how far several things have turned since they were
-    /// selected.
+    /// How far what is selected is turned, for the readout beside the knob: one thing's
+    /// angle on the canvas, or how far several things have turned since they were selected.
     var selectionTurn: Double? {
         if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
-        return selectedElement?.element.resolvedRotation
+        return selectedNode?.degrees
     }
 
     /// The shape of what is selected, in canvas points, turned as it is. For several
-    /// things, or a group, the outline they turn within (`TurnSession.shape`), which goes
-    /// round rigidly with them; with a screen among several, the upright box round them all.
+    /// things, the outline they turn within (`TurnSession.shape`), which goes round rigidly
+    /// with them; with a screen among several, the upright box round them all.
     var selectionShape: TurnedRect? {
         guard let selection else { return nil }
-        guard selection.isSeveral || selectsOneGroup else { return store.canvasShape(of: selection) }
-        if let session = severalTurn { return session.shape }
         guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        if let session = severalTurn { return session.shape }
         return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
     }
 

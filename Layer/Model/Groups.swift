@@ -180,23 +180,6 @@ extension DesignStore {
         DesignContent.contents(of: group, in: projection.elements)
     }
 
-    /// What is in a group, at any depth, that moves, turns and is resized with it as a part of
-    /// its own, back to front: everything in it, but a row, column, grid or overlay in it is one
-    /// part without what it holds, which the engine lays out in it. Empty for a group that is laid
-    /// out itself, which is one rigid part.
-    func parts(of group: DesignElement.ID) -> [DesignElement] {
-        guard let node = node(group), node.resolvedLayout == .free else { return [] }
-        var ids: Set<UUID> = []
-        func collect(_ node: LayerNode) {
-            for child in node.children {
-                ids.insert(child.id)
-                if child.isContainer, child.resolvedLayout == .free { collect(child) }
-            }
-        }
-        collect(node)
-        return contents(of: group).filter { ids.contains($0.id) }
-    }
-
     /// The group items on a screen, or on the open canvas, back to front.
     func groupItems(on host: ElementRef.Host) -> [DesignElement] {
         children(on: host).filter { $0.kind == .group }
@@ -262,68 +245,68 @@ extension DesignStore {
         return screen(parent)?.placement
     }
 
-    /// A group as a handle drag on it began: what each frame of the drag resizes it from, so
+    /// A container as a handle drag on it began: what each frame of the drag resizes it from, so
     /// that the frames don't compound and drift.
     struct GroupPose: Equatable, Sendable {
-        /// Its box: the group item's frame, in its own points.
+        /// Its box: its upright frame in its host's own points, centred on its turned shape's centre.
         var box: CGRect
-        /// The frame of each thing in it, at any depth, that isn't a group.
-        var leaves: [DesignElement.ID: CGRect]
-        /// Those of them whose kind keeps its height when it is resized, a divider: only their
-        /// width is scaled.
-        var keepingHeight: Set<DesignElement.ID>
-        /// The least the group can be scaled by: any less, and something in it would be smaller
-        /// than its kind can be. Never more than 1: one that already is stops it shrinking.
+        /// It and everything in it, as the drag began: what each frame scales.
+        var node: LayerNode
+        /// The least it can be scaled by: any less, and something in it would be smaller than its
+        /// kind can be. Never more than 1: one that already is stops it shrinking.
         var smallestScale: CGFloat
         /// Whether it is a row, column, grid or overlay itself, its own one leaf: resized by its
         /// frame, with what is in it laid out by the engine.
         var isLaidOut = false
     }
 
-    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group. A row, column, grid or
-    /// overlay in it counts as one leaf, and one resized itself is its own one leaf: what is in it
-    /// is laid out by the engine, never scaled (`parts(of:)`).
+    /// A container as it is now, read from the tree: see `GroupPose`. Nil when `ref` isn't a container
+    /// where the ref says. A row, column, grid or overlay in it counts as one leaf, and one resized
+    /// itself is its own one leaf: what is in it is laid out by the engine, never scaled.
     func groupPose(of ref: ElementRef) -> GroupPose? {
-        guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0, isLaidOut: isLaidOut(item.id))
-        let leaves = pose.isLaidOut ? [item] : parts(of: item.id).filter { $0.kind != .group || isLaidOut($0.id) }
-        for element in leaves {
-            pose.leaves[element.id] = element.frame
-            let spec = element.kind.spec
-            if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
-            var smallest = element.frame.width > 0 ? spec.minimumSize.width / element.frame.width : 1
-            if !spec.hasFixedHeight, element.frame.height > 0 { smallest = max(smallest, spec.minimumSize.height / element.frame.height) }
+        guard let placed = placed(ref), placed.node.isContainer else { return nil }
+        let isLaidOut = placed.node.resolvedLayout != .free
+        var pose = GroupPose(box: placed.frame, node: placed.node, smallestScale: 0, isLaidOut: isLaidOut)
+        func consider(_ leaf: LayerNode) {
+            let spec = leaf.kind.spec
+            var smallest = leaf.frame.width > 0 ? spec.minimumSize.width / leaf.frame.width : 1
+            if !spec.hasFixedHeight, leaf.frame.height > 0 { smallest = max(smallest, spec.minimumSize.height / leaf.frame.height) }
             pose.smallestScale = max(pose.smallestScale, min(smallest, 1))
         }
+        func visit(_ node: LayerNode) {
+            for child in node.children {
+                if child.isContainer, child.resolvedLayout == .free { visit(child) } else { consider(child) }
+            }
+        }
+        if isLaidOut { consider(placed.node) } else { visit(placed.node) }
         return pose
     }
 
     /// The most a group can be scaled to, by a frame asked for in one go.
     static let largestGroupScale: CGFloat = 100
 
-    /// Resizes a group to `frame`, in its own points, as one change: from `start`, the group as
-    /// a handle drag on it began, or from where it is now. With s the new box's width over the
-    /// start's, the middle of each thing in it, at any depth, goes where it was in the start box,
-    /// read along the box's own axes, in the new one; and each one's frame is s times as large,
+    /// Resizes a container to `frame`, in its host's own points, as one change on the tree: from
+    /// `start`, the container as a handle drag on it began, or from where it is now. With s the new
+    /// box's width over the start's, the middle of each thing in it goes where it was in the start
+    /// box, read along the box's own axes, in the new one; and each one's frame is s times as large,
     /// apart from the height of a kind that keeps its height, a divider. Their angles, and their
     /// text's size, stay as they are, so that a turned member is never sheared. A frame in
-    /// proportion with the box, as the handles and the fields give, scales everything alike; the
-    /// box is then fitted round them again by the tree's rules. Made smaller than something in it
-    /// can be, it is scaled only as far as that can go, about the same point. Nothing happens to a
-    /// group that is locked, by itself or by a group above it.
+    /// proportion with the box, as the handles and the fields give, scales everything alike; a
+    /// container that fits what it holds is then fitted round it again by the tree's rules. Made
+    /// smaller than something in it can be, it is scaled only as far as that can go, about the same
+    /// point. Nothing happens to a container that is locked, by itself or by one above it.
     ///
     /// A row, column, grid or overlay in it is one leaf, scaled as one and fixed at its new size,
     /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
-    /// at that size, and the engine lays out what is in it.
+    /// on each axis whose size changed, and the engine lays out what is in it.
     func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
         // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds the store's
         // index and never lowers the design to its list (clause (m)).
         guard let group = placed(ref), group.node.isContainer, !group.isLocked,
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
-        let placement = group.placement
         // A typed number can be anything Double reads, infinity included: finite, and at most a
-        // hundred times the box it began as, or its members go non-finite and the design can't be saved.
+        // hundred times the box it began as, or what is in it goes non-finite and the design can't be saved.
         guard frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite else { return }
         var frame = frame
         frame.size.width = min(frame.width, pose.box.width * Self.largestGroupScale)
@@ -339,45 +322,56 @@ extension DesignStore {
             let centre = CGPoint(x: fixed.x + (from.x - fixed.x) * scale, y: fixed.y + (from.y - fixed.y) * scale)
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
-        var frames: [DesignElement.ID: CGRect] = [:]
-        // Read from the pose, not the design: on every frame of a handle's drag that would walk the whole tree.
+        guard let entry = index[ref.element], let posed = index.posed(ref.element, in: tree) else { return }
+        // Read from the pose, not the design: each frame of a handle's drag scales what was there as it began.
+        var resized = posed.node
+        // Back where it began, exactly as it was, with no arithmetic to round.
+        resized.frame = frame == pose.box ? pose.node.frame : posed.parentSpace.local(of: frame)
         if pose.isLaidOut {
-            frames[ref.element] = frame
-        } else if frame == pose.box {
-            // Back where it began: exactly as it was, with no arithmetic to round.
-            frames = pose.leaves
+            (resized.width, resized.height) = (pose.node.width, pose.node.height)
+            Self.fix(&resized, from: pose.node.frame.size, to: frame.size)
         } else {
-            let degrees = group.degrees
             let across = CGSize(width: frame.width / pose.box.width, height: frame.height / pose.box.height)
-            /// Where a point in the start box goes in the new one, both in the points of `own`.
-            func moved(_ point: CGPoint, in own: Placement) -> CGPoint {
-                let from = own == placement ? pose.box : own.localRect(for: placement.canvasRect(for: pose.box))
-                let to = own == placement ? frame : own.localRect(for: placement.canvasRect(for: frame))
-                let upright = Rotation.normalized(degrees) == 0
-                let along = upright ? point : Rotation.rotate(point, about: CGPoint(x: from.midX, y: from.midY), by: -degrees)
-                let placed = CGPoint(x: to.minX + (along.x - from.minX) * across.width, y: to.minY + (along.y - from.minY) * across.height)
-                return upright ? placed : Rotation.rotate(placed, about: CGPoint(x: to.midX, y: to.midY), by: degrees)
-            }
-            let memo = index, tree = tree
-            for (id, start) in pose.leaves {
-                guard let own = memo.placement(of: id, in: tree) else { continue }
-                let centre = moved(CGPoint(x: start.midX, y: start.midY), in: own)
-                let size = CGSize(width: start.width * scale, height: pose.keepingHeight.contains(id) ? start.height : start.height * scale)
-                frames[id] = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
-            }
+            resized = Self.scaling(resized, from: pose.node, across: across, by: scale)
         }
-        apply { content in
-            for (id, frame) in frames { content.update(id) { $0.frame = frame } }
+        guard resized != posed.node else { return }
+        let written = resized
+        changeTree(writing: 1) { tree in
+            tree.changeNode(on: entry.host, at: entry.path) { $0 = written }
         }
     }
 
-    /// Where the middle of something in a group lands on the canvas, given at `point`, as the
-    /// group lands with its box's middle at `middle`: as far from it in the points of
-    /// `landing`, the placement it lands in, as it was in those of `own`, where it was.
-    nonisolated static func landedMiddle(of point: CGPoint, about middle: CGPoint, from own: Placement, to landing: Placement) -> CGPoint {
-        guard own.scale > 0, landing.scale != own.scale else { return point }
-        let ratio = landing.scale / own.scale
-        return CGPoint(x: middle.x + (point.x - middle.x) * ratio, y: middle.y + (point.y - middle.y) * ratio)
+    /// `node` with what it holds scaled from `start`, as it was when a resize began: matched by id, each
+    /// child's middle at its own across `across` from the box's top-left, where its own space starts,
+    /// and its frame `scale` times as large, a divider's height kept. A free container in it is scaled
+    /// the same way through, its own space as much larger as it is; a row, column, grid or overlay is
+    /// fixed at its new size on each axis that changed, for the engine to lay out what it holds.
+    private static func scaling(_ node: LayerNode, from start: LayerNode, across: CGSize, by scale: CGFloat) -> LayerNode {
+        var node = node
+        let was = Dictionary(start.children.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for index in node.children.indices {
+            guard let before = was[node.children[index].id] else { continue }
+            var child = node.children[index]
+            let keepsHeight = !before.isContainer && before.kind.spec.hasFixedHeight
+            let size = CGSize(width: before.frame.width * scale, height: keepsHeight ? before.frame.height : before.frame.height * scale)
+            child.frame = CGRect(x: before.frame.minX * across.width + (before.frame.width * across.width - size.width) / 2,
+                                 y: before.frame.minY * across.height + (before.frame.height * across.height - size.height) / 2,
+                                 width: size.width, height: size.height)
+            if before.isContainer, before.resolvedLayout == .free {
+                child = scaling(child, from: before, across: CGSize(width: scale, height: scale), by: scale)
+            } else if before.isContainer {
+                (child.width, child.height) = (before.width, before.height)
+                fix(&child, from: before.frame.size, to: size)
+            }
+            node.children[index] = child
+        }
+        return node
+    }
+
+    /// `.fixed` on each axis whose size changed.
+    private static func fix(_ node: inout LayerNode, from old: CGSize, to new: CGSize) {
+        if new.width != old.width { node.width.mode = .fixed }
+        if new.height != old.height { node.height.mode = .fixed }
     }
 
     // MARK: Group and Ungroup

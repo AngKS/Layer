@@ -1779,7 +1779,9 @@ struct GroupGeometryTests {
 
         let after = try #require(board.model.selectionShape)
         #expect(after.rect == before.rect && after.degrees == 30)
-        #expect(board.store.canvasShape(of: .element(g)) != after, "the box fitted round the turned members is not quite the outline")
+        // Turning a group sets only its angle (plan 2's must-do, done in plan 4 Task 5): its box goes round
+        // rigidly with it, so it is the outline.
+        #expect(board.store.canvasShape(of: .element(g)) == after, "the group's box is the outline, turned as one piece")
     }
 
     /// Review fix 6: turned in many steps, one after another, and back to where it started, a
