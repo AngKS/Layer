@@ -247,17 +247,8 @@ extension TreeProjection.Place {
     /// away, so whole numbers stay exact; under a turned one the centre goes back through the turns.
     /// The size is kept, and the angle is the pose's less this place's summed angle.
     func local(of frame: CGRect, rotation: Double?) -> (frame: CGRect, rotation: Double?) {
-        let size = frame.size
-        let origin: CGPoint
-        if isUpright {
-            origin = CGPoint(x: frame.origin.x - self.origin.x, y: frame.origin.y - self.origin.y)
-        } else {
-            let centre = CGPoint(x: frame.origin.x + size.width / 2, y: frame.origin.y + size.height / 2)
-                .applying(toHost.inverted())
-            origin = CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2)
-        }
         let angle = rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
-        return (CGRect(origin: origin, size: size), Rotation.kept(angle - degrees))
+        return (local(of: frame), Rotation.kept(angle - degrees))
     }
 }
 

@@ -22,12 +22,23 @@ extension TreeIndex {
         var degrees: Double
         var isUpright: Bool
 
+        /// A child placed in this space: see `placing(_:)`.
+        struct Placed: Sendable {
+            /// Its upright frame in the host's own points, centred on its turned shape's centre.
+            var frame: CGRect
+            /// Its angle summed with its ancestors', as it was added up.
+            var degrees: Double
+            /// Its own space, which its children are placed in.
+            var space: OwnSpace
+        }
+
         /// A host's top: a screen's space, or on the canvas a top-level node's own points.
         static let host = OwnSpace(toHost: .identity, origin: .zero, degrees: 0, isUpright: true)
 
         /// A child of the node this is the space of: its upright frame in the host's own points, centred
-        /// on its turned shape's centre, its summed angle, and its own space.
-        func placing(_ node: LayerNode) -> (frame: CGRect, degrees: Double, space: OwnSpace) {
+        /// on its turned shape's centre, its summed angle, and its own space. The projection poses its
+        /// elements through this too (`TreeProjection.Place`), so a node and its element agree exactly.
+        func placing(_ node: LayerNode) -> Placed {
             let own = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
             let size = node.frame.size
             let frame: CGRect
@@ -41,7 +52,7 @@ extension TreeIndex {
             let degrees = self.degrees + own
             let space = OwnSpace(toHost: node.transformToParent.concatenating(toHost), origin: frame.origin,
                                  degrees: degrees, isUpright: isUpright && Rotation.normalized(own) == 0)
-            return (frame, degrees, space)
+            return Placed(frame: frame, degrees: degrees, space: space)
         }
 
         /// An upright frame in the host's own points, centred where its turned shape's centre is to be, as
@@ -51,7 +62,8 @@ extension TreeIndex {
                 return CGRect(origin: CGPoint(x: frame.origin.x - origin.x, y: frame.origin.y - origin.y), size: frame.size)
             }
             let size = frame.size
-            let centre = CGPoint(x: frame.midX, y: frame.midY).applying(toHost.inverted())
+            let centre = CGPoint(x: frame.origin.x + size.width / 2, y: frame.origin.y + size.height / 2)
+                .applying(toHost.inverted())
             return CGRect(origin: CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2), size: size)
         }
     }

@@ -176,39 +176,9 @@ enum TreeProjection {
     // PROJECTION: deleted in plan 6
     /// Where a node's own space sits in its host's: what its children are placed by. The writes
     /// (`TreeProjection+Writes.swift`, `TreeLift`) place through it too, so that what they write
-    /// lowers back to exactly what was written.
-    struct Place {
-        /// The node's own space to the host's.
-        var toHost: CGAffineTransform
-        /// Its frame's origin in the host's space, which its children's origins are added to while
-        /// every node down to it is upright.
-        var origin: CGPoint
-        /// The angles of the nodes down to it, summed.
-        var degrees: Double
-        var isUpright: Bool
-
-        /// The host itself: a screen's space, or on the canvas a top-level node's own points.
-        static let host = Place(toHost: .identity, origin: .zero, degrees: 0, isUpright: true)
-
-        /// A child of the node this is the place of: its frame and angle in the host's space, and its own place.
-        func placing(_ node: LayerNode) -> (frame: CGRect, rotation: Double?, place: Place) {
-            let own = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
-            let size = node.frame.size
-            let frame: CGRect
-            if isUpright {
-                frame = CGRect(origin: CGPoint(x: origin.x + node.frame.origin.x, y: origin.y + node.frame.origin.y),
-                               size: size)
-            } else {
-                let centre = CGPoint(x: node.frame.origin.x + size.width / 2, y: node.frame.origin.y + size.height / 2)
-                    .applying(toHost)
-                frame = CGRect(origin: CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2), size: size)
-            }
-            let degrees = self.degrees + own
-            let place = Place(toHost: node.transformToParent.concatenating(toHost), origin: frame.origin,
-                              degrees: degrees, isUpright: isUpright && Rotation.normalized(own) == 0)
-            return (frame, Rotation.kept(degrees), place)
-        }
-    }
+    /// lowers back to exactly what was written. It is the canvas's own `TreeIndex.OwnSpace`, so that
+    /// an element and the node it is lowered from are posed by one piece of arithmetic.
+    typealias Place = TreeIndex.OwnSpace
 
     // PROJECTION: deleted in plan 6
     /// One host lowered: its list as kept, and its leaves as the views show them.
@@ -280,4 +250,12 @@ enum TreeProjection {
             if keepsNodes { nodes.append(LoweredNode(node: node, element: element, holder: group, shown: view)) }
         }
     }
+}
+
+// PROJECTION: deleted in plan 6
+extension TreeIndex.OwnSpace.Placed {
+    /// The angle as an element keeps it (`Rotation.kept`): what the lowering gives an element.
+    var rotation: Double? { Rotation.kept(degrees) }
+    /// The child's own space, by the name the projection's code gives it.
+    var place: TreeProjection.Place { space }
 }
