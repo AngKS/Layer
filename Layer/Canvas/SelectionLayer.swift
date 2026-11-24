@@ -348,6 +348,9 @@ final class CanvasDrags {
     /// The one thing a drag moves on its own, and how its host's points sit on the canvas, read from the tree as the
     /// drag began. Nil while several things are dragged together, and for a screen.
     @ObservationIgnored private var oneThing: (ref: DesignStore.ElementRef, placement: Placement)?
+    /// The boxes on the canvas, as the drag began, of the free containers round the one thing placed freely: while
+    /// the finger is in one, it keeps the thing (`TreeDrop`). Its box grows round the thing as it is dragged.
+    @ObservationIgnored private var startBoxes: [UUID: TurnedRect] = [:]
 
     var isDragging: Bool { session != nil }
 
@@ -509,6 +512,7 @@ final class CanvasDrags {
         groupPose = nil
         rule = nil
         oneThing = nil
+        startBoxes = [:]
         lifted = nil
         if lift != nil { lift = nil }
         if dropTarget != nil { dropTarget = nil }
@@ -543,7 +547,8 @@ final class CanvasDrags {
     /// Where one thing placed freely, its middle now at `centre` on the canvas, would go if it were let go with the
     /// finger at `finger`: the line shows. True when it shows a line, which no snapping guide shows beside.
     private func aim(_ ref: DesignStore.ElementRef, centre: CGPoint, finger: CGPoint, model: AppModel) -> Bool {
-        let target = TreeDrop.target(for: ref.element, at: finger, centre: centre, in: model.store.tree, index: model.store.index)
+        let target = TreeDrop.target(for: ref.element, at: finger, centre: centre, in: model.store.tree, index: model.store.index,
+                                     startBoxes: startBoxes)
         if dropTarget != target { dropTarget = target }
         if case .insert = target { return true }
         return false
@@ -565,6 +570,18 @@ final class CanvasDrags {
         case .free?, nil:
             store.rehost(ref)
         }
+    }
+
+    /// The boxes on the canvas of the free containers round a thing, as a drag of it begins: see `startBoxes`.
+    private static func freeBoxes(round id: UUID, in store: DesignStore) -> [UUID: TurnedRect] {
+        let index = store.index, tree = store.tree
+        var boxes: [UUID: TurnedRect] = [:]
+        for holder in index.ancestors(of: id) {
+            guard let node = index.node(holder, in: tree), node.resolvedLayout == .free,
+                  let shape = index.canvasShape(of: holder, in: tree) else { continue }
+            boxes[holder] = shape
+        }
+        return boxes
     }
 
     /// Where the finger is on the canvas: it landed at `start` in the view's points, and has gone `translation` across
@@ -691,6 +708,7 @@ final class CanvasDrags {
             if findsNewHome, placed.isLaidOut {
                 beginLift(of: placed)
             } else {
+                if findsNewHome { startBoxes = Self.freeBoxes(round: ref.element, in: model.store) }
                 // A container's frame is the box round what is in it: they are resized, from where they
                 // were as the drag began, and the box is fitted round them.
                 groupPose = !findsNewHome && placed.node.isContainer ? model.store.groupPose(of: ref) : nil
@@ -851,7 +869,11 @@ final class CanvasDrags {
             if case .element(let ref)? = model.selection, origins.count == 1, origins[.element(ref)] != nil,
                let placed = model.store.placed(ref) {
                 oneThing = (ref, placed.placement)
-                if placed.isLaidOut { beginLift(of: placed) }
+                if placed.isLaidOut {
+                    beginLift(of: placed)
+                } else {
+                    startBoxes = Self.freeBoxes(round: ref.element, in: model.store)
+                }
             }
             model.isAdjusting = true
         }

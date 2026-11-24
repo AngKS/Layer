@@ -603,6 +603,78 @@ struct TreeReconcilerTests {
         #expect(node("w", in: merge.root)?.content.text == "Mine")
     }
 
+    /// A node the person moved up past the node it followed stays theirs, its words and its place, once that node is
+    /// deleted or moved out: a person's move is kept for the rest of the generation (plan 4 Task 4, review I1).
+    @Test(arguments: [false, true])
+    func aNodeMovedUpPastItsNeighbourStaysThePersonsOnceTheNeighbourGoes(movingItOut: Bool) throws {
+        func written(_ keys: [String], c text: String = "C") -> LayerNode {
+            generatedRoot(keys.map { keyed($0, text: $0 == "c" ? text : nil) })
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+        let c = current.children.remove(at: 2)
+        current.children.insert(c, at: 1)
+        current = update(written(["a", "b", "c", "d"]), over: current, by: &reconciler).committed
+        try #require(current.children.map(\.source?.key) == ["a", "c", "b", "d"])
+
+        let b = try #require(node("b", in: current))
+        current = deleting("b", from: current)
+        if movingItOut {
+            // Into a group of the person's own, beside something they added.
+            var box = LayerNode(kind: .group)
+            box.children = [b, handText("Mine")]
+            current.children.append(box)
+        }
+        current = update(written(["a", "b", "c", "d"], c: "GENERATOR"), over: current, by: &reconciler).committed
+        #expect(node("c", in: current)?.content.text == "C")
+        let merge = reconciler.merged(written(["c", "a", "b", "d"], c: "GENERATOR 2"), over: current)
+
+        #expect(node("c", in: merge.root)?.id == c.id)
+        #expect(node("c", in: merge.root)?.content.text == "C")
+        #expect(Array(merge.root.children.prefix(2).map(\.source?.key)) == ["a", "c"], "where the person put it")
+    }
+
+    /// A node the person didn't touch stays the generator's beside one they moved: its words take each update, and the
+    /// generator's reorders land as they did before any move was kept (plan 4 Task 4, review I2).
+    @Test func anUntouchedNeighbourOfAMovedNodeStaysTheGenerators() throws {
+        func written(_ keys: [String], d text: String = "D") -> LayerNode {
+            generatedRoot(keys.map { keyed($0, text: $0 == "d" ? text : nil) })
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+        let c = current.children.remove(at: 2)
+        current.children.insert(c, at: 1)
+        current = update(written(["a", "b", "c", "d"]), over: current, by: &reconciler).committed
+        current = deleting("b", from: current)
+        current = update(written(["a", "b", "c", "d"]), over: current, by: &reconciler).committed
+
+        var words: [String?] = []
+        for version in 1...3 {
+            current = update(written(["a", "b", "c", "d", "e"], d: "D v\(version)"), over: current, by: &reconciler).committed
+            words.append(node("d", in: current)?.content.text)
+        }
+        let merge = reconciler.merged(written(["d", "a", "b", "c", "e"], d: "D v3"), over: current)
+
+        #expect(words == ["D v1", "D v2", "D v3"])
+        #expect(merge.root.children.map(\.source?.key) == ["d", "a", "c", "e"])
+    }
+
+    /// Of two neighbours swapped, only the one that went up is the person's; the other still takes the generator's
+    /// words (plan 3's final re-review, Minor 3, closed by the same rule).
+    @Test func aSwapMakesOnlyTheOneThatWentUpThePersons() throws {
+        func written(_ keys: [String], version: String = "") -> LayerNode {
+            generatedRoot(keys.map { keyed($0, text: $0.uppercased() + version) })
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+        current.children.swapAt(0, 1)
+
+        let merge = reconciler.merged(written(["a", "b", "c"], version: " v2"), over: current)
+
+        #expect(merge.root.children.map(\.source?.key) == ["b", "a", "c"])
+        #expect(merge.root.children.map(\.content.text) == ["B", "A v2", "C v2"])
+    }
+
     /// What a newer Layer saved on a node Build Screen adopts stays on it when the generator rewrites it (final review
     /// A-M6).
     @Test func aRewrittenNodeKeepsWhatANewerLayerSavedOnIt() throws {

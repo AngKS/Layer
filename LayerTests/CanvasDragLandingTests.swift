@@ -365,7 +365,8 @@ private func rowLayout(spacing: CGFloat = 20) -> LayerNode.Layout {
 
 /// Plan 4 Task 4's row: at (20, 100) on a free iPhone root at the canvas's origin, drawn at its own size so that its
 /// points are the canvas's, and the view showing the canvas unscrolled and unzoomed. It holds a, b and c, each 80 × 40
-/// and fixed, at x 0, 100 and 200. `more` goes on the root after it, and `canvas` on the open canvas.
+/// and fixed, at x 0, 100 and 200. `more` goes on the root after it, and `canvas` on the open canvas. With a `root`
+/// layout, the root lays them out instead.
 @MainActor
 private struct RowBoard {
     let model: AppModel
@@ -379,10 +380,11 @@ private struct RowBoard {
 
     var store: DesignStore { model.store }
 
-    init(_ more: [LayerNode] = [], canvas: [LayerNode] = []) {
+    init(_ more: [LayerNode] = [], canvas: [LayerNode] = [], root layout: LayerNode.Layout? = nil) {
         let cells = ["A", "B", "C"].map { fixed(.text, $0, CGRect(x: 0, y: 0, width: 80, height: 40)) }
         let line = holding(rowLayout(), at: CGPoint(x: 20, y: 100), cells)
         var screen = TreeScreen(name: "Screen", origin: .zero, scale: 1, deviceID: nil)
+        screen.root.layout = layout
         screen.root.children = [line] + more
         var tree = TreeContent()
         tree.screens = [screen]
@@ -700,6 +702,34 @@ struct LayoutDragTests {
         #expect(!board.store.isEditing)
     }
 
+    /// A member of a free group in a column, nudged or moved within the group's box, stays in the group, placed freely
+    /// there, and no line shows; let go outside the box as it was when the drag began, it joins the column at the
+    /// line (spec §10, "Moving something in a free container"; fix round 1, I3).
+    @Test func aFreeGroupInAColumnKeepsItsMemberUntilItIsLetGoOutsideItsBox() throws {
+        let p = fixed(.text, "P", CGRect(x: 0, y: 0, width: 80, height: 40))
+        let q = fixed(.text, "Q", CGRect(x: 100, y: 0, width: 80, height: 40))
+        let group = holding(nil, at: .zero, [p, q])
+        let board = RowBoard([group], root: .stack(LayerNode.Stack(axis: .vertical, spacing: 12)))
+        try #require(board.store.parent(of: group.id) == .screen(board.screen))
+        // Q's edges line up with b's in the row above: a nudge this small would snap back.
+        board.store.updateCanvas { $0.snapsToGuides = false }
+
+        for (dx, what) in [(3.0, "a 3 pt nudge"), (-40.0, "a move within the box")] {
+            let start = board.centre(q.id), owner = CanvasDrags.Owner()
+            board.drag(q.id, by: CGSize(width: dx / 2, height: 0), from: start, owner: owner)
+            board.drag(q.id, by: CGSize(width: dx, height: 0), from: start, owner: owner)
+            #expect(board.drags.dropTarget == .free(on: .screen(board.screen)), "no line shows for \(what)")
+            board.drop(q.id, from: start, owner: owner)
+            #expect(board.store.parent(of: q.id) == .node(group.id), "\(what) leaves it in its group")
+            #expect(board.centre(q.id) == CGPoint(x: start.x + dx, y: start.y), "\(what) places it where it was let go")
+        }
+
+        // Below the group's box: the column under the finger takes it.
+        let start = board.centre(q.id)
+        board.drag(q.id, to: CGPoint(x: start.x, y: start.y + 150))
+        #expect(board.store.parent(of: q.id) == .screen(board.screen))
+    }
+
     /// Carried from plan 2: a container is taken out of a row as a leaf is. Its target's drag moves it as what is
     /// selected moves, and on its own it is lifted, then let go where it lands; dropped freely on a row, it joins it.
     @Test func aContainerIsLiftedTakenOutAndMovedInAsAThingIs() throws {
@@ -726,23 +756,34 @@ struct LayoutDragTests {
         #expect(board.children(of: board.row) == [board.a, inner.id, board.b, board.c])
     }
 
-    /// Carried from plan 2: a thing on the open canvas dropped into a row drawn at another scale joins it where the
-    /// line showed, carried into the row's scale so that it is as large as it was (as `wrap` carries it).
-    @Test func aCanvasThingDroppedIntoARowDrawnAtAnotherScaleIsAsLarge() throws {
+    /// Carried from plan 2, with the controller's ruling (fix round 1, I4): a thing moved into a group drawn at another
+    /// scale keeps its own size, as every move between scales does. Dropped into a row on the open canvas drawn at half
+    /// size, it joins it where the line showed; moved into a free group drawn at half size, its middle stays where it
+    /// was let go.
+    @Test func aCanvasThingMovedIntoAGroupDrawnAtAnotherScaleKeepsItsOwnSize() throws {
         var line = holding(rowLayout(), at: CGPoint(x: 1200, y: 200), ["P", "Q"].map { fixed(.text, $0, CGRect(x: 0, y: 0, width: 80, height: 40)) })
         line.scale = 0.5
+        var loose = holding(nil, at: CGPoint(x: 1200, y: 800), ["R", "S"].map { fixed(.text, $0, CGRect(x: 0, y: 0, width: 80, height: 40)) })
+        loose.children[1].frame.origin.x = 100
+        loose.scale = 0.5
         let t = fixed(.text, "T", CGRect(x: 800, y: 400, width: 100, height: 20))
-        let board = RowBoard(canvas: [line, t])
+        let u = fixed(.text, "U", CGRect(x: 800, y: 600, width: 100, height: 20))
+        let board = RowBoard(canvas: [line, loose, t, u])
         let (p, q) = (line.children[0].id, line.children[1].id)
-        let size = try #require(board.store.placed(t.id)).canvasShape.rect.size
 
         // The gap between P (0 to 80) and Q (100 to 180), in the row's own points at (1200, 200), drawn at half size.
         board.drag(t.id, to: CGPoint(x: (1200 + 90) * 0.5, y: (200 + 20) * 0.5))
 
         #expect(board.children(of: line.id) == [p, t.id, q])
-        let node = try #require(board.store.node(t.id))
-        #expect(node.scale == nil)
-        #expect(node.frame.size == CGSize(width: 200, height: 40))
-        #expect(try #require(board.store.placed(t.id)).canvasShape.rect.size == size, "as large on the canvas as it was")
+        let joined = try #require(board.store.node(t.id))
+        #expect(joined.scale == nil)
+        #expect(joined.frame.size == CGSize(width: 100, height: 20), "its own size")
+
+        // Into the free group: where it was let go, at its own size.
+        let middle = board.centre(u.id)
+        #expect(board.store.move(u.id, to: .node(loose.id)))
+        #expect(board.store.node(u.id)?.frame.size == CGSize(width: 100, height: 20), "its own size")
+        let landed = board.centre(u.id)
+        #expect(abs(landed.x - middle.x) < 0.5 && abs(landed.y - middle.y) < 0.5, "its middle where it was")
     }
 }

@@ -215,6 +215,27 @@ struct TreeDropTests {
         #expect(parent(of: target) == .node(innermost))
     }
 
+    /// A thing let go off every container, its centre over a column screen, takes that column's slot at its centre,
+    /// not the end (fix round 1, M3).
+    @Test func aThingLetGoWithItsCentreOverAColumnScreenTakesTheSlotThere() throws {
+        let cells = (0..<3).map { leaf(CGRect(x: 20, y: 100 + CGFloat($0) * 60, width: 200, height: 40), text: "\($0)") }
+        var content = design(cells, root: columnLayout())
+        let loose = leaf(CGRect(x: 600, y: 100, width: 80, height: 40))
+        content.canvas = [loose]
+        let screenID = content.screens[0].id
+
+        // The finger past the screen's right edge (393 wide); the thing's centre on it, between the first two.
+        let target = TreeDrop.target(for: loose.id, at: CGPoint(x: 420, y: 170), centre: CGPoint(x: 360, y: 170),
+                                     in: content, index: TreeIndex(content))
+
+        guard case .insert(let parent, let slot, _) = target else {
+            Issue.record("the column should take it: \(target)")
+            return
+        }
+        #expect(parent == .screen(screenID))
+        #expect(slot == 1)
+    }
+
     /// F23: a thing in an overlay, over that overlay, goes back to its own place there, and shows no line.
     @Test func anOverlaysOwnChildGoesBackToItsPlace() {
         let back = leaf(CGRect(x: 0, y: 0, width: 200, height: 100))

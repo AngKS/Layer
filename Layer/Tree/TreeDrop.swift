@@ -26,25 +26,37 @@ enum TreeDrop {
     /// - A container the store would refuse the move into (past depth 32 or 5,000 nodes) is skipped for the next
     ///   candidate, or `.free` (F15).
     /// - An overlay's own child over that overlay goes back to its own index, and no line shows (F23).
+    /// - A free container round a thing placed freely keeps it while the finger is in its box (`startBoxes`, as the drag
+    ///   began): its member stays its member, placed freely there, and no line shows (spec §10, "Moving something in a
+    ///   free container"). Only outside that box is anything further out looked at.
+    /// - A thing let go off every container, with its centre over a screen whose root lays things out, takes that
+    ///   root's slot at its centre, as it would at the finger.
     ///
     /// The open canvas's things lie over the screens, so its frontmost container under `point` is looked in first;
     /// then the topmost screen under `point`, its root included when that lays things out. A thing that can't go on a
     /// screen (a sticky note, or a container holding one) is placed freely on the canvas, and a drawing goes into no
     /// container, as the store keeps them. Moving changes no count of nodes, so only the depth can refuse it here.
-    static func target(for id: UUID, at point: CGPoint, centre: CGPoint, in content: TreeContent, index: TreeIndex) -> Target {
+    ///
+    /// `startBoxes` are the shapes on the canvas, as the drag began, of the free containers round a thing placed freely:
+    /// a free group's box grows round its member as it is dragged, so its box now always holds the finger.
+    static func target(for id: UUID, at point: CGPoint, centre: CGPoint, in content: TreeContent, index: TreeIndex,
+                       startBoxes: [UUID: TurnedRect] = [:]) -> Target {
         guard let entry = index[id], let node = index.node(id, in: content) else { return .free(on: .canvas) }
+        let parentIsFree = entry.parent.flatMap { index.node($0, in: content) }.map { $0.resolvedLayout == .free } ?? true
         let mover = Mover(id: id, parent: entry.parent, siblingIndex: entry.siblingIndex,
                           levels: TreeEdit.levels(below: node),
                           goesOnScreens: !TreeEdit.holds(node) { !$0.kind.belongsOnScreens },
-                          holdsDrawing: TreeEdit.holds(node) { $0.kind == .drawing })
-        let search = Search(mover: mover, point: point, content: content, index: index)
+                          holdsDrawing: TreeEdit.holds(node) { $0.kind == .drawing },
+                          freeHolders: parentIsFree ? Set(index.ancestors(of: id)) : [])
+        let search = Search(mover: mover, point: point, content: content, index: index, startBoxes: startBoxes)
 
         for top in content.canvas.reversed() where top.isContainer && top.id != id && !top.isHidden {
-            guard let shape = index[top.id].map({ $0.hostShape }), shape.contains(point) else { continue }
+            guard let entry = index[top.id], search.holds(top, entry: entry, placement: nil) else { continue }
             let scale = Self.drawn(top.scale)
             if let found = search.deepest(in: top, parent: .node(top.id), host: .canvas, placement: nil, scale: scale) {
                 return found
             }
+            if search.keeps(top) { return .free(on: .canvas) }
             break
         }
         for screen in content.screens.reversed() {
@@ -57,8 +69,11 @@ enum TreeDrop {
             break
         }
         guard mover.goesOnScreens else { return .free(on: .canvas) }
-        let under = content.screens.last { $0.canvasFrame(on: content.device(of: $0)).contains(centre) }
-        return .free(on: under.map { .screen($0.id) } ?? .canvas)
+        guard let under = content.screens.last(where: { $0.canvasFrame(on: content.device(of: $0)).contains(centre) })
+        else { return .free(on: .canvas) }
+        let atCentre = Search(mover: mover, point: centre, content: content, index: index, startBoxes: startBoxes)
+        return atCentre.taking(under.root, as: .screen(under.id), host: .screen(under.id), placement: under.placement,
+                               scale: Self.drawn(under.scale)) ?? .free(on: .screen(under.id))
     }
 
     /// The index among `children` without `skipping` that `point` (the container's own space) falls before:
@@ -84,6 +99,8 @@ enum TreeDrop {
         /// No sticky note, nor anything else that stays on the canvas, in it.
         var goesOnScreens: Bool
         var holdsDrawing: Bool
+        /// What holds it, when it is placed freely in its parent: any free container among these keeps it.
+        var freeHolders: Set<UUID>
     }
 
     /// One look for the deepest container under the finger.
@@ -93,25 +110,41 @@ enum TreeDrop {
         let point: CGPoint
         let content: TreeContent
         let index: TreeIndex
+        let startBoxes: [UUID: TurnedRect]
 
         /// The target in `container` or the deepest container in it under the point: the frontmost child container under
         /// it first, then `container` itself. Nil when neither takes the thing. `placement` is the screen's, nil on the
-        /// canvas, where the index's shapes are in canvas points already; `scale` is what the host is drawn at.
+        /// canvas, where the index's shapes are in canvas points already; `scale` is what the host is drawn at. A free
+        /// container round the thing, under the point, keeps it there.
         func deepest(in container: LayerNode, parent: NodeParent, host: TreeIndex.Host, placement: Placement?,
                      scale: CGFloat) -> Target? {
             for child in container.children.reversed() where child.isContainer && !child.isHidden && child.id != mover.id {
-                guard let entry = index[child.id], canvasShape(of: entry, placement: placement).contains(point) else { continue }
+                guard let entry = index[child.id], holds(child, entry: entry, placement: placement) else { continue }
                 if let found = deepest(in: child, parent: .node(child.id), host: host, placement: placement, scale: scale) {
                     return found
                 }
+                if keeps(child) { return .free(on: host) }
                 break
             }
             return taking(container, as: parent, host: host, placement: placement, scale: scale)
         }
 
+        /// Whether a free container keeps the thing in it, placed freely, while the point is in its box.
+        func keeps(_ container: LayerNode) -> Bool {
+            container.resolvedLayout == .free && mover.freeHolders.contains(container.id)
+        }
+
+        /// Whether the point is in a container's box on the canvas: for one that keeps the thing, its box as the drag
+        /// began, which hasn't grown round it.
+        func holds(_ container: LayerNode, entry: TreeIndex.Entry, placement: Placement?) -> Bool {
+            let shape = keeps(container) ? startBoxes[container.id] ?? canvasShape(of: entry, placement: placement)
+                : canvasShape(of: entry, placement: placement)
+            return shape.contains(point)
+        }
+
         /// The target `container` gives, if it takes the thing: it lays things out (or is the overlay the thing is in),
         /// isn't locked, and the store would move the thing into it.
-        private func taking(_ container: LayerNode, as parent: NodeParent, host: TreeIndex.Host, placement: Placement?,
+        func taking(_ container: LayerNode, as parent: NodeParent, host: TreeIndex.Host, placement: Placement?,
                             scale: CGFloat) -> Target? {
             guard let entry = index[container.id], !entry.isLockedWithAncestors, !entry.isHiddenWithAncestors,
                   entry.depth + 1 + mover.levels <= TreeRules.maximumDepth, !mover.holdsDrawing else { return nil }
