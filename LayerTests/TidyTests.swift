@@ -223,6 +223,7 @@ struct TidyTests {
             let start = ContinuousClock.now
             built = fresh.store.tidy(screen)
             times.append(ContinuousClock.now - start)
+            print("BENCH tidy 600 things \(times.last!) structures=\(built.count)")
             model = fresh
             if times.last! < budget { break }
         }

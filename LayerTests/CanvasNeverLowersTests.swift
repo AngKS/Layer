@@ -283,7 +283,8 @@ extension HostedWindowSuites {
     /// other suite writes or builds views meanwhile, and prints a `BENCH drag <what> frames=60 writes=… targets=…
     /// nodeViews=…` line for each. Targets and node views are summed over the board's own ids, as the counters' tests
     /// sum them (F9); writes are read from the process-wide `ListWork.elementsWritten`, which only this suite adds to
-    /// as it runs alone.
+    /// as it runs alone. A second line for each, `BENCH drag <what> declineCheck changes=… p50=… p95=… asThePass …`,
+    /// times the store's decline check (plan 5, Task 9) on each frame's change, outside the frame's own count.
     @MainActor
     @Suite("Drag frame benchmark", .serialized, .enabled(if: ProcessInfo.processInfo.environment["LAYER_BENCHMARK"] != nil))
     struct DragFrameBenchmarkTests {
@@ -340,8 +341,18 @@ extension HostedWindowSuites {
                 let start = model.viewport.viewPoint(for: try #require(model.store.placed(id)).canvasShape.centre)
                 let owner = CanvasDrags.Owner()
                 let (written, built, drawn) = (ListWork.elementsWritten, targets(), nodeViews())
+                var checks: [Double] = [], checksAsThePass: [Double] = []
                 for frame in 1...60 {
+                    let before = model.store.tree
                     drags.moveOnTarget(ref, by: CGSize(width: step.width * CGFloat(frame), height: 0), startingAt: start, owner: owner, model: model)
+                    let after = model.store.tree
+                    // The decline check (plan 5, Task 9) runs once on each change a frame makes: timed here on the
+                    // frame's own trees, as they are and with the row and the group made the pass's.
+                    if after != before {
+                        checks.append(Self.timeDeclineCheck(from: before, to: after))
+                        checksAsThePass.append(Self.timeDeclineCheck(from: Self.madeByThePass([row.id, group.id], in: before),
+                                                                     to: Self.madeByThePass([row.id, group.id], in: after)))
+                    }
                     host.view.layoutIfNeeded()
                     try await Task.sleep(for: .milliseconds(4))
                 }
@@ -350,7 +361,38 @@ extension HostedWindowSuites {
                 drags.dropOnTarget(ref, startingAt: start, owner: owner, model: model)
                 try await settle(.milliseconds(300))
                 print("BENCH drag \(what) frames=60 writes=\(counts.0) targets=\(counts.1) nodeViews=\(counts.2)")
+                print("BENCH drag \(what) declineCheck changes=\(checks.count) \(Self.microseconds(checks)) asThePass \(Self.microseconds(checksAsThePass))")
             }
+        }
+
+        /// How long the store's decline check takes over one change, in µs: `takenOutOfStructures`, which
+        /// `DesignStore.change` runs after every forward change.
+        private static func timeDeclineCheck(from before: TreeContent, to after: TreeContent) -> Double {
+            let start = ContinuousClock.now
+            _ = DesignStore.takenOutOfStructures(from: before, to: after)
+            let elapsed = ContinuousClock.now - start
+            return Double(elapsed.components.seconds) * 1e6 + Double(elapsed.components.attoseconds) / 1e12
+        }
+
+        /// The p50 and p95 of times in µs, as `p50=… p95=…`, or `none` when there are none.
+        private static func microseconds(_ times: [Double]) -> String {
+            guard !times.isEmpty else { return "none" }
+            let sorted = times.sorted()
+            return String(format: "p50=%.1fus p95=%.1fus", sorted[sorted.count / 2],
+                          sorted[Int((Double(sorted.count) * 0.95).rounded(.up)) - 1])
+        }
+
+        /// `tree` with each of `ids`, a screen root's child, a container the structure pass made, so that the check
+        /// walks what it holds.
+        private static func madeByThePass(_ ids: [UUID], in tree: TreeContent) -> TreeContent {
+            var tree = tree
+            for screen in tree.screens.indices {
+                for child in tree.screens[screen].root.children.indices where ids.contains(tree.screens[screen].root.children[child].id) {
+                    tree.screens[screen].root.children[child].sketch = LayerNode.SketchIntent(
+                        sketched: tree.screens[screen].root.children[child].frame, on: nil, margin: 0, confidence: 1, decidedBy: .structure)
+                }
+            }
+            return tree
         }
     }
 }

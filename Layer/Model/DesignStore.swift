@@ -270,7 +270,9 @@ final class DesignStore {
         return changed.flatMap { element($0) }
     }
 
-    /// Adds an element sketched on the open canvas, where and about as large as it was drawn.
+    // PROJECTION: deleted in plan 6
+    /// Adds an element sketched on the open canvas, where and about as large as it was drawn: the sketch path's reading
+    /// off every screen (plan 5 leaves it here, F15).
     @discardableResult
     func addFloating(_ kind: ElementKind, from sketch: CGRect) -> ElementRef {
         var element = Self.newElement(kind)
@@ -288,9 +290,10 @@ final class DesignStore {
         delete(nodes: Set(refs.map(\.element)))
     }
 
+    // PROJECTION: deleted in plan 6
     /// Puts a ready-made element on the canvas, centred on a point: onto the screen
     /// there, if it is the kind of thing that goes on screens, and onto the open canvas
-    /// otherwise. Only the size of `element.frame` is used.
+    /// otherwise. Only the size of `element.frame` is used. The library's drops land here (plan 5 leaves it, F15).
     @discardableResult
     func place(_ element: DesignElement, centeredAt point: CGPoint) -> ElementRef {
         var element = element
@@ -534,6 +537,7 @@ final class DesignStore {
         return self.ref(of: ref.element) ?? ref
     }
 
+    // PROJECTION: deleted in plan 6
     /// Puts a ready-made element on the open canvas exactly where its frame says, in points
     /// of its own drawn `scale` canvas points each.
     @discardableResult
