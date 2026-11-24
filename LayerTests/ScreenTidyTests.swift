@@ -551,27 +551,23 @@ struct VoiceScreenLayoutTests {
         #expect(bench.box.tidyScreen(screen: "E99") == "There is no E99.")
     }
 
+    /// Each thing follows where it was put (plan 5's call 9, fallout p): the title and the button span the column, so
+    /// they scale with the screen's width, and the image keeps its leading inset.
     @Test func changingTheDeviceReflowsTheScreen() throws {
         let bench = bench()
+        let before = try #require(bench.app.store.screen(bench.screen)).elements.map(\.frame)
         let line = bench.box.changeScreenDevice(screen: "S1", device: "iPad")
         #expect(line == "Made S1 an iPad screen (820 × 1180).")
         let screen = try #require(bench.app.store.screen(bench.screen))
         #expect(screen.deviceID == "ipad")
-        let bounds = CGRect(origin: .zero, size: screen.size)
-        let column = ScreenTidy.column(on: screen.device)
-        for element in screen.elements {
-            #expect(bounds.contains(element.frame))
-            if element.kind == .image {
-                // Held to half the screen's height, so narrower than the column, in its shape.
-                #expect(element.frame.width <= column.width)
-                #expect(abs(element.frame.width - element.frame.height) <= 1)
-            } else {
-                #expect(element.frame.width == column.width)
-            }
-        }
-        // Back to an iPhone is no device at all, as the Siri action keeps it.
+        #expect(screen.elements.map(\.kind) == [.title, .button, .image])
+        #expect(screen.elements.map(\.frame) == [CGRect(x: 42, y: 75, width: 737, height: 41),
+                                                 CGRect(x: 42, y: 420, width: 737, height: 50),
+                                                 CGRect(x: 20, y: 500, width: 200, height: 200)])
+        // Back to an iPhone is no device at all, as the Siri action keeps it, and everything is where it was.
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPhone").hasPrefix("Made S1 an iPhone screen"))
         #expect(bench.app.store.screen(bench.screen)?.deviceID == nil)
+        #expect(bench.app.store.screen(bench.screen)?.elements.map(\.frame) == before)
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "watch").hasPrefix("I can make it"))
     }
 
