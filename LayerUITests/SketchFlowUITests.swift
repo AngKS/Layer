@@ -1453,6 +1453,49 @@ final class SketchFlowUITests: XCTestCase {
         attach("milestone-code")
     }
 
+    /// The first milestone from a sketch (plan 5, Task 11): two zigzags, a box drawn round them, and four boxes with
+    /// crosses become a card holding a title and a body and a two-column grid of images at once. Layers lists the card
+    /// and the grid, and the screen's code lays the grid out with `Grid` and gives the card its background.
+    func testASketchedCardAndGridExportAGridAndACard() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10), "the box should become a screen")
+
+        // Each zigzag read on its own, as `FirstMilestoneTests` draws them. Here the handwriting reader runs, and may
+        // read a word in a zigzag drawn in straight strokes, so a text is looked for where it was drawn, whatever it says.
+        zigzag(140, 120, 110, 30, humps: 3)
+        convert()
+        XCTAssertTrue(textIsRead(over: CGRect(x: 140, y: 120, width: 110, height: 30)), "the first zigzag should become a text")
+        zigzag(30, 170, 330, 34, humps: 4)
+        convert()
+        XCTAssertTrue(textIsRead(over: CGRect(x: 30, y: 170, width: 330, height: 34)), "the second zigzag should become a text")
+        attach("sketched-milestone-two-texts")
+
+        // A box round them is a card holding them.
+        box(CGRect(origin: onScreen((10, 100)), size: CGSize(width: 373 * screenScale, height: 130 * screenScale)))
+        convert()
+        attach("sketched-milestone-card")
+
+        // Four boxes with crosses, read together, are a grid of images. The rows are further apart than the unit test's:
+        // this screen is drawn at two thirds of its size, where its 20 points apart are 13 on the canvas, close enough
+        // for the Magic Pen to take the boxes above and below as one sketch (it joins strokes within 14).
+        for (x, y) in [(40, 300), (213, 300), (40, 452), (213, 452)] as [(CGFloat, CGFloat)] {
+            crossedBox(x, y, 140, 120)
+        }
+        convert()
+        attach("sketched-milestone-card-and-grid")
+
+        // Layers lists the card and the grid, and the code lays the grid out and gives the card its background.
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Card") != nil }, "the Layers panel should list the card")
+        XCTAssertNotNil(layerRow("Grid"), "the Layers panel should list the grid")
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.staticTexts.matching(labelContaining("Grid(")).firstMatch.waitForExistence(timeout: 5), "the code should lay the grid out with Grid")
+        XCTAssertTrue(app.staticTexts.matching(labelContaining(".background(.background.secondary")).firstMatch.exists, "the code should give the card its background")
+        attach("sketched-milestone-code")
+    }
+
     /// A thing in a column dragged over the lower half of the thing after it is lifted, and lands after it: the column's
     /// order, which Layers lists first at the top, changes (plan 4, call 3).
     func testDraggingAThingInAColumnReordersIt() {
@@ -1779,6 +1822,41 @@ final class SketchFlowUITests: XCTestCase {
     private func zigzag() {
         let points: [(CGFloat, CGFloat)] = [(150, 132), (170, 104), (190, 132), (210, 104), (230, 132)]
         for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
+    }
+
+    /// A zigzag across a box given in the phone screen's own coordinates, where `wave x y width height humps` would go:
+    /// from the middle of its left edge to its top and bottom `humps` times each, then to the middle of its right edge,
+    /// one stroke for each straight part.
+    private func zigzag(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, humps: Int) {
+        let peaks = (0..<(2 * humps)).map { index -> (CGFloat, CGFloat) in
+            (x + width * CGFloat(2 * index + 1) / CGFloat(4 * humps), index.isMultiple(of: 2) ? y : y + height)
+        }
+        let points = [(x, y + height / 2)] + peaks + [(x + width, y + height / 2)]
+        for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
+    }
+
+    /// Whether words are shown over an area given in the phone screen's own coordinates, give or take a few points,
+    /// within `timeout`: what a zigzag drawn there was read as, whatever it says.
+    private func textIsRead(over local: CGRect, timeout: TimeInterval = 10) -> Bool {
+        let corner = onScreen((local.minX - 10, local.minY - 10))
+        let area = CGRect(origin: corner, size: CGSize(width: (local.width + 20) * screenScale, height: (local.height + 20) * screenScale))
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let found = app.staticTexts.allElementsBoundByIndex.contains { text in
+                text.exists && area.contains(CGPoint(x: text.frame.midX, y: text.frame.midY))
+            }
+            if found { return true }
+            usleep(500_000)
+        } while Date() < deadline
+        return false
+    }
+
+    /// A box with a cross through it, given in the phone screen's own coordinates, as `box …; cross …` draws it.
+    private func crossedBox(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+        box(CGRect(origin: onScreen((x, y)), size: CGSize(width: width * screenScale, height: height * screenScale)))
+        let (dx, dy) = (width * 0.14, height * 0.14)
+        stroke(onScreen((x + dx, y + dy)), onScreen((x + width - dx, y + height - dy)))
+        stroke(onScreen((x + width - dx, y + dy)), onScreen((x + dx, y + height - dy)))
     }
 
     /// Reads the sketch on the canvas. The tests draw with conversion after a pause off;

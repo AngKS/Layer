@@ -288,6 +288,24 @@ struct SwiftUIExportTests {
         #expect(lines.filter { $0 == "GridRow {" }.count == 2)
     }
 
+    /// In a free container a grid that fits its width is as wide as its columns of its widest cell, as the engine lays
+    /// it out. Its cells grow across to sit in their columns, so it is held to that width, or SwiftUI stretches it over
+    /// the room offered and its first column leaves where it was drawn: here, under a title wider than it, to the
+    /// title's edge (plan 5, Task 11: the first milestone's sketched grid). In a column, its columns share the column's
+    /// width in both, so nothing holds it.
+    @Test func aGridThatFitsAFreeContainerKeepsItsWidth() {
+        let images = (0..<4).map { _ in Self.leaf(.image, frame: CGRect(x: 0, y: 0, width: 160, height: 120)) }
+        var grid = Self.container(.group, .grid(LayerNode.Grid(columns: 2, columnSpacing: 12, rowSpacing: 16)), images, width: .fit)
+        grid.frame.origin = CGPoint(x: 30, y: 300)
+        let title = Self.leaf(.title, "Wider", frame: CGRect(x: 20, y: 100, width: 353, height: 40))
+
+        let free = Self.code(Self.design(.free, [title, grid]))
+        #expect(Self.modifiers(startingWith: "Grid(", in: free).first == ".fixedSize(horizontal: true, vertical: false)")
+        let column = Self.code(Self.design(Self.stack(.vertical, spacing: 16), [grid]))
+        #expect(Self.lines(column).contains { $0.hasPrefix("Grid(") })
+        #expect(!Self.modifiers(startingWith: "Grid(", in: column).contains { $0.hasPrefix(".fixedSize(") })
+    }
+
     @Test func anOverlayIsAZStackWithItsAlignment() {
         let overlay = Self.container(.group, .overlay(LayerNode.Alignment(horizontal: .end, vertical: .end)),
                                      [Self.leaf(.image), Self.text("Caption")])

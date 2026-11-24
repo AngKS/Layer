@@ -1,0 +1,404 @@
+{
+  "content" : {
+    "canvas" : [
+
+    ],
+    "screens" : [
+      {
+        "id" : "F0451F64-2185-47BD-9C10-C5777FBD3465",
+        "name" : "Screen 1",
+        "origin" : [
+          0,
+          0
+        ],
+        "root" : {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "frame" : [
+                    [
+                      73.5,
+                      21
+                    ],
+                    [
+                      228,
+                      32
+                    ]
+                  ],
+                  "id" : "261029E3-3F29-4F08-860F-FC3A6B28A7D7",
+                  "kind" : "title",
+                  "sketch" : {
+                    "confidence" : 0.9631294184113128,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.356234096692112,
+                        0.14084914609190333
+                      ],
+                      [
+                        0.27989821882951654,
+                        0.03520311626689758
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        140,
+                        120.00347247030163
+                      ],
+                      [
+                        110,
+                        29.993055059396738
+                      ]
+                    ],
+                    "placement" : "centered",
+                    "structureDeclined" : false
+                  },
+                  "style" : {
+                    "fontSize" : 22,
+                    "hasShadow" : false
+                  },
+                  "text" : "Title"
+                },
+                {
+                  "frame" : [
+                    [
+                      39,
+                      65
+                    ],
+                    [
+                      297,
+                      44
+                    ]
+                  ],
+                  "id" : "CDAC159D-F0AB-4525-9A51-B3B588447CBA",
+                  "kind" : "body",
+                  "sketch" : {
+                    "confidence" : 0.9999999998468416,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.07633587786259542,
+                        0.19953865342948449
+                      ],
+                      [
+                        0.8396946564885496,
+                        0.039889829291265784
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        30,
+                        170.00693272192078
+                      ],
+                      [
+                        330,
+                        33.98613455615845
+                      ]
+                    ],
+                    "placement" : "proportional",
+                    "structureDeclined" : false
+                  },
+                  "text" : "A short description goes here, a line or two that says what this is."
+                }
+              ],
+              "frame" : [
+                [
+                  9,
+                  99
+                ],
+                [
+                  375,
+                  132
+                ]
+              ],
+              "id" : "B23D157E-65D4-42D4-A130-755736D27793",
+              "kind" : "card",
+              "padding" : {
+                "bottom" : 16,
+                "leading" : 16,
+                "top" : 16,
+                "trailing" : 16
+              },
+              "sketch" : {
+                "confidence" : 0.95,
+                "decidedBy" : "rules",
+                "normalizedBounds" : [
+                  [
+                    0.02239716025678182,
+                    0.11596569288365925
+                  ],
+                  [
+                    0.955209265195317,
+                    0.15539499193655204
+                  ]
+                ],
+                "originalBounds" : [
+                  [
+                    8.802083980915256,
+                    98.80277033687769
+                  ],
+                  [
+                    375.3972412217596,
+                    132.39653312994233
+                  ]
+                ],
+                "placement" : "proportional",
+                "structureDeclined" : false
+              }
+            },
+            {
+              "children" : [
+                {
+                  "frame" : [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      160,
+                      120
+                    ]
+                  ],
+                  "id" : "11839DC4-83B8-45FA-A238-2CB8CF9D10AA",
+                  "kind" : "image",
+                  "sketch" : {
+                    "confidence" : 1,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.09872869948220053,
+                        0.3507063038341987
+                      ],
+                      [
+                        0.36233311776638005,
+                        0.14365959902088107
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        38.80037889650481,
+                        298.8017708667373
+                      ],
+                      [
+                        142.39691528218736,
+                        122.39797836579066
+                      ]
+                    ],
+                    "placement" : "leading",
+                    "structureDeclined" : false
+                  }
+                },
+                {
+                  "frame" : [
+                    [
+                      172,
+                      0
+                    ],
+                    [
+                      160,
+                      120
+                    ]
+                  ],
+                  "id" : "FF5000E7-C731-46EA-A9C8-C2331BDE7A60",
+                  "kind" : "image",
+                  "sketch" : {
+                    "confidence" : 1,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.5389322618231674,
+                        0.3507063038341987
+                      ],
+                      [
+                        0.36233311776638005,
+                        0.14365959902088107
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        211.8003788965048,
+                        298.8017708667373
+                      ],
+                      [
+                        142.39691528218736,
+                        122.39797836579066
+                      ]
+                    ],
+                    "placement" : "trailing",
+                    "structureDeclined" : false
+                  }
+                },
+                {
+                  "frame" : [
+                    [
+                      0,
+                      136
+                    ],
+                    [
+                      160,
+                      120
+                    ]
+                  ],
+                  "id" : "774C87AC-B601-441A-8C96-EBA08F67ECC2",
+                  "kind" : "image",
+                  "sketch" : {
+                    "confidence" : 1,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.09872869948220053,
+                        0.5150255526604898
+                      ],
+                      [
+                        0.36233311776638005,
+                        0.143659599020881
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        38.80037889650481,
+                        438.8017708667373
+                      ],
+                      [
+                        142.39691528218736,
+                        122.3979783657906
+                      ]
+                    ],
+                    "placement" : "leading",
+                    "structureDeclined" : false
+                  }
+                },
+                {
+                  "frame" : [
+                    [
+                      172,
+                      136
+                    ],
+                    [
+                      160,
+                      120
+                    ]
+                  ],
+                  "id" : "C426C9F4-CB8B-42E5-9053-63478A1D1ABC",
+                  "kind" : "image",
+                  "sketch" : {
+                    "confidence" : 1,
+                    "decidedBy" : "rules",
+                    "normalizedBounds" : [
+                      [
+                        0.5389322618231674,
+                        0.5150255526604898
+                      ],
+                      [
+                        0.36233311776638005,
+                        0.143659599020881
+                      ]
+                    ],
+                    "originalBounds" : [
+                      [
+                        211.8003788965048,
+                        438.8017708667373
+                      ],
+                      [
+                        142.39691528218736,
+                        122.3979783657906
+                      ]
+                    ],
+                    "placement" : "trailing",
+                    "structureDeclined" : false
+                  }
+                }
+              ],
+              "frame" : [
+                [
+                  30,
+                  300
+                ],
+                [
+                  332,
+                  256
+                ]
+              ],
+              "height" : {
+                "mode" : "fit"
+              },
+              "id" : "6012A3A3-36CD-5898-B1B2-EFE98B49157E",
+              "kind" : "group",
+              "layout" : {
+                "columnSpacing" : 12,
+                "columns" : 2,
+                "horizontal" : "start",
+                "rowSpacing" : 16,
+                "type" : "grid",
+                "vertical" : "start"
+              },
+              "sketch" : {
+                "confidence" : 1,
+                "decidedBy" : "structure",
+                "normalizedBounds" : [
+                  [
+                    0.07633587786259542,
+                    0.352112676056338
+                  ],
+                  [
+                    0.8447837150127226,
+                    0.3004694835680751
+                  ]
+                ],
+                "originalBounds" : [
+                  [
+                    30,
+                    300
+                  ],
+                  [
+                    332,
+                    256
+                  ]
+                ],
+                "placement" : "proportional",
+                "structureDeclined" : false
+              },
+              "width" : {
+                "mode" : "fit"
+              }
+            }
+          ],
+          "frame" : [
+            [
+              0,
+              0
+            ],
+            [
+              393,
+              852
+            ]
+          ],
+          "id" : "F0451F64-2185-47BD-9C10-C5777FBD3465",
+          "kind" : "group"
+        },
+        "scale" : 1
+      }
+    ],
+    "settings" : {
+      "code" : {
+        "includesPreview" : true,
+        "layout" : "structure",
+        "usesNavigationTitle" : false
+      },
+      "gridSpacing" : 24,
+      "gridStyle" : "dots",
+      "model" : {
+        "provider" : "apple-intelligence"
+      },
+      "showsFrameNames" : true,
+      "showsGrid" : true,
+      "showsMeasurements" : true,
+      "snapsToGrid" : false,
+      "snapsToGuides" : true
+    },
+    "title" : "iPhone Wireframe"
+  },
+  "fileName" : "Sketched Milestone",
+  "version" : 4
+}

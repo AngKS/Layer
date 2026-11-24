@@ -403,15 +403,22 @@ extension SwiftUICodeGenerator.ScreenWriter {
 
     /// The frame a row, column, grid or overlay is written with as an item of the inference, in
     /// a free container whose children's frames are their own: its lengths where it doesn't fit
-    /// what it holds, its content placed in it as the engine places it.
+    /// what it holds, its content placed in it as the engine places it. A grid that fits its
+    /// width is first held to it: nothing offers it a width there, so the engine makes its
+    /// columns as wide as its widest cell, but its cells grow across to sit in their columns, and
+    /// SwiftUI would stretch it over the room offered (plan 5, Task 11).
     func framesInFreeParent(_ node: LayerNode) -> [String] {
+        var held: [String] = []
+        if case .grid = node.resolvedLayout, node.width.mode == .fit {
+            held.append(".fixedSize(horizontal: true, vertical: false)")
+        }
         let width: CGFloat? = node.width.mode == .fit ? nil : node.frame.width
         let height: CGFloat? = node.height.mode == .fit ? nil : node.frame.height
-        guard width != nil || height != nil else { return [] }
+        guard width != nil || height != nil else { return held }
         let own = Generator.contentAlignment(of: node)
         let alignment = Generator.alignmentName(horizontal: width == nil ? nil : own.horizontal, vertical: height == nil ? nil : own.vertical)
         let parts = [width.map { "width: \(Generator.number($0))" }, height.map { "height: \(Generator.number($0))" }, alignment.map { "alignment: .\($0)" }]
-        return [".frame(\(parts.compactMap { $0 }.joined(separator: ", ")))"]
+        return held + [".frame(\(parts.compactMap { $0 }.joined(separator: ", ")))"]
     }
 }
 
