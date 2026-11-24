@@ -540,6 +540,69 @@ struct TreeReconcilerTests {
         #expect(node("k", in: merge.root)?.children.map(\.id) == [b.id])
     }
 
+    /// A reorder stays the person's after the node the moved one followed is deleted: it can't be followed any more,
+    /// and that is no reason to give the moved node back to the generator (plan 3's final re-review, S4).
+    @Test func aReorderSurvivesItsOldNeighbourBeingDeleted() throws {
+        func written(_ keys: [String], c text: String = "C") -> LayerNode {
+            generatedRoot(keys.map { keyed($0, text: $0 == "c" ? text : nil) })
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+        let c = current.children.removeLast()
+        current.children.insert(c, at: 0)
+        current = update(written(["a", "b", "c", "d"]), over: current, by: &reconciler).committed
+        try #require(current.children.map(\.source?.key) == ["c", "a", "b", "d"])
+
+        current = deleting("b", from: current)
+        current = update(written(["a", "b", "c", "d"], c: "GENERATOR"), over: current, by: &reconciler).committed
+        let merge = reconciler.merged(written(["a", "b", "c", "d"], c: "GENERATOR"), over: current)
+
+        #expect(merge.root.children.map(\.source?.key) == ["c", "a", "d"])
+        #expect(node("c", in: merge.root)?.id == c.id)
+        #expect(node("c", in: merge.root)?.content.text == "C")
+    }
+
+    /// The same when the generator stops listing the node the moved one followed, so that it is dropped: the stream
+    /// alone mustn't undo the person's one reorder (S2).
+    @Test func aReorderSurvivesTheGeneratorDroppingItsAnchor() throws {
+        func written(_ keys: [String], b text: String = "B") -> LayerNode {
+            generatedRoot(keys.map { keyed($0, text: $0 == "b" ? text : nil) })
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c", "d"]), over: emptyRoot(), by: &reconciler).committed
+        // The person moves b to the end.
+        let b = current.children.remove(at: 1)
+        current.children.append(b)
+        current = update(written(["a", "b", "c", "d", "e"]), over: current, by: &reconciler).committed
+        try #require(current.children.map(\.source?.key) == ["a", "c", "d", "b", "e"])
+
+        // The generator no longer lists a, which b followed when it was written.
+        let (dropping, committed) = update(written(["b", "c", "d", "e", "f"]), over: current, by: &reconciler)
+        try #require(dropping.dropped == ["a"])
+        try #require(committed.children.map(\.source?.key) == ["c", "d", "b", "e", "f"])
+        let merge = reconciler.merged(written(["b", "c", "d", "e", "f", "g"], b: "GENERATOR"), over: committed)
+
+        #expect(merge.root.children.map(\.source?.key) == ["c", "d", "b", "e", "f", "g"])
+        #expect(node("b", in: merge.root)?.id == b.id)
+        #expect(node("b", in: merge.root)?.content.text == "B")
+    }
+
+    /// A node whose words the person changed, but which they didn't move, goes on following the generator's order:
+    /// after the generator reorders round it once, and again (S3).
+    @Test func aWordEditedNodeKeepsItsPlaceAfterTheGeneratorReorders() throws {
+        func written(_ keys: [String]) -> LayerNode { generatedRoot(keys.map { keyed($0) }) }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "w", "n"]), over: emptyRoot(), by: &reconciler).committed
+        current = editing(current, "w") { $0.content.text = "Mine" }
+        current = update(written(["w", "a", "n"]), over: current, by: &reconciler).committed
+        try #require(current.children.map(\.source?.key) == ["w", "a", "n"])
+
+        let merge = reconciler.merged(written(["a", "n", "w"]), over: current)
+
+        #expect(merge.root.children.map(\.source?.key) == ["a", "n", "w"])
+        #expect(node("w", in: merge.root)?.content.text == "Mine")
+    }
+
     /// What a newer Layer saved on a node Build Screen adopts stays on it when the generator rewrites it (final review
     /// A-M6).
     @Test func aRewrittenNodeKeepsWhatANewerLayerSavedOnIt() throws {

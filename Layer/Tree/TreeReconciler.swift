@@ -57,6 +57,10 @@ struct TreeReconciler: Sendable {
         /// The keys whose generated node this merge wrote (new, or unchanged since its commit), each with the
         /// id it wrote it with. The person's nodes aren't among them: their records stay as they were.
         fileprivate var wrote: [String: UUID] = [:]
+        /// The written keys whose node this merge found where its anchor says, the person's changed nodes among them:
+        /// each is anchored again where the commit leaves it, its fields as they were. A node found moved keeps the
+        /// anchor it had, so that it stays moved (plan 3's final re-review, A-I1).
+        fileprivate var unmoved: Set<String> = []
     }
 
     /// The screen root's key, as `Outline` writes it.
@@ -108,6 +112,9 @@ struct TreeReconciler: Sendable {
     /// took its node away. A node the store gave a new id, because the design held its id elsewhere, is found by
     /// its key, so that it keeps the new one. Keys found deleted become deleted, with every key that was inside
     /// them and went with them, and keys dropped are forgotten.
+    ///
+    /// Every written node the merge didn't find moved is anchored where the commit leaves it, whether it wrote it or
+    /// kept it (one the person changed, say), so that no anchor but a moved node's goes stale.
     mutating func record(_ merge: Merge, committed: LayerNode) {
         var placed: [UUID: Placed] = [:]
         Self.index(committed, into: &placed)
@@ -134,11 +141,11 @@ struct TreeReconciler: Sendable {
         recordDeleted(merge.deletedByUser, committed: placed)
         for key in merge.dropped { written[key] = nil }
         // Which nodes are written is known only now, so each is placed among them last.
-        anchor(recorded, in: committed)
+        anchor(recorded.union(merge.unmoved), in: committed)
     }
 
     /// Each of `keys` that is written as a node of `root` gets the anchor it has there: the key of the written node
-    /// just before it among its siblings, or nil.
+    /// just before it among its siblings, or nil. Its fields stay as recorded.
     private mutating func anchor(_ keys: Set<String>, in root: LayerNode) {
         guard !keys.isEmpty else { return }
         let anchors = Self.anchors(in: root, written: written)
@@ -291,7 +298,19 @@ private struct Merging {
         root.source = generatedRoot.source
         usedIDs.insert(root.id)
         root.children = children(of: root, generated: generatedRoot.children, current: currentRoot.children)
-        return TreeReconciler.Merge(root: root, deletedByUser: deletedByUser, dropped: dropped, wrote: wrote)
+        return TreeReconciler.Merge(root: root, deletedByUser: deletedByUser, dropped: dropped, wrote: wrote,
+                                    unmoved: unmoved())
+    }
+
+    /// The written keys whose node is on the screen where its anchor says: changed by the person or not.
+    func unmoved() -> Set<String> {
+        var keys: Set<String> = []
+        for (key, entry) in written {
+            guard case .node(let id, let record) = entry, let placed = current[id], !wasMoved(placed, since: record)
+            else { continue }
+            keys.insert(key)
+        }
+        return keys
     }
 
     // MARK: Building
@@ -316,15 +335,18 @@ private struct Merging {
     /// Whether the person moved a written node since its commit: to another parent, or among the generator's nodes in
     /// its parent, so that the written node just before it now isn't its anchor. Where the anchor has gone from that
     /// parent since (deleted, moved out or dropped), the node that anchor followed stands in for it, so that what goes
-    /// round a node doesn't move it. An anchor that can't be followed further, one forgotten or deleted before, moves
-    /// nothing.
+    /// round a node doesn't move it.
+    ///
+    /// An anchor that can't be followed further, one forgotten, deleted or taken away by the rules before, is a move:
+    /// every node found unmoved is anchored again at each commit, so only a node once found moved has an anchor that
+    /// old, and it stays the person's (plan 3's final re-review, A-I1).
     func wasMoved(_ placed: TreeReconciler.Placed, since record: TreeReconciler.Record) -> Bool {
         guard placed.parent == record.parent else { return true }
         let now = anchors[placed.node.id]
         var anchor = record.anchor
         var followed: Set<String> = []
         while let key = anchor, key != now {
-            guard followed.insert(key).inserted, case .node(let id, let recorded)? = written[key] else { return false }
+            guard followed.insert(key).inserted, case .node(let id, let recorded)? = written[key] else { return true }
             // Still there, and something else has come before the node.
             if current[id]?.parent == placed.parent { return true }
             anchor = recorded.anchor
