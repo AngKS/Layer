@@ -128,12 +128,21 @@ extension HostedWindowSuites {
             let live = TreeProjection.lowerings(of: board.screen)
             _ = board.store.screens
             #expect(TreeProjection.lowerings(of: board.screen) - live == 1, "a read of the projection is counted")
+            let hostLive = TreeProjection.hostLowerings(of: board.screen)
+            board.store.updateScreen(board.screen) { $0.name = "Renamed" }
+            #expect(TreeProjection.hostLowerings(of: board.screen) - hostLive == 1, "a write through the projection to the screen is counted")
             board.store.update(board.cardText) { $0.content.text = "Changed again" }
             let before = TreeProjection.lowerings(of: board.screen)
+            let hostBefore = TreeProjection.hostLowerings(of: board.screen)
 
             // A line dragged 60 frames, then let go.
             let line = try #require(board.store.ref(of: board.lines[5]))
             let lineStart = board.start(of: line.element)
+            // What the finger takes there: the line, or the drawing whose ink is on top within a finger's reach of it,
+            // which among drawings 18 points apart is the one above it.
+            let taken = model.inkTarget(at: lineStart)?.element ?? line.element
+            #expect(board.store.node(taken)?.kind == (linesAreDrawings ? .drawing : .text))
+            let takenCentre = try #require(board.store.placed(taken)).canvasShape.centre
             let lineOwner = CanvasDrags.Owner()
             for step in 1...60 {
                 drags.moveOnTarget(line, by: CGSize(width: CGFloat(step), height: 0), startingAt: lineStart, owner: lineOwner, model: model)
@@ -142,6 +151,11 @@ extension HostedWindowSuites {
             drags.dropOnTarget(line, startingAt: lineStart, owner: lineOwner, model: model)
             try await settle(host.view)
             let afterLine = TreeProjection.lowerings(of: board.screen) - before
+            // The frames moved what the finger took, a text or a drawing, 60 points across the glass: lowering nothing
+            // proves only as much as the frames did (final review A1 m3).
+            let takenMoved = try #require(board.store.placed(taken)).canvasShape.centre
+            #expect(abs(takenMoved.x - takenCentre.x - 60 / model.zoomScale) <= 1, "it went across with the finger: \(takenCentre) to \(takenMoved)")
+            #expect(abs(takenMoved.y - takenCentre.y) <= 1, "and no further down")
 
             // A child of the row lifted 60 frames, along the row past its last child, and let go there. A lift writes
             // nothing, so the design is changed first (F11).
@@ -170,6 +184,7 @@ extension HostedWindowSuites {
             drags.dropScreen(owner: screenOwner, model: model)
             try await settle(host.view, for: .milliseconds(300))
             let afterScreen = TreeProjection.lowerings(of: board.screen) - before
+            let hostLowered = TreeProjection.hostLowerings(of: board.screen) - hostBefore
 
             let zoom = model.zoomScale
             #expect(board.store.treeScreen(board.screen)?.origin == CGPoint(x: (340 + 60 / zoom).rounded(), y: (40 + 30 / zoom).rounded()),
@@ -177,6 +192,7 @@ extension HostedWindowSuites {
             #expect(afterLine == 0, "lowerings over a 60-frame drag of a line: \(afterLine)")
             #expect(afterLift - afterLine == 0, "lowerings over a 60-frame lift of a row's child: \(afterLift - afterLine)")
             #expect(afterScreen - afterLift == 0, "lowerings over a 60-frame drag of the screen: \(afterScreen - afterLift)")
+            #expect(hostLowered == 0, "the screen's list, or a node on it, lowered alone over the three drags: \(hostLowered)")
         }
     }
 }
