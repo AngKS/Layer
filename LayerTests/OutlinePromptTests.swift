@@ -142,20 +142,25 @@ struct OutlinePromptTests {
     }
 
     #if DEBUG
-    @Test func aTemplatePreviewIsMadeOnce() {
+    @Test func aTemplatePreviewIsMadeOnce() throws {
         let before = AssetLibrary.templatePreviewsMade(named: "Settings")
-        let first = AssetLibrary.templatePreview(named: "Settings")
+        let first = try #require(AssetLibrary.templateRoot(named: "Settings"))
         let afterFirst = AssetLibrary.templatePreviewsMade(named: "Settings")
         // Another test, or the library's view, may have made it already.
         #expect(afterFirst - before <= 1)
-        let second = AssetLibrary.templatePreview(named: "Settings")
+        let second = try #require(AssetLibrary.templateRoot(named: "Settings"))
         #expect(AssetLibrary.templatePreviewsMade(named: "Settings") == afterFirst)
         #expect(afterFirst == 1)
         #expect(first == second)
-        #expect(first.contains { $0.kind == .toggle })
+        // Each leaf with its frame on the screen: a node's frame is in its parent's space.
+        func leaves(_ node: LayerNode, from origin: CGPoint = .zero) -> [(kind: ElementKind, frame: CGRect)] {
+            let frame = node.frame.offsetBy(dx: origin.x, dy: origin.y)
+            return node.children.isEmpty ? [(node.kind, frame)] : node.children.flatMap { leaves($0, from: frame.origin) }
+        }
+        #expect(leaves(first).contains { $0.kind == .toggle })
         // Laid out on the iPhone: everything inside its screen, below its safe area.
         let phone = CGRect(origin: .zero, size: DeviceFrame.iPhone.size)
-        #expect(first.allSatisfy { phone.contains($0.frame) && $0.frame.minY >= DeviceFrame.iPhone.safeTop })
+        #expect(leaves(first).allSatisfy { phone.contains($0.frame) && $0.frame.minY >= DeviceFrame.iPhone.safeTop })
     }
     #endif
 
