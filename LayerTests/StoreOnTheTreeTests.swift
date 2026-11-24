@@ -21,6 +21,10 @@ private func button(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, height: 
     DesignElement(kind: .button, frame: frame, text: "Go", tint: Theme.accent)
 }
 
+private func buttonNode(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, height: 50)) -> LayerNode {
+    .leaf(.button, frame: frame, text: "Go", tint: Theme.accent)
+}
+
 /// The store keeps the design as a tree: its rules run inside every change, undo and redo, and
 /// what hasn't moved onto the tree yet reads and writes it through the projection (plan 2, Task 7).
 @Suite("The store on the tree")
@@ -30,9 +34,9 @@ struct StoreOnTheTreeTests {
         let (store, _) = makeStore()
         let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 393, height: 852))
         let centre = CGPoint(x: screen.canvasFrame.midX, y: screen.canvasFrame.midY)
-        store.place(DesignStore.newElement(.button), centeredAt: centre)
+        store.place(LayerNode.standard(.button), centredAt: centre)
 
-        let root = try #require(store.content.tree.screens.first?.root)
+        let root = try #require(store.tree.screens.first?.root)
         #expect(root.children.map(\.kind) == [.button])
     }
 
@@ -42,22 +46,21 @@ struct StoreOnTheTreeTests {
         let (store, undo) = makeStore()
         let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         undo.removeAllActions()
-        let item = DesignStore.newElement(.group)
-        let member = button()
+        let member = buttonNode()
+        let item = LayerNode.container(children: [member])
 
         store.apply { content in
-            content.add(item, to: screen.id)
-            content.add(member, to: screen.id)
-            content.update(member.id) { $0.group = item.id }
+            guard let index = content.tree.screens.firstIndex(where: { $0.id == screen.id }) else { return }
+            content.tree.screens[index].root.children.append(item)
         }
 
-        let root = try #require(store.content.tree.screens.first?.root)
+        let root = try #require(store.tree.screens.first?.root)
         #expect(root.children.map(\.id) == [member.id])
         #expect(root.children.first?.frame == member.frame)
-        #expect(store.element(item.id) == nil)
+        #expect(store.node(item.id) == nil)
         #expect(undo.canUndo)
         undo.undo()
-        #expect(store.content.tree.screens.first?.root.children.isEmpty == true)
+        #expect(store.tree.screens.first?.root.children.isEmpty == true)
         #expect(!undo.canUndo)
     }
 
@@ -88,12 +91,12 @@ struct StoreOnTheTreeTests {
         let (store, _) = makeStore()
         let a = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let b = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 0), scale: 1))
-        let onA = store.setElements([button()], on: a.id)
-        _ = store.setElements([button()], on: b.id)
-        let roots = store.content.tree.screens.map(\.root.id)
+        let onA = store.add([buttonNode()], onScreen: a.id)
+        _ = store.add([buttonNode()], onScreen: b.id)
+        let roots = store.tree.screens.map(\.root.id)
         let before = roots.map(LayoutEngine.timesLaidOut)
 
-        store.update(onA[0]) { $0.frame.origin.x += 10 }
+        store.update(onA[0].element) { $0.frame.origin.x += 10 }
 
         let laid = zip(roots.map(LayoutEngine.timesLaidOut), before).map(-)
         #expect(laid == [1, 0])

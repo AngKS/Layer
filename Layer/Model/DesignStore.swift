@@ -126,13 +126,17 @@ final class DesignStore {
     /// on every move of the pen.
     @ObservationIgnored private var targets: (entered: Set<UUID>, found: TreeTargets)?
 
-    /// What `make` works out about what can be touched while the containers in `entered` have been
-    /// gone into: kept until the content changes, or other containers are gone into.
-    func keptTargets(entered: Set<UUID>, _ make: () -> TreeTargets) -> TreeTargets {
+    /// What can be touched on each screen and the open canvas while the containers in `entered` have been
+    /// gone into: see `TreeTargets`. Kept until the content changes, or other containers are gone into:
+    /// hover asks on every move of the pen. `CanvasWork.targetPasses` counts each build.
+    func treeTargets(entered: Set<UUID>) -> TreeTargets {
         // Read first, so that whatever draws from it is redrawn when the content changes.
         _ = content
         if let targets, targets.entered == entered { return targets.found }
-        let found = make()
+        #if DEBUG
+        CanvasWork.targetPasses += 1
+        #endif
+        let found = TreeTargets(tree, index: index, entered: entered)
         targets = (entered, found)
         return found
     }
@@ -212,10 +216,8 @@ final class DesignStore {
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
-    // PROJECTION: deleted in plan 6
-    // Reads the projection's screens, for `addFloating`, `place(_:centeredAt:)` and Siri (plans 5 and 6).
-    /// The scale loose elements are drawn at: that of the newest screen, so they match it.
-    var looseScale: CGFloat { screens.last?.scale ?? 0.66 }
+    /// The scale loose things are drawn at: that of the newest screen, so they match it.
+    var looseScale: CGFloat { tree.screens.last?.scale ?? 0.66 }
 
     // MARK: Changes made in one step
 

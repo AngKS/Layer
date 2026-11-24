@@ -637,16 +637,6 @@ final class CanvasDrags {
         }
     }
 
-    // PROJECTION: deleted in plan 6
-    /// `moveRule(for:model:)` for an element as the projection had it: only its id is read, and the rest from the
-    /// tree. One that is gone moves without lining up with anything.
-    func moveRule(for element: DesignElement, placement: Placement, on screen: DesignScreen?, model: AppModel) -> Rule {
-        guard let placed = model.store.placed(element.id) else {
-            return { origin, translation in (ElementLayout.moved(origin, by: translation, snapsToCenter: false), []) }
-        }
-        return moveRule(for: placed, model: model)
-    }
-
     /// Where a dragged thing goes: onto the grid's marks, or lined up with its screen and the
     /// visible leaves on its host besides itself and what it holds, from the index
     /// (`leafBounds`), as the canvas is set up to do. In its host's own points. Worked out once,
@@ -699,9 +689,10 @@ final class CanvasDrags {
             }
     }
 
-    // PROJECTION: deleted in plan 6
-    /// `moveNode` for an element as the projection had it: its frame and placement are read from the tree as the
-    /// drag begins, not taken from what is given.
+    // Kept for `FormatPanelTests` (lane B's, plan 6 Task 10), which still calls it: its port moves it to
+    // `moveNode(_:by:startingAt:findsNewHome:owner:model:rule:)`, and this goes once nothing calls it.
+    /// `moveNode` as its first callers made it: the frame and placement given aren't read, and the rule is asked for
+    /// once, as the drag begins.
     func moveElement(
         _ ref: DesignStore.ElementRef, from frame: CGRect, placement: Placement, by glassTranslation: CGSize,
         startingAt start: CGPoint, findsNewHome: Bool = true, owner: Owner, model: AppModel, rule makeRule: () -> Rule
@@ -810,16 +801,6 @@ final class CanvasDrags {
             .onEnded { [self] value in
                 dropOnTarget(ref, startingAt: value.startLocation, owner: owner, model: model)
             }
-    }
-
-    // PROJECTION: deleted in plan 6
-    /// `moveOnTarget(_:by:startingAt:owner:model:)` as the projection's callers make it: what is given besides the
-    /// ref isn't read.
-    func moveOnTarget(
-        _ ref: DesignStore.ElementRef, element: DesignElement, placement: Placement, on screen: DesignScreen?,
-        by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel
-    ) {
-        moveOnTarget(ref, by: translation, startingAt: start, owner: owner, model: model)
     }
 
     /// Moves what a drag on a thing's target moves: the thing, or the drawing whose ink lay
@@ -1149,7 +1130,7 @@ private struct ElementTarget: View, Equatable {
 
 /// A screen's name, which picks the screen and drags it.
 private struct ScreenNameTarget: View, Equatable {
-    let id: DesignScreen.ID
+    let id: TreeScreen.ID
     let frame: CGRect
     let isLocked: Bool
     let minimum: CGFloat

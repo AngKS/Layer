@@ -28,8 +28,8 @@ private let olderMessage = "This design was made by an earlier version of Layer 
 struct DesignFileV4Tests {
     // MARK: Helpers
 
-    private func element(_ kind: ElementKind, at y: CGFloat = 100) -> DesignElement {
-        DesignElement(kind: kind, frame: CGRect(x: 20, y: y, width: 200, height: 40), text: kind.placeholder, tint: Theme.accent)
+    private func element(_ kind: ElementKind, at y: CGFloat = 100) -> LayerNode {
+        .leaf(kind, frame: CGRect(x: 20, y: y, width: 200, height: 40), text: kind.placeholder, tint: Theme.accent)
     }
 
     /// The JSON object of a saved package's design.
@@ -80,13 +80,16 @@ struct DesignFileV4Tests {
     // MARK: Writing
 
     @Test func aDesignIsSavedAsVersion4WithTreesAndCanvasNodes() throws {
-        var content = DesignContent()
         let title = element(.title), button = element(.button, at: 200)
-        content.screens = [DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [title, button])]
-        let note = element(.stickyNote)
-        content.floating = [FloatingElement(element: note, scale: 0.66)]
+        var holder = LayerNode(kind: .group)
+        holder.children = [title, button]
+        var note = element(.stickyNote)
+        note.scale = 0.66
+        var file = DesignFile()
+        file.content.tree.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
+        file.content.tree.canvas = [note]
 
-        let package = try DesignFile(content: content).wrapper()
+        let package = try file.wrapper()
 
         #expect(try manifest(of: package)["version"] as? Int == 4)
         let saved = try self.content(of: package)
@@ -352,7 +355,7 @@ struct DesignFileV4Tests {
         #expect(file.content.tree.canvas.map(\.content.text) == ["A", "B"])
         // Opened in a store, read and changed, nothing traps and both stay.
         let store = DesignStore(content: file.content)
-        #expect(store.screens.first?.elements.count == 2)
+        #expect(store.shownLeaves(onScreenAt: 0)?.count == 2)
         store.setTitle("Twins")
         #expect(store.content.tree.screens.first?.root.children.map(\.content.text) == ["One", "Two"])
         #expect(store.content.tree.canvas.map(\.content.text) == ["A", "B"])
@@ -381,8 +384,8 @@ struct DesignFileV4Tests {
 
         let reopened = try DesignFile(wrapper: DesignFile(content: DesignContent(tree: tree)).wrapper()).content
 
-        #expect(reopened.canvas.customDevices == [frame])
-        #expect(reopened.canvas.tokens == tree.settings.tokens)
+        #expect(reopened.tree.settings.customDevices == [frame])
+        #expect(reopened.tree.settings.tokens == tree.settings.tokens)
         let screen = try #require(reopened.tree.screens.first)
         #expect(reopened.tree.device(of: screen) == frame)
         // Opening laid the screen out at its own device's size.

@@ -4,7 +4,7 @@ import Foundation
 /// like any other.
 enum CanvasSelection: Hashable, Sendable {
     case element(DesignStore.ElementRef)
-    case screen(DesignScreen.ID)
+    case screen(TreeScreen.ID)
     /// Two or more elements and screens, each a single thing. Made with `init(_:)`.
     case several(Set<CanvasSelection>)
 }
@@ -15,7 +15,7 @@ extension CanvasSelection {
     /// screen and goes wherever the screen goes.
     init?(_ things: some Sequence<CanvasSelection>) {
         var single = Set(things.flatMap(\.things))
-        let screens = Set(single.compactMap { thing -> DesignScreen.ID? in
+        let screens = Set(single.compactMap { thing -> TreeScreen.ID? in
             if case .screen(let id) = thing { id } else { nil }
         })
         if !screens.isEmpty {

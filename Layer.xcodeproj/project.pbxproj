@@ -262,6 +262,7 @@
 		80397F63F1C913EFA60625D4 /* GenerateScreenPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27F1C76E80D7C425B468608 /* GenerateScreenPanel.swift */; };
 		8066F5FB47341EF262F0DF3B /* stickyNote_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 10BF3C2F25C36221CC151AE2 /* stickyNote_clean_2.json */; };
 		8088ECD8AFEBC5082705BA77 /* image_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = BAA734A20F2453F4B1D3EB37 /* image_clean_1.json */; };
+		80D413F689D4A3DF2586EE29 /* DesignStore+Place.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BBD817525E7EECE8FE7B0 /* DesignStore+Place.swift */; };
 		818013E7551DD3B2BD0DB0B9 /* TextMeasure.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF88529E7753C026EC47961F /* TextMeasure.swift */; };
 		81E988876029F80E1E5AA0D7 /* CustomDeviceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 508E33A6D1443835A17C71F7 /* CustomDeviceSheet.swift */; };
 		829E1C8D5549A511AC03039F /* avatar_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 7ABFEA276705A10EA9154E0C /* avatar_noisy_1.json */; };
@@ -422,6 +423,7 @@
 		CDC1A884BBC75F2BDC416A29 /* LayerCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF22400A1624472321B028F /* LayerCatalog.swift */; };
 		CDEBAB3349C20B804B8285EB /* Rotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8BDD670626F59E9E693B93 /* Rotation.swift */; };
 		CE09FD1292C79C3445336879 /* GroupAs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F9B02A013D18F658864CFD0 /* GroupAs.swift */; };
+		CE50FEB15B389BB42D3989FC /* TreeBuilders+Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32C9B7AFFAE9B7E61649C3B5 /* TreeBuilders+Model.swift */; };
 		CEE81C9EF25B30AB5D5BA34D /* stickyNote_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = 47E606AB621C1BDD229B9976 /* stickyNote_jittered_2b.json */; };
 		CEF2BEFD5E7785E6232D94C8 /* DesignActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E9F8475057548E87E66556 /* DesignActions.swift */; };
 		CF361F384595380A40A324A7 /* DesignStore+Devices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D675AD8BCCC4664836EC628 /* DesignStore+Devices.swift */; };
@@ -663,6 +665,7 @@
 		31749F187E9CED051537C5BA /* LayerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LayerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		31CBB0C567E920CD0EDB9F33 /* VoiceAgentLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentLiveTests.swift; sourceTree = "<group>"; };
 		325CEE68B7A8307CCDFAEF09 /* structure-card_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "structure-card_clean_2.json"; sourceTree = "<group>"; };
+		32C9B7AFFAE9B7E61649C3B5 /* TreeBuilders+Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TreeBuilders+Model.swift"; sourceTree = "<group>"; };
 		33439AE49460B2DF93D3843C /* TreeBuildersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeBuildersTests.swift; sourceTree = "<group>"; };
 		3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MagicPenComponentTests.swift; sourceTree = "<group>"; };
 		33FD717EF8A57773E689FBE1 /* ShapeKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeKind.swift; sourceTree = "<group>"; };
@@ -937,6 +940,7 @@
 		B8304F493FAD2779908982EB /* button_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_1b.json; sourceTree = "<group>"; };
 		B913F32A038AC223100E64C4 /* avatar_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_2b.json; sourceTree = "<group>"; };
 		B99EA13F6706F71173016180 /* VoiceModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeUITests.swift; sourceTree = "<group>"; };
+		BA3BBD817525E7EECE8FE7B0 /* DesignStore+Place.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignStore+Place.swift"; sourceTree = "<group>"; };
 		BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayersPanelTests.swift; sourceTree = "<group>"; };
 		BAA734A20F2453F4B1D3EB37 /* image_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_clean_1.json; sourceTree = "<group>"; };
 		BACC3382A545FA5EAB6241B7 /* Layer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Layer.entitlements; sourceTree = "<group>"; };
@@ -1188,6 +1192,7 @@
 				A669134FE96884A767A7C1AD /* SketchedTitles.swift */,
 				CD55C8F80091F3426CAB6784 /* TargetHosts.swift */,
 				8E1CD40492EA531D646C655E /* TreeBuilders.swift */,
+				32C9B7AFFAE9B7E61649C3B5 /* TreeBuilders+Model.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -1285,6 +1290,7 @@
 				6D81AA846F5E6FC9108B603B /* DesignStore+HostFrame.swift */,
 				F6B0015C0713EB8C39468265 /* DesignStore+Layout.swift */,
 				5B9EE5D6438233990ED19B2F /* DesignStore+NewElement.swift */,
+				BA3BBD817525E7EECE8FE7B0 /* DesignStore+Place.swift */,
 				08F3B794B664EB7960F939CD /* DesignStore+Sketch.swift */,
 				9D0662CA505F127155100648 /* DesignStore+Structure.swift */,
 				F0C1EFFB485960CFCC7F4D4D /* DesignStore+Tidy.swift */,
@@ -2328,6 +2334,7 @@
 				3C52049C9F6256FE86626938 /* TestWindows.swift in Sources */,
 				4CCCD18BC3EEFA21999FD550 /* TextMeasureTests.swift in Sources */,
 				31E3C8E9DB41F6D79FD5ABEA /* TidyTests.swift in Sources */,
+				CE50FEB15B389BB42D3989FC /* TreeBuilders+Model.swift in Sources */,
 				BC743BDD3BE2BDF3EB92B3AC /* TreeBuilders.swift in Sources */,
 				F509216E9B676CAB6704F9F9 /* TreeBuildersTests.swift in Sources */,
 				573516FBEFCA200B414368C0 /* TreeContentTests.swift in Sources */,
@@ -2406,6 +2413,7 @@
 				1107E8E68C0185521E7A4919 /* DesignStore+HostFrame.swift in Sources */,
 				D0A90CCEAB532A84087518EA /* DesignStore+Layout.swift in Sources */,
 				95262B1B72E6E2FB4100208B /* DesignStore+NewElement.swift in Sources */,
+				80D413F689D4A3DF2586EE29 /* DesignStore+Place.swift in Sources */,
 				42EF53EA040B37FD324CA630 /* DesignStore+Sketch.swift in Sources */,
 				31BB5C80C82A732634B92749 /* DesignStore+Structure.swift in Sources */,
 				363DAAF18890D6438E815814 /* DesignStore+Tidy.swift in Sources */,

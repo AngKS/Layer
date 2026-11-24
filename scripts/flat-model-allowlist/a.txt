@@ -66,31 +66,4 @@ LayerTests/StoreOnTheTreeTests.swift             # keeps (u) and (s); Task 9 por
 LayerTests/TreePlaceTests.swift                  # keeps (u); Task 9 ports the rest
 LayerTests/TreeVerbOldCallerTests.swift          # keeps (u); Task 9 ports the rest
 
-# Task 9: the other app files, and the model's and the canvas's tests.
-Layer/Canvas/DrawingSync.swift
-Layer/Canvas/InkCanvas.swift
-Layer/Canvas/PhoneScreenView.swift
-Layer/Canvas/SelectionLayer.swift                # the marked CanvasDrags adapters (F26)
-Layer/Chrome/AssetLibrary.swift
-Layer/Chrome/ScreenEditField.swift
-Layer/Code/SwiftUICodeGenerator.swift
-Layer/Model/CanvasSelection.swift
-Layer/Model/ElementLayout.swift                  # measure(_:in:), the flat adapter
-Layer/Model/LayerOrder.swift
-Layer/Model/SeveralThings.swift
-LayerTests/CanvasHitTestTests.swift
-LayerTests/ConcurrentEditTests.swift
-LayerTests/DesignTests.swift
-LayerTests/DrawingTests.swift
-LayerTests/FlatStoreTests.swift
-LayerTests/GroupFinalFixTests.swift
-LayerTests/GroupTests.swift
-LayerTests/LayerOrderTests.swift
-LayerTests/MultiSelectionTests.swift
-LayerTests/PerformanceFixTests.swift
-LayerTests/PerformanceTests.swift
-LayerTests/RotationTests.swift
-LayerTests/StoreChangeBudgetTests.swift
-LayerTests/UndoNameTests.swift
-
 # Task 2 (F16).

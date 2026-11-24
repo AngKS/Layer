@@ -211,15 +211,6 @@ struct ElementView: View {
     }
 }
 
-// PROJECTION: deleted in plan 6
-extension ElementView {
-    /// An element drawn as the node it stands for, with Layer's own tokens: for what still holds elements, such
-    /// as the library's tiles and template previews.
-    init(element: DesignElement, isLaidOut: Bool = false) {
-        self.init(node: LayerNode(element: element), isLaidOut: isLaidOut)
-    }
-}
-
 extension FontWeightChoice {
     var fontWeight: Font.Weight {
         switch self {

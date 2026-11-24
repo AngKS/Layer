@@ -451,13 +451,6 @@ struct SpacingGuides: Equatable, Sendable {
 
     var gaps: [Gap] { [top, left, bottom, right] }
 
-    /// An element on a screen, measured to the screen's other visible elements and its edges: see
-    /// `measure(_:among:in:)`.
-    static func measure(_ element: DesignElement, in screen: DesignScreen) -> SpacingGuides {
-        measure(element.shapeBounds, among: screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds),
-                in: CGRect(origin: .zero, size: screen.size))
-    }
-
     /// The box round a thing's turned shape measured to the nearest of `others` on each side, or to the edge of
     /// `container` where none is: all in one host's own points. With no container, a side with nothing beside it has
     /// no gap to show (its distance is 0), and the thing is never centred.

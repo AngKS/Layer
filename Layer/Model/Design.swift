@@ -473,7 +473,14 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
     var typeName: String { Self.typeName(forScreenNamed: name) }
 
-    /// The view a screen of this name is written as: see `typeName`. A screen of the tree is named by the same rule.
+    /// The view a screen of this name is written as: see `typeName` and `TreeScreen.typeName(forScreenNamed:)`.
+    static func typeName(forScreenNamed name: String) -> String { TreeScreen.typeName(forScreenNamed: name) }
+}
+
+extension TreeScreen {
+    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name that is one of the types the
+    /// view's own code uses, or a Swift keyword, has "Screen" added: a view called `Image` hid SwiftUI's `Image` from its
+    /// own body.
     static func typeName(forScreenNamed name: String) -> String {
         let cleaned = name.filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first, first.isLetter else { return "Screen" + cleaned }

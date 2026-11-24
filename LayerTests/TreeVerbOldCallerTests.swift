@@ -155,15 +155,15 @@ struct TreeVerbOldCallerTests {
         let olds = (0..<2).map { _ in leaf(CGRect(x: 0, y: 0, width: 120, height: 20)) }
         let (store, undo) = makeStore(design(olds, layout: column()))
         let screenID = try #require(store.tree.screens.first?.id)
-        var title = DesignStore.newElement(.title)
+        var title = LayerNode.standard(.title)
         title.frame = CGRect(x: 5, y: 500, width: 200, height: 40)
-        var button = DesignStore.newElement(.button)
+        var button = LayerNode.standard(.button)
         button.frame = CGRect(x: 90, y: 30, width: 160, height: 44)
 
-        #expect(store.replaceChildren(of: .screen(screenID), with: [title, button].map(LayerNode.init(element:))))
+        #expect(store.replaceChildren(of: .screen(screenID), with: [title, button]))
 
         let refs = [title, button].map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
-        #expect(refs.allSatisfy { store.resolve($0) != nil })
+        #expect(refs.allSatisfy { store.placed($0) != nil })
         let root = try #require(store.tree.screens.first?.root)
         #expect(root.layout == column())
         #expect(root.children.map(\.id) == [title.id, button.id])
@@ -225,7 +225,7 @@ struct TreeVerbOldCallerTests {
         let copy = try #require(store.duplicateScreen(original.id))
 
         #expect(copy.name == "Screen Copy")
-        #expect(copy.origin.x == (store.screen(original.id)?.canvasFrame.maxX ?? 0) + 60)
+        #expect(copy.origin.x == (store.canvasFrame(ofScreen: original.id)?.maxX ?? 0) + 60)
         let made = try #require(store.tree.screens.first { $0.id == copy.id })
         #expect(made.root.layout == column())
         #expect(made.root.children.map(\.kind) == [.text, .group])
@@ -246,16 +246,17 @@ struct TreeVerbOldCallerTests {
         tree.screens[0].scale = 0.5
         let (store, undo) = makeStore(tree)
         let screenID = try #require(store.tree.screens.first?.id)
-        var title = DesignStore.newElement(.title)
+        var title = LayerNode.standard(.title)
         title.frame = CGRect(x: 20, y: 80, width: 200, height: 40)
-        var note = DesignStore.newElement(.stickyNote)
+        var note = LayerNode.standard(.stickyNote)
         note.frame = CGRect(x: 40, y: 60, width: 150, height: 150)
 
         let kept = try #require(store.tree.screens.first?.root.children.first?.id)
 
-        let refs = store.setElements([title, note], on: screenID)
+        // Given to the screen's root in one change: the rules at its end put the note on the canvas.
+        store.apply { $0.tree.screens[0].root.children += [title, note] }
 
-        #expect(refs == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: note.id)])
+        #expect([title.id, note.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: note.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
         let landed = try #require(store.tree.canvas.first { $0.id == note.id })
         #expect(landed.frame == CGRect(x: 40 + 100 / 0.5, y: 60 + 50 / 0.5, width: 150, height: 150))
@@ -331,19 +332,20 @@ struct TreeVerbOldCallerTests {
         let (store, _) = makeStore(tree)
         let screenID = try #require(store.tree.screens.first?.id)
         let kept = try #require(store.tree.screens.first?.root.children.first?.id)
-        var title = DesignStore.newElement(.title)
+        var title = LayerNode.standard(.title)
         title.frame = CGRect(x: 20, y: 80, width: 200, height: 40)
         let point = { (x: CGFloat, t: TimeInterval) in
             PKStrokePoint(location: CGPoint(x: x, y: x), timeOffset: t, size: CGSize(width: 4, height: 4), opacity: 1, force: 1,
                           azimuth: 0, altitude: .pi / 2)
         }
         let stroke = PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: [point(0, 0), point(40, 0.1)], creationDate: Date()))
-        var drawing = try #require(DesignElement.drawing([stroke]))
+        var drawing = try #require(LayerNode.drawing([stroke]))
         drawing.frame.origin = CGPoint(x: 40, y: 60)
 
-        let refs = store.setElements([title, drawing], on: screenID)
+        // Given to the screen's root in one change: the rules at its end put the drawing on the canvas.
+        store.apply { $0.tree.screens[0].root.children += [title, drawing] }
 
-        #expect(refs == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
+        #expect([title.id, drawing.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
         let landed = try #require(store.tree.canvas.first { $0.id == drawing.id })
         #expect(landed.kind == .drawing)

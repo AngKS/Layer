@@ -497,7 +497,7 @@ final class AppModel {
             case failed(String)
         }
 
-        var screenID: DesignScreen.ID
+        var screenID: TreeScreen.ID
         var description: String
         /// The leaves of the screen as the model last wrote it.
         var elementCount = 0
@@ -547,7 +547,7 @@ final class AppModel {
         let device = device ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
-        let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
+        let board = store.tree.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
         // Part of a spoken command's step, which waits for the screen; otherwise a step of its
         // own, even when asked for inside a one-off step that ends at once (review M-5).
         let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
@@ -663,13 +663,13 @@ final class AppModel {
             return
         }
         // A screen taken away while it was written has nothing to show either.
-        guard let screen = store.screen(finished.screenID) else {
+        guard let screen = store.treeScreen(finished.screenID) else {
             generation = nil
             return
         }
         // A screen nothing was written on isn't left behind, unless something was put on it
         // by hand meanwhile: it stays, with that on it (M1).
-        if finished.elementCount == 0, screen.elements.isEmpty {
+        if finished.elementCount == 0, screen.root.children.isEmpty {
             store.act(for: edit) { store.deleteScreen(finished.screenID) }
         }
         // Stopped before it wrote anything: there is nothing to say (G10).
@@ -1119,9 +1119,9 @@ final class AppModel {
 
     /// What the board's picture shows, its ink included, so that a board changed and
     /// changed back, or touched without changing, isn't drawn again.
-    @ObservationIgnored private var previewedBoard: DesignContent?
+    @ObservationIgnored private var previewedBoard: TreeContent?
 
-    private var board: DesignContent { document.current.content }
+    private var board: TreeContent { document.current.content.tree }
 
     private var needsPreview: Bool {
         guard document.current.preview != nil else { return true }
@@ -1436,12 +1436,12 @@ final class AppModel {
     /// Every container that holds something selected, at any depth: those that have been gone
     /// into. A tap picks what is inside them, one level at a time, and what they hold has
     /// targets of its own in place of theirs. Read from the index (`groups(holding:)`).
-    var enteredGroups: Set<DesignElement.ID> {
+    var enteredGroups: Set<UUID> {
         enteredGroups(in: selection)
     }
 
-    private func enteredGroups(in selection: CanvasSelection?) -> Set<DesignElement.ID> {
-        var entered: Set<DesignElement.ID> = []
+    private func enteredGroups(in selection: CanvasSelection?) -> Set<UUID> {
+        var entered: Set<UUID> = []
         for case .element(let ref) in selection?.things ?? [] {
             entered.formUnion(store.groups(holding: ref).map(\.element))
         }
@@ -1638,35 +1638,6 @@ final class AppModel {
     func deselect(_ thing: CanvasSelection) {
         guard let selection, selection.contains(thing) else { return }
         self.selection = selection.removing(thing)
-    }
-
-    // PROJECTION: deleted in plan 6
-    // The Format panel writes the tree (`update(_:_:)`); these element-typed writes are left to the tests of the projection.
-    /// Makes one change to every selected element that `applies` to, as one step: a
-    /// colour, for instance, to each that has a fill.
-    func changeSelectedElements(where applies: (DesignElement) -> Bool = { _ in true }, _ body: (inout DesignElement) -> Void) {
-        store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
-    }
-
-    // PROJECTION: deleted in plan 6
-    /// The elements selected that aren't locked, by themselves or by a group above them:
-    /// what corners, opacity and angle change for several things (F4).
-    var unlockedSelectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        selectedElements.filter { !store.isLocked(.element($0.ref)) }
-    }
-
-    // PROJECTION: deleted in plan 6
-    /// Changes those of `refs` that `applies` to, in the Format panel's own edit (see
-    /// `adjusting`): the elements a field was showing, even if it is set once the selection
-    /// has moved on. With `unlockedOnly`, only those that aren't locked, by themselves or by
-    /// a group above them (F4).
-    func changeElements(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        adjusting {
-            store.update(refs.filter { ref in
-                guard let found = store.resolve(ref) else { return false }
-                return (!unlockedOnly || !store.isLocked(.element(ref))) && applies(found.element)
-            }, body)
-        }
     }
 
     /// Gives every element selected to whatever it now lies on, after a drag. Several
@@ -2486,20 +2457,23 @@ final class AppModel {
         viewport.canvasPoint(for: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 
-    /// Puts a new element in the middle of the view, or centred on `point` in canvas
-    /// points, selected and ready to be dragged. Over a screen it joins the screen, kept
-    /// inside its edges.
+    /// A new leaf for the open canvas, about as large as `sketch` (canvas points) was drawn, at the scale loose things are
+    /// drawn at (`looseScale`), as its kind's loose size allows.
+    private func looseNode(_ kind: ElementKind, sketchedAs sketch: CGRect) -> LayerNode {
+        var node = LayerNode.standard(kind)
+        let scale = store.looseScale
+        let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
+        node.frame.size = kind.spec.looseSize.size(from: node.frame.size, drawn: drawn)
+        return node
+    }
+
+    /// Puts a new leaf in the middle of the view, or centred on `point` in canvas points,
+    /// selected and ready to be dragged: see `DesignStore.place(_:centredAt:)`. Over a screen
+    /// it joins the screen, kept inside its edges. Nil, and nothing changes, when the design
+    /// can't take it.
     @discardableResult
-    private func add(_ element: DesignElement, at point: CGPoint? = nil) -> DesignStore.ElementRef {
-        var center = point ?? middleOfView
-        if element.kind.belongsOnScreens, let screen = store.screens.last(where: { $0.canvasFrame.contains(center) }) {
-            var local = screen.placement.localPoint(for: center)
-            let half = CGSize(width: element.frame.width / 2, height: element.frame.height / 2)
-            if half.width * 2 <= screen.size.width { local.x = min(max(local.x, half.width), screen.size.width - half.width) }
-            if half.height * 2 <= screen.size.height { local.y = min(max(local.y, half.height), screen.size.height - half.height) }
-            center = screen.placement.canvasPoint(for: local)
-        }
-        let ref = store.place(element, centeredAt: center)
+    private func add(_ node: LayerNode, at point: CGPoint? = nil) -> DesignStore.ElementRef? {
+        guard let ref = store.place(node, centredAt: point ?? middleOfView) else { return nil }
         tool = .select
         selection = .element(ref)
         return ref
@@ -2512,17 +2486,17 @@ final class AppModel {
         AssetLibrary.noteUsed(asset, in: settings)
         switch asset.content {
         case .symbol(let name):
-            add(DesignStore.newElement(.symbol, symbol: name), at: point)
+            add(LayerNode.standard(.symbol, symbol: name), at: point)
         case .shape(let kind, let filled):
-            var element = DesignStore.newElement(.shape)
-            element.shape = kind
-            element.frame.size = kind.size
-            element.isOn = filled
-            add(element, at: point)
+            var node = LayerNode.standard(.shape)
+            node.content.shape = kind
+            node.frame.size = kind.size
+            node.content.isOn = filled
+            add(node, at: point)
         case .component(let id):
-            guard let element = AssetLibrary.element(forComponent: id) else { return }
-            add(element, at: point)
-            if element.kind == .stickyNote { isEditingText = true }
+            guard let node = AssetLibrary.element(forComponent: id) else { return }
+            add(node, at: point)
+            if node.kind == .stickyNote { isEditingText = true }
         case .frame(let id):
             // A built-in, or one of the design's own; a frame this design doesn't have adds nothing.
             let device = store.tree.settings.device(named: id)
@@ -2552,18 +2526,18 @@ final class AppModel {
     }
 
     func addSymbol(_ name: String) {
-        add(DesignStore.newElement(.symbol, symbol: name))
+        add(LayerNode.standard(.symbol, symbol: name))
     }
 
     /// Adds a piece of text and opens it for typing.
     func addText() {
-        add(DesignStore.newElement(.text))
+        add(LayerNode.standard(.text))
         isEditingText = true
         suggestTitleIfNeeded()
     }
 
     func addStickyNote() {
-        add(DesignStore.newElement(.stickyNote))
+        add(LayerNode.standard(.stickyNote))
         isEditingText = true
     }
 
@@ -2571,18 +2545,21 @@ final class AppModel {
     func addImage(_ prepared: ImageImport.Prepared) {
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
-        var element = DesignStore.newElement(.image)
+        var node = LayerNode.standard(.image)
         let width = min(prepared.image.size.width, 280)
-        element.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
-        element.imageID = id
-        add(element)
+        node.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
+        node.content.imageID = id
+        add(node)
     }
 
     /// Adds a device frame in the middle of the view, or centred on `point` in canvas
     /// points, sized to fit comfortably in the view.
     @discardableResult
-    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> DesignScreen {
-        let screen = store.addScreen(device, at: framePlacement(device, centeredAt: point))
+    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> TreeScreen {
+        let placement = framePlacement(device, centeredAt: point)
+        let screen = TreeScreen(name: "Screen \(store.tree.screens.count + 1)", origin: placement.origin,
+                                scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
+        store.addScreen(screen)
         tool = .select
         // A new frame comes in unselected.
         selection = nil
@@ -2618,7 +2595,7 @@ final class AppModel {
     /// match. This is the step undo takes back, for ink as for anything else.
     func inkChanged(_ changes: DrawingSync.Changes) {
         guard !changes.isEmpty else { return }
-        store.apply { changes.apply(to: &$0) }
+        store.apply { changes.apply(to: &$0.tree) }
     }
 
     /// The Magic Pen's ink changed.
@@ -2661,8 +2638,8 @@ final class AppModel {
     /// Reads the selected drawing as a sketch, told what `prompt` says of it, and puts what
     /// it means in its place. The drawing stays if it can't be read as anything.
     func convertSelection(prompt: String) {
-        guard let selected = selectedElement, selected.element.kind == .drawing else { return }
-        let strokes = selected.element.sketchStrokes
+        guard let selected = selectedNode, selected.node.kind == .drawing else { return }
+        let strokes = selected.node.sketchStrokes
         guard !strokes.isEmpty else { return }
         selection = nil
         let zoom = viewport.scale
@@ -2803,8 +2780,9 @@ final class AppModel {
                             converted = true
                             added = store.ref(of: id)
                         }
-                    } else if !kind.belongsOnScreens || kind == .text {
-                        let floating = store.addFloating(kind, from: bounds)
+                    } else if !kind.belongsOnScreens || kind == .text,
+                              let floating = store.place(looseNode(kind, sketchedAs: bounds),
+                                                         centredAt: CGPoint(x: bounds.midX, y: bounds.midY)) {
                         // On the open canvas it remembers the sketch's canvas bounds, and no screen.
                         store.update(floating.element) {
                             $0.sketch = LayerNode.SketchIntent(sketched: bounds, on: nil, margin: 0,

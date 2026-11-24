@@ -216,17 +216,6 @@ extension DesignStore {
         abs(a.x - b.x) < 0.01 && abs(a.y - b.y) < 0.01
     }
 
-    // PROJECTION: deleted in plan 6
-    // Element-typed: for `AppModel.changeSelectedElements` and `changeElements`, which only the projection's tests call.
-    /// Makes one change to several elements, as one step.
-    func update(_ refs: [ElementRef], _ body: (inout DesignElement) -> Void) {
-        let present = refs.filter { resolve($0) != nil }
-        guard !present.isEmpty else { return }
-        apply { content in
-            for ref in present { content.update(ref.element, body) }
-        }
-    }
-
     /// Locks or unlocks everything selected, as one step: each thing's own flag, and nothing above it.
     func setLocked(_ isLocked: Bool, _ selection: CanvasSelection) {
         var nodes: [UUID] = []
@@ -295,7 +284,7 @@ extension DesignStore {
     func delete(_ selection: CanvasSelection) {
         let things = things(in: selection).filter { !isLocked($0) }
         asOneStep {
-            delete(nodes: Set(things.compactMap { thing -> DesignElement.ID? in
+            delete(nodes: Set(things.compactMap { thing -> UUID? in
                 if case .element(let ref) = thing { ref.element } else { nil }
             }))
             for case .screen(let id) in things { deleteScreen(id) }

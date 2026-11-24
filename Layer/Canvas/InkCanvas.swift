@@ -935,7 +935,7 @@ struct InkCanvas: UIViewRepresentable {
 
         /// The drawing with ink under a canvas point, among those on the document
         /// canvas. Nil if there is no ink at the point.
-        func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
+        func drawing(at point: CGPoint, tolerance: CGFloat) -> LayerNode.ID? {
             let areas = inkAreas ?? documentCanvas.drawing.strokes.map { ($0, $0.renderBounds) }
             inkAreas = areas
             let hit = areas.last { stroke, area in
@@ -949,7 +949,7 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         /// The drawing that strokes with these keys ended up in, when they share one.
-        func drawing(owning keys: Set<Double>) -> DesignElement.ID? {
+        func drawing(owning keys: Set<Double>) -> LayerNode.ID? {
             let owners = Set(keys.compactMap { drawings.drawing(owning: $0) })
             return owners.count == 1 ? owners.first : nil
         }
