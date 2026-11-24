@@ -264,6 +264,34 @@ struct TreeTargetsTests {
         #expect(board.model.hoverTarget(at: middle, skippingDrawings: true) == board.thing(note.id))
     }
 
+    /// Voice looks through a container's gaps to the things in it, as it did through a group's: a card's padding
+    /// included, which the projection held as a group's gap (fix round 1, I1). A tap there still picks the card.
+    @Test func voiceLooksThroughACardsPaddingAsThroughAnyGap() throws {
+        var card = container(.card, columnLayout(), frame: CGRect(x: 40, y: 200, width: 0, height: 0), fits: true, [fittingText("One")])
+        card.padding = LayerNode.Padding(all: 16)
+        let behind = leaf(.text, CGRect(x: 0, y: 180, width: 300, height: 120), text: "Behind")
+        let onItsOwn = TreeBoard([card])
+        let shape = onItsOwn.shape(card.id)
+        try #require(shape.rect.width > 32 && shape.rect.height > 32)
+        let padding = CGPoint(x: shape.rect.minX + 8, y: shape.rect.midY)
+        #expect(TreeTargets.leaf(at: padding, in: card.id, content: onItsOwn.store.tree, index: onItsOwn.store.index) == nil)
+
+        #expect(onItsOwn.model.hoverTarget(at: padding) == onItsOwn.thing(card.id), "a tap there picks the card")
+        #expect(onItsOwn.model.hoverTarget(at: padding, skippingDrawings: true) == .screen(onItsOwn.screenID))
+
+        let overSomething = TreeBoard([behind, card])
+        #expect(overSomething.shape(behind.id).contains(padding))
+        #expect(overSomething.model.hoverTarget(at: padding, skippingDrawings: true) == overSomething.thing(behind.id))
+
+        // On the open canvas, off the screen, with nothing beneath, there is nothing to point at.
+        var aside = card
+        aside.frame.origin = CGPoint(x: 600, y: 200)
+        let floating = TreeBoard([], canvas: [aside])
+        let canvasPadding = CGPoint(x: floating.shape(card.id).rect.minX + 8, y: floating.shape(card.id).rect.midY)
+        #expect(floating.model.hoverTarget(at: canvasPadding) == floating.thing(card.id))
+        #expect(floating.model.hoverTarget(at: canvasPadding, skippingDrawings: true) == nil)
+    }
+
     // MARK: The lasso and the box
 
     @Test func theLassoPicksTopLevelContainersWhole() throws {

@@ -1712,8 +1712,8 @@ final class AppModel {
     /// makes either what a tap picks. Read from the tree.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing; and through the gaps of a container with no look of its own, so that
-    /// voice sees elements, not groups. A card's fill is something to point at.
+    /// change a drawing; and through a container's gaps, a card's padding among them, so that
+    /// voice sees elements, not groups.
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
@@ -1747,7 +1747,7 @@ final class AppModel {
                 if let leaf = TreeTargets.leaf(at: point, in: target.id, content: store.tree, index: store.index) {
                     return .init(host: host, element: leaf)
                 }
-                if skippingDrawings, store.node(target.id)?.kind != .card { continue }
+                if skippingDrawings { continue }
             } else if skippingDrawings, store.node(target.id)?.kind == .drawing {
                 continue
             }
