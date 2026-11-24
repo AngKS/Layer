@@ -122,21 +122,20 @@ extension DesignStore {
     /// Elements and screens land on whole points of their own, so that those that started
     /// on whole points keep their places relative to each other; a drawing, whose ink lies
     /// where it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
-    /// All of it is one change.
+    /// All of it is one change, read from the index and written on the tree: nothing lowers
+    /// the projection, on any frame of a drag.
     ///
-    /// A container moves by its own frame, in one write, and everything in it rides along,
-    /// those locked on their own included: it is one thing. A thing that isn't a container
-    /// moves through its frame as the list shows it. In a row, column, grid or overlay, either
-    /// is taken out by a new place to the top of its screen, or of the open canvas, unless what
-    /// holds its screen's things is laid out too, which lays it back (My call 20): a container
-    /// through its parent (`place`), whole.
+    /// A container placed freely moves by its own frame, in one write, and everything in it
+    /// rides along, those locked on their own included: it is one thing. Anything else goes
+    /// through its parent as `place` puts it (`placing(_:at:)`), the one place My call 20 is
+    /// worked out: in a row, column, grid or overlay, a new place takes it out to the top of
+    /// its screen, or of the open canvas, unless what holds its screen's things is laid out
+    /// too, which lays it back. A screen moves by its origin.
     func position(_ origins: [CanvasSelection: CGPoint]) {
-        // Worked out first: the design can't be read while it is being changed.
-        var elements: [DesignElement.ID: CGPoint] = [:]
+        // Worked out first, against one version of the tree: the design can't be read while it is being changed.
         var containers: [(host: TreeIndex.Host, path: [Int], origin: CGPoint)] = []
-        // Containers a row, column, grid or overlay lays out, each with its new frame in its host's points.
-        var laidOut: [(id: UUID, frame: CGRect)] = []
-        var screens: [DesignScreen.ID: CGPoint] = [:]
+        var placings: [Placing] = []
+        var screens: [TreeScreen.ID: CGPoint] = [:]
         // A member given beside its container moves with it, not on its own.
         let alone = Set(things(in: CanvasSelection(origins.keys)))
         for (thing, origin) in origins where alone.contains(thing) {
@@ -148,13 +147,10 @@ extension DesignStore {
                 let box = placed.canvasShape.bounds
                 let target = placed.placement.localPoint(for: origin), current = placed.placement.localPoint(for: box.origin)
                 let distance = CGSize(width: target.x - current.x, height: target.y - current.y)
-                guard placed.node.isContainer else {
-                    let local = CGPoint(x: placed.frame.minX + distance.width, y: placed.frame.minY + distance.height)
-                    elements[ref.element] = placed.node.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
-                    continue
-                }
-                guard !placed.isLaidOut else {
-                    laidOut.append((ref.element, placed.frame.offsetBy(dx: distance.width, dy: distance.height)))
+                guard placed.node.isContainer, !placed.isLaidOut else {
+                    if let placing = placing(ref.element, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height)) {
+                        placings.append(placing)
+                    }
                     continue
                 }
                 // Where the container is, from the index `placed` built for this version.
@@ -163,35 +159,30 @@ extension DesignStore {
                 if landed != placed.node.frame.origin { containers.append((entry.host, entry.path, landed)) }
             case .screen(let id):
                 guard let screen = treeScreen(id), screen.isLocked != true else { continue }
-                screens[id] = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
+                let landed = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
+                if landed != screen.origin { screens[id] = landed }
             case .several:
                 continue
             }
         }
-        guard !elements.isEmpty || !containers.isEmpty || !screens.isEmpty || !laidOut.isEmpty else { return }
-        func write() {
-            guard !elements.isEmpty || !containers.isEmpty || !screens.isEmpty else { return }
-            #if DEBUG
-            let version = contentVersion
-            #endif
-            apply { content in
-                // The containers first: a frame written changes no path, and a thing taken out of a row may.
-                for container in containers {
-                    content.tree.changeNode(on: container.host, at: container.path) { $0.frame.origin = container.origin }
-                }
-                for (id, origin) in elements { content.update(id) { $0.frame.origin = origin } }
-                for (id, origin) in screens { content.updateScreen(id) { $0.origin = origin } }
+        guard !containers.isEmpty || !placings.isEmpty || !screens.isEmpty else { return }
+        #if DEBUG
+        let version = contentVersion
+        #endif
+        apply { content in
+            // Frames and origins first: none of them changes a path, and a thing taken out of a row may.
+            for container in containers {
+                content.tree.changeNode(on: container.host, at: container.path) { $0.frame.origin = container.origin }
             }
-            #if DEBUG
-            if contentVersion != version { ListWork.wrote(containers.count) }
-            #endif
+            for (id, origin) in screens {
+                guard let index = content.tree.screens.firstIndex(where: { $0.id == id }) else { continue }
+                content.tree.screens[index].origin = origin
+            }
+            Self.write(placings, to: &content.tree)
         }
-        guard !laidOut.isEmpty else { return write() }
-        // Taken out after the rest: a container leaving its row moves no path among what was written.
-        asOneStep {
-            write()
-            for container in laidOut { place(container.id, at: container.frame) }
-        }
+        #if DEBUG
+        if contentVersion != version { ListWork.wrote(containers.count + placings.count) }
+        #endif
     }
 
     /// Lines several things up with one another: by an edge, or through the middle, of

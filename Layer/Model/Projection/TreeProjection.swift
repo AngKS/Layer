@@ -50,6 +50,20 @@ enum TreeProjection {
     /// How many times a design holding `screen` has been lowered, on the main thread: what a test reads
     /// for its own board's screen, so that other suites' designs lowered meanwhile don't add to it (F9).
     static func lowerings(of screen: TreeScreen.ID) -> Int { loweringsByScreen[screen] ?? 0 }
+
+    /// What `lowerings(of:)` doesn't see, by screen: a screen's list lowered alone (`lowerHost`, `lowerHostNodes`), as
+    /// the projection's writes and `DesignContent.updateScreen` lower it, and a node on it lowered alone to be written
+    /// through the projection (`TreeContent.projectedUpdate`). Counted on the main thread alone, as `lowerings` is.
+    nonisolated(unsafe) private static var hostLoweringsByScreen: [TreeScreen.ID: Int] = [:]
+
+    /// How many times `screen`'s list, or a node on it, has been lowered alone on the main thread (F9).
+    static func hostLowerings(of screen: TreeScreen.ID) -> Int { hostLoweringsByScreen[screen] ?? 0 }
+
+    /// Counts a lowering of `host`'s list, or of a node on it, alone.
+    static func countHostLowering(on host: TreeIndex.Host) {
+        guard Thread.isMainThread, case .screen(let id) = host else { return }
+        hostLoweringsByScreen[id, default: 0] += 1
+    }
     #endif
 
     static func lower(_ content: TreeContent, pending: [UUID: UUID] = [:]) -> Lowered {
@@ -121,6 +135,9 @@ enum TreeProjection {
     /// One host lowered, or nil for a screen the design doesn't have.
     private static func lowering(_ host: TreeIndex.Host, in content: TreeContent, pending: [UUID: UUID],
                                  keepsNodes: Bool) -> Lowering? {
+        #if DEBUG
+        countHostLowering(on: host)
+        #endif
         switch host {
         case .screen(let id):
             guard let screen = content.screens.first(where: { $0.id == id }) else { return nil }

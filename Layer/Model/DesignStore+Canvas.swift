@@ -126,7 +126,7 @@ extension DesignStore {
     /// A node's upright frame, given in its host's own points. Under a free parent: through the parent's inverse
     /// transform, its subtree riding along; whole points, drawings exact. Under a laid-out parent: plan 2's call 6
     /// exactly (F20). A size change fixes that axis. An origin change takes it out to its host's root when that root
-    /// is free, and is dropped when it isn't (plan 2's F11). One write (`ListWork`).
+    /// is free, and is dropped when it isn't (plan 2's F11, My call 20). One write (`ListWork`).
     ///
     /// A new origin is put on whole points, but for a drawing, whose ink lies where it was drawn; an origin given as
     /// it is stays exactly where it is. A row, column, grid or overlay given a new size under a free parent is fixed
@@ -134,10 +134,18 @@ extension DesignStore {
     /// at its angle there, fixed both ways, and on the canvas at its top-level node's scale. Nothing is written for a
     /// screen's root, an id the design doesn't have, or a frame that isn't finite.
     func place(_ id: UUID, at ownFrame: CGRect) {
+        guard let placing = placing(id, at: ownFrame) else { return }
+        changeTree(writing: 1) { Self.write([placing], to: &$0) }
+    }
+
+    /// What `place(_:at:)` writes for a node: where it is, and the node as it is to be, written where it is or taken
+    /// out onto the top of its host (My call 20). The one place that rule is worked out: `place` writes one, and
+    /// `position` several in one change. Nil when nothing would change, or nothing is written (see `place`).
+    func placing(_ id: UUID, at ownFrame: CGRect) -> Placing? {
         let memo = index, tree = tree
-        guard let entry = memo[id], let slot = entry.path.last, let posed = memo.posed(id, in: tree),
+        guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree),
               [ownFrame.minX, ownFrame.minY, ownFrame.width, ownFrame.height].allSatisfy(\.isFinite),
-              ownFrame.width >= 0, ownFrame.height >= 0 else { return }
+              ownFrame.width >= 0, ownFrame.height >= 0 else { return nil }
         let node = posed.node
         var frame = ownFrame
         let isMoved = frame.origin != posed.frame.origin
@@ -148,9 +156,7 @@ extension DesignStore {
             // Under a free container, a free root, or at the canvas's top level.
             placed.frame = posed.parentSpace.local(of: frame)
             if node.isContainer, node.resolvedLayout != .free { Self.fix(&placed, from: node.frame.size, to: frame.size) }
-            guard placed != node else { return }
-            changeTree(writing: 1) { $0.changeNode(on: entry.host, at: entry.path) { $0 = placed } }
-            return
+            return placed == node ? nil : Placing(host: entry.host, path: entry.path, node: placed)
         }
 
         let hostRootIsFree: Bool = switch entry.host {
@@ -161,22 +167,15 @@ extension DesignStore {
             // Nowhere to take it out to: the origin is dropped, and the engine lays it back.
             Self.fix(&placed, from: node.frame.size, to: frame.size)
             placed.frame.size = frame.size
-            guard placed != node else { return }
-            changeTree(writing: 1) { $0.changeNode(on: entry.host, at: entry.path) { $0 = placed } }
-            return
+            return placed == node ? nil : Placing(host: entry.host, path: entry.path, node: placed)
         }
 
-        // Out to the top of its host, where it was put, at its angle there, fixed both ways.
-        placed.frame = frame
-        placed.rotation = Rotation.kept(posed.degrees)
-        placed.width.mode = .fixed
-        placed.height.mode = .fixed
-        if entry.host == .canvas, let top = entry.path.first, tree.canvas.indices.contains(top) { placed.scale = tree.canvas[top].scale }
-        let taken = placed, from = Array(entry.path.dropLast())
-        changeTree(writing: 1) { tree in
-            tree.changeChildren(on: entry.host, at: from) { $0.remove(at: slot) }
-            tree.changeChildren(on: entry.host, at: []) { $0.append(taken) }
-        }
+        // Out to the top of its host, where it was put, at its angle there, fixed both ways; on the canvas at its
+        // top-level node's scale.
+        var scale = node.scale
+        if entry.host == .canvas, let top = entry.path.first, tree.canvas.indices.contains(top) { scale = tree.canvas[top].scale }
+        return Placing(host: entry.host, path: entry.path, node: Self.takenOut(node, at: frame, degrees: posed.degrees, scale: scale),
+                       takenOutTo: entry.host)
     }
 
     /// Takes a node out of what holds it onto the top of `host`, in front of what is there, as a drag lets go of a thing
@@ -190,7 +189,7 @@ extension DesignStore {
     @discardableResult
     func takeOut(_ id: UUID, to host: TreeIndex.Host, centredAt centre: CGPoint) -> Bool {
         let memo = index, tree = tree
-        guard let entry = memo[id], let slot = entry.path.last, let posed = memo.posed(id, in: tree),
+        guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree),
               centre.x.isFinite, centre.y.isFinite else { return false }
         let node = posed.node
         // What it is drawn at where it is: its screen's scale, or its top-level canvas node's.
@@ -208,18 +207,12 @@ extension DesignStore {
             placement = Placement(origin: .zero, scale: drawnAt.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1)
         }
         let local = placement.localPoint(for: centre), size = node.frame.size
-        var taken = node
-        taken.frame = CGRect(x: (local.x - size.width / 2).rounded(), y: (local.y - size.height / 2).rounded(),
-                             width: size.width, height: size.height)
-        taken.rotation = Rotation.kept(posed.degrees)
-        taken.width.mode = .fixed
-        taken.height.mode = .fixed
-        taken.scale = host == .canvas ? drawnAt : nil
-        let made = taken, from = Array(entry.path.dropLast())
-        changeTree(writing: 1) { tree in
-            tree.changeChildren(on: entry.host, at: from) { $0.remove(at: slot) }
-            tree.changeChildren(on: host, at: []) { $0.append(made) }
-        }
+        let frame = CGRect(x: (local.x - size.width / 2).rounded(), y: (local.y - size.height / 2).rounded(),
+                           width: size.width, height: size.height)
+        let placing = Placing(host: entry.host, path: entry.path,
+                              node: Self.takenOut(node, at: frame, degrees: posed.degrees, scale: host == .canvas ? drawnAt : nil),
+                              takenOutTo: host)
+        changeTree(writing: 1) { Self.write([placing], to: &$0) }
         return true
     }
 
@@ -244,6 +237,50 @@ extension DesignStore {
     }
 
     // MARK: How the writes work
+
+    /// A node as `placing(_:at:)` or `takeOut` has it, worked out against one version of the tree: where it is, and it
+    /// as it is to be, written where it is or taken out onto the top of `takenOutTo`.
+    struct Placing {
+        var host: TreeIndex.Host
+        var path: [Int]
+        var node: LayerNode
+        /// The host whose top it goes on, in front of what is there, out of what holds it (My call 20); nil when it is
+        /// written where it is.
+        var takenOutTo: TreeIndex.Host?
+    }
+
+    /// A node as it is taken out of what holds it onto the top of a host (My call 20): at `frame` there, at its angle
+    /// there, fixed both ways, drawn at `scale`.
+    private static func takenOut(_ node: LayerNode, at frame: CGRect, degrees: Double, scale: CGFloat?) -> LayerNode {
+        var taken = node
+        taken.frame = frame
+        taken.rotation = Rotation.kept(degrees)
+        taken.width.mode = .fixed
+        taken.height.mode = .fixed
+        taken.scale = scale
+        return taken
+    }
+
+    /// Writes placings worked out against one version of the tree, in one go. Those written where they are go first,
+    /// which moves no path. Those taken out are taken from the last in the tree's order back, so that taking one out
+    /// moves none of the others' paths, and are then put on top of their hosts in the order they were in, back to front.
+    static func write(_ placings: [Placing], to tree: inout TreeContent) {
+        for placing in placings where placing.takenOutTo == nil {
+            let node = placing.node
+            tree.changeNode(on: placing.host, at: placing.path) { $0 = node }
+        }
+        let out = placings.filter { $0.takenOutTo != nil }.sorted { $0.path.lexicographicallyPrecedes($1.path) }
+        for placing in out.reversed() {
+            guard let slot = placing.path.last else { continue }
+            tree.changeChildren(on: placing.host, at: Array(placing.path.dropLast())) { children in
+                if children.indices.contains(slot) { children.remove(at: slot) }
+            }
+        }
+        for placing in out {
+            guard let host = placing.takenOutTo else { continue }
+            tree.changeChildren(on: host, at: []) { $0.append(placing.node) }
+        }
+    }
 
     /// `.fixed` on each axis whose size changed.
     private static func fix(_ node: inout LayerNode, from old: CGSize, to new: CGSize) {
