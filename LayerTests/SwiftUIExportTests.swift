@@ -331,6 +331,34 @@ struct SwiftUIExportTests {
         #expect(Self.lines(Self.code(column)).filter { $0.hasPrefix(".font(") } == styles)
     }
 
+    /// Final review B-I2: text is written in the text style of the size it is drawn at, so that canvas and code agree
+    /// once a design's own text sizes aren't Layer's: a title at 34 as Large Title, at 28 as Title and at 22 as Title 2,
+    /// a body at 15 as Subheadline and text at 17 as Body, and text at any other size at that size. Read in reading
+    /// order, at exact positions, and in a column.
+    @Test func textIsWrittenInTheStyleOfTheSizeItIsDrawnAt() throws {
+        func fonts(title: CGFloat, body: CGFloat = 15, text: CGFloat = 17) -> [[String]] {
+            var tokens = DesignTokens.standard
+            tokens.textSizes = DesignTokens.TextSizes(title: title, body: body, text: text)
+            let free = Self.design([(.free, [
+                Self.leaf(.title, "Title", frame: CGRect(x: 20, y: 80, width: 353, height: 44)),
+                Self.leaf(.body, "Body", frame: CGRect(x: 20, y: 140, width: 353, height: 40)),
+                Self.text("Text", frame: CGRect(x: 20, y: 200, width: 353, height: 24)),
+            ])], tokens: tokens)
+            let column = Self.design(Self.stack(.vertical, spacing: 16),
+                                     [Self.leaf(.title, "Title"), Self.leaf(.body, "Body"), Self.text("Text")], tokens: tokens)
+            return [Self.code(free), Self.code(free, settings: CodeSettings(layout: .absolute)), Self.code(column)]
+                .map { Self.lines($0).filter { $0.hasPrefix(".font(") } }
+        }
+
+        #expect(fonts(title: 28) == Array(repeating: [".font(.title.bold())", ".font(.subheadline)", ".font(.body)"], count: 3),
+                "Layer's own sizes, as before")
+        #expect(fonts(title: 34, body: 20, text: 21)
+                == Array(repeating: [".font(.largeTitle.bold())", ".font(.system(size: 20))", ".font(.system(size: 21))"], count: 3))
+        #expect(fonts(title: 30) == Array(repeating: [".font(.system(size: 30, weight: .bold))", ".font(.subheadline)", ".font(.body)"], count: 3))
+        #expect(fonts(title: 22, body: 17, text: 15)
+                == Array(repeating: [".font(.title2.bold())", ".font(.system(size: 17))", ".font(.system(size: 15))"], count: 3))
+    }
+
     // MARK: - Free containers: today's reading-order inference
 
     @Test func theSketchedScreensCodeIsTodays() throws {

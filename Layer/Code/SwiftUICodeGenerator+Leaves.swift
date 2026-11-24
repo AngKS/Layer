@@ -81,7 +81,7 @@ extension SwiftUICodeGenerator {
         case .body:
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: ".subheadline")))",
+                "    .font(\(font(of: element, style: ".subheadline", drawnAt: TextStyleSize.subheadline)))",
             ] + textColor(of: element, usual: nil) + [
                 "    .multilineTextAlignment(.\(element.resolvedTextAlignment.rawValue))",
                 fillsWidth ? "    .frame(maxWidth: .infinity)" : "    .frame(width: \(number(frame.width)))",
@@ -91,7 +91,7 @@ extension SwiftUICodeGenerator {
             let alignment = element.resolvedTextAlignment
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: ".body")))",
+                "    .font(\(font(of: element, style: ".body", drawnAt: TextStyleSize.body)))",
             ] + textColor(of: element, usual: nil)
                 + (alignment == .leading ? [] : ["    .multilineTextAlignment(.\(alignment.rawValue))"])
                 + ["    .frame(width: \(number(frame.width)), alignment: .\(alignment.rawValue))"]
@@ -165,7 +165,8 @@ extension SwiftUICodeGenerator {
         case .title, .body, .text, .stickyNote:
             let textFont = switch element.kind {
             case .title: titleFont(of: element)
-            case .body: font(of: element, usual: ".subheadline")
+            case .body: font(of: element, style: ".subheadline", drawnAt: TextStyleSize.subheadline)
+            case .text: font(of: element, style: ".body", drawnAt: TextStyleSize.body)
             default: font(of: element, usual: ".body")
             }
             lines = [
@@ -285,22 +286,33 @@ extension SwiftUICodeGenerator {
         }
     }
 
-    /// The font of text in a laid-out container: the text style its size stands for when it has its
-    /// kind's weight (a title's as `titleFont(of:)` says; Subheadline and Body at the design's body
-    /// and text sizes), else its size and weight, as it is measured and drawn.
+    /// The font of text in a laid-out container: the text style of the size it is drawn at when it has
+    /// its kind's weight (a title's as `titleFont(of:)` says; a body's Subheadline at 15 and a text's
+    /// Body at 17), else its size and weight, as it is measured and drawn.
     private static func laidOutFont(of element: Leaf) -> String {
         if element.kind == .title { return titleFont(of: element) }
         let size = element.resolvedFontSize
         let weight = element.resolvedFontWeight
-        let sizes = element.tokens.textSizes
         if weight == element.kind.spec.fontWeight {
             switch element.kind {
-            case .body where size == sizes.body: return ".subheadline"
-            case .text where size == sizes.text: return ".body"
+            case .body where size == TextStyleSize.subheadline: return ".subheadline"
+            case .text where size == TextStyleSize.body: return ".body"
             default: break
             }
         }
         return systemFont(size: size, weight: weight)
+    }
+
+    /// The sizes SwiftUI draws its text styles at, at the standard Dynamic Type size: text drawn at one of them, in its
+    /// kind's weight, is written in that style, and text at any other size at its size, so that canvas and code agree
+    /// whatever a design's own text sizes are (final review B-I2). Layer's standard tokens give text these sizes (Title
+    /// 28, Subheadline 15 for a body, Body 17 for text), and so does the Magic Pen (Title 2 at 22, Large Title at 34).
+    private enum TextStyleSize {
+        static let largeTitle = ElementLayout.largeTitleSize
+        static let title: CGFloat = 28
+        static let title2 = ElementLayout.titleTwoSize
+        static let body: CGFloat = 17
+        static let subheadline: CGFloat = 15
     }
 
     // MARK: Pieces of the views
@@ -318,17 +330,17 @@ extension SwiftUICodeGenerator {
         ]
     }
 
-    /// A title's font, by the size it is drawn at: with a title's weight, Title at the design's
-    /// title size, Title 2 at 22 and Large Title at 34 (the sizes the Magic Pen gives titles drawn
-    /// small and large); otherwise its size and weight.
+    /// A title's font, by the size it is drawn at, whatever the design's title size: with a title's
+    /// weight, Title at 28, Title 2 at 22 and Large Title at 34 (`TextStyleSize`); otherwise its size
+    /// and weight.
     private static func titleFont(of element: Leaf) -> String {
         let size = element.resolvedFontSize
         let weight = element.resolvedFontWeight
         if weight == element.kind.spec.fontWeight {
             switch size {
-            case element.tokens.textSizes.title: return ".title.bold()"
-            case ElementLayout.titleTwoSize: return ".title2.bold()"
-            case ElementLayout.largeTitleSize: return ".largeTitle.bold()"
+            case TextStyleSize.title: return ".title.bold()"
+            case TextStyleSize.title2: return ".title2.bold()"
+            case TextStyleSize.largeTitle: return ".largeTitle.bold()"
             default: break
             }
         }
@@ -471,6 +483,14 @@ extension SwiftUICodeGenerator {
     /// The font modifier's argument: the kind's usual font unless the leaf has its own.
     private static func font(of element: Leaf, usual: String?) -> String {
         if element.fontSize == nil, element.fontWeight == nil, let usual { return usual }
+        return systemFont(size: element.resolvedFontSize, weight: element.resolvedFontWeight)
+    }
+
+    /// A body's or a text's font: its kind's text style while it has no size or weight of its own and is drawn at the
+    /// style's own size (`TextStyleSize`), as Layer's standard tokens draw it; otherwise its size and weight, as it is
+    /// drawn at the design's own text sizes.
+    private static func font(of element: Leaf, style: String, drawnAt styleSize: CGFloat) -> String {
+        if element.fontSize == nil, element.fontWeight == nil, element.resolvedFontSize == styleSize { return style }
         return systemFont(size: element.resolvedFontSize, weight: element.resolvedFontWeight)
     }
 
