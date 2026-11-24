@@ -15,7 +15,8 @@ import Foundation
 ///   no words, so that it is drawn and written with the design's card fill (F2).
 ///   - In a free container it is `.fixed`. It takes what it encloses that isn't locked, hidden or turned, the person's own
 ///     containers included, where they are on screen, and grows to hold them. It goes in just behind the backmost thing
-///     it covers but can't take, so that nothing it is drawn round goes out of sight; else in front.
+///     it can't take that its final box overlaps at all, so that nothing it is drawn over goes out of sight; else in
+///     front.
 ///   - In a row, column or grid it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as
 ///     wide as what holds it when it was drawn across the screen (`PlacementIntent.proportional`).
 enum SketchedNode {
@@ -24,7 +25,7 @@ enum SketchedNode {
         var landing: SketchLanding
         /// What a card takes: the receiving container's children it encloses, back to front. Empty for anything else.
         var takes: [UUID]
-        /// What a card in a free container covers but can't take, backmost: it goes in just behind it. Nil: in front.
+        /// What a card in a free container is drawn over but can't take, backmost: it goes in just behind it. Nil: in front.
         var behind: UUID? = nil
     }
 
@@ -65,7 +66,7 @@ enum SketchedNode {
     }
 
     /// The root with `made` put in: at its slot, a card holding what it takes at their places on screen, just behind what
-    /// it covers but can't take.
+    /// it is drawn over but can't take.
     static func inserting(_ made: Made, into root: LayerNode) -> LayerNode {
         var root = root
         _ = put(made, in: &root)
@@ -100,8 +101,9 @@ enum SketchedNode {
 
     /// A card at the drawn box in whole points, `.fixed`, what it takes, and what it goes behind. In a free container it
     /// takes what it encloses (`SketchLanding.enclosed`) whose subtrees stay within depth 32 once inside it (F9), and the
-    /// box grows to hold them. It goes behind the backmost thing it covers and doesn't take. `depth` is the receiving
-    /// container's.
+    /// box grows to hold them. It goes behind the backmost thing it can't take that the grown box overlaps at all: one
+    /// locked, hidden or turned, however little of it is under the card, or one it encloses but would take past depth 32.
+    /// `depth` is the receiving container's.
     private static func card(in parent: LayerNode, at depth: Int, landing: SketchLanding,
                              tokens: DesignTokens) -> (LayerNode, takes: [UUID], behind: UUID?) {
         var node = LayerNode(kind: .card)
@@ -117,7 +119,11 @@ enum SketchedNode {
         }
         if let box = TreeEdit.shapesBox(of: taken) { node.frame = node.frame.union(box).integral }
         let takes = taken.map(\.id)
-        return (node, takes, SketchLanding.covered(by: drawn, in: parent).first { !takes.contains($0) })
+        let behind = parent.children.first { child in
+            !takes.contains(child.id) && (enclosed.contains(child.id) || !SketchLanding.canBeTaken(child))
+                && overlaps(child, node.frame)
+        }
+        return (node, takes, behind?.id)
     }
 
     /// Sized for a row, column or grid (call 7): like the visible sibling of its kind whose middle is nearest the sketch's,
@@ -135,6 +141,13 @@ enum SketchedNode {
         } else {
             (node.width, node.height) = NaturalSize.defaultSizing(for: node.kind)
         }
+    }
+
+    /// Whether the box round a thing's turned shape and `box` share any area.
+    private static func overlaps(_ node: LayerNode, _ box: CGRect) -> Bool {
+        guard let shape = TreeEdit.shapesBox(of: [node]) else { return false }
+        let shared = shape.intersection(box)
+        return !shared.isNull && shared.width > 0 && shared.height > 0
     }
 
     /// Whether a screen shows a filled button: one not hidden, nor inside anything hidden.

@@ -296,6 +296,41 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(store.placed(title.id)?.frame == title.frame)
     }
 
+    @Test func aCardGoesBehindALockedThingPartlyUnderIt() throws {
+        let (store, screen, _) = makeStore()
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        // 40 of its 100 points tall are under the card drawn below: too little to take, and locked besides.
+        var image = leaf(.image, CGRect(x: 250, y: 180, width: 100, height: 100))
+        image.isLocked = true
+        #expect(store.add(title, to: .screen(screen)))
+        #expect(store.add(image, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, image.id])
+        #expect(store.placed(image.id)?.frame == image.frame)
+    }
+
+    @Test func aCardGoesBehindATurnedThingInTheBoxItGrewTo() throws {
+        let (store, screen, _) = makeStore()
+        // 280 of its 300 points tall are inside the card drawn below: the card takes it, and grows 20 points down.
+        let image = leaf(.image, CGRect(x: 20, y: 120, width: 200, height: 300))
+        // Turned, below the drawn card but inside the box it grows to.
+        var symbol = leaf(.symbol, CGRect(x: 250, y: 405, width: 10, height: 10))
+        symbol.rotation = 45
+        #expect(store.add(image, to: .screen(screen)))
+        #expect(store.add(symbol, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 300),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.frame == CGRect(x: 10, y: 100, width: 373, height: 320))
+        #expect(store.node(card)?.children.map(\.id) == [image.id])
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, symbol.id])
+    }
+
     @Test func aCardGoesBehindTheBackmostThingItCantTake() throws {
         let (store, screen, _) = makeStore()
         let behind = leaf(.text, CGRect(x: 20, y: 400, width: 100, height: 20))
