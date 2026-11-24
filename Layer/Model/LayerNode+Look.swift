@@ -1,8 +1,8 @@
 import CoreGraphics
 
 /// How a node looks once its own choices are laid over its kind's usual look and the design's tokens: the values
-/// `DesignElement`'s `resolved…` members give for the same fields (`ElementStyle.swift`), read off the node, and
-/// what the node views draw.
+/// `DesignElement`'s `resolved…` members give for the same fields (`ElementStyle.swift`), read off the node. The node
+/// views draw them, and the SwiftUI export writes them (`SwiftUICodeGenerator.Leaf`), so the rules are written once.
 extension LayerNode {
     /// Its own colour, or its kind's: a button's or sticky note's fill, a symbol's ink.
     var resolvedTint: RGBColor { style.tint ?? kind.spec.tint }

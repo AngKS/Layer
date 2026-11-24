@@ -228,17 +228,20 @@ final class DesignStore {
     @discardableResult
     func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements, tokens: canvas.tokens)
         adjust(&element)
         return add(element, to: screenID)
     }
 
-    /// The element a sketch drawn on a screen stands for, laid out among `others` there.
-    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement]) -> DesignElement {
+    /// The element a sketch drawn on a screen stands for, laid out among `others` there. A title drawn small or
+    /// large carries its size as its own font size, so that it is drawn and written at it (`sketchedTitleSize`).
+    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement],
+                                        tokens: DesignTokens) -> DesignElement {
         let existing = others.filter { !$0.isHidden }
         let laid = ElementLayout.sketched(kind, sketch: screen.localRect(for: sketch), on: screen.device, among: existing.map(\.frame))
         var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
         element.textAlignment = laid.alignment
+        if kind == .title { element.fontSize = ElementLayout.sketchedTitleSize(height: laid.frame.height, tokens: tokens) }
         // A screen's first button is its main action; any more are outlined beside or below it.
         if kind == .button, existing.contains(where: { $0.kind == .button && $0.resolvedButtonLook == .filled }) {
             element.buttonLook = .bordered
@@ -256,7 +259,8 @@ final class DesignStore {
     @discardableResult
     func changeKind(of ref: ElementRef, to kind: ElementKind, sketchedAt sketch: CGRect, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard case .screen(let screenID) = ref.host, let old = resolve(ref)?.element, let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id })
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id },
+                                           tokens: canvas.tokens)
         element.name = old.name
         element.isLocked = old.isLocked
         if kind.hasText, old.kind.hasText, old.text != old.kind.placeholder { element.text = old.text }

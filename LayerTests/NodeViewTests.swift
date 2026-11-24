@@ -47,6 +47,15 @@ private struct Picture {
             stride(from: Int(left), to: Int(right), by: 1).contains { x in pixel(CGFloat(x), CGFloat(y))[0] < 128 }
         }
     }
+
+    /// How many rows, from the first with anything dark in `rect` to the last, its ink spans: 0 for none.
+    func inkHeight(in rect: CGRect) -> Int {
+        let rows = stride(from: Int(rect.minY), to: Int(rect.maxY), by: 1).filter { y in
+            stride(from: Int(rect.minX), to: Int(rect.maxX), by: 1).contains { x in pixel(CGFloat(x), CGFloat(y))[0] < 128 }
+        }
+        guard let first = rows.first, let last = rows.last else { return 0 }
+        return last - first + 1
+    }
 }
 
 /// The tree drawn: each screen's root through recursive node views, the open canvas's nodes at their scale, and the
@@ -241,6 +250,23 @@ private struct Picture {
             #expect(NaturalSize.fontSize(of: node, tokens: tokens) == node.resolvedFontSize(tokens: tokens), "\(kind)")
             #expect(NaturalSize.fontSize(of: node) == NaturalSize.fontSize(of: node, tokens: .standard), "\(kind)")
         }
+    }
+
+    /// The Magic Pen's titles drawn small, as usual and large (32, 40 and 48 tall) are drawn at Title 2's, the design's
+    /// title and Large Title's sizes: 22, 28 and 34. Each carries the size it isn't given by the tokens as its own.
+    @Test func aSketchedTitleIsDrawnAtTheSizeItWasDrawn() throws {
+        let (store, ids) = sketchedTitles()
+        let tree = store.tree
+        let titles = try ids.map { try #require(store.node($0)) }
+        try #require(titles.count == 3)
+        #expect(titles.map(\.frame.height) == [32, 40, 48])
+        #expect(titles.map(\.style.fontSize) == [22, nil, 34])
+        #expect(titles.map { $0.resolvedFontSize(tokens: tree.settings.tokens) } == [22, 28, 34])
+
+        let screen = try #require(tree.screens.first)
+        let picture = try Self.picture(of: screen)
+        let heights = titles.map { picture.inkHeight(in: $0.frame) }
+        #expect(heights[0] > 0 && heights[0] < heights[1] && heights[1] < heights[2], "the titles' ink, top to bottom: \(heights)")
     }
 
     /// F7: what a container is called where it has no name of its own.
