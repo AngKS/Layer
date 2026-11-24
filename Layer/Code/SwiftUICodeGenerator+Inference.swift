@@ -193,7 +193,7 @@ extension SwiftUICodeGenerator.ScreenWriter {
     /// size and turn, then placed as a leaf of that frame would be.
     private mutating func view(for item: Generator.Item, margin: CGFloat, contentWidth: CGFloat, screenWidth: CGFloat) -> [String] {
         guard item.node.isContainer else {
-            return Generator.inferredLeaf(Generator.Leaf(node: item.node, frame: item.frame, rotation: item.rotation),
+            return Generator.inferredLeaf(Generator.Leaf(node: item.node, frame: item.frame, rotation: item.rotation, tokens: context.tokens),
                                           margin: margin, contentWidth: contentWidth, screenWidth: screenWidth)
         }
         let fillsWidth = item.frame.width >= contentWidth - 1

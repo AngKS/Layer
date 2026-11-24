@@ -181,6 +181,52 @@ struct GenerationThroughTheReconcilerTests {
         #expect(await writer.write(Outline.parse("title: Settings", isComplete: true), to: app.store, in: nil) == false)
     }
 
+    /// A thing dragged to another place in its column while the screen is written is where the person put it, with
+    /// its own words, in the updates after it: the drag writes nothing until its drop, and the reconciler keeps the
+    /// reorder the drop made, even once the person deletes the thing it followed when it was written (plan 4 Task 4,
+    /// with plan 3's final re-review, A-I1 and S4).
+    @Test func aReorderByADragWhileTheScreenIsWrittenIsKept() async throws {
+        let (app, feed) = bench()
+        let drags = CanvasDrags()
+        app.drags = drags
+        app.generateScreen(from: "a list")
+        let screen = try #require(app.generation?.screenID)
+        #expect(await self.feed("text: One\ntext: Two\ntext: Three\n", until: 3, on: screen, of: app, feed))
+        let written = try #require(app.store.root(of: screen)).leafIDs
+        try #require(written.count == 3)
+        let (one, two, three) = (written[0], written[1], written[2])
+        let section = try #require(app.store.parent(of: three))
+
+        // Three, lifted out of its place in the column and let go above One.
+        let ref = try #require(app.store.ref(of: three))
+        let start = try #require(app.store.placed(three)).canvasShape.centre
+        let top = try #require(app.store.placed(one)).canvasShape.rect
+        let owner = CanvasDrags.Owner()
+        for part in [0.5, 1.0] {
+            drags.moveOnTarget(ref, by: CGSize(width: (top.midX - start.x) * part, height: (top.minY + 1 - start.y) * part),
+                               startingAt: start, owner: owner, model: app)
+        }
+        #expect(drags.lift != nil, "a thing in a column is lifted")
+        drags.dropOnTarget(ref, startingAt: start, owner: owner, model: app)
+        #expect(app.store.children(of: section)?.map(\.id) == [three, one, two])
+
+        #expect(await self.feed("text: One\ntext: Two\ntext: Three\ntext: Four\n", until: 4, on: screen, of: app, feed))
+        #expect(Array(try #require(app.store.root(of: screen)).leafIDs.prefix(3)) == [three, one, two])
+
+        // The person deletes Two, which Three followed when it was written; the generator goes on rewriting Three.
+        app.store.asOwnStep { app.store.delete(nodes: [two]) }
+        let lines = "text: One\ntext: Two\ntext: THREE\ntext: Four\n"
+        #expect(await self.feed(lines + "text: Five\n", until: 4, on: screen, of: app, feed))
+        #expect(await self.feed(lines + "text: Five\ntext: Six\n", until: 5, on: screen, of: app, feed))
+
+        let root = try #require(app.store.root(of: screen))
+        #expect(root.leafIDs.first == three)
+        #expect(app.store.node(three)?.content.text == "Three", "the moved node keeps its words")
+        #expect(Array(root.leafIDs.prefix(2)) == [three, one])
+        feed.finish()
+        await app.waitForGeneration()
+    }
+
     @Test func anOpenerAloneWaitsForItsFirstLine() throws {
         var outline = OutlineStream(tokens: .standard)
         let firstTaken = outline.take("title: A\n", isComplete: false)
@@ -188,5 +234,12 @@ struct GenerationThroughTheReconcilerTests {
         #expect(first.leafCount == 1)
         let opener = outline.take("title: A\ncard:\n", isComplete: false)
         #expect(opener == nil)
+    }
+}
+
+private extension LayerNode {
+    /// The ids of the nodes below this that aren't containers, in reading order.
+    var leafIDs: [UUID] {
+        children.flatMap { $0.isContainer ? $0.leafIDs : [$0.id] }
     }
 }

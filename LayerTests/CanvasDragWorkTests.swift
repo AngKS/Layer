@@ -131,32 +131,41 @@ struct CanvasDragWorkTests {
         // Several lines dragged together, out and back.
         board.model.selection = lines
         let owner = CanvasDrags.Owner()
+        let dragStart = board.store.contentVersion
         var built = board.store.timesIndexed
         for dx in BusyBoard.outAndBack {
             drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
         }
-        let dragged = board.store.timesIndexed - built
+        let dragVersions = board.store.contentVersion - dragStart + 1, dragged = board.store.timesIndexed - built
         drags.dropGroup(owner: owner, model: board.model)
-        #expect(dragged <= 1, "index built \(dragged) times during a 60-frame drag of three lines")
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(dragVersions > 1)
+        #expect(dragged <= dragVersions, "index built \(dragged) times over \(dragVersions) versions of a 60-frame drag of three lines")
 
         // The same lines twisted with two fingers, a degree a frame.
         board.model.selection = lines
+        let twistStart = board.store.contentVersion
         built = board.store.timesIndexed
         #expect(board.model.beginTwist())
         for degrees in 1...60 { board.model.twist(by: Double(degrees)) }
-        let twisted = board.store.timesIndexed - built
+        let twistVersions = board.store.contentVersion - twistStart + 1, twisted = board.store.timesIndexed - built
         board.model.endTwist()
-        #expect(twisted <= 1, "index built \(twisted) times during a 60-frame twist of three lines")
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(twistVersions > 1)
+        #expect(twisted <= twistVersions, "index built \(twisted) times over \(twistVersions) versions of a 60-frame twist of three lines")
 
         // The group's corner handle, from the pose taken as it began, a point a frame.
+        let resizeStart = board.store.contentVersion
         built = board.store.timesIndexed
         let pose = try #require(board.store.groupPose(of: g))
         for width in 1...60 {
             let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
             board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
         }
-        let resized = board.store.timesIndexed - built
-        #expect(resized <= 1, "index built \(resized) times during a 60-frame resize of a group")
+        let resizeVersions = board.store.contentVersion - resizeStart + 1, resized = board.store.timesIndexed - built
+        // Clause (m), plan 4: the canvas reads the index, so at most one build per version of the design.
+        #expect(resizeVersions > 1)
+        #expect(resized <= resizeVersions, "index built \(resized) times over \(resizeVersions) versions of a 60-frame resize of a group")
 
         // The group dragged: a container moves on every frame, and the store's memo is read for it.
         let groupOwner = CanvasDrags.Owner()
@@ -167,6 +176,53 @@ struct CanvasDragWorkTests {
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: groupOwner, model: board.model)
         #expect(versions > 1)
         #expect(groupDragged <= versions, "index built \(groupDragged) times over \(versions) versions of a group's drag")
+    }
+
+    /// A drag of several things and a group's corner handle read the tree on every frame, so that a frame builds
+    /// the store's index alone and never lowers the design to its list (plan 4 Task 1, with clause (m)). Counted
+    /// for this board's own screen (F9), after a change through a tree verb has left the store's memo stale, and
+    /// once that count is shown to be live (F11).
+    @Test func aDragOfSeveralThingsAndAGroupsHandleLowerNothing() throws {
+        let board = BusyBoard()
+        let g = try #require(board.groupThreeLines())
+        let pose = try #require(board.store.groupPose(of: g))
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let lines = try #require(CanvasSelection(board.lines[10...12].map { CanvasSelection.element($0) }))
+        board.model.selection = lines
+
+        // After a change through a tree verb, a read of the list lowers the design: the count is live.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed" }
+        let live = TreeProjection.lowerings(of: board.screen)
+        _ = board.store.screens
+        #expect(TreeProjection.lowerings(of: board.screen) - live == 1)
+
+        // Several lines dragged together, out and back.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed again" }
+        let owner = CanvasDrags.Owner()
+        let dragStart = board.store.contentVersion
+        var before = TreeProjection.lowerings(of: board.screen)
+        for dx in BusyBoard.outAndBack {
+            drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
+        }
+        let dragVersions = board.store.contentVersion - dragStart + 1
+        let dragged = TreeProjection.lowerings(of: board.screen) - before
+        drags.dropGroup(owner: owner, model: board.model)
+        #expect(dragVersions > 1)
+        #expect(dragged == 0, "lowered \(dragged) times over \(dragVersions) versions of a 60-frame drag of three lines")
+
+        // The group's corner handle, from the pose taken as it began, a point a frame.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed once more" }
+        let resizeStart = board.store.contentVersion
+        before = TreeProjection.lowerings(of: board.screen)
+        for width in 1...60 {
+            let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
+            board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
+        }
+        let resizeVersions = board.store.contentVersion - resizeStart + 1
+        let resized = TreeProjection.lowerings(of: board.screen) - before
+        #expect(resizeVersions > 1)
+        #expect(resized == 0, "lowered \(resized) times over \(resizeVersions) versions of a 60-frame resize of a group")
     }
     #endif
 
@@ -256,15 +312,23 @@ extension HostedWindowSuites {
             view.layoutIfNeeded()
         }
 
+        /// The targets built for the things in `store`'s design: another suite's canvas, built meanwhile, isn't
+        /// counted (F9, clause (k)).
+        private func targetsBuilt(in store: DesignStore) -> Int {
+            let tree = store.tree
+            let ids = tree.screens.flatMap { TreeEdit.ids(in: $0.root) } + tree.canvas.flatMap(TreeEdit.ids(in:))
+            return ids.reduce(0) { $0 + CanvasWork.targetsBuilt(of: $1) }
+        }
+
         /// Nudges a line, now and then, until a change to the design builds at most its own
         /// target. For a while after a window first shows, SwiftUI builds every view on every
         /// update whatever it is given (see `LayersPanelWorkTests`).
         private func waitForTargetsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
             for step in 0..<40 {
-                let before = CanvasWork.targetsBuilt
+                let before = targetsBuilt(in: model.store)
                 model.store.update(ref) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(50))
-                if CanvasWork.targetsBuilt - before <= 1 { return }
+                if targetsBuilt(in: model.store) - before <= 1 { return }
             }
         }
 
@@ -275,17 +339,17 @@ extension HostedWindowSuites {
             // Shown without being made key: taking the key window from another hosted suite's
             // has SwiftUI building every view in that one, and in this, on its next updates.
             window.isHidden = false
-            let built = CanvasWork.targetsBuilt
-            for _ in 0..<20 where CanvasWork.targetsBuilt == built || board.model.drags == nil { try await settle(host.view) }
+            let built = targetsBuilt(in: board.store)
+            for _ in 0..<20 where targetsBuilt(in: board.store) == built || board.model.drags == nil { try await settle(host.view) }
             return (window, host.view)
         }
 
         @Test func aDragBuildsOnlyTheTargetOfWhatItMoves() async throws {
             let board = BusyBoard()
-            let shown = CanvasWork.targetsBuilt
+            let shown = targetsBuilt(in: board.store)
             let (window, view) = try await show(board)
             defer { window.isHidden = true }
-            #expect(CanvasWork.targetsBuilt - shown >= 40, "a target for each line (a drawing has none: its ink is picked)")
+            #expect(targetsBuilt(in: board.store) - shown >= 40, "a target for each line (a drawing has none: its ink is picked)")
             let drags = try #require(board.model.drags)
 
             // Measured again, up to three times, while something outside has SwiftUI building
@@ -294,7 +358,7 @@ extension HostedWindowSuites {
             var built = Int.max
             for _ in 0..<3 where built > 70 {
                 try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
-                let start = CanvasWork.targetsBuilt
+                let start = targetsBuilt(in: board.store)
                 let owner = CanvasDrags.Owner()
                 for frame in 1...60 {
                     board.drag(drags, board.lines[5], by: CGFloat(frame), owner: owner)
@@ -303,7 +367,7 @@ extension HostedWindowSuites {
                 }
                 drags.dropElement(board.lines[5], findsNewHome: true, owner: owner, model: board.model)
                 try await settle(view)
-                built = CanvasWork.targetsBuilt - start
+                built = targetsBuilt(in: board.store) - start
             }
             // Every target on every frame then: 40 lines, 60 times (2,441 measured); now only the
             // line dragged, once a frame (60).
@@ -322,9 +386,9 @@ extension HostedWindowSuites {
             // Measured again, up to three times, while something outside has SwiftUI building
             // every view, or SwiftUI folds two frames into one update.
             var built = Int.max
-            for _ in 0..<3 where !(60...70).contains(built) {
+            for _ in 0..<3 where built > 70 {
                 try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
-                let start = CanvasWork.targetsBuilt
+                let start = targetsBuilt(in: board.store)
                 let owner = CanvasDrags.Owner()
                 for dx in BusyBoard.outAndBack {
                     board.drag(drags, group: g, by: CGFloat(dx), owner: owner)
@@ -333,10 +397,10 @@ extension HostedWindowSuites {
                 }
                 drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
                 try await settle(view)
-                built = CanvasWork.targetsBuilt - start
+                built = targetsBuilt(in: board.store) - start
             }
             // The group's own target, once for each of 60 frames.
-            #expect((60...70).contains(built), "targets built during a 60-frame drag of a group: \(built)")
+            #expect((1...70).contains(built), "targets built during a 60-frame drag of a group: \(built)")
         }
 
         /// A pinch changes the zoom on every frame. The targets' smallest size follows the zoom
@@ -348,14 +412,14 @@ extension HostedWindowSuites {
             var built = Int.max
             for _ in 0..<3 where built > 0 {
                 try await waitForTargetsToSettle(nudging: board.lines[30], in: board.model, view: view)
-                let start = CanvasWork.targetsBuilt
+                let start = targetsBuilt(in: board.store)
                 for frame in 1...30 {
                     board.model.zoomScale = 1 + CGFloat(frame) / 50
                     view.layoutIfNeeded()
                     try await Task.sleep(for: .milliseconds(4))
                 }
                 try await settle(view)
-                built = CanvasWork.targetsBuilt - start
+                built = targetsBuilt(in: board.store) - start
                 board.model.zoomScale = 1
                 try await settle(view)
             }
@@ -370,18 +434,18 @@ extension HostedWindowSuites {
             defer { window.isHidden = true }
             board.model.tool = .draw
             try await settle(view)
-            let start = CanvasWork.targetsBuilt
+            let start = targetsBuilt(in: board.store)
             for frame in 1...60 {
                 board.store.update(board.lines[5]) { $0.frame.origin.x = 20 + CGFloat(frame) }
                 view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(4))
             }
             try await settle(view)
-            let inDraw = CanvasWork.targetsBuilt - start
+            let inDraw = targetsBuilt(in: board.store) - start
             #expect(inDraw == 0, "targets built in Draw for 60 changes: \(inDraw)")
             board.model.tool = .select
             try await settle(view)
-            #expect(CanvasWork.targetsBuilt - start >= 40, "back in Select, every element has its target again")
+            #expect(targetsBuilt(in: board.store) - start >= 40, "back in Select, every element has its target again")
         }
     }
 }

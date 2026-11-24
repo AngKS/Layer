@@ -1,4 +1,6 @@
 import CoreGraphics
+import Foundation
+import PencilKit
 
 /// What a loop drawn on the canvas goes round: the lasso's loop, or the corners of a box
 /// dragged out with a finger. The loop is closed by joining its end to its start.
@@ -96,49 +98,58 @@ enum Enclosure {
 }
 
 extension DesignStore {
-    /// The things a loop drawn on the canvas goes round, in canvas points: every element
-    /// that at least half lies inside it, and every screen that all but lies inside it. A
-    /// screen picked this way stands for what is on it. A group is picked whole, by its box,
-    /// as an element is; what is in a group is never picked on its own. Locked and hidden
-    /// things are left alone.
+    /// The things a loop drawn on the canvas goes round, in canvas points: every thing on a
+    /// screen's root, or on the open canvas's top level, that at least half lies inside it, and
+    /// every screen that all but lies inside it. A screen picked this way stands for what is on
+    /// it. A container is picked whole, by its box, as a thing is; what is in a container is
+    /// never picked on its own. Locked and hidden things are left alone. Read from the tree.
     func things(enclosedBy loop: [CGPoint]) -> [CanvasSelection] {
         guard let bounds = Enclosure.bounds(of: loop) else { return [] }
+        let tree = tree
         var found: [CanvasSelection] = []
 
-        func isPicked(_ element: DesignElement, _ placement: Placement) -> Bool {
-            guard !element.isLocked, !element.isHidden else { return false }
-            let shape = TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation)
+        /// Its own lock and hide are all a top-level thing has.
+        func isPicked(_ node: LayerNode, _ placed: TreeIndex.OwnSpace.Placed, _ placement: Placement) -> Bool {
+            guard !node.isLocked, !node.isHidden else { return false }
+            let shape = TurnedRect(rect: placement.canvasRect(for: placed.frame), degrees: Rotation.kept(placed.degrees) ?? 0)
             guard shape.bounds.intersects(bounds) else { return false }
-            if element.kind == .drawing {
-                let ink = element.sketchStrokes.flatMap(\.points).map(placement.canvasPoint(for:))
+            if node.kind == .drawing {
+                let ink = Self.inkPoints(of: node).map(placement.canvasPoint(for:))
                 if !ink.isEmpty { return Enclosure.coverage(of: ink, by: loop) >= Enclosure.share }
             }
             return Enclosure.coverage(of: shape, by: loop) >= Enclosure.share
         }
 
         // The screens not picked themselves, whose things may be.
-        var placements: [DesignScreen.ID: Placement] = [:]
-        for screen in screens {
+        var open: [TreeScreen] = []
+        for screen in tree.screens {
             // Measured finely: all but all of a screen is a close call.
-            if screen.isLocked != true, Enclosure.coverage(of: screen.canvasFrame, by: loop, across: 32) >= Enclosure.screenShare {
+            let frame = screen.canvasFrame(on: tree.device(of: screen))
+            if screen.isLocked != true, Enclosure.coverage(of: frame, by: loop, across: 32) >= Enclosure.screenShare {
                 found.append(.screen(screen.id))
             } else {
-                placements[screen.id] = screen.placement
+                open.append(screen)
             }
         }
-        // The list itself, group items in it: only what is in no group is picked, a group
-        // standing for everything in it. Its own lock and hide are then all it has.
-        for element in projection.elements where element.group == nil {
-            let placement: Placement
-            if let parent = element.parent {
-                guard let onScreen = placements[parent] else { continue }
-                placement = onScreen
-            } else {
-                placement = Placement(origin: .zero, scale: element.scale ?? 1)
+        for screen in open {
+            let placement = screen.placement, root = TreeIndex.OwnSpace.host.placing(screen.root).space
+            for node in screen.root.children where isPicked(node, root.placing(node), placement) {
+                found.append(.element(ElementRef(host: .screen(screen.id), element: node.id)))
             }
-            guard isPicked(element, placement) else { continue }
-            found.append(.element(ElementRef(host: element.parent.map { .screen($0) } ?? .canvas, element: element.id)))
+        }
+        for node in tree.canvas {
+            let placement = Placement(origin: .zero, scale: node.scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1)
+            guard isPicked(node, TreeIndex.OwnSpace.host.placing(node), placement) else { continue }
+            found.append(.element(ElementRef(host: .canvas, element: node.id)))
         }
         return found
+    }
+
+    /// A drawing's strokes as points in its own points, where they now lie: for ink, which is picked by where its
+    /// strokes run, not by the box round them.
+    private static func inkPoints(of node: LayerNode) -> [CGPoint] {
+        node.canvasStrokes.flatMap { stroke in
+            stroke.path.interpolatedPoints(by: .distance(3)).map { $0.location.applying(stroke.transform) }
+        }
     }
 }

@@ -8,13 +8,14 @@ import Foundation
 extension DesignStore {
     /// The shape something takes up on the canvas: an element's rect with the angle it is
     /// turned to, or a screen's frame, which never turns. Nil for several things, which
-    /// have no shape of their own, and when it is gone.
+    /// have no shape of their own, and when it is gone or no longer where the selection says.
+    /// Read from the index and the node's path (`placed(_:)`).
     func canvasShape(of selection: CanvasSelection) -> TurnedRect? {
         switch selection {
         case .element(let ref):
-            return resolve(ref).map { TurnedRect(rect: $0.placement.canvasRect(for: $0.element.frame), degrees: $0.element.resolvedRotation) }
+            return placed(ref)?.canvasShape
         case .screen(let id):
-            return screen(id).map { TurnedRect(rect: $0.canvasFrame, degrees: 0) }
+            return treeScreen(id).map { TurnedRect(rect: $0.canvasFrame(on: tree.device(of: $0)), degrees: 0) }
         case .several:
             return nil
         }
@@ -38,14 +39,16 @@ extension DesignStore {
     /// things are, when every one of them is.
     func isLocked(_ selection: CanvasSelection) -> Bool {
         switch selection {
-        case .element(let ref): resolve(ref).map { isLockedWithItsGroups($0.element) } == true
-        case .screen(let id): screen(id)?.isLocked == true
+        case .element(let ref): placed(ref)?.isLocked == true
+        case .screen(let id): treeScreen(id)?.isLocked == true
         case .several(let things): things.allSatisfy(isLocked)
         }
     }
 
     /// The single things of a selection that are still there, in the design's own order:
-    /// its screens, then its elements from the back to the front.
+    /// its screens, then its elements from the back to the front, host by host (the screens'
+    /// in their order, then the open canvas's), each before what it holds. What is in a
+    /// container selected is left out. Read from the index: no walk of the design.
     func things(in selection: CanvasSelection?) -> [CanvasSelection] {
         #if DEBUG
         CanvasWork.thingsListed += 1
@@ -53,45 +56,63 @@ extension DesignStore {
         guard let selection else { return [] }
         let picked = selection.things
         guard picked.count > 1 else { return Array(picked.filter { canvasFrame(of: $0) != nil }) }
+        let memo = index, screens = tree.screens
+        let screenRank = Dictionary(screens.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         var ordered: [CanvasSelection] = screens.map { .screen($0.id) }.filter(picked.contains)
-        for element in projection.elements {
-            let host: ElementRef.Host = element.parent.map { .screen($0) } ?? .canvas
-            let thing = CanvasSelection.element(ElementRef(host: host, element: element.id))
-            if picked.contains(thing) { ordered.append(thing) }
+        var elements: [(rank: Int, path: [Int], ref: ElementRef)] = []
+        for case .element(let ref) in picked {
+            guard let entry = memo[ref.element], !entry.path.isEmpty, ElementRef.Host(entry.host) == ref.host else { continue }
+            let rank = switch entry.host {
+            case .screen(let id): screenRank[id] ?? screens.count
+            case .canvas: screens.count
+            }
+            elements.append((rank, entry.path, ref))
         }
-        // What is in a group selected goes with it: a member picked beside its group would be
-        // copied or moved twice, and the lone copy would join the original group.
-        let groups = Set(ordered.compactMap { thing -> DesignElement.ID? in
-            if case .element(let ref) = thing, groupItem(ref.element) != nil { ref.element } else { nil }
-        })
-        guard !groups.isEmpty else { return ordered }
-        return ordered.filter { thing in
-            guard case .element(let ref) = thing else { return true }
-            return content.ancestors(of: ref.element).allSatisfy { !groups.contains($0) }
+        // In the order the design holds them: a container before what it holds, each before the
+        // siblings after it.
+        elements.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.path.lexicographicallyPrecedes($1.path) }
+        // What is in a container selected goes with it: a member picked beside its container would be
+        // copied or moved twice, and the lone copy would join the original.
+        let selected = Set(elements.map(\.ref.element))
+        for element in elements where memo.ancestors(of: element.ref.element).allSatisfy({ !selected.contains($0) }) {
+            ordered.append(.element(element.ref))
         }
+        return ordered
     }
 
     /// The frames of everything showing on the canvas apart from some things, and apart
-    /// from what is on any screen among them or in any group among them: what those things
-    /// can be lined up with as they are dragged. A dragged group's members move with it, and
-    /// lined up with where they were, it would stick there.
+    /// from what is on any screen among them or in any container among them: what those
+    /// things can be lined up with as they are dragged. A dragged container's contents move
+    /// with it, and lined up with where they were, they would stick there. Each screen's
+    /// frame, then the things on it that aren't containers, back to front, then the open
+    /// canvas's: read from the tree, each turned thing by the box round its shape.
     func canvasFrames(besides things: Set<CanvasSelection>) -> [CGRect] {
-        var moving: Set<DesignElement.ID> = []
-        for case .element(let ref) in things where groupItem(ref.element) != nil {
-            moving.formUnion(leaves(of: ref.element).map(\.id))
-        }
-        func isLeftOut(_ id: DesignElement.ID, on host: ElementRef.Host) -> Bool {
-            moving.contains(id) || things.contains(.element(ElementRef(host: host, element: id)))
-        }
+        let tree = tree
+        var moving: Set<UUID> = []
+        for case .element(let ref) in things { moving.insert(ref.element) }
         var frames: [CGRect] = []
-        for screen in screens where !things.contains(.screen(screen.id)) {
-            frames.append(screen.canvasFrame)
-            for element in screen.elements where !element.isHidden && !isLeftOut(element.id, on: .screen(screen.id)) {
-                frames.append(screen.placement.canvasRect(for: element.shapeBounds))
+        func visit(_ node: LayerNode, in space: TreeIndex.OwnSpace, on host: ElementRef.Host, at placement: Placement) {
+            guard !node.isHidden else { return }
+            let placed = space.placing(node)
+            guard node.isContainer else {
+                guard !things.contains(.element(ElementRef(host: host, element: node.id))) else { return }
+                let shape = TurnedRect(rect: placed.frame, degrees: Rotation.kept(placed.degrees) ?? 0)
+                frames.append(placement.canvasRect(for: shape.bounds))
+                return
             }
+            // A container dragged takes what is in it along.
+            guard !moving.contains(node.id) else { return }
+            for child in node.children { visit(child, in: placed.space, on: host, at: placement) }
         }
-        for floating in floating where !floating.element.isHidden && !isLeftOut(floating.id, on: .canvas) {
-            frames.append(floating.placement.canvasRect(for: floating.element.shapeBounds))
+        for screen in tree.screens where !things.contains(.screen(screen.id)) {
+            let placement = screen.placement
+            frames.append(screen.canvasFrame(on: tree.device(of: screen)))
+            let root = TreeIndex.OwnSpace.host.placing(screen.root).space
+            for node in screen.root.children { visit(node, in: root, on: .screen(screen.id), at: placement) }
+        }
+        for node in tree.canvas {
+            let scale = node.scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1
+            visit(node, in: .host, on: .canvas, at: Placement(origin: .zero, scale: scale))
         }
         return frames
     }
@@ -116,26 +137,26 @@ extension DesignStore {
         var screens: [DesignScreen.ID: CGPoint] = [:]
         // A member given beside its container moves with it, not on its own.
         let alone = Set(things(in: CanvasSelection(origins.keys)))
-        for (thing, origin) in origins where !isLocked(thing) && alone.contains(thing) {
+        for (thing, origin) in origins where alone.contains(thing) {
             switch thing {
             case .element(let ref):
-                guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
-                let target = placement.localPoint(for: origin), current = placement.localPoint(for: box.origin)
+                // Read from the tree, as every frame of a drag reads it, so that a frame builds the store's
+                // index and never lowers the design to its list (clause (m)).
+                guard let placed = placed(ref), !placed.isLocked else { continue }
+                let box = placed.canvasShape.bounds
+                let target = placed.placement.localPoint(for: origin), current = placed.placement.localPoint(for: box.origin)
                 let distance = CGSize(width: target.x - current.x, height: target.y - current.y)
-                guard element.kind == .group else {
-                    let local = CGPoint(x: element.frame.minX + distance.width, y: element.frame.minY + distance.height)
-                    elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
+                guard placed.node.isContainer else {
+                    let local = CGPoint(x: placed.frame.minX + distance.width, y: placed.frame.minY + distance.height)
+                    elements[ref.element] = placed.node.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
                     continue
                 }
-                // Read only for a container: built again for each version of the design, the index
-                // would cost a drag of several things that aren't containers a walk of the tree a frame.
-                let memo = index
-                guard let entry = memo[ref.element], let moved = self.origin(of: ref.element, movedBy: distance),
-                      let node = memo.node(ref.element, in: tree) else { continue }
+                // Where the container is, from the index `placed` built for this version.
+                guard let entry = index[ref.element], let moved = self.origin(of: ref.element, movedBy: distance) else { continue }
                 let landed = CGPoint(x: moved.x.rounded(), y: moved.y.rounded())
-                if landed != node.frame.origin { containers.append((entry.host, entry.path, landed)) }
+                if landed != placed.node.frame.origin { containers.append((entry.host, entry.path, landed)) }
             case .screen(let id):
-                guard screen(id) != nil else { continue }
+                guard let screen = treeScreen(id), screen.isLocked != true else { continue }
                 screens[id] = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
             case .several:
                 continue
@@ -195,19 +216,35 @@ extension DesignStore {
         }
     }
 
-    /// Locks or unlocks everything selected.
+    /// Locks or unlocks everything selected, as one step: each thing's own flag, and nothing above it.
     func setLocked(_ isLocked: Bool, _ selection: CanvasSelection) {
-        let present = things(in: selection)
-        apply { content in
-            for thing in present {
-                switch thing {
-                case .element(let ref):
-                    content.update(ref.element) { $0.isLocked = isLocked }
-                case .screen(let id):
-                    content.updateScreen(id) { $0.isLocked = isLocked ? true : nil }
-                case .several:
-                    continue
-                }
+        var nodes: [UUID] = []
+        var screens: [TreeScreen.ID] = []
+        for thing in things(in: selection) {
+            switch thing {
+            case .element(let ref): nodes.append(ref.element)
+            case .screen(let id): screens.append(id)
+            case .several: continue
+            }
+        }
+        setOwnLocks(isLocked, nodes: nodes, screens: screens)
+    }
+
+    /// Sets the own lock of each node and screen given, as one change: a node's own flag, and a screen's (nil once
+    /// unlocked). A screen's root, and what the design doesn't have, are passed over. Found through the index.
+    func setOwnLocks(_ isLocked: Bool, nodes: [UUID], screens: [TreeScreen.ID]) {
+        let memo = index
+        var seen: Set<UUID> = []
+        let places = nodes.compactMap { id -> (host: TreeIndex.Host, path: [Int])? in
+            guard seen.insert(id).inserted, let entry = memo[id], !entry.path.isEmpty else { return nil }
+            return (entry.host, entry.path)
+        }
+        guard !places.isEmpty || !screens.isEmpty else { return }
+        changeTree(writing: places.count) { tree in
+            for place in places { tree.changeNode(on: place.host, at: place.path) { $0.isLocked = isLocked } }
+            for id in screens {
+                guard let index = tree.screens.firstIndex(where: { $0.id == id }) else { continue }
+                tree.screens[index].isLocked = isLocked ? true : nil
             }
         }
     }
@@ -256,7 +293,7 @@ extension DesignStore {
 
     /// Gives each element selected to whatever it now lies on, as after a drag: see
     /// `rehost(_:)`. Each moves on the tree in a change of its own, a container whole with
-    /// everything in it (`rehostGroup(_:)`), all of them one step; each lands in the design's
+    /// everything in it, all of them one step; each lands in the design's
     /// order, back to front, on top of what is on its new host, so that those landing together
     /// are stacked there as they were. Returns the selection as it now stands.
     func rehost(_ selection: CanvasSelection) -> CanvasSelection? {

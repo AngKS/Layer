@@ -315,15 +315,20 @@ enum BoardSnapshot {
             area = area.insetBy(dx: (area.width - width) / 2, dy: (area.height - height) / 2).integral
         }
 
+        // Drawn from the tree through the canvas's own views.
+        let tree = model.store.tree
+        let tokens = tree.settings.tokens
         let board = ZStack(alignment: .topLeading) {
-            ForEach(model.store.screens) { screen in
-                PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
+            ForEach(tree.screens) { screen in
+                ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: tree.settings.showsFrameNames)
+                    .equatable()
                     .offset(x: screen.origin.x, y: screen.origin.y)
             }
-            ForEach(model.store.floating) { floating in
-                FloatingElementView(floating: floating)
-                    // Floating drawings last, as the canvas draws them.
-                    .zIndex(floating.element.kind == .drawing ? 1 : 0)
+            ForEach(tree.canvas) { node in
+                CanvasNodeView(node: node, tokens: tokens)
+                    .equatable()
+                    // Drawings last, as the canvas draws them.
+                    .zIndex(node.kind == .drawing ? 1 : 0)
             }
         }
         .offset(x: -area.minX, y: -area.minY)

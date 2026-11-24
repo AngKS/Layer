@@ -449,9 +449,6 @@ struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
     /// The device when it is a custom frame, which `deviceID` alone can't name here. Not
     /// saved; set where a screen is made from a design's tree.
     var resolvedDevice: DeviceFrame?
-    /// What the canvas draws that `elements` leaves out. Not saved; see `ScreenDrawing`.
-    // PROJECTION: deleted in plan 6
-    var drawing = ScreenDrawing()
 
     var device: DeviceFrame { resolvedDevice ?? DeviceFrame.named(deviceID) }
     var size: CGSize { device.size }

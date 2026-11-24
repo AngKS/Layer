@@ -784,7 +784,7 @@ struct InkCanvas: UIViewRepresentable {
             followInkNotYetFollowed()
             // The canvas's strokes are read only if a drawing has changed: see `DrawingSync`.
             let canvas = documentCanvas
-            guard let strokes = drawings.strokes(showing: model.store.content, reading: {
+            guard let strokes = drawings.strokes(showing: model.store.tree, reading: {
                 let current = canvas.drawing.strokes
                 #if DEBUG
                 CanvasWork.strokesRead += current.count
@@ -804,7 +804,7 @@ struct InkCanvas: UIViewRepresentable {
             // While the design is being put back by undo or redo it is the one to follow.
             if !evenWhileTheHistoryMoves, let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
-            let changes = drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach)
+            let changes = drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.tree, reach: reach)
             // Part of the tool's use under way, if it is, and of nothing else under way.
             model.store.act(for: toolEdit) { model.inkChanged(changes) }
             // PencilKit's own record of the change is not the one that is kept.

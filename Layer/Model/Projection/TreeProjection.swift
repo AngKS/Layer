@@ -44,22 +44,30 @@ enum TreeProjection {
     /// Whole designs lowered: counted on the main thread alone, as `ListWork` is, so that a design
     /// lowered elsewhere meanwhile doesn't add to a test's count. It only grows.
     nonisolated(unsafe) private(set) static var lowerings = 0
+    /// `lowerings` by screen: each lowering of a design counts once for every screen it holds.
+    nonisolated(unsafe) private static var loweringsByScreen: [TreeScreen.ID: Int] = [:]
+
+    /// How many times a design holding `screen` has been lowered, on the main thread: what a test reads
+    /// for its own board's screen, so that other suites' designs lowered meanwhile don't add to it (F9).
+    static func lowerings(of screen: TreeScreen.ID) -> Int { loweringsByScreen[screen] ?? 0 }
     #endif
 
     static func lower(_ content: TreeContent, pending: [UUID: UUID] = [:]) -> Lowered {
         #if DEBUG
-        if Thread.isMainThread { lowerings += 1 }
+        if Thread.isMainThread {
+            lowerings += 1
+            for screen in content.screens { loweringsByScreen[screen.id, default: 0] += 1 }
+        }
         #endif
         var elements: [DesignElement] = []
         var screens: [DesignScreen] = []
         screens.reserveCapacity(content.screens.count)
         for screen in content.screens {
-            var lowering = Lowering(host: screen.id, pending: pending, card: content.settings.tokens.card)
+            var lowering = Lowering(host: screen.id, pending: pending)
             lowering.lowerRoot(screen.root)
             elements += lowering.raw
             var view = Self.view(of: screen)
             view.elements = lowering.shown
-            view.drawing = lowering.drawing
             let device = content.device(of: screen)
             if device != view.device { view.resolvedDevice = device }
             screens.append(view)
@@ -176,39 +184,9 @@ enum TreeProjection {
     // PROJECTION: deleted in plan 6
     /// Where a node's own space sits in its host's: what its children are placed by. The writes
     /// (`TreeProjection+Writes.swift`, `TreeLift`) place through it too, so that what they write
-    /// lowers back to exactly what was written.
-    struct Place {
-        /// The node's own space to the host's.
-        var toHost: CGAffineTransform
-        /// Its frame's origin in the host's space, which its children's origins are added to while
-        /// every node down to it is upright.
-        var origin: CGPoint
-        /// The angles of the nodes down to it, summed.
-        var degrees: Double
-        var isUpright: Bool
-
-        /// The host itself: a screen's space, or on the canvas a top-level node's own points.
-        static let host = Place(toHost: .identity, origin: .zero, degrees: 0, isUpright: true)
-
-        /// A child of the node this is the place of: its frame and angle in the host's space, and its own place.
-        func placing(_ node: LayerNode) -> (frame: CGRect, rotation: Double?, place: Place) {
-            let own = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
-            let size = node.frame.size
-            let frame: CGRect
-            if isUpright {
-                frame = CGRect(origin: CGPoint(x: origin.x + node.frame.origin.x, y: origin.y + node.frame.origin.y),
-                               size: size)
-            } else {
-                let centre = CGPoint(x: node.frame.origin.x + size.width / 2, y: node.frame.origin.y + size.height / 2)
-                    .applying(toHost)
-                frame = CGRect(origin: CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2), size: size)
-            }
-            let degrees = self.degrees + own
-            let place = Place(toHost: node.transformToParent.concatenating(toHost), origin: frame.origin,
-                              degrees: degrees, isUpright: isUpright && Rotation.normalized(own) == 0)
-            return (frame, Rotation.kept(degrees), place)
-        }
-    }
+    /// lowers back to exactly what was written. It is the canvas's own `TreeIndex.OwnSpace`, so that
+    /// an element and the node it is lowered from are posed by one piece of arithmetic.
+    typealias Place = TreeIndex.OwnSpace
 
     // PROJECTION: deleted in plan 6
     /// One host lowered: its list as kept, and its leaves as the views show them.
@@ -221,52 +199,37 @@ enum TreeProjection {
         var raw: [DesignElement] = []
         var shown: [DesignElement] = []
         var nodes: [LoweredNode] = []
-        /// The design's card tokens, for a card with no look of its own; nil where cards aren't drawn.
-        let card: DesignTokens.Card?
-        var drawing = ScreenDrawing()
 
-        init(host: DesignScreen.ID?, pending: [UUID: UUID], keepsNodes: Bool = false, card: DesignTokens.Card? = nil) {
+        init(host: DesignScreen.ID?, pending: [UUID: UUID], keepsNodes: Bool = false) {
             self.host = host
             self.pending = pending
             self.keepsNodes = keepsNodes
-            self.card = card
         }
 
         /// A screen's root's children, pointing at nothing. The screen's own lock isn't shown on them.
         mutating func lowerRoot(_ root: LayerNode) {
             let place = Place.host.placing(root).place
             for child in root.children {
-                emit(child, at: place, scale: nil, group: nil, locked: false, hidden: false, in: root.resolvedLayout)
+                emit(child, at: place, scale: nil, group: nil, locked: false, hidden: false)
             }
         }
 
         /// The canvas's nodes, each in its own points, at its own scale with everything in it.
         mutating func lowerCanvas(_ nodes: [LayerNode]) {
             for node in nodes {
-                emit(node, at: .host, scale: node.scale, group: nil, locked: false, hidden: false, in: .free)
+                emit(node, at: .host, scale: node.scale, group: nil, locked: false, hidden: false)
             }
         }
 
         /// `node`'s block: its children's blocks, back to front, then the node. `place` is its parent's,
-        /// and `locked` and `hidden` say whether a container above it is. `layout` is its parent's.
+        /// and `locked` and `hidden` say whether a container above it is.
         private mutating func emit(_ node: LayerNode, at place: Place, scale: CGFloat?, group: UUID?,
-                                   locked: Bool, hidden: Bool, in layout: LayerNode.Layout) {
+                                   locked: Bool, hidden: Bool) {
             let placed = place.placing(node)
             let lockedInside = locked || (node.isContainer && node.isLocked)
             let hiddenInside = hidden || (node.isContainer && node.isHidden)
-            if let card, node.kind == .card, !hiddenInside {
-                // Before what it holds, so that the outermost comes first.
-                var drawn = DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: host,
-                                          scale: scale, group: group)
-                drawn.kind = .card
-                drawn.tint = node.style.tint ?? card.fill
-                drawn.cornerRadius = node.style.cornerRadius ?? card.radius
-                drawing.cards.append(drawn)
-            }
-            if card != nil, !node.isContainer, layout != .free { drawing.laidOut.insert(node.id) }
             for child in node.children {
-                emit(child, at: placed.place, scale: scale, group: node.id, locked: lockedInside, hidden: hiddenInside,
-                     in: node.resolvedLayout)
+                emit(child, at: placed.place, scale: scale, group: node.id, locked: lockedInside, hidden: hiddenInside)
             }
             let element = DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: host,
                                         scale: scale, group: pending[node.id] ?? group)
@@ -280,4 +243,12 @@ enum TreeProjection {
             if keepsNodes { nodes.append(LoweredNode(node: node, element: element, holder: group, shown: view)) }
         }
     }
+}
+
+// PROJECTION: deleted in plan 6
+extension TreeIndex.OwnSpace.Placed {
+    /// The angle as an element keeps it (`Rotation.kept`): what the lowering gives an element.
+    var rotation: Double? { Rotation.kept(degrees) }
+    /// The child's own space, by the name the projection's code gives it.
+    var place: TreeProjection.Place { space }
 }

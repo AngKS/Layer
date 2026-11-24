@@ -125,12 +125,12 @@ final class InkBoardPerformanceTests: XCTestCase {
         var content = board()
         let dragged = content.elements[0].id
         var sync = DrawingSync()
-        var shown = sync.strokes(showing: content, on: []) ?? []
+        var shown = sync.strokes(showing: content.tree, on: []) ?? []
 
         measure {
             for _ in 0..<30 {
                 content.update(dragged) { $0.frame.origin.x += 2 }
-                shown = sync.strokes(showing: content, on: shown) ?? shown
+                shown = sync.strokes(showing: content.tree, on: shown) ?? shown
             }
         }
     }

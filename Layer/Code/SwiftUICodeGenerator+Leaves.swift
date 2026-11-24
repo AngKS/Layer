@@ -8,13 +8,15 @@ import Foundation
 
 extension SwiftUICodeGenerator {
     /// A leaf as its code reads it: the node, the frame it is written at, and its turn, in the
-    /// space its code places it in. Its look resolves as an element's does (`ElementStyle`), so
-    /// the code is what it was for the element it once was.
+    /// space its code places it in, with the design's tokens. Its look is the node's, as the canvas
+    /// draws it (`LayerNode+Look.swift`); what is its own decides what the code says of it.
     struct Leaf {
         var node: LayerNode
         var frame: CGRect
         /// From 0 up to 360, nil when upright, as an element keeps it.
         var rotation: Double?
+        /// The design's, for text with no size of its own.
+        var tokens: DesignTokens
 
         var kind: ElementKind { node.kind }
         var text: String { node.content.text }
@@ -22,8 +24,7 @@ extension SwiftUICodeGenerator {
         var symbol: String? { node.content.symbol }
         var shape: ShapeKind? { node.content.shape }
         var isOn: Bool { node.content.isOn }
-        /// The node's own colour, or its kind's, as an element's `tint` is.
-        var tint: RGBColor { node.style.tint ?? kind.spec.tint }
+        var tint: RGBColor { node.resolvedTint }
         var fontSize: CGFloat? { node.style.fontSize }
         var fontWeight: FontWeightChoice? { node.style.fontWeight }
         var textColor: RGBColor? { node.style.textColor }
@@ -31,18 +32,18 @@ extension SwiftUICodeGenerator {
         var cornerRadius: CGFloat? { node.style.cornerRadius }
         var hasShadow: Bool { node.style.hasShadow }
 
-        var resolvedFontSize: CGFloat { fontSize ?? kind.spec.fontSize.points(in: frame) }
-        var resolvedFontWeight: FontWeightChoice { fontWeight ?? kind.spec.fontWeight }
-        var resolvedCornerRadius: CGFloat { cornerRadius ?? kind.spec.cornerRadius.points(in: frame) }
-        var resolvedOpacity: Double { node.style.opacity ?? 1 }
-        var resolvedButtonLook: ButtonLook { node.content.buttonLook ?? .filled }
-        var resolvedValue: Double { min(max(node.content.value ?? 0.5, 0), 1) }
-        var resolvedTextAlignment: TextAlignmentChoice { textAlignment ?? kind.spec.textAlignment }
-        var resolvedBorderWidth: CGFloat { max(node.style.borderWidth ?? 0, 0) }
-        var resolvedBorderColor: RGBColor { node.style.borderColor ?? Theme.inkTint }
+        var resolvedFontSize: CGFloat { node.resolvedFontSize(tokens: tokens) }
+        var resolvedFontWeight: FontWeightChoice { node.resolvedFontWeight }
+        var resolvedCornerRadius: CGFloat { node.resolvedCornerRadius(tokens: tokens) }
+        var resolvedOpacity: Double { node.resolvedOpacity }
+        var resolvedButtonLook: ButtonLook { node.resolvedButtonLook }
+        var resolvedValue: Double { node.resolvedValue }
+        var resolvedTextAlignment: TextAlignmentChoice { node.resolvedTextAlignment }
+        var resolvedBorderWidth: CGFloat { node.resolvedBorderWidth }
+        var resolvedBorderColor: RGBColor { node.resolvedBorderColor }
         var resolvedRotation: Double { rotation ?? 0 }
-        var hasCornerRadius: Bool { kind.spec.traits.contains(.cornerRadius) }
-        var hasBorder: Bool { kind.spec.traits.contains(.border) }
+        var hasCornerRadius: Bool { node.hasCornerRadius }
+        var hasBorder: Bool { node.hasBorder }
         var isCircular: Bool {
             hasCornerRadius && resolvedCornerRadius >= min(frame.width, frame.height) / 2 - 0.5 && abs(frame.width - frame.height) < 1
         }
@@ -67,7 +68,7 @@ extension SwiftUICodeGenerator {
             let alignment = element.textAlignment.map { $0.rawValue } ?? "leading"
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: titleFont(height: frame.height))))",
+                "    .font(\(titleFont(of: element)))",
             ] + textColor(of: element, usual: nil)
             if centered && (element.textAlignment ?? .center) == .center {
                 // Stretched across the screen as it is placed: finished, and turned, before that.
@@ -162,14 +163,14 @@ extension SwiftUICodeGenerator {
 
         switch element.kind {
         case .title, .body, .text, .stickyNote:
-            let usual = switch element.kind {
-            case .title: titleFont(height: frame.height) ?? ".title.bold()"
-            case .body: ".subheadline"
-            default: ".body"
+            let textFont = switch element.kind {
+            case .title: titleFont(of: element)
+            case .body: font(of: element, usual: ".subheadline")
+            default: font(of: element, usual: ".body")
             }
             lines = [
                 "Text(\(literal(element.text)))",
-                "    .font(\(font(of: element, usual: usual)))",
+                "    .font(\(textFont))",
             ] + textColor(of: element, usual: nil)
                 + (alignment == "leading" ? [] : ["    .multilineTextAlignment(.\(alignment))"])
                 + (element.kind == .stickyNote
@@ -284,24 +285,22 @@ extension SwiftUICodeGenerator {
         }
     }
 
-    /// The font of text in a laid-out container: the text style its kind's standard size stands
-    /// for (Title, Subheadline, Body) when it has that size and its kind's weight, else its size
-    /// and weight as the engine measured them (`NaturalSize`).
+    /// The font of text in a laid-out container: the text style its size stands for when it has its
+    /// kind's weight (a title's as `titleFont(of:)` says; Subheadline and Body at the design's body
+    /// and text sizes), else its size and weight, as it is measured and drawn.
     private static func laidOutFont(of element: Leaf) -> String {
-        let size = NaturalSize.fontSize(of: element.node)
-        let weight = NaturalSize.fontWeight(of: element.node)
-        let sizes = DesignTokens.standard.textSizes
+        if element.kind == .title { return titleFont(of: element) }
+        let size = element.resolvedFontSize
+        let weight = element.resolvedFontWeight
+        let sizes = element.tokens.textSizes
         if weight == element.kind.spec.fontWeight {
             switch element.kind {
-            case .title where size == sizes.title: return ".title.bold()"
             case .body where size == sizes.body: return ".subheadline"
             case .text where size == sizes.text: return ".body"
             default: break
             }
         }
-        return weight == .regular
-            ? ".system(size: \(number(size)))"
-            : ".system(size: \(number(size)), weight: .\(weight.rawValue))"
+        return systemFont(size: size, weight: weight)
     }
 
     // MARK: Pieces of the views
@@ -319,14 +318,21 @@ extension SwiftUICodeGenerator {
         ]
     }
 
-    /// The text style a title of this height is drawn in: Title 2, Title or Large Title.
-    private static func titleFont(height: CGFloat) -> String? {
-        switch height {
-        case 31...33: ".title2.bold()"
-        case 39...41: ".title.bold()"
-        case 47...49: ".largeTitle.bold()"
-        default: nil
+    /// A title's font, by the size it is drawn at: with a title's weight, Title at the design's
+    /// title size, Title 2 at 22 and Large Title at 34 (the sizes the Magic Pen gives titles drawn
+    /// small and large); otherwise its size and weight.
+    private static func titleFont(of element: Leaf) -> String {
+        let size = element.resolvedFontSize
+        let weight = element.resolvedFontWeight
+        if weight == element.kind.spec.fontWeight {
+            switch size {
+            case element.tokens.textSizes.title: return ".title.bold()"
+            case ElementLayout.titleTwoSize: return ".title2.bold()"
+            case ElementLayout.largeTitleSize: return ".largeTitle.bold()"
+            default: break
+            }
         }
+        return systemFont(size: size, weight: weight)
     }
 
     /// A button in its look. `frames` size the label, unindented.
@@ -465,10 +471,14 @@ extension SwiftUICodeGenerator {
     /// The font modifier's argument: the kind's usual font unless the leaf has its own.
     private static func font(of element: Leaf, usual: String?) -> String {
         if element.fontSize == nil, element.fontWeight == nil, let usual { return usual }
-        let weight = element.resolvedFontWeight
-        return weight == .regular
-            ? ".system(size: \(number(element.resolvedFontSize)))"
-            : ".system(size: \(number(element.resolvedFontSize)), weight: .\(weight.rawValue))"
+        return systemFont(size: element.resolvedFontSize, weight: element.resolvedFontWeight)
+    }
+
+    /// The system font at a size, with its weight where it isn't regular.
+    private static func systemFont(size: CGFloat, weight: FontWeightChoice) -> String {
+        weight == .regular
+            ? ".system(size: \(number(size)))"
+            : ".system(size: \(number(size)), weight: .\(weight.rawValue))"
     }
 
     private static func textColor(of element: Leaf, usual: String?) -> [String] {

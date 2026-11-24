@@ -19,17 +19,26 @@ struct CanvasScreen: View {
                 LiveCanvasGrid()
 
                 OnCanvas {
-                    ForEach(model.store.screens) { screen in
-                        PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
+                    // Drawn from the tree, each screen and canvas node compared by value: an edit draws
+                    // again only the views on its path.
+                    let tree = model.store.tree
+                    let tokens = tree.settings.tokens
+                    let showsNames = tree.settings.showsFrameNames
+                    let raised = model.screensBeingDraggedFrom
+                    ForEach(tree.screens) { screen in
+                        ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: showsNames)
+                            .equatable()
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
-                            .zIndex(screensBeingDraggedFrom.contains(screen.id) ? 1 : 0)
+                            .zIndex(raised.contains(screen.id) ? 1 : 0)
                             .transition(.blurReplace)
                     }
-                    ForEach(model.store.floating) { floating in
-                        FloatingElementView(floating: floating)
-                            // A locked drawing is above the other things, as it is touched.
-                            .zIndex(floating.element.kind == .drawing ? 3 : 2)
+                    ForEach(tree.canvas) { node in
+                        CanvasNodeView(node: node, tokens: tokens)
+                            .equatable()
+                            // A locked drawing is above the other things, as it is touched. An unlocked one
+                            // draws nothing here: PencilKit draws it.
+                            .zIndex(node.kind == .drawing ? 3 : 2)
                             .transition(.blurReplace)
                     }
                 }
@@ -186,14 +195,6 @@ struct CanvasScreen: View {
             get: { model.panelIsASheet && model[keyPath: isOpen] },
             set: { model[keyPath: isOpen] = $0 }
         )
-    }
-
-    /// The screens that hold elements being dragged, one or several of them.
-    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
-        guard model.isAdjusting, let selection = model.selection else { return [] }
-        return Set(selection.things.compactMap { thing in
-            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
-        })
     }
 }
 

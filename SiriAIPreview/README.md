@@ -13,6 +13,6 @@ Layer's App Intents in `Layer/Intents/` ship with the iOS 26.6 deployment target
 2. **Describe entity properties.** Add `description:` to each `@Property` in `LayerEntities.swift`, written for someone who has never seen Layer.
 3. **Add the generable spec.** Move `ScreenSpecTool.swift` into `Layer/Intents/`. Its `ScreenSpec` turns into the outline that `BuildScreenIntent` reads, and is built by the same code.
 4. **Add the skills.** Move `Skills.skillsbundle` into the app target's resources (an app target can hold only one). Each skill is one folder with one `SKILL.md`.
-5. **Card snippets.** Make `DesignEntity` and `ScreenEntity` `SnippetRepresentableEntity`, returning a `CardSnippet` that shows the design's stored thumbnail or the screen drawn with `PhoneScreenView`.
+5. **Card snippets.** Make `DesignEntity` and `ScreenEntity` `SnippetRepresentableEntity`, returning a `CardSnippet` that shows the design's stored thumbnail or the screen drawn with `ScreenView`.
 6. **Model toolset reference.** `docs/automation.md` lists every action, its units and the stroke and look formats, written for a model choosing tools.
 7. **Test on a device**, not the Simulator, with Siri Evaluations scenarios for each request in the plan doc. Run the build-screen set against `AppleIntelligenceInterpreter` as the benchmark.

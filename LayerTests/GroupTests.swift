@@ -1128,7 +1128,7 @@ struct SelectingGroupsTests {
         let c = try #require(board.store.canvasFrame(of: .element(board.c)))
         let gap = CGPoint(x: b.midX, y: (b.maxY + c.minY) / 2)
         #expect(try #require(board.store.canvasShape(of: .element(g))).contains(gap))
-        #expect(board.store.leaf(at: gap, in: g.element) == nil)
+        #expect(TreeTargets.leaf(at: gap, in: g.element, content: board.store.tree, index: board.store.index) == nil)
 
         board.model.targetTapped(.element(g), at: gap)
         #expect(board.model.selection == .element(g))
@@ -1151,24 +1151,24 @@ struct SelectingGroupsTests {
         let board = OrderBoard()
         let host = DesignStore.ElementRef.Host.screen(board.screen)
         let g = board.group(board.b, board.d)
-        #expect(board.store.targets(on: host, entered: []) == [board.a, board.c, g, board.e])
+        #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, board.c, g, board.e])
 
         board.model.selection = .element(board.b)
         #expect(board.model.enteredGroups == [g.element])
-        #expect(board.store.targets(on: host, entered: board.model.enteredGroups) == [board.a, board.c, board.b, board.d, board.e])
+        #expect(board.store.treeTargets(entered: board.model.enteredGroups).refs(on: host) == [board.a, board.c, board.b, board.d, board.e])
 
         // Inside a group gone into, a group in it is one target, and the rest are their own.
         let g2 = board.group(g, board.c, named: "G2")
-        #expect(board.store.targets(on: host, entered: []) == [board.a, g2, board.e])
-        #expect(board.store.targets(on: host, entered: [g2.element]) == [board.a, board.c, g, board.e])
+        #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, g2, board.e])
+        #expect(board.store.treeTargets(entered: [g2.element]).refs(on: host) == [board.a, board.c, g, board.e])
 
         // A hidden group has none, and nor do its members.
         board.store.update(g2) { $0.isHidden = true }
-        #expect(board.store.targets(on: host, entered: []) == [board.a, board.e])
-        #expect(board.store.targets(on: host, entered: [g.element, g2.element]) == [board.a, board.e])
+        #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, board.e])
+        #expect(board.store.treeTargets(entered: [g.element, g2.element]).refs(on: host) == [board.a, board.e])
 
         // On the open canvas a drawing is picked by its ink, and has no target.
-        #expect(board.store.targets(on: .canvas, entered: []) == [board.note1, board.note2])
+        #expect(board.store.treeTargets(entered: []).refs(on: .canvas) == [board.note1, board.note2])
     }
 
     @Test func aLoopPicksWholeGroupsNeverMembersAlone() throws {
@@ -2412,11 +2412,11 @@ struct LayerTreeTests {
         #expect(board.store.element(note.element)?.frame.contains(point) == true, "they overlap there")
 
         #expect(board.model.hoverTarget(at: point) == .element(board.drawing))
-        let targets = board.store.targets(on: .canvas, entered: [])
+        let targets = board.store.treeTargets(entered: []).refs(on: .canvas)
         let drawingIndex = try #require(targets.firstIndex(of: board.drawing))
         let noteIndex = try #require(targets.firstIndex(of: note))
         #expect(drawingIndex > noteIndex, "the targets lie as the canvas draws")
-        let elements = try #require(board.store.targetElements(entered: [])[.canvas])
+        let elements = try #require(board.store.treeTargets(entered: []).byHost[.canvas])
         #expect(elements.last?.id == board.drawing.element)
     }
 }

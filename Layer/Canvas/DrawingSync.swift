@@ -4,7 +4,7 @@ import PencilKit
 
 /// Keeps the design's drawings and the ink canvas in step.
 ///
-/// The design is where drawings are kept: each is an element with its own ink. The ink
+/// The design is where drawings are kept: each is a node on the canvas with its own ink. The ink
 /// canvas is where they are drawn on: it shows the strokes of every drawing that is
 /// neither locked nor hidden, and PencilKit's pens and eraser work on them there. (The
 /// palette's lasso selects whole drawings, with everything else: see `InkCanvas`.)
@@ -16,19 +16,27 @@ struct DrawingSync {
     /// What the design's drawings become, to follow the canvas.
     struct Changes: Equatable {
         /// Drawings that are new, or whose ink or frame changed.
-        var drawings: [DesignElement] = []
+        var drawings: [LayerNode] = []
         /// Drawings none of whose strokes are left.
-        var removed: Set<DesignElement.ID> = []
+        var removed: Set<LayerNode.ID> = []
 
         var isEmpty: Bool { drawings.isEmpty && removed.isEmpty }
 
+        // PROJECTION: deleted in plan 6
+        // The DesignContent parameter becomes TreeContent then (F21).
+        /// Writes the drawings on the canvas's top level: a new one goes on top at scale 1, one it has
+        /// keeps its angle and takes only the frame and ink.
         func apply(to content: inout DesignContent) {
-            content.remove(removed)
+            let gone = removed
+            if !gone.isEmpty { content.tree.canvas.removeAll { gone.contains($0.id) } }
             for drawing in drawings {
-                if content.element(drawing.id) == nil {
-                    content.add(drawing, to: nil, scale: 1)
+                if let index = content.tree.canvas.firstIndex(where: { $0.id == drawing.id }) {
+                    content.tree.canvas[index].frame = drawing.frame
+                    content.tree.canvas[index].content.ink = drawing.content.ink
                 } else {
-                    content.update(drawing.id) { $0.frame = drawing.frame; $0.ink = drawing.ink }
+                    var added = drawing
+                    added.scale = 1
+                    content.tree.canvas.append(added)
                 }
             }
         }
@@ -49,17 +57,19 @@ struct DrawingSync {
     }
 
     /// Which drawing each stroke on the canvas belongs to.
-    private var owner: [Double: DesignElement.ID] = [:]
+    private var owner: [Double: LayerNode.ID] = [:]
     /// The drawings the canvas shows, as the design had them when the two last agreed.
-    private var shown: [DesignElement.ID: Shown] = [:]
+    private var shown: [LayerNode.ID: Shown] = [:]
     /// Each shown drawing's strokes as they were then, to tell which drawings changed.
-    private var marks: [DesignElement.ID: [Mark]] = [:]
+    private var marks: [LayerNode.ID: [Mark]] = [:]
 
-    /// The drawings the canvas shows: those that can be drawn on. Read from the open canvas's own
-    /// nodes, where the design keeps every drawing, rather than from the whole design lowered to its
-    /// list, which this runs on every change, each frame of a drag among them.
-    private static func onCanvas(_ content: DesignContent) -> [DesignElement] {
-        TreeProjection.canvasDrawings(in: content.tree).filter { !$0.isLocked && !$0.isHidden }
+    /// The canvas's unlocked, visible drawing nodes, back to front: those that can be drawn on. Read from
+    /// the open canvas's own nodes, where the design keeps every drawing, rather than from the whole
+    /// design lowered to its list, which this runs on every change, each frame of a drag among them.
+    /// `TreeRules` keeps every drawing there, in no container, so each one's own lock and hide are how
+    /// the views show it.
+    static func onCanvas(_ content: TreeContent) -> [LayerNode] {
+        content.canvas.filter { $0.kind == .drawing && !$0.isLocked && !$0.isHidden }
     }
 
     private static func mark(_ stroke: PKStroke) -> Mark {
@@ -67,14 +77,14 @@ struct DrawingSync {
     }
 
     /// The drawing a stroke on the canvas belongs to.
-    func drawing(owning key: Double) -> DesignElement.ID? {
+    func drawing(owning key: Double) -> LayerNode.ID? {
         owner[key]
     }
 
     /// The strokes the canvas should hold to show a design, or nil when it shows it
     /// already. `current` is what the canvas holds now: strokes that stay keep their
     /// place and are handed back as they are, so that PencilKit still knows them.
-    mutating func strokes(showing content: DesignContent, on current: [PKStroke]) -> [PKStroke]? {
+    mutating func strokes(showing content: TreeContent, on current: [PKStroke]) -> [PKStroke]? {
         strokes(showing: content, reading: { current })
     }
 
@@ -82,9 +92,9 @@ struct DrawingSync {
     /// drawings have changed. Reading it bridges every stroke on the canvas out of PencilKit,
     /// which every change to the design did, each frame of an element's drag among them,
     /// though most changes leave every drawing as it was (audit C6).
-    mutating func strokes(showing content: DesignContent, reading current: () -> [PKStroke]) -> [PKStroke]? {
+    mutating func strokes(showing content: TreeContent, reading current: () -> [PKStroke]) -> [PKStroke]? {
         let drawings = Self.onCanvas(content)
-        let wanted = Dictionary(uniqueKeysWithValues: drawings.map { ($0.id, Shown(frame: $0.frame, ink: $0.ink, rotation: $0.resolvedRotation)) })
+        let wanted = Dictionary(uniqueKeysWithValues: drawings.map { ($0.id, Shown(frame: $0.frame, ink: $0.content.ink, rotation: $0.resolvedRotation)) })
         guard wanted != shown else { return nil }
         let current = current()
 
@@ -143,10 +153,10 @@ struct DrawingSync {
 
     /// What the design's drawings become now that the canvas holds `strokes`. A new
     /// stroke joins the drawing it touches, within `reach` canvas points, or starts one.
-    mutating func changes(for strokes: [PKStroke], in content: DesignContent, reach: CGFloat = InkGeometry.reach) -> Changes {
+    mutating func changes(for strokes: [PKStroke], in content: TreeContent, reach: CGFloat = InkGeometry.reach) -> Changes {
         let existing = Dictionary(uniqueKeysWithValues: Self.onCanvas(content).map { ($0.id, $0) })
-        var members: [DesignElement.ID: [PKStroke]] = [:]
-        var order: [DesignElement.ID] = []
+        var members: [LayerNode.ID: [PKStroke]] = [:]
+        var order: [LayerNode.ID] = []
         var strays: [PKStroke] = []
 
         for stroke in strokes {
@@ -168,15 +178,15 @@ struct DrawingSync {
 
         var changes = Changes()
         owner = [:]
-        var nowShown: [DesignElement.ID: Shown] = [:]
-        var nowMarks: [DesignElement.ID: [Mark]] = [:]
+        var nowShown: [LayerNode.ID: Shown] = [:]
+        var nowMarks: [LayerNode.ID: [Mark]] = [:]
         for id in order {
             guard let strokes = members[id] else { continue }
             for stroke in strokes { owner[stroke.key] = id }
             let strokeMarks = strokes.map(Self.mark)
             nowMarks[id] = strokeMarks
             // Untouched since its ink was last written out: nothing to work out again.
-            if let known = existing[id], marks[id] == strokeMarks, shown[id] == Shown(frame: known.frame, ink: known.ink, rotation: known.resolvedRotation) {
+            if let known = existing[id], marks[id] == strokeMarks, shown[id] == Shown(frame: known.frame, ink: known.content.ink, rotation: known.resolvedRotation) {
                 nowShown[id] = shown[id]
                 continue
             }
@@ -184,16 +194,16 @@ struct DrawingSync {
             // and it keeps its angle. Back by the angle they were last placed at, about where
             // they were placed: a turn that has landed since, not yet shown, isn't in them, and
             // keeps its angle as only the frame and the ink are written.
-            let drawn: DesignElement?
-            let lies = existing[id].map { known in shown[id] ?? Shown(frame: known.frame, ink: known.ink, rotation: known.resolvedRotation) }
+            let drawn: LayerNode?
+            let lies = existing[id].map { known in shown[id] ?? Shown(frame: known.frame, ink: known.content.ink, rotation: known.resolvedRotation) }
             if let lies, lies.rotation != 0 {
-                drawn = DesignElement.drawing(strokes, id: id, keepingTurn: lies.rotation, about: CGPoint(x: lies.frame.midX, y: lies.frame.midY))
+                drawn = LayerNode.drawing(strokes, id: id, keepingTurn: lies.rotation, about: CGPoint(x: lies.frame.midX, y: lies.frame.midY))
             } else {
-                drawn = DesignElement.drawing(strokes, id: id)
+                drawn = LayerNode.drawing(strokes, id: id)
             }
             guard let drawn else { continue }
-            nowShown[id] = Shown(frame: drawn.frame, ink: drawn.ink, rotation: drawn.resolvedRotation)
-            if let known = existing[id], known.frame == drawn.frame, known.ink == drawn.ink { continue }
+            nowShown[id] = Shown(frame: drawn.frame, ink: drawn.content.ink, rotation: drawn.resolvedRotation)
+            if let known = existing[id], known.frame == drawn.frame, known.content.ink == drawn.content.ink { continue }
             changes.drawings.append(drawn)
         }
         changes.removed = Set(existing.keys).subtracting(order)

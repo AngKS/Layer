@@ -803,7 +803,7 @@ struct DesignFileTests {
         // Ink drawn on the canvas becomes a drawing in the design.
         var sync = DrawingSync()
         let strokes = sampleFile().drawing.strokes
-        model.inkChanged(sync.changes(for: strokes, in: model.store.content))
+        model.inkChanged(sync.changes(for: strokes, in: model.store.content.tree))
 
         let snapshot = try document.snapshot(contentType: .layerDesign)
         #expect(snapshot.content.screens.map(\.name) == ["Screen 1"])

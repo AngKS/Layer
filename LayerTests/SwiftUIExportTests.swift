@@ -311,6 +311,26 @@ struct SwiftUIExportTests {
         #expect(Self.lines(file.source).contains("static let cardFill = Color(red: 0.07, green: 0.13, blue: 0.20)"))
     }
 
+    /// The Magic Pen's titles drawn small, as usual and large are written as Title 2, Title and Large Title, as they
+    /// are drawn: read in reading order, at exact positions, and in a column.
+    @MainActor @Test func aSketchedTitleIsWrittenInTheTextStyleOfItsSize() throws {
+        let (store, ids) = sketchedTitles()
+        let tree = store.tree
+        try #require(ids.count == 3)
+        let styles = [".font(.title2.bold())", ".font(.title.bold())", ".font(.largeTitle.bold())"]
+        for layout in CodeSettings.Layout.allCases {
+            let fonts = Self.lines(Self.code(tree, settings: CodeSettings(layout: layout))).filter { $0.hasPrefix(".font(") }
+            #expect(fonts == styles, "\(layout)")
+        }
+
+        let column = Self.design(Self.stack(.vertical, spacing: 16), try ids.map { id in
+            var title = try #require(store.node(id))
+            (title.width, title.height) = NaturalSize.defaultSizing(for: .title)
+            return title
+        })
+        #expect(Self.lines(Self.code(column)).filter { $0.hasPrefix(".font(") } == styles)
+    }
+
     // MARK: - Free containers: today's reading-order inference
 
     @Test func theSketchedScreensCodeIsTodays() throws {

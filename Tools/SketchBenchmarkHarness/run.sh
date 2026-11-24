@@ -17,7 +17,6 @@ swiftc \
     -target arm64-apple-macos27.0 \
     -O \
     "$REPO_ROOT/Layer/Model/Design.swift" \
-    "$REPO_ROOT/Layer/Model/Projection/ScreenDrawing.swift" \
     "$REPO_ROOT/Layer/Model/ShapeKind.swift" \
     "$REPO_ROOT/Layer/Components/ComponentSpec.swift" \
     "$REPO_ROOT/Layer/Components/Catalogue.swift" \

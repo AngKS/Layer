@@ -36,10 +36,15 @@ struct DesignTokens: Equatable, Sendable, Codable {
     /// The rhythm step nearest `standard`, the smaller on a tie: how the standard 24, 12 and 8 carry over to a
     /// design's own rhythm. Standard tokens give `standard` back.
     func spacing(nearest standard: CGFloat) -> CGFloat {
-        var best = standard
+        Self.step(nearest: standard, in: rhythm)
+    }
+
+    /// The step of `rhythm` nearest `value`, the smaller on a tie; `value` itself when the rhythm has none.
+    static func step(nearest value: CGFloat, in rhythm: [CGFloat]) -> CGFloat {
+        var best = value
         var distance = CGFloat.infinity
         for step in rhythm.sorted() {
-            let gap = abs(step - standard)
+            let gap = abs(step - value)
             if gap < distance { best = step; distance = gap }
         }
         return best

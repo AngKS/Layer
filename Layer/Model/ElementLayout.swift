@@ -57,6 +57,23 @@ enum ElementLayout {
     /// The gaps between one element and the next that a sketched element snaps to.
     static let rhythm: [CGFloat] = DesignTokens.standard.rhythm
 
+    /// iOS's Title 2 and Large Title sizes: the font size the Magic Pen gives a title drawn small or large, and the
+    /// text styles the SwiftUI export writes for a title of these sizes.
+    static let titleTwoSize: CGFloat = 22
+    static let largeTitleSize: CGFloat = 34
+
+    /// The font size of a title `sketched(_:sketch:on:among:)` made `height` tall: Title 2's when it is 32 tall, and
+    /// Large Title's when it is 48. A Title, 40 tall, has none of its own and takes the design's title size, as does a
+    /// size that is the design's title size.
+    static func sketchedTitleSize(height: CGFloat, tokens: DesignTokens) -> CGFloat? {
+        let size: CGFloat? = switch height {
+        case 32: titleTwoSize
+        case 48: largeTitleSize
+        default: nil
+        }
+        return size == tokens.textSizes.title ? nil : size
+    }
+
     /// A new element drawn with the Magic Pen. It starts from `frame(for:sketch:on:)` and
     /// keeps more of what was drawn: the width of a box drawn clearly narrower than the
     /// screen (half a screen wide becomes one of two columns), text drawn against the
@@ -420,23 +437,31 @@ struct SpacingGuides: Equatable, Sendable {
 
     var gaps: [Gap] { [top, left, bottom, right] }
 
+    /// An element on a screen, measured to the screen's other visible elements and its edges: see
+    /// `measure(_:among:in:)`.
     static func measure(_ element: DesignElement, in screen: DesignScreen) -> SpacingGuides {
-        let frame = element.shapeBounds
-        let others = screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
+        measure(element.shapeBounds, among: screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds),
+                in: CGRect(origin: .zero, size: screen.size))
+    }
+
+    /// The box round a thing's turned shape measured to the nearest of `others` on each side, or to the edge of
+    /// `container` where none is: all in one host's own points. With no container, a side with nothing beside it has
+    /// no gap to show (its distance is 0), and the thing is never centred.
+    static func measure(_ frame: CGRect, among others: [CGRect], in container: CGRect?) -> SpacingGuides {
         let beside = others.filter { $0.maxY > frame.minY && $0.minY < frame.maxY }
         let stacked = others.filter { $0.maxX > frame.minX && $0.minX < frame.maxX }
 
-        let above = stacked.filter { $0.maxY <= frame.minY }.map(\.maxY).max() ?? 0
-        let below = stacked.filter { $0.minY >= frame.maxY }.map(\.minY).min() ?? screen.size.height
-        let before = beside.filter { $0.maxX <= frame.minX }.map(\.maxX).max() ?? 0
-        let after = beside.filter { $0.minX >= frame.maxX }.map(\.minX).min() ?? screen.size.width
+        let above = stacked.filter { $0.maxY <= frame.minY }.map(\.maxY).max() ?? container?.minY ?? frame.minY
+        let below = stacked.filter { $0.minY >= frame.maxY }.map(\.minY).min() ?? container?.maxY ?? frame.maxY
+        let before = beside.filter { $0.maxX <= frame.minX }.map(\.maxX).max() ?? container?.minX ?? frame.minX
+        let after = beside.filter { $0.minX >= frame.maxX }.map(\.minX).min() ?? container?.maxX ?? frame.maxX
 
         return SpacingGuides(
             top: Gap(start: CGPoint(x: frame.midX, y: above), end: CGPoint(x: frame.midX, y: frame.minY)),
             left: Gap(start: CGPoint(x: before, y: frame.midY), end: CGPoint(x: frame.minX, y: frame.midY)),
             bottom: Gap(start: CGPoint(x: frame.midX, y: frame.maxY), end: CGPoint(x: frame.midX, y: below)),
             right: Gap(start: CGPoint(x: frame.maxX, y: frame.midY), end: CGPoint(x: after, y: frame.midY)),
-            isCentered: ElementLayout.isCentered(frame, in: screen.size.width)
+            isCentered: container.map { abs(frame.midX - $0.midX) <= 1 } ?? false
         )
     }
 }
