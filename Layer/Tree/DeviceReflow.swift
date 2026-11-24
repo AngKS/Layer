@@ -17,12 +17,12 @@ import Foundation
 /// What a rule works out is in whole points, a half point rounded to even, so that a round trip between two widths
 /// of different parity (the iPhone's 393 and the iPad's 820) leaves a centred node where it was.
 ///
-/// A device with the same room, its size and safe areas, moves nothing, whatever its margin: a screen saved as a
-/// device of its own, or a device renamed or saved again, isn't asking for anything to move.
+/// A device of the same size moves nothing, whatever its margin or safe areas, since a free root is inset by neither:
+/// a screen saved as a device of its own, or a device renamed or saved again, isn't asking for anything to move.
 enum DeviceReflow {
     /// New frames for a free root's children when its screen goes from `old` to `new` (§5, call 9). Unmoved ones aren't listed.
     static func frames(for root: LayerNode, from old: DeviceFrame, to new: DeviceFrame) -> [UUID: CGRect] {
-        guard root.resolvedLayout == .free, !hasTheSameRoom(old, new), isLength(old.size.width), isLength(new.size.width),
+        guard root.resolvedLayout == .free, old.size != new.size, isLength(old.size.width), isLength(new.size.width),
               isLength(new.size.height)
         else { return [:] }
         var frames: [UUID: CGRect] = [:]
@@ -82,10 +82,4 @@ enum DeviceReflow {
 
     /// A number a rule works out, in whole points: a half rounds to even, so it doesn't creep one way.
     private static func whole(_ value: CGFloat) -> CGFloat { value.rounded(.toNearestOrEven) }
-
-    /// Whether a screen has the same room on both: the same size and safe areas. The margin doesn't count.
-    private static func hasTheSameRoom(_ old: DeviceFrame, _ new: DeviceFrame) -> Bool {
-        old.size == new.size && old.safeTop == new.safeTop && old.safeBottom == new.safeBottom
-            && old.safeLeading == new.safeLeading && old.safeTrailing == new.safeTrailing
-    }
 }

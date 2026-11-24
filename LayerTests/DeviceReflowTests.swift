@@ -138,9 +138,10 @@ struct DeviceReflowTests {
         #expect(centred.frame == CGRect(x: 96, y: 80, width: 200, height: 40))
     }
 
-    /// A device with the same size and safe areas moves nothing, not even what hangs off the screen or sits on a half
-    /// point, whatever its margin. One whose safe areas differ is a change of room, and things follow their intents.
-    @Test func aDeviceWithTheSameRoomMovesNothing() throws {
+    /// A device of the same size moves nothing on a free screen, not even what hangs off the screen or sits on a half
+    /// point, whatever its margin or safe areas: a free root isn't inset by either. A column screen on it is still laid
+    /// out again by the rules, which do inset it by its safe areas and margin.
+    @Test func aDeviceOfTheSameSizeMovesNothingOnAFreeScreen() throws {
         let hanging = node(CGRect(x: 20, y: 800, width: 170, height: 120))
         let halfway = node(CGRect(x: 203.5, y: 300, width: 170, height: 120))
         var draft = CustomDeviceDraft(from: .iPhone, named: "iPhone (Custom)")
@@ -148,9 +149,29 @@ struct DeviceReflowTests {
         #expect(reflowed([hanging, halfway], to: copy).isEmpty)
         draft.margin = 32
         #expect(reflowed([hanging, halfway], to: try #require(draft.device(id: nil))).isEmpty, "a margin alone")
+        draft.margin = 20
         draft.safeTop = 20
-        let lowered = try #require(draft.device(id: nil))
-        #expect(reflowed([hanging, halfway], to: lowered)[hanging.id] == CGRect(x: 20, y: 732, width: 170, height: 120))
+        draft.safeLeading = 10
+        let inset = try #require(draft.device(id: copy.id))
+        #expect(reflowed([hanging, halfway], to: inset).isEmpty, "safe areas alone")
+
+        // Through the store: a free screen and a column screen on the device, whose safe areas alone are edited.
+        let free = freeScreen([hanging, halfway], on: copy.id)
+        var filling = node(CGRect(x: 0, y: 0, width: 100, height: 50))
+        filling.width = LayerNode.Sizing(.fill(weight: 1))
+        var column = TreeScreen(name: "Column", origin: CGPoint(x: 600, y: 0), scale: 1, deviceID: copy.id)
+        column.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 12))
+        column.root.children = [filling]
+        let (model, _) = makeModel([free, column], devices: [copy])
+        #expect(model.store.node(filling.id)?.frame.origin == CGPoint(x: 20, y: 79), "inset by the safe top 59 and the margin")
+
+        model.store.updateCustomDevice(inset)
+
+        #expect(model.store.treeScreen(free.id)?.root.children.map(\.frame) == [hanging.frame, halfway.frame])
+        let laid = try #require(model.store.node(filling.id))
+        // Inset by the new safe top 20 and safe leading 10, and the margin: 393 − 10 − 2 × 20 across.
+        #expect(laid.frame.origin == CGPoint(x: 30, y: 40))
+        #expect(laid.frame.width == 343)
     }
 
     /// Save as Device… from the screen's own device, a rename in the Edit Device sheet, and a Save with nothing changed
