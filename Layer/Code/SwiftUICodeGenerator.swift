@@ -301,7 +301,7 @@ extension SwiftUICodeGenerator.ScreenWriter {
         if child.isContainer {
             lines += container(child, frames: frames.lines, stretched: (frames.stretchedAcross, frames.stretchedDown), rotation: rotation)
         } else {
-            lines += Generator.laidOutLeaf(Generator.Leaf(node: child, frame: child.frame, rotation: rotation), frames: frames.lines)
+            lines += Generator.laidOutLeaf(Generator.Leaf(node: child, frame: child.frame, rotation: rotation, tokens: context.tokens), frames: frames.lines)
         }
         return lines
     }
@@ -529,7 +529,7 @@ extension SwiftUICodeGenerator.ScreenWriter {
             let placed = shape(entry.node)
             body += entry.isCard
                 ? positionedCard(entry.node, at: placed)
-                : Generator.positionedLeaf(Generator.Leaf(node: entry.node, frame: placed.rect, rotation: Rotation.kept(placed.degrees)))
+                : Generator.positionedLeaf(Generator.Leaf(node: entry.node, frame: placed.rect, rotation: Rotation.kept(placed.degrees), tokens: context.tokens))
         }
         return ["ZStack(alignment: .topLeading) {"] + Generator.indented(body) + [
             "}",

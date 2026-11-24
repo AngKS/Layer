@@ -121,14 +121,14 @@ final class DesignStore {
         return index
     }
 
-    /// What can be touched on each host, for the groups that had been gone into when it was
-    /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
-    /// for it on every move of the pen.
-    @ObservationIgnored private var targets: (entered: Set<DesignElement.ID>, found: [ElementRef.Host: [DesignElement]])?
+    /// What can be touched on each host, for the containers that had been gone into when it was
+    /// worked out (see `treeTargets(entered:)`), for the content as it is now. Hover asks for it
+    /// on every move of the pen.
+    @ObservationIgnored private var targets: (entered: Set<UUID>, found: TreeTargets)?
 
-    /// What `make` works out about what can be touched while the groups in `entered` have been
-    /// gone into: kept until the content changes, or other groups are gone into.
-    func keptTargets(entered: Set<DesignElement.ID>, _ make: () -> [ElementRef.Host: [DesignElement]]) -> [ElementRef.Host: [DesignElement]] {
+    /// What `make` works out about what can be touched while the containers in `entered` have been
+    /// gone into: kept until the content changes, or other containers are gone into.
+    func keptTargets(entered: Set<UUID>, _ make: () -> TreeTargets) -> TreeTargets {
         // Read first, so that whatever draws from it is redrawn when the content changes.
         _ = content
         if let targets, targets.entered == entered { return targets.found }
@@ -185,10 +185,19 @@ final class DesignStore {
         }
     }
 
-    /// The area everything in the design covers, or nil for an empty design. A turned loose
-    /// element covers the box round its turned shape.
+    /// The area everything in the design covers, or nil for an empty design: each screen with its name, and the
+    /// shape of every node on the open canvas as the index has it. A turned one covers the box round its turned shape.
     var contentBounds: CGRect? {
-        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map { $0.placement.canvasRect(for: $0.element.shapeBounds) }
+        let tree = tree, index = index
+        var rects = tree.screens.map { screen in
+            let device = tree.device(of: screen)
+            return screen.canvasFrame(on: device).union(screen.labelFrame(on: device))
+        }
+        func cover(_ node: LayerNode) {
+            if let shape = index.canvasShape(of: node.id, in: tree) { rects.append(shape.bounds) }
+            node.children.forEach(cover)
+        }
+        tree.canvas.forEach(cover)
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
@@ -219,17 +228,20 @@ final class DesignStore {
     @discardableResult
     func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements, tokens: canvas.tokens)
         adjust(&element)
         return add(element, to: screenID)
     }
 
-    /// The element a sketch drawn on a screen stands for, laid out among `others` there.
-    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement]) -> DesignElement {
+    /// The element a sketch drawn on a screen stands for, laid out among `others` there. A title drawn small or
+    /// large carries its size as its own font size, so that it is drawn and written at it (`sketchedTitleSize`).
+    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement],
+                                        tokens: DesignTokens) -> DesignElement {
         let existing = others.filter { !$0.isHidden }
         let laid = ElementLayout.sketched(kind, sketch: screen.localRect(for: sketch), on: screen.device, among: existing.map(\.frame))
         var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
         element.textAlignment = laid.alignment
+        if kind == .title { element.fontSize = ElementLayout.sketchedTitleSize(height: laid.frame.height, tokens: tokens) }
         // A screen's first button is its main action; any more are outlined beside or below it.
         if kind == .button, existing.contains(where: { $0.kind == .button && $0.resolvedButtonLook == .filled }) {
             element.buttonLook = .bordered
@@ -247,7 +259,8 @@ final class DesignStore {
     @discardableResult
     func changeKind(of ref: ElementRef, to kind: ElementKind, sketchedAt sketch: CGRect, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
         guard case .screen(let screenID) = ref.host, let old = resolve(ref)?.element, let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id })
+        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id },
+                                           tokens: canvas.tokens)
         element.name = old.name
         element.isLocked = old.isLocked
         if kind.hasText, old.kind.hasText, old.text != old.kind.placeholder { element.text = old.text }

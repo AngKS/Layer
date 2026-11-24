@@ -216,19 +216,35 @@ extension DesignStore {
         }
     }
 
-    /// Locks or unlocks everything selected.
+    /// Locks or unlocks everything selected, as one step: each thing's own flag, and nothing above it.
     func setLocked(_ isLocked: Bool, _ selection: CanvasSelection) {
-        let present = things(in: selection)
-        apply { content in
-            for thing in present {
-                switch thing {
-                case .element(let ref):
-                    content.update(ref.element) { $0.isLocked = isLocked }
-                case .screen(let id):
-                    content.updateScreen(id) { $0.isLocked = isLocked ? true : nil }
-                case .several:
-                    continue
-                }
+        var nodes: [UUID] = []
+        var screens: [TreeScreen.ID] = []
+        for thing in things(in: selection) {
+            switch thing {
+            case .element(let ref): nodes.append(ref.element)
+            case .screen(let id): screens.append(id)
+            case .several: continue
+            }
+        }
+        setOwnLocks(isLocked, nodes: nodes, screens: screens)
+    }
+
+    /// Sets the own lock of each node and screen given, as one change: a node's own flag, and a screen's (nil once
+    /// unlocked). A screen's root, and what the design doesn't have, are passed over. Found through the index.
+    func setOwnLocks(_ isLocked: Bool, nodes: [UUID], screens: [TreeScreen.ID]) {
+        let memo = index
+        var seen: Set<UUID> = []
+        let places = nodes.compactMap { id -> (host: TreeIndex.Host, path: [Int])? in
+            guard seen.insert(id).inserted, let entry = memo[id], !entry.path.isEmpty else { return nil }
+            return (entry.host, entry.path)
+        }
+        guard !places.isEmpty || !screens.isEmpty else { return }
+        changeTree(writing: places.count) { tree in
+            for place in places { tree.changeNode(on: place.host, at: place.path) { $0.isLocked = isLocked } }
+            for id in screens {
+                guard let index = tree.screens.firstIndex(where: { $0.id == id }) else { continue }
+                tree.screens[index].isLocked = isLocked ? true : nil
             }
         }
     }

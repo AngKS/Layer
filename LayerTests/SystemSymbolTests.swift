@@ -100,7 +100,7 @@ struct SystemSymbolTests {
         var github = DesignStore.newElement(.symbol, symbol: "GitHub")
         github.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
         let asGiven = try Self.inkedPixels(Image(systemName: "GitHub").resizable().scaledToFit())
-        let drawn = try Self.inkedPixels(ElementView(element: github).environment(ImageLibrary([:])))
+        let drawn = try Self.inkedPixels(ElementView(node: LayerNode(element: github)).environment(ImageLibrary([:])))
         #expect(asGiven == 0, "the name as given draws nothing")
         #expect(drawn > 40, "the element should draw an icon")
     }

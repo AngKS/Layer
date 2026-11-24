@@ -57,6 +57,23 @@ enum ElementLayout {
     /// The gaps between one element and the next that a sketched element snaps to.
     static let rhythm: [CGFloat] = DesignTokens.standard.rhythm
 
+    /// iOS's Title 2 and Large Title sizes: the font size the Magic Pen gives a title drawn small or large, and the
+    /// text styles the SwiftUI export writes for a title of these sizes.
+    static let titleTwoSize: CGFloat = 22
+    static let largeTitleSize: CGFloat = 34
+
+    /// The font size of a title `sketched(_:sketch:on:among:)` made `height` tall: Title 2's when it is 32 tall, and
+    /// Large Title's when it is 48. A Title, 40 tall, has none of its own and takes the design's title size, as does a
+    /// size that is the design's title size.
+    static func sketchedTitleSize(height: CGFloat, tokens: DesignTokens) -> CGFloat? {
+        let size: CGFloat? = switch height {
+        case 32: titleTwoSize
+        case 48: largeTitleSize
+        default: nil
+        }
+        return size == tokens.textSizes.title ? nil : size
+    }
+
     /// A new element drawn with the Magic Pen. It starts from `frame(for:sketch:on:)` and
     /// keeps more of what was drawn: the width of a box drawn clearly narrower than the
     /// screen (half a screen wide becomes one of two columns), text drawn against the

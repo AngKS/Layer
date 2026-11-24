@@ -4,11 +4,17 @@ import Foundation
 /// How big each kind of leaf is when nothing else decides, and what sizing a new node of a
 /// kind starts with. The layout engine asks here for every `.fit` leaf.
 enum NaturalSize {
-    /// The node's own font size, or its kind's.
+    /// `fontSize(of:tokens:)` with Layer's own tokens.
     static func fontSize(of node: LayerNode) -> CGFloat {
+        fontSize(of: node, tokens: .standard)
+    }
+
+    /// The node's own font size, else the design's title, body or text size, else its kind's: the one rule text is
+    /// measured and drawn by (F5).
+    static func fontSize(of node: LayerNode, tokens: DesignTokens) -> CGFloat {
         if let size = node.style.fontSize { return size }
         let spec = node.kind.spec
-        let sizes = DesignTokens.standard.textSizes
+        let sizes = tokens.textSizes
         switch node.kind {
         case .title: return sizes.title
         case .body: return sizes.body
