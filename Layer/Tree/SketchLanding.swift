@@ -55,6 +55,16 @@ struct SketchLanding: Equatable, Sendable {
         return SketchLanding(screen: screen.id, parent: parent.id, isLaidOut: isLaidOut, local: local, index: slot)
     }
 
+    /// Where a reading drawn at `drawn` (screen points) lands in `parent`, a container already on `screen`, whatever else is
+    /// under its centre: the same landing as `of(_:in:index:forCard:)` with the receiving container chosen. `slot` is the
+    /// slot to give a laid-out container. Nil when the container isn't posed in `content`.
+    static func within(_ parent: LayerNode, on screen: TreeScreen, drawn: CGRect, slot: Int?, in content: TreeContent,
+                       index: TreeIndex) -> SketchLanding? {
+        guard let space = ownSpace(of: parent, on: screen, in: content, index: index) else { return nil }
+        return SketchLanding(screen: screen.id, parent: parent.id, isLaidOut: parent.resolvedLayout != .free,
+                             local: space.local(of: drawn), index: slot)
+    }
+
     /// What a card drawn round `rect` (the parent's space) takes: the children at least 90% inside it that aren't locked,
     /// hidden or turned, back to front. The person's own containers are among them, and become the card's (call 7).
     static func enclosed(by rect: CGRect, in parent: LayerNode) -> [UUID] {

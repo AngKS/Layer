@@ -43,6 +43,65 @@ enum SketchedNode {
         let device = content.device(of: screen)
         let intent = LayerNode.SketchIntent(sketched: screen.placement.localRect(for: sketch), on: device.size,
                                             margin: device.margin, confidence: confidence, decidedBy: decidedBy)
+        return build(kind, intent: intent, landing: landing, parent: parent, depth: index[parent.id]?.depth ?? 0, screen: screen,
+                     content: content)
+    }
+
+    /// `node` as `kind`, laid out afresh in its current parent from `node.sketch.originalBounds` (or `fallback`, screen
+    /// points, when it has none). Its id, slot, name and lock are kept, and so are its words when both kinds show words;
+    /// everything else is as a reading of `kind` there would make it, its intent saying the person chose (`.asked`,
+    /// confidence 1) over the same bounds.
+    ///
+    /// A card the node is gives back what it held, where it was on screen, in front of the node's slot; a card it becomes
+    /// takes what it encloses (`Made.takes`), as `make` does. The result is put in by `replacing(_:with:in:)`. Nil when the
+    /// node isn't on a screen, or has neither bounds.
+    static func remade(_ node: LayerNode, as kind: ElementKind, fallback: CGRect?, in content: TreeContent,
+                       index: TreeIndex) -> Made? {
+        guard let entry = index[node.id], case .screen(let screenID) = entry.host, let parentID = entry.parent,
+              let screen = content.screens.first(where: { $0.id == screenID }),
+              let held = parentID == screen.root.id ? screen.root : index.node(parentID, in: content),
+              let at = held.children.firstIndex(where: { $0.id == node.id }),
+              let drawn = node.sketch?.originalBounds ?? fallback
+        else { return nil }
+        // The parent as it is once the node is out of it, what it held given back.
+        var parent = held
+        release(node, from: &parent)
+        let device = content.device(of: screen)
+        let isLaidOut = parent.resolvedLayout != .free
+        // A card in a free container goes where nothing seen is hidden; anything else keeps the slot it had.
+        let slot = kind == .card && !isLaidOut ? nil : at
+        guard let landing = SketchLanding.within(held, on: screen, drawn: drawn, slot: slot, in: content, index: index)
+        else { return nil }
+        var intent = node.sketch ?? LayerNode.SketchIntent(sketched: drawn, on: device.size, margin: device.margin,
+                                                           confidence: 1, decidedBy: .asked)
+        intent.confidence = 1
+        intent.decidedBy = .asked
+
+        var made = build(kind, intent: intent, landing: landing, parent: parent, depth: entry.depth - 1, screen: screen,
+                         content: content, without: node.id)
+        made.node.id = node.id
+        made.node.name = node.name
+        made.node.isLocked = node.isLocked
+        if kind.hasText, node.kind.hasText, node.content.text != node.kind.placeholder {
+            made.node.content.text = node.content.text
+        }
+        return made
+    }
+
+    /// The root with the node `id` taken out and `made`, its remaking, put in where `made.landing` says: the card it was
+    /// gives back what it held first, in front of the slot it leaves.
+    static func replacing(_ id: UUID, with made: Made, in root: LayerNode) -> LayerNode {
+        var root = root
+        _ = swap(id, for: made, in: &root)
+        return root
+    }
+
+    /// The shared tail of `make` and `remade`: `kind` laid out in `parent` at `landing`, remembering `intent`. `without`
+    /// is a node the screen is counted without, the one being remade.
+    private static func build(_ kind: ElementKind, intent: LayerNode.SketchIntent, landing: SketchLanding,
+                              parent: LayerNode, depth: Int, screen: TreeScreen, content: TreeContent,
+                              without: UUID? = nil) -> Made {
+        let device = content.device(of: screen)
         // A screen's root is laid out on the screen's device; anything inside it on a device of the container's size.
         let standIn = parent.id == screen.root.id ? device
             : DeviceFrame.custom(name: parent.kind.rawValue, size: parent.frame.size, family: device.family)
@@ -51,13 +110,12 @@ enum SketchedNode {
         var takes: [UUID] = []
         var behind: UUID?
         if kind == .card {
-            let depth = index[parent.id]?.depth ?? 0
             (node, takes, behind) = card(in: parent, at: depth, landing: landing, tokens: content.settings.tokens)
             // Call 6: as drawn, in a row, column or grid too. Drawn across the screen, it is as wide as what holds it.
             if landing.isLaidOut, intent.placement == .proportional { node.width = LayerNode.Sizing(.fill(weight: 1)) }
         } else {
             node = leaf(kind, in: parent, landing: landing, on: standIn, tokens: content.settings.tokens)
-            if kind == .button, hasFilledButton(screen.root) {
+            if kind == .button, hasFilledButton(screen.root, except: without) {
                 // A screen's first button is its main action; any more are outlined beside or below it.
                 node.content.buttonLook = .bordered
                 node.content.text = "Cancel"
@@ -186,11 +244,11 @@ enum SketchedNode {
         return !shared.isNull && shared.width > 0 && shared.height > 0
     }
 
-    /// Whether a screen shows a filled button: one not hidden, nor inside anything hidden.
-    private static func hasFilledButton(_ node: LayerNode) -> Bool {
-        guard !node.isHidden else { return false }
+    /// Whether a screen shows a filled button: one not hidden, nor inside anything hidden, and not `except`.
+    private static func hasFilledButton(_ node: LayerNode, except: UUID? = nil) -> Bool {
+        guard !node.isHidden, node.id != except else { return false }
         if node.kind == .button, (node.content.buttonLook ?? .filled) == .filled { return true }
-        return node.children.contains(where: hasFilledButton)
+        return node.children.contains { hasFilledButton($0, except: except) }
     }
 
     /// `made` put in `node`, or in what `node` holds, wherever its landing's parent is. False when it isn't there.
@@ -218,5 +276,36 @@ enum SketchedNode {
         children.insert(added, at: slot)
         TreeEdit.give(children, to: &node)
         return true
+    }
+
+    /// `parent` without `old`, which it gives back what it held at its place, where it was on screen and at its angle
+    /// there, in front of the slot it leaves.
+    private static func release(_ old: LayerNode, from parent: inout LayerNode) {
+        guard let at = parent.children.firstIndex(where: { $0.id == old.id }) else { return }
+        let toParent = old.transformToParent
+        let turn = old.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
+        let given = old.children.map { child -> LayerNode in
+            var held = child
+            let centre = CGPoint(x: child.frame.midX, y: child.frame.midY).applying(toParent)
+            held.frame.origin = CGPoint(x: centre.x - child.frame.width / 2, y: centre.y - child.frame.height / 2)
+            if turn != 0 { held.rotation = Rotation.kept((child.rotation ?? 0) + turn) }
+            return held
+        }
+        var children = parent.children
+        children.replaceSubrange(at...at, with: given)
+        TreeEdit.give(children, to: &parent)
+    }
+
+    /// `node`, or what it holds, with `id` taken out and `made` put in, wherever its landing's parent is.
+    private static func swap(_ id: UUID, for made: Made, in node: inout LayerNode) -> Bool {
+        guard node.id == made.landing.parent else {
+            for index in node.children.indices {
+                if swap(id, for: made, in: &node.children[index]) { return true }
+            }
+            return false
+        }
+        guard let old = node.children.first(where: { $0.id == id }) else { return false }
+        release(old, from: &node)
+        return put(made, in: &node)
     }
 }

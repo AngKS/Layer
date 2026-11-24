@@ -2362,7 +2362,10 @@ final class AppModel {
     func acceptSuggestion() {
         guard let suggestion else { return }
         dismissSuggestion()
-        let changed = store.changeKind(of: suggestion.ref, to: suggestion.kind, sketchedAt: suggestion.sketch) {
+        // The node remembers where it was drawn; the suggestion's own sketch is only for one that doesn't.
+        guard case .screen(let screenID) = suggestion.ref.host, let screen = store.treeScreen(screenID) else { return }
+        let changed = store.changeKind(of: suggestion.ref.element, to: suggestion.kind,
+                                       fallback: screen.placement.localRect(for: suggestion.sketch)) {
             $0.adoptMarks(of: suggestion.observation)
         }
         guard changed != nil else { return }
