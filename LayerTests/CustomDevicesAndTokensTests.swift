@@ -242,6 +242,95 @@ struct CustomDevicesAndTokensTests {
         #expect(CGFloat(393.9).wholePoints == 393)
     }
 
+    /// A design read from a file whose own device is 1e300 by 1e19 points, and whose radii, card and text sizes are
+    /// 1e300, 1e19 and just past 1,000: numbers no whole number holds. Its screen is on that device and holds a title
+    /// with no size of its own, which the Format panel shows at the tokens' title size.
+    private func designOfHugeNumbers() throws -> TreeContent {
+        var content = TreeContent()
+        var screen = TreeScreen(name: "Huge", origin: .zero, scale: 1, deviceID: "custom-huge")
+        screen.root.children = [words(.title, "Title")]
+        content.screens = [screen]
+        var json = try #require(try JSONSerialization.jsonObject(with: TreeManifest.encode(content, fileName: nil)) as? [String: Any])
+        var inner = try #require(json["content"] as? [String: Any])
+        var settings = inner["settings"] as? [String: Any] ?? [:]
+        settings["customDevices"] = [["id": "custom-huge", "name": "Huge", "size": [1e300, 1e19]]]
+        settings["tokens"] = [
+            "rhythm": [8, 12, 16],
+            "cornerRadii": ["small": 1e300, "medium": 1e19, "large": 1e300],
+            "card": ["padding": 1e300, "radius": 1e19],
+            "textSizes": ["title": 1e300, "body": 1e19, "text": 1_000.5],
+        ]
+        inner["settings"] = settings
+        json["content"] = inner
+        return try TreeManifest.decode(JSONSerialization.data(withJSONObject: json)).content
+    }
+
+    /// Final review B-I1: a token text size past what text is measured at, from a file or typed, is read as Layer's
+    /// own, as a size that isn't one is: text drawn at a token's size is measured at that size.
+    @Test func aTokenTextSizePastWhatTextIsMeasuredAtIsReadAsLayersOwn() throws {
+        let read = try designOfHugeNumbers()
+        #expect(read.settings.tokens.textSizes == DesignTokens.standard.textSizes)
+        #expect(read.settings.tokens.cornerRadii.small == 1e300, "a radius isn't text: only text sizes are bounded")
+        #expect(DesignTokens.textSizeRange == 1...1_000)
+        #expect(DesignTokens.reading(textSize: 1_000, standard: 28) == 1_000)
+        #expect(DesignTokens.reading(textSize: 1, standard: 28) == 1)
+        #expect(DesignTokens.reading(textSize: 0.5, standard: 28) == 28)
+        #expect(DesignTokens.reading(textSize: 1e9, standard: 28) == 28)
+
+        let (model, _) = makeModel(design([screen(free: true)]))
+        DesignTokensSection.edit(model) { $0.textSizes.title = 5_000 }
+        #expect(model.store.tree.settings.tokens.textSizes.title == DesignTokens.standard.textSizes.title)
+        DesignTokensSection.edit(model) { $0.textSizes.title = 34 }
+        #expect(model.store.tree.settings.tokens.textSizes.title == 34)
+    }
+
+    /// Final review B-I1: the library, opened on its Wireframes tab or searched, says a frame from a file too large for
+    /// a whole number by the largest length a design has, as the device picker does, without trapping.
+    @Test func theLibrarySaysAFrameFromAFileTooLargeForAWholeNumber() throws {
+        let devices = try designOfHugeNumbers().settings.customDevices
+        let shown = AssetLibrary.matching("", in: .wireframes, including: AssetLibrary.customFrames(devices))
+        let found = AssetLibrary.searchEverywhere("huge", including: AssetLibrary.customFrames(devices)).flatMap(\.assets)
+
+        let names = (shown + found).map { $0.accessibilityName(among: devices) }
+
+        #expect(names.filter { $0 == "Huge  1000000 × 1000000" }.count == 2)
+    }
+
+    /// Final review B-I1: each field plan 4 added, held or squeezed to scrub on that design, begins from its value
+    /// stopped at its range's ends, which the ruler can say, and steps from there within the range: the tokens'
+    /// fields, the device form's, and the Format panel's font size for a title at the tokens' size.
+    @Test func eachNewFieldBeginsScrubbingWithinItsRange() throws {
+        let read = try designOfHugeNumbers()
+        let tokens = read.settings.tokens
+        let device = try #require(read.settings.customDevices.first)
+        let draft = CustomDeviceDraft(from: device, named: device.name)
+        let title = try #require(read.screens.first?.root.children.first)
+        let fields: [(label: String, value: CGFloat, range: ClosedRange<CGFloat>)] = [
+            ("Small radius", tokens.cornerRadii.small, 1...400), ("Medium radius", tokens.cornerRadii.medium, 1...400),
+            ("Large radius", tokens.cornerRadii.large, 1...400), ("Card padding", tokens.card.padding, 1...400),
+            ("Card radius", tokens.card.radius, 1...400), ("Title size", tokens.textSizes.title, 1...400),
+            ("Body size", tokens.textSizes.body, 1...400), ("Text size", tokens.textSizes.text, 1...400),
+            ("Width", draft.width, CustomDeviceDraft.sides), ("Height", draft.height, CustomDeviceDraft.sides),
+            ("Corner radius", draft.cornerRadius, 0...999), ("Margin", draft.margin, 0...999),
+            ("Safe area top", draft.safeTop, 0...999), ("Safe area bottom", draft.safeBottom, 0...999),
+            ("Font size", StylePanel.fontSizeShown(for: title, tokens: tokens), 6...400),
+            ("Not a number", .nan, 0...999), ("Below", -1e300, 1...400),
+        ]
+        let scrubber = Scrubber()
+        for field in fields {
+            var set: [CGFloat] = []
+            let target = Scrubber.Target(label: field.label, unit: "pt", frame: .zero, range: field.range,
+                                         get: { field.value }, set: { set.append($0) }, owner: .form)
+            scrubber.begin(target)
+            #expect(field.range.contains(scrubber.value), "\(field.label) begins at \(scrubber.value)")
+            #expect(!target.shown(scrubber.value).isEmpty)
+            scrubber.scrub(to: -1)
+            scrubber.scrub(to: 1)
+            scrubber.end()
+            #expect(set.allSatisfy(field.range.contains), "\(field.label) set \(set)")
+        }
+    }
+
     @Test func aRhythmKeepsNoStepLargerThanAnyScreen() throws {
         #expect(DesignTokens.largestStep == DeviceFrame.sides.upperBound)
         #expect(DesignTokensSection.rhythm(typed: "16, 8, 5000, 4000, 1e300") == [8, 16, 4000])

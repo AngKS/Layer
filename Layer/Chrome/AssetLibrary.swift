@@ -70,7 +70,8 @@ struct Asset: Identifiable, Hashable, Sendable {
         switch content {
         case .symbol(let name): name
         case .frame(let id):
-            (DeviceFrame.all + custom).first { $0.id == id }.map { "\($0.name)  \(Int($0.size.width)) × \(Int($0.size.height))" } ?? name
+            // A design's own frame can come from a file at any size: said in whole points, as the device picker says it.
+            (DeviceFrame.all + custom).first { $0.id == id }.map { "\($0.name)  \($0.size.width.wholePoints) × \($0.size.height.wholePoints)" } ?? name
         default: name
         }
     }

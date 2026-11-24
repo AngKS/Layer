@@ -86,7 +86,10 @@ final class Scrubber {
 
     func begin(_ target: Target) {
         guard self.target == nil else { return }
-        start = target.get().rounded()
+        // Within the field's range before anything works with it as a whole number: a value from a file can be any
+        // size, or none, and the ruler says it in whole units.
+        let shown = target.get()
+        start = Self.typed(shown.isFinite ? shown.rounded() : target.range.lowerBound, in: target.range, wraps: target.wraps)
         value = start
         steps = 0
         lastRoll = nil

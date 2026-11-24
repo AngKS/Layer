@@ -77,8 +77,19 @@ struct DesignTokens: Equatable, Sendable, Codable {
         size.isFinite && size > 0 ? size : standard
     }
 
-    /// These tokens with every number read as a file's are (`reading(rhythm:)`, `reading(size:standard:)`): what a
-    /// design holding them keeps.
+    /// The text sizes a design keeps, in points: those text is measured at (`TextMeasure` measures from 1 to 1,000), and
+    /// at most the largest font size a node keeps (`TreeValidator`), so that text drawn at a token's size is measured at
+    /// that size too.
+    static let textSizeRange: ClosedRange<CGFloat> = 1...1_000
+
+    /// A text size as the design keeps it: `size` when it is within `textSizeRange`, else `standard`, as a size that
+    /// isn't one is read. A file's are read this way, and so are those typed in the canvas settings (F25).
+    static func reading(textSize size: CGFloat, standard: CGFloat) -> CGFloat {
+        size.isFinite && textSizeRange.contains(size) ? size : standard
+    }
+
+    /// These tokens with every number read as a file's are (`reading(rhythm:)`, `reading(size:standard:)`,
+    /// `reading(textSize:standard:)`): what a design holding them keeps.
     var asRead: DesignTokens {
         let standard = Self.standard
         var tokens = self
@@ -88,15 +99,15 @@ struct DesignTokens: Equatable, Sendable, Codable {
         tokens.cornerRadii.large = Self.reading(size: cornerRadii.large, standard: standard.cornerRadii.large)
         tokens.card.padding = Self.reading(size: card.padding, standard: standard.card.padding)
         tokens.card.radius = Self.reading(size: card.radius, standard: standard.card.radius)
-        tokens.textSizes.title = Self.reading(size: textSizes.title, standard: standard.textSizes.title)
-        tokens.textSizes.body = Self.reading(size: textSizes.body, standard: standard.textSizes.body)
-        tokens.textSizes.text = Self.reading(size: textSizes.text, standard: standard.textSizes.text)
+        tokens.textSizes.title = Self.reading(textSize: textSizes.title, standard: standard.textSizes.title)
+        tokens.textSizes.body = Self.reading(textSize: textSizes.body, standard: standard.textSizes.body)
+        tokens.textSizes.text = Self.reading(textSize: textSizes.text, standard: standard.textSizes.text)
         return tokens
     }
 
-    /// Reads leniently: a number that isn't finite and above zero, or a part that can't be
-    /// read, is the standard's. The rhythm is sorted and made unique, and the standard's
-    /// when nothing in it is usable. The rules are `reading(rhythm:)` and `reading(size:standard:)`.
+    /// Reads leniently: a number that isn't finite and above zero, a text size outside `textSizeRange`, or a part
+    /// that can't be read, is the standard's. The rhythm is sorted and made unique, and the standard's when nothing in
+    /// it is usable. The rules are `reading(rhythm:)`, `reading(size:standard:)` and `reading(textSize:standard:)`.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let standard = DesignTokens.standard
@@ -123,6 +134,12 @@ private extension KeyedDecodingContainer {
     func size(_ key: Key, standard: CGFloat) -> CGFloat {
         guard let value = (try? decodeIfPresent(CGFloat.self, forKey: key)) ?? nil else { return standard }
         return DesignTokens.reading(size: value, standard: standard)
+    }
+
+    /// A text size within `DesignTokens.textSizeRange`, or the standard's (`DesignTokens.reading(textSize:standard:)`).
+    func textSize(_ key: Key, standard: CGFloat) -> CGFloat {
+        guard let value = (try? decodeIfPresent(CGFloat.self, forKey: key)) ?? nil else { return standard }
+        return DesignTokens.reading(textSize: value, standard: standard)
     }
 }
 
@@ -156,9 +173,9 @@ extension DesignTokens.TextSizes {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let standard = Self()
-        title = container.size(.title, standard: standard.title)
-        body = container.size(.body, standard: standard.body)
-        text = container.size(.text, standard: standard.text)
+        title = container.textSize(.title, standard: standard.title)
+        body = container.textSize(.body, standard: standard.body)
+        text = container.textSize(.text, standard: standard.text)
     }
 }
 
