@@ -726,9 +726,12 @@ struct BoardMenu: View {
         if isSheet {
             ScrollView { settings }
                 .scrollBounceBehavior(.basedOnSize)
+                .scrollDisabled(model.scrubber.target?.owner == .form)
         } else {
             ScrollView { settings }
                 .scrollBounceBehavior(.basedOnSize)
+                // Not while a token field is scrubbed by a finger.
+                .scrollDisabled(model.scrubber.target?.owner == .form)
                 .frame(maxHeight: max(240, model.canvasSize.height - 220), alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1005,6 +1008,8 @@ struct PanelRow<Content: View>: View {
 /// dragged sideways, or squeezed over with an Apple Pencil Pro and rolled.
 struct NumberField: View {
     @Environment(Scrubber.self) private var scrubber
+    /// Whose field it is: the Format panel's, or a form's over the canvas.
+    @Environment(\.scrubberOwner) private var owner
     let unit: String
     let label: String
     @Binding var value: CGFloat
@@ -1033,7 +1038,7 @@ struct NumberField: View {
     }
 
     var body: some View {
-        let isScrubbing = scrubber.target?.label == label && scrubber.target?.frame == frame
+        let isScrubbing = scrubber.target?.owner == owner && scrubber.target?.label == label && scrubber.target?.frame == frame
         HStack(spacing: 6) {
             Text(unit)
                 .font(.system(size: 11, weight: .medium))
@@ -1086,9 +1091,9 @@ struct NumberField: View {
                 },
             isEnabled: !isTyping
         )
-        // However the hold ends, lifted or cancelled, scrubbing ends with it: the panel's,
-        // not a zoom ruler another finger may hold.
-        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(.panel) } }
+        // However the hold ends, lifted or cancelled, scrubbing ends with it: this field's
+        // panel's or form's, not a zoom ruler another finger may hold.
+        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(owner) } }
     }
 
     private static let format = TypedNumber.format
@@ -1097,7 +1102,8 @@ struct NumberField: View {
         Scrubber.Target(
             label: label, unit: unit, frame: frame, range: range,
             get: { value }, set: { value = $0 },
-            pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery
+            pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery,
+            owner: owner
         )
     }
 }

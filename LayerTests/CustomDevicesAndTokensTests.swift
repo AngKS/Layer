@@ -132,7 +132,151 @@ struct CustomDevicesAndTokensTests {
         var edges = good
         edges.width = 1
         edges.height = 4000
+        edges.margin = 0
         #expect(edges.problems.isEmpty)
+        // Safe areas and a margin that leave the column no room are a problem too, on either axis.
+        var crowded = good
+        crowded.safeTop = 500
+        crowded.safeBottom = 352
+        #expect(!crowded.problems.isEmpty && crowded.device(id: nil) == nil)
+        var wideMargin = good
+        wideMargin.margin = 197
+        #expect(!wideMargin.problems.isEmpty && wideMargin.device(id: nil) == nil)
+    }
+
+    // MARK: - What the device verbs take (fix round 1)
+
+    @Test func everyBuiltInDeviceIsOneTheVerbsTake() {
+        for device in DeviceFrame.all { #expect(device.problems.isEmpty, "\(device.name)") }
+    }
+
+    @Test func theDeviceVerbsRefuseAFrameWithNoUsableSize() throws {
+        let frame = watch()
+        let s = screen(on: frame.id, free: true)
+        let (model, undo) = makeModel(design([s], devices: [frame]))
+        let store = model.store
+        func sized(_ width: CGFloat, _ height: CGFloat, id: String? = nil) -> DeviceFrame {
+            DeviceFrame(id: id ?? DeviceFrame.customPrefix + UUID().uuidString, name: "Odd", size: CGSize(width: width, height: height),
+                        safeTop: 0, safeBottom: 0, cornerRadius: 0, hasIsland: false, hasHomeIndicator: false, family: .other,
+                        margin: 0)
+        }
+        for bad: CGFloat in [0, -5, .nan, .infinity, 0.5, 4001, 1e300] {
+            let wide = sized(bad, 500), tall = sized(300, bad)
+            #expect(!wide.problems.isEmpty && !tall.problems.isEmpty, "\(bad)")
+            #expect(store.addCustomDevice(wide, forScreen: s.id) == "", "\(bad)")
+            #expect(store.addCustomDevice(tall) == "", "\(bad)")
+            #expect(store.addCustomDeviceForNewScreens(wide) == "", "\(bad)")
+            store.updateCustomDevice(sized(bad, bad, id: frame.id))
+        }
+        #expect(store.tree.settings.customDevices == [frame])
+        #expect(store.treeScreen(s.id)?.deviceID == frame.id)
+        #expect(store.tree.settings.sketchDeviceID == nil)
+        #expect(!undo.canUndo, "nothing refused is a step")
+        // The sides' ends are taken.
+        #expect(store.addCustomDevice(sized(1, 4000)) != "")
+        #expect(store.addCustomDevice(sized(4000, 1)) != "")
+    }
+
+    @Test func theDeviceVerbsRefuseSafeAreasOrAMarginWithNoRoom() throws {
+        let frame = watch()
+        let s = screen(on: frame.id, free: true)
+        let (model, undo) = makeModel(design([s], devices: [frame]))
+        let store = model.store
+        func crowded(top: CGFloat = 0, bottom: CGFloat = 0, leading: CGFloat = 0, trailing: CGFloat = 0, margin: CGFloat = 0,
+                     radius: CGFloat = 0, id: String? = nil) -> DeviceFrame {
+            DeviceFrame(id: id ?? DeviceFrame.customPrefix + UUID().uuidString, name: "Crowded",
+                        size: CGSize(width: 300, height: 500), safeTop: top, safeBottom: bottom, cornerRadius: radius,
+                        hasIsland: false, hasHomeIndicator: false, family: .phone, safeLeading: leading,
+                        safeTrailing: trailing, margin: margin)
+        }
+        let refused = [
+            crowded(top: 500), crowded(top: 300, bottom: 200), crowded(top: 200, bottom: 200, margin: 50),
+            crowded(leading: 300), crowded(leading: 100, trailing: 100, margin: 50), crowded(margin: 150),
+            crowded(top: -1), crowded(leading: .nan), crowded(margin: .infinity), crowded(radius: -4),
+        ]
+        for device in refused {
+            #expect(!device.problems.isEmpty)
+            #expect(store.addCustomDevice(device, forScreen: s.id) == "")
+            store.updateCustomDevice(crowded(top: device.safeTop, bottom: device.safeBottom, leading: device.safeLeading,
+                                             trailing: device.safeTrailing, margin: device.margin,
+                                             radius: device.cornerRadius, id: frame.id))
+        }
+        #expect(store.tree.settings.customDevices == [frame])
+        #expect(store.treeScreen(s.id)?.deviceID == frame.id)
+        #expect(!undo.canUndo)
+        // One point of room on each axis is enough.
+        let roomy = crowded(top: 200, bottom: 199, leading: 100, trailing: 99, margin: 50)
+        #expect(roomy.problems.isEmpty)
+        let id = store.addCustomDevice(crowded(top: 249, bottom: 250, leading: 149, trailing: 150), forScreen: s.id)
+        #expect(id != "")
+        #expect(store.treeScreen(s.id)?.deviceID == id)
+    }
+
+    /// A design's own device whose size a file held as too large for a whole number is said in the device picker and
+    /// in the selection's summary as the largest length a design has, and it can't be chosen for another screen.
+    @Test func aDeviceSizeFromAFileTooLargeForAWholeNumberIsSaidWithoutTrapping() throws {
+        var content = TreeContent()
+        content.screens = [TreeScreen(name: "Huge", origin: .zero, scale: 1, deviceID: "custom-huge"),
+                           TreeScreen(name: "Phone", origin: CGPoint(x: 0, y: 2000), scale: 1, deviceID: nil)]
+        var json = try #require(try JSONSerialization.jsonObject(with: TreeManifest.encode(content, fileName: nil)) as? [String: Any])
+        var inner = try #require(json["content"] as? [String: Any])
+        var settings = inner["settings"] as? [String: Any] ?? [:]
+        settings["customDevices"] = [["id": "custom-huge", "name": "Huge", "size": [1e300, 1e19]]]
+        inner["settings"] = settings
+        json["content"] = inner
+        let read = try TreeManifest.decode(JSONSerialization.data(withJSONObject: json)).content
+        let huge = try #require(read.settings.customDevices.first)
+        #expect(huge.size.width == 1e300 && huge.size.height == 1e19)
+        #expect(!huge.problems.isEmpty)
+
+        #expect(DevicePicker.label(huge, showsSize: true) == "Huge  1000000 × 1000000")
+        #expect(DevicePicker.label(huge, showsSize: false) == "Huge")
+
+        let (model, _) = makeModel(read)
+        let screens = model.store.tree.screens
+        model.selection = .screen(screens[0].id)
+        #expect(SelectionSummary.value(for: model) == "Huge · 1000000 × 1000000")
+        model.store.setDevice(of: screens[1].id, to: "custom-huge")
+        #expect(model.store.treeScreen(screens[1].id)?.deviceID == nil)
+        #expect(CGFloat.nan.wholePoints == 0 && (-CGFloat.infinity).wholePoints == 0 && CGFloat(-1e300).wholePoints == -1_000_000)
+        #expect(CGFloat(393.9).wholePoints == 393)
+    }
+
+    @Test func aRhythmKeepsNoStepLargerThanAnyScreen() throws {
+        #expect(DesignTokens.largestStep == DeviceFrame.sides.upperBound)
+        #expect(DesignTokensSection.rhythm(typed: "16, 8, 5000, 4000, 1e300") == [8, 16, 4000])
+        #expect(DesignTokensSection.rhythm(typed: "9000, 100000") == DesignTokens.standard.rhythm)
+        var typed = DesignTokens.standard
+        typed.rhythm = [16, 4001, 4000]
+        let decoded = try JSONDecoder().decode(DesignTokens.self, from: JSONEncoder().encode(typed))
+        #expect(decoded.rhythm == [16, 4000])
+        let (model, _) = makeModel(design([screen(free: true)]))
+        DesignTokensSection.edit(model) { $0.rhythm = [8, 12, 50_000] }
+        #expect(model.store.tree.settings.tokens.rhythm == [8, 12])
+    }
+
+    /// A form's number field, the board menu's tokens or a device's form, scrubs as a Format panel field does: a scrub is
+    /// an edit, begun and ended with it, and its ticks are felt at the field, where the form is in the window.
+    @Test func aFormsFieldScrubsAsAnEditAndTicksWhereTheFormIs() {
+        let scrubber = Scrubber()
+        var begins = 0, ends = 0
+        var ticks: [CGPoint] = []
+        scrubber.onBegin = { begins += 1 }
+        scrubber.onEnd = { ends += 1 }
+        scrubber.onStep = { ticks.append($0) }
+        scrubber.panelOrigin = CGPoint(x: 900, y: 0)
+        scrubber.formOrigin = CGPoint(x: 10, y: 100)
+        let title = ScrubbedField(28)
+        var target = title.target("Title size", at: CGRect(x: 0, y: 0, width: 80, height: 32), range: 1...400)
+        target.owner = .form
+        scrubber.begin(target)
+        scrubber.scrub(to: 2)
+        #expect(title.value == 30)
+        #expect(ticks.last == CGPoint(x: 50, y: 116))
+        scrubber.end(.panel)
+        #expect(scrubber.target != nil, "the Format panel's going doesn't put a form's ruler away")
+        scrubber.end(.form)
+        #expect(begins == 1 && ends == 1)
     }
 
     @Test func thePickerListsTheDesignsOwnFrames() {

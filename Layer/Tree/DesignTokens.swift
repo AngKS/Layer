@@ -58,10 +58,16 @@ struct DesignTokens: Equatable, Sendable, Codable {
 
     // MARK: Reading
 
-    /// A rhythm as the design keeps it: its steps that are finite and above zero, sorted and each once; the
-    /// standard's when none is. A file's rhythm is read this way, and so is one typed in the canvas settings (F25).
+    /// The largest step a rhythm keeps, in points: the longest side a design's own device can have
+    /// (`DeviceFrame.sides`), so that no step is a gap that fits on no screen. Larger ones would only be clamped by
+    /// the engine (`LayoutEngine.maximumGap`) and written as they are into the code exported.
+    static let largestStep: CGFloat = 4_000
+
+    /// A rhythm as the design keeps it: its steps that are finite, above zero and at most `largestStep`, sorted and each
+    /// once; the standard's when none is. A file's rhythm is read this way, and so is one typed in the canvas settings
+    /// (F25).
     static func reading(rhythm: [CGFloat]) -> [CGFloat] {
-        let kept = Array(Set(rhythm.filter { $0.isFinite && $0 > 0 })).sorted()
+        let kept = Array(Set(rhythm.filter { $0.isFinite && $0 > 0 && $0 <= largestStep })).sorted()
         return kept.isEmpty ? standard.rhythm : kept
     }
 

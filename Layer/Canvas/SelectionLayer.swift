@@ -248,11 +248,11 @@ extension SelectionSummary {
     /// strokes"; "N items · W × H"; "<screen> · W × H". Read from the tree.
     @MainActor static func value(for model: AppModel) -> String? {
         if case .several(let things) = model.selection, let area = model.store.canvasFrame(of: .several(things)) {
-            return "\(things.count) items · \(Int(area.width.rounded())) × \(Int(area.height.rounded()))"
+            return "\(things.count) items · \(area.width.rounded().wholePoints) × \(area.height.rounded().wholePoints)"
         }
         if let selected = model.selectedNode {
             let node = selected.node
-            let size = "\(Int(selected.frame.width)) × \(Int(selected.frame.height))"
+            let size = "\(selected.frame.width.wholePoints) × \(selected.frame.height.wholePoints)"
             if node.kind == .drawing {
                 let strokes = node.content.ink.flatMap { DecodedInk.drawing(node.id, ink: $0) }?.strokes.count ?? 0
                 return strokes == 1 ? "Drawing · 1 stroke" : "Drawing · \(strokes) strokes"
@@ -261,8 +261,9 @@ extension SelectionSummary {
             return node.isContainer ? "\(node.kindName) · \(size)" : size
         }
         if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) {
+            // A device's size is as a file held it, which may be too large for a whole number (`wholePoints`).
             let size = model.store.tree.device(of: screen).size
-            return "\(screen.name) · \(Int(size.width)) × \(Int(size.height))"
+            return "\(screen.name) · \(size.width.wholePoints) × \(size.height.wholePoints)"
         }
         return nil
     }

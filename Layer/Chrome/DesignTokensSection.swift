@@ -2,11 +2,10 @@ import SwiftUI
 
 /// The canvas settings' design tokens: the rhythm the space between things is made of, the corner radii, what a card
 /// is, and the sizes of text, with a way back to Layer's own. What is typed is read as a file's tokens are read
-/// (`DesignTokens.reading`, F25), and a run of changes is one Format step.
+/// (`DesignTokens.reading`, F25), and a run of changes is one Format step. Its number fields are a form's
+/// (`numberFieldsOfAForm`): a squeeze over one scrubs it.
 struct DesignTokensSection: View {
     @Environment(AppModel.self) private var model
-    /// The section's own ruler for its fields: the Format panel's stays with the panel.
-    @State private var scrubber = Scrubber()
     /// The rhythm as it is being typed.
     @State private var rhythmDraft = ""
     @FocusState private var isTypingRhythm: Bool
@@ -56,9 +55,7 @@ struct DesignTokensSection: View {
                     .disabled(isStandard)
             }
         }
-        .overlay { ScrubberOverlay() }
-        .coordinateSpace(.named(Scrubber.space))
-        .environment(scrubber)
+        .numberFieldsOfAForm(model)
         .onAppear { rhythmDraft = Self.text(of: tokens.rhythm) }
         .onChange(of: tokens.rhythm) { _, rhythm in
             if !isTypingRhythm { rhythmDraft = Self.text(of: rhythm) }
@@ -69,7 +66,6 @@ struct DesignTokensSection: View {
         // The menu closed while the rhythm was being typed: what was typed is kept, as a number field keeps it.
         .onDisappear {
             if isTypingRhythm { keepRhythm(typed: rhythmDraft, over: tokens.rhythm) }
-            scrubber.end()
         }
     }
 

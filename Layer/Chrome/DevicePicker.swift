@@ -85,7 +85,11 @@ struct DevicePicker: View {
         if let present { present(purpose) } else { sheet = purpose }
     }
 
-    private func label(_ device: DeviceFrame) -> String {
-        showsSizes ? "\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))" : device.name
+    private func label(_ device: DeviceFrame) -> String { Self.label(device, showsSize: showsSizes) }
+
+    /// What a device is listed as: its name, and its size in whole points when `showsSize`. A size from a file too
+    /// large for a whole number is said as the largest a design has (`wholePoints`), never trapping.
+    static func label(_ device: DeviceFrame, showsSize: Bool) -> String {
+        showsSize ? "\(device.name)  \(device.size.width.wholePoints) × \(device.size.height.wholePoints)" : device.name
     }
 }

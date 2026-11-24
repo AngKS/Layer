@@ -29,8 +29,6 @@ struct CustomDeviceSheet: View {
     /// Closes the form shown in place of other settings; nil for a sheet, which is dismissed.
     let onClose: (() -> Void)?
     @State private var draft: CustomDeviceDraft
-    /// The sheet's own ruler for its fields: the Format panel's stays with the panel.
-    @State private var scrubber = Scrubber()
     /// Save was pressed, and the device is being saved.
     @State private var isSaving = false
 
@@ -72,10 +70,7 @@ struct CustomDeviceSheet: View {
             .padding(.vertical, 12)
             fields
         }
-        .overlay { ScrubberOverlay() }
-        .coordinateSpace(.named(Scrubber.space))
-        .environment(scrubber)
-        .onDisappear { scrubber.end() }
+        .numberFieldsOfAForm(model)
     }
 
     private var sheet: some View {
@@ -87,9 +82,9 @@ struct CustomDeviceSheet: View {
                 .padding(.bottom, 12)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .overlay { ScrubberOverlay() }
-            .coordinateSpace(.named(Scrubber.space))
-            .environment(scrubber)
+            // Not while a field is scrubbed by a finger.
+            .scrollDisabled(model.scrubber.target?.owner == .form)
+            .numberFieldsOfAForm(model)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             // The document's own Back, which the sheet would otherwise show beside Cancel, isn't the sheet's to offer.
@@ -104,7 +99,6 @@ struct CustomDeviceSheet: View {
                 }
             }
         }
-        .onDisappear { scrubber.end() }
     }
 
     @ViewBuilder private var fields: some View {
