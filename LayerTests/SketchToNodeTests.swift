@@ -69,7 +69,9 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(node.frame == ElementLayout.sketched(.button, sketch: sketch, on: .iPhone, among: []).frame)
         #expect(node.width.mode == .fixed && node.height.mode == .fixed)
         #expect(node.content.text == "Continue")
-        #expect(node.style.tint == Theme.accent)
+        // No colour of its own: its kind's, the accent, is what it is drawn in.
+        #expect(node.style.tint == nil)
+        #expect(node.resolvedTint == Theme.accent)
         let intent = try #require(node.sketch)
         #expect(intent.originalBounds == sketch)
         #expect(intent.normalizedBounds == CGRect(x: 30.0 / 393, y: 700.0 / 852, width: 330.0 / 393, height: 56.0 / 852))
@@ -77,6 +79,31 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(intent.decidedBy == .rules)
         #expect(intent.placement == .proportional)
         #expect(!intent.structureDeclined)
+    }
+
+    @Test func aSketchedLeafHasNoColourOfItsOwnAndLooksAsItDid() throws {
+        let (store, _, _) = makeStore()
+        let button = try #require(store.addSketched(.button, from: CGRect(x: 30, y: 700, width: 330, height: 56),
+                                                    confidence: 1, decidedBy: .rules))
+        let title = try #require(store.addSketched(.title, from: CGRect(x: 150, y: 112, width: 96, height: 40),
+                                                   confidence: 1, decidedBy: .rules))
+
+        for id in [button, title] {
+            #expect(store.node(id)?.style.tint == nil)
+            #expect(store.node(id)?.resolvedTint == Theme.accent)
+        }
+        // Exported as it would be with the accent written on each: the kind's own colour needs no saying.
+        var given = store.tree
+        given.screens[0].root.children = given.screens[0].root.children.map { node in
+            var tinted = node
+            tinted.style.tint = Theme.accent
+            return tinted
+        }
+        let settings = CodeSettings(includesPreview: false)
+        let exported = SwiftUICodeGenerator.files(for: store.tree, settings: settings)
+        let withAccent = SwiftUICodeGenerator.files(for: given, settings: settings)
+        #expect(!exported.isEmpty)
+        #expect(exported.map(\.source) == withAccent.map(\.source))
     }
 
     @Test func onAHalfScaleScreenTheIntentIsInScreenPoints() throws {
@@ -219,6 +246,35 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(laidOut.children.map(\.id) == [row.children[0].id, row.children[1].id, card])
         #expect(store.node(card)?.children.isEmpty == true)
         #expect(try root(of: screen, in: store).children.map(\.id) == [row.id])
+        // As drawn: the row places it, at its drawn size.
+        #expect(store.node(card)?.frame.size == CGSize(width: 100, height: 52))
+        #expect(store.node(card)?.width.mode == .fixed)
+        #expect(store.node(card)?.height.mode == .fixed)
+    }
+
+    @Test func aCardInAColumnKeepsItsDrawnBox() throws {
+        let (store, screen, _) = makeStore()
+        // A screen laid out as a column, as a generated one is, holding a title.
+        store.updateTreeScreen(screen) { $0.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 16)) }
+        #expect(store.add(leaf(.title, CGRect(x: 0, y: 0, width: 393, height: 40)), to: .screen(screen)))
+
+        let empty = try #require(store.addSketched(.card, from: CGRect(x: 40, y: 300, width: 200, height: 120),
+                                                   confidence: 0.6, decidedBy: .rules))
+        let card = try #require(store.node(empty))
+        #expect(card.height.mode == .fixed && card.width.mode == .fixed)
+        #expect(card.frame.size == CGSize(width: 200, height: 120))
+
+        // Drawn across the screen, between its margins, it is as wide as the column.
+        let across = try #require(store.addSketched(.card, from: CGRect(x: 25, y: 500, width: 345, height: 80),
+                                                    confidence: 0.6, decidedBy: .rules))
+        let wide = try #require(store.node(across))
+        #expect(wide.sketch?.placement == .proportional)
+        #expect(wide.width.mode == .fill(weight: 1))
+        #expect(wide.height.mode == .fixed)
+        // The column on a screen lies inside the screen's margins.
+        let column = DeviceFrame.iPhone.size.width - 2 * DeviceFrame.iPhone.margin
+        #expect(wide.frame.size == CGSize(width: column, height: 80))
+        #expect(try root(of: screen, in: store).children.map(\.id).suffix(2) == [empty, across])
     }
 
     @Test func aCardLeavesLockedThingsWhereTheyAre() throws {
@@ -232,11 +288,51 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
                                                   confidence: 0.95, decidedBy: .rules))
 
-        #expect(try root(of: screen, in: store).children.map(\.id) == [body.id, card])
+        // The card goes behind the locked body, which it can't take, so the body is still seen.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, body.id])
         #expect(store.node(card)?.children.map(\.id) == [title.id])
         #expect(store.node(card)?.frame == CGRect(x: 10, y: 100, width: 373, height: 120))
         #expect(store.placed(body.id)?.frame == body.frame)
         #expect(store.placed(title.id)?.frame == title.frame)
+    }
+
+    @Test func aCardGoesBehindTheBackmostThingItCantTake() throws {
+        let (store, screen, _) = makeStore()
+        let behind = leaf(.text, CGRect(x: 20, y: 400, width: 100, height: 20))
+        var turned = leaf(.image, CGRect(x: 40, y: 112, width: 100, height: 60))
+        turned.rotation = 10
+        let title = leaf(.title, CGRect(x: 160, y: 112, width: 200, height: 40))
+        var hidden = leaf(.body, CGRect(x: 20, y: 170, width: 353, height: 40))
+        hidden.isHidden = true
+        for node in [behind, turned, title, hidden] { #expect(store.add(node, to: .screen(screen))) }
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        // What wasn't under it stays behind it; the turned image and the hidden body, which it can't take, stay in front.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [behind.id, card, turned.id, hidden.id])
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+    }
+
+    @Test func aGroupInsideBecomesTheCardsChild() throws {
+        let (store, screen, _) = makeStore()
+        var group = LayerNode(kind: .group)
+        group.frame = CGRect(x: 20, y: 112, width: 200, height: 40)
+        group.children = [leaf(.symbol, CGRect(x: 0, y: 0, width: 40, height: 40)), leaf(.text, CGRect(x: 52, y: 10, width: 148, height: 20))]
+        let body = leaf(.body, CGRect(x: 20, y: 160, width: 353, height: 50))
+        #expect(store.add(group, to: .screen(screen)))
+        #expect(store.add(body, to: .screen(screen)))
+        let held = try #require(store.node(group.id)).children
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card])
+        #expect(store.node(card)?.children.map(\.id) == [group.id, body.id])
+        // The person's group is as it was, where it was.
+        #expect(store.node(group.id)?.children == held)
+        #expect(store.placed(group.id)?.frame == group.frame)
+        #expect(store.placed(body.id)?.frame == body.frame)
     }
 
     @Test func aCardTakesNothingThatWouldGoPastDepth32() throws {
@@ -267,7 +363,8 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
                                                   confidence: 0.95, decidedBy: .rules))
 
         #expect(store.node(card)?.children.map(\.id) == [shallow.id])
-        #expect(try root(of: screen, in: store).children.map(\.id) == [deep.id, card])
+        // What it can't take stays in front of it.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, deep.id])
         #expect(store.index[shallow.id]?.depth == 2)
     }
 

@@ -10,15 +10,22 @@ import Foundation
 ///   `.fixed` on both axes.
 /// - In a row, column or grid it takes the slot nearest its centre, sized like the nearest sibling of its kind, or as its
 ///   kind starts (`NaturalSize.defaultSizing`), and the engine places it.
-/// - A card (call 6) is `.fixed` at the drawn box, in whole points, padded by the design's card padding. In a free
-///   container it takes the arrangeable children at least 90% inside it, where they are on screen, and grows to hold
-///   them. Its tint is nil and it has no words, so that it is drawn and written with the design's card fill (F2).
+/// - A leaf has no colour of its own: its kind's (the accent) is what it is drawn and written in.
+/// - A card (call 6) is at the drawn box, in whole points, padded by the design's card padding. Its tint is nil and it has
+///   no words, so that it is drawn and written with the design's card fill (F2).
+///   - In a free container it is `.fixed`. It takes what it encloses that isn't locked, hidden or turned, the person's own
+///     containers included, where they are on screen, and grows to hold them. It goes in just behind the backmost thing
+///     it covers but can't take, so that nothing it is drawn round goes out of sight; else in front.
+///   - In a row, column or grid it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as
+///     wide as what holds it when it was drawn across the screen (`PlacementIntent.proportional`).
 enum SketchedNode {
     struct Made: Equatable, Sendable {
         var node: LayerNode
         var landing: SketchLanding
         /// What a card takes: the receiving container's children it encloses, back to front. Empty for anything else.
         var takes: [UUID]
+        /// What a card in a free container covers but can't take, backmost: it goes in just behind it. Nil: in front.
+        var behind: UUID? = nil
     }
 
     /// The node a reading of `kind` becomes where `sketch` (canvas points) lands, with its SketchIntent (call 7, call 8).
@@ -30,15 +37,20 @@ enum SketchedNode {
               let parent = landing.parent == screen.root.id ? screen.root : index.node(landing.parent, in: content)
         else { return nil }
         let device = content.device(of: screen)
+        let intent = LayerNode.SketchIntent(sketched: screen.placement.localRect(for: sketch), on: device.size,
+                                            margin: device.margin, confidence: confidence, decidedBy: decidedBy)
         // A screen's root is laid out on the screen's device; anything inside it on a device of the container's size.
         let standIn = parent.id == screen.root.id ? device
             : DeviceFrame.custom(name: parent.kind.rawValue, size: parent.frame.size, family: device.family)
 
         var node: LayerNode
         var takes: [UUID] = []
+        var behind: UUID?
         if kind == .card {
             let depth = index[parent.id]?.depth ?? 0
-            (node, takes) = card(in: parent, at: depth, landing: landing, tokens: content.settings.tokens)
+            (node, takes, behind) = card(in: parent, at: depth, landing: landing, tokens: content.settings.tokens)
+            // Call 6: as drawn, in a row, column or grid too. Drawn across the screen, it is as wide as what holds it.
+            if landing.isLaidOut, intent.placement == .proportional { node.width = LayerNode.Sizing(.fill(weight: 1)) }
         } else {
             node = leaf(kind, in: parent, landing: landing, on: standIn, tokens: content.settings.tokens)
             if kind == .button, hasFilledButton(screen.root) {
@@ -46,14 +58,14 @@ enum SketchedNode {
                 node.content.buttonLook = .bordered
                 node.content.text = "Cancel"
             }
+            if landing.isLaidOut { size(&node, likeTheNearestOf: parent, to: landing.local) }
         }
-        if landing.isLaidOut { size(&node, likeTheNearestOf: parent, to: landing.local) }
-        node.sketch = LayerNode.SketchIntent(sketched: screen.placement.localRect(for: sketch), on: device.size,
-                                             margin: device.margin, confidence: confidence, decidedBy: decidedBy)
-        return Made(node: node, landing: landing, takes: takes)
+        node.sketch = intent
+        return Made(node: node, landing: landing, takes: takes, behind: behind)
     }
 
-    /// The root with `made` put in: at its slot, a card holding what it takes at their places on screen.
+    /// The root with `made` put in: at its slot, a card holding what it takes at their places on screen, just behind what
+    /// it covers but can't take.
     static func inserting(_ made: Made, into root: LayerNode) -> LayerNode {
         var root = root
         _ = put(made, in: &root)
@@ -62,14 +74,14 @@ enum SketchedNode {
 
     // MARK: - How it is made
 
-    /// A leaf with today's fields (placeholder text and the accent tint), placed in a free container as a Magic Pen sketch
-    /// always was. In a row, column or grid, which places it, it starts at the size it would have on a phone. A title
-    /// drawn small or large carries its size as its own font size (`sketchedTitleSize`), wherever it lands.
+    /// A leaf with today's fields: its placeholder text, and no colour of its own, so that its kind's is what it is drawn
+    /// in. It is placed in a free container as a Magic Pen sketch always was. In a row, column or grid, which places it, it
+    /// starts at the size it would have on a phone. A title drawn small or large carries its size as its own font size
+    /// (`sketchedTitleSize`), wherever it lands.
     private static func leaf(_ kind: ElementKind, in parent: LayerNode, landing: SketchLanding, on device: DeviceFrame,
                              tokens: DesignTokens) -> LayerNode {
         var node = LayerNode(kind: kind)
         node.content.text = kind.placeholder
-        node.style.tint = Theme.accent
         let laid = landing.isLaidOut
             ? ElementLayout.sketched(kind, sketch: landing.local)
             : ElementLayout.sketched(kind, sketch: landing.local, on: device,
@@ -86,24 +98,26 @@ enum SketchedNode {
         return node
     }
 
-    /// A card at the drawn box in whole points, and what it takes: in a free container, the arrangeable children at least
-    /// 90% inside it whose subtrees stay within depth 32 once inside it (F9), the box grown to hold them. `depth` is the
-    /// receiving container's.
+    /// A card at the drawn box in whole points, `.fixed`, what it takes, and what it goes behind. In a free container it
+    /// takes what it encloses (`SketchLanding.enclosed`) whose subtrees stay within depth 32 once inside it (F9), and the
+    /// box grows to hold them. It goes behind the backmost thing it covers and doesn't take. `depth` is the receiving
+    /// container's.
     private static func card(in parent: LayerNode, at depth: Int, landing: SketchLanding,
-                             tokens: DesignTokens) -> (LayerNode, [UUID]) {
+                             tokens: DesignTokens) -> (LayerNode, takes: [UUID], behind: UUID?) {
         var node = LayerNode(kind: .card)
         node.padding = LayerNode.Padding(all: tokens.card.padding)
         let drawn = landing.local
         let minX = drawn.minX.rounded(), minY = drawn.minY.rounded()
         node.frame = CGRect(x: minX, y: minY, width: drawn.maxX.rounded() - minX, height: drawn.maxY.rounded() - minY)
-        guard !landing.isLaidOut else { return (node, []) }
+        guard !landing.isLaidOut else { return (node, [], nil) }
         let enclosed = Set(SketchLanding.enclosed(by: drawn, in: parent))
         // A child of the card sits two levels below the receiving container.
         let taken = parent.children.filter {
             enclosed.contains($0.id) && depth + 2 + TreeEdit.levels(below: $0) <= TreeRules.maximumDepth
         }
         if let box = TreeEdit.shapesBox(of: taken) { node.frame = node.frame.union(box).integral }
-        return (node, taken.map(\.id))
+        let takes = taken.map(\.id)
+        return (node, takes, SketchLanding.covered(by: drawn, in: parent).first { !takes.contains($0) })
     }
 
     /// Sized for a row, column or grid (call 7): like the visible sibling of its kind whose middle is nearest the sketch's,
@@ -150,7 +164,9 @@ enum SketchedNode {
             }
             children.removeAll { taking.contains($0.id) }
         }
-        children.insert(added, at: made.landing.index.map { min(max($0, 0), children.count) } ?? children.count)
+        let slot = made.behind.flatMap { behind in children.firstIndex { $0.id == behind } }
+            ?? made.landing.index.map { min(max($0, 0), children.count) } ?? children.count
+        children.insert(added, at: slot)
         TreeEdit.give(children, to: &node)
         return true
     }

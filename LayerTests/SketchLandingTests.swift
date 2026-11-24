@@ -190,13 +190,15 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
         let card = try #require(landing(sketch, in: content, forCard: true))
         #expect(card.parent == content.screens[0].root.id)
         #expect(card.local == sketch)
+        // The person's group becomes the card's.
+        #expect(SketchLanding.enclosed(by: card.local, in: content.screens[0].root) == [group.id])
 
         // Anything else drawn there goes into the group.
         let other = try #require(landing(sketch, in: content))
         #expect(other.parent == group.id)
     }
 
-    @Test func whatACardEnclosesIsMostlyInsideAndCanBeArranged() {
+    @Test func whatACardEnclosesIsMostlyInsideAndCanBeTaken() {
         let inside = leaf(CGRect(x: 20, y: 110, width: 100, height: 40))
         let mostly = leaf(CGRect(x: 20, y: 195, width: 100, height: 40))   // 37 of 40 tall inside
         let partly = leaf(CGRect(x: 300, y: 110, width: 100, height: 40))   // 83 of 100 wide inside
@@ -211,12 +213,19 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
         var sketched = container(.card, nil, CGRect(x: 100, y: 210, width: 60, height: 20))
         sketched.sketch = LayerNode.SketchIntent(sketched: sketched.frame, on: CGSize(width: 393, height: 852), margin: 20,
                                                  confidence: 0.95, decidedBy: .rules)
+        var declined = leaf(CGRect(x: 170, y: 210, width: 60, height: 20))
+        declined.sketch = LayerNode.SketchIntent(sketched: declined.frame, on: CGSize(width: 393, height: 852), margin: 20,
+                                                 confidence: 1, decidedBy: .structure)
+        declined.sketch?.structureDeclined = true
         let parent = container(.group, nil, CGRect(x: 0, y: 0, width: 393, height: 852),
-                               [inside, mostly, partly, locked, hidden, turned, persons, sketched])
+                               [inside, mostly, partly, locked, hidden, turned, persons, sketched, declined])
+        let rect = CGRect(x: 10, y: 100, width: 373, height: 132)
 
-        let enclosed = SketchLanding.enclosed(by: CGRect(x: 10, y: 100, width: 373, height: 132), in: parent)
-
-        #expect(enclosed == [inside.id, mostly.id, sketched.id])
+        // What a card drawn there would hold: the person's own group and a thing the structure pass may not take
+        // included, but nothing locked, hidden or turned, which stays where it is.
+        #expect(SketchLanding.enclosed(by: rect, in: parent) == [inside.id, mostly.id, persons.id, sketched.id, declined.id])
+        #expect(SketchLanding.covered(by: rect, in: parent)
+            == [inside.id, mostly.id, locked.id, hidden.id, turned.id, persons.id, sketched.id, declined.id])
     }
 
     @Test func aSketchPastDepth32LandsInItsParent() throws {

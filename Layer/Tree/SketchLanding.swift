@@ -55,14 +55,32 @@ struct SketchLanding: Equatable, Sendable {
         return SketchLanding(screen: screen.id, parent: parent.id, isLaidOut: isLaidOut, local: local, index: slot)
     }
 
-    /// The arrangeable children of `parent` at least 90% inside `rect` (the parent's space), back to front.
+    /// What a card drawn round `rect` (the parent's space) takes: the children at least 90% inside it that aren't locked,
+    /// hidden or turned, back to front. The person's own containers are among them, and become the card's (call 7).
     static func enclosed(by rect: CGRect, in parent: LayerNode) -> [UUID] {
-        parent.children
-            .filter { $0.isArrangeable && share(of: $0.frame, inside: rect) >= StructureConventions.enclosedShare }
-            .map(\.id)
+        parent.children.filter { canBeTaken($0) && isCovered($0, by: rect) }.map(\.id)
+    }
+
+    /// What a card drawn round `rect` (the parent's space) covers: the children at least 90% inside it, by the box round
+    /// each one's turned shape, whether it may take them or not, back to front.
+    static func covered(by rect: CGRect, in parent: LayerNode) -> [UUID] {
+        parent.children.filter { isCovered($0, by: rect) }.map(\.id)
     }
 
     // MARK: - How it is worked out
+
+    /// Whether at least 90% of the box round a thing's turned shape is inside `rect`.
+    private static func isCovered(_ node: LayerNode, by rect: CGRect) -> Bool {
+        share(of: TreeEdit.shapesBox(of: [node]) ?? node.frame, inside: rect) >= StructureConventions.enclosedShare
+    }
+
+    /// Whether a card may take a thing: not locked, hidden or turned, which stay where they are. A drawing never sits where
+    /// a card is drawn.
+    private static func canBeTaken(_ node: LayerNode) -> Bool {
+        if node.isLocked || node.isHidden || node.kind == .drawing { return false }
+        if let rotation = node.rotation, rotation.isFinite, rotation != 0 { return false }
+        return true
+    }
 
     /// How much of `box` lies inside `rect`, by area: 0 to 1. A box with no area is inside when its middle is.
     private static func share(of box: CGRect, inside rect: CGRect) -> Double {
