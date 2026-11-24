@@ -7,16 +7,39 @@ import Foundation
 extension DesignStore {
     // MARK: Turning
 
+    /// A thing's own angle, as it keeps it, and the summed angle of what holds it: what turning it alone starts from,
+    /// and puts back when the turn comes back round to where it began (`setCanvasAngles(_:puttingBack:)`).
+    struct OwnAngle: Equatable, Sendable {
+        var rotation: Double?
+        var parentDegrees: Double
+    }
+
+    /// A node's own angle and its parent's summed angle, as they are now: see `OwnAngle`. Nil for a screen's root and
+    /// an id the design doesn't have.
+    func ownAngle(of id: UUID) -> OwnAngle? {
+        let memo = index
+        guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree) else { return nil }
+        return OwnAngle(rotation: posed.node.rotation, parentDegrees: posed.parentSpace.degrees)
+    }
+
     /// Each node turned about its own middle to an angle on the canvas: its own angle that less its parent's summed
     /// angle, as an element keeps one. Its middle can't move, so its frame is neither worked out again nor written: only
     /// the angle is, and an angle it already has, as an element keeps one, leaves its own as it is. What a thing turned
     /// alone, the Rotation field and turning each of several things on its own pivot write. One change; ids the design
     /// doesn't have, a screen's root, and angles that aren't finite are passed over.
-    func setCanvasAngles(_ angles: [UUID: Double]) {
+    ///
+    /// Each of `starts` whose parent is still turned exactly as it was instead takes back the own angle it had, as it
+    /// had it: a turn come back round to where it began, where the canvas angle less the parent's wouldn't be the own
+    /// angle to the last bit once any of them isn't whole, and the design would differ from what it was.
+    func setCanvasAngles(_ angles: [UUID: Double], puttingBack starts: [UUID: OwnAngle] = [:]) {
         let memo = index, tree = tree
         var writes: [(host: TreeIndex.Host, path: [Int], rotation: Double?)] = []
         for (id, degrees) in angles where degrees.isFinite {
             guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree) else { continue }
+            if let start = starts[id], start.parentDegrees == posed.parentSpace.degrees {
+                if posed.node.rotation != start.rotation { writes.append((entry.host, entry.path, start.rotation)) }
+                continue
+            }
             let angle = Rotation.kept(degrees - posed.parentSpace.degrees)
             if Rotation.kept(posed.node.rotation ?? 0) != angle { writes.append((entry.host, entry.path, angle)) }
         }

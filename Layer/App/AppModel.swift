@@ -1701,8 +1701,8 @@ final class AppModel {
         selection = rehosted
         // The new selection let go of the session as it was set; it is the same one.
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
-        if case .element(let ref, let degrees)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
-            turnStart = .element(now, degrees: degrees)
+        if case .element(let ref, let degrees, let own)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
+            turnStart = .element(now, degrees: degrees, own: own)
         }
     }
 
@@ -1944,8 +1944,9 @@ final class AppModel {
 
     /// What the turn under way turns, and how far it was turned when the turn began.
     private enum TurnStart {
-        /// One thing, and its angle on the canvas.
-        case element(DesignStore.ElementRef, degrees: Double)
+        /// One thing, its angle on the canvas, and its own angle with that of what held it: put
+        /// back as it was if the turn comes back round to where it began.
+        case element(DesignStore.ElementRef, degrees: Double, own: DesignStore.OwnAngle?)
         /// Several things, and how far their session had turned them.
         case several(turned: Double)
     }
@@ -1964,9 +1965,10 @@ final class AppModel {
     }
 
     /// Turns one thing to `degrees` on the canvas, about its own middle, as one change: only its
-    /// angle is written, less the angles of what holds it (`DesignStore.setCanvasAngles`).
-    private func setCanvasAngle(of placed: PlacedNode, to degrees: Double) {
-        store.setCanvasAngles([placed.ref.element: degrees])
+    /// angle is written, less the angles of what holds it (`DesignStore.setCanvasAngles`). Given
+    /// `start`, it takes back the own angle it had then, exactly.
+    private func setCanvasAngle(of placed: PlacedNode, to degrees: Double, puttingBack start: DesignStore.OwnAngle? = nil) {
+        store.setCanvasAngles([placed.ref.element: degrees], puttingBack: start.map { [placed.ref.element: $0] } ?? [:])
     }
 
     /// What turns several things selected: the session kept from their last turn or move,
@@ -1995,7 +1997,7 @@ final class AppModel {
         guard !isTurning, canTurnSelection else { return false }
         let start: Double
         if let turnable = turnableNode {
-            turnStart = .element(turnable.ref, degrees: turnable.degrees)
+            turnStart = .element(turnable.ref, degrees: turnable.degrees, own: store.ownAngle(of: turnable.ref.element))
             start = turnable.degrees
         } else if let session = severalTurn {
             turnSession = session
@@ -2029,10 +2031,12 @@ final class AppModel {
     func turnSelection(by degrees: Double, snaps: Bool) -> Bool {
         let snapped: Double?
         switch turnStart {
-        case .element(let ref, let start)?:
+        case .element(let ref, let start, let own)?:
             guard selection == .element(ref), let placed = store.placed(ref) else { return false }
             let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
-            store.act(for: turnEdit) { setCanvasAngle(of: placed, to: angle) }
+            // Back where it began, it takes back its own angle as it was: worked out again, it could
+            // differ in its last bit, and the turn, changing nothing to the eye, would be a step.
+            store.act(for: turnEdit) { setCanvasAngle(of: placed, to: angle, puttingBack: angle == start ? own : nil) }
             snapped = isSnapped ? angle : nil
         case .several(let start)?:
             // Changed by something else meanwhile, they are left as that left them.

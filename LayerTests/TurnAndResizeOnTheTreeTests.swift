@@ -248,6 +248,51 @@ struct TurnAndResizeOnTheTreeTests {
         #expect(model.store.tree == before)
     }
 
+    /// Fix round 2 (N1): turned alone through angles that aren't whole and back to where it began, by the knob, a
+    /// thing in a turned container takes its own angle back exactly, though its angle on the canvas less its
+    /// container's (63.3 − 46) isn't 17.3 to the last bit. Nothing has changed, so no step is left to undo.
+    @Test func aThingTurnedByTheKnobThroughFractionalAnglesAndBackLeavesNothingToUndo() throws {
+        var text = leaf(.text, CGRect(x: 52, y: 29, width: 61, height: 23))
+        text.rotation = 17.3
+        // Two things in it: a free group of one dissolves.
+        let other = leaf(.text, CGRect(x: 7, y: 61, width: 133, height: 27))
+        let g = container(frame: CGRect(x: 282, y: 128, width: 215, height: 109), turned: 46, [text, other])
+        let (model, undo) = makeModel(design([screen([g], origin: CGPoint(x: 137.3, y: 59.9), scale: 0.7)]))
+        let before = model.store.tree
+        model.selection = .element(try model.ref(text.id))
+        #expect(model.store.parent(of: text.id) == .node(g.id))
+        #expect(model.store.node(text.id)?.rotation == 17.3)
+        #expect(model.store.placed(text.id)?.degrees == 46 + 17.3)
+
+        model.knobTurn(12.7, 133.9, -71.3, 0)
+
+        #expect(model.store.node(text.id)?.rotation == 17.3)
+        #expect(model.store.tree == before)
+        #expect(!undo.canUndo, "a turn that changed nothing is no step")
+    }
+
+    /// Fix round 2 (N1), for two fingers: a twist between the 45s and back puts the thing's own angle back exactly.
+    @Test func aThingTwistedThroughFractionalAnglesAndBackLeavesNothingToUndo() throws {
+        var text = leaf(.text, CGRect(x: 52, y: 29, width: 61, height: 23))
+        text.rotation = 17.3
+        // Two things in it: a free group of one dissolves.
+        let other = leaf(.text, CGRect(x: 7, y: 61, width: 133, height: 27))
+        let g = container(frame: CGRect(x: 282, y: 128, width: 215, height: 109), turned: 46, [text, other])
+        let (model, undo) = makeModel(design([screen([g], origin: CGPoint(x: 137.3, y: 59.9), scale: 0.7)]))
+        let before = model.store.tree
+        model.selection = .element(try model.ref(text.id))
+        #expect(model.store.parent(of: text.id) == .node(g.id))
+
+        #expect(model.beginTwist())
+        // 76, 97.2 and 52 on the canvas: none within 4 of a 45, so none snaps.
+        for degrees in [12.7, 33.9, -11.3, 0] { model.twist(by: degrees) }
+        model.endTwist()
+
+        #expect(model.store.node(text.id)?.rotation == 17.3)
+        #expect(model.store.tree == before)
+        #expect(!undo.canUndo, "a twist that changed nothing is no step")
+    }
+
     /// Fix round 1 (I1), for ink: a drawing, which goes exactly where it is put, off whole points on the open canvas
     /// drawn at seven tenths (the rules keep drawings off screens), turned alone through several angles and back.
     @Test func aDrawingTurnedAloneOnAScaledCanvasComesBackExactly() throws {
