@@ -254,6 +254,22 @@ import Testing
         #expect(column.movement == 0)
     }
 
+    @Test func aCardsPaddingIsJudgedByHowFarItMovesThings() throws {
+        // Both insets 6 pt off: the card's 16 on both sides moves every text hypot(6, 6) ≈ 8.49 pt, so the insets as
+        // drawn are kept, and they move nothing.
+        let off = [text(22, 22, 200, 24), text(22, 62, 200, 24), text(22, 102, 200, 24)]
+        let drawn = try #require(applied(infer(card(off)).first))
+        #expect(drawn.kind == .cardColumn)
+        #expect(drawn.container.padding == LayerNode.Padding(top: 22, leading: 22, bottom: 16, trailing: 16))
+        #expect(drawn.movement == 0)
+
+        // Both 4 pt off: the card's 16 moves each hypot(4, 4) ≈ 5.66 pt, within 8, so it is kept.
+        let near = [text(20, 20, 200, 24), text(20, 60, 200, 24), text(20, 100, 200, 24)]
+        let padded = try #require(applied(infer(card(near)).first))
+        #expect(padded.container.padding == LayerNode.Padding(all: 16))
+        #expect(abs(padded.movement - hypot(4, 4)) < 1e-9)
+    }
+
     @Test func twoThingsInACardStayFree() {
         #expect(infer(card([text(16, 16, 200, 24), text(16, 56, 200, 24)])).isEmpty)
         #expect(infer(card([text(16, 16), text(128, 16)])).isEmpty, "a new card's inside is a column or nothing")

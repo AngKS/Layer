@@ -417,23 +417,39 @@ enum StructureInference {
             return decision(confidence: column.confidence, rhythm: rhythm, exact: exact).map { [$0] } ?? []
         }
 
-        /// The card laid out as the column: its padding is the design's card padding, but where that would move the
-        /// column's leading line or its top more than 8 pt, the inset as drawn is kept there (tidying, it is always
-        /// the card's). Its trailing and bottom padding are the card's.
+        /// The card laid out as the column. Its padding is the design's card padding where that moves nothing more
+        /// than 8 pt, measured on the members as the engine places them; else its leading and top insets are kept as
+        /// drawn. Tidying, it is always the card's. Its trailing and bottom padding are the card's.
         private func cardProposal(_ candidate: Candidate, among items: [Item], spacing: CGFloat) -> Structure {
-            let members = candidate.items.map { items[$0].node }
-            let frames = members.map(\.frame)
+            let padded = cardProposal(candidate, among: items, spacing: spacing,
+                                      padding: LayerNode.Padding(all: tokens.card.padding))
+            guard mode == .sketch, padded.movement > StructureConventions.furthestAutomaticMove else { return padded }
+            let drawn = insetsAsDrawn(candidate, among: items)
+            return drawn == padded.container.padding
+                ? padded : cardProposal(candidate, among: items, spacing: spacing, padding: drawn)
+        }
+
+        /// The card's padding with its leading and top insets as drawn: its top where the column starts, and its leading
+        /// inset where it keeps the shared line where it was drawn. A trailing line keeps the card's.
+        private func insetsAsDrawn(_ candidate: Candidate, among items: [Item]) -> LayerNode.Padding {
+            let frames = candidate.items.map { items[$0].frame }
             let cardPadding = tokens.card.padding, width = parent.frame.width
-            let limit = mode == .tidy ? CGFloat.infinity : StructureConventions.furthestAutomaticMove
-            let edge = median(frames.map(candidate.line.position)), top = frames.map(\.minY).min() ?? cardPadding
+            let edge = median(frames.map(candidate.line.position))
             var padding = LayerNode.Padding(all: cardPadding)
-            if abs(top - cardPadding) > limit { padding.top = max(0, snap(top)) }
+            padding.top = max(0, snap(frames.map(\.minY).min() ?? cardPadding))
             switch candidate.line {
-            case .leading where abs(edge - cardPadding) > limit: padding.leading = max(0, snap(edge))
+            case .leading: padding.leading = max(0, snap(edge))
             // Centred in what the card's trailing padding leaves.
-            case .middles where abs(edge - width / 2) > limit: padding.leading = max(0, snap(2 * edge - width + cardPadding))
+            case .middles: padding.leading = max(0, snap(2 * edge - width + cardPadding))
             default: break
             }
+            return padding
+        }
+
+        /// The card laid out as the column with `padding`, and how far that moves what it holds.
+        private func cardProposal(_ candidate: Candidate, among items: [Item], spacing: CGFloat,
+                                  padding: LayerNode.Padding) -> Structure {
+            let members = candidate.items.map { items[$0].node }
             var template = LayerNode(kind: .group)
             template.frame.size = parent.frame.size
             (template.width, template.height) = (parent.width, parent.height)
