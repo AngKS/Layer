@@ -181,13 +181,14 @@ extension HostedWindowSuites {
     }
 }
 
-/// What the popover and the panels ask of the selection, and what their taps do (Ungroup, Arrange, Duplicate, a drop in
-/// the Layers panel), read and write the tree: none of it lowers the design to the projection's list (plan 4, Task 12;
-/// the carries from Tasks 6 and 8). Synchronous on the main actor, so no other suite adds to the count meanwhile.
+/// What the popover and the panels ask of the selection, and what their taps do (Ungroup, Arrange, Align, Duplicate, a
+/// drop in the Layers panel, a frame added from the library), read and write the tree: none of it lowers the design to
+/// the projection's list (plan 4, Task 12; the carries from Tasks 6 and 8, and fix round 1). Synchronous on the main
+/// actor, so no other suite adds to the count meanwhile.
 @MainActor
 @Suite("The selection's controls lower nothing")
 struct ControlsLowerNothingTests {
-    @Test func theGroupArrangeAndDuplicateControlsAndALayersDropLowerNothing() throws {
+    @Test func theGroupArrangeAlignAndDuplicateControlsALayersDropAndALibraryFrameLowerNothing() throws {
         func text(_ words: String, _ frame: CGRect) -> LayerNode {
             var node = LayerNode(kind: .text)
             node.frame = frame
@@ -230,18 +231,29 @@ struct ControlsLowerNothingTests {
         model.selection = .screen(screen.id)
         #expect(model.selectionViewRect != nil)
 
-        // Their taps: Send to Back, a row dropped into the group in Layers, Ungroup, Duplicate of the screen.
+        // Their taps: Send to Back, Align of one thing (a leaf, then a container, which goes whole), a row dropped into
+        // the group in Layers, Ungroup, a frame from the library, Duplicate of the screen.
         model.selection = .element(lineRef)
         model.arrangeSelection(.back)
         #expect(store.treeScreen(screen.id)?.root.children.first?.id == line.id, "sent to the back")
+        model.lineUpSelection(.left)
+        #expect(store.placed(line.id)?.frame == CGRect(x: 0, y: 400, width: 200, height: 20), "aligned to the screen's left")
+        model.selection = .element(cardRef)
+        model.lineUpSelection(.right)
+        #expect(store.placed(card.id)?.frame == CGRect(x: 193, y: 60, width: 200, height: 80), "aligned to the screen's right")
+        #expect(store.placed(card.children[0].id)?.frame.minX == 209, "what the card holds goes with it")
+        model.selection = .element(lineRef)
         #expect(store.moveLayer(line.id, to: .node(group.id), before: nil), "dropped into the group's list")
         #expect(store.parent(of: line.id) == .node(group.id))
         model.selection = .element(cardRef)
         model.ungroupSelection()
         #expect(store.node(card.id) == nil, "Ungroup takes the card apart")
+        let added = model.addFrame(.iPhone)
+        #expect(store.tree.screens.map(\.name) == ["Screen", "Screen 2"], "a library frame is named by the screens' count")
+        #expect(added.name == "Screen 2")
         model.selection = .screen(screen.id)
         model.duplicateSelection()
-        #expect(store.tree.screens.count == 2, "the screen is copied")
+        #expect(store.tree.screens.count == 3, "the screen is copied")
 
         #expect(TreeProjection.lowerings(of: screen.id) - before == 0,
                 "lowerings over the controls' reads and taps: \(TreeProjection.lowerings(of: screen.id) - before)")

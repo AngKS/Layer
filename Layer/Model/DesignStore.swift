@@ -218,10 +218,11 @@ final class DesignStore {
         return addScreen(device, at: ElementLayout.screenPlacement(for: sketch, device: device))
     }
 
+    /// Named by how many screens the tree holds, so that a frame added from the library lowers nothing.
     @discardableResult
     func addScreen(_ device: DeviceFrame, at placement: Placement) -> DesignScreen {
         let screen = DesignScreen(
-            name: "Screen \(screens.count + 1)", origin: placement.origin, scale: placement.scale,
+            name: "Screen \(tree.screens.count + 1)", origin: placement.origin, scale: placement.scale,
             deviceID: device == .iPhone ? nil : device.id
         )
         change { $0.addScreen(screen) }
@@ -430,26 +431,23 @@ final class DesignStore {
         canArrange(.element(ref), arrangement)
     }
 
-    /// Lines an element on a screen up with an edge or the middle of that screen. A group
-    /// lines up as one block: its box is lined up, and everything in it moves as far.
+    /// Lines an element on a screen up with an edge or the middle of that screen. A container
+    /// lines up as one block: its box is lined up, and everything in it moves as far. Read from the
+    /// tree and written to it, so that an Align tap lowers nothing: a container by `position`, and
+    /// anything else through its parent (`place`), which in a row, column, grid or overlay takes it
+    /// out as a new place does (My call 20).
     func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
-        guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
-        if let item = resolve(ref)?.element, item.kind == .group {
-            guard let box = canvasShape(of: .element(ref))?.bounds else { return }
-            let shape = item.shapeBounds
-            let aligned = ElementLayout.aligned(shape, alignment, in: screen.size)
-            // `position` takes canvas points.
-            let scale = screen.placement.scale
-            position([.element(ref): CGPoint(x: box.minX + (aligned.minX - shape.minX) * scale, y: box.minY + (aligned.minY - shape.minY) * scale)])
-            return
+        guard case .screen(let id) = ref.host, let screen = treeScreen(id), let placed = placed(ref) else { return }
+        // A turned thing lines up by the box round its shape; its frame moves with it.
+        let shape = TurnedRect(rect: placed.frame, degrees: placed.degrees).bounds
+        let aligned = ElementLayout.aligned(shape, alignment, in: tree.device(of: screen).size)
+        let distance = CGSize(width: aligned.minX - shape.minX, height: aligned.minY - shape.minY)
+        guard placed.node.isContainer else {
+            return place(ref.element, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height))
         }
-        // A turned element lines up by the box round its shape; its frame moves with it.
-        update(ref) {
-            let box = $0.shapeBounds
-            let aligned = ElementLayout.aligned(box, alignment, in: screen.size)
-            $0.frame.origin.x += aligned.minX - box.minX
-            $0.frame.origin.y += aligned.minY - box.minY
-        }
+        // `position` takes canvas points.
+        let box = placed.canvasShape.bounds, scale = screen.placement.scale
+        position([.element(ref): CGPoint(x: box.minX + distance.width * scale, y: box.minY + distance.height * scale)])
     }
 
     func deleteScreen(_ id: DesignScreen.ID) {
