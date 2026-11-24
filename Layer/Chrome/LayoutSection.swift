@@ -35,7 +35,7 @@ struct LayoutSection: View, Equatable {
                     NumberField("pt", label: "Spacing", value: stackBinding(\.spacing), range: 0...400)
                 }
                 paddingFields
-                PanelRow("Alignment") {
+                PanelRow("Align") {
                     Picker("Alignment", selection: stackBinding(\.alignment)) {
                         ForEach([LayerNode.CrossAlignment.start, .center, .end, .fill], id: \.self) { Text($0.title).tag($0) }
                     }
@@ -211,8 +211,11 @@ struct SizingSection: View, Equatable {
     static func isPositionEditable(for placed: PlacedNode) -> Bool { !placed.isLaidOut }
 
     var body: some View {
-        axisRow("Width", unit: "W", axis: .horizontal)
-        axisRow("Height", unit: "H", axis: .vertical)
+        // One view, so that `.equatable()` stacks the two rows rather than laying them over each other.
+        VStack(alignment: .leading, spacing: 10) {
+            axisRow("Width", unit: "W", axis: .horizontal)
+            axisRow("Height", unit: "H", axis: .vertical)
+        }
     }
 
     private func axisRow(_ name: String, unit: String, axis: LayerNode.Axis) -> some View {

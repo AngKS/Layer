@@ -308,8 +308,9 @@ private struct ContainerSettings: View {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
                 LockButton()
                 ArrangeButtons()
+                // On when Ungroup would act: a group or a card, unlocked (what `canUngroupSelection` says, from the tree).
                 IconButton("Ungroup", symbol: "rectangle.3.group.dashed") { model.ungroupSelection() }
-                    .disabled(isLocked)
+                    .disabled(isLocked || !node.isContainer)
             }
         }
 
@@ -485,7 +486,7 @@ private struct SeveralSettings: View {
         }
         let refs = nodes.map(\.ref)
         let first = nodes.first { !$0.isLocked }
-        let turnable = model.canTurnSelection && first != nil
+        let turnable = model.canTurnSelectionOnTheTree && first != nil
         LeafStyleSections(leaves: model.selectedLeafNodes, showsAngle: turnable) {
             if turnable, let first {
                 NumberField("°", label: "Rotation", value: Binding(

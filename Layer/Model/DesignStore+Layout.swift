@@ -157,3 +157,16 @@ extension LayerNode {
         style.tint ?? (kind == .card ? tokens.card.fill : kind.spec.tint)
     }
 }
+
+extension AppModel {
+    /// `canTurnSelection`, read from the tree: something is selected, no screen is among it, and some of it isn't
+    /// locked, by itself or by a container above it. What the Format panel's body asks, so it lowers nothing.
+    var canTurnSelectionOnTheTree: Bool {
+        var hasUnlocked = false
+        for thing in selectedThings {
+            guard case .element(let ref) = thing else { return false }
+            if let found = store.placed(ref), !found.isLocked { hasUnlocked = true }
+        }
+        return hasUnlocked
+    }
+}
