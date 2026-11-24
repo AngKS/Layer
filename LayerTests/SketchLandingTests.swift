@@ -224,8 +224,6 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
         // What a card drawn there would hold: the person's own group and a thing the structure pass may not take
         // included, but nothing locked, hidden or turned, which stays where it is.
         #expect(SketchLanding.enclosed(by: rect, in: parent) == [inside.id, mostly.id, persons.id, sketched.id, declined.id])
-        #expect(![locked, hidden, turned].contains(where: SketchLanding.canBeTaken))
-        #expect([inside, partly, persons, sketched, declined].allSatisfy(SketchLanding.canBeTaken))
     }
 
     @Test func aSketchPastDepth32LandsInItsParent() throws {

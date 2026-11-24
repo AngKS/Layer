@@ -296,6 +296,52 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(store.placed(title.id)?.frame == title.frame)
     }
 
+    @Test func aCardOverALockedBackgroundIsInFrontOfIt() throws {
+        let (store, screen, _) = makeStore()
+        var background = leaf(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
+        background.isLocked = true
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        #expect(store.add(background, to: .screen(screen)))
+        #expect(store.add(title, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        #expect(try root(of: screen, in: store).children.map(\.id) == [background.id, card])
+    }
+
+    @Test func aCardStaysInFrontOfABackgroundWhateverIsBehindIt() throws {
+        let (store, screen, _) = makeStore()
+        // Partly under the card, but behind the background, which already hides it.
+        let note = leaf(.text, CGRect(x: 250, y: 205, width: 100, height: 50))
+        var background = leaf(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
+        background.isLocked = true
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        for node in [note, background, title] { #expect(store.add(node, to: .screen(screen))) }
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(try root(of: screen, in: store).children.map(\.id) == [note.id, background.id, card])
+    }
+
+    @Test func anOrdinaryThingPartlyUnderACardStaysInFrontOfIt() throws {
+        let (store, screen, _) = makeStore()
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        // 15 of its 50 points tall are under the card drawn below: too little to take.
+        let text = leaf(.text, CGRect(x: 250, y: 205, width: 100, height: 50))
+        #expect(store.add(title, to: .screen(screen)))
+        #expect(store.add(text, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, text.id])
+        #expect(store.placed(text.id)?.frame == text.frame)
+    }
+
     @Test func aCardGoesBehindALockedThingPartlyUnderIt() throws {
         let (store, screen, _) = makeStore()
         let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))

@@ -61,15 +61,15 @@ struct SketchLanding: Equatable, Sendable {
         parent.children.filter { canBeTaken($0) && isMostlyInside($0, rect) }.map(\.id)
     }
 
+    // MARK: - How it is worked out
+
     /// Whether a card may take a thing: not locked, hidden or turned, which stay where they are. A drawing never sits where
     /// a card is drawn.
-    static func canBeTaken(_ node: LayerNode) -> Bool {
+    private static func canBeTaken(_ node: LayerNode) -> Bool {
         if node.isLocked || node.isHidden || node.kind == .drawing { return false }
         if let rotation = node.rotation, rotation.isFinite, rotation != 0 { return false }
         return true
     }
-
-    // MARK: - How it is worked out
 
     /// Whether at least 90% of the box round a thing's turned shape is inside `rect`.
     private static func isMostlyInside(_ node: LayerNode, _ rect: CGRect) -> Bool {
