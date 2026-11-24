@@ -3,35 +3,39 @@ import CryptoKit
 import Foundation
 import os
 
-/// The structure pass (spec §5): the rows and columns among what a batch drew and its neighbours, each with how sure
-/// it is, the spacing it takes, and how far it moves anything. Pure and deterministic, with no UIKit and no SwiftUI,
-/// so it builds on macOS and runs off the main actor. Its numbers are `StructureConventions`', and the spacing comes
-/// from the design's own rhythm (§14).
+/// The structure pass (spec §5): the grids, rows and columns among what a batch drew and its neighbours, and a new
+/// card's column, each with how sure it is, the spacing it takes, and how far it moves anything. Pure and
+/// deterministic, with no UIKit and no SwiftUI, so it builds on macOS and runs off the main actor. Its numbers are
+/// `StructureConventions`', and the spacing comes from the design's own rhythm (§14).
 ///
-/// Rows come first, then columns, in which a row just applied is one item: one level of nesting per pass, inner first
-/// (call 3). Each proposal is laid out by the engine with its members `.fixed` at their sizes (My call 16), and its
-/// movement is measured on exactly what the engine gives (call 5).
+/// A new card's inside is a column or nothing. Elsewhere grids come first, then rows, then columns, in which a row or
+/// grid just applied is one item: one level of nesting per pass, inner first (call 3). A structure the pass made that
+/// may grow is read as its members by a structure that may take its place, which then holds all of them (call 2).
+/// Each proposal is laid out by the engine with its members `.fixed` at their sizes (My call 16), and its movement is
+/// measured on exactly what the engine gives (call 5).
 enum StructureInference {
     enum Mode: Sendable {
         /// After a batch of readings: the 0.8 bar and nothing moved more than 8 pt, or an offer.
         case sketch
-        /// Voice's tidy (call 10): the 0.5 bar, no limit, and a column's gaps needn't be regular.
+        /// Voice's tidy (call 10): every arrangeable child new, the 0.5 bar, no limit, and a column's gaps needn't be
+        /// regular.
         case tidy
     }
 
     struct Structure: Equatable, Sendable {
         enum Kind: Equatable, Sendable { case row, column, grid(columns: Int), cardColumn }
         var kind: Kind
-        /// The receiving container, a screen's root included.
+        /// The receiving container, a screen's root included; for `.cardColumn`, the card.
         var parent: UUID
-        /// In reading order (My call 15). A row proposed just before, by its container's id, may be one.
+        /// In reading order (My call 15). A row or grid proposed just before, by its container's id, may be one.
         var members: [UUID]
-        /// Containers the pass made that this one takes the place of (Task 6).
+        /// Containers the pass made that this one takes the place of (call 2). `applying` opens them first.
         var replacing: [UUID] = []
         /// What would be built: its layout and padding, its frame in the parent's space, and both sizings `.fit`,
-        /// with the members inside at their laid-out frames, each `.fixed` (My call 16). It carries an intent decided
-        /// by `.structure`, so that a structure proposed after it may take it (a container without one is the
-        /// person's); the store writes its real one when it builds it. For `.cardColumn` it is the card itself.
+        /// with the members inside at their laid-out frames, each `.fixed` (My call 16) but for a row or column the
+        /// pass built, which keeps fitting along its own axis. It carries an intent decided by `.structure`, so that a
+        /// structure proposed after it may take it (a container without one is the person's); the store writes its
+        /// real one when it builds it. For `.cardColumn` it is the card itself, with its new layout and padding.
         var container: LayerNode
         var confidence: Double
         /// The furthest any member moves, as proposed. Members are upright and keep their sizes, so every corner
@@ -50,18 +54,21 @@ enum StructureInference {
     enum Decision: Equatable, Sendable { case apply(Structure), offer(Structure) }
     enum Outcome: Equatable, Sendable { case applyRhythm, applyMedian, offer }
 
-    /// Pure and deterministic. `parent` as it is now; `new` the batch's nodes in it; `grows` the containers the pass
-    /// made that may grow (Task 6); `depth` how deep `parent` sits, as `TreeIndex` counts it (a screen's root is 0),
-    /// so that nothing is built past depth 32 (F9). In the order to apply: inner structures first.
+    /// Pure and deterministic. `parent` as it is now; `new` the batch's nodes in it (a new card's: all it holds);
+    /// `grows` the containers the pass made that may grow (call 2); `depth` how deep `parent` sits, as `TreeIndex`
+    /// counts it (a screen's root is 0), so that nothing is built past depth 32 (F9). Tidying, every arrangeable child
+    /// counts as new, whatever `new` says. In the order to apply: inner structures first.
     static func infer(in parent: LayerNode, new: Set<UUID>, grows: Set<UUID> = [], tokens: DesignTokens,
                       mode: Mode = .sketch, measure: TextMeasure = .shared, depth: Int = 0) -> [Decision] {
         guard parent.isContainer, parent.resolvedLayout == .free else { return [] }
+        let new = mode == .tidy ? Set(parent.children.filter(\.isArrangeable).map(\.id)) : new
         let near = neighbourhood(of: parent, new: new)
         #if DEBUG
         record(near.count, for: parent.id)
         #endif
         guard !near.isEmpty else { return [] }
-        return Pass(parent: parent, new: new, tokens: tokens, mode: mode, measure: measure, depth: depth).decisions(near)
+        return Pass(parent: parent, new: new, grows: grows, tokens: tokens, mode: mode, measure: measure, depth: depth)
+            .decisions(near)
     }
 
     /// My call 16: the rhythm's spacing, else the exact median, else an offer. Nil: nothing.
@@ -77,10 +84,18 @@ enum StructureInference {
         }
     }
 
-    /// `parent` with `structure` built in it: members as they are now, each `.fixed` at its size and at the proposed
-    /// frame, inside the proposed container (its id kept) at the frontmost member's slot. Nil when a member is gone,
-    /// no longer `parent`'s child, or not arrangeable, or when the container is already there.
+    /// `parent` with `structure` built in it. The containers it replaces are opened first, their members where they
+    /// are on screen. Then its members, as they are now, each `.fixed` at its size and at the proposed frame, go
+    /// inside the proposed container (its id kept) at the frontmost member's slot. For `.cardColumn`, `parent` is the
+    /// card, which takes the proposed layout and padding and holds its children in the proposed order and frames.
+    /// Nil when a member is gone, no longer `parent`'s child, or not arrangeable, when a container it replaces isn't
+    /// there, or when the container is already there.
     static func applying(_ structure: Structure, to parent: LayerNode) -> LayerNode? {
+        if structure.kind == .cardColumn { return applyingInside(structure, card: parent) }
+        var parent = parent
+        for id in structure.replacing {
+            guard let place = parent.children.firstIndex(where: { $0.id == id }), open(place, in: &parent) else { return nil }
+        }
         let members = structure.members
         guard !members.isEmpty, Set(members).count == members.count,
               !parent.children.contains(where: { $0.id == structure.container.id }) else { return nil }
@@ -90,13 +105,10 @@ enum StructureInference {
             else { return nil }
             places.append(place)
         }
-        let proposed = Dictionary(structure.container.children.map { ($0.id, $0.frame.origin) },
-                                  uniquingKeysWith: { first, _ in first })
+        let proposed = origins(in: structure.container)
         var container = structure.container
         container.children = zip(members, places).map { id, place in
-            var member = parent.children[place]
-            member.width.mode = .fixed
-            member.height.mode = .fixed
+            var member = fixedInPlace(parent.children[place])
             member.frame.origin = proposed[id] ?? member.frame.origin
             return member
         }
@@ -111,6 +123,65 @@ enum StructureInference {
         for place in others.sorted(by: >) { children.remove(at: place) }
         result.children = children
         return result
+    }
+
+    /// The card with its column built: nil unless it holds exactly the members, every one arrangeable, and is free.
+    private static func applyingInside(_ structure: Structure, card: LayerNode) -> LayerNode? {
+        let members = structure.members
+        guard card.id == structure.container.id, card.isContainer, card.resolvedLayout == .free,
+              card.children.count == members.count, Set(card.children.map(\.id)) == Set(members),
+              card.children.allSatisfy(\.isArrangeable) else { return nil }
+        let proposed = origins(in: structure.container)
+        let held = Dictionary(card.children.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var result = card
+        result.layout = structure.container.layout
+        result.padding = structure.container.padding
+        result.children = members.compactMap { held[$0] }.map { child in
+            var member = fixedInPlace(child)
+            member.frame.origin = proposed[child.id] ?? member.frame.origin
+            return member
+        }
+        return result
+    }
+
+    /// Opens the container the pass made at `place`: its members take its slot where they are on screen, and a child
+    /// this build couldn't read keeps its place among the rest. False when it isn't one the pass made, or holds
+    /// something this build couldn't read.
+    private static func open(_ place: Int, in parent: inout LayerNode) -> Bool {
+        let container = parent.children[place]
+        guard container.kind == .group, container.sketch?.decidedBy == .structure, container.unreadChildren.isEmpty
+        else { return false }
+        let members = container.children.map { TreeRules.released($0, from: container) }
+        if !parent.unreadChildren.isEmpty {
+            // Its place among all the children, read and unread: those after it move on by what it held, less itself.
+            let unread = Set(parent.unreadChildren.map(\.index))
+            var at = 0, read = 0
+            while unread.contains(at) || read < place {
+                if !unread.contains(at) { read += 1 }
+                at += 1
+            }
+            for index in parent.unreadChildren.indices where parent.unreadChildren[index].index > at {
+                parent.unreadChildren[index].index += members.count - 1
+            }
+        }
+        parent.children.replaceSubrange(place...place, with: members)
+        return true
+    }
+
+    /// A member as a structure holds it: fixed at its size (My call 16), except that a row or column the pass built
+    /// keeps fitting along its own axis, so that it still grows with what it holds.
+    private static func fixedInPlace(_ node: LayerNode) -> LayerNode {
+        var node = node
+        let axis: LayerNode.Axis? = if node.kind == .group, node.sketch?.decidedBy == .structure,
+                                       case .stack(let stack) = node.resolvedLayout { stack.axis } else { nil }
+        if axis != .horizontal || node.width.mode != .fit { node.width.mode = .fixed }
+        if axis != .vertical || node.height.mode != .fit { node.height.mode = .fixed }
+        return node
+    }
+
+    /// Where each child of `container` is proposed to be, in its space.
+    private static func origins(in container: LayerNode) -> [UUID: CGPoint] {
+        Dictionary(container.children.map { ($0.id, $0.frame.origin) }, uniquingKeysWith: { first, _ in first })
     }
 
     // MARK: - The neighbourhood
@@ -140,20 +211,33 @@ enum StructureInference {
 
     // MARK: - One pass
 
-    /// Something a structure may take: a child of the parent as it is now, or a row proposed just before, as one.
+    /// Something a structure may take: a child of the parent as it is now, a member of a container that may grow
+    /// read where it is on screen, or a row or grid proposed just before, as one.
     private struct Item {
         var node: LayerNode
-        /// New, or a row holding a new one.
+        /// New, or a row or grid holding a new one.
         var isNew: Bool
-        /// Its place among the parent's children; a row proposed just before takes its frontmost member's.
+        /// Its place among the parent's children; a member read from its container takes the container's, and a
+        /// structure proposed just before its frontmost member's.
         var place: Int
+        /// The container that may grow it was read from.
+        var grower: UUID?
         var frame: CGRect { node.frame }
     }
 
-    /// Something that may lie between two members: a visible child's turned shape, or a row proposed just before.
+    /// Something that may lie between members: a visible child's turned shape, or a structure proposed just before.
     private struct Obstacle {
         var id: UUID
         var shape: CGRect
+
+        init(id: UUID, shape: CGRect) {
+            self.id = id
+            self.shape = shape
+        }
+
+        init(_ node: LayerNode) {
+            self.init(id: node.id, shape: TreeEdit.shapesBox(of: [node]) ?? node.frame)
+        }
     }
 
     /// A run that qualifies: its items in reading order, the line they share, and its gaps.
@@ -162,6 +246,26 @@ enum StructureInference {
         var line: Line
         var gaps: [CGFloat]
         var confidence: Double
+        var replacing: [UUID]
+    }
+
+    /// A grid that qualifies: its items row by row, its first column's leading edge and first row's top (medians),
+    /// and the gaps between its columns and between its rows.
+    private struct GridCandidate {
+        var items: [Int]
+        var columns: Int
+        var leading: CGFloat
+        var top: CGFloat
+        var columnGaps: [CGFloat]
+        var rowGaps: [CGFloat]
+        var confidence: Double
+        var replacing: [UUID]
+    }
+
+    /// A container the pass made that may grow: what it is, and what it holds.
+    private struct Growing {
+        var kind: Structure.Kind
+        var members: [UUID]
     }
 
     private struct Pass {
@@ -171,54 +275,177 @@ enum StructureInference {
         let mode: Mode
         let measure: TextMeasure
         let depth: Int
-        /// Where each of the parent's children is now.
+        /// The children in `grows` that are still a row, column or grid the pass made, holding only what it may take.
+        let growing: [UUID: Growing]
+        /// Where each of the parent's children, and each member of a container that may grow, is now on screen.
         let origins: [UUID: CGPoint]
+        /// Their places among the parent's children: a member's is its container's.
+        let places: [UUID: Int]
 
-        init(parent: LayerNode, new: Set<UUID>, tokens: DesignTokens, mode: Mode, measure: TextMeasure, depth: Int) {
+        init(parent: LayerNode, new: Set<UUID>, grows: Set<UUID>, tokens: DesignTokens, mode: Mode,
+             measure: TextMeasure, depth: Int) {
             self.parent = parent
             self.new = new
             self.tokens = tokens
             self.mode = mode
             self.measure = measure
             self.depth = depth
-            origins = Dictionary(parent.children.map { ($0.id, $0.frame.origin) }, uniquingKeysWith: { first, _ in first })
+            var growing: [UUID: Growing] = [:], origins: [UUID: CGPoint] = [:], places: [UUID: Int] = [:]
+            for (place, child) in parent.children.enumerated() {
+                if origins[child.id] == nil {
+                    origins[child.id] = child.frame.origin
+                    places[child.id] = place
+                }
+                guard grows.contains(child.id), child.kind == .group, child.sketch?.decidedBy == .structure,
+                      child.isArrangeable, child.unreadChildren.isEmpty, !child.children.isEmpty,
+                      child.children.allSatisfy(\.isArrangeable), let kind = Self.kind(of: child) else { continue }
+                growing[child.id] = Growing(kind: kind, members: child.children.map(\.id))
+                for member in child.children where origins[member.id] == nil {
+                    origins[member.id] = TreeRules.released(member, from: child).frame.origin
+                    places[member.id] = place
+                }
+            }
+            self.growing = growing
+            self.origins = origins
+            self.places = places
         }
 
-        /// Rows, then columns over the rows applied and the rest.
-        func decisions(_ near: [Int]) -> [Decision] {
-            let items = near.map { Item(node: parent.children[$0], isNew: new.contains(parent.children[$0].id), place: $0) }
-            let obstacles = parent.children.filter { !$0.isHidden }.map {
-                Obstacle(id: $0.id, shape: TreeEdit.shapesBox(of: [$0]) ?? $0.frame)
+        private static func kind(of container: LayerNode) -> Structure.Kind? {
+            switch container.resolvedLayout {
+            case .stack(let stack): stack.axis == .horizontal ? .row : .column
+            case .grid(let grid): .grid(columns: grid.columns)
+            case .free, .overlay: nil
             }
-            let rowRule = Rule.row
-            let rows = candidates(among: items, rule: rowRule, obstacles: obstacles).compactMap {
-                decision(for: $0, among: items, rule: rowRule)
+        }
+
+        /// A new card's column; else grids, rows, then columns over the rows and grids applied and the rest.
+        func decisions(_ near: [Int]) -> [Decision] {
+            if parent.kind == .card, !parent.children.isEmpty, parent.children.allSatisfy({ new.contains($0.id) }) {
+                return parent.isArrangeable ? inside() : []
+            }
+            let base = near.map { Item(node: parent.children[$0], isNew: new.contains(parent.children[$0].id), place: $0) }
+
+            // Grids, with every container that may grow read as its members. A grid offered keeps what it holds from
+            // rows and columns too, so that a grid is never split into rows (call 3).
+            let gridItems = expanding(base) { _ in true }
+            let grids = gridCandidates(among: gridItems, obstacles: obstacles(gridItems)).compactMap {
+                decision(for: $0, among: gridItems)
+            }
+            let inGrids = Set(grids.flatMap { $0.structure.members + $0.structure.replacing })
+            let rest = base.filter { !inGrids.contains($0.node.id) }
+
+            // Rows, with the rows that may grow read as their members.
+            let rowItems = expanding(rest) { $0 == .row }
+            let rows = candidates(among: rowItems, rule: .row, obstacles: obstacles(rowItems)).compactMap {
+                decision(for: $0, among: rowItems, rule: .row)
             }
 
-            let applied = rows.compactMap { decision -> Structure? in
-                if case .apply(let row) = decision { row } else { nil }
-            }
-            let inRows = Set(applied.flatMap(\.members))
-            let places = Dictionary(items.map { ($0.node.id, $0.place) }, uniquingKeysWith: { first, _ in first })
-            let columnItems = applied.map { row in
-                Item(node: row.container, isNew: row.members.contains(where: new.contains),
-                     place: row.members.compactMap { places[$0] }.max() ?? 0)
-            } + items.filter { !inRows.contains($0.node.id) }
-            let columnObstacles = obstacles.filter { !inRows.contains($0.id) }
+            // Columns, over the rows and grids just applied, each one item, and the rest, with the columns that may
+            // grow read as their members.
+            let applied = (grids + rows).compactMap(\.applied)
+            let inApplied = Set(applied.flatMap { $0.members + $0.replacing })
+            let columnItems = applied.map { built in
+                Item(node: built.container, isNew: built.members.contains(where: new.contains),
+                     place: built.members.compactMap { places[$0] }.max() ?? 0)
+            } + expanding(rest.filter { !inApplied.contains($0.node.id) }) { $0 == .column }
+            let columnObstacles = obstacles(columnItems, leaving: inApplied)
                 + applied.map { Obstacle(id: $0.container.id, shape: $0.container.frame) }
             let columnRule = Rule.column(mode)
             let columns = candidates(among: columnItems, rule: columnRule, obstacles: columnObstacles).compactMap {
                 decision(for: $0, among: columnItems, rule: columnRule)
             }
 
-            // A row offered whose members a column now holds couldn't be built after it.
-            let taken = Set(columns.flatMap { decision -> [UUID] in
-                if case .apply(let column) = decision { column.members } else { [] }
-            })
+            // A row offered that a column now holds, or whose container that may grow a column holds, couldn't be
+            // built after it.
+            let taken = Set(columns.compactMap(\.applied).flatMap { $0.members + $0.replacing })
             let kept = rows.filter { decision in
-                if case .offer(let row) = decision { taken.isDisjoint(with: row.members) } else { true }
+                if case .offer(let row) = decision { taken.isDisjoint(with: row.members + row.replacing) } else { true }
             }
-            return kept + columns
+            return grids + kept + columns
+        }
+
+        /// `items` with each container that may grow, of a kind `reads` takes, read as its members where they are on
+        /// screen: a structure that may take its place (call 2).
+        private func expanding(_ items: [Item], _ reads: (Structure.Kind) -> Bool) -> [Item] {
+            items.flatMap { item -> [Item] in
+                guard let growing = growing[item.node.id], reads(growing.kind) else { return [item] }
+                return item.node.children.map { member in
+                    Item(node: TreeRules.released(member, from: item.node), isNew: new.contains(member.id),
+                         place: item.place, grower: item.node.id)
+                }
+            }
+        }
+
+        /// Every visible child's turned shape but those `gone`, with a container `items` reads as its members shown
+        /// as its members.
+        private func obstacles(_ items: [Item], leaving gone: Set<UUID> = []) -> [Obstacle] {
+            let read = Set(items.compactMap(\.grower))
+            return parent.children.filter { !$0.isHidden && !gone.contains($0.id) }.flatMap { child -> [Obstacle] in
+                guard read.contains(child.id) else { return [Obstacle(child)] }
+                return child.children.filter { !$0.isHidden }.map { Obstacle(TreeRules.released($0, from: child)) }
+            }
+        }
+
+        /// Call 2: holding any member of a container that may grow, a structure holds all of them and a new node
+        /// besides, and is bigger: more members, or a grid over a row or column. The containers it takes the place
+        /// of, in reading order; nil when it may not be built.
+        private func replacing(_ members: [Item], kind: Structure.Kind) -> [UUID]? {
+            let ids = Set(members.map(\.node.id))
+            var replaced: [UUID] = []
+            for case let container? in members.map(\.grower) where !replaced.contains(container) {
+                guard let growing = growing[container] else { return nil }
+                let held = Set(growing.members)
+                guard held.isSubset(of: ids), members.contains(where: { $0.isNew && !held.contains($0.node.id) }),
+                      members.count > held.count || (kind.isGrid && !growing.kind.isGrid) else { return nil }
+                replaced.append(container)
+            }
+            return replaced
+        }
+
+        // MARK: A new card's inside
+
+        /// Everything a new card holds, as a column that is the card's own layout; else nothing.
+        private func inside() -> [Decision] {
+            let items = parent.children.indices.map { Item(node: parent.children[$0], isNew: true, place: $0) }
+            let rule = Rule.column(mode)
+            guard items.allSatisfy({ $0.node.isArrangeable }),
+                  let column = candidates(among: items, rule: rule, obstacles: []).first, column.items.count == items.count
+            else { return [] }
+            let gap = median(column.gaps)
+            let rhythm = cardProposal(column, among: items, spacing: tokens.spacing(nearest: gap))
+            let exact = spacing(of: rhythm) == gap.rounded() ? rhythm : cardProposal(column, among: items, spacing: gap.rounded())
+            return decision(confidence: column.confidence, rhythm: rhythm, exact: exact).map { [$0] } ?? []
+        }
+
+        /// The card laid out as the column: its padding is the design's card padding, but where that would move the
+        /// column's leading line or its top more than 8 pt, the inset as drawn is kept there (tidying, it is always
+        /// the card's). Its trailing and bottom padding are the card's.
+        private func cardProposal(_ candidate: Candidate, among items: [Item], spacing: CGFloat) -> Structure {
+            let members = candidate.items.map { items[$0].node }
+            let frames = members.map(\.frame)
+            let cardPadding = tokens.card.padding, width = parent.frame.width
+            let limit = mode == .tidy ? CGFloat.infinity : StructureConventions.furthestAutomaticMove
+            let edge = median(frames.map(candidate.line.position)), top = frames.map(\.minY).min() ?? cardPadding
+            var padding = LayerNode.Padding(all: cardPadding)
+            if abs(top - cardPadding) > limit { padding.top = max(0, snap(top)) }
+            switch candidate.line {
+            case .leading where abs(edge - cardPadding) > limit: padding.leading = max(0, snap(edge))
+            // Centred in what the card's trailing padding leaves.
+            case .middles where abs(edge - width / 2) > limit: padding.leading = max(0, snap(2 * edge - width + cardPadding))
+            default: break
+            }
+            var template = LayerNode(kind: .group)
+            template.frame.size = parent.frame.size
+            (template.width, template.height) = (parent.width, parent.height)
+            template.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: spacing, alignment: candidate.line.alignment))
+            template.padding = padding
+            let laid = laidOut(template, holding: members)
+            var proposed = parent
+            (proposed.layout, proposed.padding, proposed.children) = (laid.layout, laid.padding, laid.children)
+            proposed.frame.size = laid.frame.size
+            let movement = laid.children.map { moved($0, to: $0.frame.origin) }.max() ?? 0
+            return Structure(kind: .cardColumn, parent: parent.id, members: members.map(\.id), container: proposed,
+                             confidence: candidate.confidence, movement: movement)
         }
 
         // MARK: Finding runs
@@ -231,10 +458,11 @@ enum StructureInference {
             while true {
                 let order = available.sorted { a, b in
                     let (x, y) = (items[a].frame, items[b].frame)
-                    return (rule.start(x), rule.startAcross(x), items[a].place) < (rule.start(y), rule.startAcross(y), items[b].place)
+                    return (rule.start(x), rule.startAcross(x), items[a].place, a) < (rule.start(y), rule.startAcross(y), items[b].place, b)
                 }
                 let runs = order.indices.compactMap { run(from: $0, in: order, items: items, rule: rule, obstacles: obstacles) }
-                guard let best = runs.min(by: { ranks($0, before: $1, items: items) }) else { break }
+                guard let best = runs.min(by: { ranks($0.items, $0.confidence, before: $1.items, $1.confidence, items: items) })
+                else { break }
                 chosen.append(best)
                 available.removeAll { best.items.contains($0) }
             }
@@ -266,12 +494,14 @@ enum StructureInference {
             let frames = run.map { items[$0].frame }
             // The line that fits best against its tolerance; ties go to the first (a row's centres, a column's leading).
             guard run.count >= rule.least, run.contains(where: { items[$0].isNew }),
+                  let replaced = self.replacing(run.map { items[$0] }, kind: rule.kind),
                   let line = lines.enumerated().min(by: { a, b in
                       (error(frames.map(a.element.position)) / a.element.tolerance, a.offset)
                           < (error(frames.map(b.element.position)) / b.element.tolerance, b.offset)
                   })?.element
             else { return nil }
-            return Candidate(items: run, line: line, gaps: gaps, confidence: confidence(frames, line: line, gaps: gaps, rule: rule))
+            return Candidate(items: run, line: line, gaps: gaps, confidence: confidence(frames, line: line, gaps: gaps, rule: rule),
+                             replacing: replaced)
         }
 
         /// Never a row holding a row or a column holding a column (F5), nor a member's subtree past depth 32 (F9):
@@ -281,11 +511,12 @@ enum StructureInference {
             return depth + 2 + TreeEdit.levels(below: item.node) <= TreeRules.maximumDepth
         }
 
-        private func ranks(_ a: Candidate, before b: Candidate, items: [Item]) -> Bool {
-            if a.items.count != b.items.count { return a.items.count > b.items.count }
-            if a.confidence != b.confidence { return a.confidence > b.confidence }
-            let (x, y) = (items[a.items[0]], items[b.items[0]])
-            return (x.frame.minY, x.frame.minX, x.place) < (y.frame.minY, y.frame.minX, y.place)
+        /// Most members first, then most sure, then first in reading order.
+        private func ranks(_ a: [Int], _ aSure: Double, before b: [Int], _ bSure: Double, items: [Item]) -> Bool {
+            if a.count != b.count { return a.count > b.count }
+            if aSure != bSure { return aSure > bSure }
+            let (x, y) = (items[a[0]], items[b[0]])
+            return (x.frame.minY, x.frame.minX, x.place, a[0]) < (y.frame.minY, y.frame.minX, y.place, b[0])
         }
 
         /// Call 4: alignment × gaps × sizes, each `clamp(1 − e / (2 · limit), 0.5, 1)`.
@@ -298,6 +529,120 @@ enum StructureInference {
             return alignment * gapFactor * factor(sizeError, limit: 1)
         }
 
+        // MARK: Finding grids
+
+        /// The grids that qualify, taken greedily as runs are. Each item is in one at most.
+        private func gridCandidates(among items: [Item], obstacles: [Obstacle]) -> [GridCandidate] {
+            var available = items.indices.filter { mayHoldInGrid(items[$0]) }
+            var chosen: [GridCandidate] = []
+            while true {
+                let found = blocks(of: available, in: items, obstacles: obstacles)
+                guard let best = found.min(by: { ranks($0.items, $0.confidence, before: $1.items, $1.confidence, items: items) })
+                else { break }
+                chosen.append(best)
+                available.removeAll { best.items.contains($0) }
+            }
+            return chosen
+        }
+
+        /// A grid takes only leaves and cards (F5), and nothing whose subtree would pass depth 32 (F9).
+        private func mayHoldInGrid(_ item: Item) -> Bool {
+            item.node.kind != .group && depth + 2 + TreeEdit.levels(below: item.node) <= TreeRules.maximumDepth
+        }
+
+        /// Every grid among `available`: each run of rows (tops within 4), and in it each run of columns (leading edges
+        /// within 4), with what lies in both. Only a run's last row may be short.
+        private func blocks(of available: [Int], in items: [Item], obstacles: [Obstacle]) -> [GridCandidate] {
+            let least = StructureConventions.gridLeastColumns
+            let rows = clusters(available, items, by: \.minY)
+            var found: [GridCandidate] = []
+            for first in rows.indices where rows[first].count >= least {
+                for last in (first + 1)..<rows.count {
+                    let inRows = rows[first...last].flatMap { $0 }
+                    let columns = clusters(inRows, items, by: \.minX)
+                    for left in columns.indices {
+                        for right in (left + 1)..<columns.count {
+                            let taken = Set(columns[left...right].joined())
+                            if let grid = grid(inRows.filter(taken.contains), items, obstacles) { found.append(grid) }
+                        }
+                    }
+                    if rows[last].count < least { break }
+                }
+            }
+            return found
+        }
+
+        /// The grid `indices` make, if they make one: ≥ 2 rows and ≥ 2 columns, one member in each cell, every row full
+        /// but a last one that a growing grid gains, filling its first columns; cell sizes within 20% of the median's;
+        /// a new member; gaps that don't overlap; nothing else inside; and all of any container that may grow.
+        private func grid(_ indices: [Int], _ items: [Item], _ obstacles: [Obstacle]) -> GridCandidate? {
+            typealias C = StructureConventions
+            let rows = clusters(indices, items, by: \.minY), columns = clusters(indices, items, by: \.minX)
+            guard rows.count >= C.gridLeastRows, columns.count >= C.gridLeastColumns,
+                  indices.contains(where: { items[$0].isNew }) else { return nil }
+            var column: [Int: Int] = [:]
+            for (place, group) in columns.enumerated() { for index in group { column[index] = place } }
+            let cells = rows.map { row in row.sorted { column[$0, default: 0] < column[$1, default: 0] } }
+            for (place, row) in cells.enumerated() {
+                // One in each cell, from the first column on; full but for the last row.
+                guard row.map({ column[$0, default: -1] }) == Array(0..<row.count),
+                      row.count == columns.count || place == cells.count - 1 else { return nil }
+            }
+
+            let frames = indices.map { items[$0].frame }
+            let middleWidth = median(frames.map(\.width)), middleHeight = median(frames.map(\.height))
+            guard middleWidth > 0, middleHeight > 0 else { return nil }
+            let sizeError = frames.map {
+                max(abs($0.width - middleWidth) / middleWidth, abs($0.height - middleHeight) / middleHeight)
+            }.max() ?? 0
+            guard Double(sizeError) <= C.gridCellSizeVariation else { return nil }
+
+            var columnGaps: [CGFloat] = [], rowGaps: [CGFloat] = []
+            for row in cells {
+                for (a, b) in zip(row, row.dropFirst()) { columnGaps.append(items[b].frame.minX - items[a].frame.maxX) }
+            }
+            for (upper, lower) in zip(cells, cells.dropFirst()) {
+                for (a, b) in zip(upper, lower) { rowGaps.append(items[b].frame.minY - items[a].frame.maxY) }
+            }
+            guard (columnGaps + rowGaps).allSatisfy({ $0 >= 0 }) else { return nil }
+
+            let ids = Set(indices.map { items[$0].node.id })
+            let box = frames.dropFirst().reduce(frames[0]) { $0.union($1) }
+            guard !obstacles.contains(where: { !ids.contains($0.id) && overlaps($0.shape, box) }) else { return nil }
+
+            let kind = Structure.Kind.grid(columns: columns.count)
+            let members = cells.flatMap { $0 }
+            guard let replaced = self.replacing(members.map { items[$0] }, kind: kind) else { return nil }
+            // Only a grid that may grow gains a short last row.
+            if cells[cells.count - 1].count < columns.count,
+               !replaced.contains(where: { growing[$0]?.kind == kind }) { return nil }
+
+            let alignment = (rows.map { $0.map { items[$0].frame.minY } } + columns.map { $0.map { items[$0].frame.minX } })
+                .map(error).max() ?? 0
+            let confidence = factor(alignment, limit: C.gridEdgeTolerance)
+                * factor(max(spread(columnGaps), spread(rowGaps)), limit: gridGapLimit)
+                * factor(sizeError, limit: CGFloat(C.gridCellSizeVariation))
+            return GridCandidate(
+                items: members, columns: columns.count,
+                leading: median(columns[0].map { items[$0].frame.minX }), top: median(rows[0].map { items[$0].frame.minY }),
+                columnGaps: columnGaps, rowGaps: rowGaps, confidence: confidence, replacing: replaced)
+        }
+
+        /// `indices` in groups along one edge: in order, a group takes each next one within 4 of its first.
+        private func clusters(_ indices: [Int], _ items: [Item], by edge: (CGRect) -> CGFloat) -> [[Int]] {
+            let sorted = indices.sorted { (edge(items[$0].frame), items[$0].place, $0) < (edge(items[$1].frame), items[$1].place, $1) }
+            var groups: [[Int]] = []
+            for index in sorted {
+                if let first = groups.last?.first,
+                   edge(items[index].frame) - edge(items[first].frame) <= StructureConventions.gridEdgeTolerance {
+                    groups[groups.count - 1].append(index)
+                } else {
+                    groups.append([index])
+                }
+            }
+            return groups
+        }
+
         // MARK: Proposals
 
         /// The rhythm's spacing, else the exact median gap, else an offer with the rhythm's (My call 16).
@@ -307,25 +652,63 @@ enum StructureInference {
             let exactGap = gap.rounded()
             let exact = spacing(of: rhythm) == exactGap
                 ? rhythm : proposal(candidate, among: items, rule: rule, spacing: exactGap)
-            switch decide(confidence: candidate.confidence, rhythmMove: rhythm.movement, medianMove: exact.movement, mode: mode) {
-            case .applyRhythm?: return .apply(rhythm)
-            case .applyMedian?: return .apply(exact)
-            case .offer?: return .offer(rhythm)
-            case nil: return nil
+            return decision(confidence: candidate.confidence, rhythm: rhythm, exact: exact)
+        }
+
+        /// A grid's column and row spacings, each through the rhythm as a row's is, then both exact.
+        private func decision(for grid: GridCandidate, among items: [Item]) -> Decision? {
+            let gaps = (column: median(grid.columnGaps), row: median(grid.rowGaps))
+            let onRhythm = (tokens.spacing(nearest: gaps.column), tokens.spacing(nearest: gaps.row))
+            let exactly = (gaps.column.rounded(), gaps.row.rounded())
+            let rhythm = proposal(grid, among: items, spacing: onRhythm)
+            let exact = onRhythm == exactly ? rhythm : proposal(grid, among: items, spacing: exactly)
+            return decision(confidence: grid.confidence, rhythm: rhythm, exact: exact)
+        }
+
+        private func decision(confidence: Double, rhythm: Structure, exact: Structure) -> Decision? {
+            switch decide(confidence: confidence, rhythmMove: rhythm.movement, medianMove: exact.movement, mode: mode) {
+            case .applyRhythm?: .apply(rhythm)
+            case .applyMedian?: .apply(exact)
+            case .offer?: .offer(rhythm)
+            case nil: nil
             }
         }
 
-        /// The container as the engine lays it out: it starts at the first member, with the shared line at the
+        /// A row or column as the engine lays it out: it starts at the first member, with the shared line at the
         /// members' median, in whole points.
         private func proposal(_ candidate: Candidate, among items: [Item], rule: Rule, spacing: CGFloat) -> Structure {
             let members = candidate.items.map { items[$0].node }
-            var container = LayerNode(kind: .group)
-            container.layout = .stack(LayerNode.Stack(axis: rule.axis, spacing: spacing, alignment: candidate.line.alignment))
-            container.width = LayerNode.Sizing(.fit)
-            container.height = LayerNode.Sizing(.fit)
-            // Each member is fixed, so where the stack puts it depends on its size alone: the engine lays out a leaf
-            // of that size in its place, in a free parent as it will be. So nothing inside a member is laid out, and
-            // no id the pass doesn't throw away is counted as laid out (F7).
+            var template = LayerNode(kind: .group)
+            template.layout = .stack(LayerNode.Stack(axis: rule.axis, spacing: spacing, alignment: candidate.line.alignment))
+            (template.width, template.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+            var container = laidOut(template, holding: members)
+            let frames = members.map(\.frame)
+            let along = snap(rule.start(frames[0]))
+            let across = snap(median(frames.map(candidate.line.position)) - candidate.line.share * rule.across(container.frame))
+            container.frame.origin = rule.axis == .horizontal ? CGPoint(x: along, y: across) : CGPoint(x: across, y: along)
+            return made(rule.kind, members: members, in: container, confidence: candidate.confidence, replacing: candidate.replacing)
+        }
+
+        /// A grid as the engine lays it out, aligned (start, start): its first column's leading edge and first row's
+        /// top where they were drawn, in whole points.
+        private func proposal(_ grid: GridCandidate, among items: [Item], spacing: (column: CGFloat, row: CGFloat)) -> Structure {
+            let members = grid.items.map { items[$0].node }
+            var template = LayerNode(kind: .group)
+            template.layout = .grid(LayerNode.Grid(
+                columns: grid.columns, columnSpacing: spacing.column, rowSpacing: spacing.row,
+                alignment: LayerNode.Alignment(horizontal: .start, vertical: .start)))
+            (template.width, template.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+            var container = laidOut(template, holding: members)
+            container.frame.origin = CGPoint(x: snap(grid.leading), y: snap(grid.top))
+            return made(.grid(columns: grid.columns), members: members, in: container, confidence: grid.confidence,
+                        replacing: grid.replacing)
+        }
+
+        /// `template` as the engine lays it out holding `members` fixed in place. A fixed member's place depends on its size alone, so the engine lays out a leaf of that size in its
+        /// place, in a free parent as it will be: nothing inside a member is laid out, and no id the pass doesn't throw
+        /// away is counted as laid out (F7).
+        private func laidOut(_ template: LayerNode, holding members: [LayerNode]) -> LayerNode {
+            var container = template
             container.children = members.map { member in
                 var standIn = LayerNode(kind: .shape)
                 standIn.frame = member.frame
@@ -336,26 +719,26 @@ enum StructureInference {
             var diagnostics: [LayoutDiagnostic] = []
             LayoutEngine.layOut(&scratch, previous: nil, measure: measure, diagnostics: &diagnostics)
             container = scratch.children[0]
-            container.id = containerID(rule.kind, members: members.map(\.id))
             container.children = zip(members, container.children).map { member, standIn in
-                var member = member
-                member.width.mode = .fixed
-                member.height.mode = .fixed
+                var member = StructureInference.fixedInPlace(member)
                 member.frame = standIn.frame
                 return member
             }
+            return container
+        }
 
-            let frames = members.map(\.frame)
-            let along = snap(rule.start(frames[0]))
-            let across = snap(median(frames.map(candidate.line.position)) - candidate.line.share * rule.across(container.frame))
-            container.frame.origin = rule.axis == .horizontal ? CGPoint(x: along, y: across) : CGPoint(x: across, y: along)
-            container.sketch = LayerNode.SketchIntent(
-                originalBounds: container.frame, normalizedBounds: .zero, confidence: candidate.confidence,
-                decidedBy: .structure, placement: .fixed)
+        /// The structure `container` makes: the id these members always make in this parent, an intent decided by
+        /// `.structure`, and how far it moves what it holds.
+        private func made(_ kind: Structure.Kind, members: [LayerNode], in container: LayerNode, confidence: Double,
+                          replacing: [UUID]) -> Structure {
+            var container = container
+            container.id = containerID(kind, members: members.map(\.id))
+            container.sketch = LayerNode.SketchIntent(sketched: container.frame, on: nil, margin: 0, confidence: confidence,
+                                                      decidedBy: .structure)
             let origin = container.frame.origin
             let movement = container.children.map { moved($0, to: origin.offset(by: $0.frame.origin)) }.max() ?? 0
-            return Structure(kind: rule.kind, parent: parent.id, members: members.map(\.id), container: container,
-                             confidence: candidate.confidence, movement: movement)
+            return Structure(kind: kind, parent: parent.id, members: members.map(\.id), replacing: replacing,
+                             container: container, confidence: confidence, movement: movement)
         }
 
         /// How far a member moves to `origin` in the parent's space. What a row proposed just before holds moves with it,
@@ -472,6 +855,9 @@ enum StructureInference {
 
     // MARK: - Numbers
 
+    /// The limit of a grid's gap factor: the spec gives a grid's gaps the 4 pt a column's may vary by.
+    private static let gridGapLimit = StructureConventions.columnGapVariation
+
     /// The middle value, or the mean of the middle two.
     private static func median(_ values: [CGFloat]) -> CGFloat {
         let sorted = values.sorted()
@@ -523,6 +909,24 @@ enum StructureInference {
 
     private static let looked = OSAllocatedUnfairLock(initialState: [UUID: [Int]]())
     #endif
+}
+
+private extension StructureInference.Decision {
+    var structure: StructureInference.Structure {
+        switch self {
+        case .apply(let structure), .offer(let structure): structure
+        }
+    }
+
+    var applied: StructureInference.Structure? {
+        if case .apply(let structure) = self { structure } else { nil }
+    }
+}
+
+private extension StructureInference.Structure.Kind {
+    var isGrid: Bool {
+        if case .grid = self { true } else { false }
+    }
 }
 
 private extension CGPoint {
