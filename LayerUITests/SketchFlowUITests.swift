@@ -1254,6 +1254,72 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "Ungroup should leave the two notes selected")
     }
 
+    /// The Group button offers what is selected can be grouped as (plan 4, Task 6). One thing can only be held by a
+    /// card: a tap opens the menu, and Card wraps it. Beside a locked note, which Group leaves out, only Card is
+    /// offered too, and a tap again opens the menu rather than doing nothing.
+    func testTheGroupMenuPutsOneThingInACard() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        // A note, moved aside and locked.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        for _ in 0..<3 where !control("Unlock").exists {
+            control("Lock").tap()
+            _ = control("Unlock").waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(control("Unlock").exists, "the note should lock")
+
+        // Another, alone: a card is all it can be, so a tap on Group opens the menu, and Card wraps it.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+
+        // The icons the bar had before it offered a card keep their order and their place: centred over the note, as
+        // the bar was, on the knob below its middle. Group comes after all of them.
+        XCTAssertTrue(control("Group").waitForExistence(timeout: 5), "one thing should be offered Group")
+        usleep(600_000)
+        let known = ["Edit text", "Format selection", "Duplicate", "Lock", "Arrange", "Delete selection"]
+            .map(control).filter(\.exists).map(\.frame)
+        XCTAssertGreaterThanOrEqual(known.count, 5, "the bar should have the icons it had")
+        XCTAssertTrue(zip(known, known.dropFirst()).allSatisfy { $0.maxX <= $1.minX }, "the icons should keep their order")
+        if let first = known.first, let last = known.last {
+            XCTAssertGreaterThanOrEqual(control("Group").frame.minX, last.maxX, "Group should come after every icon that was there")
+            XCTAssertEqual((first.minX + last.maxX) / 2, control("Rotate").frame.midX, accuracy: 1.5,
+                           "the icons that were there should stay centred over the note, where they were")
+        }
+        openGroupMenu()
+        XCTAssertFalse(app.buttons["Row"].isEnabled, "one thing can't be a row")
+        app.buttons["Card"].tap()
+        XCTAssertTrue(control("Ungroup").waitForExistence(timeout: 5), "Card should wrap the note and select the card")
+
+        // The card and the locked note: Group leaves the locked one out, so a tap opens the menu with Card in it.
+        clearSelection()
+        point(other).tap()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        openGroupMenu()
+        XCTAssertFalse(app.buttons["Row"].isEnabled, "with the locked note left out there is one thing to group")
+        XCTAssertTrue(app.buttons["Card"].isEnabled)
+    }
+
+    /// Taps Group until its menu shows Card: a note's popover, for typing, may take the first tap.
+    private func openGroupMenu() {
+        for _ in 0..<3 where !app.buttons["Card"].exists {
+            control("Group").tap()
+            _ = app.buttons["Card"].waitForExistence(timeout: 6)
+        }
+        XCTAssertTrue(app.buttons["Card"].exists, "a tap on Group should open its menu")
+    }
+
     /// Send to Back from the Arrange menu puts the thing behind the one it overlapped, and the
     /// Layers panel, which lists the front first, shows the selected note move down a row.
     func testArrangeMenuSendsToBack() {
