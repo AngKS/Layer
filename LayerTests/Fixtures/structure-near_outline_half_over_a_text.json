@@ -2,8 +2,26 @@
   "existing" : [
     {
       "frame" : [
+        96,
+        120,
+        200,
+        40
+      ],
+      "kind" : "title"
+    },
+    {
+      "frame" : [
+        20,
+        170,
+        353,
+        40
+      ],
+      "kind" : "body"
+    },
+    {
+      "frame" : [
         30,
-        215,
+        210,
         300,
         40
       ],
@@ -12,7 +30,7 @@
   ],
   "expected" : "none",
   "id" : "structure-near_outline_half_over_a_text",
-  "label" : "none",
+  "label" : "card",
   "screenSize" : [
     393,
     852

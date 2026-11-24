@@ -29,11 +29,12 @@ struct StructureFixture: Codable, Sendable, Identifiable {
 
 extension StructureFixture {
     /// Whether what the pass found is what this fixture expects. A clean or jittered fixture becomes its structure with
-    /// its decision; a near miss never groups; a noisy one is never the wrong structure: the expected one, or none.
+    /// its decision; a near miss never groups (its decision is none); a noisy one is never the wrong structure: the expected one, or none.
     func isAsExpected(label found: String, decision: String) -> Bool {
         switch variant {
         case .clean, .jittered: found == label && decision == expected
-        case .nearMiss: found == "none"
+        // A card that holds only what it encloses is no grouping: what matters is that the pass makes nothing of it.
+        case .nearMiss: decision == "none" && (found == "none" || found == label)
         case .noisy: found == label || found == "none"
         }
     }
@@ -48,11 +49,8 @@ enum StructureBenchmark {
         return try files.map { try decoder.decode(StructureFixture.self, from: Data(contentsOf: $0)) }
     }
 
-    /// Each sketch is read by the rules, placed with `SketchedNode` on a free root built from `existing`, then the pass
-    /// runs over the batch. Returns the structure kind found ("none" when there isn't one), the decision, and the pass's
-    /// time. A batch that made a card round something is read by what the pass makes of the card's inside, labelled
-    /// "card"; otherwise the pass runs over the screen's root, and the last decision (the outermost) is the answer.
-    static func run(_ fixture: StructureFixture) -> (label: String, decision: String, passSeconds: Double) {
+    /// The screen's content with the batch placed, the nodes the batch made, and which of them are cards that took something.
+    static func place(_ fixture: StructureFixture) -> (content: TreeContent, batch: Set<UUID>, cards: [UUID]) {
         let size = CGSize(width: fixture.screenSize[0], height: fixture.screenSize[1])
         var screen = TreeScreen(name: "Screen", origin: .zero, scale: 1, deviceID: nil)
         screen.root.children = fixture.existing.map { existing in
@@ -64,7 +62,6 @@ enum StructureBenchmark {
         }
         var content = TreeContent()
         content.screens = [screen]
-        let tokens = content.settings.tokens
 
         var batch: Set<UUID> = []
         var cards: [UUID] = []
@@ -87,8 +84,17 @@ enum StructureBenchmark {
             if !made.takes.isEmpty { cards.append(made.node.id) }
         }
 
+        return (content, batch, cards)
+    }
+
+    /// Each sketch is read by the rules, placed with `SketchedNode` on a free root built from `existing`, then the pass
+    /// runs over the batch. Returns the structure kind found ("none" when there isn't one), the decision, and the pass's
+    /// time. A batch that made a card round something is read by what the pass makes of the card's inside, labelled
+    /// "card"; otherwise the pass runs over the screen's root, and the last decision (the outermost) is the answer.
+    static func run(_ fixture: StructureFixture) -> (label: String, decision: String, passSeconds: Double) {
+        let (content, batch, cards) = place(fixture)
+        let tokens = content.settings.tokens
         let root = content.screens[0].root
-        if ProcessInfo.processInfo.environment["P5DEBUG"] != nil { print(fixture.id, root.children.map { "\($0.kind.rawValue) \($0.frame)" }) }
         var decisions: [StructureInference.Decision] = []
         let start = ContinuousClock.now
         if cards.isEmpty {

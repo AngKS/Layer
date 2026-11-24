@@ -452,9 +452,9 @@ enum StructureFixtureGenerator {
                  sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 140))], label: "card", expected: "apply"),
         ], jittered: [0], noisy: [1])
 
-        func near(_ name: String, _ base: Base) {
+        func near(_ name: String, _ base: Base, label: String = "none") {
             var base = base
-            base.label = "none"
+            base.label = label
             base.expected = "none"
             out.append(structureFixture("near_\(name)", .nearMiss, base))
         }
@@ -472,9 +472,9 @@ enum StructureFixtureGenerator {
                                           sketches: [image(20, 340, 160, 120)], label: "", expected: ""))
         near("column_edge_6_off", Base(existing: [thing(.image, 22, 180, 160, 120), thing(.image, 28, 452, 160, 120)],
                                        sketches: [image(22, 316, 160, 120)], label: "", expected: ""))
-        near("outline_half_over_a_text", Base(existing: [thing(.text, 30, 215, 300, 40)],
-                                              sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 130))],
-                                              label: "", expected: ""))
+        near("outline_half_over_a_text", Base(
+            existing: [thing(.title, 96, 120, 200, 40), thing(.body, 20, 170, 353, 40), thing(.text, 30, 210, 300, 40)],
+            sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 130))], label: "card", expected: "none"), label: "card")
         near("a_lone_text", Base(sketches: [[SketchSamples.wave(CGRect(x: 100, y: 300, width: 160, height: 24), humps: 6)]],
                                  label: "", expected: ""))
         return out

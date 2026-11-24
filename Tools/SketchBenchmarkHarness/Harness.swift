@@ -155,7 +155,7 @@ struct SketchBenchmarkHarness {
             times.append(found.passSeconds)
             let right = fixture.isAsExpected(label: found.label, decision: found.decision)
             if right { asExpected += 1 }
-            if fixture.variant == .nearMiss, found.label != "none" { nearMissesGrouped += 1 }
+            if fixture.variant == .nearMiss, found.decision != "none" { nearMissesGrouped += 1 }
             if verbose || !right {
                 print("  \(right ? "ok  " : "WRONG") \(fixture.id): \(found.label) \(found.decision) (expected \(fixture.label) \(fixture.expected))")
             }

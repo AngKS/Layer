@@ -220,15 +220,16 @@ by `RuleInterpreter`, placed with `SketchedNode` on a free root, and then `Struc
 | Columns | 6: three wide boxes as text fields, four stacked-line bodies; 2 clean, 2 jittered, 2 noisy | a column, applied |
 | Grids | 6: 2 × 2 and 2 × 3 half-width images; 2 clean, 2 jittered, 2 noisy | a grid, applied |
 | Cards | 4: an outline round two texts (clean, jittered), round three (clean, noisy) | a card; its inside none for two, a column applied for three |
-| Near misses | 8: a title 120 pt above a button, two images 40 apart, heights 2.5 times apart (an image and an avatar), a locked divider between texts, an L of three images, a column edge 6 pt off, an outline half over a text, a lone text | none |
+| Near misses | 8: a title 120 pt above a button, two images 40 apart, heights 2.5 times apart (an image and an avatar), a locked divider between texts, an L of three images, a column edge 6 pt off, an outline round a title and a body with a third text half under its edge (a card of the two, the text left out), a lone text | none (the card's inside none) |
 
 A clean or jittered fixture must be its structure with its decision; a near miss must give none; a noisy fixture may be
 its structure or none, never another (`isAsExpected`). The fixtures went in first and `StructureFixtureTests` was red
 before any of them was generated.
 
-Three near misses were checked against a control (the same fixture with the one thing changed back: the divider not locked, the
-column's edge not off, the images 20 apart) to be sure that they are none for the reason they name, and not for another:
-each control groups.
+Controls are tests in `StructureFixtureTests`: each near miss with only its one cause changed back must group (the image's
+height 150 to 70 beside the avatar, the divider unlocked, the column's edge 6 pt off made 0, the gap 40 made 20), so that
+none is for the reason it names. The half-over outline reads as a card that takes the title and the body and leaves the
+text; with the text wholly inside it takes all three.
 
 Two things the layout does to a sketch shaped the fixtures: `ElementLayout.sketched` places a sketched title or body after
 a neighbour on its left at the gutter, and lines a box's leading edge up with a neighbour's within 8 pt. So "two texts 40

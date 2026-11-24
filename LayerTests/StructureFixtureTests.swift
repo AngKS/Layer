@@ -53,7 +53,7 @@ struct StructureFixtureTests {
     @Test func nearMissesNeverGroup() {
         let misses = Self.run(Self.fixtures.filter { $0.variant == .nearMiss })
         #expect(misses.count == 8)
-        let grouped = misses.filter { $0.label != "none" || $0.decision != "none" }
+        let grouped = misses.filter { $0.decision != "none" }
         #expect(grouped.isEmpty, "\(grouped.map { "\($0.fixture.id): \($0.label) \($0.decision)" })")
     }
 
@@ -64,10 +64,63 @@ struct StructureFixtureTests {
         #expect(wrong.isEmpty, "\(wrong.map { "\($0.fixture.id): \($0.label) \($0.decision)" })")
     }
 
+    // MARK: Controls
+    //
+    // Each near miss is none for the one cause it names. The same fixture with only that cause changed back must group, or
+    // the near miss could be none for another reason (a kind mix, a snap).
+
+    private func nearMiss(_ name: String) throws -> StructureFixture {
+        try #require(Self.fixtures.first { $0.id == "structure-near_\(name)" })
+    }
+
+    private func control(_ name: String, becomes label: String, change: (inout StructureFixture) -> Void) throws {
+        let miss = try nearMiss(name)
+        #expect(StructureBenchmark.run(miss).decision == "none", "\(name) is none as drawn")
+        var changed = miss
+        change(&changed)
+        let found = StructureBenchmark.run(changed)
+        #expect(found.label == label && found.decision != "none", "\(name), the one cause changed back: \(found.label) \(found.decision)")
+    }
+
+    @Test func heightsTwoAndAHalfTimesApartGroupWhenTheyAreAlike() throws {
+        // Only the image's height, kept about the same centre (375, the avatar's): 150 against the avatar's 60 is 2.5
+        // times; 70 is not.
+        try control("heights_2_5_apart", becomes: "row") { $0.existing[0].frame[1] = 340; $0.existing[0].frame[3] = 70 }
+    }
+
+    @Test func aLockedDividerBetweenTextsGroupsWhenItIsNotLocked() throws {
+        try control("locked_divider_between_texts", becomes: "column") { $0.existing[2].locked = false }
+    }
+
+    @Test func aColumnEdgeSixPointsOffGroupsWhenItIsNotOff() throws {
+        try control("column_edge_6_off", becomes: "column") { $0.existing[0].frame[0] = 28; $0.existing[1].frame[0] = 28 }
+    }
+
+    @Test func twoThingsFortyPointsApartGroupWhenTheyAreCloser() throws {
+        try control("two_things_40_apart", becomes: "row") { $0.existing[0].frame[0] = 210 }
+    }
+
+    @Test func anOutlineHalfOverATextTakesOnlyWhatItEncloses() throws {
+        let miss = try nearMiss("outline_half_over_a_text")
+        let drawn = StructureBenchmark.place(miss)
+        // The reading is a card, and it holds the title and the body but not the text half under its edge.
+        let card = try #require(drawn.content.screens[0].root.children.first { drawn.cards.contains($0.id) })
+        #expect(card.kind == .card)
+        #expect(card.children.map(\.kind) == [.title, .body])
+        #expect(drawn.content.screens[0].root.children.contains { $0.kind == .text })
+
+        // The control: the text wholly inside is taken too.
+        var inside = miss
+        inside.existing[2].frame[1] = 186
+        let whole = StructureBenchmark.place(inside)
+        let held = try #require(whole.content.screens[0].root.children.first { whole.cards.contains($0.id) })
+        #expect(held.children.map(\.kind) == [.title, .body, .text])
+    }
+
     @Test func printsTheStructureReport() {
         let found = Self.run(Self.fixtures)
         let asExpected = found.filter { $0.fixture.isAsExpected(label: $0.label, decision: $0.decision) }
-        let grouped = found.filter { $0.fixture.variant == .nearMiss && $0.label != "none" }
+        let grouped = found.filter { $0.fixture.variant == .nearMiss && $0.decision != "none" }
         let times = found.map(\.seconds).sorted()
         func percentile(_ fraction: Double) -> Double {
             guard !times.isEmpty else { return 0 }
