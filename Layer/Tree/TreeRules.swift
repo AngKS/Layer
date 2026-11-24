@@ -19,7 +19,9 @@ import Foundation
 ///
 /// Then each screen that changed is laid out at its device's size, and each container on the
 /// canvas's top level that changed at its own size, which it fits on each axis sized to fit, as
-/// in a free container. Applying them again changes nothing.
+/// in a free container. Text is measured at the design's sizes (`settings.tokens`), so when the
+/// tokens change every screen and every such container is laid out again, from scratch (F25).
+/// Applying them again changes nothing.
 ///
 /// What this build can't read inside a node counts as a child: a group holding only that isn't
 /// empty, and it keeps its place among the children when one of the others goes.
@@ -245,25 +247,30 @@ enum TreeRules {
 
     /// Lays out each screen whose root or device changed since `previous`, at its device's size,
     /// and each canvas top-level container that changed, at its own size once fitted (see
-    /// `fitOnCanvas`). What didn't change was laid out with `previous`, and the engine leaves
-    /// alone what is the same inside the rest.
+    /// `fitOnCanvas`), with the design's tokens. What didn't change was laid out with `previous`,
+    /// and the engine leaves alone what is the same inside the rest. When the tokens aren't
+    /// `previous`'s, nothing was laid out with them: every screen and every such container is laid
+    /// out, with no `previous` (F25).
     private static func layOut(_ content: inout TreeContent, after previous: TreeContent?,
                                measure: TextMeasure) -> [LayoutDiagnostic] {
         var diagnostics: [LayoutDiagnostic] = []
-        let screens = Dictionary((previous?.screens ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let tokens = content.settings.tokens
+        let earlier = previous.flatMap { $0.settings.tokens == tokens ? $0 : nil }
+        let screens = Dictionary((earlier?.screens ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for index in content.screens.indices {
             let screen = content.screens[index], before = screens[screen.id]
-            if let before, let previous, previous.device(of: before) == content.device(of: screen),
+            if let before, let earlier, earlier.device(of: before) == content.device(of: screen),
                before.root == screen.root { continue }
-            LayoutEngine.layOut(&content.screens[index].root, previous: before?.root, measure: measure,
+            LayoutEngine.layOut(&content.screens[index].root, previous: before?.root, measure: measure, tokens: tokens,
                                 diagnostics: &diagnostics)
         }
-        let canvas = Dictionary((previous?.canvas ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let canvas = Dictionary((earlier?.canvas ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for index in content.canvas.indices where content.canvas[index].isContainer {
             let before = canvas[content.canvas[index].id]
             if before == content.canvas[index] { continue }
-            fitOnCanvas(&content.canvas[index], measure: measure)
-            LayoutEngine.layOut(&content.canvas[index], previous: before, measure: measure, diagnostics: &diagnostics)
+            fitOnCanvas(&content.canvas[index], measure: measure, tokens: tokens)
+            LayoutEngine.layOut(&content.canvas[index], previous: before, measure: measure, tokens: tokens,
+                                diagnostics: &diagnostics)
         }
         return diagnostics
     }
@@ -273,14 +280,15 @@ enum TreeRules {
     /// engine's `fittedInFreeParent`, whose numbers these are): its other axis keeps its frame's
     /// size, and its top-left corner stays where it is, turned or not. A free container sized to
     /// fit hugs what it holds in the engine instead.
-    private static func fitOnCanvas(_ node: inout LayerNode, measure: TextMeasure) {
+    private static func fitOnCanvas(_ node: inout LayerNode, measure: TextMeasure, tokens: DesignTokens) {
         let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
         guard node.resolvedLayout != .free, fitsWidth || fitsHeight else { return }
         // Measured with the axis that doesn't fit held at the frame's size, as a free parent holds it.
         var held = node
         if !fitsWidth { held.width = LayerNode.Sizing(.fixed) }
         if !fitsHeight { held.height = LayerNode.Sizing(.fixed) }
-        let fitting = LayoutEngine.size(of: held, proposal: ProposedSize(width: nil, height: nil), measure: measure)
+        let fitting = LayoutEngine.size(of: held, proposal: ProposedSize(width: nil, height: nil), measure: measure,
+                                        tokens: tokens)
         let size = CGSize(width: fitsWidth ? snapped(fitting.width) : fitting.width,
                           height: fitsHeight ? snapped(fitting.height) : fitting.height)
         guard size != node.frame.size else { return }

@@ -3,7 +3,7 @@ import Foundation
 
 extension TreeRules {
     /// A screen's root laid out exactly as `apply` would lay it out on the screen whose device is `deviceID` among
-    /// `settings`' devices, for use off the main actor. `previous` (that screen's root before) lets unchanged
+    /// `settings`' devices, its text at `settings`' sizes (`tokens`, F25), for use off the main actor. `previous` (that screen's root before) lets unchanged
     /// containers be reused. Pure.
     ///
     /// The root is kept to its device and tidied as the rules keep a screen, so that committed with

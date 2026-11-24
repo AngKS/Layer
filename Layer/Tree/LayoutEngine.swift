@@ -32,12 +32,14 @@ enum LayoutEngine {
     /// The largest padding or spacing, in points.
     static let maximumGap: CGFloat = 10_000
 
-    /// The size `node` takes for `proposal`: fixed sizes, natural sizes, or (containers) content plus padding.
-    static func size(of node: LayerNode, proposal: ProposedSize, measure: TextMeasure) -> CGSize {
+    /// The size `node` takes for `proposal`: fixed sizes, natural sizes, or (containers) content plus padding. Text
+    /// is measured at the size `tokens` give it, as it is drawn (`NaturalSize.fontSize(of:tokens:)`).
+    static func size(of node: LayerNode, proposal: ProposedSize, measure: TextMeasure,
+                     tokens: DesignTokens = .standard) -> CGSize {
         var node = node
-        settle(&node, previous: nil, placedByParent: true, measure: measure)
-        let width = Self.width(of: node, offered: offer(proposal.width), measure: measure)
-        let height = Self.height(of: node, width: width, offered: offer(proposal.height), measure: measure)
+        settle(&node, previous: nil, placedByParent: true, measure: measure, tokens: tokens)
+        let width = Self.width(of: node, offered: offer(proposal.width), measure: measure, tokens: tokens)
+        let height = Self.height(of: node, width: width, offered: offer(proposal.height), measure: measure, tokens: tokens)
         return CGSize(width: finite(width), height: finite(height))
     }
 
@@ -49,11 +51,12 @@ enum LayoutEngine {
     ///
     /// `previous` is `node` as it was last laid out. A container that is the same as its same-id
     /// one there, at the same size, is left as it is with everything inside it. So diagnostics
-    /// come only from the containers laid out this time.
+    /// come only from the containers laid out this time. Text is measured at the size `tokens` give it; laid out with
+    /// other tokens than `previous` was, `previous` is no guide (`TreeRules` passes none then).
     static func layOut(_ node: inout LayerNode, previous: LayerNode?, measure: TextMeasure,
-                       diagnostics: inout [LayoutDiagnostic]) {
-        settle(&node, previous: previous, placedByParent: false, measure: measure)
-        place(&node, previous: previous, measure: measure, diagnostics: &diagnostics)
+                       tokens: DesignTokens = .standard, diagnostics: inout [LayoutDiagnostic]) {
+        settle(&node, previous: previous, placedByParent: false, measure: measure, tokens: tokens)
+        place(&node, previous: previous, measure: measure, tokens: tokens, diagnostics: &diagnostics)
     }
 
     /// Settles what free containers decide on their own, inside out, before anything is placed.
@@ -62,7 +65,7 @@ enum LayoutEngine {
     /// the room a parent offers, so a row or column measuring a free child later only reads it.
     /// `placedByParent` is true under a row, column, grid or overlay, which will write its frame.
     private static func settle(_ node: inout LayerNode, previous: LayerNode?, placedByParent: Bool,
-                               measure: TextMeasure) {
+                               measure: TextMeasure, tokens: DesignTokens) {
         guard node.isContainer else { return }
         let free = node.resolvedLayout == .free
         if !isUnchanged(node, since: previous) {
@@ -70,8 +73,8 @@ enum LayoutEngine {
             // Hidden children, and what is inside them, are left as they are.
             for index in node.children.indices where node.children[index].isContainer && !node.children[index].isHidden {
                 settle(&node.children[index], previous: earlier[node.children[index].id], placedByParent: !free,
-                       measure: measure)
-                if free, let frame = fittedInFreeParent(node.children[index], measure: measure) {
+                       measure: measure, tokens: tokens)
+                if free, let frame = fittedInFreeParent(node.children[index], measure: measure, tokens: tokens) {
                     node.children[index].frame = frame
                 }
             }
@@ -83,7 +86,7 @@ enum LayoutEngine {
 
     /// Places children, top down, once everything is settled. A free container's children are
     /// already where they go, so it only passes on down.
-    private static func place(_ node: inout LayerNode, previous: LayerNode?, measure: TextMeasure,
+    private static func place(_ node: inout LayerNode, previous: LayerNode?, measure: TextMeasure, tokens: DesignTokens,
                               diagnostics: inout [LayoutDiagnostic]) {
         guard node.isContainer, !isUnchanged(node, since: previous) else { return }
         #if DEBUG
@@ -97,23 +100,24 @@ enum LayoutEngine {
         switch node.resolvedLayout {
         case .free:
             for index in visible {
-                place(&node.children[index], previous: earlier[node.children[index].id], measure: measure,
+                place(&node.children[index], previous: earlier[node.children[index].id], measure: measure, tokens: tokens,
                       diagnostics: &diagnostics)
             }
             return
-        case .stack(let stack): placement = placeStack(kids, stack, in: contentBox(of: node), measure: measure)
-        case .grid(let grid): placement = placeGrid(kids, grid, in: contentBox(of: node), measure: measure)
-        case .overlay(let alignment): placement = placeOverlay(kids, alignment, in: contentBox(of: node), measure: measure)
+        case .stack(let stack): placement = placeStack(kids, stack, in: contentBox(of: node), measure: measure, tokens: tokens)
+        case .grid(let grid): placement = placeGrid(kids, grid, in: contentBox(of: node), measure: measure, tokens: tokens)
+        case .overlay(let alignment):
+            placement = placeOverlay(kids, alignment, in: contentBox(of: node), measure: measure, tokens: tokens)
         }
         for (index, frame) in zip(visible, placement.frames) {
             node.children[index].frame = written(frame, for: node.children[index])
         }
         if placement.overflows { diagnostics.append(LayoutDiagnostic(node: node.id, kind: .overflow)) }
-        for index in visible where hasWordTooWide(node.children[index], measure: measure) {
+        for index in visible where hasWordTooWide(node.children[index], measure: measure, tokens: tokens) {
             diagnostics.append(LayoutDiagnostic(node: node.children[index].id, kind: .textTooWide))
         }
         for index in visible {
-            place(&node.children[index], previous: earlier[node.children[index].id], measure: measure,
+            place(&node.children[index], previous: earlier[node.children[index].id], measure: measure, tokens: tokens,
                   diagnostics: &diagnostics)
         }
     }
@@ -121,43 +125,47 @@ enum LayoutEngine {
     // MARK: - Sizes
 
     /// A node's width for the width offered to it (nil = its ideal).
-    private static func width(of node: LayerNode, offered: CGFloat?, measure: TextMeasure) -> CGFloat {
+    private static func width(of node: LayerNode, offered: CGFloat?, measure: TextMeasure, tokens: DesignTokens) -> CGFloat {
         switch (node.width.mode, offered) {
         case (.fixed, _): clean(node.frame.size.width)
         case (.fill, let offered?): clamped(offered, node.width)
-        default: clamped(fittingWidth(of: node, offered: offered, measure: measure), node.width)
+        default: clamped(fittingWidth(of: node, offered: offered, measure: measure, tokens: tokens), node.width)
         }
     }
 
     /// A node's height once its width has settled.
-    private static func height(of node: LayerNode, width: CGFloat, offered: CGFloat?, measure: TextMeasure) -> CGFloat {
+    private static func height(of node: LayerNode, width: CGFloat, offered: CGFloat?, measure: TextMeasure,
+                               tokens: DesignTokens) -> CGFloat {
         switch (node.height.mode, offered) {
         case (.fixed, _): clean(node.frame.size.height)
         case (.fill, let offered?): clamped(offered, node.height)
-        default: clamped(fittingHeight(of: node, width: width, measure: measure), node.height)
+        default: clamped(fittingHeight(of: node, width: width, measure: measure, tokens: tokens), node.height)
         }
     }
 
     /// A leaf's natural width, or a container's content plus padding, at the offered width.
     /// A leaf offered no room at all takes its ideal size, as `TextMeasure` reads a zero width.
-    private static func fittingWidth(of node: LayerNode, offered: CGFloat?, measure: TextMeasure) -> CGFloat {
+    private static func fittingWidth(of node: LayerNode, offered: CGFloat?, measure: TextMeasure,
+                                     tokens: DesignTokens) -> CGFloat {
         guard node.isContainer else {
-            return clean(NaturalSize.of(node, width: offered.flatMap { $0 > 0 ? $0 : nil }, measure: measure).width)
+            let room = offered.flatMap { $0 > 0 ? $0 : nil }
+            return clean(NaturalSize.of(node, width: room, measure: measure, tokens: tokens).width)
         }
         let padding = cleaned(node.padding)
         let inner = offered.map { max(0, $0 - padding.leading - padding.trailing) }
-        return contentWidth(visibleChildren(of: node), node.resolvedLayout, offered: inner, measure: measure)
+        return contentWidth(visibleChildren(of: node), node.resolvedLayout, offered: inner, measure: measure, tokens: tokens)
             + padding.leading + padding.trailing
     }
 
     /// A leaf's natural height, or a container's content plus padding, at a settled width.
-    private static func fittingHeight(of node: LayerNode, width: CGFloat, measure: TextMeasure) -> CGFloat {
+    private static func fittingHeight(of node: LayerNode, width: CGFloat, measure: TextMeasure,
+                                      tokens: DesignTokens) -> CGFloat {
         guard node.isContainer else {
-            return clean(NaturalSize.of(node, width: width > 0 ? width : nil, measure: measure).height)
+            return clean(NaturalSize.of(node, width: width > 0 ? width : nil, measure: measure, tokens: tokens).height)
         }
         let padding = cleaned(node.padding)
         let inner = max(0, width - padding.leading - padding.trailing)
-        return contentHeight(visibleChildren(of: node), node.resolvedLayout, width: inner, measure: measure)
+        return contentHeight(visibleChildren(of: node), node.resolvedLayout, width: inner, measure: measure, tokens: tokens)
             + padding.top + padding.bottom
     }
 
@@ -165,50 +173,51 @@ enum LayoutEngine {
     /// container's children are settled, so it only reads their frames), so measuring a deep tree
     /// never measures a subtree twice over for each level above it.
     private static func contentWidth(_ kids: [LayerNode], _ layout: LayerNode.Layout, offered: CGFloat?,
-                                     measure: TextMeasure) -> CGFloat {
+                                     measure: TextMeasure, tokens: DesignTokens) -> CGFloat {
         guard !kids.isEmpty else { return 0 }
         switch layout {
         case .free:
             return shapesBox(of: kids)?.width ?? 0
         case .stack(let stack):
-            let widths = Self.widths(of: kids, in: stack, box: offered, stretching: false, measure: measure)
+            let widths = Self.widths(of: kids, in: stack, box: offered, stretching: false, measure: measure, tokens: tokens)
             return stack.axis == .vertical ? widths.max() ?? 0 : widths.reduce(0, +) + gaps(stack.spacing, kids.count)
         case .grid(let grid):
             // Equal columns share the width offered. With none, every column, empty ones included,
             // is as wide as the widest child, so placing at this width gives each child its cell.
             if let offered { return offered }
             let columns = columnCount(grid)
-            let widest = kids.map { width(of: $0, offered: nil, measure: measure) }.max() ?? 0
+            let widest = kids.map { width(of: $0, offered: nil, measure: measure, tokens: tokens) }.max() ?? 0
             return CGFloat(columns) * widest + gaps(grid.columnSpacing, columns)
         case .overlay:
-            return kids.map { width(of: $0, offered: offered, measure: measure) }.max() ?? 0
+            return kids.map { width(of: $0, offered: offered, measure: measure, tokens: tokens) }.max() ?? 0
         }
     }
 
     /// How tall a container's content is when it fits it, at a settled content width.
     private static func contentHeight(_ kids: [LayerNode], _ layout: LayerNode.Layout, width: CGFloat,
-                                      measure: TextMeasure) -> CGFloat {
+                                      measure: TextMeasure, tokens: DesignTokens) -> CGFloat {
         guard !kids.isEmpty else { return 0 }
         switch layout {
         case .free:
             return shapesBox(of: kids)?.height ?? 0
         case .stack(let stack):
-            let heights = stackSizes(kids, stack, width: width, height: nil, measure: measure).map(\.height)
+            let heights = stackSizes(kids, stack, width: width, height: nil, measure: measure, tokens: tokens).map(\.height)
             return stack.axis == .vertical ? heights.reduce(0, +) + gaps(stack.spacing, kids.count) : heights.max() ?? 0
         case .grid(let grid):
-            let rows = rowHeights(gridSizes(kids, grid, width: width, measure: measure), columns: columnCount(grid))
+            let sizes = gridSizes(kids, grid, width: width, measure: measure, tokens: tokens)
+            let rows = rowHeights(sizes, columns: columnCount(grid))
             return rows.reduce(0, +) + gaps(grid.rowSpacing, rows.count)
         case .overlay:
-            return overlaySizes(kids, width: width, height: nil, measure: measure).map(\.height).max() ?? 0
+            return overlaySizes(kids, width: width, height: nil, measure: measure, tokens: tokens).map(\.height).max() ?? 0
         }
     }
 
     /// Each child's size in a stack whose content box is `width` wide and `height` high (nil
     /// while the stack is fitting its content, when nothing stretches to a height).
     private static func stackSizes(_ kids: [LayerNode], _ stack: LayerNode.Stack, width: CGFloat, height: CGFloat?,
-                                   measure: TextMeasure) -> [CGSize] {
-        let widths = Self.widths(of: kids, in: stack, box: width, stretching: true, measure: measure)
-        let heights = Self.heights(of: kids, widths: widths, in: stack, box: height, measure: measure)
+                                   measure: TextMeasure, tokens: DesignTokens) -> [CGSize] {
+        let widths = Self.widths(of: kids, in: stack, box: width, stretching: true, measure: measure, tokens: tokens)
+        let heights = Self.heights(of: kids, widths: widths, in: stack, box: height, measure: measure, tokens: tokens)
         return zip(widths, heights).map { CGSize(width: $0, height: $1) }
     }
 
@@ -216,20 +225,22 @@ enum LayoutEngine {
     /// column's width (and, when placed, the row's height); the rest their fixed or natural size
     /// at the column's width.
     private static func gridSizes(_ kids: [LayerNode], _ grid: LayerNode.Grid, width: CGFloat,
-                                  measure: TextMeasure) -> [CGSize] {
+                                  measure: TextMeasure, tokens: DesignTokens) -> [CGSize] {
         let column = columnWidth(grid, width)
         return kids.map { kid in
-            let childWidth = self.width(of: kid, offered: column, measure: measure)
-            return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: nil, measure: measure))
+            let childWidth = self.width(of: kid, offered: column, measure: measure, tokens: tokens)
+            return CGSize(width: childWidth,
+                          height: self.height(of: kid, width: childWidth, offered: nil, measure: measure, tokens: tokens))
         }
     }
 
     /// Each child's size in an overlay whose content box is `width` wide and `height` high (nil while fitting).
     private static func overlaySizes(_ kids: [LayerNode], width: CGFloat, height: CGFloat?,
-                                     measure: TextMeasure) -> [CGSize] {
+                                     measure: TextMeasure, tokens: DesignTokens) -> [CGSize] {
         kids.map { kid in
-            let childWidth = self.width(of: kid, offered: width, measure: measure)
-            return CGSize(width: childWidth, height: self.height(of: kid, width: childWidth, offered: height, measure: measure))
+            let childWidth = self.width(of: kid, offered: width, measure: measure, tokens: tokens)
+            return CGSize(width: childWidth,
+                          height: self.height(of: kid, width: childWidth, offered: height, measure: measure, tokens: tokens))
         }
     }
 
@@ -237,11 +248,11 @@ enum LayoutEngine {
     /// false while a column works out how wide it is, so `.fill` alignment doesn't make it greedy.
     /// A stretch leaves a kind with a shape of its own at its size (`NaturalSize.keepsItsShape`).
     private static func widths(of kids: [LayerNode], in stack: LayerNode.Stack, box: CGFloat?, stretching: Bool,
-                               measure: TextMeasure) -> [CGFloat] {
+                               measure: TextMeasure, tokens: DesignTokens) -> [CGFloat] {
         guard stack.axis == .vertical else {
             return mainSizes(of: kids, sizing: \.width, room: box, spacing: stack.spacing,
                              takesTheRoomOffered: { takesTheWidthOffered(kids[$0]) }) { index, offered in
-                width(of: kids[index], offered: offered, measure: measure)
+                width(of: kids[index], offered: offered, measure: measure, tokens: tokens)
             }
         }
         let stretches = stretching && stack.alignment == .fill
@@ -249,18 +260,18 @@ enum LayoutEngine {
             if stretches, let box, kid.width.mode != .fixed, !NaturalSize.keepsItsShape(kid.kind) {
                 return clamped(box, kid.width)
             }
-            return width(of: kid, offered: box, measure: measure)
+            return width(of: kid, offered: box, measure: measure, tokens: tokens)
         }
     }
 
     /// Children's heights, at their settled widths, in a stack whose content is `box` high.
     private static func heights(of kids: [LayerNode], widths: [CGFloat], in stack: LayerNode.Stack, box: CGFloat?,
-                                measure: TextMeasure) -> [CGFloat] {
+                                measure: TextMeasure, tokens: DesignTokens) -> [CGFloat] {
         guard stack.axis == .horizontal else {
             // A fitting height is the same whatever room is offered: it depends on the width alone.
             return mainSizes(of: kids, sizing: \.height, room: box, spacing: stack.spacing,
                              takesTheRoomOffered: { _ in false }) { index, offered in
-                height(of: kids[index], width: widths[index], offered: offered, measure: measure)
+                height(of: kids[index], width: widths[index], offered: offered, measure: measure, tokens: tokens)
             }
         }
         let stretches = stack.alignment == .fill
@@ -269,7 +280,7 @@ enum LayoutEngine {
             if stretches, let box, kid.height.mode != .fixed, !NaturalSize.keepsItsShape(kid.kind) {
                 return clamped(box, kid.height)
             }
-            return height(of: kid, width: widths[index], offered: box, measure: measure)
+            return height(of: kid, width: widths[index], offered: box, measure: measure, tokens: tokens)
         }
     }
 
@@ -334,9 +345,9 @@ enum LayoutEngine {
     }
 
     private static func placeStack(_ kids: [LayerNode], _ stack: LayerNode.Stack, in box: CGRect,
-                                   measure: TextMeasure) -> Placement {
+                                   measure: TextMeasure, tokens: DesignTokens) -> Placement {
         let vertical = stack.axis == .vertical
-        let sizes = stackSizes(kids, stack, width: box.width, height: box.height, measure: measure)
+        let sizes = stackSizes(kids, stack, width: box.width, height: box.height, measure: measure, tokens: tokens)
         let along = sizes.map { vertical ? $0.height : $0.width }
         let room = vertical ? box.height : box.width
         let spacing = gap(stack.spacing)
@@ -361,12 +372,12 @@ enum LayoutEngine {
     }
 
     private static func placeGrid(_ kids: [LayerNode], _ grid: LayerNode.Grid, in box: CGRect,
-                                  measure: TextMeasure) -> Placement {
+                                  measure: TextMeasure, tokens: DesignTokens) -> Placement {
         let columns = columnCount(grid)
         let column = columnWidth(grid, box.width)
         let columnSpacing = gap(grid.columnSpacing)
         let rowSpacing = gap(grid.rowSpacing)
-        let sizes = gridSizes(kids, grid, width: box.width, measure: measure)
+        let sizes = gridSizes(kids, grid, width: box.width, measure: measure, tokens: tokens)
         let rows = rowHeights(sizes, columns: columns)
         var frames: [CGRect] = []
         var top = box.minY
@@ -388,8 +399,8 @@ enum LayoutEngine {
     }
 
     private static func placeOverlay(_ kids: [LayerNode], _ alignment: LayerNode.Alignment, in box: CGRect,
-                                     measure: TextMeasure) -> Placement {
-        let sizes = overlaySizes(kids, width: box.width, height: box.height, measure: measure)
+                                     measure: TextMeasure, tokens: DesignTokens) -> Placement {
+        let sizes = overlaySizes(kids, width: box.width, height: box.height, measure: measure, tokens: tokens)
         let frames = sizes.map { size in
             CGRect(x: box.minX + offset(alignment.horizontal, room: box.width, size: size.width),
                    y: box.minY + offset(alignment.vertical, room: box.height, size: size.height),
@@ -434,7 +445,7 @@ enum LayoutEngine {
     /// when the text is wider than that on one line, its widest word is measured on its own
     /// (once for each text: see `TextMeasure.widestWord`, which keeps the words out of the cache
     /// of texts the layout measures).
-    private static func hasWordTooWide(_ node: LayerNode, measure: TextMeasure) -> Bool {
+    private static func hasWordTooWide(_ node: LayerNode, measure: TextMeasure, tokens: DesignTokens) -> Bool {
         let inset: CGFloat
         switch node.kind {
         case .title, .body, .text: inset = 0
@@ -443,7 +454,7 @@ enum LayoutEngine {
         }
         let text = node.content.text
         let width = max(0, clean(node.frame.size.width) - inset)
-        let fontSize = NaturalSize.fontSize(of: node), weight = NaturalSize.fontWeight(of: node)
+        let fontSize = NaturalSize.fontSize(of: node, tokens: tokens), weight = NaturalSize.fontWeight(of: node)
         guard !text.isEmpty,
               measure.size(of: text, fontSize: fontSize, weight: weight, width: nil).width > width + slack else { return false }
         return measure.widestWord(in: text, fontSize: fontSize, weight: weight) > width + slack
@@ -456,12 +467,13 @@ enum LayoutEngine {
 
     /// In a free parent, a row, column, grid or overlay sized to fit takes its fitting size on that
     /// axis. Its top-left corner stays where it is, turned or not. Nil when its frame stays as it is.
-    private static func fittedInFreeParent(_ node: LayerNode, measure: TextMeasure) -> CGRect? {
+    private static func fittedInFreeParent(_ node: LayerNode, measure: TextMeasure, tokens: DesignTokens) -> CGRect? {
         let fitsWidth = node.width.mode == .fit, fitsHeight = node.height.mode == .fit
         guard node.isContainer, node.resolvedLayout != .free, fitsWidth || fitsHeight else { return nil }
-        let width = fitsWidth ? clean(snap(width(of: node, offered: nil, measure: measure))) : clean(node.frame.size.width)
+        let width = fitsWidth
+            ? clean(snap(width(of: node, offered: nil, measure: measure, tokens: tokens))) : clean(node.frame.size.width)
         let height = fitsHeight
-            ? clean(snap(height(of: node, width: width, offered: nil, measure: measure))) : clean(node.frame.size.height)
+            ? clean(snap(height(of: node, width: width, offered: nil, measure: measure, tokens: tokens))) : clean(node.frame.size.height)
         return reframed(node, size: CGSize(width: width, height: height), shift: .zero)
     }
 

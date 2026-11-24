@@ -1959,6 +1959,57 @@ struct SqueezeRouterTests {
         bench.end()
     }
 
+    /// A form's number fields over the canvas, the board menu's design tokens and a device's
+    /// form, are the window's scrubber's as the Format panel's are (review I1): with Squeeze to
+    /// Talk on, a squeeze over one scrubs it and starts no voice command. While the form is up,
+    /// its handler has the squeezes rather than the window's, and gives them back as it goes.
+    @Test func aSqueezeOverAFormsFieldScrubsItAndStartsNoVoiceCommand() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        #expect(router.talks && router.windowHandlerIsOn)
+        // The board menu, with its token fields, up at the window's top left.
+        bench.app.chromeFrames[SqueezeRouter.formChrome] = CGRect(x: 0, y: 0, width: 360, height: 700)
+        router.formCameUp()
+        #expect(router.formHandlerIsOn && !router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        // A token's field, then a device form's.
+        for (label, start) in [("Title size", CGFloat(28)), ("Width", CGFloat(393))] {
+            let field = ScrubbedField(start)
+            var target = field.target(label, at: CGRect(x: 20, y: 80, width: 80, height: 32), range: 1...4000)
+            target.owner = .form
+            scrubber.hovered = target
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            #expect(router.taker == .ruler)
+            #expect(scrubber.target?.label == label && scrubber.target?.owner == .form)
+            router.ended()
+            scrubber.rolled(to: .degrees(3))
+            #expect(field.value == start + 3)
+            // The next squeeze keeps the value and puts the ruler away.
+            router.began(at: overField, azimuth: nil, roll: .degrees(3))
+            router.ended()
+            #expect(scrubber.target == nil && field.value == start + 3)
+            scrubber.hovered = nil
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+
+        // A form field's hover with the pen gone off the form isn't a field's.
+        let left = ScrubbedField(8)
+        var leftTarget = left.target("Small radius", at: .zero, range: 1...400)
+        leftTarget.owner = .form
+        scrubber.hovered = leftTarget
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(router.taker == .voice)
+        router.failed()
+
+        // Gone, the form gives the squeezes back to the window.
+        router.formWent()
+        bench.app.chromeFrames[SqueezeRouter.formChrome] = nil
+        #expect(router.windowHandlerIsOn && !router.formHandlerIsOn)
+        bench.end()
+    }
+
     /// A Format field's hover is a field's only while the pen is over the Format panel, not
     /// over other chrome; the zoom's hover is the zoom's over the controls.
     @Test func aFieldsHoverIsAFieldsOnlyOverTheFormatPanel() {

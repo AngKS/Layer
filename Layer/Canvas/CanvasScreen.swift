@@ -328,7 +328,7 @@ private struct PanelSheet<Content: View>: View {
 
 /// Tells the model where a view is in its window's points, for a view that may sit in a
 /// presentation of its own, such as a sheet, where SwiftUI's global space is the sheet's.
-private struct WindowFrameReporter: UIViewRepresentable {
+struct WindowFrameReporter: UIViewRepresentable {
     let name: String
     let model: AppModel
 
@@ -437,7 +437,7 @@ private struct SheetSqueeze: View {
 /// is set. While off, the action is not there at all: an action that is there, even one that
 /// ignores the squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the
 /// iPad), and the system's own squeeze action elsewhere.
-private struct Squeezable: ViewModifier {
+struct Squeezable: ViewModifier {
     let router: SqueezeRouter
     let isOn: Bool
     /// Where the view is in the window, which its points are counted from.

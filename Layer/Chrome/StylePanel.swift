@@ -13,12 +13,14 @@ struct StylePanel: View {
     var body: some View {
         let scrolling = ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let selected = model.selectedElement, selected.element.kind == .group {
-                    // A group has settings of its own, never one element's.
-                    GroupSettings(ref: selected.ref, group: selected.element)
-                } else if let selected = model.selectedElement {
-                    ElementSettings(ref: selected.ref, element: selected.element)
-                } else if let screen = model.selectedScreen {
+                if let selected = model.selectedNode {
+                    if selected.node.isContainer {
+                        // A group or card has settings of its own, never one element's.
+                        ContainerSettings(placed: selected)
+                    } else {
+                        ElementSettings(placed: selected)
+                    }
+                } else if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) {
                     FrameSettings(screen: screen)
                 } else if model.selection?.isSeveral == true {
                     SeveralSettings()
@@ -64,16 +66,60 @@ struct StylePanel: View {
 
 // MARK: What is selected
 
+/// What the panel shows of a node beyond `LayerNode+Look`'s rules, which it reads for the rest: which of its kind's
+/// traits it has, and its radius as an element's was (`ElementStyle`).
+private extension LayerNode {
+    var traits: ComponentSpec.Traits { kind.spec.traits }
+    var hasOnState: Bool { traits.contains(.onState) }
+    var hasTextAlignment: Bool { traits.contains(.textAlignment) }
+    var hasValue: Bool { traits.contains(.value) }
+    var hasButtonLooks: Bool { traits.contains(.buttonLooks) }
+    var hasEffects: Bool { kind.spec.hasEffects }
+
+    var shownTint: RGBColor { style.tint ?? kind.spec.tint }
+    var resolvedCornerRadius: CGFloat { style.cornerRadius ?? kind.spec.cornerRadius.points(in: frame) }
+}
+
+extension StylePanel {
+    /// What the font size field shows for a text: the size it is measured and drawn at, its own or the design's for
+    /// its kind (`LayerNode.resolvedFontSize(tokens:)`, F5), in whole points.
+    static func fontSizeShown(for node: LayerNode, tokens: DesignTokens) -> CGFloat {
+        node.resolvedFontSize(tokens: tokens).rounded()
+    }
+}
+
+/// How a node's frame and angle are written from the panel: through `place`, which keeps what the parent places and
+/// what a turned container holds, and through the node's own angle, which the ones above it add to.
+private extension AppModel {
+    /// One side of the node's frame, in its host's own points; the others as they are now.
+    func setFrame(of id: UUID, _ body: (inout CGRect) -> Void) {
+        adjusting {
+            guard var frame = store.placed(id)?.frame else { return }
+            body(&frame)
+            store.place(id, at: frame)
+        }
+    }
+
+    /// The node's angle on the canvas, given what the containers above it already turn by.
+    func setDegrees(of id: UUID, to degrees: Double) {
+        adjusting {
+            guard let found = store.placed(id) else { return }
+            let inherited = found.degrees - (found.node.rotation ?? 0)
+            store.update(id) { $0.rotation = Rotation.kept(degrees - inherited) }
+        }
+    }
+}
+
 private struct ElementSettings: View {
     @Environment(AppModel.self) private var model
-    let ref: DesignStore.ElementRef
-    let element: DesignElement
+    let placed: PlacedNode
 
     var body: some View {
+        let node = placed.node
         PanelHeader(
-            symbol: element.symbol.map(SystemSymbol.resolve) ?? element.kind.symbol,
-            name: Binding(get: { element.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }),
-            placeholder: element.kind.layerName,
+            symbol: node.content.symbol.map(SystemSymbol.resolve) ?? node.kind.symbol,
+            name: Binding(get: { node.name ?? "" }, set: { name in change { $0.name = name.isEmpty ? nil : name } }),
+            placeholder: node.kind.layerName,
             onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
         )
 
@@ -83,76 +129,79 @@ private struct ElementSettings: View {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
                 LockButton()
                 // A drawing stays on top: there is no order to change.
-                if element.kind != .drawing {
+                if node.kind != .drawing {
                     ArrangeButtons()
                 }
             }
         }
 
         PanelSection {
+            let isPlacedHere = SizingSection.isPositionEditable(for: placed)
             HStack(spacing: 8) {
-                NumberField("X", value: binding(\.frame.origin.x))
-                NumberField("Y", value: binding(\.frame.origin.y))
+                NumberField("X", value: frameBinding(\.origin.x))
+                NumberField("Y", value: frameBinding(\.origin.y))
             }
-            HStack(spacing: 8) {
-                NumberField("W", value: binding(\.frame.size.width), range: 1...4000)
-                NumberField("H", value: binding(\.frame.size.height), range: 1...4000)
-            }
-            HStack(spacing: 8) {
-                if element.hasCornerRadius {
-                    NumberField("R", label: "Corner radius", value: Binding(get: { element.resolvedCornerRadius }, set: { radius in change { $0.cornerRadius = radius } }), range: 0...999)
+            .disabled(!isPlacedHere)
+            if isPlacedHere {
+                HStack(spacing: 8) {
+                    NumberField("W", value: frameBinding(\.size.width), range: 1...4000)
+                    NumberField("H", value: frameBinding(\.size.height), range: 1...4000)
                 }
-                if element.kind.spec.hasEffects {
+            } else {
+                // What lays it out gives it its place: its size is Fit, Fill or Fixed along each axis.
+                SizingSection(placed: placed).equatable()
+            }
+            HStack(spacing: 8) {
+                if node.hasCornerRadius {
+                    NumberField("R", label: "Corner radius", value: Binding(get: { node.resolvedCornerRadius }, set: { radius in change { $0.style.cornerRadius = radius } }), range: 0...999)
+                }
+                if node.hasEffects {
                     NumberField("%", label: "Opacity", value: Binding(
-                        get: { (element.resolvedOpacity * 100).rounded() },
-                        set: { percent in change { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                        get: { (node.resolvedOpacity * 100).rounded() },
+                        set: { percent in change { $0.style.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                     ), range: 5...100)
                 }
                 NumberField("°", label: "Rotation",
-                            value: Binding(get: { CGFloat(Rotation.shown(element.resolvedRotation)) }, set: { degrees in change { $0.setRotation(Double(degrees)) } }),
+                            value: Binding(get: { CGFloat(Rotation.shown(placed.degrees)) }, set: { degrees in model.setDegrees(of: node.id, to: Double(degrees)) }),
                             range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
             }
-            if case .screen = ref.host {
-                HStack(spacing: 6) {
-                    ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
-                        IconButton(alignment.name, symbol: alignment.symbol) { model.store.align(ref, alignment) }
-                    }
-                }
+            if case .screen = placed.ref.host {
+                AlignButtons()
             }
         }
         // Locked by itself or by a group above it, it stays as it is.
         .disabled(model.isSelectionLocked)
 
         PanelSection {
-            if element.hasFill {
+            if node.hasFill {
                 PanelRow("Fill") {
-                    ColorField(label: "Fill colour", color: Binding(get: { element.tint }, set: { color in change { $0.tint = color } }))
+                    ColorField(label: "Fill colour", color: Binding(get: { node.shownTint }, set: { color in change { $0.style.tint = color } }))
                 }
             }
-            if element.hasBorder {
+            if node.hasBorder {
                 PanelRow("Border") {
-                    NumberField("W", label: "Border width", value: Binding(get: { element.resolvedBorderWidth }, set: { width in change { $0.borderWidth = width > 0 ? width : nil } }), range: 0...40)
+                    NumberField("W", label: "Border width", value: Binding(get: { node.resolvedBorderWidth }, set: { width in change { $0.style.borderWidth = width > 0 ? width : nil } }), range: 0...40)
                         .frame(width: 84)
-                    ColorField(label: "Border colour", color: Binding(get: { element.resolvedBorderColor }, set: { color in change { $0.borderColor = color } }))
+                    ColorField(label: "Border colour", color: Binding(get: { node.resolvedBorderColor }, set: { color in change { $0.style.borderColor = color } }))
                 }
             }
-            if element.kind.spec.hasEffects {
-                Toggle("Shadow", isOn: Binding(get: { element.hasShadow }, set: { shadow in change { $0.hasShadow = shadow } }))
+            if node.hasEffects {
+                Toggle("Shadow", isOn: Binding(get: { node.style.hasShadow }, set: { shadow in change { $0.style.hasShadow = shadow } }))
             }
-            if element.hasOnState {
-                Toggle(element.kind.spec.onName ?? "On",
-                       isOn: Binding(get: { element.isOn }, set: { isOn in change { $0.isOn = isOn } }))
+            if node.hasOnState {
+                Toggle(node.kind.spec.onName ?? "On",
+                       isOn: Binding(get: { node.content.isOn }, set: { isOn in change { $0.content.isOn = isOn } }))
             }
-            if element.hasValue {
+            if node.hasValue {
                 PanelRow("Progress") {
-                    Slider(value: Binding(get: { element.resolvedValue }, set: { value in change { $0.value = (value * 100).rounded() / 100 } }), in: 0...1)
-                    Text(element.resolvedValue, format: .percent.precision(.fractionLength(0)))
+                    Slider(value: Binding(get: { node.resolvedValue }, set: { value in change { $0.content.value = (value * 100).rounded() / 100 } }), in: 0...1)
+                    Text(node.resolvedValue, format: .percent.precision(.fractionLength(0)))
                         .monospacedDigit()
                         .frame(width: 44, alignment: .trailing)
                 }
             }
-            if element.hasButtonLooks {
-                Picker("Button style", selection: Binding(get: { element.resolvedButtonLook }, set: { look in change { $0.buttonLook = look } })) {
+            if node.hasButtonLooks {
+                Picker("Button style", selection: Binding(get: { node.resolvedButtonLook }, set: { look in change { $0.content.buttonLook = look } })) {
                     ForEach(ButtonLook.allCases, id: \.self) { look in
                         Text(look.name).tag(look)
                     }
@@ -161,28 +210,28 @@ private struct ElementSettings: View {
             }
         }
 
-        if element.kind.hasText {
+        if node.kind.hasText {
             PanelSection {
-                TextField("Text", text: Binding(get: { element.text }, set: { text in change { $0.text = text } }), axis: .vertical)
+                TextField("Text", text: Binding(get: { node.content.text }, set: { text in change { $0.content.text = text } }), axis: .vertical)
                     .lineLimit(1...5)
                     .padding(10)
                     .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 12))
                 HStack(spacing: 8) {
-                    NumberField("pt", label: "Font size", value: Binding(get: { element.resolvedFontSize.rounded() }, set: { size in change { $0.fontSize = size } }), range: 6...400)
+                    NumberField("pt", label: "Font size", value: Binding(get: { StylePanel.fontSizeShown(for: node, tokens: model.store.tree.settings.tokens) }, set: { size in change { $0.style.fontSize = size } }), range: 6...400)
                         .frame(width: 84)
                     Spacer(minLength: 0)
-                    Picker("Weight", selection: Binding(get: { element.resolvedFontWeight }, set: { weight in change { $0.fontWeight = weight } })) {
+                    Picker("Weight", selection: Binding(get: { node.resolvedFontWeight }, set: { weight in change { $0.style.fontWeight = weight } })) {
                         ForEach(FontWeightChoice.allCases, id: \.self) { weight in
                             Text(weight.name).tag(weight)
                         }
                     }
                     .labelsHidden()
                     .fixedSize()
-                    ColorPicker("Text colour", selection: Binding(get: { element.resolvedTextColor.color }, set: { color in change { $0.textColor = RGBColor(UIColor(color)) } }), supportsOpacity: false)
+                    ColorPicker("Text colour", selection: Binding(get: { node.resolvedTextColor.color }, set: { color in change { $0.style.textColor = RGBColor(UIColor(color)) } }), supportsOpacity: false)
                         .labelsHidden()
                 }
-                if element.hasTextAlignment {
-                    Picker("Text alignment", selection: Binding(get: { element.resolvedTextAlignment }, set: { alignment in change { $0.textAlignment = alignment } })) {
+                if node.hasTextAlignment {
+                    Picker("Text alignment", selection: Binding(get: { node.resolvedTextAlignment }, set: { alignment in change { $0.style.textAlignment = alignment } })) {
                         ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
                             Image(systemName: alignment.symbol)
                                 .accessibilityLabel(alignment.name)
@@ -195,32 +244,50 @@ private struct ElementSettings: View {
         }
     }
 
-    private func change(_ body: (inout DesignElement) -> Void) {
-        model.adjusting { model.store.update(ref, body) }
+    private func change(_ body: (inout LayerNode) -> Void) {
+        let id = placed.node.id
+        model.adjusting { model.store.update(id, body) }
     }
 
-    private func binding(_ keyPath: WritableKeyPath<DesignElement, CGFloat>) -> Binding<CGFloat> {
-        Binding(get: { element[keyPath: keyPath] }, set: { value in change { $0[keyPath: keyPath] = value } })
+    private func frameBinding(_ keyPath: WritableKeyPath<CGRect, CGFloat>) -> Binding<CGFloat> {
+        let id = placed.node.id
+        return Binding(get: { placed.frame[keyPath: keyPath] }, set: { value in model.setFrame(of: id) { $0[keyPath: keyPath] = value } })
     }
 }
 
-/// One group selected: its name; what can be done to it as one thing; its box, whose X, Y,
-/// W and H move everything in it, or scale it in proportion (`AppModel.setGroupBox`); its
-/// angle, which turns it as one piece about its middle; and the settings of what is in it,
-/// each set on every member that has it, as for several things.
-private struct GroupSettings: View {
+/// The align buttons: one thing with its screen, several with each other, in a laid-out parent its alignment.
+private struct AlignButtons: View {
     @Environment(AppModel.self) private var model
-    let ref: DesignStore.ElementRef
-    let group: DesignElement
 
     var body: some View {
+        HStack(spacing: 6) {
+            ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
+                IconButton(alignment.name, symbol: alignment.symbol) { model.lineUpSelection(alignment) }
+                    .disabled(!model.canLineUpSelection(alignment))
+            }
+        }
+    }
+}
+
+/// One container selected, a group or a card: its name; what can be done to it as one thing; its box, whose X, Y, W
+/// and H move everything in it, or scale it in proportion (`AppModel.setGroupBox`), where nothing lays it out, and
+/// otherwise its Width and Height; its angle, which turns it as one piece about its middle; the settings of what is in
+/// it, each set on every member that has it, as for several things; then how it lays what it holds out, and a card's
+/// own look.
+private struct ContainerSettings: View {
+    @Environment(AppModel.self) private var model
+    let placed: PlacedNode
+
+    var body: some View {
+        let node = placed.node
+        let ref = placed.ref
         let isLocked = model.isSelectionLocked
         PanelHeader(
-            symbol: group.kind.symbol,
-            name: Binding(get: { group.name ?? "" }, set: { name in
-                model.adjusting { model.store.update(ref) { $0.name = name.isEmpty ? nil : name } }
+            symbol: node.kind.symbol,
+            name: Binding(get: { node.name ?? "" }, set: { name in
+                model.adjusting { model.store.update(node.id) { $0.name = name.isEmpty ? nil : name } }
             }),
-            placeholder: group.kind.layerName,
+            placeholder: node.kind.layerName,
             onDelete: { withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() } }
         )
 
@@ -230,45 +297,94 @@ private struct GroupSettings: View {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
                 LockButton()
                 ArrangeButtons()
+                // On when Ungroup would act: a group or a card, unlocked (what `canUngroupSelection` says, from the tree).
                 IconButton("Ungroup", symbol: "rectangle.3.group.dashed") { model.ungroupSelection() }
-                    .disabled(!model.canUngroupSelection)
+                    .disabled(isLocked || !node.isContainer)
             }
         }
 
         // Its box, in its host's points, as an element's frame is shown.
         PanelSection {
+            let isPlacedHere = SizingSection.isPositionEditable(for: placed)
             HStack(spacing: 8) {
-                NumberField("X", value: Binding(get: { group.frame.minX }, set: { x in model.setGroupBox(ref, x: x) }))
-                NumberField("Y", value: Binding(get: { group.frame.minY }, set: { y in model.setGroupBox(ref, y: y) }))
+                NumberField("X", value: Binding(get: { placed.frame.minX }, set: { x in model.setGroupBox(ref, x: x) }))
+                NumberField("Y", value: Binding(get: { placed.frame.minY }, set: { y in model.setGroupBox(ref, y: y) }))
             }
-            HStack(spacing: 8) {
-                NumberField("W", value: Binding(get: { group.frame.width }, set: { width in model.setGroupBox(ref, width: width) }), range: 1...4000)
-                NumberField("H", value: Binding(get: { group.frame.height }, set: { height in model.setGroupBox(ref, height: height) }), range: 1...4000)
+            .disabled(!isPlacedHere)
+            if isPlacedHere {
+                HStack(spacing: 8) {
+                    NumberField("W", value: Binding(get: { placed.frame.width }, set: { width in model.setGroupBox(ref, width: width) }), range: 1...4000)
+                    NumberField("H", value: Binding(get: { placed.frame.height }, set: { height in model.setGroupBox(ref, height: height) }), range: 1...4000)
+                }
+            } else {
+                SizingSection(placed: placed).equatable()
             }
             if case .screen = ref.host {
                 // Lined up with its screen as one block.
-                HStack(spacing: 6) {
-                    ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
-                        IconButton(alignment.name, symbol: alignment.symbol) { model.store.align(ref, alignment) }
-                    }
-                }
+                AlignButtons()
             }
         }
         .disabled(isLocked)
 
-        LeafStyleSections(leaves: model.selectedLeaves.map { ($0.ref, $0.element) }, showsAngle: true) {
+        LeafStyleSections(leaves: model.selectedLeafNodes, showsAngle: true) {
             NumberField("°", label: "Rotation", value: Binding(
-                get: { CGFloat(Rotation.shown(group.resolvedRotation)) },
+                get: { CGFloat(Rotation.shown(placed.degrees)) },
                 set: { degrees in model.setGroupRotation(ref, to: Double(degrees)) }
             ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
             .disabled(isLocked)
         }
+
+        // After what was always here, so that nothing a person knows moves.
+        LayoutSection(id: node.id, layout: node.resolvedLayout, padding: node.padding, isScreenRoot: false, children: node.children)
+            .equatable()
+            .disabled(isLocked)
+        if node.kind == .card {
+            CardLook(node: node)
+                .disabled(isLocked)
+        }
+    }
+}
+
+/// A card's own look: its fill, which is its own until it is reset to the design's, and its corners.
+private struct CardLook: View {
+    @Environment(AppModel.self) private var model
+    let node: LayerNode
+
+    var body: some View {
+        let tokens = model.store.tree.settings.tokens
+        let id = node.id
+        PanelSection {
+            Text("Card")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            PanelRow("Fill") {
+                ColorField(label: "Card fill colour", color: Binding(
+                    get: { node.shownFill(tokens: tokens) },
+                    set: { colour in change(id) { $0.style.tint = colour } }
+                ))
+                Button("Default") { change(id) { $0.style.tint = nil } }
+                    .disabled(node.style.tint == nil)
+                    .accessibilityLabel("Default card fill")
+            }
+            PanelRow("Corners") {
+                NumberField("R", label: "Card corner radius", value: Binding(
+                    get: { node.style.cornerRadius ?? tokens.card.radius },
+                    set: { radius in change(id) { $0.style.cornerRadius = radius } }
+                ), range: 0...999)
+            }
+        }
+    }
+
+    private func change(_ id: UUID, _ body: (inout LayerNode) -> Void) {
+        model.adjusting { model.store.update(id, body) }
     }
 }
 
 private struct FrameSettings: View {
     @Environment(AppModel.self) private var model
-    let screen: DesignScreen
+    let screen: TreeScreen
+    /// The device "Save as Device…" is making, while its sheet is up.
+    @State private var savingAsDevice: CustomDeviceSheet.Purpose?
 
     var body: some View {
         PanelHeader(
@@ -285,12 +401,9 @@ private struct FrameSettings: View {
         }
 
         PanelSection {
-            Picker("Device", selection: Binding(get: { screen.device.id }, set: { id in change { $0.deviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
-                ForEach(DeviceFrame.all) { device in
-                    Text("\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))").tag(device.id)
-                }
-            }
-            .labelsHidden()
+            DevicePicker(title: "Device", selection: screen.deviceID, showsSizes: true,
+                         choose: { id in model.adjusting { model.store.setDevice(of: screen.id, to: id) } },
+                         add: { device in model.store.addCustomDevice(device, forScreen: screen.id) })
             HStack(spacing: 8) {
                 NumberField("X", value: Binding(get: { screen.origin.x }, set: { x in change { $0.origin.x = x } }))
                 NumberField("Y", value: Binding(get: { screen.origin.y }, set: { y in change { $0.origin.y = y } }))
@@ -300,10 +413,30 @@ private struct FrameSettings: View {
                 set: { percent in change { $0.scale = percent / 100 } }
             ), range: 15...200)
         }
+
+        // A screen's root is free or a column.
+        LayoutSection(id: screen.root.id, layout: screen.root.resolvedLayout, padding: screen.root.padding, isScreenRoot: true,
+                      children: screen.root.children)
+            .equatable()
+
+        // After everything the panel had: a device of the design's own, made from this one.
+        PanelSection {
+            Button("Save as Device…", systemImage: "plus.rectangle.on.rectangle") {
+                let device = model.store.tree.device(of: screen)
+                savingAsDevice = CustomDeviceSheet.Purpose.add(CustomDeviceDraft(from: device, named: "\(device.name) (Custom)"))
+            }
+            .foregroundStyle(.tint)
+        }
+        .sheet(item: $savingAsDevice) { purpose in
+            let id = screen.id
+            CustomDeviceSheet(purpose: purpose, add: { device in model.store.addCustomDevice(device, forScreen: id) })
+                .environment(model)
+        }
     }
 
-    private func change(_ body: (inout DesignScreen) -> Void) {
-        model.adjusting { model.store.updateScreen(screen.id, body) }
+    private func change(_ body: (inout TreeScreen) -> Void) {
+        let id = screen.id
+        model.adjusting { model.store.updateTreeScreen(id, body) }
     }
 }
 
@@ -327,38 +460,39 @@ private struct SeveralSettings: View {
                 IconButton("Duplicate", symbol: "plus.square.on.square") { model.duplicateSelection() }
                 LockButton()
                 ArrangeButtons()
-                let canGroup = model.canGroupSelection
-                IconButton("Group", symbol: "rectangle.3.group") { model.groupSelection() }
-                    .disabled(!canGroup)
-                    .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
+                GroupMenuButton()
             }
         }
 
         PanelSection {
             HStack(spacing: 6) {
                 ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
-                    IconButton(alignment.name, symbol: alignment.symbol) { model.alignSelection(alignment) }
+                    IconButton(alignment.name, symbol: alignment.symbol) { model.lineUpSelection(alignment) }
+                        .disabled(!model.canLineUpSelection(alignment))
                 }
             }
             HStack(spacing: 6) {
                 ForEach(ElementLayout.Distribution.allCases, id: \.self) { distribution in
-                    IconButton(distribution.name, symbol: distribution.symbol) { model.distributeSelection(distribution) }
+                    IconButton(distribution.name, symbol: distribution.symbol) { model.lineUpSelection(distribution) }
+                        .disabled(!model.canLineUpSelection(distribution))
                 }
             }
-            .disabled(!model.canDistributeSelection)
         }
         .disabled(isLocked)
 
         // Each thing is turned to the angle shown (the first unlocked one's) on its own pivot,
         // a group as one piece about its middle; a screen among them leaves nothing to turn.
         // What the field turns: these, even if it is set once the selection has moved on.
-        let refs = model.selectedElements.map(\.ref)
-        let first = model.unlockedSelectedElements.first?.element
-        let turnable = model.canTurnSelection && first != nil
-        LeafStyleSections(leaves: model.selectedLeaves.map { ($0.ref, $0.element) }, showsAngle: turnable) {
+        let nodes = things.compactMap { thing -> PlacedNode? in
+            if case .element(let ref) = thing { model.store.placed(ref) } else { nil }
+        }
+        let refs = nodes.map(\.ref)
+        let first = nodes.first { !$0.isLocked }
+        let turnable = model.canTurnSelectionOnTheTree && first != nil
+        LeafStyleSections(leaves: model.selectedLeafNodes, showsAngle: turnable) {
             if turnable, let first {
                 NumberField("°", label: "Rotation", value: Binding(
-                    get: { CGFloat(Rotation.shown(first.resolvedRotation)) },
+                    get: { CGFloat(Rotation.shown(first.degrees)) },
                     set: { degrees in model.setAngle(of: refs, to: Double(degrees)) }
                 ), range: 0...360, pointsPerStep: 2, degreesPerStep: 1, wraps: true, ticksEvery: 15)
             }
@@ -366,49 +500,84 @@ private struct SeveralSettings: View {
     }
 }
 
-/// The settings the elements a panel is for have in common, each set on every one of
+/// The Group button for several things: a tap groups when Group is offered, and the menu offers Row, Column, Grid and
+/// Card, each off when what is selected can't be grouped so; a tap opens the menu when Group itself is off, so that it
+/// never does nothing.
+private struct GroupMenuButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let offered = model.groupShapesOffered
+        let hint = offered.isEmpty && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : ""
+        let items = ForEach(GroupShape.allCases, id: \.self) { shape in
+            Button(shape.title, systemImage: shape.symbol) { group(shape) }
+                .disabled(!offered.contains(shape))
+        }
+        let label = IconLabel(symbol: "rectangle.3.group", isEnabled: !offered.isEmpty)
+        Group {
+            if offered.contains(.group) {
+                Menu { items } label: { label } primaryAction: { group(.group) }
+            } else {
+                Menu { items } label: { label }
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuOrder(.fixed)
+        .disabled(offered.isEmpty)
+        .accessibilityLabel("Group")
+        .accessibilityHint(hint)
+        .help("Group")
+    }
+
+    private func group(_ shape: GroupShape) {
+        withAnimation(.smooth(duration: 0.25)) { model.groupSelection(as: shape) }
+    }
+}
+
+/// The settings the things a panel is for have in common, each set on every one of
 /// `leaves` that has it, and showing what the first of those has: corners and opacity, with
-/// `angle` beside them; fill, border and shadow; and text. A group stands for what is in it:
-/// `leaves` are `AppModel.selectedLeaves`, so that a group, alone or among several things,
+/// `angle` beside them; fill, border and shadow; and text. A container stands for what is in it:
+/// `leaves` are `AppModel.selectedLeafNodes`, so that a group or card, alone or among several things,
 /// is styled through its members.
 private struct LeafStyleSections<Angle: View>: View {
     @Environment(AppModel.self) private var model
     /// What the settings change: these, even if a field typed in sets its value once the
     /// selection has moved on (M5).
-    let leaves: [(ref: DesignStore.ElementRef, element: DesignElement)]
+    let leaves: [PlacedNode]
     /// Whether `angle` has a field to show.
     let showsAngle: Bool
     let angle: Angle
 
-    init(leaves: [(ref: DesignStore.ElementRef, element: DesignElement)], showsAngle: Bool, @ViewBuilder angle: () -> Angle) {
+    init(leaves: [PlacedNode], showsAngle: Bool, @ViewBuilder angle: () -> Angle) {
         self.leaves = leaves
         self.showsAngle = showsAngle
         self.angle = angle()
     }
 
     var body: some View {
-        let elements = leaves.map(\.element)
-        let refs = leaves.map(\.ref)
+        let elements = leaves.map(\.node)
+        let ids = elements.map(\.id)
         // Corners and opacity are for what isn't locked, by itself or by a group above it, as
         // they are for one element: the value shown is an unlocked one's, and only unlocked
         // ones change.
-        let unlocked = leaves.filter { !model.store.isLocked(.element($0.ref)) }.map(\.element)
+        let unlocked = leaves.filter { !$0.isLocked }.map(\.node)
         let rounded = unlocked.first(where: \.hasCornerRadius)
-        let faded = unlocked.first { $0.kind.spec.hasEffects }
-        let effects = elements.first { $0.kind.spec.hasEffects }
+        let faded = unlocked.first(where: \.hasEffects)
+        let effects = elements.first(where: \.hasEffects)
         if rounded != nil || faded != nil || showsAngle {
             PanelSection {
                 HStack(spacing: 8) {
                     if let rounded {
                         NumberField("R", label: "Corner radius", value: Binding(
                             get: { rounded.resolvedCornerRadius },
-                            set: { radius in change(refs, unlockedOnly: true, where: \.hasCornerRadius) { $0.cornerRadius = radius } }
+                            set: { radius in change(ids, unlockedOnly: true, where: \.hasCornerRadius) { $0.style.cornerRadius = radius } }
                         ), range: 0...999)
                     }
                     if let faded {
                         NumberField("%", label: "Opacity", value: Binding(
                             get: { (faded.resolvedOpacity * 100).rounded() },
-                            set: { percent in change(refs, unlockedOnly: true, where: { $0.kind.spec.hasEffects }) { $0.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
+                            set: { percent in change(ids, unlockedOnly: true, where: \.hasEffects) { $0.style.opacity = percent >= 99.5 ? nil : Double(percent) / 100 } }
                         ), range: 5...100)
                     }
                     if showsAngle {
@@ -424,24 +593,24 @@ private struct LeafStyleSections<Angle: View>: View {
             PanelSection {
                 if let filled {
                     PanelRow("Fill") {
-                        ColorField(label: "Fill colour", color: Binding(get: { filled.tint }, set: { colour in change(refs, where: \.hasFill) { $0.tint = colour } }))
+                        ColorField(label: "Fill colour", color: Binding(get: { filled.shownTint }, set: { colour in change(ids, where: \.hasFill) { $0.style.tint = colour } }))
                     }
                 }
                 if let bordered {
                     PanelRow("Border") {
                         NumberField("W", label: "Border width", value: Binding(
                             get: { bordered.resolvedBorderWidth },
-                            set: { width in change(refs, where: \.hasBorder) { $0.borderWidth = width > 0 ? width : nil } }
+                            set: { width in change(ids, where: \.hasBorder) { $0.style.borderWidth = width > 0 ? width : nil } }
                         ), range: 0...40)
                             .frame(width: 84)
                         ColorField(label: "Border colour", color: Binding(
                             get: { bordered.resolvedBorderColor },
-                            set: { colour in change(refs, where: \.hasBorder) { $0.borderColor = colour } }
+                            set: { colour in change(ids, where: \.hasBorder) { $0.style.borderColor = colour } }
                         ))
                     }
                 }
                 if let effects {
-                    Toggle("Shadow", isOn: Binding(get: { effects.hasShadow }, set: { shadow in change(refs, where: \.kind.spec.hasEffects) { $0.hasShadow = shadow } }))
+                    Toggle("Shadow", isOn: Binding(get: { effects.style.hasShadow }, set: { shadow in change(ids, where: \.hasEffects) { $0.style.hasShadow = shadow } }))
                 }
             }
         }
@@ -450,12 +619,12 @@ private struct LeafStyleSections<Angle: View>: View {
             PanelSection {
                 HStack(spacing: 8) {
                     NumberField("pt", label: "Font size", value: Binding(
-                        get: { worded.resolvedFontSize.rounded() },
-                        set: { size in change(refs, where: \.kind.hasText) { $0.fontSize = size } }
+                        get: { StylePanel.fontSizeShown(for: worded, tokens: model.store.tree.settings.tokens) },
+                        set: { size in change(ids, where: \.kind.hasText) { $0.style.fontSize = size } }
                     ), range: 6...400)
                         .frame(width: 84)
                     Spacer(minLength: 0)
-                    Picker("Weight", selection: Binding(get: { worded.resolvedFontWeight }, set: { weight in change(refs, where: \.kind.hasText) { $0.fontWeight = weight } })) {
+                    Picker("Weight", selection: Binding(get: { worded.resolvedFontWeight }, set: { weight in change(ids, where: \.kind.hasText) { $0.style.fontWeight = weight } })) {
                         ForEach(FontWeightChoice.allCases, id: \.self) { weight in
                             Text(weight.name).tag(weight)
                         }
@@ -464,14 +633,14 @@ private struct LeafStyleSections<Angle: View>: View {
                     .fixedSize()
                     ColorPicker("Text colour", selection: Binding(
                         get: { worded.resolvedTextColor.color },
-                        set: { colour in change(refs, where: \.kind.hasText) { $0.textColor = RGBColor(UIColor(colour)) } }
+                        set: { colour in change(ids, where: \.kind.hasText) { $0.style.textColor = RGBColor(UIColor(colour)) } }
                     ), supportsOpacity: false)
                         .labelsHidden()
                 }
                 if let aligned = elements.first(where: \.hasTextAlignment) {
                     Picker("Text alignment", selection: Binding(
                         get: { aligned.resolvedTextAlignment },
-                        set: { alignment in change(refs, where: \.hasTextAlignment) { $0.textAlignment = alignment } }
+                        set: { alignment in change(ids, where: \.hasTextAlignment) { $0.style.textAlignment = alignment } }
                     )) {
                         ForEach(TextAlignmentChoice.allCases, id: \.self) { alignment in
                             Image(systemName: alignment.symbol)
@@ -485,10 +654,10 @@ private struct LeafStyleSections<Angle: View>: View {
         }
     }
 
-    /// Makes a change to each of the elements the settings are for that a setting applies to.
+    /// Makes a change to each of the nodes the settings are for that a setting applies to.
     /// A run of quick changes, a colour being dragged for instance, undoes as one step.
-    private func change(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        model.changeElements(refs, unlockedOnly: unlockedOnly, where: applies, body)
+    private func change(_ ids: [UUID], unlockedOnly: Bool = false, where applies: (LayerNode) -> Bool, _ body: (inout LayerNode) -> Void) {
+        model.changeNodes(ids, unlockedOnly: unlockedOnly, where: applies, body)
     }
 }
 
@@ -511,6 +680,9 @@ struct BoardMenu: View {
     /// What the field said when the menu opened, to tell whether anything was typed.
     @State private var shown = ""
     @AppStorage("boardMenuTab") private var tab = Tab.canvas
+    /// The device the New Screens picker is making or editing, shown in place of the tab: a sheet over the popover
+    /// left its number fields unable to take the keyboard.
+    @State private var deviceForm: CustomDeviceSheet.Purpose?
 
     var body: some View {
         let sync = model.syncState
@@ -549,12 +721,19 @@ struct BoardMenu: View {
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        // A popover takes the height of the tab showing; a sheet scrolls.
+        // A popover takes the height of the tab showing, and scrolls once that is more than the window has room for
+        // below the bar and the menu's top: the Canvas tab's tokens made it taller than a short window. A sheet scrolls.
         if isSheet {
             ScrollView { settings }
                 .scrollBounceBehavior(.basedOnSize)
+                .scrollDisabled(model.scrubber.target?.owner == .form)
         } else {
-            settings
+            ScrollView { settings }
+                .scrollBounceBehavior(.basedOnSize)
+                // Not while a token field is scrubbed by a finger.
+                .scrollDisabled(model.scrubber.target?.owner == .form)
+                .frame(maxHeight: max(240, model.canvasSize.height - 220), alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
         }
         }
         .frame(width: isSheet ? nil : 360, alignment: .top)
@@ -569,13 +748,20 @@ struct BoardMenu: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 0) {
-            switch tab {
-            case .canvas: CanvasTab()
-            case .magicPen: MagicPenTab()
-            case .code: CodeTab()
+            if let deviceForm {
+                CustomDeviceSheet(purpose: deviceForm, add: { device in model.store.addCustomDeviceForNewScreens(device) },
+                                  onClose: { self.deviceForm = nil })
+                    .id(deviceForm.id)
+            } else {
+                switch tab {
+                case .canvas: CanvasTab()
+                case .magicPen: MagicPenTab(showDevice: { deviceForm = $0 })
+                case .code: CodeTab()
+                }
             }
         }
         .padding(.bottom, 12)
+        .onChange(of: tab) { deviceForm = nil }
     }
 
     /// Names the board what was typed, once typing ends or the menu closes. Only if
@@ -652,11 +838,16 @@ private struct CanvasTab: View {
             Toggle("Show Spacing", isOn: canvasBinding(model, \.showsMeasurements))
             Toggle("Frame Names", isOn: canvasBinding(model, \.showsFrameNames))
         }
+
+        // After the canvas's own settings: the numbers the design is laid out and styled by.
+        DesignTokensSection()
     }
 }
 
 private struct MagicPenTab: View {
     @Environment(AppModel.self) private var model
+    /// Shows a device being made or edited from the New Screens picker in the menu.
+    let showDevice: (CustomDeviceSheet.Purpose) -> Void
 
     var body: some View {
         @Bindable var model = model
@@ -675,13 +866,10 @@ private struct MagicPenTab: View {
             HStack {
                 Text("New Screens")
                 Spacer(minLength: 8)
-                Picker("New Screens", selection: canvasBinding(model, \.sketchDeviceID)) {
-                    ForEach(DeviceFrame.all) { device in
-                        Text(device.name).tag(device == .iPhone ? String?.none : device.id)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
+                DevicePicker(title: "New Screens", selection: model.store.canvas.sketchDeviceID, tintsName: false,
+                             choose: { id in model.adjusting { model.store.updateCanvas { $0.sketchDeviceID = id } } },
+                             add: { device in model.store.addCustomDeviceForNewScreens(device) }, present: showDevice)
+                    .fixedSize()
             }
             // The model this design uses, saved in its file.
             HStack {
@@ -781,7 +969,7 @@ private struct PanelHeader: View {
 }
 
 /// A group of related settings, set apart from the next by a line.
-private struct PanelSection<Content: View>: View {
+struct PanelSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -797,7 +985,7 @@ private struct PanelSection<Content: View>: View {
 }
 
 /// A control that needs naming: its name on the left.
-private struct PanelRow<Content: View>: View {
+struct PanelRow<Content: View>: View {
     let label: String
     @ViewBuilder var content: Content
 
@@ -818,8 +1006,10 @@ private struct PanelRow<Content: View>: View {
 /// A number that can be typed over, with its unit inside the field. The change is made
 /// when typing ends. It can also be scrubbed a unit at a time: held with a finger and
 /// dragged sideways, or squeezed over with an Apple Pencil Pro and rolled.
-private struct NumberField: View {
+struct NumberField: View {
     @Environment(Scrubber.self) private var scrubber
+    /// Whose field it is: the Format panel's, or a form's over the canvas.
+    @Environment(\.scrubberOwner) private var owner
     let unit: String
     let label: String
     @Binding var value: CGFloat
@@ -848,7 +1038,7 @@ private struct NumberField: View {
     }
 
     var body: some View {
-        let isScrubbing = scrubber.target?.label == label && scrubber.target?.frame == frame
+        let isScrubbing = scrubber.target?.owner == owner && scrubber.target?.label == label && scrubber.target?.frame == frame
         HStack(spacing: 6) {
             Text(unit)
                 .font(.system(size: 11, weight: .medium))
@@ -901,9 +1091,9 @@ private struct NumberField: View {
                 },
             isEnabled: !isTyping
         )
-        // However the hold ends, lifted or cancelled, scrubbing ends with it: the panel's,
-        // not a zoom ruler another finger may hold.
-        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(.panel) } }
+        // However the hold ends, lifted or cancelled, scrubbing ends with it: this field's
+        // panel's or form's, not a zoom ruler another finger may hold.
+        .onChange(of: isHeld) { _, held in if !held { scrubber.fingerLifted(owner) } }
     }
 
     private static let format = TypedNumber.format
@@ -912,7 +1102,8 @@ private struct NumberField: View {
         Scrubber.Target(
             label: label, unit: unit, frame: frame, range: range,
             get: { value }, set: { value = $0 },
-            pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery
+            pointsPerStep: pointsPerStep, degreesPerStep: degreesPerStep, wraps: wraps, ticksEvery: ticksEvery,
+            owner: owner
         )
     }
 }
@@ -1045,7 +1236,7 @@ private struct ArrangeButtons: View {
 }
 
 /// A square button with an icon, for a row of related actions.
-private struct IconButton: View {
+struct IconButton: View {
     @Environment(\.isEnabled) private var isEnabled
     let label: String
     let symbol: String
@@ -1063,13 +1254,7 @@ private struct IconButton: View {
         Button {
             withAnimation(.smooth(duration: 0.25)) { action() }
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .medium))
-                .opacity(isEnabled ? 1 : 0.35)
-                .frame(maxWidth: .infinity)
-                .frame(height: 32)
-                .background(Color(uiColor: isOn ? .systemFill : .tertiarySystemFill), in: .rect(cornerRadius: 9))
-                .contentShape(.rect)
+            IconLabel(symbol: symbol, isEnabled: isEnabled, isOn: isOn)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -1078,8 +1263,25 @@ private struct IconButton: View {
     }
 }
 
+/// What a square icon button looks like, for a button or a menu.
+struct IconLabel: View {
+    let symbol: String
+    var isEnabled = true
+    var isOn = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .medium))
+            .opacity(isEnabled ? 1 : 0.35)
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .background(Color(uiColor: isOn ? .systemFill : .tertiarySystemFill), in: .rect(cornerRadius: 9))
+            .contentShape(.rect)
+    }
+}
+
 /// A colour well, at the end of its row.
-private struct ColorField: View {
+struct ColorField: View {
     let label: String
     @Binding var color: RGBColor
 
