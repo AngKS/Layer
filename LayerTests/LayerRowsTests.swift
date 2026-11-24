@@ -156,15 +156,10 @@ struct LayerRowsTests {
 
         var columnNames: [String] { store.node(col.id)?.children.compactMap(\.name) ?? [] }
 
-        /// Drops B above `row` in the column's list, or below its last row for nil.
+        /// Drops B above `row` in the column's list, or below its last row for nil, through the panel's own drop.
         @MainActor
         func dropB(above row: UUID?) {
-            let list = LayerRows.lines(in: .node(col.id), content: store.tree, index: store.index)
-            if row == nil {
-                store.moveLayerToTop(b.id, of: .node(col.id))
-            } else {
-                store.moveLayer(b.id, to: .node(col.id), before: LayerRows.before(row, in: list, layoutOrder: true))
-            }
+            LayerRows.drop([b.id], in: .node(col.id), above: row, layoutOrder: true, store: store)
         }
     }
 
@@ -264,5 +259,81 @@ struct LayerRowsTests {
         _ = LayerRows.lines(in: .node(g.id), content: store.tree, index: store.index)
         #expect(rows.map(\.name) == ["G", "B", "A3"])
         #expect(TreeProjection.lowerings(of: screen) == lowered, "listing reads the tree and its index")
+    }
+
+    // MARK: Several rows at once
+
+    /// A column [x, y, z] and a free group [p, q, r] (shown r, q, p), with B and C loose beside them.
+    @MainActor
+    private struct Several {
+        let store: DesignStore
+        let b = leaf("B"), c = leaf("C")
+        let x = leaf("x"), y = leaf("y"), z = leaf("z")
+        let p = leaf("p"), q = leaf("q"), r = leaf("r")
+        let col: LayerNode, free: LayerNode
+
+        init() {
+            col = container(column, named: "Col", [x, y, z])
+            free = group(named: "Free", [p, q, r])
+            store = makeStore(design([b, c, col, free]).0)
+        }
+
+        func names(_ container: LayerNode) -> [String] { store.node(container.id)?.children.compactMap(\.name) ?? [] }
+
+        func drop(_ ids: [LayerNode], into container: LayerNode, above row: LayerNode?, layoutOrder: Bool) {
+            LayerRows.drop(ids.map(\.id), in: .node(container.id), above: row?.id, layoutOrder: layoutOrder, store: store)
+        }
+    }
+
+    @Test func twoRowsDroppedMidListKeepTheirOrder() {
+        let column = Several()
+        column.drop([column.b, column.c], into: column.col, above: column.y, layoutOrder: true)
+        #expect(column.names(column.col) == ["x", "B", "C", "y", "z"])
+
+        let free = Several()
+        // Shown r, B, C, q, p: above q.
+        free.drop([free.b, free.c], into: free.free, above: free.q, layoutOrder: false)
+        #expect(free.names(free.free) == ["p", "q", "C", "B", "r"])
+    }
+
+    @Test func twoRowsDroppedAtTheTopKeepTheirOrder() {
+        let column = Several()
+        column.drop([column.b, column.c], into: column.col, above: column.x, layoutOrder: true)
+        #expect(column.names(column.col) == ["B", "C", "x", "y", "z"])
+
+        let free = Several()
+        free.drop([free.b, free.c], into: free.free, above: free.r, layoutOrder: false)
+        #expect(free.names(free.free) == ["p", "q", "r", "C", "B"])
+    }
+
+    @Test func twoRowsDroppedWhereTheRowAboveOrBelowIsOneOfThemAreNotRefused() {
+        // Above z, with y (the row above z) dragged too.
+        let column = Several()
+        column.drop([column.x, column.y], into: column.col, above: column.z, layoutOrder: true)
+        #expect(column.names(column.col) == ["x", "y", "z"])
+        let reversed = Several()
+        reversed.drop([reversed.y, reversed.x], into: reversed.col, above: reversed.z, layoutOrder: true)
+        #expect(reversed.names(reversed.col) == ["y", "x", "z"], "they land in the order given")
+
+        // Above a row that is dragged: it is taken as the next row that stays.
+        let onOne = Several()
+        onOne.drop([onOne.x, onOne.z], into: onOne.col, above: onOne.x, layoutOrder: true)
+        #expect(onOne.names(onOne.col) == ["x", "z", "y"])
+
+        // Free group, shown r, q, p: q and r dragged, dropped above q, taken as above p.
+        let free = Several()
+        free.drop([free.r, free.q], into: free.free, above: free.q, layoutOrder: false)
+        #expect(free.names(free.free) == ["p", "q", "r"], "r above q, as dragged, above p")
+    }
+
+    @Test func twoRowsDroppedBelowTheLastRowKeepTheirOrder() {
+        let column = Several()
+        column.drop([column.b, column.c], into: column.col, above: nil, layoutOrder: true)
+        #expect(column.names(column.col) == ["x", "y", "z", "B", "C"])
+
+        let free = Several()
+        // Shown r, q, p, B, C.
+        free.drop([free.b, free.c], into: free.free, above: nil, layoutOrder: false)
+        #expect(free.names(free.free) == ["C", "B", "p", "q", "r"])
     }
 }

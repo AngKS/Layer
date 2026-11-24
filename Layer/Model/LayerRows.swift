@@ -126,4 +126,31 @@ enum LayerRows {
         guard let row, let place = list.firstIndex(where: { $0.id == row }), place > 0 else { return nil }
         return list[place - 1].id
     }
+
+    /// Lands layers in a list just above `row`, keeping their order as given (top to bottom as the panel shows
+    /// them) at every drop position; nil is below the last row, which is the back of a topmost-first list and the
+    /// front of one in layout order (F22). One step. A `row` that is itself dragged is taken as the next row
+    /// that isn't, and the `before` is worked out among the rows that stay, so no dragged layer is refused for
+    /// where another was. Refusals are `moveLayer`'s. True when any moved.
+    @MainActor @discardableResult
+    static func drop(_ ids: [UUID], in list: NodeParent, above row: UUID?, layoutOrder: Bool, store: DesignStore) -> Bool {
+        let all = lines(in: list, content: store.tree, index: store.index)
+        let moving = Set(ids)
+        var row = row
+        if let dragged = row, moving.contains(dragged) {
+            row = all.drop { $0.id != dragged }.dropFirst().first { !moving.contains($0.id) }?.id
+        }
+        var moved = false
+        store.asOneStep {
+            if layoutOrder, row == nil {
+                for id in ids { moved = store.moveLayerToTop(id, of: list) || moved }
+                return
+            }
+            let before = before(row, in: all.filter { !moving.contains($0.id) }, layoutOrder: layoutOrder)
+            // Each lands just after `before` in a layout-order list, so the last goes first; in a topmost-first
+            // list each lands just in front of it, which is above it, so the first does.
+            for id in layoutOrder ? ids.reversed() : ids { moved = store.moveLayer(id, to: list, before: before) || moved }
+        }
+        return moved
+    }
 }

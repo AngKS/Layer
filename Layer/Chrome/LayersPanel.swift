@@ -165,21 +165,7 @@ private struct LayersList: View {
         case .before(let id): list.landing(before: id)
         case .end: list.landing(before: nil)
         }
-        let store = model.store
-        store.asOneStep {
-            let siblings = list.isLayoutOrder ? LayerRows.lines(in: list.list, content: store.tree, index: store.index) : []
-            for id in difference.sources {
-                Self.drop(id, in: list.list, above: row, among: siblings, layoutOrder: list.isLayoutOrder, store: store)
-            }
-        }
-    }
-
-    /// Lands a layer in a list just above `row`; nil is below the last row, which is the back of a topmost-first
-    /// list and the front of one in layout order (F22).
-    @discardableResult
-    static func drop(_ id: UUID, in list: LayerList, above row: UUID?, among siblings: [LayerLine], layoutOrder: Bool, store: DesignStore) -> Bool {
-        if layoutOrder, row == nil { return store.moveLayerToTop(id, of: list) }
-        return store.moveLayer(id, to: list, before: LayerRows.before(row, in: siblings, layoutOrder: layoutOrder))
+        LayerRows.drop(difference.sources, in: list.list, above: row, layoutOrder: list.isLayoutOrder, store: model.store)
     }
 
     /// One list of rows: a screen's top level, the canvas's, or what is in a container, each an open
@@ -289,9 +275,8 @@ private struct MoveActions: ViewModifier {
             if let outOf {
                 Button("Move Out of \(outOf.container.name)") {
                     // Just above the container, in the list it is in: its own row's place.
-                    let among = LayerRows.lines(in: outOf.list, content: model.store.tree, index: model.store.index)
                     withAnimation(.snappy) {
-                        _ = LayersList.drop(id, in: outOf.list, above: outOf.container.id, among: among, layoutOrder: outOf.container.isLayoutOrder, store: model.store)
+                        _ = LayerRows.drop([id], in: outOf.list, above: outOf.container.id, layoutOrder: outOf.container.isLayoutOrder, store: model.store)
                     }
                 }
             }
@@ -300,12 +285,12 @@ private struct MoveActions: ViewModifier {
 
     private func run(above row: UUID?) {
         withAnimation(.snappy) {
-            _ = LayersList.drop(id, in: list, above: row, among: siblings, layoutOrder: siblings.first?.isLayoutOrder ?? false, store: model.store)
+            _ = LayerRows.drop([id], in: list, above: row, layoutOrder: siblings.first?.isLayoutOrder ?? false, store: model.store)
         }
     }
 }
 
-/// A closed container's row takes a row dropped on it: it goes inside, at the top. An open container's
+/// A closed container's row takes a row dropped on it: it goes inside, at the top (the end of a row, column or grid). An open container's
 /// row takes none, so that a drop on it is a reorder, above or below it.
 private struct DropIntoContainer: ViewModifier {
     let isClosed: Bool
