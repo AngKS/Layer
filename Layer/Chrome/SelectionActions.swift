@@ -330,7 +330,7 @@ struct SelectionActions: View {
         return CGPoint(x: min(x + trailing / 2, max(right - whole, left + whole)), y: y)
     }
 
-    private static let barSpace = "SelectionActions.bar"
+    private nonisolated static let barSpace = "SelectionActions.bar"
 }
 
 /// Typing into the selected thing, read and written on the tree (F13). Everything typed in one sitting undoes as one step.
