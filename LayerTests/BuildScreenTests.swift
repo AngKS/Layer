@@ -225,6 +225,76 @@ private final class BuildBundleMarker {}
     }
     #endif
 
+    #if DEBUG
+    /// The person's edit, landing while a rebuild is laid out off the main actor, is kept: the build is merged again
+    /// over the screen as it is then, as a generation's update is (final review A-M2).
+    @Test func anEditMadeWhileARebuildIsLaidOutIsKept() async throws {
+        let (model, undo) = makeModel()
+        let id = try await build("title: A\nbutton: Go", in: model)
+        let built = try #require(model.store.root(of: id))
+        let title = try #require(leaves(of: built).first)
+        model.beforeGenerationCommit = { model.store.update(title.id) { $0.content.text = "Mine" } }
+        let laidOut = LayoutEngine.timesLaidOut(built.id)
+
+        _ = try await build("title: B\nbutton: Go\ntext: More", on: id, in: model)
+        model.beforeGenerationCommit = nil
+
+        let root = try #require(model.store.root(of: id))
+        #expect(leaves(of: root).map(\.kind) == [.title, .button, .text])
+        #expect(leaves(of: root).first?.id == title.id)
+        #expect(leaves(of: root).first?.content.text == "Mine")
+        #expect(leaves(of: root).last?.content.text == "More")
+        // Once ahead, once for the edit's own change, and once in the commit, which merged again over the edited screen.
+        #expect(LayoutEngine.timesLaidOut(built.id) == laidOut + 3)
+        // The rebuild is a step of its own, after the person's edit.
+        undo.undo()
+        let back = try #require(model.store.root(of: id))
+        #expect(leaves(of: back).map(\.content.text) == ["Mine", "Go"])
+    }
+    #endif
+
+    /// A rebuild, or a new screen, that would take the design past what Layer keeps changes nothing and says so in
+    /// words about room, not about reading: Siri doesn't say it built anything (final review A-M1).
+    @Test func aBuildTheDesignHasNoRoomForIsRefusedForWantOfRoom() async throws {
+        let (model, undo) = makeModel()
+        // The screen's root, its section and its title: 3 nodes.
+        let id = try await build("title: A", in: model)
+        // A screen of 4,995 texts, laid out as it is given: 4,996 nodes, so the design holds 4,999.
+        var crowd = TreeScreen(name: "Crowd", origin: CGPoint(x: 2_000, y: 0), scale: 1, deviceID: nil)
+        crowd.root.children = (0..<4_995).map { index in
+            var text = LayerNode(kind: .text)
+            text.content.text = "\(index)"
+            text.frame = CGRect(x: 20, y: 100, width: 80, height: 20)
+            return text
+        }
+        try #require(model.store.addLaidOutScreens([crowd]) == [crowd.id])
+        let before = model.store.content
+        let steps = undo.canUndo
+
+        func expectNoRoom(_ layout: String, on target: TreeScreen.ID?) async {
+            do {
+                _ = try await build(layout, on: target, in: model)
+                Issue.record("\(layout) should be refused")
+            } catch let error as LayerIntentError {
+                guard case .designTooLarge = error else {
+                    Issue.record("refused for want of room, not \(error)")
+                    return
+                }
+                let said = String(localized: error.localizedStringResource)
+                #expect(said.contains("larger than Layer keeps"))
+                #expect(said.contains(TreeRules.maximumNodes.formatted()))
+            } catch {
+                Issue.record("refused for want of room, not \(error)")
+            }
+        }
+        // Two more nodes than there is room for, in the screen rebuilt; and a new screen's three.
+        await expectNoRoom("title: B\nbutton: Go\ntext: More", on: id)
+        await expectNoRoom("title: Hi", on: nil)
+
+        #expect(model.store.content == before)
+        #expect(undo.canUndo == steps)
+    }
+
     @Test func shortcutsWrittenForTheBlueprintStillBuild() async throws {
         let (model, _) = makeModel()
 

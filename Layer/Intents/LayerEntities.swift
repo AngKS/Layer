@@ -14,6 +14,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case nothingToExport
     case invalidColour(String)
     case invalidBlueprint
+    /// Building it would take the design past what a design holds: 5,000 nodes, nested at most 32 deep.
+    case designTooLarge
     case imagePlaygroundUnavailable
     case notAnImage
     case canvasNotReady
@@ -37,6 +39,7 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .nothingToExport: "There's nothing on that design to export yet."
         case .invalidColour(let text): "“\(text)” isn't a colour Layer knows. Use a name such as blue, or a hex code such as #0A84FF."
         case .invalidBlueprint: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
+        case .designTooLarge: "That would make the design larger than Layer keeps: \(TreeRules.maximumNodes.formatted()) elements in all, none nested more than \(TreeRules.maximumDepth) deep. Nothing was built."
         case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."

@@ -143,84 +143,103 @@ enum BuildScreenError: LocalizedError, Equatable {
 }
 
 extension BuildScreenIntent {
-    /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline. A new screen
-    /// (no `target`) is laid out off the main actor and added. An existing one is merged by a reconciler that
-    /// adopts it and committed through `commitGenerated`. One step through `DesignActions.edit` ("Build Screen").
+    /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline, read off the
+    /// main actor with the design's tokens. All the work off the main actor is done again when the design's settings
+    /// change meanwhile. One step through `DesignActions.edit` ("Build Screen").
     ///
-    /// Siri sees leaves only. A new screen with no `name` takes the surface's own when the A2UI carries one (F3), and
-    /// is on `device`. When the screen's root has changed since it was read (by the person, while this worked off
-    /// the main actor), the generated root is merged again over the root as it is now, and committed without the
-    /// layout hint, so the rules lay it out (call 1).
+    /// A new screen (no `target`) is laid out off the main actor and added. It is on `device`, and with no `name` takes
+    /// the surface's own when the A2UI carries one (F3), on one line of at most 40 characters. An existing one is
+    /// written as a generation's update is, by a `GenerationWriter` whose reconciler adopts it (call 7): merged and
+    /// laid out off the main actor, then committed. When the person changed the screen meanwhile, the writer merges
+    /// again over it as it is then, and the rules lay that out (call 1).
+    ///
+    /// Siri sees leaves only. A build the design has no room for (more than 5,000 nodes, or nested deeper than 32)
+    /// changes nothing and throws `designTooLarge`.
     @MainActor
     static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
                       undoManager: UndoManager?) async throws -> TreeScreen.ID {
-        if let target {
-            guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
-            guard screen.isLocked != true else { throw LayerIntentError.locked }
+        guard let target else {
+            return try await buildScreen(layout, name: name, device: device, in: model, undoManager: undoManager)
         }
-        // Worked off the main actor for the design's settings as they are, and again when they change meanwhile.
-        var prepared: Prepared
+        guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
+        guard screen.isLocked != true else { throw LayerIntentError.locked }
+        return try await rebuild(target, from: layout, in: model, undoManager: undoManager)
+    }
+
+    /// A new screen built from `layout`.
+    @MainActor
+    private static func buildScreen(_ layout: String, name: String?, device: DeviceFrame, in model: AppModel,
+                                    undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        let deviceID: String? = device == .iPhone ? nil : device.id
+        var made: Made
         repeat {
             let settings = model.store.tree.settings
-            let snapshot = target.flatMap { model.store.root(of: $0) }
-            // A rebuild is laid out for the screen's own device (nil is the iPhone); Siri's `device` is for a new screen.
-            let deviceID: String? = if let target, let screen = model.store.tree.screens.first(where: { $0.id == target }) {
-                screen.deviceID
-            } else {
-                device == .iPhone ? nil : device.id
-            }
-            prepared = try await Task.detached {
-                try Prepared.make(layout, snapshot: snapshot, deviceID: deviceID, settings: settings)
+            made = try await Task.detached {
+                let read = try Read(layout, tokens: settings.tokens)
+                return Made(read: read, settings: settings,
+                            laidOut: TreeRules.laidOut(read.generated, deviceID: deviceID, settings: settings, previous: nil))
             }.value
-        } while prepared.settings != model.store.tree.settings
+        } while made.settings != model.store.tree.settings
 
         return try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
-            guard let target else {
-                let screen = Self.newScreen(prepared, name: name, device: device, in: model)
-                guard let id = model.store.addLaidOutScreens([screen]).first else { throw LayerIntentError.invalidBlueprint }
-                return id
-            }
+            let screen = Self.newScreen(made, name: name, device: device, in: model)
+            guard let id = model.store.addLaidOutScreens([screen]).first else { throw LayerIntentError.designTooLarge }
+            return id
+        }
+    }
+
+    /// The screen `target` rebuilt from `layout`.
+    @MainActor
+    private static func rebuild(_ target: TreeScreen.ID, from layout: String, in model: AppModel,
+                                undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        // Read and laid out again whenever the design's settings change meanwhile, so the commit lays nothing out
+        // unless the screen itself changed.
+        var writer: GenerationWriter
+        var prepared: GenerationWriter.Prepared
+        var settings: CanvasSettings
+        repeat {
+            settings = model.store.tree.settings
+            let read = try await Task.detached { [tokens = settings.tokens] in try Read(layout, tokens: tokens) }.value
+            guard let root = model.store.root(of: target) else { throw LayerIntentError.screenNotFound }
+            writer = GenerationWriter(screenID: target, reconciler: TreeReconciler(adopting: root))
+            #if DEBUG
+            writer.beforeCommit = { model.beforeGenerationCommit?() }
+            #endif
+            guard let ready = await writer.prepare(read.generated, from: model.store) else { throw LayerIntentError.screenNotFound }
+            prepared = ready
+        } while settings != model.store.tree.settings
+
+        return try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
             guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
             guard screen.isLocked != true else { throw LayerIntentError.locked }
-            guard let snapshot = prepared.snapshot else { throw LayerIntentError.screenNotFound }
-            if screen.root == snapshot {
-                model.store.commitGenerated(prepared.laidOut, on: target, laidOutOver: snapshot)
-            } else {
-                let again = TreeReconciler(adopting: snapshot).merged(prepared.generated, over: screen.root)
-                model.store.commitGenerated(again.root, on: target, laidOutOver: nil)
-            }
+            guard writer.commit(prepared, to: model.store) else { throw LayerIntentError.designTooLarge }
             return target
         }
     }
 
-    /// The new screen a prepared build makes, named, placed and on `device`.
+    /// The new screen a build makes, named, placed and on `device`.
     @MainActor
-    private static func newScreen(_ prepared: Prepared, name: String?, device: DeviceFrame, in model: AppModel) -> TreeScreen {
+    private static func newScreen(_ made: Made, name: String?, device: DeviceFrame, in model: AppModel) -> TreeScreen {
         let given = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let surface = prepared.surfaceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let surface = made.read.surfaceName.flatMap(AppModel.screenName(from:))
         let chosen = [given, surface].compactMap { $0 }.first { !$0.isEmpty }
         let placement = DesignActions.placementForNewScreen(device, in: model)
         var screen = TreeScreen(name: chosen ?? "Screen \(model.store.tree.screens.count + 1)", origin: placement.origin,
                                 scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
         // Set after: `init` keeps a root to a built-in device only, and this one is laid out for the design's own.
-        screen.root = prepared.laidOut
+        screen.root = made.laidOut
         return screen
     }
 
-    /// A layout read, merged where there is a screen to merge into, and laid out: all pure, for off the main actor.
-    fileprivate struct Prepared: Sendable {
-        var settings: CanvasSettings
+    /// A layout read into a generated root: pure, for off the main actor.
+    fileprivate struct Read: Sendable {
         var generated: LayerNode
+        /// The name the A2UI's surface gives its screen, as it was written.
         var surfaceName: String?
-        /// The screen's root as it was read, when rebuilding.
-        var snapshot: LayerNode?
-        var laidOut: LayerNode
 
-        static func make(_ layout: String, snapshot: LayerNode?, deviceID: String?, settings: CanvasSettings) throws -> Prepared {
-            let generated: LayerNode
-            var surfaceName: String?
+        init(_ layout: String, tokens: DesignTokens) throws {
             if A2UIImporter.looksLikeA2UI(layout) {
-                let imported = A2UIImporter.importJSON(Data(layout.utf8), tokens: settings.tokens, trustsLayerLook: true)
+                let imported = A2UIImporter.importJSON(Data(layout.utf8), tokens: tokens, trustsLayerLook: true)
                 guard let screen = imported.screens.first else {
                     let said = imported.diagnostics.first { $0.reason == .missingRoot } ?? imported.diagnostics.first
                     throw BuildScreenError.nothingInA2UI(said?.message ?? "There was no A2UI screen in that.")
@@ -229,18 +248,17 @@ extension BuildScreenIntent {
                 surfaceName = screen.name
             } else {
                 // Read as a generated outline: its look's numbers are passed over (spec §14).
-                generated = Outline.parse(layout, isComplete: true, tokens: settings.tokens, readsLookNumbers: false)
+                generated = Outline.parse(layout, isComplete: true, tokens: tokens, readsLookNumbers: false)
                 guard generated.leafCount > 0 else { throw LayerIntentError.invalidBlueprint }
             }
-            guard let snapshot else {
-                let laid = TreeRules.laidOut(generated, deviceID: deviceID, settings: settings, previous: nil)
-                return Prepared(settings: settings, generated: generated, surfaceName: surfaceName, laidOut: laid)
-            }
-            let merge = TreeReconciler(adopting: snapshot).merged(generated, over: snapshot)
-            let laid = TreeRules.laidOut(merge.root, deviceID: deviceID, settings: settings, previous: snapshot)
-            return Prepared(settings: settings, generated: generated, surfaceName: surfaceName, snapshot: snapshot,
-                            laidOut: laid)
         }
+    }
+
+    /// A new screen's root, read and laid out for the design's settings.
+    fileprivate struct Made: Sendable {
+        var read: Read
+        var settings: CanvasSettings
+        var laidOut: LayerNode
     }
 }
 

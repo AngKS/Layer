@@ -624,8 +624,8 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// Runs while a generated update waits for its commit, laid out but not yet written: a test edits the screen
-    /// here, as the person might meanwhile.
+    /// Runs while a generated update, or a screen Build Screen rebuilds, waits for its commit, laid out but not yet
+    /// written: a test edits the screen here, as the person might meanwhile.
     @ObservationIgnored var beforeGenerationCommit: (@MainActor () -> Void)?
     #endif
 
