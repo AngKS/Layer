@@ -25,16 +25,22 @@ enum TreeEdit {
             let horizontal = stack.axis == .horizontal
             return sorted(nodes) { horizontal ? ($0.frame.minX, $0.frame.minY) : ($0.frame.minY, $0.frame.minX) }
         case .grid:
-            var remaining = Array(nodes.indices), order: [LayerNode] = []
-            while let top = remaining.min(by: { (nodes[$0].frame.minY, nodes[$0].frame.minX) < (nodes[$1].frame.minY, nodes[$1].frame.minX) }) {
-                let extent = nodes[top].frame
-                // The topmost always starts its row, whatever its numbers, so that every pass takes one at least.
-                let row = remaining.filter { $0 == top || (nodes[$0].frame.midY >= extent.minY && nodes[$0].frame.midY <= extent.maxY) }
-                order += sorted(row.map { nodes[$0] }) { ($0.frame.minX, $0.frame.minY) }
-                remaining.removeAll { row.contains($0) }
-            }
-            return order
+            return readingRows(nodes).flatMap { $0 }
         }
+    }
+
+    /// Nodes in the rows a grid reads them in, top to bottom, each left to right: a row starts at the topmost remaining
+    /// node and takes those whose midY lies within its vertical extent. Nodes level in a row go by y, then as given.
+    static func readingRows(_ nodes: [LayerNode]) -> [[LayerNode]] {
+        var remaining = Array(nodes.indices), rows: [[LayerNode]] = []
+        while let top = remaining.min(by: { (nodes[$0].frame.minY, nodes[$0].frame.minX) < (nodes[$1].frame.minY, nodes[$1].frame.minX) }) {
+            let extent = nodes[top].frame
+            // The topmost always starts its row, whatever its numbers, so that every pass takes one at least.
+            let row = remaining.filter { $0 == top || (nodes[$0].frame.midY >= extent.minY && nodes[$0].frame.midY <= extent.maxY) }
+            rows.append(sorted(row.map { nodes[$0] }) { ($0.frame.minX, $0.frame.minY) })
+            remaining.removeAll { row.contains($0) }
+        }
+        return rows
     }
 
     /// `order` written into `children`, every drawing keeping its index (the slot rule arrange used, on nodes).

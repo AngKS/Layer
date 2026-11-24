@@ -53,37 +53,40 @@ struct SelectionActions: View {
     private var bar: some View {
         @Bindable var model = model
         let isLocked = model.isSelectionLocked
+        // Read from the tree, so that the bar lowers nothing when the design changes.
+        let selected = model.selectedNode
         return ToolbarPill {
             if isLocked {
                 // Locked: nothing to do but unlock.
                 ToolButton(symbol: "lock.open", label: "Unlock") { model.setSelectionLocked(false) }
                     .keyboardShortcut("l", modifiers: .command)
-            } else if model.selectedElement?.element.kind == .drawing {
+            } else if selected?.node.kind == .drawing {
                 drawingActions
             } else if model.selection?.isSeveral == true {
                 severalActions
             } else {
-                if model.selectedElement?.element.kind == .group {
+                // Any container: a group, a row, column, grid or card.
+                if selected?.node.isContainer == true {
                     ToolButton(symbol: "rectangle.3.group.dashed", label: "Ungroup") {
                         withAnimation(.smooth(duration: 0.25)) { model.ungroupSelection() }
                     }
                     .keyboardShortcut("g", modifiers: [.command, .option, .shift])
                 }
-                if let selected = model.selectedElement, selected.element.kind.hasText {
+                if let selected, selected.node.kind.hasText {
                     ToolButton(symbol: "character.cursor.ibeam", label: "Edit text", isActive: model.isEditingText) {
                         model.isEditingText = true
                     }
                     .popover(isPresented: $model.isEditingText, arrowEdge: .bottom) {
-                        TextEditor(ref: selected.ref)
+                        TextEditor(id: selected.node.id)
                     }
                 }
-                if supportsImagePlayground, let selected = model.selectedElement, selected.element.kind == .image {
+                if supportsImagePlayground, let selected, selected.node.kind == .image {
                     ToolButton(symbol: "apple.image.playground", label: "Make a new picture in Image Playground") {
                         model.remakeImageWithPlayground(selected.ref)
                     }
                 }
                 // A screen takes a change described in words, typed or held and said.
-                if case .screen(let id) = model.selection {
+                if let id = model.selectedScreenID {
                     ScreenEditField(screen: id).id(id)
                 }
                 ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
@@ -145,17 +148,21 @@ struct SelectionActions: View {
             withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
         }
         Menu {
+            // In a row, column, grid or overlay, an alignment is the container's: see `lineUpSelection`.
             ForEach(ElementLayout.Alignment.allCases, id: \.self) { alignment in
                 Button(alignment.name, systemImage: alignment.symbol) {
-                    withAnimation(.smooth(duration: 0.25)) { model.alignSelection(alignment) }
+                    withAnimation(.smooth(duration: 0.25)) { model.lineUpSelection(alignment) }
                 }
+                .disabled(!model.canLineUpSelection(alignment))
             }
             Divider()
+            // What a row, column, grid or overlay holds, it spaces itself.
+            let canDistribute = model.canDistributeSelection && !model.isSelectionLaidOut
             ForEach(ElementLayout.Distribution.allCases, id: \.self) { distribution in
                 Button(distribution.name, systemImage: distribution.symbol) {
                     withAnimation(.smooth(duration: 0.25)) { model.distributeSelection(distribution) }
                 }
-                .disabled(!model.canDistributeSelection)
+                .disabled(!canDistribute)
             }
         } label: {
             ToolIcon(symbol: "align.horizontal.left")
@@ -176,9 +183,10 @@ struct SelectionActions: View {
         .keyboardShortcut(.delete, modifiers: .command)
     }
 
-    /// Group, ⌥⌘G: off, and saying why, when what is selected can't be grouped.
+    /// Group, ⌥⌘G: a tap groups, and a hold offers Group, Row, Column, Grid and Card (call 7). Each is off, and says
+    /// why, when what is selected can't be grouped so; the button is off when none can.
     private var groupButton: some View {
-        let canGroup = model.canGroupSelection
+        let canGroup = GroupShape.allCases.contains { model.canGroupSelection(as: $0) }
         return ZStack {
             // The shortcut is on a button of its own behind it, hidden and never off, as the
             // arrange shortcuts are: one switched on by the change before was at times still
@@ -187,15 +195,39 @@ struct SelectionActions: View {
                 .keyboardShortcut("g", modifiers: [.command, .option])
                 .hidden()
                 .frame(width: 0, height: 0)
-            ToolButton(symbol: "rectangle.3.group", label: "Group") { group() }
-                .disabled(!canGroup)
-                .opacity(canGroup ? 1 : 0.35)
-                .accessibilityHint(!canGroup && model.groupSelectionSpansHosts ? "Things on different screens can't be grouped" : "")
+            Menu {
+                ForEach(GroupShape.allCases, id: \.self) { shape in
+                    let canGroupAsShape = model.canGroupSelection(as: shape)
+                    Button(shape.title, systemImage: shape.symbol) { group(as: shape) }
+                        .disabled(!canGroupAsShape)
+                        .accessibilityHint(groupHint(canGroup: canGroupAsShape))
+                }
+            } label: {
+                ToolIcon(symbol: "rectangle.3.group")
+            } primaryAction: {
+                group()
+            }
+            // In the order written, Group first, even when the menu opens upwards.
+            .menuOrder(.fixed)
+            .disabled(!canGroup)
+            .opacity(canGroup ? 1 : 0.35)
+            .accessibilityLabel("Group")
+            .accessibilityHint(groupHint(canGroup: model.canGroupSelection(as: .group)))
         }
     }
 
-    private func group() {
-        withAnimation(.smooth(duration: 0.25)) { model.groupSelection() }
+    private func group(as shape: GroupShape = .group) {
+        withAnimation(.smooth(duration: 0.25)) { model.groupSelection(as: shape) }
+    }
+
+    /// Why Group is off, when it is because what is selected is on more than one screen, or on a screen and the open
+    /// canvas; nothing otherwise. Read from the selection's own refs, so that the bar lowers nothing.
+    private func groupHint(canGroup: Bool) -> String {
+        guard !canGroup else { return "" }
+        let hosts = Set(model.selectedThings.compactMap { thing -> DesignStore.ElementRef.Host? in
+            if case .element(let ref) = thing { ref.host } else { nil }
+        })
+        return hosts.count > 1 ? "Things on different screens can't be grouped" : ""
     }
 
     /// Bring to Front, Bring Forward, Send Backward and Send to Back, for one thing or
@@ -277,19 +309,19 @@ struct SelectionActions: View {
     }
 }
 
-/// Typing into the selected element. Everything typed in one sitting undoes as one step.
+/// Typing into the selected thing, read and written on the tree (F13). Everything typed in one sitting undoes as one step.
 private struct TextEditor: View {
     @Environment(AppModel.self) private var model
-    let ref: DesignStore.ElementRef
+    let id: UUID
     /// The sitting's own step: see `DesignStore.Edit`.
     @State private var edit: DesignStore.Edit?
 
     var body: some View {
         TextField(
-            model.selectedElement?.element.kind.layerName ?? "Text",
+            model.selectedNode?.node.kind.layerName ?? "Text",
             text: Binding(
-                get: { model.selectedElement?.element.text ?? "" },
-                set: { text in model.store.act(for: edit) { model.store.update(ref) { $0.text = text } } }
+                get: { model.selectedNode?.node.content.text ?? "" },
+                set: { text in model.store.act(for: edit) { model.store.update(id) { $0.content.text = text } } }
             ),
             axis: .vertical
         )
@@ -305,6 +337,19 @@ private struct TextEditor: View {
         .onDisappear {
             if let edit { model.store.endEdit(edit) }
             edit = nil
+        }
+    }
+}
+
+private extension GroupShape {
+    /// Its layout's symbol, as the Layers panel shows it.
+    var symbol: String {
+        switch self {
+        case .group: "rectangle.3.group"
+        case .row: "rectangle.split.3x1"
+        case .column: "rectangle.split.1x2"
+        case .grid: "square.grid.2x2"
+        case .card: ElementKind.card.symbol
         }
     }
 }
