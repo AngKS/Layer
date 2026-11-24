@@ -159,6 +159,7 @@
 		5E5586B4F80F0354F031F9B9 /* button_textField_button_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 0476590DFA55D55191D3B427 /* button_textField_button_2.json */; };
 		5F06ADFAD01FFA5A562095E6 /* VoiceCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3094A5EBA18C9078BE1DE192 /* VoiceCall.swift */; };
 		5FA333FEC2373B678D258E54 /* checkbox_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = A1F607A2FEAA917E489775D1 /* checkbox_clean_2.json */; };
+		623CB87025AB9F7C3E93C5A6 /* StructureInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18789C9F4BC13625FB7BA14C /* StructureInference.swift */; };
 		625DC8226DFB7C061FEE8D4D /* SketchIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710DE5C1A2D22213DD36940A /* SketchIntentTests.swift */; };
 		636AA329E840EA64A4024F33 /* a2ui-product-card.json in Resources */ = {isa = PBXBuildFile; fileRef = B2E96090EEB9AA5901356EF4 /* a2ui-product-card.json */; };
 		63A4D622D4AE02350DC2165C /* textField_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 5DE5FCC0F5D3D55662EF392C /* textField_jittered_1a.json */; };
@@ -243,6 +244,7 @@
 		9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */; };
 		90BBEA45895D2F885996C80D /* DesignFileName.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF406F35CE333DCD65351BE /* DesignFileName.swift */; };
 		90E0C0070E36FB8866E19933 /* scratchOut_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = A1F37C1FE3BB29053BB2E96F /* scratchOut_noisy_1.json */; };
+		9204F392B256D89F21621379 /* StructureInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4B33F704ED5C214D4CFB30 /* StructureInferenceTests.swift */; };
 		920B8C83A832C06EAB8020CA /* TreeIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9FED85CEF222B5069C05595 /* TreeIndex.swift */; };
 		92480E5F86E235DBC0FC8B4E /* ElementStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBB42DA7B4B37DE827C65D44 /* ElementStyle.swift */; };
 		92C9B8BF0EB837E1E7E87280 /* title_body_title_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 1027DCB477677F246B2A1CDD /* title_body_title_2.json */; };
@@ -517,6 +519,7 @@
 		12BEC9FFACF7E57B6146A335 /* text_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_jittered_2b.json; sourceTree = "<group>"; };
 		12F2E3A4DE0AF96D41BD0ACA /* TreeRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeRules.swift; sourceTree = "<group>"; };
 		174E6CBAA6637D272B1095BD /* image_textField_image_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_textField_image_1.json; sourceTree = "<group>"; };
+		18789C9F4BC13625FB7BA14C /* StructureInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructureInference.swift; sourceTree = "<group>"; };
 		19861EA94680E1443F344D14 /* ComponentSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentSpec.swift; sourceTree = "<group>"; };
 		1C1A388636246F32BFEF62D5 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		1CCCEBF59C041EE49C9AF306 /* TreeChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeChange.swift; sourceTree = "<group>"; };
@@ -608,6 +611,7 @@
 		482BB5E652E4557CFBD3A10A /* Catalogue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalogue.swift; sourceTree = "<group>"; };
 		4846A01DE529740062611EFC /* TreeRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeRecords.swift; sourceTree = "<group>"; };
 		4A2452B50A25ACD85E727421 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		4A4B33F704ED5C214D4CFB30 /* StructureInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructureInferenceTests.swift; sourceTree = "<group>"; };
 		4A962BE1E5650EE6BBE4353A /* StoreChangeBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreChangeBenchmarkTests.swift; sourceTree = "<group>"; };
 		4AFFBA4580CA7CEDCD9F8CEE /* structures-structure.swift.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "structures-structure.swift.txt"; sourceTree = "<group>"; };
 		4B8DDC3076CF2058611599E5 /* UndoAmongEditsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoAmongEditsTests.swift; sourceTree = "<group>"; };
@@ -974,6 +978,7 @@
 				EB676264DEDBAE71CFCC6657 /* Outline.swift */,
 				DE0635EBB9749D38BC2D159B /* SketchIntent+Making.swift */,
 				CB39AEC21750D67EFC746A19 /* StructureConventions.swift */,
+				18789C9F4BC13625FB7BA14C /* StructureInference.swift */,
 				CF88529E7753C026EC47961F /* TextMeasure.swift */,
 				1CCCEBF59C041EE49C9AF306 /* TreeChange.swift */,
 				06D49AD82D01E044088BBFA0 /* TreeContent.swift */,
@@ -1252,6 +1257,7 @@
 				4A962BE1E5650EE6BBE4353A /* StoreChangeBenchmarkTests.swift */,
 				830C87645559A3E97F3635A7 /* StoreChangeBudgetTests.swift */,
 				1258B3BDFAA25BD9B54AA293 /* StoreOnTheTreeTests.swift */,
+				4A4B33F704ED5C214D4CFB30 /* StructureInferenceTests.swift */,
 				125E4F50031E68FCBE621CA5 /* SwiftUIExportTests.swift */,
 				2C6CDAFC9C665AE14DECD2B3 /* SystemSymbolTests.swift */,
 				119FF4D2DC7389A86B9F3DE0 /* TestSettings.swift */,
@@ -2009,6 +2015,7 @@
 				3ADBD180BF1084006ED26272 /* StoreChangeBenchmarkTests.swift in Sources */,
 				743E435B90CFAA4F466D31CB /* StoreChangeBudgetTests.swift in Sources */,
 				16FC3AC9E74DF0FEFB6BA8EA /* StoreOnTheTreeTests.swift in Sources */,
+				9204F392B256D89F21621379 /* StructureInferenceTests.swift in Sources */,
 				D5DF400C4CD78B0AD5E4EF29 /* SwiftUIExportTests.swift in Sources */,
 				38C38F1B607854D855CC2C57 /* SystemSymbolTests.swift in Sources */,
 				F4EB7C81345A6EC116A6DF4F /* TestSettings.swift in Sources */,
@@ -2161,6 +2168,7 @@
 				512F22D4F134B55390076E7D /* StatusChrome.swift in Sources */,
 				BC7071F7DCC1454ABF783A72 /* StrokeScript.swift in Sources */,
 				7631749A0EC6DD9E68A52D7C /* StructureConventions.swift in Sources */,
+				623CB87025AB9F7C3E93C5A6 /* StructureInference.swift in Sources */,
 				324DA4C40F2350D7DBB164F2 /* StylePanel.swift in Sources */,
 				7B149E6DC025E6DB4A6D6A35 /* SuggestionPill.swift in Sources */,
 				8EEE07F3750843FDCFB3858E /* SwiftHighlighter.swift in Sources */,
