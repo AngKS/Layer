@@ -14,11 +14,16 @@ import Foundation
 ///
 /// y is kept. Anything that isn't fixed is then kept inside the new screen by its turned shape's bounds, the leading
 /// and top edges winning when it can't fit. Only the root's own children move: a container carries what it holds.
-/// What a rule works out is in whole points.
+/// What a rule works out is in whole points, a half point rounded to even, so that a round trip between two widths
+/// of different parity (the iPhone's 393 and the iPad's 820) leaves a centred node where it was.
+///
+/// A device with the same room, its size and safe areas, moves nothing, whatever its margin: a screen saved as a
+/// device of its own, or a device renamed or saved again, isn't asking for anything to move.
 enum DeviceReflow {
     /// New frames for a free root's children when its screen goes from `old` to `new` (§5, call 9). Unmoved ones aren't listed.
     static func frames(for root: LayerNode, from old: DeviceFrame, to new: DeviceFrame) -> [UUID: CGRect] {
-        guard root.resolvedLayout == .free, isLength(old.size.width), isLength(new.size.width), isLength(new.size.height)
+        guard root.resolvedLayout == .free, !hasTheSameRoom(old, new), isLength(old.size.width), isLength(new.size.width),
+              isLength(new.size.height)
         else { return [:] }
         var frames: [UUID: CGRect] = [:]
         for child in root.children where !child.isLocked {
@@ -41,16 +46,16 @@ enum DeviceReflow {
         case .leading:
             break
         case .trailing:
-            moved.origin.x = (newWidth - (width - frame.maxX) - frame.width).rounded()
+            moved.origin.x = whole(newWidth - (width - frame.maxX) - frame.width)
         case .centered:
-            moved.origin.x = ((newWidth - frame.width) / 2 + (frame.midX - width / 2)).rounded()
+            moved.origin.x = whole((newWidth - frame.width) / 2 + (frame.midX - width / 2))
         case .proportional:
             let ratio = newWidth / width
             if degrees == 0, node.width.mode == .fixed {
-                moved.origin.x = (frame.minX * ratio).rounded()
-                moved.size.width = (frame.width * ratio).rounded()
+                moved.origin.x = whole(frame.minX * ratio)
+                moved.size.width = whole(frame.width * ratio)
             } else {
-                moved.origin.x = (frame.midX * ratio - frame.width / 2).rounded()
+                moved.origin.x = whole(frame.midX * ratio - frame.width / 2)
             }
         }
         return kept(moved, turnedBy: degrees, inside: new.size)
@@ -74,4 +79,13 @@ enum DeviceReflow {
     private static let slack: CGFloat = 0.001
 
     private static func isLength(_ value: CGFloat) -> Bool { value.isFinite && value > 0 }
+
+    /// A number a rule works out, in whole points: a half rounds to even, so it doesn't creep one way.
+    private static func whole(_ value: CGFloat) -> CGFloat { value.rounded(.toNearestOrEven) }
+
+    /// Whether a screen has the same room on both: the same size and safe areas. The margin doesn't count.
+    private static func hasTheSameRoom(_ old: DeviceFrame, _ new: DeviceFrame) -> Bool {
+        old.size == new.size && old.safeTop == new.safeTop && old.safeBottom == new.safeBottom
+            && old.safeLeading == new.safeLeading && old.safeTrailing == new.safeTrailing
+    }
 }

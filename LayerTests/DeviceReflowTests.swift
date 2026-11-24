@@ -124,6 +124,62 @@ struct DeviceReflowTests {
         #expect(TreeValidator.check(root, on: .iPhone).contains(TreeValidator.Issue(node: fixed.id, kind: .clipped)))
     }
 
+    // MARK: - Moving nothing unasked (fix round 1)
+
+    /// Sent to the iPad and back five times, a centred node is exactly where it started. The iPhone's and the iPad's
+    /// widths differ in parity, so its x lands on a half point each way; rounded to even, it doesn't creep right.
+    @Test func aCentredNodeDoesNotDriftOverRoundTrips() {
+        var centred = node(CGRect(x: 96, y: 80, width: 200, height: 40))
+        for _ in 0..<5 {
+            centred.frame = reflowed([centred])[centred.id] ?? centred.frame
+            #expect(centred.frame == CGRect(x: 310, y: 80, width: 200, height: 40))
+            centred.frame = reflowed([centred], from: iPad, to: .iPhone)[centred.id] ?? centred.frame
+        }
+        #expect(centred.frame == CGRect(x: 96, y: 80, width: 200, height: 40))
+    }
+
+    /// A device with the same size and safe areas moves nothing, not even what hangs off the screen or sits on a half
+    /// point, whatever its margin. One whose safe areas differ is a change of room, and things follow their intents.
+    @Test func aDeviceWithTheSameRoomMovesNothing() throws {
+        let hanging = node(CGRect(x: 20, y: 800, width: 170, height: 120))
+        let halfway = node(CGRect(x: 203.5, y: 300, width: 170, height: 120))
+        var draft = CustomDeviceDraft(from: .iPhone, named: "iPhone (Custom)")
+        let copy = try #require(draft.device(id: nil))
+        #expect(reflowed([hanging, halfway], to: copy).isEmpty)
+        draft.margin = 32
+        #expect(reflowed([hanging, halfway], to: try #require(draft.device(id: nil))).isEmpty, "a margin alone")
+        draft.safeTop = 20
+        let lowered = try #require(draft.device(id: nil))
+        #expect(reflowed([hanging, halfway], to: lowered)[hanging.id] == CGRect(x: 20, y: 732, width: 170, height: 120))
+    }
+
+    /// Save as Device… from the screen's own device, a rename in the Edit Device sheet, and a Save with nothing changed
+    /// leave a free screen's things where they are, a thing hanging off the screen and one on a half point included.
+    @Test func savingRenamingOrSavingADeviceAgainMovesNothing() throws {
+        func things() -> [LayerNode] {
+            [node(CGRect(x: 20, y: 800, width: 170, height: 120)), node(CGRect(x: 203.5, y: 300, width: 170, height: 120))]
+        }
+        let frames = things().map(\.frame)
+        let saved = try #require(CustomDeviceDraft(from: .iPhone, named: "iPhone (Custom)").device(id: nil))
+
+        // Save as Device…: the screen takes a copy of its own device.
+        let phone = freeScreen(things())
+        let (savedAs, _) = makeModel([phone])
+        let id = savedAs.store.addCustomDevice(saved, forScreen: phone.id)
+        #expect(savedAs.store.treeScreen(phone.id)?.deviceID == id)
+        #expect(savedAs.store.treeScreen(phone.id)?.root.children.map(\.frame) == frames)
+
+        // A rename of the device a screen is on, and, in a design of its own, a Save with nothing changed.
+        let renamed = try #require(CustomDeviceDraft(from: saved, named: "My Phone").device(id: saved.id))
+        for (edit, name) in [(renamed, "My Phone"), (saved, saved.name)] {
+            let onSaved = freeScreen(things(), on: saved.id)
+            let (edited, _) = makeModel([onSaved], devices: [saved])
+            edited.store.updateCustomDevice(edit)
+            #expect(edited.store.tree.settings.customDevices.map(\.name) == [name])
+            #expect(edited.store.treeScreen(onSaved.id)?.root.children.map(\.frame) == frames, "\(name)")
+        }
+    }
+
     // MARK: - A column screen
 
     @Test func aColumnScreenIsLaidOutAgain() throws {
