@@ -66,13 +66,10 @@ struct StylePanel: View {
 
 // MARK: What is selected
 
-/// What the panel shows of a node: its kind's usual look with its own choices laid over it, as an element's was
-/// (`ElementStyle`).
+/// What the panel shows of a node beyond `LayerNode+Look`'s rules, which it reads for the rest: which of its kind's
+/// traits it has, and its size and radius as an element's were (`ElementStyle`).
 private extension LayerNode {
     var traits: ComponentSpec.Traits { kind.spec.traits }
-    var hasFill: Bool { traits.contains(.fill) }
-    var hasCornerRadius: Bool { traits.contains(.cornerRadius) }
-    var hasBorder: Bool { traits.contains(.border) }
     var hasOnState: Bool { traits.contains(.onState) }
     var hasTextAlignment: Bool { traits.contains(.textAlignment) }
     var hasValue: Bool { traits.contains(.value) }
@@ -81,22 +78,7 @@ private extension LayerNode {
 
     var shownTint: RGBColor { style.tint ?? kind.spec.tint }
     var resolvedFontSize: CGFloat { style.fontSize ?? kind.spec.fontSize.points(in: frame) }
-    var resolvedFontWeight: FontWeightChoice { style.fontWeight ?? kind.spec.fontWeight }
     var resolvedCornerRadius: CGFloat { style.cornerRadius ?? kind.spec.cornerRadius.points(in: frame) }
-    var resolvedOpacity: Double { style.opacity ?? 1 }
-    var resolvedButtonLook: ButtonLook { content.buttonLook ?? .filled }
-    var resolvedValue: Double { min(max(content.value ?? 0.5, 0), 1) }
-    var resolvedTextAlignment: TextAlignmentChoice { style.textAlignment ?? kind.spec.textAlignment }
-    var resolvedBorderWidth: CGFloat { max(style.borderWidth ?? 0, 0) }
-    var resolvedBorderColor: RGBColor { style.borderColor ?? Theme.inkTint }
-    var resolvedTextColor: RGBColor {
-        if let colour = style.textColor { return colour }
-        return switch kind.spec.textColour {
-        case .colour(let colour): colour
-        // White on a filled button; a bordered or plain one shows its colour in its text.
-        case .onFill: resolvedButtonLook == .filled ? RGBColor(hex: 0xFFFFFF) : shownTint
-        }
-    }
 }
 
 /// How a node's frame and angle are written from the panel: through `place`, which keeps what the parent places and
