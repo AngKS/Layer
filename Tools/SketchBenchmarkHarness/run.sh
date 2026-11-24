@@ -5,7 +5,7 @@
 # `Layer/Sketch` files for macOS with stubs for the two UIKit/PencilKit-only types they
 # transitively need.
 #
-# Usage: Tools/SketchBenchmarkHarness/run.sh <generate|run|healthcheck> [args...]
+# Usage: Tools/SketchBenchmarkHarness/run.sh <generate|run|check|healthcheck> [args...]
 set -eu
 cd "$(dirname "$0")/../.."
 REPO_ROOT="$(pwd)"
@@ -21,7 +21,7 @@ swiftc \
     "$REPO_ROOT/Layer/Model/ShapeKind.swift" \
     "$REPO_ROOT/Layer/Components/ComponentSpec.swift" \
     "$REPO_ROOT/Layer/Components/Catalogue.swift" \
-    "$REPO_ROOT/Layer/Tree/DesignTokens.swift" \
+    "$REPO_ROOT"/Layer/Tree/*.swift \
     "$REPO_ROOT/Layer/Document/JSONValue.swift" \
     "$REPO_ROOT/Layer/Debug/SketchSamples.swift" \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \
@@ -38,6 +38,7 @@ swiftc \
     "$REPO_ROOT/Layer/Sketch/AppleIntelligenceInterpreter.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Stubs.swift" \
     "$REPO_ROOT/Tools/Shared/RotationStub.swift" \
+    "$REPO_ROOT/Tools/Shared/TurnedRectStub.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Generate.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Harness.swift" \
     -o "$BIN"

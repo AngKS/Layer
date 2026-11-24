@@ -226,6 +226,13 @@ enum SketchConventions {
     static let progressRatio: CGFloat = 7
     static let progressHeight: CGFloat = 28
 
+    /// An outline round two or more things already on the screen: the card's score…
+    static let cardAroundSeveral = 0.95
+    /// …and every other reading of that outline is scaled by this.
+    static let cardElsewhere = 0.5
+    /// An outline round one thing: the card's score. The other readings are unchanged.
+    static let cardAroundOne = 0.6
+
     /// Below this score, the winning reading isn't confident even on its own — the low end
     /// of a close call. Matches the upper edge of the 35–65% "gray area" the Lenovo gesture
     /// patent (US10755027B2) uses for the same kind of decision.

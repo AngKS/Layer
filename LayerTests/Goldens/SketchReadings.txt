@@ -1,0 +1,156 @@
+avatar_clean_1: avatar | avatar 0.9241 | clear
+avatar_clean_2: avatar | avatar 0.9241 | clear
+avatar_jittered_1a: avatar | avatar 0.9241 | clear
+avatar_jittered_1b: avatar | avatar 0.9241 | clear
+avatar_jittered_2a: avatar | avatar 0.9241 | clear
+avatar_jittered_2b: avatar | avatar 0.9241 | clear
+avatar_noisy_1: avatar | avatar 0.9241 | clear
+avatar_noisy_2: avatar | avatar 0.9241 | clear
+body_clean_1: bodyText | bodyText 1.0000 | clear
+body_clean_2: bodyText | bodyText 1.0000 | clear
+body_jittered_1a: bodyText | bodyText 1.0000 | clear
+body_jittered_1b: bodyText | bodyText 1.0000 | clear
+body_jittered_2a: bodyText | bodyText 1.0000 | clear
+body_jittered_2b: bodyText | bodyText 1.0000 | clear
+body_noisy_1: bodyText | bodyText 1.0000 | clear
+body_noisy_2: bodyText | bodyText 1.0000 | clear
+button_clean_1: button | button 0.9820 | clear
+button_clean_2: button | button 0.9820 | clear
+button_jittered_1a: button | button 0.9820 | clear
+button_jittered_1b: button | button 0.9820 | clear
+button_jittered_2a: button | button 0.9820 | clear
+button_jittered_2b: button | button 0.9820 | clear
+button_noisy_1: button | button 0.9820 | clear
+button_noisy_2: button | button 0.9820 | clear
+button_textField_button_1: textField | textField 0.5692, button 0.4308 | close
+button_textField_button_2: textField | textField 0.5811, button 0.4189 | close
+button_textField_textField_3: textField | textField 0.5692, button 0.4308 | close
+button_textField_textField_4: button | button 0.5659, textField 0.4341 | close
+checkbox_clean_1: checkbox | checkbox 0.8454, avatar 0.0343 | clear
+checkbox_clean_2: checkbox | checkbox 0.8687, avatar 0.0219 | clear
+checkbox_image_checkbox_1: checkbox | checkbox 0.8807, image 0.0222 | clear
+checkbox_image_checkbox_2: checkbox | checkbox 0.8674, toggle 0.0379, image 0.0307 | clear
+checkbox_image_image_3: image | image 0.9241, toggle 0.1206, checkbox 0.0678 | clear
+checkbox_image_image_4: image | image 0.9241, toggle 0.2408, checkbox 0.0679 | clear
+checkbox_jittered_1a: checkbox | checkbox 0.7587, avatar 0.1141 | clear
+checkbox_jittered_1b: checkbox | checkbox 0.5707, avatar 0.3247, toggle 0.0872 | close
+checkbox_jittered_2a: checkbox | checkbox 0.5729, avatar 0.2152, radioButton 0.1390 | close
+checkbox_jittered_2b: checkbox | checkbox 0.7787, avatar 0.0752, radioButton 0.0422, toggle 0.0254 | clear
+checkbox_noisy_1: avatar | avatar 0.8471, checkbox 0.1128, toggle 0.0863 | clear
+checkbox_noisy_2: avatar | avatar 0.5875, radioButton 0.2183, checkbox 0.1561, toggle 0.0286 | close
+checkbox_radio_checkbox_1: checkbox | checkbox 0.8687, avatar 0.0219 | clear
+checkbox_radio_checkbox_2: checkbox | checkbox 0.8064, toggle 0.0669, avatar 0.0614, radioButton 0.0375 | clear
+checkbox_radio_radio_3: radioButton | radioButton 0.5410, avatar 0.4242, toggle 0.1206, checkbox 0.0311 | close
+checkbox_radio_radio_4: radioButton | radioButton 0.5437, avatar 0.4216, toggle 0.2408, checkbox 0.0310 | close
+divider_clean_1: divider | divider 1.0000 | clear
+divider_clean_2: divider | divider 1.0000 | clear
+divider_jittered_1a: divider | divider 1.0000 | clear
+divider_jittered_1b: bodyText | bodyText 1.0000 | clear
+divider_jittered_2a: bodyText | bodyText 1.0000 | clear
+divider_jittered_2b: divider | divider 1.0000 | clear
+divider_noisy_1: bodyText | bodyText 1.0000 | clear
+divider_noisy_2: bodyText | bodyText 1.0000 | clear
+image_clean_1: image | image 1.0000 | clear
+image_clean_2: image | image 1.0000 | clear
+image_jittered_1a: image | image 1.0000 | clear
+image_jittered_1b: image | image 1.0000 | clear
+image_jittered_2a: image | image 1.0000 | clear
+image_jittered_2b: image | image 1.0000 | clear
+image_noisy_1: image | image 1.0000 | clear
+image_noisy_2: image | image 1.0000 | clear
+image_textField_image_1: textField | textField 0.5143, image 0.4752 | close
+image_textField_image_2: textField | textField 0.4978, image 0.4907 | close
+image_textField_textField_3: textField | textField 0.5155, image 0.4681 | close
+image_textField_textField_4: textField | textField 0.5076, image 0.4828 | close
+progress_clean_1: progressBar | progressBar 1.0000 | clear
+progress_clean_2: progressBar | progressBar 1.0000 | clear
+progress_jittered_1a: progressBar | progressBar 1.0000 | clear
+progress_jittered_1b: progressBar | progressBar 1.0000 | clear
+progress_jittered_2a: progressBar | progressBar 1.0000 | clear
+progress_jittered_2b: progressBar | progressBar 1.0000 | clear
+progress_noisy_1: bodyText | bodyText 1.0000 | clear
+progress_noisy_2: bodyText | bodyText 1.0000 | clear
+radio_avatar_avatar_3: avatar | avatar 0.6657, radioButton 0.2797, toggle 0.1475, checkbox 0.0442 | clear
+radio_avatar_avatar_4: avatar | avatar 0.7115, radioButton 0.2301, toggle 0.0658, checkbox 0.0458 | clear
+radio_avatar_radio_1: radioButton | radioButton 0.5437, avatar 0.4216, toggle 0.2408, checkbox 0.0310 | close
+radio_avatar_radio_2: avatar | avatar 0.5112, radioButton 0.4468, toggle 0.1995, checkbox 0.0364 | close
+radio_clean_1: radioButton | radioButton 0.8025, toggle 0.1995, avatar 0.1825 | clear
+radio_clean_2: radioButton | radioButton 0.7038, avatar 0.2738, toggle 0.1782, checkbox 0.0210 | clear
+radio_jittered_1a: radioButton | radioButton 0.7748, toggle 0.2291, avatar 0.2081 | clear
+radio_jittered_1b: radioButton | radioButton 0.7709, toggle 0.3061, avatar 0.2117 | clear
+radio_jittered_2a: radioButton | radioButton 0.6562, avatar 0.2836, toggle 0.1289, title 0.1278, checkbox 0.0216, bodyText 0.0001 | clear
+radio_jittered_2b: radioButton | radioButton 0.6198, avatar 0.3198, toggle 0.1899, title 0.1348, checkbox 0.0241, bodyText 0.0001 | close
+radio_noisy_1: title | title 0.1243, bodyText 0.0001 | close
+radio_noisy_2: radioButton | radioButton 0.6562, avatar 0.3177, checkbox 0.0241 | clear
+scratchOut_clean_1: scratchOut | scratchOut 1.0000 | clear
+scratchOut_clean_2: scratchOut | scratchOut 1.0000 | clear
+scratchOut_jittered_1a: scratchOut | scratchOut 1.0000 | clear
+scratchOut_jittered_1b: scratchOut | scratchOut 1.0000 | clear
+scratchOut_jittered_2a: scratchOut | scratchOut 1.0000 | clear
+scratchOut_jittered_2b: scratchOut | scratchOut 1.0000 | clear
+scratchOut_noisy_1: scratchOut | scratchOut 1.0000 | clear
+scratchOut_noisy_2: scratchOut | scratchOut 1.0000 | clear
+screen_clean_1: phoneScreen | phoneScreen 1.0000 | clear
+screen_clean_2: phoneScreen | phoneScreen 1.0000 | clear
+screen_jittered_1a: phoneScreen | phoneScreen 1.0000 | clear
+screen_jittered_1b: phoneScreen | phoneScreen 1.0000 | clear
+screen_jittered_2a: phoneScreen | phoneScreen 1.0000 | clear
+screen_jittered_2b: phoneScreen | phoneScreen 1.0000 | clear
+screen_noisy_1: phoneScreen | phoneScreen 1.0000 | clear
+screen_noisy_2: phoneScreen | phoneScreen 1.0000 | clear
+stickyNote_clean_1: stickyNote | stickyNote 1.0000 | clear
+stickyNote_clean_2: stickyNote | stickyNote 1.0000 | clear
+stickyNote_jittered_1a: stickyNote | stickyNote 1.0000 | clear
+stickyNote_jittered_1b: stickyNote | stickyNote 1.0000 | clear
+stickyNote_jittered_2a: stickyNote | stickyNote 1.0000 | clear
+stickyNote_jittered_2b: stickyNote | stickyNote 1.0000 | clear
+stickyNote_noisy_1: stickyNote | stickyNote 1.0000 | clear
+stickyNote_noisy_2: stickyNote | stickyNote 1.0000 | clear
+textField_clean_1: textField | textField 0.9097 | clear
+textField_clean_2: textField | textField 0.8591, button 0.1409 | clear
+textField_jittered_1a: textField | textField 0.7868, button 0.2132 | clear
+textField_jittered_1b: textField | textField 0.7245, button 0.2755 | clear
+textField_jittered_2a: textField | textField 0.6246, button 0.3754 | close
+textField_jittered_2b: textField | textField 0.7060, button 0.2940 | clear
+textField_noisy_1: button | button 0.5670, textField 0.4330 | close
+textField_noisy_2: button | button 0.6542, textField 0.3458 | clear
+text_clean_1: text | text 1.0000 | clear
+text_clean_2: text | text 1.0000 | clear
+text_jittered_1a: text | text 1.0000 | clear
+text_jittered_1b: text | text 1.0000 | clear
+text_jittered_2a: text | text 1.0000 | clear
+text_jittered_2b: text | text 1.0000 | clear
+text_noisy_1: text | text 1.0000 | clear
+text_noisy_2: text | text 1.0000 | clear
+title_body_body_3: bodyText | bodyText 0.7311, title 0.2689 | clear
+title_body_body_4: bodyText | bodyText 0.8022, title 0.1978 | clear
+title_body_title_1: title | title 0.7310, bodyText 0.2689 | clear
+title_body_title_2: title | title 0.8021, bodyText 0.1978 | clear
+title_clean_1: title | title 0.8338, bodyText 0.0136 | clear
+title_clean_2: title | title 0.9520, bodyText 0.0317 | clear
+title_jittered_1a: title | title 0.8211, bodyText 0.0131 | clear
+title_jittered_1b: title | title 0.8090, bodyText 0.0140 | clear
+title_jittered_2a: title | title 0.9389, bodyText 0.0327 | clear
+title_jittered_2b: title | title 0.9390, bodyText 0.0291 | clear
+title_noisy_1: title | title 0.6753, bodyText 0.0109 | clear
+title_noisy_2: title | title 0.9044, bodyText 0.0313 | clear
+toggle_clean_1: toggle | toggle 0.9890 | clear
+toggle_clean_2: toggle | toggle 0.9890 | clear
+toggle_jittered_1a: toggle | toggle 0.9890 | clear
+toggle_jittered_1b: toggle | toggle 0.9890 | clear
+toggle_jittered_2a: toggle | toggle 0.9890 | clear
+toggle_jittered_2b: toggle | toggle 0.9890 | clear
+toggle_noisy_1: toggle | toggle 0.9890 | clear
+toggle_noisy_2: toggle | toggle 0.9890 | clear
+toggle_progress_progress_3: progressBar | progressBar 1.0000 | clear
+toggle_progress_progress_4: progressBar | progressBar 1.0000 | clear
+toggle_progress_toggle_1: textField | textField 0.9956 | clear
+toggle_progress_toggle_2: textField | textField 0.9992 | clear
+unknown_clean_1: none |  | clear
+unknown_clean_2: none |  | clear
+unknown_jittered_1a: none |  | clear
+unknown_jittered_1b: none |  | clear
+unknown_jittered_2a: none |  | clear
+unknown_jittered_2b: none |  | clear
+unknown_noisy_1: none |  | clear
+unknown_noisy_2: none |  | clear
