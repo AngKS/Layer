@@ -17,7 +17,8 @@ import Foundation
 ///     containers included, where they are on screen, and grows to hold them. Nothing goes out of sight: it goes in just
 ///     behind the backmost thing it doesn't take that its final box overlaps at all, but in front of anything its whole
 ///     final box lies on, such as a background, and of anything that lay behind a thing it takes and overlapped it;
-///     else in front. Hidden things count for none of this.
+///     else in front. That slot then moves as little as needed so that nothing seen is wholly hidden by one thing,
+///     where some slot can do that. Hidden things count for none of this.
 ///   - In a row, column or grid it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as
 ///     wide as what holds it when it was drawn across the screen (`PlacementIntent.proportional`).
 enum SketchedNode {
@@ -26,9 +27,8 @@ enum SketchedNode {
         var landing: SketchLanding
         /// What a card takes: the receiving container's children it encloses, back to front. Empty for anything else.
         var takes: [UUID]
-        /// What a card in a free container goes in just behind: the backmost thing it overlaps and doesn't take, in front
-        /// of anything its whole box lies on and of anything that lay behind a thing it takes and overlapped it.
-        /// Nil: in front.
+        /// What a card in a free container goes in just behind, so that nothing goes out of sight
+        /// (`behind(_:taking:among:)`). Nil: in front.
         var behind: UUID? = nil
     }
 
@@ -104,11 +104,8 @@ enum SketchedNode {
 
     /// A card at the drawn box in whole points, `.fixed`, what it takes, and what it goes behind. In a free container it
     /// takes what it encloses (`SketchLanding.enclosed`) whose subtrees stay within depth 32 once inside it (F9), and the
-    /// box grows to hold them. So that nothing goes out of sight, it stays in front of two kinds of thing it doesn't
-    /// take, and of all behind them: what holds the grown box whole, such as a background, and what lay behind a thing
-    /// it takes and overlapped it, which that thing, in the card now, must stay in front of. Past the frontmost of
-    /// those, it goes behind the first thing it doesn't take that the grown box overlaps at all, however little. A
-    /// hidden thing isn't drawn, and counts for none of this. `depth` is the receiving container's.
+    /// box grows to hold them; where it goes among what stays is `behind(_:taking:among:)`'s. `depth` is the receiving
+    /// container's.
     private static func card(in parent: LayerNode, at depth: Int, landing: SketchLanding,
                              tokens: DesignTokens) -> (LayerNode, takes: [UUID], behind: UUID?) {
         var node = LayerNode(kind: .card)
@@ -123,20 +120,47 @@ enum SketchedNode {
             enclosed.contains($0.id) && depth + 2 + TreeEdit.levels(below: $0) <= TreeRules.maximumDepth
         }
         if let box = TreeEdit.shapesBox(of: taken) { node.frame = node.frame.union(box).integral }
-        let takes = taken.map(\.id), taking = Set(takes)
-        let box = node.frame
-        let children = parent.children
-        // Where each thing it takes was, and the box round its shape.
-        let takenFrom = children.indices.filter { taking.contains(children[$0].id) }
-            .map { (at: $0, shape: TreeEdit.shapesBox(of: [children[$0]]) ?? children[$0].frame) }
-        // What it leaves where it is and is drawn; a hidden thing isn't, and counts for nothing here.
-        let seen = children.indices.filter { !taking.contains(children[$0].id) && !children[$0].isHidden }
-        // What it must stay in front of: what it lies on whole, and what lay behind a thing it takes and overlapped it.
-        let floor = seen.last { at in
-            holds(children[at], box) || takenFrom.contains { $0.at > at && overlaps(children[at], $0.shape) }
+        let takes = taken.map(\.id)
+        return (node, takes, behind(node.frame, taking: Set(takes), among: parent.children))
+    }
+
+    /// What a card whose final box is `box`, taking `taking` from `children` (back to front), goes in just behind, so
+    /// that nothing goes out of sight; nil: in front. Each thing counts as the box round its turned shape, and a hidden
+    /// thing, which isn't drawn, counts for nothing.
+    /// 1. The ruled slot. The card stays in front of what holds its whole box, such as a background, and of what lay
+    ///    behind a thing it takes and overlapped it, which that thing, in the card now, must stay in front of; and of
+    ///    all behind those. Past the frontmost of them, it goes behind the first thing its box overlaps at all.
+    /// 2. Moved as little as needed among the slots where nothing seen is wholly hidden by one thing: in front of what
+    ///    would hide the card whole, or hide whole a thing it takes that was seen; behind what it would hide whole.
+    ///    Where no slot does that, the ruled slot stands, and something is hidden: the accepted limit.
+    private static func behind(_ box: CGRect, taking: Set<UUID>, among children: [LayerNode]) -> UUID? {
+        let shapes = children.map { TreeEdit.shapesBox(of: [$0]) ?? $0.frame }
+        let takenAt = children.indices.filter { taking.contains(children[$0].id) }
+        // What stays, back to front: the card goes in at one of its slots, from 0, behind it all, to its count.
+        let staying = children.indices.filter { !taking.contains(children[$0].id) }
+        func isDrawn(_ at: Int) -> Bool { !children[at].isHidden }
+        /// Seen before the card: drawn, and not wholly under one drawn thing in front of it.
+        func wasSeen(_ at: Int) -> Bool {
+            isDrawn(at) && !children.indices.contains { over in
+                over > at && isDrawn(over) && shapes[over].contains(shapes[at])
+            }
+        }
+
+        // 1. The ruled slot.
+        let floor = staying.lastIndex { at in
+            isDrawn(at) && (shapes[at].contains(box) || takenAt.contains { $0 > at && overlaps(shapes[at], shapes[$0]) })
         } ?? -1
-        let behind = seen.first { $0 > floor && overlaps(children[$0], box) }
-        return (node, takes, behind.map { children[$0].id })
+        let ruled = staying.indices.first { $0 > floor && isDrawn(staying[$0]) && overlaps(shapes[staying[$0]], box) }
+            ?? staying.count
+
+        // 2. The slots that hide nothing seen run from `lowest` to `highest`; the ruled slot is moved into them.
+        let lowest = 1 + (staying.lastIndex { at in
+            isDrawn(at) && (shapes[at].contains(box)
+                || takenAt.contains { $0 > at && shapes[at].contains(shapes[$0]) && wasSeen($0) })
+        } ?? -1)
+        let highest = staying.firstIndex { box.contains(shapes[$0]) && wasSeen($0) } ?? staying.count
+        let slot = lowest <= highest ? min(max(ruled, lowest), highest) : ruled
+        return slot < staying.count ? children[staying[slot]].id : nil
     }
 
     /// Sized for a row, column or grid (call 7): like the visible sibling of its kind whose middle is nearest the sketch's,
@@ -156,15 +180,9 @@ enum SketchedNode {
         }
     }
 
-    /// Whether the box round a thing's turned shape holds the whole of `box`.
-    private static func holds(_ node: LayerNode, _ box: CGRect) -> Bool {
-        TreeEdit.shapesBox(of: [node])?.contains(box) ?? false
-    }
-
-    /// Whether the box round a thing's turned shape and `box` share any area.
-    private static func overlaps(_ node: LayerNode, _ box: CGRect) -> Bool {
-        guard let shape = TreeEdit.shapesBox(of: [node]) else { return false }
-        let shared = shape.intersection(box)
+    /// Whether two boxes share any area.
+    private static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let shared = a.intersection(b)
         return !shared.isNull && shared.width > 0 && shared.height > 0
     }
 

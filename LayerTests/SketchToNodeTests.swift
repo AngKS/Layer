@@ -50,12 +50,6 @@ private func screenHolding(_ children: [LayerNode]) -> TreeContent {
 /// The box round a thing's turned shape, in its parent's space.
 private func shapeBox(_ node: LayerNode) -> CGRect { TreeEdit.shapesBox(of: [node]) ?? node.frame }
 
-/// Whether two boxes share any area.
-private func share(_ a: CGRect, _ b: CGRect) -> Bool {
-    let shared = a.intersection(b)
-    return !shared.isNull && shared.width > 0 && shared.height > 0
-}
-
 /// A thing on a 20-point grid near the top of the screen, sometimes locked, hidden or turned.
 private func randomThing(_ random: inout SeededGenerator) -> LayerNode {
     let kind: ElementKind = Bool.random(using: &random) ? .text : .image
@@ -68,20 +62,13 @@ private func randomThing(_ random: inout SeededGenerator) -> LayerNode {
     return node
 }
 
-/// What is wrong with where a card drawn at `drawn` among `things` (a screen root's children, back to front) goes:
-/// each thing that was seen and is wholly hidden by one thing drawn over it after, and the card if it is. Each thing is
+/// What goes out of sight when `made`, a card, goes into `root` (a screen's root, its children back to front): each
+/// thing that was seen and is wholly hidden by one thing drawn over it after, and the card if it is. Each thing is
 /// drawn opaque, as the box round its shape, and a hidden thing isn't drawn. Several things that hide something only
 /// together are the accepted case, and aren't looked for.
-///
-/// One case is let off, as the ruling allows it: a thing the card leaves where it is that lay behind something the card
-/// takes and overlapped it, and anything behind such a thing. The card stays in front of those, so that what it takes
-/// stays in front of what it was in front of.
-private func whatGoesOutOfSight(_ things: [LayerNode], card drawn: CGRect) -> [String] {
-    let content = screenHolding(things)
-    guard let made = SketchedNode.make(.card, sketch: drawn, in: content, index: TreeIndex(content),
-                                       confidence: 1, decidedBy: .rules)
-    else { return ["no card"] }
-    let after = SketchedNode.inserting(made, into: content.screens[0].root)
+private func whatGoesOutOfSight(_ made: SketchedNode.Made, into root: LayerNode) -> [String] {
+    let things = root.children
+    let after = SketchedNode.inserting(made, into: root)
     guard let card = after.children.first(where: { $0.id == made.node.id }) else { return ["the card isn't there"] }
     let taken = Set(card.children.map(\.id))
     let place = Dictionary(uniqueKeysWithValues: things.enumerated().map { ($1.id, $0) })
@@ -105,12 +92,6 @@ private func whatGoesOutOfSight(_ things: [LayerNode], card drawn: CGRect) -> [S
         !things[index].isHidden
             && !things[(index + 1)...].contains { !$0.isHidden && shapeBox($0).contains(shapeBox(things[index])) }
     }
-    let takenAt = things.indices.filter { taken.contains(things[$0].id) }
-    let letOffUpTo = things.indices.last { index in
-        !taken.contains(things[index].id) && !things[index].isHidden
-            && takenAt.contains { $0 > index && share(shapeBox(things[index]), shapeBox(things[$0])) }
-    } ?? -1
-
     for (position, drawnThing) in drawnAfter.enumerated() {
         let over = drawnAfter[(position + 1)...]
         if drawnThing.id == card.id {
@@ -121,12 +102,21 @@ private func whatGoesOutOfSight(_ things: [LayerNode], card drawn: CGRect) -> [S
             continue
         }
         guard let was = place[drawnThing.id], wasSeen(was) else { continue }
-        if !taken.contains(drawnThing.id), was <= letOffUpTo { continue }
         if over.contains(where: { $0.box.contains(drawnThing.box) }) {
             wrong.append(taken.contains(drawnThing.id) ? "thing \(was), taken" : "thing \(was)")
         }
     }
     return wrong
+}
+
+/// Whether some slot among `root`'s children would put `made`, a card, where nothing goes out of sight.
+private func someSlotKeepsEverythingInSight(_ made: SketchedNode.Made, in root: LayerNode) -> Bool {
+    let slots = root.children.filter { !made.takes.contains($0.id) }.map { Optional($0.id) } + [nil]
+    return slots.contains { behind in
+        var elsewhere = made
+        elsewhere.behind = behind
+        return whatGoesOutOfSight(elsewhere, into: root).isEmpty
+    }
 }
 
 /// Strokes as the Magic Pen hands them over, keyed 1, 2, … .
@@ -475,20 +465,51 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(try root(of: screen, in: store).children.map(\.id) == [card, note.id, hidden.id])
     }
 
+    /// The limit, accepted: where no single slot keeps everything in sight, the card may hide something. For instance,
+    /// a thing the card would cover whole lay behind a thing that holds what the card takes: the card must be in front
+    /// of the one and behind the other. Several things that only together cover something aren't looked for either.
     @Test func aCardDrawnAmongThingsHidesNothingThatWasSeen() {
         // Small arrangements on a 20-point grid, the same every run: things that overlap, some locked, hidden or
         // turned, and a card drawn among them.
         var random = SeededGenerator(seed: 2026_11_25)
         var wrong: [String] = []
-        for arrangement in 0..<2000 {
+        for arrangement in 0..<10_000 {
             let things = (0..<Int.random(in: 1...5, using: &random)).map { _ in randomThing(&random) }
             let x = Int.random(in: 0..<10, using: &random), y = Int.random(in: 0..<10, using: &random)
             let width = Int.random(in: 2..<11, using: &random), height = Int.random(in: 2..<11, using: &random)
             let drawn = CGRect(x: 20 * x, y: 20 * y, width: 20 * width, height: 20 * height)
-            let found = whatGoesOutOfSight(things, card: drawn)
-            if !found.isEmpty { wrong.append("\(arrangement): \(found.joined(separator: ", "))") }
+            let content = screenHolding(things)
+            guard let made = SketchedNode.make(.card, sketch: drawn, in: content, index: TreeIndex(content),
+                                               confidence: 1, decidedBy: .rules)
+            else {
+                wrong.append("\(arrangement): no card")
+                continue
+            }
+            let root = content.screens[0].root
+            let found = whatGoesOutOfSight(made, into: root)
+            if !found.isEmpty, someSlotKeepsEverythingInSight(made, in: root) {
+                wrong.append("\(arrangement): \(found.joined(separator: ", "))")
+            }
         }
-        #expect(wrong.isEmpty, "\(wrong.count) arrangements hide something, first \(wrong.prefix(5))")
+        #expect(wrong.isEmpty, "\(wrong.count) arrangements hide something they needn't, first \(wrong.prefix(5))")
+    }
+
+    @Test func aLockedBadgeTuckedUnderATitleStaysInSight() throws {
+        let (store, screen, _) = makeStore()
+        // Locked, so the card leaves it where it is; behind the title's corner, and wholly inside the card drawn below.
+        var badge = leaf(.image, CGRect(x: 300, y: 140, width: 30, height: 30))
+        badge.isLocked = true
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        #expect(store.add(badge, to: .screen(screen)))
+        #expect(store.add(title, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        // In front of the card it would be lost under, the badge goes on covering the title's corner, as it did.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, badge.id])
+        #expect(store.placed(badge.id)?.frame == badge.frame)
     }
 
     @Test func anOrdinaryThingPartlyUnderACardStaysInFrontOfIt() throws {
