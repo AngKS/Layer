@@ -659,6 +659,24 @@ The pre-flight scan is in `.superpowers/sdd/2026-11-23-semantic-tree-4-canvas-pa
 
 **Lane:** A
 
+**MUST-FIX carried from plan 3's final re-review (A-I1 residual):**
+- **Where:** `Layer/Tree/TreeReconciler.swift`, in `record` (about :126–137) and `wasMoved` (about :327).
+- **The bug:** a node the person reordered goes back under the generator's control once the sibling it followed stops existing, whether the person deleted it, the generator dropped it, or the rules removed it. Two things combine:
+  - `record` re-anchors only the keys the merge wrote, so a moved node keeps a stale anchor;
+  - `wasMoved` returns false when it can't follow that anchor.
+- **Fix:**
+  - `wasMoved` returns true when the anchor can't be followed, or the reconciler keeps a set of keys it has judged moved;
+  - at each commit, every node judged not moved is re-anchored, keeping its old fields.
+- **Tests,** in `LayerTests/TreeReconcilerTests.swift`. They are scenarios S1, S2 and S4 in plan 3's archived `final-rereview.md` (`reports/Semantic tree 2026-11-23/plan-3/`):
+  - `aReorderSurvivesItsOldNeighbourBeingDeleted`: commit [a, b, c]; the person reorders to [c, a, b], then deletes b; two updates later c is still the person's.
+  - `aReorderSurvivesTheGeneratorDroppingItsAnchor`: the generator stops listing the node the moved one followed.
+  - `aWordEditedNodeKeepsItsPlaceAfterTheGeneratorReorders`: a node whose words the person changed, after one reorder by the generator.
+- **Must stay green:**
+  - `aReorderMadeWhileAGenerationStreamsIsKept`;
+  - the no-edit guard (a stream with no edits lands exactly as the generator wrote it);
+  - every `GenerationThroughTheReconcilerTests` test.
+- **Drag test:** reorder by a drag in a column while a generation streams, and check the drop is kept.
+
 **Files:**
 - Create: `Layer/Tree/TreeDrop.swift`, `Layer/Canvas/LayoutDrag.swift` (the lifted copy and the insertion line)
 - Modify:
