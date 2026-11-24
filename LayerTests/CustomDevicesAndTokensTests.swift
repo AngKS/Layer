@@ -298,7 +298,8 @@ struct CustomDevicesAndTokensTests {
 
     /// Final review B-I1: each field plan 4 added, held or squeezed to scrub on that design, begins from its value
     /// stopped at its range's ends, which the ruler can say, and steps from there within the range: the tokens'
-    /// fields, the device form's, and the Format panel's font size for a title at the tokens' size.
+    /// fields, the device form's, and the Format panel's font size for a title at the tokens' size. (The radii have no
+    /// fields while nothing reads them: B-I3.)
     @Test func eachNewFieldBeginsScrubbingWithinItsRange() throws {
         let read = try designOfHugeNumbers()
         let tokens = read.settings.tokens
@@ -306,8 +307,7 @@ struct CustomDevicesAndTokensTests {
         let draft = CustomDeviceDraft(from: device, named: device.name)
         let title = try #require(read.screens.first?.root.children.first)
         let fields: [(label: String, value: CGFloat, range: ClosedRange<CGFloat>)] = [
-            ("Small radius", tokens.cornerRadii.small, 1...400), ("Medium radius", tokens.cornerRadii.medium, 1...400),
-            ("Large radius", tokens.cornerRadii.large, 1...400), ("Card padding", tokens.card.padding, 1...400),
+            ("Card padding", tokens.card.padding, 1...400),
             ("Card radius", tokens.card.radius, 1...400), ("Title size", tokens.textSizes.title, 1...400),
             ("Body size", tokens.textSizes.body, 1...400), ("Text size", tokens.textSizes.text, 1...400),
             ("Width", draft.width, CustomDeviceDraft.sides), ("Height", draft.height, CustomDeviceDraft.sides),

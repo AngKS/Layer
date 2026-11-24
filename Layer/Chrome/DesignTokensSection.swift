@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The canvas settings' design tokens: the rhythm the space between things is made of, the corner radii, what a card
-/// is, and the sizes of text, with a way back to Layer's own. What is typed is read as a file's tokens are read
+/// The canvas settings' design tokens: the rhythm the space between things is made of, what a card is, and the sizes
+/// of text, with a way back to Layer's own. The corner radii are kept with the design, and Reset Tokens puts them back
+/// too, but have no row until something reads them (see `body`). What is typed is read as a file's tokens are read
 /// (`DesignTokens.reading`, F25), and a run of changes is one Format step. Its number fields are a form's
 /// (`numberFieldsOfAForm`): a squeeze over one scrubs it.
 struct DesignTokensSection: View {
@@ -28,11 +29,9 @@ struct DesignTokensSection: View {
                         .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 10))
                         .accessibilityLabel("Rhythm")
                 }
-                PanelRow("Radii") {
-                    size("S", "Small radius", \.cornerRadii.small, of: tokens)
-                    size("M", "Medium radius", \.cornerRadii.medium, of: tokens)
-                    size("L", "Large radius", \.cornerRadii.large, of: tokens)
-                }
+                // The Radii row (S, M and L: `cornerRadii.small`, `.medium` and `.large`) returns here, under Rhythm,
+                // once something draws or exports with the design's radii. Nothing reads them yet, so its fields would
+                // change nothing a person sees (final review B-I3). The radii stay in the design and its file as read.
             }
 
             PanelSection {
