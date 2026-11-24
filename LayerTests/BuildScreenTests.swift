@@ -69,6 +69,25 @@ private final class BuildBundleMarker {}
         #expect(built[1].style.fontWeight == .bold)
     }
 
+    /// And so are its radius, border width and opacity, while a progress bar's value is kept. Build Screen's
+    /// description no longer offers them.
+    @Test func aBuiltOutlinesLookNumbersArePassedOver() async throws {
+        let (model, _) = makeModel()
+
+        let id = try await build("button: Go [radius 12, border 3, opacity 50%, plain]\nprogress [40%]", in: model)
+
+        let built = leaves(of: try #require(model.store.root(of: id)))
+        #expect(built.map(\.style.cornerRadius) == [nil, nil])
+        #expect(built.map(\.style.borderWidth) == [nil, nil])
+        #expect(built.map(\.style.opacity) == [nil, nil])
+        #expect(built[0].content.buttonLook == .plain)
+        #expect(built[1].content.value == 0.4)
+        let offered = String(localized: BuildScreenIntent.description.descriptionText)
+        for number in [/radius ?[0-9]/, /border ?[0-9]/, /opacity ?[0-9]/, /[0-9] ?pt\b/] {
+            #expect(!offered.contains(number))
+        }
+    }
+
     @Test func aNewScreenIsBuiltFromA2UI() async throws {
         let (model, undo) = makeModel()
 

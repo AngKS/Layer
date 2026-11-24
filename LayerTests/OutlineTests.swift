@@ -177,6 +177,29 @@ import Testing
         #expect(byHand.map(\.style.fontSize) == [28, nil, 32])
     }
 
+    /// The rest of a look's numbers go the same way: an outline a model writes passes over a radius, a border width
+    /// and an opacity, and the kind keeps its own; a border colour still gets the default width. A progress bar's
+    /// `40%` is what it shows, not how it looks, so it is kept. One written by hand reads every number.
+    @Test func aGeneratedOutlinesLookNumbersArePassedOver() throws {
+        let written = "button: Save [radius 12, border 3, opacity 50%]\ntext: Total [border red, border 3]\nprogress [40%, opacity 50%]\n"
+        var stream = OutlineStream(tokens: .standard)
+        let taken = stream.take(written, isComplete: true)
+        let generated = try #require(taken)
+        let leaves = all(generated).filter { !$0.isContainer }
+        #expect(leaves.map(\.kind) == [.button, .text, .progress])
+        #expect(leaves.map(\.style.cornerRadius) == [nil, nil, nil])
+        #expect(leaves.map(\.style.borderWidth) == [nil, 1, nil])
+        #expect(leaves.map(\.style.opacity) == [nil, nil, nil])
+        #expect(leaves[1].style.borderColor == ColourWords.named["red"])
+        #expect(leaves[2].content.value == 0.4)
+
+        let byHand = all(Outline.parse(written, isComplete: true)).filter { !$0.isContainer }
+        #expect(byHand.map(\.style.cornerRadius) == [12, nil, nil])
+        #expect(byHand.map(\.style.borderWidth) == [3, 3, nil])
+        #expect(byHand.map(\.style.opacity) == [0.5, nil, 0.5])
+        #expect(byHand[2].content.value == 0.4)
+    }
+
     @Test func awkwardIndentationIsTolerated() {
         let tabbed = Outline.parse("column:\n\ttitle: A\n\trow:\n\t\tavatar\n\t\ttext: T", isComplete: true)
         #expect(shape(tabbed) == "group(column)[group(column)[title,group(row)[avatar,text]]]")

@@ -71,9 +71,9 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
         “card:”, “column:” or “grid 2:” to put them inside it; start a line with “row:” and split elements with \
         “|” to put them side by side; a blank line or “---” starts a new section. Kinds: title, body, button, \
         text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar, text. Square brackets \
-        hold the look: a colour name or hex code, a weight, radius 12, text white, fill or \
-        fit, on or off, a percentage such as 40% for a progress bar, filled, bordered or plain for a button, \
-        left, centre or right, shadow, border red, opacity 50%. Or give A2UI 1.0 JSON, starting with “{” or “[”, \
+        hold the look: a colour name or hex code, a weight, text white, fill or fit, on or off, a percentage \
+        such as 40% for a progress bar, filled, bordered or plain for a button, left, centre or right, shadow, \
+        border red. Or give A2UI 1.0 JSON, starting with “{” or “[”, \
         and Layer builds its components. When rebuilding a screen, what was built before is kept in place and \
         what was added by hand is left alone.
         """,
@@ -228,8 +228,8 @@ extension BuildScreenIntent {
                 generated = screen.root
                 surfaceName = screen.name
             } else {
-                // Read as a generated outline: its text sizes are passed over (spec §14).
-                generated = Outline.parse(layout, isComplete: true, tokens: settings.tokens, readsTextSizes: false)
+                // Read as a generated outline: its look's numbers are passed over (spec §14).
+                generated = Outline.parse(layout, isComplete: true, tokens: settings.tokens, readsLookNumbers: false)
                 guard generated.leafCount > 0 else { throw LayerIntentError.invalidBlueprint }
             }
             guard let snapshot else {

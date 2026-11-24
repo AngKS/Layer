@@ -67,11 +67,15 @@ struct OutlinePromptTests {
         #expect(settings.contains("row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]"))
     }
 
-    /// No model picks a number (spec §14), so neither prompt teaches a text size.
-    @Test func thePromptsTeachNoTextSize() {
+    /// No model picks a number (spec §14), so neither prompt teaches a text size, a radius, a border width or an
+    /// opacity. A progress bar's `40%` is what it shows, and stays.
+    @Test func thePromptsTeachNoLookNumber() {
         for room in [ScreenPrompt.Room.compact, .full] {
             let prompt = ScreenPrompt.instructions(room, for: "a settings screen")
-            #expect(!prompt.contains(/[0-9] ?pt\b/), "\(room)")
+            for number in [/[0-9] ?pt\b/, /radius ?[0-9]/, /border ?[0-9]/, /opacity ?[0-9]/] {
+                #expect(!prompt.contains(number), "\(room)")
+            }
+            #expect(prompt.contains("40% for a progress bar"), "\(room)")
         }
     }
 

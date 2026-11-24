@@ -38,10 +38,12 @@ enum Outline {
 
     /// As `parse(_:isComplete:)`, with the spacings the design's tokens give: the screen root 24, sections, `column:`,
     /// rows and grids 12, and cards 8 each become `tokens.spacing(nearest:)`, and a card's padding is `tokens.card.padding`.
-    /// `readsTextSizes` is false for an outline a model wrote (generation and Build Screen): no model picks a number
-    /// (spec §14), so a size such as `28pt` is passed over and the kind keeps its token size. Its other looks apply.
-    static func parse(_ text: String, isComplete: Bool, tokens: DesignTokens, readsTextSizes: Bool = true) -> LayerNode {
-        var builder = Builder(tokens: tokens, readsTextSizes: readsTextSizes)
+    /// `readsLookNumbers` is false for an outline a model wrote (generation and Build Screen): no model picks a number
+    /// (spec §14), so a text size such as `28pt`, a radius, a border width and an opacity are passed over, and the
+    /// kind keeps its own (`Look.withoutNumbers`). Its other looks apply, and so does a progress bar's `40%`, which is
+    /// what the bar shows. A hand-written outline, a template and an import read every number.
+    static func parse(_ text: String, isComplete: Bool, tokens: DesignTokens, readsLookNumbers: Bool = true) -> LayerNode {
+        var builder = Builder(tokens: tokens, readsLookNumbers: readsLookNumbers)
         var lines = text.replacingOccurrences(of: ";", with: "\n").components(separatedBy: .newlines)
         if !isComplete, !lines.isEmpty { lines.removeLast() }
         for line in lines { builder.add(line) }
@@ -61,15 +63,15 @@ enum Outline {
 
     private struct Builder {
         let tokens: DesignTokens
-        let readsTextSizes: Bool
+        let readsLookNumbers: Bool
         var frames: [Frame]
         /// The run of top-level leaves being collected, not yet in the root.
         var section: LayerNode?
         var breakPending = false
 
-        init(tokens: DesignTokens, readsTextSizes: Bool) {
+        init(tokens: DesignTokens, readsLookNumbers: Bool) {
             self.tokens = tokens
-            self.readsTextSizes = readsTextSizes
+            self.readsLookNumbers = readsLookNumbers
             frames = [Frame(node: Outline.root(tokens), depth: -1)]
         }
 
@@ -96,10 +98,10 @@ enum Outline {
                 let joinsSection = frames.count == 1 && (opener.inlineItems != nil || section != nil)
                 var container = opener.node
                 if let items = opener.inlineItems {
-                    container.children = items.compactMap { Outline.leaf($0, readsTextSizes: readsTextSizes) }
+                    container.children = items.compactMap { Outline.leaf($0, readsLookNumbers: readsLookNumbers) }
                 }
                 frames.append(Frame(node: container, depth: steps, joinsSection: joinsSection))
-            } else if let leaf = Outline.leaf(line, readsTextSizes: readsTextSizes) {
+            } else if let leaf = Outline.leaf(line, readsLookNumbers: readsLookNumbers) {
                 if frames.count == 1 {
                     section = section ?? Outline.section(tokens)
                     section?.children.append(leaf)
@@ -162,7 +164,7 @@ enum Outline {
             if let columns = Int(count) { return (makeGrid(columns: columns, tokens), nil) }
             return nil
         }
-        // The blueprint's other spellings of a row: `row - …` and `side by side: …`.
+        // The other spellings of a row, which Shortcuts written before the outline use: `row - …` and `side by side: …`.
         let rowPrefix = ["row:", "row -", "side by side:"].first { lower.hasPrefix($0) }
         if let rowPrefix {
             let rest = String(line.dropFirst(rowPrefix.count)).trimmingCharacters(in: .whitespaces)
@@ -172,9 +174,9 @@ enum Outline {
         return nil
     }
 
-    /// A leaf from `kind: words [look, …]`; a line with no known kind is text. Without `readsTextSizes` a look's text
-    /// size is passed over.
-    private static func leaf(_ written: String, readsTextSizes: Bool) -> LayerNode? {
+    /// A leaf from `kind: words [look, …]`; a line with no known kind is text. Without `readsLookNumbers` a look's
+    /// numbers are passed over.
+    private static func leaf(_ written: String, readsLookNumbers: Bool) -> LayerNode? {
         var text = written.trimmingCharacters(in: .whitespaces)
         var look: [String] = []
         if let open = text.lastIndex(of: "["), text.hasSuffix("]") {
@@ -202,9 +204,8 @@ enum Outline {
         } else {
             node.content.text = text.isEmpty ? kind.placeholder : text
         }
-        var asked = LookWords.look(from: look)
-        if !readsTextSizes { asked.fontSize = nil }
-        asked.apply(to: &node)
+        let asked = LookWords.look(from: look)
+        (readsLookNumbers ? asked : asked.withoutNumbers).apply(to: &node)
         return node
     }
 

@@ -46,8 +46,8 @@ enum Score {
     // MARK: The outline
 
     static func outline(_ text: String) -> ScreenScore {
-        // Read as generation reads it: a model's text sizes are passed over.
-        var root = Outline.parse(text, isComplete: true, tokens: .standard, readsTextSizes: false)
+        // Read as generation reads it: the numbers in a model's looks are passed over.
+        var root = Outline.parse(text, isComplete: true, tokens: .standard, readsLookNumbers: false)
         var score = tree(root)
         score.filledBeforePolish = filledAsWritten(text)
         score.splitSections = max(0, root.children.count - sectionsAsWritten(text))

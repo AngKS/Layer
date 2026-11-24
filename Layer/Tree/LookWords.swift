@@ -47,9 +47,22 @@ struct Look: Equatable, Sendable {
         if let borderWidth { node.style.borderWidth = borderWidth > 0 ? borderWidth : nil }
         if let opacity { node.style.opacity = opacity >= 0.995 ? nil : min(max(opacity, 0), 1) }
     }
+
+    /// This look without the numbers a person may pick and a model may not (spec §14): a text size, a radius, a
+    /// border width and an opacity, so the kind keeps its own and a border colour its default width. A progress
+    /// bar's value is what the bar shows, not how it looks, and stays.
+    var withoutNumbers: Look {
+        var look = self
+        look.fontSize = nil
+        look.cornerRadius = nil
+        look.borderWidth = nil
+        look.opacity = nil
+        return look
+    }
 }
 
-/// The words people write in a look and for each kind. Shared by `ScreenBlueprint` and the outline.
+/// The words people write in a look and for each kind: read by the outline, and by Siri's and voice's look
+/// parameters.
 enum LookWords {
     /// The words people use for each kind of element. No word belongs to two kinds.
     static let kindWords: [(words: [String], kind: ElementKind)] = ElementKind.allCases.map { ($0.spec.writtenNames, $0) }
@@ -141,7 +154,7 @@ enum LookWords {
     }
 }
 
-/// Colour names and hex codes, shared by the blueprint, the outline and the colour parameters.
+/// Colour names and hex codes, shared by the look words, the outline and the colour parameters.
 enum ColourWords {
     static let named: [String: RGBColor] = [
         // The same colour as `Theme.accent`, which this file can't name because it builds on macOS too.
