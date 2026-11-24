@@ -514,20 +514,22 @@ final class DesignStore {
         return elements.map { ElementRef(host: $0.kind.belongsOnScreens ? .screen(screenID) : .canvas, element: $0.id) }
     }
 
-    /// Gives an element to whatever it now lies on: the screen under its centre, or the
-    /// open canvas when there is none. It keeps its size in points and its position on
-    /// the canvas. A container lands whole, everything in it with it: see `rehostGroup(_:)`.
-    /// Returns where the element now lives.
+    /// Gives a thing to whatever it now lies on: the screen under its middle, or the open canvas
+    /// when there is none. It goes to that host's top level, on top, in one change (`move(_:to:at:)`):
+    /// its middle stays where it is on the canvas and its size in its own points, its corner on
+    /// whole points. A container goes whole, and what is in it keeps its own frames, so that on a
+    /// screen drawn at another scale it arrives scaled about its middle. Sticky notes and drawings
+    /// stay on the canvas, and so does a container holding one, which the move refuses. Read from
+    /// the tree. Returns where the thing now lives.
     @discardableResult
     func rehost(_ ref: ElementRef) -> ElementRef {
-        guard let (element, placement) = resolve(ref) else { return ref }
-        if element.kind == .group { return rehostGroup(ref) }
-        let frame = placement.canvasRect(for: element.frame)
-        // Sticky notes and drawings stay on the canvas.
-        let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
+        guard let placed = placed(ref) else { return ref }
+        let middle = placed.canvasShape.centre
+        let goesOnScreens = placed.node.isContainer || placed.node.kind.belongsOnScreens
+        let target = goesOnScreens ? treeScreen(at: middle) : nil
         let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host else { return ref }
-        return move(ref, toScreen: target?.id, origin: nil) ?? ref
+        guard host != ref.host, move(ref.element, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
+        return self.ref(of: ref.element) ?? ref
     }
 
     /// Puts a ready-made element on the open canvas exactly where its frame says, in points

@@ -24,12 +24,13 @@ struct CanvasScreen: View {
                     let tree = model.store.tree
                     let tokens = tree.settings.tokens
                     let showsNames = tree.settings.showsFrameNames
+                    let raised = model.screensBeingDraggedFrom
                     ForEach(tree.screens) { screen in
                         ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: showsNames)
                             .equatable()
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
-                            .zIndex(screensBeingDraggedFrom.contains(screen.id) ? 1 : 0)
+                            .zIndex(raised.contains(screen.id) ? 1 : 0)
                             .transition(.blurReplace)
                     }
                     ForEach(tree.canvas) { node in
@@ -194,14 +195,6 @@ struct CanvasScreen: View {
             get: { model.panelIsASheet && model[keyPath: isOpen] },
             set: { model[keyPath: isOpen] = $0 }
         )
-    }
-
-    /// The screens that hold elements being dragged, one or several of them.
-    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
-        guard model.isAdjusting, let selection = model.selection else { return [] }
-        return Set(selection.things.compactMap { thing in
-            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
-        })
     }
 }
 

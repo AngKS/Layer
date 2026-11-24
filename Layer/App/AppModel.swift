@@ -265,6 +265,19 @@ final class AppModel {
     /// True while an element is being dragged or resized, which shows the spacing guides.
     var isAdjusting = false
 
+    /// The screens that hold what is being dragged, one thing or several, a thing lifted out of
+    /// a row among them: each is drawn above the others until what it holds is dropped. Each
+    /// thing is found by its node id in the index, wherever it is now.
+    var screensBeingDraggedFrom: Set<TreeScreen.ID> {
+        guard isAdjusting else { return [] }
+        var ids: [UUID] = []
+        for case .element(let ref) in selection?.things ?? [] { ids.append(ref.element) }
+        if let lifted = drags?.lifted { ids.append(lifted.element) }
+        return Set(ids.compactMap { id in
+            if case .screen(let screen)? = store.ref(of: id)?.host { screen } else { nil }
+        })
+    }
+
     private(set) var effects: [RetraceEffect] = []
     private(set) var ghosts: [InkGhost] = []
     /// True while there is Magic Pen ink on the canvas that hasn't become anything.
@@ -1663,7 +1676,11 @@ final class AppModel {
     /// than its finger lifting: SwiftUI cancelled it, the tool changed, a twist cut it short
     /// (see `CanvasDrags`). The selection goes on naming those of them it named, wherever they
     /// now are, and a turn of them under way goes on: they are still the same things.
-    func rehost(_ things: [CanvasSelection]) {
+    ///
+    /// `land` lands each instead, when the drag knows better where it goes: one thing let go
+    /// over a row's insertion line, say. Each is named afresh from the index (`ref(of:)`),
+    /// wherever it went.
+    func rehost(_ things: [CanvasSelection], landing land: ((DesignStore.ElementRef) -> Void)? = nil) {
         let selected = selection
         let session = turnSession.flatMap { $0.selection == selected && $0.matches(store) ? $0 : nil }
         // Moved to its new host, an element drops out of the selection until it is named again.
@@ -1675,8 +1692,8 @@ final class AppModel {
         let inOrder = CanvasSelection(things).map { store.things(in: $0) } ?? []
         store.asOneStep {
             for case .element(let ref) in inOrder {
-                let now = store.rehost(ref)
-                if now != ref { renamed[.element(ref)] = .element(now) }
+                if let land { land(ref) } else { store.rehost(ref) }
+                if let now = store.ref(of: ref.element), now != ref { renamed[.element(ref)] = .element(now) }
             }
         }
         guard let selected, selected.things.contains(where: { renamed[$0] != nil }) else { return }

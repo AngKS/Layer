@@ -26,11 +26,26 @@ struct PlacedNode: Equatable {
     var canvasShape: TurnedRect {
         TurnedRect(rect: placement.canvasRect(for: frame), degrees: degrees)
     }
+
+    /// Whether a touch anywhere in its frame picks it. A drawing on the ink canvas is picked by
+    /// its strokes instead, which leaves the space round and inside them free. Locked, it is off
+    /// that canvas, and its frame is all there is to touch.
+    var isPickedByItsFrame: Bool { node.kind != .drawing || isLocked }
 }
 
 extension DesignStore.ElementRef.Host {
     /// Where the index has a node.
     init(_ host: TreeIndex.Host) {
+        switch host {
+        case .screen(let id): self = .screen(id)
+        case .canvas: self = .canvas
+        }
+    }
+}
+
+extension TreeIndex.Host {
+    /// Where a ref says a node is.
+    init(_ host: DesignStore.ElementRef.Host) {
         switch host {
         case .screen(let id): self = .screen(id)
         case .canvas: self = .canvas
@@ -70,6 +85,40 @@ extension DesignStore {
     /// has gone to another host since.
     func placed(_ ref: ElementRef) -> PlacedNode? {
         placed(ref.element).flatMap { $0.ref == ref ? $0 : nil }
+    }
+
+    /// The topmost screen whose frame on the canvas holds a canvas point, drawn as its device, a design's own included.
+    func treeScreen(at point: CGPoint) -> TreeScreen? {
+        let tree = tree
+        return tree.screens.last { $0.canvasFrame(on: tree.device(of: $0)).contains(point) }
+    }
+
+    /// The box round each visible leaf's turned shape on a host, apart from `id` and whatever it holds, in the own points
+    /// of `placement` (the screen's, or on the open canvas a top-level node's): what a thing dragged there lines up
+    /// with and is measured to. Its shapes come from the index; the walk only finds which leaves there are, back to
+    /// front, the open canvas's drawings among them.
+    func leafBounds(on host: ElementRef.Host, besides id: UUID, in placement: Placement) -> [CGRect] {
+        let memo = index, tree = tree
+        let nodes: [LayerNode]
+        switch host {
+        case .screen(let screenID):
+            nodes = tree.screens.first { $0.id == screenID }?.root.children ?? []
+        case .canvas:
+            nodes = tree.canvas
+        }
+        var bounds: [CGRect] = []
+        func visit(_ node: LayerNode) {
+            guard !node.isHidden, node.id != id else { return }
+            guard node.isContainer else {
+                guard let shape = memo[node.id]?.hostShape.bounds else { return }
+                // A screen's shapes are in its own points already; the open canvas's are in canvas points.
+                bounds.append(host == .canvas ? placement.localRect(for: shape) : shape)
+                return
+            }
+            node.children.forEach(visit)
+        }
+        nodes.forEach(visit)
+        return bounds
     }
 
     // MARK: Writing
@@ -128,6 +177,50 @@ extension DesignStore {
             tree.changeChildren(on: entry.host, at: from) { $0.remove(at: slot) }
             tree.changeChildren(on: entry.host, at: []) { $0.append(taken) }
         }
+    }
+
+    /// Takes a node out of what holds it onto the top of `host`, in front of what is there, as a drag lets go of a thing
+    /// lifted out of a row, column, grid or overlay (plan 4, call 3): its middle at `centre` on the canvas, its corner on
+    /// whole points, its size in its own points kept, at its angle there, fixed both ways. On the open canvas it is
+    /// drawn at the scale it was drawn at. One change, one write (`ListWork`).
+    ///
+    /// False, and nothing changes, for a screen's root, an id the design doesn't have, a centre that isn't finite, a
+    /// screen the design doesn't have, and a thing that stays on the open canvas (a sticky note, or what holds one)
+    /// taken onto a screen. Out at a host's top, a thing is never deeper than it was.
+    @discardableResult
+    func takeOut(_ id: UUID, to host: TreeIndex.Host, centredAt centre: CGPoint) -> Bool {
+        let memo = index, tree = tree
+        guard let entry = memo[id], let slot = entry.path.last, let posed = memo.posed(id, in: tree),
+              centre.x.isFinite, centre.y.isFinite else { return false }
+        let node = posed.node
+        // What it is drawn at where it is: its screen's scale, or its top-level canvas node's.
+        let drawnAt: CGFloat? = switch entry.host {
+        case .screen(let screenID): tree.screens.first { $0.id == screenID }?.scale
+        case .canvas: entry.path.first.flatMap { tree.canvas.indices.contains($0) ? tree.canvas[$0].scale : nil }
+        }
+        let placement: Placement
+        switch host {
+        case .screen(let screenID):
+            guard let screen = tree.screens.first(where: { $0.id == screenID }),
+                  !TreeEdit.holds(node, where: { !$0.kind.belongsOnScreens }) else { return false }
+            placement = screen.placement
+        case .canvas:
+            placement = Placement(origin: .zero, scale: drawnAt.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1)
+        }
+        let local = placement.localPoint(for: centre), size = node.frame.size
+        var taken = node
+        taken.frame = CGRect(x: (local.x - size.width / 2).rounded(), y: (local.y - size.height / 2).rounded(),
+                             width: size.width, height: size.height)
+        taken.rotation = Rotation.kept(posed.degrees)
+        taken.width.mode = .fixed
+        taken.height.mode = .fixed
+        taken.scale = host == .canvas ? drawnAt : nil
+        let made = taken, from = Array(entry.path.dropLast())
+        changeTree(writing: 1) { tree in
+            tree.changeChildren(on: entry.host, at: from) { $0.remove(at: slot) }
+            tree.changeChildren(on: host, at: []) { $0.append(made) }
+        }
+        return true
     }
 
     /// A screen's own fields and its root's layout, in one change; the root's children stay as they are.

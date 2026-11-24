@@ -293,7 +293,7 @@ extension DesignStore {
 
     /// Gives each element selected to whatever it now lies on, as after a drag: see
     /// `rehost(_:)`. Each moves on the tree in a change of its own, a container whole with
-    /// everything in it (`rehostGroup(_:)`), all of them one step; each lands in the design's
+    /// everything in it, all of them one step; each lands in the design's
     /// order, back to front, on top of what is on its new host, so that those landing together
     /// are stacked there as they were. Returns the selection as it now stands.
     func rehost(_ selection: CanvasSelection) -> CanvasSelection? {

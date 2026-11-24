@@ -371,26 +371,6 @@ extension DesignStore {
         }
     }
 
-    /// Gives a container to whatever the middle of its box now lies on, as after a drag: the
-    /// screen there, or the open canvas when there is none. It goes whole, in one change, on top
-    /// of what is there (`move(_:to:at:)`): its middle stays where it is on the canvas and its
-    /// size in its own points, and what is in it keeps its own frames, so that on a screen drawn
-    /// at another scale it arrives scaled about its middle, rather than with its members spaced
-    /// as they were on the canvas, overlapping or apart. One holding something that doesn't go on
-    /// screens, a sticky note, stays where it is instead of landing on a screen. Returns where the
-    /// container now lives.
-    @discardableResult
-    func rehostGroup(_ ref: ElementRef) -> ElementRef {
-        guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
-        let middle = placement.canvasPoint(for: CGPoint(x: item.frame.midX, y: item.frame.midY))
-        let target = screen(at: middle)
-        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        // Refused, as for a sticky note going onto a screen, it stays where it is.
-        guard host != ref.host, move(item.id, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
-        let landed = ElementRef(host: host, element: item.id)
-        return resolve(landed) != nil ? landed : ref
-    }
-
     /// Where the middle of something in a group lands on the canvas, given at `point`, as the
     /// group lands with its box's middle at `middle`: as far from it in the points of
     /// `landing`, the placement it lands in, as it was in those of `own`, where it was.

@@ -125,7 +125,8 @@ extension DesignStore {
     /// Within its own parent it only changes place. Elsewhere in a free parent its centre stays where it is
     /// on the canvas, and its angle there, at its size in its own points; between hosts its corner goes to
     /// whole points, as a move between hosts always went. On the canvas's top level it is drawn at the
-    /// scale it was drawn at.
+    /// scale it was drawn at. Into a laid-out parent drawn at another scale, it is carried into that scale
+    /// as `wrap` carries a canvas node (`held(_:drawnAt:)`), so that it is as large as it was.
     @discardableResult
     func move(_ id: UUID, to parent: NodeParent, at index: Int? = nil) -> Bool {
         let memo = self.index, tree = tree
@@ -138,7 +139,12 @@ extension DesignStore {
         var moved = node
         if holder.host != entry.host || holder.path != from {
             let scale = drawnScale(of: entry)
-            if holder.isFree { moved = keepingItsPlace(node, from: entry, into: holder, drawnAt: scale) }
+            if holder.isFree {
+                moved = keepingItsPlace(node, from: entry, into: holder, drawnAt: scale)
+            } else if let into = drawnScale(of: holder), into != scale {
+                moved.scale = scale
+                moved = Self.held([moved], drawnAt: into)[0]
+            }
             moved.scale = holder.node == nil ? scale : nil
         }
         let landing = moved
@@ -474,6 +480,19 @@ extension DesignStore {
             return Self.drawn(tree.screens.first { $0.id == id }?.scale)
         case .canvas:
             guard let top = entry.path.first, tree.canvas.indices.contains(top) else { return 1 }
+            return Self.drawn(tree.canvas[top].scale)
+        }
+    }
+
+    /// How many canvas points each of a holder's own is drawn as: its screen's scale, or its top-level canvas node's. Nil
+    /// for the canvas's top level, where each node is drawn at a scale of its own.
+    private func drawnScale(of holder: Holder) -> CGFloat? {
+        let tree = tree
+        switch holder.host {
+        case .screen(let id):
+            return Self.drawn(tree.screens.first { $0.id == id }?.scale)
+        case .canvas:
+            guard let top = holder.path.first, tree.canvas.indices.contains(top) else { return nil }
             return Self.drawn(tree.canvas[top].scale)
         }
     }

@@ -161,7 +161,7 @@ struct TurnSession: Equatable {
     /// everything in it, where it landed. Each one's start keeps its middle where it was on
     /// the canvas, in its new host's points, so that the turn goes on about the same pivot.
     /// What is in a group lands as the group does, scaled about the middle of its box to the
-    /// new host's scale (`DesignStore.rehostGroup(_:)`): its start is scaled likewise about
+    /// new host's scale (`DesignStore.rehost(_:)`): its start is scaled likewise about
     /// where that middle was before the turn so far, so that turned by as much it is where it
     /// landed, and a twist that cut the drag short goes on without a jump. Nil when
     /// `selection` isn't the same elements.
