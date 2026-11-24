@@ -177,6 +177,53 @@ struct CanvasDragWorkTests {
         #expect(versions > 1)
         #expect(groupDragged <= versions, "index built \(groupDragged) times over \(versions) versions of a group's drag")
     }
+
+    /// A drag of several things and a group's corner handle read the tree on every frame, so that a frame builds
+    /// the store's index alone and never lowers the design to its list (plan 4 Task 1, with clause (m)). Counted
+    /// for this board's own screen (F9), after a change through a tree verb has left the store's memo stale, and
+    /// once that count is shown to be live (F11).
+    @Test func aDragOfSeveralThingsAndAGroupsHandleLowerNothing() throws {
+        let board = BusyBoard()
+        let g = try #require(board.groupThreeLines())
+        let pose = try #require(board.store.groupPose(of: g))
+        let drags = CanvasDrags()
+        board.model.drags = drags
+        let lines = try #require(CanvasSelection(board.lines[10...12].map { CanvasSelection.element($0) }))
+        board.model.selection = lines
+
+        // After a change through a tree verb, a read of the list lowers the design: the count is live.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed" }
+        let live = TreeProjection.lowerings(of: board.screen)
+        _ = board.store.screens
+        #expect(TreeProjection.lowerings(of: board.screen) - live == 1)
+
+        // Several lines dragged together, out and back.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed again" }
+        let owner = CanvasDrags.Owner()
+        let dragStart = board.store.contentVersion
+        var before = TreeProjection.lowerings(of: board.screen)
+        for dx in BusyBoard.outAndBack {
+            drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
+        }
+        let dragVersions = board.store.contentVersion - dragStart + 1
+        let dragged = TreeProjection.lowerings(of: board.screen) - before
+        drags.dropGroup(owner: owner, model: board.model)
+        #expect(dragVersions > 1)
+        #expect(dragged == 0, "lowered \(dragged) times over \(dragVersions) versions of a 60-frame drag of three lines")
+
+        // The group's corner handle, from the pose taken as it began, a point a frame.
+        board.store.update(board.lines[0].element) { $0.content.text = "Changed once more" }
+        let resizeStart = board.store.contentVersion
+        before = TreeProjection.lowerings(of: board.screen)
+        for width in 1...60 {
+            let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
+            board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
+        }
+        let resizeVersions = board.store.contentVersion - resizeStart + 1
+        let resized = TreeProjection.lowerings(of: board.screen) - before
+        #expect(resizeVersions > 1)
+        #expect(resized == 0, "lowered \(resized) times over \(resizeVersions) versions of a 60-frame resize of a group")
+    }
     #endif
 
     /// A drawing dragged is shown where it goes on every frame, as before.

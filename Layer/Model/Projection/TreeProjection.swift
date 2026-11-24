@@ -44,11 +44,20 @@ enum TreeProjection {
     /// Whole designs lowered: counted on the main thread alone, as `ListWork` is, so that a design
     /// lowered elsewhere meanwhile doesn't add to a test's count. It only grows.
     nonisolated(unsafe) private(set) static var lowerings = 0
+    /// `lowerings` by screen: each lowering of a design counts once for every screen it holds.
+    nonisolated(unsafe) private static var loweringsByScreen: [TreeScreen.ID: Int] = [:]
+
+    /// How many times a design holding `screen` has been lowered, on the main thread: what a test reads
+    /// for its own board's screen, so that other suites' designs lowered meanwhile don't add to it (F9).
+    static func lowerings(of screen: TreeScreen.ID) -> Int { loweringsByScreen[screen] ?? 0 }
     #endif
 
     static func lower(_ content: TreeContent, pending: [UUID: UUID] = [:]) -> Lowered {
         #if DEBUG
-        if Thread.isMainThread { lowerings += 1 }
+        if Thread.isMainThread {
+            lowerings += 1
+            for screen in content.screens { loweringsByScreen[screen.id, default: 0] += 1 }
+        }
         #endif
         var elements: [DesignElement] = []
         var screens: [DesignScreen] = []

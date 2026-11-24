@@ -409,9 +409,12 @@ extension DesignStore {
     /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
     /// at that size, and the engine lays out what is in it.
     func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
-        guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
+        // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds the store's
+        // index and never lowers the design to its list (clause (m)).
+        guard let group = placed(ref), group.node.isContainer, !group.isLocked,
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
+        let placement = group.placement
         // A typed number can be anything Double reads, infinity included: finite, and at most a
         // hundred times the box it began as, or its members go non-finite and the design can't be saved.
         guard frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite else { return }
@@ -432,12 +435,12 @@ extension DesignStore {
         var frames: [DesignElement.ID: CGRect] = [:]
         // Read from the pose, not the design: on every frame of a handle's drag that would walk the whole tree.
         if pose.isLaidOut {
-            frames[item.id] = frame
+            frames[ref.element] = frame
         } else if frame == pose.box {
             // Back where it began: exactly as it was, with no arithmetic to round.
             frames = pose.leaves
         } else {
-            let degrees = item.resolvedRotation
+            let degrees = group.degrees
             let across = CGSize(width: frame.width / pose.box.width, height: frame.height / pose.box.height)
             /// Where a point in the start box goes in the new one, both in the points of `own`.
             func moved(_ point: CGPoint, in own: Placement) -> CGPoint {
@@ -448,8 +451,9 @@ extension DesignStore {
                 let placed = CGPoint(x: to.minX + (along.x - from.minX) * across.width, y: to.minY + (along.y - from.minY) * across.height)
                 return upright ? placed : Rotation.rotate(placed, about: CGPoint(x: to.midX, y: to.midY), by: degrees)
             }
+            let memo = index, tree = tree
             for (id, start) in pose.leaves {
-                guard let leaf = element(id), let own = self.placement(of: leaf) else { continue }
+                guard let own = memo.placement(of: id, in: tree) else { continue }
                 let centre = moved(CGPoint(x: start.midX, y: start.midY), in: own)
                 let size = CGSize(width: start.width * scale, height: pose.keepingHeight.contains(id) ? start.height : start.height * scale)
                 frames[id] = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)

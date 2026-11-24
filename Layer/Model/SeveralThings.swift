@@ -137,26 +137,26 @@ extension DesignStore {
         var screens: [DesignScreen.ID: CGPoint] = [:]
         // A member given beside its container moves with it, not on its own.
         let alone = Set(things(in: CanvasSelection(origins.keys)))
-        for (thing, origin) in origins where !isLocked(thing) && alone.contains(thing) {
+        for (thing, origin) in origins where alone.contains(thing) {
             switch thing {
             case .element(let ref):
-                guard let (element, placement) = resolve(ref), let box = canvasShape(of: thing)?.bounds else { continue }
-                let target = placement.localPoint(for: origin), current = placement.localPoint(for: box.origin)
+                // Read from the tree, as every frame of a drag reads it, so that a frame builds the store's
+                // index and never lowers the design to its list (clause (m)).
+                guard let placed = placed(ref), !placed.isLocked else { continue }
+                let box = placed.canvasShape.bounds
+                let target = placed.placement.localPoint(for: origin), current = placed.placement.localPoint(for: box.origin)
                 let distance = CGSize(width: target.x - current.x, height: target.y - current.y)
-                guard element.kind == .group else {
-                    let local = CGPoint(x: element.frame.minX + distance.width, y: element.frame.minY + distance.height)
-                    elements[ref.element] = element.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
+                guard placed.node.isContainer else {
+                    let local = CGPoint(x: placed.frame.minX + distance.width, y: placed.frame.minY + distance.height)
+                    elements[ref.element] = placed.node.kind == .drawing ? local : CGPoint(x: local.x.rounded(), y: local.y.rounded())
                     continue
                 }
-                // Read only for a container: built again for each version of the design, the index
-                // would cost a drag of several things that aren't containers a walk of the tree a frame.
-                let memo = index
-                guard let entry = memo[ref.element], let moved = self.origin(of: ref.element, movedBy: distance),
-                      let node = memo.node(ref.element, in: tree) else { continue }
+                // Where the container is, from the index `placed` built for this version.
+                guard let entry = index[ref.element], let moved = self.origin(of: ref.element, movedBy: distance) else { continue }
                 let landed = CGPoint(x: moved.x.rounded(), y: moved.y.rounded())
-                if landed != node.frame.origin { containers.append((entry.host, entry.path, landed)) }
+                if landed != placed.node.frame.origin { containers.append((entry.host, entry.path, landed)) }
             case .screen(let id):
-                guard screen(id) != nil else { continue }
+                guard let screen = treeScreen(id), screen.isLocked != true else { continue }
                 screens[id] = CGPoint(x: origin.x.rounded(), y: origin.y.rounded())
             case .several:
                 continue
