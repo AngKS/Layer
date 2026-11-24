@@ -38,6 +38,97 @@ private func rowOfTwoButtons() -> LayerNode {
     return row
 }
 
+/// An iPhone screen at the canvas's origin, at its own size, holding `children`: the tree with no store round it.
+private func screenHolding(_ children: [LayerNode]) -> TreeContent {
+    var screen = TreeScreen(name: "Screen", origin: .zero, scale: 1, deviceID: nil)
+    screen.root.children = children
+    var content = TreeContent()
+    content.screens = [screen]
+    return content
+}
+
+/// The box round a thing's turned shape, in its parent's space.
+private func shapeBox(_ node: LayerNode) -> CGRect { TreeEdit.shapesBox(of: [node]) ?? node.frame }
+
+/// Whether two boxes share any area.
+private func share(_ a: CGRect, _ b: CGRect) -> Bool {
+    let shared = a.intersection(b)
+    return !shared.isNull && shared.width > 0 && shared.height > 0
+}
+
+/// A thing on a 20-point grid near the top of the screen, sometimes locked, hidden or turned.
+private func randomThing(_ random: inout SeededGenerator) -> LayerNode {
+    let kind: ElementKind = Bool.random(using: &random) ? .text : .image
+    let x = Int.random(in: 0..<15, using: &random), y = Int.random(in: 0..<15, using: &random)
+    let width = Int.random(in: 1..<11, using: &random), height = Int.random(in: 1..<11, using: &random)
+    var node = leaf(kind, CGRect(x: 20 * x, y: 20 * y, width: 20 * width, height: 20 * height))
+    node.isLocked = Double.random(in: 0..<1, using: &random) < 0.3
+    node.isHidden = Double.random(in: 0..<1, using: &random) < 0.15
+    if Double.random(in: 0..<1, using: &random) < 0.1 { node.rotation = 30 }
+    return node
+}
+
+/// What is wrong with where a card drawn at `drawn` among `things` (a screen root's children, back to front) goes:
+/// each thing that was seen and is wholly hidden by one thing drawn over it after, and the card if it is. Each thing is
+/// drawn opaque, as the box round its shape, and a hidden thing isn't drawn. Several things that hide something only
+/// together are the accepted case, and aren't looked for.
+///
+/// One case is let off, as the ruling allows it: a thing the card leaves where it is that lay behind something the card
+/// takes and overlapped it, and anything behind such a thing. The card stays in front of those, so that what it takes
+/// stays in front of what it was in front of.
+private func whatGoesOutOfSight(_ things: [LayerNode], card drawn: CGRect) -> [String] {
+    let content = screenHolding(things)
+    guard let made = SketchedNode.make(.card, sketch: drawn, in: content, index: TreeIndex(content),
+                                       confidence: 1, decidedBy: .rules)
+    else { return ["no card"] }
+    let after = SketchedNode.inserting(made, into: content.screens[0].root)
+    guard let card = after.children.first(where: { $0.id == made.node.id }) else { return ["the card isn't there"] }
+    let taken = Set(card.children.map(\.id))
+    let place = Dictionary(uniqueKeysWithValues: things.enumerated().map { ($1.id, $0) })
+
+    // Drawn after, back to front, in the screen's points: the card, then what it holds, where the card is.
+    var drawnAfter: [(id: UUID, box: CGRect)] = []
+    for child in after.children where !child.isHidden {
+        drawnAfter.append((child.id, child.id == card.id ? card.frame : shapeBox(child)))
+        if child.id == card.id {
+            drawnAfter += card.children.map { ($0.id, shapeBox($0).offsetBy(dx: card.frame.minX, dy: card.frame.minY)) }
+        }
+    }
+    var wrong: [String] = []
+    let kept = Set(after.children.flatMap { TreeEdit.ids(in: $0) })
+    if kept != Set(things.map(\.id)).union([card.id]) { wrong.append("something was lost") }
+    for (id, box) in drawnAfter where id != card.id {
+        if let was = place[id], box != shapeBox(things[was]) { wrong.append("thing \(was) moved") }
+    }
+
+    func wasSeen(_ index: Int) -> Bool {
+        !things[index].isHidden
+            && !things[(index + 1)...].contains { !$0.isHidden && shapeBox($0).contains(shapeBox(things[index])) }
+    }
+    let takenAt = things.indices.filter { taken.contains(things[$0].id) }
+    let letOffUpTo = things.indices.last { index in
+        !taken.contains(things[index].id) && !things[index].isHidden
+            && takenAt.contains { $0 > index && share(shapeBox(things[index]), shapeBox(things[$0])) }
+    } ?? -1
+
+    for (position, drawnThing) in drawnAfter.enumerated() {
+        let over = drawnAfter[(position + 1)...]
+        if drawnThing.id == card.id {
+            // What it holds is drawn on it, and hides none of it.
+            if over.contains(where: { !taken.contains($0.id) && $0.box.contains(card.frame) }) {
+                wrong.append("the card")
+            }
+            continue
+        }
+        guard let was = place[drawnThing.id], wasSeen(was) else { continue }
+        if !taken.contains(drawnThing.id), was <= letOffUpTo { continue }
+        if over.contains(where: { $0.box.contains(drawnThing.box) }) {
+            wrong.append(taken.contains(drawnThing.id) ? "thing \(was), taken" : "thing \(was)")
+        }
+    }
+    return wrong
+}
+
 /// Strokes as the Magic Pen hands them over, keyed 1, 2, … .
 private func strokes(_ script: String) throws -> [SketchStroke] {
     try StrokeScript.parse(script).enumerated().map { SketchStroke(key: Double($0.offset + 1), points: $0.element) }
@@ -324,6 +415,80 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
                                                   confidence: 0.95, decidedBy: .rules))
 
         #expect(try root(of: screen, in: store).children.map(\.id) == [note.id, background.id, card])
+    }
+
+    @Test func aTitleOverALockedImageStaysInFrontOfIt() throws {
+        let (store, screen, _) = makeStore()
+        // A locked hero image with a title over it. The card is drawn round the title and past the image's bottom, so
+        // it overlaps the image without lying on it whole.
+        var image = leaf(.image, CGRect(x: 0, y: 0, width: 393, height: 200))
+        image.isLocked = true
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        #expect(store.add(image, to: .screen(screen)))
+        #expect(store.add(title, to: .screen(screen)))
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 160),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        // The title, in the card now, is still in front of the image it was over.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [image.id, card])
+        #expect(store.placed(title.id)?.frame == title.frame)
+        #expect(store.placed(image.id)?.frame == image.frame)
+    }
+
+    @Test func aHiddenThingIsNoBackground() throws {
+        let (store, screen, _) = makeStore()
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        // Wholly inside the card drawn below, and locked, so the card leaves it where it is.
+        var note = leaf(.text, CGRect(x: 20, y: 160, width: 353, height: 40))
+        note.isLocked = true
+        // As big as the screen, but hidden: it isn't drawn, so the card doesn't lie on it.
+        var hidden = leaf(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
+        hidden.isHidden = true
+        for node in [title, note, hidden] { #expect(store.add(node, to: .screen(screen))) }
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        // The card goes behind the locked note, which is still seen.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, note.id, hidden.id])
+    }
+
+    @Test func aHiddenThingUnderWhatItTakesKeepsItInFrontOfNothing() throws {
+        let (store, screen, _) = makeStore()
+        // Wholly inside the card drawn below, and locked, so the card leaves it where it is.
+        var note = leaf(.text, CGRect(x: 20, y: 160, width: 353, height: 40))
+        note.isLocked = true
+        // Behind the title and overlapping it, but hidden: the card needn't stay in front of it.
+        var hidden = leaf(.image, CGRect(x: 20, y: 100, width: 200, height: 60))
+        hidden.isHidden = true
+        let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))
+        for node in [note, hidden, title] { #expect(store.add(node, to: .screen(screen))) }
+
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 100, width: 373, height: 120),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(store.node(card)?.children.map(\.id) == [title.id])
+        // The card goes behind the locked note, which is still seen.
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, note.id, hidden.id])
+    }
+
+    @Test func aCardDrawnAmongThingsHidesNothingThatWasSeen() {
+        // Small arrangements on a 20-point grid, the same every run: things that overlap, some locked, hidden or
+        // turned, and a card drawn among them.
+        var random = SeededGenerator(seed: 2026_11_25)
+        var wrong: [String] = []
+        for arrangement in 0..<2000 {
+            let things = (0..<Int.random(in: 1...5, using: &random)).map { _ in randomThing(&random) }
+            let x = Int.random(in: 0..<10, using: &random), y = Int.random(in: 0..<10, using: &random)
+            let width = Int.random(in: 2..<11, using: &random), height = Int.random(in: 2..<11, using: &random)
+            let drawn = CGRect(x: 20 * x, y: 20 * y, width: 20 * width, height: 20 * height)
+            let found = whatGoesOutOfSight(things, card: drawn)
+            if !found.isEmpty { wrong.append("\(arrangement): \(found.joined(separator: ", "))") }
+        }
+        #expect(wrong.isEmpty, "\(wrong.count) arrangements hide something, first \(wrong.prefix(5))")
     }
 
     @Test func anOrdinaryThingPartlyUnderACardStaysInFrontOfIt() throws {
