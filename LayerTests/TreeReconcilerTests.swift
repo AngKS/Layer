@@ -490,6 +490,79 @@ struct TreeReconcilerTests {
         #expect(merge.root.source == generated.source)
     }
 
+    /// A person's reorder within a laid-out parent is theirs: what they moved stays where they put it, and the
+    /// generator's new nodes go round it, in this update and the ones after it (final review A-I1).
+    @Test func aReorderMadeWhileAGenerationStreamsIsKept() throws {
+        func written(_ keys: [String]) -> LayerNode { generatedRoot(keys.map { keyed($0) }) }
+        var reconciler = TreeReconciler()
+        var current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+        let before = ids(byKey: current)
+        let c = current.children.removeLast()
+        current.children.insert(c, at: 0)
+
+        let (merge, committed) = update(written(["a", "b", "c", "d"]), over: current, by: &reconciler)
+
+        #expect(merge.root.children.map(\.source?.key) == ["c", "a", "b", "d"])
+        #expect(["a", "b", "c"].allSatisfy { node($0, in: merge.root)?.id == before[$0] })
+        let again = reconciler.merged(written(["a", "b", "c", "d", "e"]), over: committed)
+        #expect(again.root.children.map(\.source?.key) == ["c", "a", "b", "d", "e"])
+    }
+
+    /// With no reorder by the person, each update takes the generator's order, as it always has.
+    @Test func withoutAReorderEachUpdateTakesTheGeneratorsOrder() {
+        func written(_ keys: [String]) -> LayerNode { generatedRoot(keys.map { keyed($0) }) }
+        var reconciler = TreeReconciler()
+        let current = update(written(["a", "b", "c"]), over: emptyRoot(), by: &reconciler).committed
+
+        let (merge, committed) = update(written(["b", "a", "d", "c"]), over: current, by: &reconciler)
+        #expect(merge.root.children.map(\.source?.key) == ["b", "a", "d", "c"])
+
+        let again = reconciler.merged(written(["c", "d", "a", "b", "e"]), over: committed)
+        #expect(again.root.children.map(\.source?.key) == ["c", "d", "a", "b", "e"])
+    }
+
+    /// A node whose neighbour the person deleted, or moved into another container, hasn't been moved itself: it is
+    /// still the generator's to write.
+    @Test func aNeighbourDeletedOrMovedOutLeavesANodeTheGenerators() throws {
+        func written(_ text: String) -> LayerNode {
+            generatedRoot([keyedGroup("k", column, []), keyed("a"), keyed("b"), keyed("c", text: text), keyed("d")])
+        }
+        var reconciler = TreeReconciler()
+        var current = update(written("Old"), over: emptyRoot(), by: &reconciler).committed
+        let b = try #require(node("b", in: current))
+        current = deleting("a", from: deleting("b", from: current))
+        current = editing(current, "k") { $0.children.append(b) }
+
+        let merge = reconciler.merged(written("New"), over: current)
+
+        #expect(node("c", in: merge.root)?.content.text == "New")
+        #expect(merge.root.children.map(\.source?.key) == ["k", "c", "d"])
+        #expect(node("k", in: merge.root)?.children.map(\.id) == [b.id])
+    }
+
+    /// What a newer Layer saved on a node Build Screen adopts stays on it when the generator rewrites it (final review
+    /// A-M6).
+    @Test func aRewrittenNodeKeepsWhatANewerLayerSavedOnIt() throws {
+        var current = TreeRules.laidOut(outline("title: A\nbutton: Go"), deviceID: "iphone", settings: CanvasSettings(),
+                                        previous: nil)
+        let unread = LayerNode.UnreadChild(index: 2, raw: .object(["kind": .string("hologram")]))
+        current = editing(current, "group:0") { $0.unreadChildren = [unread] }
+        current = editing(current, "group:0/title:0") { title in
+            title.unknownKeys["glow"] = .string("soft")
+            var style = UnknownKeys()
+            style["blur"] = .number(4)
+            title.unknownPartKeys["style"] = style
+        }
+
+        let merge = TreeReconciler(adopting: current).merged(outline("title: B\nbutton: Go"), over: current)
+
+        let title = try #require(node("group:0/title:0", in: merge.root))
+        #expect(title.content.text == "B")
+        #expect(title.unknownKeys["glow"] == .string("soft"))
+        #expect(title.unknownPartKeys["style"]?["blur"] == .number(4))
+        #expect(node("group:0", in: merge.root)?.unreadChildren == [unread])
+    }
+
     @Test func leavesAreCountedThroughContainers() {
         var hidden = LayerNode(kind: .text)
         hidden.isHidden = true

@@ -5,13 +5,14 @@ import Foundation
 /// key (`LayerNode.Source.key`), which the outline and the A2UI importer give every node they make.
 ///
 /// A node the generator wrote keeps its id for as long as the generation runs. One the person has
-/// changed since its commit is left as they left it, one they deleted is never written again (nor
-/// anything that was inside it), and one they added by hand is never touched and keeps its place
-/// (plan 3, calls 2 to 5). It is a value, made once per screen a generation writes, and pure: the
-/// merge runs off the main actor, on a copy of the screen's root.
+/// changed since its commit is left as they left it, one they moved is left where they put it, one
+/// they deleted is never written again (nor anything that was inside it), and one they added by hand
+/// is never touched and keeps its place (plan 3, calls 2 to 5). It is a value, made once per screen a
+/// generation writes, and pure: the merge runs off the main actor, on a copy of the screen's root.
 struct TreeReconciler: Sendable {
     /// A node as compared to see whether the person changed it: every field but `children`, `frame` only where it
-    /// is the truth (under a free parent, and not a container sized to fit), and its parent's id (call 2).
+    /// is the truth (under a free parent, and not a container sized to fit), its parent's id (call 2), and its place
+    /// among the generator's nodes in that parent, its anchor (final review A-I1).
     ///
     /// A container sized to fit under a free parent keeps its origin in the record, and only its size, which the rules
     /// work out, is left out: the rules keep its corner where it is, so a drag of it is the person's change.
@@ -19,8 +20,11 @@ struct TreeReconciler: Sendable {
         /// The node's own fields, with what it holds left out, and its frame too where the rules write it.
         private var fields: LayerNode
         fileprivate var parent: UUID?
+        /// The key of the written node just before it in its parent, as the commit left them; nil when none was. A
+        /// written node is one the generator wrote and the store still holds with the id it was written with.
+        fileprivate var anchor: String?
 
-        init(_ node: LayerNode, parent: UUID?, parentIsFree: Bool) {
+        init(_ node: LayerNode, parent: UUID?, parentIsFree: Bool, anchor: String? = nil) {
             var fields = node
             fields.children = []
             fields.unreadChildren = []
@@ -31,6 +35,12 @@ struct TreeReconciler: Sendable {
             }
             self.fields = fields
             self.parent = parent
+            self.anchor = anchor
+        }
+
+        /// Whether `other` has this node's fields under this parent: wherever it is among its siblings.
+        fileprivate func holdsTheSameNode(as other: Record) -> Bool {
+            fields == other.fields && parent == other.parent
         }
     }
 
@@ -57,8 +67,8 @@ struct TreeReconciler: Sendable {
     /// A new screen this generation made: nothing written yet.
     init() {}
 
-    /// An existing screen (Build Screen): its keyed nodes count as written, as they are now (call 7). Of two
-    /// nodes that share a key, the first in reading order counts.
+    /// An existing screen (Build Screen): its keyed nodes count as written, as they are now and where they are now
+    /// (call 7). Of two nodes that share a key, the first in reading order counts.
     init(adopting root: LayerNode) {
         var written: [String: Written] = [:]
         Self.walk(below: root) { node, parent in
@@ -67,6 +77,7 @@ struct TreeReconciler: Sendable {
                                                              parentIsFree: parent.resolvedLayout == .free))
         }
         self.written = written
+        anchor(Set(written.keys), in: root)
     }
 
     /// Pure. `generated` is keyed by `source.key` (ids fresh from a parse). `current` is the screen's root now.
@@ -74,12 +85,15 @@ struct TreeReconciler: Sendable {
     /// The root keeps its id and everything about it but its layout and source, which are the generator's
     /// (call 5). Below it, each generated node is written by its key:
     /// - one not written before is new, with its parse id (or the id it had, when the rules took it away);
-    /// - one written and unchanged since takes the generator's fields, with its id, wherever the generator puts it;
+    /// - one written and unchanged since takes the generator's fields, with its id, wherever the generator puts it, and
+    ///   keeps what a newer Layer saved on it;
     /// - one the person changed is left as it is, where it is, and what the generator puts inside it goes in it;
+    /// - one the person moved (to another parent, or among the generator's nodes in its own) is the person's too;
     /// - one the person deleted isn't written, nor anything inside it.
     ///
-    /// Within each parent the generator's nodes take its order. Everything else there (added by hand, or the
-    /// person's and not listed there) stays just after the generator's node it followed, or first (call 4).
+    /// Within each parent the generator's nodes take its order. Everything else there (added by hand, moved by the
+    /// person, or the person's and not listed there) stays just after the generator's node it followed, or first
+    /// (call 4).
     /// A written node that is unchanged and that the generator no longer lists anywhere goes, with everything inside
     /// it that the generator no longer lists, unless it holds something that isn't the generator's. One the generator
     /// lists only where nothing is written (under a node the person deleted, say) stays where it is.
@@ -97,6 +111,7 @@ struct TreeReconciler: Sendable {
     mutating func record(_ merge: Merge, committed: LayerNode) {
         var placed: [UUID: Placed] = [:]
         Self.index(committed, into: &placed)
+        var recorded: Set<String> = []
         let missing = Set(merge.wrote.filter { placed[$0.value] == nil }.keys)
         var renewed: [String: Placed] = [:]
         if !missing.isEmpty {
@@ -111,12 +126,27 @@ struct TreeReconciler: Sendable {
         for (key, id) in merge.wrote {
             if let entry = placed[id] ?? renewed[key] {
                 written[key] = .node(id: entry.node.id, record: entry.record)
+                recorded.insert(key)
             } else {
                 written[key] = .removedByRules(id: id)
             }
         }
         recordDeleted(merge.deletedByUser, committed: placed)
         for key in merge.dropped { written[key] = nil }
+        // Which nodes are written is known only now, so each is placed among them last.
+        anchor(recorded, in: committed)
+    }
+
+    /// Each of `keys` that is written as a node of `root` gets the anchor it has there: the key of the written node
+    /// just before it among its siblings, or nil.
+    private mutating func anchor(_ keys: Set<String>, in root: LayerNode) {
+        guard !keys.isEmpty else { return }
+        let anchors = Self.anchors(in: root, written: written)
+        for key in keys {
+            guard case .node(let id, var record)? = written[key] else { continue }
+            record.anchor = anchors[id]
+            written[key] = .node(id: id, record: record)
+        }
     }
 
     /// Each of `keys` as deleted, and every written key that was inside one of them and is gone from the
@@ -160,6 +190,23 @@ struct TreeReconciler: Sendable {
         }
     }
 
+    /// For each node of `root` that has a written node before it among its siblings, the key of the nearest one: its
+    /// anchor. A written node is one `written` holds by its key with its id. A node added by hand, which has no key,
+    /// is never an anchor, so it can come and go without moving anything.
+    fileprivate static func anchors(in root: LayerNode, written: [String: Written]) -> [UUID: String] {
+        var anchors: [UUID: String] = [:]
+        func visit(_ node: LayerNode) {
+            var last: String?
+            for child in node.children {
+                if let last { anchors[child.id] = last }
+                if let key = Self.key(of: child), case .node(let id, _)? = written[key], id == child.id { last = key }
+                visit(child)
+            }
+        }
+        visit(root)
+        return anchors
+    }
+
     /// Every node of `root`, itself included, by id. The first of two nodes of one id is kept.
     fileprivate static func index(_ root: LayerNode, into placed: inout [UUID: Placed]) {
         if placed[root.id] == nil { placed[root.id] = Placed(node: root, parent: nil, parentIsFree: false) }
@@ -192,6 +239,8 @@ private struct Merging {
     let currentRoot: LayerNode
     /// The screen as it is now, by id.
     var current: [UUID: TreeReconciler.Placed] = [:]
+    /// The screen's anchors now: for each node with a written node before it among its siblings, that node's key.
+    let anchors: [UUID: String]
     /// The first generated node of each key, in reading order.
     var generated: [String: LayerNode] = [:]
     /// The generated keys that can be written: those not inside a node that won't be, as one the person deleted,
@@ -211,6 +260,7 @@ private struct Merging {
         self.generatedRoot = generated
         self.currentRoot = current
         TreeReconciler.index(current, into: &self.current)
+        anchors = TreeReconciler.anchors(in: current, written: written)
         var byKey: [String: LayerNode] = [:], repeated: Set<String> = []
         TreeReconciler.walk(below: generated) { node, _ in
             guard let key = TreeReconciler.key(of: node) else { return }
@@ -253,8 +303,33 @@ private struct Merging {
         case .deletedByUser?: return .gone(found: false)
         case .node(let id, let record)?:
             guard let placed = current[id] else { return .gone(found: true) }
-            return placed.record == record ? .ours(id) : .theirs(id)
+            return isUnchanged(placed, since: record) ? .ours(id) : .theirs(id)
         }
+    }
+
+    /// Whether a written node is as the commit that wrote it left it: the same fields, under the same parent, and in
+    /// the same place among the generator's nodes there.
+    func isUnchanged(_ placed: TreeReconciler.Placed, since record: TreeReconciler.Record) -> Bool {
+        placed.record.holdsTheSameNode(as: record) && !wasMoved(placed, since: record)
+    }
+
+    /// Whether the person moved a written node since its commit: to another parent, or among the generator's nodes in
+    /// its parent, so that the written node just before it now isn't its anchor. Where the anchor has gone from that
+    /// parent since (deleted, moved out or dropped), the node that anchor followed stands in for it, so that what goes
+    /// round a node doesn't move it. An anchor that can't be followed further, one forgotten or deleted before, moves
+    /// nothing.
+    func wasMoved(_ placed: TreeReconciler.Placed, since record: TreeReconciler.Record) -> Bool {
+        guard placed.parent == record.parent else { return true }
+        let now = anchors[placed.node.id]
+        var anchor = record.anchor
+        var followed: Set<String> = []
+        while let key = anchor, key != now {
+            guard followed.insert(key).inserted, case .node(let id, let recorded)? = written[key] else { return false }
+            // Still there, and something else has come before the node.
+            if current[id]?.parent == placed.parent { return true }
+            anchor = recorded.anchor
+        }
+        return anchor != now
     }
 
     /// The merged node for a generated one under the parent of id `parentID`, or nil when it isn't written there.
@@ -266,13 +341,22 @@ private struct Merging {
             if found { deletedByUser.insert(key) }
             return nil
         case .theirs(let id):
-            // It lives where the person put it, and is merged there.
-            guard let placed = current[id], placed.parent == parentID, !usedIDs.contains(id) else { return nil }
+            // It lives where the person put it, and is merged there: in the generator's order when they changed only
+            // what it is, or just where they put it, by `keep`, when they moved it, so that the generator's nodes go
+            // round it.
+            guard let placed = current[id], placed.parent == parentID, !usedIDs.contains(id),
+                  case .node(_, let record)? = written[key], !wasMoved(placed, since: record) else { return nil }
             node = placed.node
         case .ours(let id):
             guard !usedIDs.contains(id) else { return nil }
             node = generated
             node.id = id
+            // What a newer Layer saved on it, which no generator knows of, stays with it.
+            if let kept = current[id]?.node {
+                node.unknownKeys = kept.unknownKeys
+                node.unknownPartKeys = kept.unknownPartKeys
+                node.unreadChildren = kept.unreadChildren
+            }
             wrote[key] = id
         case .new(let remembered):
             node = generated
@@ -334,10 +418,10 @@ private struct Merging {
         return kept
     }
 
-    /// The key of a node of the screen that the generator wrote and the person hasn't changed since.
+    /// The key of a node of the screen that the generator wrote and the person hasn't changed or moved since.
     func oursKey(_ node: LayerNode) -> String? {
         guard let key = TreeReconciler.key(of: node), case .node(let id, let record)? = written[key], id == node.id,
-              current[id]?.record == record else { return nil }
+              let placed = current[id], isUnchanged(placed, since: record) else { return nil }
         return key
     }
 
