@@ -365,6 +365,30 @@ struct TurnAndResizeOnTheTreeTests {
         #expect(board.model.store.tree == board.before, "the knob there and back")
     }
 
+    /// Final review A2-M3: one thing turned alone and back, at the edge of a turned group sized to fit, which fits round
+    /// its turned shape on the way and back again through its own turn, leaves the design exactly as it was, and so no
+    /// step to undo.
+    @Test func aThingAtTheEdgeOfATurnedFitGroupTurnedAloneAndBackLeavesNothingToUndo() throws {
+        let a = leaf(.text, CGRect(x: 0, y: 0, width: 50, height: 50), text: "A")
+        let b = leaf(.text, CGRect(x: 100, y: 0, width: 50, height: 50), text: "B")
+        let g = container(frame: CGRect(x: 137, y: 211, width: 150, height: 50), fits: true, turned: 33, [a, b])
+        let (model, undo) = makeModel(design([screen([g], origin: CGPoint(x: 137.3, y: 59.9), scale: 0.7)]))
+        let before = model.store.tree
+        model.selection = .element(try model.ref(a.id))
+
+        model.knobTurn(40, 0)
+        #expect(model.store.tree == before, "the knob there and back")
+        #expect(!undo.canUndo, "a turn that changed nothing is no step")
+
+        #expect(model.beginTwist())
+        for degrees in [17.0, 40, 1] { model.twist(by: degrees) }
+        #expect(model.store.tree != before, "turned, the group fits round it")
+        model.twist(by: 0)
+        model.endTwist()
+        #expect(model.store.tree == before, "a twist there and back")
+        #expect(!undo.canUndo, "a twist that changed nothing is no step")
+    }
+
     /// Final review A2-I1, for a handle: a container in a group sized to fit, at the group's left edge, resized out past
     /// it and back to exactly the box it began as, is exactly as it was, though the group moved its box meanwhile.
     @Test func aContainerInAFitGroupResizedBackToWhereItBeganIsAsItWas() throws {

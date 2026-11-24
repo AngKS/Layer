@@ -1957,6 +1957,10 @@ final class AppModel {
         case several(turned: Double)
     }
     @ObservationIgnored private var turnStart: TurnStart?
+    /// The design as a turn of one thing began, and its version as the turn's own last change left it, while nothing
+    /// but the turn has changed it: what the turn puts back when it comes back round to where it began. Nil once
+    /// anything else has changed the design, and for several things, whose session puts back each one's start.
+    @ObservationIgnored private var turnBegan: (tree: TreeContent, version: Int)?
     /// Several things selected, as their last turn or move left them: see `severalTurn`.
     @ObservationIgnored private var turnSession: TurnSession?
     /// That session as it was when the drag moving them began, if it held then.
@@ -2004,6 +2008,7 @@ final class AppModel {
         let start: Double
         if let turnable = turnableNode {
             turnStart = .element(turnable.ref, degrees: turnable.degrees, own: store.ownAngle(of: turnable.ref.element))
+            turnBegan = (store.tree, store.contentVersion)
             start = turnable.degrees
         } else if let session = severalTurn {
             turnSession = session
@@ -2041,8 +2046,19 @@ final class AppModel {
             guard selection == .element(ref), let placed = store.placed(ref) else { return false }
             let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
             // Back where it began, it takes back its own angle as it was: worked out again, it could
-            // differ in its last bit, and the turn, changing nothing to the eye, would be a step.
-            store.act(for: turnEdit) { setCanvasAngle(of: placed, to: angle, puttingBack: angle == start ? own : nil) }
+            // differ in its last bit, and the turn, changing nothing to the eye, would be a step. With
+            // nothing but the turn having changed the design since it began, the design is put back as it
+            // was: a turned group sized to fit, fitted round it on the way and back through its own turn,
+            // could differ in its last bits too (final review A2-M3).
+            let began = turnBegan.flatMap { $0.version == store.contentVersion ? $0.tree : nil }
+            store.act(for: turnEdit) {
+                if angle == start, let began {
+                    store.putBack(began)
+                } else {
+                    setCanvasAngle(of: placed, to: angle, puttingBack: angle == start ? own : nil)
+                }
+            }
+            turnBegan = began.map { ($0, store.contentVersion) }
             snapped = isSnapped ? angle : nil
         case .several(let start)?:
             // Changed by something else meanwhile, they are left as that left them.
@@ -2069,6 +2085,7 @@ final class AppModel {
     func endTurn() {
         guard isTurning else { return }
         turnStart = nil
+        turnBegan = nil
         isTurning = false
         isTwisting = false
         // A drag still under way, another finger's, is still adjusting the selection (C9).

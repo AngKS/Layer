@@ -109,6 +109,13 @@ extension DesignStore {
         }
     }
 
+    /// The design's tree put back exactly as `tree` holds it, in one change: what a turn of one thing that comes back
+    /// round to where it began leaves, when nothing but the turn has changed the design since it began. Only the turn's
+    /// own changes are taken back, so the design is as it was to the last bit, and its step is withdrawn.
+    func putBack(_ tree: TreeContent) {
+        apply { $0.tree = tree }
+    }
+
     // MARK: Resizing
 
     /// A laid-out child's handle: each axis whose size changed by more than 0.5 becomes `.fixed` at the new size.
