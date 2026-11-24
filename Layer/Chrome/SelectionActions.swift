@@ -14,10 +14,16 @@ struct SelectionActions: View {
     @FocusState private var isTypingPrompt: Bool
     /// The top of the on-screen keyboard in the canvas's coordinates, while it is up.
     @State private var keyboardTop: CGFloat?
+    /// Where the one-thing bar's last icon before its Group button ends, and where that Group button ends, across the
+    /// bar: the Group button is placed after every other icon, and the bar as though it weren't there, so that the
+    /// icons people know keep their places. The Group button's end is nil while it isn't shown.
+    @State private var lastIconEnd: CGFloat = 0
+    @State private var trailingGroupEnd: CGFloat?
 
     var body: some View {
         if !model.isAdjusting, let rect = model.selectionViewRect {
             bar
+                .coordinateSpace(.named(Self.barSpace))
                 .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
                 .reportsChromeFrame("selection actions", to: model)
                 // Offered no more than the room between its margins: a screen's field gives
@@ -89,11 +95,6 @@ struct SelectionActions: View {
                 if let id = model.selectedScreenID {
                     ScreenEditField(screen: id).id(id)
                 }
-                // One thing can be put in a card: where Group is when several things are selected.
-                let offered = model.groupShapesOffered
-                if !offered.isEmpty {
-                    groupButton(offered)
-                }
                 ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
                     withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
                 }
@@ -114,6 +115,17 @@ struct SelectionActions: View {
                     withAnimation(.smooth(duration: 0.3)) { model.deleteSelection() }
                 }
                 .keyboardShortcut(.delete, modifiers: .command)
+                .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.barSpace)).maxX }) { lastIconEnd = $0 }
+                // One thing can be put in a card. Its Group button comes after every icon above, so that none of
+                // them moves: see `position(above:)`.
+                let offered = model.groupShapesOffered
+                if !offered.isEmpty {
+                    groupButton(offered)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.barSpace)).maxX }) {
+                            trailingGroupEnd = $0
+                        }
+                        .onDisappear { trailingGroupEnd = nil }
+                }
             }
         }
         .animation(.smooth(duration: 0.2), value: isLocked)
@@ -309,10 +321,16 @@ struct SelectionActions: View {
         if let keyboardTop, y + size.height / 2 > keyboardTop - 12 {
             y = max(keyboardTop - 12 - size.height / 2, top + size.height / 2)
         }
-        let half = size.width / 2
+        // The icons before a trailing Group button are centred as they would be without it, and it reaches past them,
+        // unless that would take it past the side.
+        let trailing = trailingGroupEnd.map { max(0, $0 - lastIconEnd) } ?? 0
+        let half = (size.width - trailing) / 2
         let x = min(max(rect.midX, left + half), max(right - half, left + half))
-        return CGPoint(x: x, y: y)
+        let whole = size.width / 2
+        return CGPoint(x: min(x + trailing / 2, max(right - whole, left + whole)), y: y)
     }
+
+    private static let barSpace = "SelectionActions.bar"
 }
 
 /// Typing into the selected thing, read and written on the tree (F13). Everything typed in one sitting undoes as one step.

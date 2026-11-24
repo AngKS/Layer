@@ -1282,6 +1282,20 @@ final class SketchFlowUITests: XCTestCase {
         // Another, alone: a card is all it can be, so a tap on Group opens the menu, and Card wraps it.
         control("Sticky note").tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+
+        // The icons the bar had before it offered a card keep their order and their place: centred over the note, as
+        // the bar was, on the knob below its middle. Group comes after all of them.
+        XCTAssertTrue(control("Group").waitForExistence(timeout: 5), "one thing should be offered Group")
+        usleep(600_000)
+        let known = ["Edit text", "Format selection", "Duplicate", "Lock", "Arrange", "Delete selection"]
+            .map(control).filter(\.exists).map(\.frame)
+        XCTAssertGreaterThanOrEqual(known.count, 5, "the bar should have the icons it had")
+        XCTAssertTrue(zip(known, known.dropFirst()).allSatisfy { $0.maxX <= $1.minX }, "the icons should keep their order")
+        if let first = known.first, let last = known.last {
+            XCTAssertGreaterThanOrEqual(control("Group").frame.minX, last.maxX, "Group should come after every icon that was there")
+            XCTAssertEqual((first.minX + last.maxX) / 2, control("Rotate").frame.midX, accuracy: 1.5,
+                           "the icons that were there should stay centred over the note, where they were")
+        }
         openGroupMenu()
         XCTAssertFalse(app.buttons["Row"].isEnabled, "one thing can't be a row")
         app.buttons["Card"].tap()
