@@ -365,7 +365,7 @@ private struct TextEditor: View {
     }
 }
 
-private extension GroupShape {
+extension GroupShape {
     /// Its layout's symbol, as the Layers panel shows it.
     var symbol: String {
         switch self {

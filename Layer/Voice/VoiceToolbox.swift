@@ -402,8 +402,9 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    /// Makes a screen another device's and lays what is on it out again for that size,
-    /// so that it looks made for it rather than a phone's layout in a tablet's corner.
+    /// Makes a screen another device's, as the device picker and Siri do (`changeDevice(of:to:)`):
+    /// what is on it follows where it was put, so that it looks made for the new size rather
+    /// than a phone's layout in a tablet's corner.
     func changeScreenDevice(screen: String?, device: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -414,14 +415,9 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 let handle = handles.handle(forScreen: found.id)
-                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(Int(frame.size.width)) × \(Int(frame.size.height)))"
+                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(frame.size.width.wholePoints) × \(frame.size.height.wholePoints))"
                 guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
-                let frames = ScreenTidy.frames(for: found.elements, on: frame, from: found.device)
-                model.store.updateScreen(found.id) { screen in
-                    // An iPhone is kept as no device at all, as the Siri action keeps it.
-                    screen.deviceID = frame.id == DeviceFrame.iPhone.id ? nil : frame.id
-                    Self.apply(frames, to: &screen)
-                }
+                model.store.changeDevice(of: found.id, to: frame)
                 reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }

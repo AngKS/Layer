@@ -34,12 +34,13 @@ enum NaturalSize {
         node.style.fontWeight ?? node.kind.spec.fontWeight
     }
 
-    /// A leaf's natural size for an offered width (nil = ideal). Not for containers.
-    static func of(_ node: LayerNode, width: CGFloat?, measure: TextMeasure) -> CGSize {
+    /// A leaf's natural size for an offered width (nil = ideal), its text at the size `tokens` give it. Not for
+    /// containers.
+    static func of(_ node: LayerNode, width: CGFloat?, measure: TextMeasure, tokens: DesignTokens = .standard) -> CGSize {
         switch node.kind {
         case .title, .body, .text:
             return measure.size(
-                of: node.content.text, fontSize: fontSize(of: node), weight: fontWeight(of: node), width: width)
+                of: node.content.text, fontSize: fontSize(of: node, tokens: tokens), weight: fontWeight(of: node), width: width)
         case .stickyNote:
             return CGSize(width: 150, height: 150)
         case .button:
