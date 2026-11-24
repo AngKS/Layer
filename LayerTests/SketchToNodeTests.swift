@@ -487,7 +487,10 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
             }
             let root = content.screens[0].root
             let found = whatGoesOutOfSight(made, into: root)
-            if !found.isEmpty, someSlotKeepsEverythingInSight(made, in: root) {
+            // Only a plain "thing N" going out of sight is excused, and only where no slot would keep it in sight:
+            // a loss, a move or a missing card never depends on the slot, and fails whatever the slots allow.
+            let isPlainThing: (String) -> Bool = { $0.hasPrefix("thing ") && Int($0.dropFirst("thing ".count)) != nil }
+            if !found.isEmpty, !found.allSatisfy(isPlainThing) || someSlotKeepsEverythingInSight(made, in: root) {
                 wrong.append("\(arrangement): \(found.joined(separator: ", "))")
             }
         }
@@ -507,7 +510,8 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
                                                   confidence: 0.95, decidedBy: .rules))
 
         #expect(store.node(card)?.children.map(\.id) == [title.id])
-        // In front of the card it would be lost under, the badge goes on covering the title's corner, as it did.
+        // In front of the card it would be lost under, the badge, which lay behind the title, now covers its corner: the order
+        // flipped, and no slot can avoid that.
         #expect(try root(of: screen, in: store).children.map(\.id) == [card, badge.id])
         #expect(store.placed(badge.id)?.frame == badge.frame)
     }
