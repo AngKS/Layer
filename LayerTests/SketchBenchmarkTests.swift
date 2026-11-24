@@ -55,6 +55,7 @@ struct SketchBenchmarkTests {
         print("Candidate-set recall: \(String(format: "%.1f", report.candidateRecall * 100))%")
         print("Top-3 recall: \(String(format: "%.1f", report.top3Recall * 100))%")
         print("Escalation rate: \(String(format: "%.1f", report.escalationRate * 100))%")
+        print("BENCH sketch accuracy overall=\(String(format: "%.1f", report.overallAccuracy * 100))% candidateRecall=\(String(format: "%.1f", report.candidateRecall * 100))% top3=\(String(format: "%.1f", report.top3Recall * 100))% escalation=\(String(format: "%.1f", report.escalationRate * 100))% cases=\(report.totalCases)")
         if let handwriting = report.handwritingLatency {
             print("Handwriting recognizer latency p50/p95: \(handwriting.p50 * 1000)ms / \(handwriting.p95 * 1000)ms")
         }

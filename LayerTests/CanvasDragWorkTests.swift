@@ -344,6 +344,7 @@ struct CanvasDragWorkTests {
         drags.dropOnTarget(g, startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
         // The group is written alone on each of 60 frames, and its three lines ride along in it
         // (plan 2, call 13).
+        print("BENCH drag group frames=60 writes=\(groupWrites)")
         #expect(groupWrites == 60, "elements written during a 60-frame drag of a group of three: \(groupWrites)")
         #expect(!board.store.isEditing)
 
@@ -353,6 +354,7 @@ struct CanvasDragWorkTests {
         for dx in BusyBoard.outAndBack { board.drag(drags, board.lines[20], by: CGFloat(dx), owner: other) }
         let lineWrites = ListWork.elementsWritten - before
         drags.dropElement(board.lines[20], findsNewHome: true, owner: other, model: board.model)
+        print("BENCH drag line frames=60 writes=\(lineWrites)")
         #expect(lineWrites == 60, "elements written during a 60-frame drag of one line: \(lineWrites)")
     }
 

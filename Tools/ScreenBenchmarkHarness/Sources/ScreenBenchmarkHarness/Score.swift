@@ -200,6 +200,16 @@ struct Summary {
     var completion: [Duration] = []
     var outputTokens: [Int] = []
 
+    /// The screens the model answered or failed to, and those among them that are valid.
+    var screens: Int { scores.count + errors.count }
+    var valid: Int { scores.filter(\.valid).count }
+
+    /// The median first-content time in milliseconds (0 when no screen had content), as `HostedFormatRule` reads it.
+    var firstContentP50: Double {
+        guard !firstContent.isEmpty else { return 0 }
+        return Double(Self.percentile(firstContent.map { Int(($0 / .milliseconds(1)).rounded()) }, 0.5))
+    }
+
     var line: String {
         let count = scores.count + errors.count
         func perScreen(_ value: (ScreenScore) -> Int) -> String {
@@ -239,5 +249,61 @@ struct Summary {
         let sorted = values.sorted()
         let rank = Int((fraction * Double(sorted.count)).rounded(.up))
         return sorted[min(max(rank, 1), sorted.count) - 1]
+    }
+}
+
+/// My call 8, in one place: which format the hosted models write by default, from a run of both over the same briefs.
+enum HostedFormatRule {
+    struct Result: Sendable {
+        var valid: Int
+        var screens: Int
+        /// The median time to the first screen handed on, in milliseconds.
+        var firstContentP50: Double
+    }
+
+    /// "a2ui" unless A2UI has fewer valid screens, or its first-content median is more than 25% above the outline's.
+    static func decide(outline: Result, a2ui: Result) -> String {
+        if a2ui.valid < outline.valid { return "outline" }
+        if a2ui.firstContentP50 > outline.firstContentP50 * 1.25 { return "outline" }
+        return "a2ui"
+    }
+
+    /// The line `run.sh hosted <model> both` ends with.
+    static func line(outline: Result, a2ui: Result) -> String {
+        let change: String
+        if outline.firstContentP50 > 0 {
+            let percent = (a2ui.firstContentP50 - outline.firstContentP50) / outline.firstContentP50 * 100
+            change = String(format: "%@%.0f%%", percent < 0 ? "\u{2212}" : "+", abs(percent))
+        } else {
+            change = "n/a"
+        }
+        return "hosted default: \(decide(outline: outline, a2ui: a2ui)) \u{2014} valid \(a2ui.valid)/\(a2ui.screens) vs "
+            + "\(outline.valid)/\(outline.screens); first content p50 \(Int(a2ui.firstContentP50.rounded())) ms vs "
+            + "\(Int(outline.firstContentP50.rounded())) ms (\(change))"
+    }
+
+    /// The four cases `run.sh check` holds the rule to: (outline valid, A2UI valid, outline p50, A2UI p50, the expected
+    /// answer), each over 24 screens.
+    static let cases: [(Int, Int, Double, Double, String)] = [
+        (24, 23, 1000, 1000, "outline"),
+        (24, 24, 1000, 1300, "outline"),
+        (24, 24, 1000, 1250, "a2ui"),
+        (22, 24, 1000, 1200, "a2ui"),
+    ]
+
+    /// Prints `rule ok: 4/4` when every case gives its answer; true then.
+    static func check() -> Bool {
+        var held = 0
+        for (outlineValid, a2uiValid, outlineP50, a2uiP50, expected) in cases {
+            let answer = decide(outline: Result(valid: outlineValid, screens: 24, firstContentP50: outlineP50),
+                                a2ui: Result(valid: a2uiValid, screens: 24, firstContentP50: a2uiP50))
+            if answer == expected {
+                held += 1
+            } else {
+                print("ERR rule (\(outlineValid), \(a2uiValid), \(outlineP50), \(a2uiP50)) gave \(answer), not \(expected)")
+            }
+        }
+        print("rule \(held == cases.count ? "ok" : "FAILED"): \(held)/\(cases.count)")
+        return held == cases.count
     }
 }

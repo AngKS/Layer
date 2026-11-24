@@ -463,6 +463,7 @@ struct LayoutDragTests {
         }
         targets.append(board.drags.lift?.target)
 
+        print("BENCH drag row child frames=60 writes=\(ListWork.elementsWritten - written) versions=\(board.store.contentVersion - version)")
         #expect(ListWork.elementsWritten == written, "nodes written during a 60-frame lift")
         #expect(board.store.contentVersion == version, "versions made during a 60-frame lift")
         #expect(TreeProjection.lowerings(of: board.screen) == lowered, "lowerings during a 60-frame lift")

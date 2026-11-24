@@ -94,4 +94,3 @@ LayerTests/StoreChangeBudgetTests.swift
 LayerTests/UndoNameTests.swift
 
 # Task 2 (F16).
-LayerTests/StoreChangeBenchmarkTests.swift

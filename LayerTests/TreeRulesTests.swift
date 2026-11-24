@@ -438,6 +438,7 @@ import Testing
             String(format: "%.3f", Double(duration.components.attoseconds) / 1e15 + Double(duration.components.seconds) * 1e3)
         }
         print("TreeRules, one text edit on a screen of 100 nodes in 25 rows: p50 \(milliseconds(p50)) ms, p95 \(milliseconds(p95)) ms")
+        print("BENCH rules edit p50=\(milliseconds(p50)) p95=\(milliseconds(p95))")
         // Each edit was laid out: the row it is in, every time.
         #expect(LayoutEngine.timesLaidOut(edited) - laidOutBefore == 50)
         #expect(p95 < .milliseconds(16))

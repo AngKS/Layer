@@ -6,11 +6,15 @@
 #
 # Usage:
 #   Tools/ScreenBenchmarkHarness/run.sh check
-#       builds, and scores one canned outline answer and one canned A2UI answer, with no model.
+#       builds, scores one canned outline answer and one canned A2UI answer, with no model, and holds the
+#       hosted-default rule (HostedFormatRule) to its four cases.
 #   Tools/ScreenBenchmarkHarness/run.sh outline [runs per brief, default 1]
 #       the on-device model with ScreenPrompt's compact prompt, over the 8 briefs.
 #   Tools/ScreenBenchmarkHarness/run.sh hosted <LM Studio model id> <outline|a2ui> [runs per brief]
 #       a model served by LM Studio, through HostedModelClient, with no key.
+#   Tools/ScreenBenchmarkHarness/run.sh hosted <LM Studio model id> both [runs per brief]
+#       both formats, one after the other on each brief (A2UI first on the odd ones); each format's summary, then
+#       "hosted default: ..." from HostedFormatRule.
 set -eu
 cd "$(dirname "$0")/../.."
 R="$(pwd)"

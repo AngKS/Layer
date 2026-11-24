@@ -422,6 +422,7 @@ extension HostedWindowSuites {
                 rose = built(path) - start
                 linesRose = zip(board.lines, linesAtStart).map { CanvasWork.nodeViewsBuilt(of: $0) - $1 }
             }
+            print("BENCH node views edits=20 path=\(rose) lines=\(linesRose.reduce(0, +))")
             #expect(rose >= 1, "the views on C's path are drawn again")
             #expect(rose <= 20 * 3 + 10, "root, G and C built over 20 edits: \(rose)")
             #expect(linesRose.allSatisfy { $0 == 0 }, "lines built over 20 edits of C: \(linesRose.reduce(0, +))")
