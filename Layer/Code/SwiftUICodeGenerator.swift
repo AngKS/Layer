@@ -179,21 +179,22 @@ extension SwiftUICodeGenerator {
 
 extension SwiftUICodeGenerator.ScreenWriter {
     /// A screen whose root lays its children out: its block inside the safe area, which SwiftUI
-    /// keeps clear, padded by its device's margin, across the column, at most as wide as its
-    /// device's widest column, and from the top.
+    /// keeps clear, padded by its device's margin, across the column, and from the top. On a
+    /// device with a widest column, the column is held to that width before the margin pads it,
+    /// as the engine lays it out: that wide and centred, the margins round it.
     mutating func columnScreen() -> [String] {
         let root = screen.root
         var lines = block(of: root)
-        if let name = context.marginNames[screen.id] {
-            lines.append(".padding(\(token(name)))")
-        } else {
-            lines.append(".padding(\(Generator.number(device.margin)))")
-        }
-        if let edge = Generator.alignmentName(horizontal: Generator.contentAlignment(of: root).horizontal, vertical: nil) {
-            lines.append(".frame(maxWidth: .infinity, alignment: .\(edge))")
-        }
+        let margin = if let name = context.marginNames[screen.id] { token(name) } else { Generator.number(device.margin) }
+        let across = Generator.alignmentName(horizontal: Generator.contentAlignment(of: root).horizontal, vertical: nil)
+            .map { ".frame(maxWidth: .infinity, alignment: .\($0))" }
         if let name = context.maxContentWidthNames[screen.id] {
+            if let across { lines.append(across) }
             lines.append(".frame(maxWidth: \(token(name)))")
+            lines.append(".padding(\(margin))")
+        } else {
+            lines.append(".padding(\(margin))")
+            if let across { lines.append(across) }
         }
         lines.append(".frame(maxHeight: .infinity, alignment: .top)")
         return lines

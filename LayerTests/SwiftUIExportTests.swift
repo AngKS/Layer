@@ -433,6 +433,19 @@ struct SwiftUIExportTests {
         TreeRules.apply(to: &desktop, after: nil)
         #expect(Self.lines(Self.code(desktop)).contains(".frame(maxWidth: DesignTokens.maxContentWidth)"))
         #expect(Self.lines(Generator.tokensFile(in: Generator.Context(desktop)).source).contains("static let maxContentWidth: CGFloat = 1080"))
+
+        // The column is held to its widest before the margin pads it, as the engine lays it out: 1080 across, centred,
+        // not 1080 less both margins (final review B-I2).
+        let desktopRoot = Self.block(startingWith: "VStack(", in: Self.code(desktop))
+        let desktopClose = try #require(desktopRoot.lastIndex(of: "}"))
+        let modifiers = Array(desktopRoot[(desktopClose + 1)...])
+        let widest = try #require(modifiers.firstIndex(of: ".frame(maxWidth: DesignTokens.maxContentWidth)"))
+        let margin = try #require(modifiers.firstIndex(of: ".padding(DesignTokens.margin)"))
+        #expect(widest < margin, "\(modifiers)")
+        if let across = modifiers.firstIndex(where: { $0.hasPrefix(".frame(maxWidth: .infinity") }) {
+            #expect(across < widest, "\(modifiers)")
+        }
+        #expect(modifiers.last == ".frame(maxHeight: .infinity, alignment: .top)")
     }
 
     // MARK: - The tokens
