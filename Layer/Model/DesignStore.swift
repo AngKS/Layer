@@ -137,6 +137,8 @@ final class DesignStore {
         return found
     }
 
+    // PROJECTION: deleted in plan 6
+    // Called by nothing: the projection's list has no place in the tree.
     /// Where an element is in the design's own list.
     func indexInList(of id: DesignElement.ID) -> Int? {
         projection.position[id]
@@ -158,11 +160,15 @@ final class DesignStore {
         screens.first { $0.id == id }
     }
 
+    // PROJECTION: deleted in plan 6
+    // The tree's is `treeScreen(at:)`.
     /// The topmost screen covering a point on the canvas.
     func screen(at point: CGPoint) -> DesignScreen? {
         screens.last { $0.canvasFrame.contains(point) }
     }
 
+    // PROJECTION: deleted in plan 6
+    // For the sketch path (`AppModel`, plan 5); the tree's is `treeScreen(at:)` at the sketch's centre.
     /// The screen a sketch was drawn on, judged by where the sketch's centre falls.
     func screen(under sketch: CGRect) -> DesignScreen? {
         screen(at: CGPoint(x: sketch.midX, y: sketch.midY))
@@ -206,6 +212,8 @@ final class DesignStore {
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
+    // PROJECTION: deleted in plan 6
+    // Reads the projection's screens, for `addFloating`, `place(_:centeredAt:)` and Siri (plans 5 and 6).
     /// The scale loose elements are drawn at: that of the newest screen, so they match it.
     var looseScale: CGFloat { screens.last?.scale ?? 0.66 }
 
@@ -898,6 +906,8 @@ final class DesignStore {
         change { $0.update(ref.element, body) }
     }
 
+    // PROJECTION: deleted in plan 6
+    // The twin of `update(_ ref:)`, for Siri, voice and Debug; the tree's is `updateTreeScreen(_:_:)`.
     func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
         guard screen(id) != nil else { return }
         change { $0.updateScreen(id, body) }
