@@ -1,5 +1,6 @@
 # Lane A's allowlist for scripts/check-flat-model.sh: files whose tier-1 hits are allowed until their owner ports them.
-# One path per line, from the repository's root; after a # is a note. Lane A only ever takes lines out (plan 6, call 1).
+# One path per line, from the repository's root; after a # is a note. Lane A only ever takes lines out (plan 6, call 1),
+# and takes a file's line out once its last hit has gone: the gate fails on a stale line.
 # The owners are the ledger's table (plan 6, Task 1). (u) and (s) are the test-fallout clauses Task 11 changes lines under.
 
 # Task 11: deleted or retyped with the flat model.
@@ -22,20 +23,20 @@ Layer/Code/SwiftUICodeGenerator+Leaves.swift     # a comment naming the flat ele
 LayerTests/Support/CodeOfElements.swift
 LayerTests/TreeProjectionTests.swift             # (s)
 LayerTests/TreeProjectionWriteTests.swift        # (s)
-LayerTests/TreeBuildersTests.swift               # (s): Task 1's bridge test aLeafLowersToTheElementItReplaces
+LayerTests/TreeBuildersTests.swift               # (s): Task 1's bridges, the test aLeafLowersToTheElementItReplaces and sketchedIsWhatTheWrapperGave's twin.addElement line
 Tools/Shared/RotationStub.swift                  # its comment
 Tools/Shared/TurnedRectStub.swift                # the flat element's stub
 Tools/SketchBenchmarkHarness/Stubs.swift         # the flat content's stub
 
-# Task 11, from tests whose only hits are what it renames under (u), DesignContent(tree: t) -> t, or retires under (s),
-# a read of store.screens that shows the lowering counter is live (F18, F26). Some are lane B's files by call 2.
+# Task 11, from tests whose only hits are what it renames under (u), DesignContent(tree: t) -> t, or retires under (s):
+# a read of store.screens, or a write through updateScreen, that shows a lowering counter is live (F18, F26), or a test
+# of the flat model itself. Some are lane B's files by call 2.
 LayerTests/CanvasNeverLowersTests.swift          # (u), (s)
 LayerTests/CanvasOnTheTreeTests.swift            # (u), (s)
 LayerTests/GroupAsTests.swift                    # (u), (s)
 LayerTests/TreeTargetsTests.swift                # (u), (s)
-LayerTests/TreeVerbTests.swift                   # (u)
+LayerTests/TreeVerbTests.swift                   # (u); (s): aScreenOnACustomDeviceResolvesIt's store.screen line, theContentsViewOfAScreenResolvesItsCustomDevice
 LayerTests/UndoAmongEditsTests.swift             # (u)
-LayerTests/CustomDevicesAndTokensTests.swift     # (u); lane B's file
 LayerTests/DeviceReflowTests.swift               # (u); lane B's file (F11)
 LayerTests/DeviceFrameTests.swift                # (s): aProjectedScreenUsesItsResolvedDevice tests the flat screen; lane B's file
 LayerTests/FormatPanelLayoutTests.swift          # (u), (s); lane B's file
@@ -50,8 +51,13 @@ LayerTests/TurnAndResizeOnTheTreeTests.swift     # (u); lane B's file
 Layer/Intents/DesignActions.swift                # keeps TakenAction's DesignContent; lane B (Tasks 3-5) ports the rest, frameForNewElement with it
 Layer/App/AppModel.swift                         # keeps selectedElement, selectedScreen, selectedElements, selectedLeaves; Task 9 ports the rest, Task 6 voiceVocabulary
 Layer/Model/Groups.swift                         # keeps the keepGroupsSound shim; Task 9 ports the rest
-Layer/Sketch/SketchInterpreter.swift             # keeps the flat element's adoptMarks extension; Task 9 ports describe(board:)
+Layer/Sketch/SketchInterpreter.swift             # keeps the flat element's adoptMarks extension, and describe(board:) with its describe(element:): lane B's SketchReadingTests calls describe(board:), so Task 9 leaves it (F11), and Task 11 removes it once that caller has moved
+Layer/Sketch/RuleInterpreter.swift               # keeps title(for: DesignContent): lane B's SketchReadingTests calls it, so Task 9 leaves it (F11), and Task 11 removes it once that caller has moved
+Layer/Sketch/SketchEngine.swift                  # keeps fallbackTitle(for:) and suggestTitle(for:), which take a DesignContent: lane B's SketchReadingTests calls suggestTitle, so Task 9 leaves both (F11), and Task 11 removes them once that caller has moved
+Layer/Document/DrawingInk.swift                  # keeps the flat element's extension (drawing(_:id:), drawing(_:id:keepingTurn:about:), canvasStrokes) and the comment naming it: lane C's VoiceToolsTests calls drawing(_:id:), so Task 9 leaves it (F11), and Task 11 removes it once that caller has moved (to LayerNode.drawing); Task 9 ports the content's visibleInk and adopt(_:)
 LayerTests/CanvasDragLandingTests.swift          # keeps (u) and (s); Task 9 ports the rest
+LayerTests/CustomDevicesAndTokensTests.swift     # keeps (u) in makeModel; Task 10 ports or retires the rest: aScreensViewsResolveTheDesignsOwnDevices tests the flat views (screenFrames, updateScreen)
+LayerTests/SketchReadingTests.swift              # keeps the DesignContent it hands title(for:), suggestTitle(for:) and describe(board:) while they take one (F11); Task 10 ports the rest
 LayerTests/CanvasDragWorkTests.swift             # keeps (u) and (s); Task 9 ports the rest
 LayerTests/DesignFileV4Tests.swift               # keeps DesignContent as DesignFile's content (u); Task 9 ports the rest
 LayerTests/InkOnTheTreeTests.swift               # keeps (s); Task 9 ports the rest with DrawingSync's apply(to:)
@@ -68,13 +74,10 @@ Layer/Canvas/SelectionLayer.swift                # the marked CanvasDrags adapte
 Layer/Chrome/AssetLibrary.swift
 Layer/Chrome/ScreenEditField.swift
 Layer/Code/SwiftUICodeGenerator.swift
-Layer/Document/DrawingInk.swift
 Layer/Model/CanvasSelection.swift
 Layer/Model/ElementLayout.swift                  # measure(_:in:), the flat adapter
 Layer/Model/LayerOrder.swift
 Layer/Model/SeveralThings.swift
-Layer/Sketch/RuleInterpreter.swift
-Layer/Sketch/SketchEngine.swift
 LayerTests/CanvasHitTestTests.swift
 LayerTests/ConcurrentEditTests.swift
 LayerTests/DesignTests.swift

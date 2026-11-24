@@ -258,6 +258,26 @@ struct TreeBuildersTests {
         #expect(store.tree == before)
         #expect(!undo.canUndo)
 
+        // Into a slot with a new size: reordered, the size fixed on the axis that changed, as one step.
+        #expect(store.move(login.toggle, toHostFrame: CGRect(x: 10, y: 320, width: 60, height: 31)) == .reordered)
+        #expect(store.children(of: .node(login.row))?.map(\.id) == [login.toggle, login.label])
+        let widened = try #require(store.node(login.toggle))
+        #expect(widened.frame.width == 60)
+        #expect(widened.width.mode == .fixed)
+        #expect(store.ownFrame(login.row)?.width == 152)
+        undo.undo()
+        #expect(store.tree == before)
+        #expect(!undo.canUndo)
+
+        // Its own slot with a new size, given as a frame rather than a size alone: resized, still where it was.
+        #expect(store.move(login.label, toHostFrame: CGRect(x: 20, y: 324, width: 100, height: 24)) == .resized)
+        #expect(store.children(of: .node(login.row))?.map(\.id) == [login.label, login.toggle])
+        #expect(store.node(login.label)?.frame.width == 100)
+        #expect(store.node(login.label)?.width.mode == .fixed)
+        undo.undo()
+        #expect(store.tree == before)
+        #expect(!undo.canUndo)
+
         // Where it already is: nothing, and no step.
         #expect(store.move(login.label, toHostFrame: CGRect(x: 20, y: 324, width: 80, height: 24)) == .unchanged)
         #expect(store.tree == before)
