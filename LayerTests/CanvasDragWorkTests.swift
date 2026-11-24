@@ -30,7 +30,7 @@ private struct BusyBoard {
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
         lines = model.store.setElements((0..<40).map { index in
             DesignElement(kind: .text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
-        }, on: screen, replacing: true)
+        }, on: screen)
         for index in 0..<20 {
             let corner = CGPoint(x: 700 + CGFloat(index % 4) * 120, y: 80 + CGFloat(index / 4) * 140)
             let strokes = (0..<10).map { line in stroke(from: CGPoint(x: corner.x, y: corner.y + CGFloat(line) * 9), length: 80) }

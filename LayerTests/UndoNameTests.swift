@@ -20,7 +20,7 @@ struct UndoNameTests {
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
             button = model.store.setElements([
                 DesignElement(kind: .button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: Theme.accent),
-            ], on: screen, replacing: true)[0]
+            ], on: screen)[0]
             model.store.updateCanvas { $0.snapsToGuides = false }
             model.drags = drags
             undo.groupsByEvent = false

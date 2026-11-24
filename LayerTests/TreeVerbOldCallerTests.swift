@@ -151,7 +151,7 @@ struct TreeVerbOldCallerTests {
         #expect(store.tree.screens.first?.root.children.map(\.id) == things.map(\.id))
     }
 
-    @Test func setElementsReplacingKeepsTheScreensRootLayout() throws {
+    @Test func replacingAScreensChildrenKeepsItsRootLayout() throws {
         let olds = (0..<2).map { _ in leaf(CGRect(x: 0, y: 0, width: 120, height: 20)) }
         let (store, undo) = makeStore(design(olds, layout: column()))
         let screenID = try #require(store.tree.screens.first?.id)
@@ -160,9 +160,10 @@ struct TreeVerbOldCallerTests {
         var button = DesignStore.newElement(.button)
         button.frame = CGRect(x: 90, y: 30, width: 160, height: 44)
 
-        let refs = store.setElements([title, button], on: screenID, replacing: true)
+        #expect(store.replaceChildren(of: .screen(screenID), with: [title, button].map(LayerNode.init(element:))))
 
-        #expect(refs == [title, button].map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) })
+        let refs = [title, button].map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
+        #expect(refs.allSatisfy { store.resolve($0) != nil })
         let root = try #require(store.tree.screens.first?.root)
         #expect(root.layout == column())
         #expect(root.children.map(\.id) == [title.id, button.id])
@@ -250,10 +251,12 @@ struct TreeVerbOldCallerTests {
         var note = DesignStore.newElement(.stickyNote)
         note.frame = CGRect(x: 40, y: 60, width: 150, height: 150)
 
-        let refs = store.setElements([title, note], on: screenID, replacing: true)
+        let kept = try #require(store.tree.screens.first?.root.children.first?.id)
+
+        let refs = store.setElements([title, note], on: screenID)
 
         #expect(refs == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: note.id)])
-        #expect(store.tree.screens.first?.root.children.map(\.id) == [title.id])
+        #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
         let landed = try #require(store.tree.canvas.first { $0.id == note.id })
         #expect(landed.frame == CGRect(x: 40 + 100 / 0.5, y: 60 + 50 / 0.5, width: 150, height: 150))
         #expect(landed.scale == 0.5)
@@ -319,8 +322,8 @@ struct TreeVerbOldCallerTests {
         #expect(store.node(card.id)?.children.map(\.id) == [inside.id])
     }
 
-    /// A drawing given to a screen goes on the canvas where the screen would have shown it, adding
-    /// to what is there as well as replacing it.
+    /// A drawing given to a screen goes on the canvas where the screen would have shown it, as a
+    /// sticky note does.
     @Test func aDrawingGivenToAScreenGoesOnTheCanvas() throws {
         var tree = design([leaf(CGRect(x: 20, y: 100, width: 120, height: 20))])
         tree.screens[0].origin = CGPoint(x: 100, y: 50)
@@ -338,7 +341,7 @@ struct TreeVerbOldCallerTests {
         var drawing = try #require(DesignElement.drawing([stroke]))
         drawing.frame.origin = CGPoint(x: 40, y: 60)
 
-        let refs = store.setElements([title, drawing], on: screenID, replacing: false)
+        let refs = store.setElements([title, drawing], on: screenID)
 
         #expect(refs == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])

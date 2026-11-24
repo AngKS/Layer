@@ -105,7 +105,7 @@ struct AddElementIntent: AppIntent, UndoableIntent {
             if let x { element.frame.origin.x = CGFloat(x) }
             if let y { element.frame.origin.y = CGFloat(y) }
             ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add \(kind.name)") {
-                model.store.setElements([element], on: host.id, replacing: false)[0]
+                model.store.setElements([element], on: host.id)[0]
             }
         }
         DesignActions.reveal(.element(ref), in: model)

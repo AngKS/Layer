@@ -116,7 +116,7 @@ extension AppModel {
                 origin: CGPoint(x: ((screen.size.width - size.width) / 2).rounded(), y: max(screen.device.safeTop, min(below, lowest))),
                 size: size
             )
-            ref = store.setElements([element], on: screenID, replacing: false)[0]
+            ref = store.setElements([element], on: screenID)[0]
         case .newImage(nil):
             return nil
         }

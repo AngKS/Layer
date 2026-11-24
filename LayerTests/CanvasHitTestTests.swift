@@ -26,7 +26,7 @@ private struct HitBoard {
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.viewport = Viewport(offset: .zero, scale: 1)
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-        button = model.store.setElements([element(.button, 20, 300, 353, 50)], on: screen, replacing: true)[0]
+        button = model.store.setElements([element(.button, 20, 300, 353, 50)], on: screen)[0]
         note = model.store.addFloating(element(.stickyNote, 600, 100, 140, 130), scale: 1)
     }
 

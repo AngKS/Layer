@@ -21,7 +21,7 @@ struct PanelStepTests {
             let placed = model.store.setElements([
                 DesignElement(kind: .button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: RGBColor(hex: 0x000000)),
                 DesignElement(kind: .button, frame: CGRect(x: 40, y: 400, width: 200, height: 50), text: "Two", tint: RGBColor(hex: 0x000000)),
-            ], on: screen, replacing: true)
+            ], on: screen)
             (first, second) = (placed[0], placed[1])
             undo.groupsByEvent = false
             model.store.undoManager = undo

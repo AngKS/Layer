@@ -30,7 +30,7 @@ private struct TwoScreens {
         let placed = model.store.setElements([
             element(.button, 100, 300, 120, 40),
             element(.title, 80, 100, 228, 40),
-        ], on: a, replacing: true)
+        ], on: a)
         (button, title) = (placed[0], placed[1])
         model.store.updateCanvas { $0.snapsToGuides = false }
         model.tool = .select
@@ -298,7 +298,7 @@ struct CanvasDragLandingTests {
         // Six labels overlapping on A, each over the one before it.
         let labels = board.store.setElements((0..<6).map { index in
             element(.body, 60 + CGFloat(index) * 4, 500 + CGFloat(index) * 4, 120, 40)
-        }, on: board.a, replacing: false)
+        }, on: board.a)
         let ids = labels.map(\.element)
         let order = { (screen: DesignScreen.ID) in board.store.content.elements.filter { $0.parent == screen && ids.contains($0.id) }.map(\.id) }
         #expect(order(board.a) == ids)

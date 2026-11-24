@@ -88,8 +88,8 @@ struct StoreOnTheTreeTests {
         let (store, _) = makeStore()
         let a = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let b = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 0), scale: 1))
-        let onA = store.setElements([button()], on: a.id, replacing: false)
-        _ = store.setElements([button()], on: b.id, replacing: false)
+        let onA = store.setElements([button()], on: a.id)
+        _ = store.setElements([button()], on: b.id)
         let roots = store.content.tree.screens.map(\.root.id)
         let before = roots.map(LayoutEngine.timesLaidOut)
 
@@ -103,7 +103,7 @@ struct StoreOnTheTreeTests {
     @Test func theProjectionIsLoweredOncePerVersion() throws {
         let (store, _) = makeStore()
         let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let refs = store.setElements([button()], on: screen.id, replacing: false)
+        let refs = store.setElements([button()], on: screen.id)
         store.addFloating(DesignStore.newElement(.stickyNote), scale: 1)
         store.update(refs[0]) { $0.text = "Changed" }
         let before = TreeProjection.lowerings

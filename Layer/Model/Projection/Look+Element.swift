@@ -3,8 +3,8 @@ import Foundation
 
 // PROJECTION: deleted in plan 6
 extension Look {
-    /// What `ScreenBlueprint.Item.applyLook(to:)` wrote, field for field: border width 1 when only a colour is
-    /// given, opacity of 99.5% or more read as none, value clamped to 0...1. It goes through `apply(to: inout LayerNode)`
+    /// A look given to an element, field for field as `apply(to: inout LayerNode)` gives it to a node: border width 1
+    /// when only a colour is given, opacity of 99.5% or more read as none, value clamped to 0...1. It goes through it
     /// on a scratch node holding the element's style and content fields, which are then written back, so the rule
     /// lives once. A width is a node's, so an element ignores it.
     func apply(to element: inout DesignElement) {

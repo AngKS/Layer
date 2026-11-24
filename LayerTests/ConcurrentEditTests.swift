@@ -39,7 +39,7 @@ struct ConcurrentEditTests {
         let refs = model.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        ], on: screen.id)
         undo.removeAllActions()
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         model.screenStream = { _ in stream }
@@ -189,11 +189,11 @@ struct ConcurrentEditTests {
         store.act(for: b) {
             store.update(board.title) { $0.frame.origin.x += 5 }
             store.delete(board.button)
-            _ = store.setElements([extra("From B")], on: board.screen, replacing: false)
+            _ = store.setElements([extra("From B")], on: board.screen)
         }
         store.act(for: a) {
             store.update(board.title) { $0.text = "AA" }
-            _ = store.setElements([extra("From A")], on: board.screen, replacing: false)
+            _ = store.setElements([extra("From A")], on: board.screen)
         }
         store.endEdit(b)
         store.endEdit(a)
@@ -260,7 +260,7 @@ struct ConcurrentEditTests {
         let refs = store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        ], on: screen.id)
         undo.removeAllActions()
         let start = store.content
         let erasing = store.beginEdit()
@@ -403,7 +403,7 @@ struct ConcurrentEditsGroupedByEventTests {
         let refs = model.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        ], on: screen.id)
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         model.screenStream = { _ in stream }
         return (model, undo, screen.id, refs[0], refs[1], feed)

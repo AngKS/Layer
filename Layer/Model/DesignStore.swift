@@ -470,15 +470,15 @@ final class DesignStore {
         change { $0 = previous }
     }
 
-    /// Adds ready-made elements to a screen as one step, in front of what is there, or in
-    /// place of all of it when `replacing` is set. The screen's root keeps its layout, and lays
-    /// them out if it lays things out. Returns where they now live.
+    /// Adds ready-made elements to a screen as one step, in front of what is there. The screen's
+    /// root keeps its layout, and lays them out if it lays things out. Returns where they now live.
+    /// What a screen holds is replaced whole with `replaceChildren(of:with:)`.
     ///
     /// The tree keeps sticky notes and drawings on the open canvas, never on a screen: one
     /// given here goes on the canvas where the screen would have shown it, at the screen's
     /// scale, in front of what is there.
     @discardableResult
-    func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID, replacing: Bool) -> [ElementRef] {
+    func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID) -> [ElementRef] {
         guard let screen = tree.screens.first(where: { $0.id == screenID }) else { return [] }
         let scale = screen.scale.isFinite && screen.scale > 0 ? screen.scale : 1
         var onScreen: [LayerNode] = [], onCanvas: [LayerNode] = []
@@ -495,11 +495,7 @@ final class DesignStore {
             onCanvas.append(node)
         }
         asOneStep {
-            if replacing {
-                replaceChildren(of: .screen(screenID), with: onScreen)
-            } else {
-                for node in onScreen { add(node, to: .screen(screenID)) }
-            }
+            for node in onScreen { add(node, to: .screen(screenID)) }
             for node in onCanvas { add(node, to: .canvas) }
         }
         return elements.map { ElementRef(host: $0.kind.belongsOnScreens ? .screen(screenID) : .canvas, element: $0.id) }

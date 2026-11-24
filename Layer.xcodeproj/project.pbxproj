@@ -94,7 +94,6 @@
 		38C38F1B607854D855CC2C57 /* SystemSymbolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C6CDAFC9C665AE14DECD2B3 /* SystemSymbolTests.swift */; };
 		38E24ED3DCD85EA5E803AB9A /* radio_avatar_radio_2.json in Resources */ = {isa = PBXBuildFile; fileRef = E0E9A3C3175D23604BD0A70B /* radio_avatar_radio_2.json */; };
 		3A34ED14F0035CBCF3DE413B /* progress_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 666C306910A1813C3D3D54BA /* progress_clean_1.json */; };
-		3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E6D9AAF13ACD16D213B2AC /* ScreenBlueprint.swift */; };
 		3A7846E3163FA2ACB288B943 /* DesignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01548CA8886933886FFD4CCD /* DesignTests.swift */; };
 		3ADBD180BF1084006ED26272 /* StoreChangeBenchmarkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A962BE1E5650EE6BBE4353A /* StoreChangeBenchmarkTests.swift */; };
 		3ADC0D166D0C3D994178A970 /* TreeValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42CCA8BD785231550A0DD16E /* TreeValidator.swift */; };
@@ -782,7 +781,6 @@
 		B8304F493FAD2779908982EB /* button_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_jittered_1b.json; sourceTree = "<group>"; };
 		B913F32A038AC223100E64C4 /* avatar_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_jittered_2b.json; sourceTree = "<group>"; };
 		B99EA13F6706F71173016180 /* VoiceModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeUITests.swift; sourceTree = "<group>"; };
-		B9E6D9AAF13ACD16D213B2AC /* ScreenBlueprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBlueprint.swift; sourceTree = "<group>"; };
 		BA621A80B6B9D50811EF4482 /* LayersPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayersPanelTests.swift; sourceTree = "<group>"; };
 		BAA734A20F2453F4B1D3EB37 /* image_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = image_clean_1.json; sourceTree = "<group>"; };
 		BACC3382A545FA5EAB6241B7 /* Layer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Layer.entitlements; sourceTree = "<group>"; };
@@ -1079,7 +1077,6 @@
 				2635FEAE6E6657C7B97B1E77 /* ImageLibrary.swift */,
 				FA6044F295DC2817A3A8248A /* LayerOrder.swift */,
 				AB8BDD670626F59E9E693B93 /* Rotation.swift */,
-				B9E6D9AAF13ACD16D213B2AC /* ScreenBlueprint.swift */,
 				EECCAA5A67E8574034481759 /* ScreenTidy.swift */,
 				CF33233009DAC3F3377B7B9B /* SeveralThings.swift */,
 				33FD717EF8A57773E689FBE1 /* ShapeKind.swift */,
@@ -2113,7 +2110,6 @@
 				1A2F317AC2C7E0B3AFAC0A5D /* RotateKnob.swift in Sources */,
 				CDEBAB3349C20B804B8285EB /* Rotation.swift in Sources */,
 				74F672D76D3657A681AD5C42 /* RuleInterpreter.swift in Sources */,
-				3A36E6CA9C7B745B6F99B292 /* ScreenBlueprint.swift in Sources */,
 				A0999B8223472032FD864F01 /* ScreenDrawing.swift in Sources */,
 				D2DA2F3B24202571D0F19339 /* ScreenEditField.swift in Sources */,
 				78CD73F08E732197ADC53262 /* ScreenEditor.swift in Sources */,

@@ -534,7 +534,7 @@ final class VoiceToolbox: VoiceActing {
             if kind.hasText, !words.isEmpty { element.text = words }
             if let look { Self.apply(look: look, to: &element) }
             element.frame = DesignActions.frameForNewElement(element, on: host)
-            let ref = model.store.setElements([element], on: host.id, replacing: false)[0]
+            let ref = model.store.setElements([element], on: host.id)[0]
             reveal(.element(ref), in: model)
             let handle = handles.handle(forElement: element.id)
             let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")

@@ -48,7 +48,7 @@ private struct Board {
             element(.title, 80, 100, 228, 40),
             element(.body, 40, 200, 300, 60),
             element(.button, 28, 700, 337, 60),
-        ], on: screen, replacing: true)
+        ], on: screen)
         (title, body, button) = (placed[0], placed[1], placed[2])
         note = model.store.addFloating(element(.stickyNote, 500, 100, 140, 130), scale: 1)
         // Building the board is not something these tests undo.

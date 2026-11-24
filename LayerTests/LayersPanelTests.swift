@@ -18,7 +18,7 @@ extension HostedWindowSuites {
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
             let lines = model.store.setElements((0..<20).map { index in
                 DesignElement(kind: .text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
-            }, on: screen, replacing: true)
+            }, on: screen)
             for index in 0..<8 {
                 var drawing = DesignStore.newElement(.drawing)
                 drawing.frame = CGRect(x: 700, y: 100 + CGFloat(index) * 60, width: 100, height: 40)

@@ -42,7 +42,8 @@ import CoreGraphics
 ///   of small things only, such as a tab bar, gets equal slots, as generated rows do.
 ///   Members are centred on the row's middle.
 /// - **The top is the generator's top.** The first row starts 16 points below the safe
-///   area, where `ScreenBlueprint.layout(on:)` starts, so a tidied screen looks generated.
+///   area, near where the outline's column root starts (its margin below the safe area, 20
+///   points on a phone: `TreeRules`), so a tidied screen looks generated.
 /// - **Spacing on a rhythm** (`ElementLayout.rhythm`): 8 between a heading and the text
 ///   under it, 16 between a heading and anything else, 12 between items, and 24 between
 ///   groups. A group starts at a heading (a title, or bold text) and a divider ends one.
@@ -88,7 +89,8 @@ enum ScreenTidy {
         return (((device.size.width - width) / 2).rounded(), width)
     }
 
-    /// Where the first row starts: as `ScreenBlueprint.layout(on:)` places its first element.
+    /// Where the first row starts: 16 points below the safe area, near where the outline's column
+    /// root starts its first section.
     static func top(on device: DeviceFrame) -> CGFloat {
         device.safeTop + 16
     }

@@ -94,7 +94,7 @@ struct CanvasPictureTests {
         let (app, screen) = VoiceFixture.login()
         _ = app.store.setElements([
             DesignElement(kind: .body, frame: CGRect(x: 20, y: 10, width: 353, height: 20), text: "Above it all", tint: Theme.accent),
-        ], on: screen, replacing: false)
+        ], on: screen)
         let text = CanvasPicture.capture(from: app, handles: VoiceHandles()).text(.full)
         let above = try #require(text.range(of: "Above it all"))
         let title = try #require(text.range(of: "Welcome back"))
@@ -109,7 +109,7 @@ struct CanvasPictureTests {
         _ = app.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Edit profile", tint: Theme.accent),
-        ], on: profile.id, replacing: true)
+        ], on: profile.id)
         let title = try #require(app.store.screen(login)?.elements.first)
         app.selection = .element(.init(host: .screen(login), element: title.id))
 

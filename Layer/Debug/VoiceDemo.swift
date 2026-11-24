@@ -111,7 +111,7 @@ enum VoiceDemo {
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
             DesignElement(kind: .image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
-        ], on: screen.id, replacing: true)
+        ], on: screen.id)
         model.ink?.zoomToFit()
     }
 }

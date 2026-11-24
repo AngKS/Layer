@@ -8,74 +8,91 @@ import UIKit
 // What Siri and Shortcuts rely on: reading a written screen, laying it out, finding
 // designs and elements again by identifier, and undoing what an action changed.
 
-@Suite("Screen blueprints")
-struct ScreenBlueprintTests {
-    @Test func readsOneElementPerLine() throws {
-        let blueprint = try #require(ScreenBlueprint.parse("""
+@Suite("Written screens")
+struct WrittenScreenTests {
+    private func all(_ node: LayerNode) -> [LayerNode] { [node] + node.children.flatMap(all) }
+    private func leaves(_ node: LayerNode) -> [LayerNode] { all(node).filter { !$0.isContainer } }
+
+    /// A written screen's leaves where the rules lay it out on the iPhone, each frame in the screen's points: its
+    /// origin carried through its containers', none of which is turned.
+    private func laidOut(_ written: String) -> [(node: LayerNode, frame: CGRect)] {
+        let root = TreeRules.laidOut(Outline.parse(written, isComplete: true), deviceID: DeviceFrame.iPhone.id,
+                                     settings: CanvasSettings(), previous: nil)
+        func placed(_ node: LayerNode, in origin: CGPoint) -> [(node: LayerNode, frame: CGRect)] {
+            let frame = node.frame.offsetBy(dx: origin.x, dy: origin.y)
+            return node.isContainer ? node.children.flatMap { placed($0, in: frame.origin) } : [(node, frame)]
+        }
+        return placed(root, in: .zero)
+    }
+
+    @Test func readsOneElementPerLine() {
+        let screen = Outline.parse("""
         title: Welcome back
         text field: Email
         text field: Password
         button: Sign in
-        """))
-        let items = blueprint.sections.flatMap(\.items)
-        #expect(items.map(\.kind) == [.title, .textField, .textField, .button])
-        #expect(items.map(\.text) == ["Welcome back", "Email", "Password", "Sign in"])
+        """, isComplete: true)
+        #expect(leaves(screen).map(\.kind) == [.title, .textField, .textField, .button])
+        #expect(leaves(screen).map(\.content.text) == ["Welcome back", "Email", "Password", "Sign in"])
     }
 
     @Test func readsRowsSectionsAndLooks() throws {
-        let blueprint = try #require(ScreenBlueprint.parse("""
+        let screen = Outline.parse("""
         heading: Settings
 
         row: button: Cancel | button: Done [blue, bold, radius 12]
         ---
         body: Tap a row to change it [text #333333, 15pt]
-        """))
-        #expect(blueprint.sections.count == 3)
-        #expect(blueprint.sections[1].axis == .horizontal)
-        let done = blueprint.sections[1].items[1]
-        #expect(done.text == "Done")
-        #expect(done.colour == ColourWords.named["blue"])
-        #expect(done.weight == .bold)
-        #expect(done.cornerRadius == 12)
-        let body = blueprint.sections[2].items[0]
-        #expect(body.textColour == RGBColor(hex: 0x333333))
-        #expect(body.fontSize == 15)
+        """, isComplete: true)
+        #expect(screen.children.count == 3)
+        let second = screen.children[1]
+        #expect(second.children.count == 1)
+        guard case .stack(let row)? = second.children.first?.resolvedLayout else {
+            Issue.record("the second section holds a row")
+            return
+        }
+        #expect(row.axis == .horizontal)
+        let done = try #require(all(second).first { $0.content.text == "Done" })
+        #expect(done.style.tint == ColourWords.named["blue"])
+        #expect(done.style.fontWeight == .bold)
+        #expect(done.style.cornerRadius == 12)
+        let body = try #require(all(screen).first { $0.kind == .body })
+        #expect(body.style.textColor == RGBColor(hex: 0x333333))
+        #expect(body.style.fontSize == 15)
     }
 
-    @Test func understandsSynonymsSymbolsAndBareKinds() throws {
-        let blueprint = try #require(ScreenBlueprint.parse("icon: heart.fill; switch; separator; Just some words"))
-        let items = blueprint.sections.flatMap(\.items)
-        #expect(items.map(\.kind) == [.symbol, .toggle, .divider, .text])
-        #expect(items[0].symbol == "heart.fill")
-        #expect(items[3].text == "Just some words")
+    @Test func understandsSynonymsSymbolsAndBareKinds() {
+        let screen = Outline.parse("icon: heart.fill; switch; separator; Just some words", isComplete: true)
+        #expect(leaves(screen).map(\.kind) == [.symbol, .toggle, .divider, .text])
+        #expect(leaves(screen)[0].content.symbol == "heart.fill")
+        #expect(leaves(screen)[3].content.text == "Just some words")
     }
 
-    @Test func nothingToLayOutIsNil() {
-        #expect(ScreenBlueprint.parse("   \n---\n") == nil)
+    @Test func nothingToLayOutLeavesTheRootEmpty() {
+        #expect(Outline.parse("   \n---\n", isComplete: true).children.isEmpty)
     }
 
-    @Test func laysOutTopToBottomInsideTheSafeArea() throws {
+    @Test func laysOutTopToBottomInsideTheSafeArea() {
         let device = DeviceFrame.iPhone
-        let blueprint = try #require(ScreenBlueprint.parse("title: Hi\ntext field: Email\nbutton: Go"))
-        let elements = blueprint.layout(on: device)
-        #expect(elements.count == 3)
-        #expect(elements[0].frame.minY >= device.safeTop)
-        for (upper, lower) in zip(elements, elements.dropFirst()) {
-            #expect(lower.frame.minY >= upper.frame.maxY, "\(lower.kind) overlaps \(upper.kind)")
+        let placed = laidOut("title: Hi\ntext field: Email\nbutton: Go")
+        #expect(placed.count == 3)
+        #expect((placed.first?.frame.minY ?? 0) >= device.safeTop)
+        for (upper, lower) in zip(placed, placed.dropFirst()) {
+            #expect(lower.frame.minY >= upper.frame.maxY, "\(lower.node.kind) overlaps \(upper.node.kind)")
         }
         // Fields and buttons run between the 20-point margins.
-        #expect(elements[2].frame.minX == 20)
-        #expect(elements[2].frame.width == device.size.width - 40)
+        #expect(placed.last?.frame.minX == 20)
+        #expect(placed.last?.frame.width == device.size.width - 40)
     }
 
-    @Test func aRowSharesItsWidth() throws {
+    @Test func aRowSharesItsWidth() {
         let device = DeviceFrame.iPhone
-        let blueprint = try #require(ScreenBlueprint.parse("row: button: A | button: B"))
-        let elements = blueprint.layout(on: device)
-        #expect(elements.count == 2)
-        #expect(elements[0].frame.minY == elements[1].frame.minY)
-        #expect(elements[0].frame.maxX < elements[1].frame.minX)
-        #expect(elements[1].frame.maxX <= device.size.width - 20)
+        let placed = laidOut("row: button: A | button: B")
+        #expect(placed.count == 2)
+        guard placed.count == 2 else { return }
+        #expect(placed[0].frame.minY == placed[1].frame.minY)
+        #expect(placed[0].frame.maxX < placed[1].frame.minX)
+        #expect(placed[1].frame.maxX <= device.size.width - 20)
     }
 }
 
@@ -611,9 +628,9 @@ struct DesignActionTests {
     @Test func anEditIsOneUndoStep() throws {
         let model = model()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let blueprint = try #require(ScreenBlueprint.parse("title: A\nbody: B\nbutton: C"))
+        let written = Outline.parse("title: A\nbody: B\nbutton: C", isComplete: true)
         DesignActions.edit(model, undoManager: nil, actionName: "Build Screen") {
-            model.store.setElements(blueprint.layout(on: screen.device), on: screen.id, replacing: true)
+            model.store.replaceChildren(of: .screen(screen.id), with: written.children)
             model.store.updateScreen(screen.id) { $0.name = "Login" }
         }
         #expect(model.store.screen(screen.id)?.elements.count == 3)
@@ -632,7 +649,7 @@ struct DesignActionTests {
         DesignActions.edit(model, undoManager: siriUndo, actionName: "Add Title") {
             var title = DesignStore.newElement(.title)
             title.frame = DesignActions.frameForNewElement(title, on: screen)
-            model.store.setElements([title], on: screen.id, replacing: false)
+            model.store.setElements([title], on: screen.id)
         }
         #expect(model.store.content != before)
         #expect(siriUndo.canUndo)
@@ -661,7 +678,7 @@ struct DesignActionTests {
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let other = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
         let title = DesignStore.newElement(.title), button = DesignStore.newElement(.button), note = DesignStore.newElement(.body)
-        model.store.setElements([title, button, note], on: screen.id, replacing: false)
+        model.store.setElements([title, button, note], on: screen.id)
         let siri = UndoManager()
         siri.groupsByEvent = false
         let red = RGBColor(hex: 0xFF0000)
@@ -672,7 +689,7 @@ struct DesignActionTests {
             model.store.update(.init(host: .screen(screen.id), element: title.id)) { $0.tint = red }
             model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.tint = red }
             model.store.delete(.init(host: .screen(screen.id), element: note.id))
-            model.store.setElements([DesignStore.newElement(.symbol)], on: screen.id, replacing: false)
+            model.store.setElements([DesignStore.newElement(.symbol)], on: screen.id)
             model.store.updateScreen(other.id) { $0.origin.x = 900 }
         }
         // By hand since: the button is given words of its own, and a screen is added.
@@ -696,7 +713,7 @@ struct DesignActionTests {
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         var button = DesignStore.newElement(.button)
         button.frame.origin.y = 200
-        let refs = model.store.setElements([DesignStore.newElement(.title), button], on: screen.id, replacing: false)
+        let refs = model.store.setElements([DesignStore.newElement(.title), button], on: screen.id)
         let both = try #require(CanvasSelection(refs.map(CanvasSelection.element)))
         let g = try #require(model.store.group(both))
         // What Siri is offered, as the design's snapshot lists it: the title, then the button.
@@ -775,7 +792,7 @@ struct DesignActionTests {
         let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
         let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: first.id, replacing: false)
+        model.store.setElements([button], on: first.id)
         let siri = UndoManager()
         siri.groupsByEvent = false
         DesignActions.edit(model, undoManager: siri, actionName: "Move Button") {
@@ -797,7 +814,7 @@ struct DesignActionTests {
         let model = model()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: screen.id, replacing: false)
+        model.store.setElements([button], on: screen.id)
         let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
         let siri = UndoManager()
         siri.groupsByEvent = false
@@ -842,7 +859,7 @@ struct DesignActionTests {
         let model = model()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: screen.id, replacing: false)
+        model.store.setElements([button], on: screen.id)
         let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
         let siri = UndoManager()
         siri.groupsByEvent = false
@@ -875,7 +892,7 @@ struct DesignActionTests {
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         var title = DesignStore.newElement(.title)
         title.frame = DesignActions.frameForNewElement(title, on: screen)
-        model.store.setElements([title], on: screen.id, replacing: false)
+        model.store.setElements([title], on: screen.id)
         let updated = model.store.screen(screen.id)!
         let button = DesignStore.newElement(.button)
         let frame = DesignActions.frameForNewElement(button, on: updated)
@@ -913,8 +930,8 @@ struct ImagePlaygroundTests {
         model.store.undoManager = undo
         model.store.setTitle("Wander")
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let blueprint = ScreenBlueprint.parse("title: Plan your trip\nbody: Beaches, cities and mountains\nbutton: Get started\ntext field")!
-        model.store.setElements(blueprint.layout(on: screen.device), on: screen.id, replacing: true)
+        let written = Outline.parse("title: Plan your trip\nbody: Beaches, cities and mountains\nbutton: Get started\ntext field", isComplete: true)
+        model.store.replaceChildren(of: .screen(screen.id), with: written.children)
         model.store.updateScreen(screen.id) { $0.name = "Welcome" }
         return (model, model.store.screen(screen.id)!)
     }
@@ -961,7 +978,7 @@ struct ImagePlaygroundTests {
         let (model, screen) = modelWithScreen()
         var image = DesignStore.newElement(.image)
         image.frame = CGRect(x: 30, y: 400, width: 200, height: 120)
-        let ref = model.store.setElements([image], on: screen.id, replacing: false)[0]
+        let ref = model.store.setElements([image], on: screen.id)[0]
 
         let request = ImagePlaygroundRequest(target: .replace(ref), prompt: "mountains")
         #expect(model.imageSize(for: request) == CGSize(width: 200, height: 120))
@@ -1084,32 +1101,32 @@ struct StrokeScriptTests {
 
 @Suite("Look words")
 struct LookWordTests {
-    @Test func controlsTakeTheirState() throws {
-        let blueprint = try #require(ScreenBlueprint.parse("""
+    @Test func controlsTakeTheirState() {
+        let root = TreeRules.laidOut(Outline.parse("""
         checkbox [off]
         radio [selected]
         progress [40%]
         button: Skip [plain, centre, shadow, border red, opacity 50%]
-        """))
-        let elements = blueprint.layout(on: .iPhone)
-        #expect(elements.map(\.kind) == [.checkbox, .radio, .progress, .button])
-        #expect(elements[0].isOn == false)
-        #expect(elements[1].isOn == true)
-        #expect(elements[2].value == 0.4)
-        let skip = elements[3]
-        #expect(skip.buttonLook == .plain)
-        #expect(skip.textAlignment == .center)
-        #expect(skip.hasShadow)
-        #expect(skip.borderColor == ColourWords.named["red"])
-        #expect(skip.borderWidth == 1)
-        #expect(skip.opacity == 0.5)
+        """, isComplete: true), deviceID: DeviceFrame.iPhone.id, settings: CanvasSettings(), previous: nil)
+        func leaves(_ node: LayerNode) -> [LayerNode] { node.isContainer ? node.children.flatMap(leaves) : [node] }
+        let laid = leaves(root)
+        #expect(laid.map(\.kind) == [.checkbox, .radio, .progress, .button])
+        guard laid.count == 4 else { return }
+        #expect(laid[0].content.isOn == false)
+        #expect(laid[1].content.isOn == true)
+        #expect(laid[2].content.value == 0.4)
+        let skip = laid[3]
+        #expect(skip.content.buttonLook == .plain)
+        #expect(skip.style.textAlignment == .center)
+        #expect(skip.style.hasShadow == true)
+        #expect(skip.style.borderColor == ColourWords.named["red"])
+        #expect(skip.style.borderWidth == 1)
+        #expect(skip.style.opacity == 0.5)
     }
 
     @Test func aLookCanBeGivenToAnElementAlone() {
         var element = DesignStore.newElement(.button)
-        var item = ScreenBlueprint.Item(kind: .button, text: element.text)
-        ScreenBlueprint.applyLook(["Bordered", " #112233", "20pt", "border 3"], to: &item)
-        item.applyLook(to: &element)
+        LookWords.look(from: ["Bordered", " #112233", "20pt", "border 3"]).apply(to: &element)
         #expect(element.buttonLook == .bordered)
         #expect(element.tint == RGBColor(hex: 0x112233))
         #expect(element.fontSize == 20)
@@ -1134,7 +1151,7 @@ struct MovingTests {
         let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 0), scale: 0.5))
         var button = DesignStore.newElement(.button)
         button.frame = CGRect(x: 20, y: 700, width: 353, height: 50)
-        let ref = model.store.setElements([button], on: first.id, replacing: false)[0]
+        let ref = model.store.setElements([button], on: first.id)[0]
 
         let moved = try #require(model.store.move(ref, toScreen: second.id, origin: CGPoint(x: 20, y: 100)))
         #expect(moved.host == .screen(second.id))
@@ -1151,7 +1168,7 @@ struct MovingTests {
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
         var title = DesignStore.newElement(.title)
         title.frame = CGRect(x: 40, y: 80, width: 200, height: 40)
-        let ref = model.store.setElements([title], on: screen.id, replacing: false)[0]
+        let ref = model.store.setElements([title], on: screen.id)[0]
         let before = try #require(model.store.resolve(ref)).placement.canvasRect(for: title.frame)
 
         let moved = try #require(model.store.move(ref, toScreen: nil, origin: nil))
@@ -1171,8 +1188,8 @@ struct MovingTests {
     @Test func theLayoutReadsBackAsJSON() throws {
         let model = model()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 10, y: 20), scale: 0.5))
-        let blueprint = try #require(ScreenBlueprint.parse("title: Hello\ntoggle [off]"))
-        model.store.setElements(blueprint.layout(on: screen.device), on: screen.id, replacing: true)
+        let written = Outline.parse("title: Hello\ntoggle [off]", isComplete: true)
+        model.store.replaceChildren(of: .screen(screen.id), with: written.children)
         model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 0.5)
         let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.content, modified: nil)
 

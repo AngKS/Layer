@@ -33,7 +33,7 @@ struct OrderBoard {
         screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
         let placed = model.store.setElements(["A", "B", "C", "D", "E"].enumerated().map { index, name in
             Self.element(.button, named: name, CGRect(x: 40, y: 40 + CGFloat(index) * 150, width: 300, height: 100))
-        }, on: screen, replacing: true)
+        }, on: screen)
         (a, b, c, d, e) = (placed[0], placed[1], placed[2], placed[3], placed[4])
         note1 = model.store.addFloating(Self.element(.stickyNote, named: "note 1", CGRect(x: 500, y: 100, width: 140, height: 130)), scale: 1)
         note2 = model.store.addFloating(Self.element(.stickyNote, named: "note 2", CGRect(x: 700, y: 100, width: 140, height: 130)), scale: 1)

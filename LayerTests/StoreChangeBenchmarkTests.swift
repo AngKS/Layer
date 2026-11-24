@@ -56,7 +56,7 @@ struct StoreChangeBenchmarkTests {
             elements.append(DesignElement(kind: .toggle, frame: CGRect(x: 322, y: y, width: 51, height: 31), text: "", tint: Theme.accent))
             elements.append(DesignElement(kind: .divider, frame: CGRect(x: 20, y: y + 72, width: 353, height: 1), text: "", tint: Theme.accent))
         }
-        let refs = store.setElements(elements, on: screen, replacing: true)
+        let refs = store.setElements(elements, on: screen)
         try #require(refs.count == 100)
 
         // What the runs change: row 12's title (moved and edited) and its body (resized).
@@ -66,7 +66,7 @@ struct StoreChangeBenchmarkTests {
         let resize = measure("resize", reading: store) { _ in store.update(resized) { $0.frame.size.width += 1 } }
         let text = measure("text", reading: store) { _ in store.update(texted) { $0.text += "a" } }
         let add = measure("add", reading: store) { run in
-            let added = store.setElements([DesignElement(kind: .text, frame: CGRect(x: 20, y: 2100, width: 228, height: 24), text: "Added \(run)", tint: Theme.accent)], on: screen, replacing: false)
+            let added = store.setElements([DesignElement(kind: .text, frame: CGRect(x: 20, y: 2100, width: 228, height: 24), text: "Added \(run)", tint: Theme.accent)], on: screen)
             store.delete(added)
         }
 

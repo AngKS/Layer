@@ -21,6 +21,18 @@ private func s(_ size: CGSize) -> String { "\(n(size.width))x\(n(size.height))" 
 private func r(_ rect: CGRect) -> String { "\(n(rect.minX)),\(n(rect.minY)) \(s(rect.size))" }
 private func c(_ colour: RGBColor) -> String { colour.hex }
 
+/// The leaves under a node, in order.
+private func leaves(of node: LayerNode) -> [LayerNode] {
+    node.isContainer ? node.children.flatMap(leaves(of:)) : [node]
+}
+
+/// The leaves under a screen's root, each frame in the screen's points: its origin carried through its containers',
+/// none of which is turned.
+private func placedLeaves(of node: LayerNode, in origin: CGPoint = .zero) -> [(node: LayerNode, frame: CGRect)] {
+    let frame = node.frame.offsetBy(dx: origin.x, dy: origin.y)
+    return node.isContainer ? node.children.flatMap { placedLeaves(of: $0, in: frame.origin) } : [(node, frame)]
+}
+
 /// Sketches of several shapes and places, to bring out each kind's layout rules.
 private let sketches: [(name: String, rect: CGRect)] = [
     ("wide", CGRect(x: 20, y: 700, width: 340, height: 50)),
@@ -44,9 +56,9 @@ private func describe(_ kind: ElementKind) throws -> [String] {
     var lines = ["## \(kind.rawValue)"]
     lines.append("name: \(kind.layerName) | symbol: \(kind.symbol) | placeholder: \(kind.placeholder)")
     lines.append("hasText: \(kind.hasText) | belongsOnScreens: \(kind.belongsOnScreens) | prompt: \(SketchPrompt.name(for: .element(kind)))")
-    let words = ScreenBlueprint.kindWords.first { $0.kind == kind }?.words ?? []
+    let words = LookWords.kindWords.first { $0.kind == kind }?.words ?? []
     lines.append("written as: \(words.joined(separator: ", "))")
-    lines.append("found by each of its written names: \(words.allSatisfy { ScreenBlueprint.kind(named: $0) == kind })")
+    lines.append("found by each of its written names: \(words.allSatisfy { LookWords.kind(named: $0) == kind })")
 
     // Size and placement.
     lines.append("size: \(s(ElementLayout.size(for: kind, sketch: .zero)))"
@@ -87,15 +99,26 @@ private func describe(_ kind: ElementKind) throws -> [String] {
     let small = store.resolve(store.addFloating(kind, from: CGRect(x: 0, y: 0, width: 30, height: 20)))
     lines.append("loose, drawn large: \(s(large?.element.frame.size ?? .zero)) | drawn small: \(s(small?.element.frame.size ?? .zero))")
 
-    // In a written or generated screen.
-    let item = ScreenBlueprint.Item(kind: kind, text: "")
-    var sized = item
-    sized.fontSize = 40
-    lines.append("in a blueprint: \(s(ScreenBlueprint.size(of: item, available: 353, on: .iPhone)))"
-        + " | in a row: \(s(ScreenBlueprint.size(of: item, available: 170, on: .iPhone, inRow: true)))"
-        + " | at 40pt: \(s(ScreenBlueprint.size(of: sized, available: 353, on: .iPhone)))")
-    let laid = try #require(ScreenBlueprint(sections: [.init(items: [item])]).layout(on: .iPhone).first)
-    lines.append("laid out: \(r(laid.frame)) alignment \(laid.textAlignment?.rawValue ?? "-")")
+    // In a written or generated screen: the leaf the one-line outline of its first written name makes, its natural
+    // size offered a phone's column and a row's share, and where the rules lay it out on a phone.
+    if let name = words.first {
+        let screen = Outline.parse(name, isComplete: true)
+        let leaf = try #require(leaves(of: screen).first)
+        var sized = leaf
+        sized.style.fontSize = 40
+        lines.append("in an outline: \(s(NaturalSize.of(leaf, width: 353, measure: .shared)))"
+            + " | in a row: \(s(NaturalSize.of(leaf, width: 170, measure: .shared)))"
+            + " | at 40pt: \(s(NaturalSize.of(sized, width: 353, measure: .shared)))")
+        let laid = TreeRules.laidOut(screen, deviceID: DeviceFrame.iPhone.id, settings: CanvasSettings(), previous: nil)
+        if let placed = placedLeaves(of: laid).first(where: { $0.node.id == leaf.id }) {
+            lines.append("laid out: \(r(placed.frame)) alignment \(placed.node.style.textAlignment?.rawValue ?? "-")")
+        } else {
+            lines.append("laid out: not kept on a screen")
+        }
+    } else {
+        lines.append("in an outline: not written")
+        lines.append("laid out: not written")
+    }
 
     // What the marks inside a sketch say.
     func marked(_ inner: SketchObservation.InnerMark, at bounds: CGRect?) -> String {
@@ -173,10 +196,10 @@ struct ComponentCatalogueTests {
     /// F9: a group is made by grouping. No word names it, nothing written or sketched
     /// becomes one, and it shows no words of its own.
     @Test func aGroupIsAKindNothingIsSketchedAsOrWrittenAs() {
-        #expect(ScreenBlueprint.kindWords.first { $0.kind == .group }?.words == [])
-        #expect(ScreenBlueprint.kind(named: "group") != .group)
-        #expect(ScreenBlueprint.kind(named: "Group") != .group)
-        #expect(!ScreenPrompt.kindNames.contains { ScreenBlueprint.kind(named: $0) == .group })
+        #expect(LookWords.kindWords.first { $0.kind == .group }?.words == [])
+        #expect(LookWords.kind(named: "group") != .group)
+        #expect(LookWords.kind(named: "Group") != .group)
+        #expect(!ScreenPrompt.kindNames.contains { LookWords.kind(named: $0) == .group })
         #expect(!ScreenPrompt.kindNames.contains("group"))
         let observation = SketchObservation(bounds: CGRect(x: 0, y: 0, width: 10, height: 10), form: .scribble, strokeCount: 1)
         let onScreen = SketchRequest(observation: observation, placement: .onScreen(local: CGRect(x: 0, y: 0, width: 10, height: 10), existing: []), strokes: [], prompt: "")

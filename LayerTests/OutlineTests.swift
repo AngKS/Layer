@@ -293,14 +293,15 @@ import Testing
         #expect(small.cornerRadius == 0)
     }
 
-    @Test func theBlueprintStillReadsItsLooks() throws {
-        let blueprint = try #require(ScreenBlueprint.parse("button: Go [bordered, 20pt]"))
-        let item = try #require(blueprint.sections.first?.items.first)
-        #expect(item.kind == .button)
-        #expect(item.text == "Go")
-        #expect(item.buttonLook == .bordered)
-        #expect(item.fontSize == 20)
-        #expect(item.colour == nil)
+    /// A main action follows it: alone, the one-primary-action rule would make the only button filled.
+    @Test func aWrittenLineStillReadsItsLooks() throws {
+        let screen = Outline.parse("button: Go [bordered, 20pt]\nbutton: Done", isComplete: true)
+        let leaf = try #require(all(screen).first { !$0.isContainer })
+        #expect(leaf.kind == .button)
+        #expect(leaf.content.text == "Go")
+        #expect(leaf.content.buttonLook == .bordered)
+        #expect(leaf.style.fontSize == 20)
+        #expect(leaf.style.tint == nil)
     }
 }
 

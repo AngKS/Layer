@@ -230,7 +230,7 @@ extension HostedWindowSuites {
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
             var button = DesignStore.newElement(.button)
             button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
-            let ref = model.store.setElements([button], on: screen, replacing: true)[0]
+            let ref = model.store.setElements([button], on: screen)[0]
             func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
             undo.removeAllActions()
 
@@ -534,7 +534,7 @@ struct PanelChangesBesideADragTests {
         let refs = model.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen, replacing: false)
+        ], on: screen)
         let (title, button) = (refs[0], refs[1])
         undo.removeAllActions()
         func frame(_ ref: DesignStore.ElementRef) -> CGRect? { model.store.resolve(ref)?.element.frame }

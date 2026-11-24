@@ -659,7 +659,7 @@ struct GroupCommandTests {
 
         // Things on two screens.
         let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 1000, y: 50), scale: 0.5))
-        let f = board.store.setElements([OrderBoard.element(.button, named: "F", CGRect(x: 40, y: 40, width: 300, height: 100))], on: other.id, replacing: true)[0]
+        let f = board.store.setElements([OrderBoard.element(.button, named: "F", CGRect(x: 40, y: 40, width: 300, height: 100))], on: other.id)[0]
         board.model.selection = board.selection(board.a, f)
         #expect(!board.model.canGroupSelection)
         #expect(board.model.groupSelectionSpansHosts)
@@ -1592,7 +1592,7 @@ struct GroupGeometryTests {
         let pair = board.store.setElements([
             OrderBoard.element(.button, named: "P", CGRect(x: 40, y: 760, width: 100, height: 40)),
             OrderBoard.element(.button, named: "Q", CGRect(x: 150, y: 760, width: 100, height: 40)),
-        ], on: board.screen, replacing: false)
+        ], on: board.screen)
         let g = board.group(pair[0], pair[1])
         let offsets = board.offsets(in: g, of: pair)
         let box = try #require(board.store.canvasFrame(of: .element(g)))
@@ -1840,7 +1840,7 @@ struct GroupGeometryTests {
     /// smallest size; and a divider, whose height is fixed, keeps its height.
     @Test func aGroupShrinksNoFurtherThanWhatIsInItCanGo() throws {
         let board = OrderBoard()
-        let line = board.store.setElements([OrderBoard.element(.divider, named: "line", CGRect(x: 40, y: 300, width: 200, height: 1))], on: board.screen, replacing: false)[0]
+        let line = board.store.setElements([OrderBoard.element(.divider, named: "line", CGRect(x: 40, y: 300, width: 200, height: 1))], on: board.screen)[0]
         let g = board.group(board.b, line)
         let box = try #require(board.frame(of: g))
         #expect(box == CGRect(x: 40, y: 190, width: 300, height: 111))
@@ -1867,7 +1867,7 @@ struct GroupGeometryTests {
         let board = OrderBoard()
         var text = OrderBoard.element(.text, named: "T", CGRect(x: 40, y: 300, width: 200, height: 30))
         text.fontSize = 17
-        let t = board.store.setElements([text], on: board.screen, replacing: false)[0]
+        let t = board.store.setElements([text], on: board.screen)[0]
         let g = board.group(board.b, t, board.d)
         let members = [board.b, t, board.d]
         let box = try #require(board.frame(of: g))

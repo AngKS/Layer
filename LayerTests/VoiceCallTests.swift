@@ -19,7 +19,7 @@ enum VoiceFixture {
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
             DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
             DesignElement(kind: .image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
-        ], on: screen.id, replacing: true)
+        ], on: screen.id)
         return (app, screen.id)
     }
 
@@ -39,7 +39,7 @@ enum VoiceFixture {
         app.store.updateScreen(profile.id) { $0.name = "Profile" }
         _ = app.store.setElements([
             DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
-        ], on: profile.id, replacing: true)
+        ], on: profile.id)
         giveUndo(to: app)
         return (app, screen, profile.id)
     }

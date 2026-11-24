@@ -362,7 +362,7 @@ struct ScreenGenerationLifecycleTests {
         let title = try #require(app.store.screen(screen)?.elements.first)
         var note = DesignStore.newElement(.text)
         note.frame.origin = CGPoint(x: 40, y: 600)
-        let added = app.store.setElements([note], on: screen, replacing: false)[0]
+        let added = app.store.setElements([note], on: screen)[0]
         app.store.update(added) { $0.text = "typed" }
         app.selection = .element(.init(host: .screen(screen), element: title.id))
 
@@ -409,7 +409,7 @@ struct ScreenGenerationLifecycleTests {
         let screen = try #require(app.generation?.screenID)
         feed.yield(.startedWriting)
         #expect(await eventually { app.generation?.isThinking == false })
-        let added = app.store.setElements([DesignStore.newElement(.text)], on: screen, replacing: false)[0]
+        let added = app.store.setElements([DesignStore.newElement(.text)], on: screen)[0]
         app.store.update(added) { $0.text = "typed" }
         if fails { feed.finish(throwing: URLError(.notConnectedToInternet)) } else { feed.finish() }
         await app.waitForGeneration()
