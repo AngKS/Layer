@@ -1,0 +1,33 @@
+# Lane B's allowlist for scripts/check-flat-model.sh: files whose tier-1 hits are allowed until their owner ports them.
+# One path per line, from the repository's root; after a # is a note. Lane B only ever takes lines out (plan 6, call 1).
+# The owners are the ledger's table (plan 6, Task 1).
+
+# Siri: Tasks 3-5. DesignActions.swift is in a.txt (F16).
+Layer/Canvas/ImagePlaygroundSupport.swift
+Layer/Debug/DemoScript.swift
+Layer/Intents/CanvasIntents.swift
+Layer/Intents/DesignLibrary.swift
+Layer/Intents/ElementIntents.swift
+Layer/Intents/ImageIntents.swift
+Layer/Intents/LayerEntities.swift
+Layer/Intents/OnscreenContext.swift
+LayerTests/ComponentCatalogueTests.swift         # Task 3 (F10)
+LayerTests/LookWordsEverywhereTests.swift        # Task 5 (F24)
+LayerTests/SiriIntentsLiveTests.swift
+LayerTests/SiriIntentsTests.swift
+
+# Task 10: the sketch, generation, code and panel tests.
+LayerTests/AssetLibraryTests.swift
+LayerTests/CorrectedReadingTests.swift
+LayerTests/FormatPanelTests.swift
+LayerTests/FreeformTests.swift
+LayerTests/HostedModelTests.swift
+LayerTests/LayersPanelTests.swift
+LayerTests/MagicPenComponentTests.swift
+LayerTests/PanelStepTests.swift
+LayerTests/ScreenGenerationTests.swift
+LayerTests/ShareA2UITests.swift
+LayerTests/SketchReadingTests.swift
+LayerTests/SketchToNodeTests.swift
+LayerTests/Support/SketchedTitles.swift          # NodeViewTests (Task 9) calls sketchedTitles() too; its signature stays
+LayerTests/SystemSymbolTests.swift

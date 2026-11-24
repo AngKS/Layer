@@ -403,16 +403,8 @@ struct GroupModelTests {
         #expect(SwiftUICodeGenerator.code(for: content.screens[0], typeName: nil, settings: CodeSettings())
             == SwiftUICodeGenerator.code(for: plain.screens[0], typeName: nil, settings: CodeSettings()))
 
-        // Voice's picture of the board lists the members, and no group.
-        let picture = CanvasPicture.capture(from: board.model, handles: VoiceHandles())
-        #expect(picture.screens.first?.elements.count == 5)
-        #expect(picture.loose.count == 2)
-        #expect(!(picture.screens.flatMap(\.elements) + picture.loose).contains { $0.kind == ElementKind.group.layerName.lowercased() })
-
-        // Siri's elements are the members too.
-        let entities = DesignSnapshot(id: "design", name: "Design", content: content, modified: nil).elements
-        #expect(entities.count == 8)
-        #expect(!entities.contains { $0.ref?.element == g.element || $0.ref?.element == notes.element })
+        // How voice and Siri are told the same board went to their own lanes' files (plan 6, Task 1, F11):
+        // `CanvasPictureTests.aGroupsMembersAreToldInItsPlace` and `EntityKeyTests.aGroupsMembersAreSirisElements`.
     }
 
     // MARK: Lock and hide

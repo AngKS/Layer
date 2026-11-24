@@ -50,6 +50,20 @@ enum ElementLayout {
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
+    /// Where a new element of a kind goes on a screen of `device`: 16 below the lowest of `visible` (frames in the
+    /// screen's points), or 16 below the top of the safe area on an empty screen, held above the bottom safe area, and
+    /// centred across the screen, for kinds that keep their sketched place too.
+    static func newElementFrame(for kind: ElementKind, on device: DeviceFrame, below visible: [CGRect]) -> CGRect {
+        let lowest = visible.map(\.maxY).max()
+        let top = (lowest.map { $0 + 16 } ?? device.safeTop + 16)
+        var frame = ElementLayout.frame(for: kind, sketch: CGRect(x: device.size.width / 2, y: top, width: 0, height: 0), on: device)
+        frame.origin.y = min(top, max(device.safeTop, device.size.height - device.safeBottom - frame.height - 8))
+        if keepsSketchedPosition(kind) {
+            frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
+        }
+        return frame
+    }
+
     /// The side margin of text that is aligned to the leading edge.
     static let margin: CGFloat = 20
     /// The gap between two elements side by side.

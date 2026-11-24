@@ -123,6 +123,20 @@ struct EntityKeyTests {
         #expect(id == "local:Sub/My Design.layer")
         #expect(DesignLibrary.url(for: id)?.standardizedFileURL.path == url.standardizedFileURL.path)
     }
+
+    /// The board of `GroupModelTests.groupItemsAreLeftOutOfWhatIsDrawnExportedAndDescribed`, which this part of it
+    /// came from (plan 6, Task 1, F11): B and D grouped on the screen, and the two notes on the canvas.
+    @MainActor @Test func aGroupsMembersAreSirisElements() {
+        let board = OrderBoard()
+        let g = board.group(board.b, board.d)
+        let notes = board.group(board.note1, board.note2, named: "N")
+        let content = board.store.content
+
+        // Siri's elements are the members too.
+        let entities = DesignSnapshot(id: "design", name: "Design", content: content, modified: nil).elements
+        #expect(entities.count == 8)
+        #expect(!entities.contains { $0.ref?.element == g.element || $0.ref?.element == notes.element })
+    }
 }
 
 @Suite("Colours")
