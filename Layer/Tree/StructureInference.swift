@@ -240,6 +240,24 @@ enum StructureInference {
         }
     }
 
+    /// The obstacles, sorted by where they lie (`ShapeBuckets`) when there are many, so that asking what lies in a box
+    /// looks only near it. A batch's handful is looked through whole, which is quicker.
+    private struct Obstacles {
+        let all: [Obstacle]
+        private let buckets: ShapeBuckets?
+
+        init(_ all: [Obstacle]) {
+            self.all = all
+            buckets = all.count < fewestSorted ? nil : ShapeBuckets(all.map { $0.shape })
+        }
+
+        /// Whether one that `ignoring` doesn't name shares some area with `box`.
+        func meet(_ box: CGRect, ignoring: (UUID) -> Bool) -> Bool {
+            guard let buckets else { return all.contains { overlaps($0.shape, box) && !ignoring($0.id) } }
+            return buckets.contains(near: box) { overlaps(all[$0].shape, box) && !ignoring(all[$0].id) }
+        }
+    }
+
     /// A run that qualifies: its items in reading order, the line they share, and its gaps.
     private struct Candidate {
         var items: [Int]
@@ -248,6 +266,22 @@ enum StructureInference {
         var confidence: Double
         var replacing: [UUID]
     }
+
+    /// What the search reads of each item again and again, read once: copying an item copies its whole node, which
+    /// unoptimised was most of a large tidy's time.
+    private struct Fact {
+        let frame: CGRect
+        let place: Int
+        let id: UUID
+        let isNew: Bool
+        let grower: UUID?
+
+        init(_ item: Item) {
+            (frame, place, id, isNew, grower) = (item.node.frame, item.place, item.node.id, item.isNew, item.grower)
+        }
+    }
+
+    private typealias Facts = [Fact]
 
     /// A grid that qualifies: its items row by row, its first column's leading edge and first row's top (medians),
     /// and the gaps between its columns and between its rows.
@@ -328,7 +362,7 @@ enum StructureInference {
             // Grids, with every container that may grow read as its members. A grid offered keeps what it holds from
             // rows and columns too, so that a grid is never split into rows (call 3).
             let gridItems = expanding(base) { _ in true }
-            let grids = gridCandidates(among: gridItems, obstacles: obstacles(gridItems)).compactMap {
+            let grids = gridCandidates(among: gridItems, obstacles: Obstacles(obstacles(gridItems))).compactMap {
                 decision(for: $0, among: gridItems)
             }
             let inGrids = Set(grids.flatMap { $0.structure.members + $0.structure.replacing })
@@ -336,7 +370,7 @@ enum StructureInference {
 
             // Rows, with the rows that may grow read as their members.
             let rowItems = expanding(rest) { $0 == .row }
-            let rows = candidates(among: rowItems, rule: .row, obstacles: obstacles(rowItems)).compactMap {
+            let rows = candidates(among: rowItems, rule: .row, obstacles: Obstacles(obstacles(rowItems))).compactMap {
                 decision(for: $0, among: rowItems, rule: .row)
             }
 
@@ -348,8 +382,8 @@ enum StructureInference {
                 Item(node: built.container, isNew: built.members.contains(where: new.contains),
                      place: built.members.compactMap { places[$0] }.max() ?? 0)
             } + expanding(rest.filter { !inApplied.contains($0.node.id) }) { $0 == .column }
-            let columnObstacles = obstacles(columnItems, leaving: inApplied)
-                + applied.map { Obstacle(id: $0.container.id, shape: $0.container.frame) }
+            let columnObstacles = Obstacles(obstacles(columnItems, leaving: inApplied)
+                + applied.map { Obstacle(id: $0.container.id, shape: $0.container.frame) })
             let columnRule = Rule.column(mode)
             let columns = candidates(among: columnItems, rule: columnRule, obstacles: columnObstacles).compactMap {
                 decision(for: $0, among: columnItems, rule: columnRule)
@@ -389,13 +423,13 @@ enum StructureInference {
         /// Call 2: holding any member of a container that may grow, a structure holds all of them and a new node
         /// besides, and is bigger: more members, or a grid over a row or column. The containers it takes the place
         /// of, in reading order; nil when it may not be built.
-        private func replacing(_ members: [Item], kind: Structure.Kind) -> [UUID]? {
-            let ids = Set(members.map(\.node.id))
+        private func replacing(_ members: [Int], _ facts: Facts, kind: Structure.Kind) -> [UUID]? {
+            let ids = Set(members.map { facts[$0].id })
             var replaced: [UUID] = []
-            for case let container? in members.map(\.grower) where !replaced.contains(container) {
+            for case let container? in members.map({ facts[$0].grower }) where !replaced.contains(container) {
                 guard let growing = growing[container] else { return nil }
                 let held = Set(growing.members)
-                guard held.isSubset(of: ids), members.contains(where: { $0.isNew && !held.contains($0.node.id) }),
+                guard held.isSubset(of: ids), members.contains(where: { facts[$0].isNew && !held.contains(facts[$0].id) }),
                       members.count > held.count || (kind.isGrid && !growing.kind.isGrid) else { return nil }
                 replaced.append(container)
             }
@@ -409,7 +443,7 @@ enum StructureInference {
             let items = parent.children.indices.map { Item(node: parent.children[$0], isNew: true, place: $0) }
             let rule = Rule.column(mode)
             guard items.allSatisfy({ $0.node.isArrangeable }),
-                  let column = candidates(among: items, rule: rule, obstacles: []).first, column.items.count == items.count
+                  let column = candidates(among: items, rule: rule, obstacles: Obstacles([])).first, column.items.count == items.count
             else { return [] }
             let gap = median(column.gaps)
             let rhythm = cardProposal(column, among: items, spacing: tokens.spacing(nearest: gap))
@@ -467,57 +501,118 @@ enum StructureInference {
         // MARK: Finding runs
 
         /// The runs that qualify, taken greedily: most members, then most sure, then first in reading order (call 3).
-        /// Each item is in one at most.
-        private func candidates(among items: [Item], rule: Rule, obstacles: [Obstacle]) -> [Candidate] {
-            var available = items.indices.filter { mayHold(items[$0], rule) }
+        /// Each item is in one at most. The run from each item is found once, and found again only when one it held is
+        /// taken: a run passes over what isn't in it, and stops at a place along the axis, so taking anything else
+        /// leaves it as it was.
+        private func candidates(among items: [Item], rule: Rule, obstacles: Obstacles) -> [Candidate] {
+            let facts = items.map(Fact.init)
+            let order = items.indices.filter { mayHold(items[$0], rule) }.sorted { a, b in
+                let (x, y) = (facts[a].frame, facts[b].frame)
+                return precedes(rule.start(x), rule.startAcross(x), facts[a].place, a, rule.start(y), rule.startAcross(y), facts[b].place, b)
+            }
+            let partners = Self.partners(in: order, facts: facts, rule: rule)
+            // By item: not yet taken by a run chosen.
+            var available = [Bool](repeating: true, count: items.count)
+            var runs: [[Int]?] = order.indices.map { _ in nil }, found: [Candidate?] = runs.map { _ in nil }
+            for start in order.indices {
+                (runs[start], found[start]) = run(from: start, in: order, partners: partners, available: available,
+                                                  facts: facts, rule: rule, obstacles: obstacles)
+            }
             var chosen: [Candidate] = []
-            while true {
-                let order = available.sorted { a, b in
-                    let (x, y) = (items[a].frame, items[b].frame)
-                    return (rule.start(x), rule.startAcross(x), items[a].place, a) < (rule.start(y), rule.startAcross(y), items[b].place, b)
-                }
-                let runs = order.indices.compactMap { run(from: $0, in: order, items: items, rule: rule, obstacles: obstacles) }
-                guard let best = runs.min(by: { ranks($0.items, $0.confidence, before: $1.items, $1.confidence, items: items) })
-                else { break }
+            while let best = found.lazy.compactMap({ $0 }).min(by: {
+                ranks($0.items, $0.confidence, before: $1.items, $1.confidence, facts)
+            }) {
                 chosen.append(best)
-                available.removeAll { best.items.contains($0) }
+                for index in best.items { available[index] = false }
+                for start in order.indices {
+                    guard let held = runs[start] else { continue }
+                    if !available[order[start]] {
+                        (runs[start], found[start]) = (nil, nil)
+                    } else if held.contains(where: { !available[$0] }) {
+                        (runs[start], found[start]) = run(from: start, in: order, partners: partners, available: available,
+                                                          facts: facts, rule: rule, obstacles: obstacles)
+                    }
+                }
             }
             return chosen
         }
 
         /// The run that starts at `order[start]`: each next one along the axis joins while it is past the last, shares
-        /// a line with the whole run, keeps the run's sizes and gaps, and nothing else lies between them.
-        private func run(from start: Int, in order: [Int], items: [Item], rule: Rule, obstacles: [Obstacle]) -> Candidate? {
-            var run = [order[start]], gaps: [CGFloat] = [], lines = rule.lines
-            for next in order[(start + 1)...] {
-                let last = items[run[run.count - 1]].frame, frame = items[next].frame
+        /// a line with the whole run, keeps the run's sizes and gaps, and nothing else lies between them. Only those
+        /// that share a line with the first can join (`partners`); the rest are passed over, as are those taken.
+        private func run(from start: Int, in order: [Int], partners: [[Int]], available: [Bool], facts: Facts, rule: Rule,
+                         obstacles: Obstacles) -> (held: [Int], candidate: Candidate?) {
+            let first = order[start], lines = rule.lines
+            var run = [first], gaps: [CGFloat] = [], last = facts[first].frame
+            // The lines it still shares, a bit each, and what it spans on each, across the axis, and in its gaps.
+            var shared = (1 << lines.count) - 1
+            var spans = lines.map { (low: $0.position(last), high: $0.position(last)) }
+            var across = (low: rule.across(last), high: rule.across(last))
+            var gapSpan = (low: CGFloat.infinity, high: -CGFloat.infinity)
+            for place in partners[start] where available[order[place]] {
+                let next = order[place], frame = facts[next].frame
                 let gap = rule.start(frame) - rule.end(last)
                 if gap < 0 { continue }
                 // Sorted along the axis, what comes after is further still.
                 if let largest = rule.largestGap, gap > largest { break }
-                let frames = (run + [next]).map { items[$0].frame }
-                if let ratio = rule.sizeRatio, !isWithin(ratio, frames.map(rule.across)) { continue }
-                let fitting = lines.filter { spread(frames.map($0.position)) <= $0.tolerance }
-                if fitting.isEmpty { continue }
-                if let variation = rule.gapVariation, spread(gaps + [gap]) > variation { continue }
-                let members = Set((run + [next]).map { items[$0].node.id })
+                if let ratio = rule.sizeRatio {
+                    let size = rule.across(frame)
+                    if !isWithin(ratio, low: min(across.low, size), high: max(across.high, size)) { continue }
+                }
+                var fitting = 0
+                for bit in lines.indices where shared & (1 << bit) != 0 {
+                    let position = lines[bit].position(frame)
+                    if max(spans[bit].high, position) - min(spans[bit].low, position) <= lines[bit].tolerance { fitting |= 1 << bit }
+                }
+                if fitting == 0 { continue }
+                if let variation = rule.gapVariation, max(gapSpan.high, gap) - min(gapSpan.low, gap) > variation { continue }
+                let id = facts[next].id
                 let between = rule.space(between: last, and: frame)
-                if obstacles.contains(where: { !members.contains($0.id) && overlaps($0.shape, between) }) { continue }
+                if obstacles.meet(between, ignoring: { other in other == id || run.contains { facts[$0].id == other } }) { continue }
                 run.append(next)
                 gaps.append(gap)
-                lines = fitting
+                last = frame
+                shared = fitting
+                for bit in lines.indices {
+                    let position = lines[bit].position(frame)
+                    spans[bit] = (min(spans[bit].low, position), max(spans[bit].high, position))
+                }
+                across = (min(across.low, rule.across(frame)), max(across.high, rule.across(frame)))
+                gapSpan = (min(gapSpan.low, gap), max(gapSpan.high, gap))
             }
-            let frames = run.map { items[$0].frame }
+            guard run.count >= rule.least, run.contains(where: { facts[$0].isNew }),
+                  let replaced = self.replacing(run, facts, kind: rule.kind) else { return (run, nil) }
+            let memberFrames = run.map { facts[$0].frame }
+            let still = lines.indices.filter { shared & (1 << $0) != 0 }.map { lines[$0] }
             // The line that fits best against its tolerance; ties go to the first (a row's centres, a column's leading).
-            guard run.count >= rule.least, run.contains(where: { items[$0].isNew }),
-                  let replaced = self.replacing(run.map { items[$0] }, kind: rule.kind),
-                  let line = lines.enumerated().min(by: { a, b in
-                      (error(frames.map(a.element.position)) / a.element.tolerance, a.offset)
-                          < (error(frames.map(b.element.position)) / b.element.tolerance, b.offset)
-                  })?.element
-            else { return nil }
-            return Candidate(items: run, line: line, gaps: gaps, confidence: confidence(frames, line: line, gaps: gaps, rule: rule),
-                             replacing: replaced)
+            guard let line = still.enumerated().min(by: { a, b in
+                (error(memberFrames.map(a.element.position)) / a.element.tolerance, a.offset)
+                    < (error(memberFrames.map(b.element.position)) / b.element.tolerance, b.offset)
+            })?.element else { return (run, nil) }
+            return (run, Candidate(
+                items: run, line: line, gaps: gaps, confidence: confidence(memberFrames, line: line, gaps: gaps, rule: rule),
+                replacing: replaced))
+        }
+
+        /// For each place in `order`, the later places whose item shares one of the rule's lines with that place's item
+        /// within the line's tolerance, in order: only those can join a run that starts there. Among a batch's handful,
+        /// every later place, which is quicker than sorting them.
+        private static func partners(in order: [Int], facts: Facts, rule: Rule) -> [[Int]] {
+            guard order.count >= fewestSorted else { return order.indices.map { Array(($0 + 1)..<order.count) } }
+            var partners = [[Int]](repeating: [], count: order.count)
+            for line in rule.lines {
+                let positions = order.map { line.position(facts[$0].frame) }
+                let sorted = order.indices.filter { positions[$0].isFinite }.sorted { positions[$0] < positions[$1] }
+                for (rank, place) in sorted.enumerated() {
+                    // A point's leeway for rounding; the test that decides is the run's own.
+                    for other in sorted[(rank + 1)...] {
+                        let (a, b) = (positions[place], positions[other])
+                        if b - a > line.tolerance + 1 { break }
+                        if max(a, b) - min(a, b) <= line.tolerance { partners[min(place, other)].append(max(place, other)) }
+                    }
+                }
+            }
+            return partners.map { Array(Set($0)).sorted() }
         }
 
         /// Never a row holding a row or a column holding a column (F5), nor a member's subtree past depth 32 (F9):
@@ -528,11 +623,11 @@ enum StructureInference {
         }
 
         /// Most members first, then most sure, then first in reading order.
-        private func ranks(_ a: [Int], _ aSure: Double, before b: [Int], _ bSure: Double, items: [Item]) -> Bool {
+        private func ranks(_ a: [Int], _ aSure: Double, before b: [Int], _ bSure: Double, _ facts: Facts) -> Bool {
             if a.count != b.count { return a.count > b.count }
             if aSure != bSure { return aSure > bSure }
-            let (x, y) = (items[a[0]], items[b[0]])
-            return (x.frame.minY, x.frame.minX, x.place, a[0]) < (y.frame.minY, y.frame.minX, y.place, b[0])
+            let (x, y) = (facts[a[0]].frame, facts[b[0]].frame)
+            return precedes(x.minY, x.minX, facts[a[0]].place, a[0], y.minY, y.minX, facts[b[0]].place, b[0])
         }
 
         /// Call 4: alignment × gaps × sizes, each `clamp(1 − e / (2 · limit), 0.5, 1)`.
@@ -547,18 +642,44 @@ enum StructureInference {
 
         // MARK: Finding grids
 
-        /// The grids that qualify, taken greedily as runs are. Each item is in one at most.
-        private func gridCandidates(among items: [Item], obstacles: [Obstacle]) -> [GridCandidate] {
-            var available = items.indices.filter { mayHoldInGrid(items[$0]) }
-            var chosen: [GridCandidate] = []
-            while true {
-                let found = blocks(of: available, in: items, obstacles: obstacles)
-                guard let best = found.min(by: { ranks($0.items, $0.confidence, before: $1.items, $1.confidence, items: items) })
-                else { break }
-                chosen.append(best)
-                available.removeAll { best.items.contains($0) }
+        /// The grids that qualify, taken greedily as runs are. Each item is in one at most. Among more things than
+        /// `StructureConventions.gridSearchedTogether`, a grid is looked for in one band of them at a time (`bands`).
+        private func gridCandidates(among items: [Item], obstacles: Obstacles) -> [GridCandidate] {
+            let facts = items.map(Fact.init)
+            return Self.bands(of: items.indices.filter { mayHoldInGrid(items[$0]) }, facts).flatMap { band in
+                var available = band
+                var chosen: [GridCandidate] = []
+                while true {
+                    guard let best = bestBlock(of: available, facts, obstacles: obstacles) else { break }
+                    chosen.append(best)
+                    available.removeAll { best.items.contains($0) }
+                }
+                return chosen
             }
-            return chosen
+        }
+
+        /// `indices` as one band, or, when there are more than `StructureConventions.gridSearchedTogether`, in bands
+        /// across the container from the top, each of that many at most: a band ends there, or once it is half full
+        /// where nothing in it reaches below the top of the next. Every grid there can be is tried within a band, and
+        /// trying every grid among hundreds of things took seconds.
+        private static func bands(of indices: [Int], _ facts: Facts) -> [[Int]] {
+            let most = StructureConventions.gridSearchedTogether
+            guard indices.count > most else { return [indices] }
+            let sorted = indices.sorted { a, b in
+                let (x, y) = (facts[a].frame, facts[b].frame)
+                return precedes(x.minY, x.minX, facts[a].place, a, y.minY, y.minX, facts[b].place, b)
+            }
+            var bands: [[Int]] = [], band: [Int] = [], bottom = -CGFloat.infinity
+            for index in sorted {
+                let frame = facts[index].frame
+                if band.count == most || (band.count >= most / 2 && frame.minY >= bottom) {
+                    bands.append(band)
+                    (band, bottom) = ([], -.infinity)
+                }
+                band.append(index)
+                bottom = max(bottom, frame.maxY)
+            }
+            return bands + [band]
         }
 
         /// A grid takes only leaves and cards (F5), and nothing whose subtree would pass depth 32 (F9).
@@ -566,36 +687,51 @@ enum StructureInference {
             item.node.kind != .group && depth + 2 + TreeEdit.levels(below: item.node) <= TreeRules.maximumDepth
         }
 
-        /// Every grid among `available`: each run of rows (tops within 4), and in it each run of columns (leading edges
-        /// within 4), with what lies in both. Only a run's last row may be short.
-        private func blocks(of available: [Int], in items: [Item], obstacles: [Obstacle]) -> [GridCandidate] {
-            let least = StructureConventions.gridLeastColumns
-            let rows = clusters(available, items, by: \.minY)
-            var found: [GridCandidate] = []
-            for first in rows.indices where rows[first].count >= least {
+        /// The best grid among `available` (`ranks`), of every grid there: each run of rows (tops within 4), and in it
+        /// each run of columns (leading edges within 4) of 12 at most (`StructureConventions.gridMostColumns`), with what
+        /// lies in both. Only a run's last row may be short. One with fewer members than the best found so far can't be
+        /// better, so it isn't looked at.
+        private func bestBlock(of available: [Int], _ facts: Facts, obstacles: Obstacles) -> GridCandidate? {
+            typealias C = StructureConventions
+            let rows = clusters(available, facts, by: { $0.minY })
+            var best: GridCandidate?
+            for first in rows.indices where rows[first].count >= C.gridLeastColumns {
                 for last in (first + 1)..<rows.count {
                     let inRows = rows[first...last].flatMap { $0 }
-                    let columns = clusters(inRows, items, by: \.minX)
-                    for left in columns.indices {
-                        for right in (left + 1)..<columns.count {
-                            let taken = Set(columns[left...right].joined())
-                            if let grid = grid(inRows.filter(taken.contains), items, obstacles) { found.append(grid) }
+                    let columns = inRows.count < best?.items.count ?? 0 ? [] : clusters(inRows, facts, by: { $0.minX })
+                    // A grid's first column holds one of each of its rows, and each column after it as many as the one
+                    // before or one fewer, the last row being short. Past a column that doesn't, no wider run of
+                    // columns is a grid.
+                    for left in columns.indices where columns[left].count >= C.gridLeastRows {
+                        var total = columns[left].count
+                        for right in (left + 1)..<min(columns.count, left + C.gridMostColumns) {
+                            let count = columns[right].count
+                            guard count <= columns[right - 1].count, count >= columns[left].count - 1 else { break }
+                            total += count
+                            guard total >= best?.items.count ?? 0,
+                                  let grid = grid(Array(columns[left...right].joined()), columns: Array(columns[left...right]),
+                                                  facts, obstacles)
+                            else { continue }
+                            if best.map({ ranks(grid.items, grid.confidence, before: $0.items, $0.confidence, facts) }) ?? true {
+                                best = grid
+                            }
                         }
                     }
-                    if rows[last].count < least { break }
+                    if rows[last].count < C.gridLeastColumns { break }
                 }
             }
-            return found
+            return best
         }
 
         /// The grid `indices` make, if they make one: ≥ 2 rows and ≥ 2 columns, one member in each cell, every row full
         /// but a last one that a growing grid gains, filling its first columns; cell sizes within 20% of the median's;
         /// a new member; gaps that don't overlap; nothing else inside; and all of any container that may grow.
-        private func grid(_ indices: [Int], _ items: [Item], _ obstacles: [Obstacle]) -> GridCandidate? {
+        /// `columns` are theirs, leading edges within 4: as `bestBlock` found them, which a run of whole columns keeps.
+        private func grid(_ indices: [Int], columns: [[Int]], _ facts: Facts, _ obstacles: Obstacles) -> GridCandidate? {
             typealias C = StructureConventions
-            let rows = clusters(indices, items, by: \.minY), columns = clusters(indices, items, by: \.minX)
+            let rows = clusters(indices, facts, by: { $0.minY })
             guard rows.count >= C.gridLeastRows, columns.count >= C.gridLeastColumns,
-                  indices.contains(where: { items[$0].isNew }) else { return nil }
+                  indices.contains(where: { facts[$0].isNew }) else { return nil }
             var column: [Int: Int] = [:]
             for (place, group) in columns.enumerated() { for index in group { column[index] = place } }
             let cells = rows.map { row in row.sorted { column[$0, default: 0] < column[$1, default: 0] } }
@@ -605,8 +741,8 @@ enum StructureInference {
                       row.count == columns.count || place == cells.count - 1 else { return nil }
             }
 
-            let frames = indices.map { items[$0].frame }
-            let middleWidth = median(frames.map(\.width)), middleHeight = median(frames.map(\.height))
+            let frames = indices.map { facts[$0].frame }
+            let middleWidth = median(frames.map { $0.width }), middleHeight = median(frames.map { $0.height })
             guard middleWidth > 0, middleHeight > 0 else { return nil }
             let sizeError = frames.map {
                 max(abs($0.width - middleWidth) / middleWidth, abs($0.height - middleHeight) / middleHeight)
@@ -615,42 +751,43 @@ enum StructureInference {
 
             var columnGaps: [CGFloat] = [], rowGaps: [CGFloat] = []
             for row in cells {
-                for (a, b) in zip(row, row.dropFirst()) { columnGaps.append(items[b].frame.minX - items[a].frame.maxX) }
+                for (a, b) in zip(row, row.dropFirst()) { columnGaps.append(facts[b].frame.minX - facts[a].frame.maxX) }
             }
             for (upper, lower) in zip(cells, cells.dropFirst()) {
-                for (a, b) in zip(upper, lower) { rowGaps.append(items[b].frame.minY - items[a].frame.maxY) }
+                for (a, b) in zip(upper, lower) { rowGaps.append(facts[b].frame.minY - facts[a].frame.maxY) }
             }
             guard (columnGaps + rowGaps).allSatisfy({ $0 >= 0 }) else { return nil }
 
-            let ids = Set(indices.map { items[$0].node.id })
+            let ids = Set(indices.map { facts[$0].id })
             let box = frames.dropFirst().reduce(frames[0]) { $0.union($1) }
-            guard !obstacles.contains(where: { !ids.contains($0.id) && overlaps($0.shape, box) }) else { return nil }
+            guard !obstacles.meet(box, ignoring: { ids.contains($0) }) else { return nil }
 
             let kind = Structure.Kind.grid(columns: columns.count)
             let members = cells.flatMap { $0 }
-            guard let replaced = self.replacing(members.map { items[$0] }, kind: kind) else { return nil }
+            guard let replaced = self.replacing(members, facts, kind: kind) else { return nil }
             // Only a grid that may grow gains a short last row.
             if cells[cells.count - 1].count < columns.count,
                !replaced.contains(where: { growing[$0]?.kind == kind }) { return nil }
 
-            let alignment = (rows.map { $0.map { items[$0].frame.minY } } + columns.map { $0.map { items[$0].frame.minX } })
+            let alignment = (rows.map { $0.map { facts[$0].frame.minY } } + columns.map { $0.map { facts[$0].frame.minX } })
                 .map(error).max() ?? 0
             let confidence = factor(alignment, limit: C.gridEdgeTolerance)
                 * factor(max(spread(columnGaps), spread(rowGaps)), limit: gridGapLimit)
                 * factor(sizeError, limit: CGFloat(C.gridCellSizeVariation))
             return GridCandidate(
                 items: members, columns: columns.count,
-                leading: median(columns[0].map { items[$0].frame.minX }), top: median(rows[0].map { items[$0].frame.minY }),
+                leading: median(columns[0].map { facts[$0].frame.minX }), top: median(rows[0].map { facts[$0].frame.minY }),
                 columnGaps: columnGaps, rowGaps: rowGaps, confidence: confidence, replacing: replaced)
         }
 
         /// `indices` in groups along one edge: in order, a group takes each next one within 4 of its first.
-        private func clusters(_ indices: [Int], _ items: [Item], by edge: (CGRect) -> CGFloat) -> [[Int]] {
-            let sorted = indices.sorted { (edge(items[$0].frame), items[$0].place, $0) < (edge(items[$1].frame), items[$1].place, $1) }
+        private func clusters(_ indices: [Int], _ facts: Facts, by edge: (CGRect) -> CGFloat) -> [[Int]] {
+            // By (edge, place, index): the 0s stand in for a second key there isn't.
+            let sorted = indices.sorted { precedes(edge(facts[$0].frame), 0, facts[$0].place, $0, edge(facts[$1].frame), 0, facts[$1].place, $1) }
             var groups: [[Int]] = []
             for index in sorted {
                 if let first = groups.last?.first,
-                   edge(items[index].frame) - edge(items[first].frame) <= StructureConventions.gridEdgeTolerance {
+                   edge(facts[index].frame) - edge(facts[first].frame) <= StructureConventions.gridEdgeTolerance {
                     groups[groups.count - 1].append(index)
                 } else {
                     groups.append([index])
@@ -874,6 +1011,19 @@ enum StructureInference {
     /// The limit of a grid's gap factor: the spec gives a grid's gaps the 4 pt a column's may vary by.
     private static let gridGapLimit = StructureConventions.columnGapVariation
 
+    /// Among fewer things than this, a run looks at every later one rather than sorting them by their lines first.
+    private static let fewestSorted = 32
+
+    /// `(a0, a1, a2, a3) < (b0, b1, b2, b3)` written out as the tuples compare: the first that differ decide. The
+    /// tuples' own comparison is generic, and unoptimised it was much of a large tidy's time.
+    private static func precedes(_ a0: CGFloat, _ a1: CGFloat, _ a2: Int, _ a3: Int,
+                                 _ b0: CGFloat, _ b1: CGFloat, _ b2: Int, _ b3: Int) -> Bool {
+        if a0 != b0 { return a0 < b0 }
+        if a1 != b1 { return a1 < b1 }
+        if a2 != b2 { return a2 < b2 }
+        return a3 < b3
+    }
+
     /// The middle value, or the mean of the middle two.
     private static func median(_ values: [CGFloat]) -> CGFloat {
         let sorted = values.sorted()
@@ -893,10 +1043,9 @@ enum StructureInference {
         return high - low
     }
 
-    /// Whether every value is within `ratio` times every other.
-    private static func isWithin(_ ratio: CGFloat, _ values: [CGFloat]) -> Bool {
-        guard let low = values.min(), let high = values.max() else { return true }
-        return low > 0 ? high / low <= ratio : high <= 0
+    /// Whether every value from `low` to `high` is within `ratio` times every other.
+    private static func isWithin(_ ratio: CGFloat, low: CGFloat, high: CGFloat) -> Bool {
+        low > 0 ? high / low <= ratio : high <= 0
     }
 
     /// `clamp(1 − e / (2 · limit), 0.5, 1)`.

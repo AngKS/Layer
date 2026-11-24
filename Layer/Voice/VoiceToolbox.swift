@@ -384,19 +384,17 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    /// Lays a whole screen out again with design sense: see `ScreenTidy`. One change, so
-    /// one undo puts it back.
+    /// Lays a whole screen out again with design sense: the structure pass in its tidy mode
+    /// (`DesignStore.tidy(_:)`). One change, so one undo puts it back.
     func tidyScreen(screen: String?) -> String {
         forCommand {
             guard let model else { return gone }
             switch screenMeant(screen, in: model) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                let frames = ScreenTidy.frames(for: found.elements, on: found.device)
                 let handle = handles.handle(forScreen: found.id)
-                guard !frames.isEmpty else { return failed("There is nothing on \(handle) that can be tidied.") }
+                guard model.store.tidy(found.id) else { return failed("There is nothing on \(handle) that can be tidied.") }
                 reveal(.screen(found.id), in: model)
-                model.store.updateScreen(found.id) { Self.apply(frames, to: &$0) }
                 return done("Tidied the layout of \(handle).")
             }
         }
@@ -421,12 +419,6 @@ final class VoiceToolbox: VoiceActing {
                 reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
-        }
-    }
-
-    private static func apply(_ frames: [DesignElement.ID: CGRect], to screen: inout DesignScreen) {
-        for index in screen.elements.indices {
-            if let frame = frames[screen.elements[index].id] { screen.elements[index].frame = frame }
         }
     }
 

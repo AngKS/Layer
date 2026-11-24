@@ -311,6 +311,29 @@ import Testing
         #expect(result.children[1] == locked, "a root child, unchanged")
     }
 
+    // MARK: - Bounds on the grid search (plan 5, Task 10)
+
+    /// Two rows of fourteen: a grid holds twelve columns at most, the tree's limit, so the last two columns are a grid of
+    /// their own.
+    @Test func aGridHasTwelveColumnsAtMost() {
+        let cells = (0..<28).map { image(20 + CGFloat($0 % 14) * 24, 300 + CGFloat($0 / 14) * 34, 20, 30) }
+        let columns = infer(root(cells)).compactMap { decision -> Int? in
+            if case .grid(let columns)? = structure(decision)?.kind { columns } else { nil }
+        }
+        #expect(columns == [12, 2])
+    }
+
+    /// A hundred images on a clean 10 × 10 lattice: among more than 64 things the grid search goes a band at a time, so
+    /// each grid lies within a band of four rows, and together they still hold all hundred.
+    @Test func aLargeContainerIsSearchedForGridsInBands() {
+        let cells = (0..<100).map { image(20 + CGFloat($0 % 10) * 40, 20 + CGFloat($0 / 10) * 40, 30, 30) }
+        let grids = infer(root(cells), mode: .tidy).compactMap(structure).filter {
+            if case .grid = $0.kind { true } else { false }
+        }
+        #expect(grids.map(\.members.count) == [40, 40, 20])
+        #expect(Set(grids.flatMap(\.members)) == Set(cells.map(\.id)))
+    }
+
     // MARK: - A row the pass built, inside a column
 
     @Test func aPassBuiltRowInAColumnStillGrowsWithItsText() throws {

@@ -19,6 +19,8 @@ enum StructureConventions {
     static let gridLeastColumns = 2
     static let gridEdgeTolerance: CGFloat = 4
     static let gridCellSizeVariation = 0.2
+    /// The tree's own limit on a grid's columns (`TreeValidator`).
+    static let gridMostColumns = 12
     // Enclosure: the share of a thing that must lie inside a card's rectangle.
     static let enclosedShare = 0.9
     // Confidence bars.
@@ -31,6 +33,9 @@ enum StructureConventions {
     static let offerLifetime: Duration = .seconds(8)
     /// The builder's: a sibling this close to the neighbourhood joins it.
     static let reach: CGFloat = 48
+    /// The builder's: the grid search tries every grid among this many things at once at most, and among more, in
+    /// bands of this many across the container (plan 5, Task 10: tidying hundreds of things took seconds).
+    static let gridSearchedTogether = 64
     // Placement zones.
     /// Of the screen's width: how far from the middle still reads as centred.
     static let centredShare = 0.06

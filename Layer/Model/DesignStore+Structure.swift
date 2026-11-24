@@ -13,23 +13,39 @@ extension DesignStore {
     /// nodes.
     @discardableResult
     func build(_ structure: StructureInference.Structure) -> UUID? {
+        build([structure]).first
+    }
+
+    /// `build(_:)` for structures proposed in one parent, in order, in one change: each is built on what those before
+    /// it built, so that a column holds a row built just before it, and one that can't be built is left out. One change
+    /// lays the parent out once, where a change each laid it out once each: tidying a container of hundreds of things
+    /// builds dozens (Task 10). Returns the containers built: none when the parent isn't on a screen or the result
+    /// would pass depth 32 or 5,000 nodes. A structure proposed in another parent than the first's is left out.
+    @discardableResult
+    func build(_ structures: [StructureInference.Structure]) -> [UUID] {
+        guard let parentID = structures.first?.parent else { return [] }
         let index = index, tree = tree
-        guard let entry = index[structure.parent], case .screen(let screenID) = entry.host,
+        guard let entry = index[parentID], case .screen(let screenID) = entry.host,
               let screen = tree.screens.first(where: { $0.id == screenID }),
-              let parent = index.node(structure.parent, in: tree),
-              var built = StructureInference.applying(structure, to: parent) else { return nil }
-        let id = structure.container.id
-        if structure.kind != .cardColumn {
-            guard index[id] == nil, let slot = built.children.firstIndex(where: { $0.id == id }) else { return nil }
-            // The parent's own space to the screen's: through a card it lies in, turned or not.
-            let device = tree.device(of: screen)
-            built.children[slot].sketch = LayerNode.SketchIntent(
-                sketched: structure.container.frame.applying(entry.toHost), on: device.size, margin: device.margin,
-                confidence: structure.confidence, decidedBy: .structure)
+              var parent = index.node(parentID, in: tree) else { return [] }
+        let device = tree.device(of: screen)
+        var ids: [UUID] = []
+        for structure in structures where structure.parent == parentID {
+            guard var built = StructureInference.applying(structure, to: parent) else { continue }
+            let id = structure.container.id
+            if structure.kind != .cardColumn {
+                guard index[id] == nil, let slot = built.children.firstIndex(where: { $0.id == id }) else { continue }
+                // The parent's own space to the screen's: through a card it lies in, turned or not.
+                built.children[slot].sketch = LayerNode.SketchIntent(
+                    sketched: structure.container.frame.applying(entry.toHost), on: device.size, margin: device.margin,
+                    confidence: structure.confidence, decidedBy: .structure)
+            }
+            parent = built
+            ids.append(id)
         }
-        let made = built
-        guard reconcile(screenID, { $0.replaceNode(at: entry.path[...], with: made) }) else { return nil }
-        return self.index[id] != nil ? id : nil
+        let made = parent
+        guard !ids.isEmpty, reconcile(screenID, { $0.replaceNode(at: entry.path[...], with: made) }) else { return [] }
+        return ids.filter { self.index[$0] != nil }
     }
 
     /// Marks the pass's refusal on each (call 11): `structureDeclined`, so that it never takes them again. One with no
