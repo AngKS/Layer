@@ -345,9 +345,10 @@ final class CanvasDrags {
     @ObservationIgnored private var rule: Rule?
     /// A container a handle resizes, as the drag began: every frame resizes it from there.
     @ObservationIgnored private var groupPose: DesignStore.GroupPose?
-    /// Whether a handle resizes a thing a row, column, grid or overlay lays out: only the axes it changes are written,
-    /// fixed at their new sizes, and the engine places it (`resizeLaidOut`).
-    @ObservationIgnored private var resizesLaidOut = false
+    /// A thing a row, column, grid or overlay lays out, as a handle resizing it began: each frame writes only the axes it
+    /// changes from there, fixed at their new sizes, puts the others back as they were, and the engine places it
+    /// (`resizeLaidOut`).
+    @ObservationIgnored private var laidOutStart: LayerNode?
     /// The one thing a drag moves on its own, and how its host's points sit on the canvas, read from the tree as the
     /// drag began. Nil while several things are dragged together, and for a screen.
     @ObservationIgnored private var oneThing: (ref: DesignStore.ElementRef, placement: Placement)?
@@ -518,7 +519,7 @@ final class CanvasDrags {
         screenOrigin = nil
         groupOrigins = nil
         groupPose = nil
-        resizesLaidOut = false
+        laidOutStart = nil
         rule = nil
         oneThing = nil
         startBoxes = [:]
@@ -726,8 +727,8 @@ final class CanvasDrags {
                 if findsNewHome { startBoxes = Self.freeBoxes(round: ref.element, in: model.store) }
                 // Laid out, only its size is written, and the engine places it. A container's frame is the box round what
                 // is in it: they are resized, from where they were as the drag began, and the box is fitted round them.
-                resizesLaidOut = !findsNewHome && placed.isLaidOut
-                groupPose = !findsNewHome && !resizesLaidOut && placed.node.isContainer ? model.store.groupPose(of: ref) : nil
+                laidOutStart = !findsNewHome && placed.isLaidOut ? placed.node : nil
+                groupPose = !findsNewHome && laidOutStart == nil && placed.node.isContainer ? model.store.groupPose(of: ref) : nil
                 elementOrigin = groupPose?.box ?? placed.frame
                 rule = makeRule(placed)
             }
@@ -746,8 +747,8 @@ final class CanvasDrags {
         // Set only when it differs: each setting tells whatever draws the guides to draw again.
         if guidePlacement != placement { guidePlacement = placement }
         model.store.act(for: edit) {
-            if self.resizesLaidOut {
-                model.store.resizeLaidOut(ref.element, to: frame.size, from: elementOrigin.size)
+            if let laidOutStart = self.laidOutStart {
+                model.store.resizeLaidOut(ref.element, to: frame.size, from: laidOutStart)
             } else if let groupPose {
                 model.store.resizeGroup(ref, to: frame, from: groupPose)
             } else if self.findsNewHome {

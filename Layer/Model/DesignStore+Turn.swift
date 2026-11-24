@@ -7,6 +7,27 @@ import Foundation
 extension DesignStore {
     // MARK: Turning
 
+    /// Each node turned about its own middle to an angle on the canvas: its own angle that less its parent's summed
+    /// angle, as an element keeps one. Its middle can't move, so its frame is neither worked out again nor written: only
+    /// the angle is, and an angle it already has, as an element keeps one, leaves its own as it is. What a thing turned
+    /// alone, the Rotation field and turning each of several things on its own pivot write. One change; ids the design
+    /// doesn't have, a screen's root, and angles that aren't finite are passed over.
+    func setCanvasAngles(_ angles: [UUID: Double]) {
+        let memo = index, tree = tree
+        var writes: [(host: TreeIndex.Host, path: [Int], rotation: Double?)] = []
+        for (id, degrees) in angles where degrees.isFinite {
+            guard let entry = memo[id], !entry.path.isEmpty, let posed = memo.posed(id, in: tree) else { continue }
+            let angle = Rotation.kept(degrees - posed.parentSpace.degrees)
+            if Rotation.kept(posed.node.rotation ?? 0) != angle { writes.append((entry.host, entry.path, angle)) }
+        }
+        guard !writes.isEmpty else { return }
+        changeTree(writing: writes.count) { tree in
+            for write in writes {
+                tree.changeNode(on: write.host, at: write.path) { $0.rotation = write.rotation }
+            }
+        }
+    }
+
     /// Each node to its canvas pose: its centre through its parent's inverse transform, its angle less its parent's
     /// summed angle. A laid-out child takes the angle only. One change.
     ///
@@ -36,7 +57,10 @@ extension DesignStore {
             let rotation: Double?? = Rotation.kept(node.rotation ?? 0) == angle ? nil : .some(angle)
             var frame: CGRect?
             let isLaidOut = posed.parent.map { $0.resolvedLayout != .free } ?? false
-            let current = placement.canvasPoint(for: CGPoint(x: posed.frame.midX, y: posed.frame.midY))
+            // Worked out as a pose's centre is (`PlacedNode.canvasShape`), so that a centre that hasn't moved compares equal
+            // to the last bit.
+            let onCanvas = placement.canvasRect(for: posed.frame)
+            let current = CGPoint(x: onCanvas.midX, y: onCanvas.midY)
             if !isLaidOut, pose.centre != current {
                 let centre = placement.localPoint(for: pose.centre), size = posed.frame.size
                 var local = posed.parentSpace.local(of: CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
@@ -63,21 +87,29 @@ extension DesignStore {
 
     /// A laid-out child's handle: each axis whose size changed by more than 0.5 becomes `.fixed` at the new size.
     ///
-    /// Its origin is never written: the engine places it (plan 4, call 5). An axis changed by half a point or less is
-    /// left as it is, so that a finger's wobble across a handle dragged along the other doesn't fix it. One write; none
-    /// for a screen's root, an id the design doesn't have, or a size that isn't finite or is below zero.
-    func resizeLaidOut(_ id: UUID, to size: CGSize, from start: CGSize) {
+    /// `start` is the child as the handle's drag began, and each frame is worked out from it alone. An axis within half a
+    /// point of its start size is put back as it was then, its size and its sizing (fit, fill or fixed): a finger's wobble
+    /// across a handle dragged along the other axis doesn't fix it, and a handle brought back to where it began, however
+    /// fast, leaves the child as it was. Its origin is never written: the engine places it (plan 4, call 5). One write;
+    /// none for a screen's root, an id the design doesn't have, or a size that isn't finite or is below zero.
+    func resizeLaidOut(_ id: UUID, to size: CGSize, from start: LayerNode) {
         guard let entry = index[id], !entry.path.isEmpty, let node = index.node(id, in: tree),
               size.width.isFinite, size.height.isFinite, size.width >= 0, size.height >= 0 else { return }
-        let changesWidth = abs(size.width - start.width) > 0.5, changesHeight = abs(size.height - start.height) > 0.5
+        let begun = start.frame.size
         var resized = node
-        if changesWidth {
+        if abs(size.width - begun.width) > 0.5 {
             resized.width.mode = .fixed
             resized.frame.size.width = size.width
+        } else {
+            resized.width = start.width
+            resized.frame.size.width = begun.width
         }
-        if changesHeight {
+        if abs(size.height - begun.height) > 0.5 {
             resized.height.mode = .fixed
             resized.frame.size.height = size.height
+        } else {
+            resized.height = start.height
+            resized.frame.size.height = begun.height
         }
         guard resized != node else { return }
         let (width, height, frame) = (resized.width, resized.height, resized.frame)

@@ -56,10 +56,11 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
 }
 
 /// The box a free container that fits what it holds takes round `corners`, the corners of what it holds turned as they
-/// are, in its parent's points: turned to `degrees`, its own points starting at `origin`. Spec §4: its frame is on whole
-/// points of its own, so each side is taken out to the next whole point along its own axes, as the engine fits it (the
-/// hug in `LayoutEngine`), a thousandth of a point being a turn's rounding and no reason to take a whole point more. An
-/// upright frame in the parent's points, centred on the box's turned centre, as a turned element's frame is kept.
+/// are, in its parent's points: turned to `degrees`, its own points starting at `origin`. The engine's rule
+/// (`LayoutEngine.shapesBox`, with its `roundingError`): the box round what it holds is taken out to whole points of its
+/// own, each side to the next whole point along its own axes, a thousandth of a point being a turn's rounding and no
+/// reason to take a whole point more. An upright frame in the parent's points, centred on the box's turned centre, as a
+/// turned element's frame is kept.
 private func wholePointBox(round corners: [CGPoint], at degrees: Double, ownPointsFrom origin: CGPoint) -> CGRect {
     let turn = degrees * .pi / 180
     let across = CGVector(dx: cos(turn), dy: sin(turn)), down = CGVector(dx: -sin(turn), dy: cos(turn))
@@ -115,8 +116,8 @@ struct GroupModelTests {
         }
         let box = try #require(TurnedRect.enclosing(shapes, at: 30))
         let item = try #require(content.element(g))
-        // That box, taken out to whole points of the group's own (spec §4). Its own points start where its item was
-        // put: at the screen's origin, the frame of a new item being zero.
+        // That box, taken out to whole points of the group's own, by the engine's rule (`LayoutEngine.shapesBox`). Its own
+        // points start where its item was put: at the screen's origin, the frame of a new item being zero.
         let corners = box.corners.map(screen.placement.localPoint(for:))
         #expect(close(item.frame, wholePointBox(round: corners, at: 30, ownPointsFrom: .zero)))
         #expect(item.rotation == 30)
@@ -1930,8 +1931,9 @@ struct GroupGeometryTests {
             let now = try #require(board.frame(of: ref))
             #expect(abs(now.width - was.width * s) < 0.000_1 && abs(now.height - was.height * s) < 0.000_1)
         }
-        // Fitted round them again, the box is the one asked for, taken out to whole points of its own (spec §4): in
-        // proportion, with its top-left corner where it was on the canvas, where its own points start.
+        // Fitted round them again, the box is the one asked for, taken out to whole points of its own by the engine's rule
+        // (`LayoutEngine.shapesBox`): in proportion, with its top-left corner where it was on the canvas, where its own
+        // points start.
         let now = try #require(board.store.canvasShape(of: .element(g)))
         let shapes = try [board.b, board.d].map { ref in
             let element = try #require(board.store.element(ref.element))

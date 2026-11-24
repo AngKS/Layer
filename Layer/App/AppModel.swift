@@ -1964,9 +1964,9 @@ final class AppModel {
     }
 
     /// Turns one thing to `degrees` on the canvas, about its own middle, as one change: only its
-    /// angle is written, less the angles of what holds it.
+    /// angle is written, less the angles of what holds it (`DesignStore.setCanvasAngles`).
     private func setCanvasAngle(of placed: PlacedNode, to degrees: Double) {
-        store.setCanvasPoses([placed.ref.element: TurnSession.Pose(centre: placed.canvasShape.centre, degrees: degrees)])
+        store.setCanvasAngles([placed.ref.element: degrees])
     }
 
     /// What turns several things selected: the session kept from their last turn or move,
@@ -2199,12 +2199,9 @@ final class AppModel {
     /// a container as one piece, everything in it going round with it, as one selected alone
     /// turns, and a laid-out child in place. Only their angles are written.
     private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
-        var poses: [UUID: TurnSession.Pose] = [:]
-        for ref in refs {
-            guard let placed = store.placed(ref) else { continue }
-            poses[ref.element] = TurnSession.Pose(centre: placed.canvasShape.centre, degrees: degrees)
-        }
-        store.setCanvasPoses(poses)
+        var angles: [UUID: Double] = [:]
+        for ref in refs where store.placed(ref) != nil { angles[ref.element] = degrees }
+        store.setCanvasAngles(angles)
     }
 
     /// Puts several things where their session turned `degrees` places them, as one change,

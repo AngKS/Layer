@@ -52,9 +52,10 @@ private func screen(_ children: [LayerNode], origin: CGPoint = .zero, scale: CGF
     return screen
 }
 
-private func design(_ screens: [TreeScreen]) -> TreeContent {
+private func design(_ screens: [TreeScreen], canvas: [LayerNode] = []) -> TreeContent {
     var content = TreeContent()
     content.screens = screens
+    content.canvas = canvas
     return content
 }
 
@@ -88,6 +89,26 @@ private extension AppModel {
         beginTurn()
         for angle in degrees { turnSelection(by: angle, snaps: false) }
         endTurn()
+    }
+
+    /// Turns the one thing `id` on its own, through several angles and back to where it was: in one turn of the knob
+    /// that comes back round, and over several turns that add up to none. True when its own frame is exactly as it
+    /// was on every frame of it.
+    func turnAloneAndBack(_ id: UUID) throws -> Bool {
+        let frame = ownFrame(of: id)
+        var kept = true
+        selection = .element(try ref(id))
+        beginTurn()
+        for angle in [17.0, 133, 251, 0] {
+            turnSelection(by: angle, snaps: false)
+            kept = kept && ownFrame(of: id) == frame
+        }
+        endTurn()
+        for angle in [29.0, -73, 44] {
+            knobTurn(angle)
+            kept = kept && ownFrame(of: id) == frame
+        }
+        return kept
     }
 }
 
@@ -207,16 +228,93 @@ struct TurnAndResizeOnTheTreeTests {
         #expect(distance(try model.canvasCentre(of: a.id), centre) < 1e-9, "the member turned about its own middle")
     }
 
+    /// Fix round 1 (I1): turned alone about its own middle, a thing has only its angle written, so turned back it is
+    /// exactly as it was, wherever it is: here in a turned container on a screen drawn at (137.3, 59.9), seven tenths
+    /// of a point to each of its own, where its middle worked out two ways differs in its last bits.
+    @Test func aThingTurnedAloneInATurnedContainerComesBackExactly() throws {
+        let texts = [
+            leaf(.text, CGRect(x: 52, y: 29, width: 21, height: 49)),
+            leaf(.text, CGRect(x: 7, y: 61, width: 133, height: 27)),
+            leaf(.text, CGRect(x: 119, y: 3, width: 58, height: 17)),
+        ]
+        let g = container(frame: CGRect(x: 282, y: 128, width: 215, height: 109), turned: 46, texts)
+        let (model, _) = makeModel(design([screen([g], origin: CGPoint(x: 137.3, y: 59.9), scale: 0.7)]))
+        let before = model.store.tree
+
+        for id in texts.map(\.id) + [g.id] {
+            #expect(try model.turnAloneAndBack(id), "only the angle is written as it turns")
+        }
+
+        #expect(model.store.tree == before)
+    }
+
+    /// Fix round 1 (I1), for ink: a drawing, which goes exactly where it is put, off whole points on the open canvas
+    /// drawn at seven tenths (the rules keep drawings off screens), turned alone through several angles and back.
+    @Test func aDrawingTurnedAloneOnAScaledCanvasComesBackExactly() throws {
+        let frames = [
+            CGRect(x: 612.37, y: 288.91, width: 87.13, height: 41.77),
+            CGRect(x: 133.71, y: 47.29, width: 211.43, height: 96.07),
+            CGRect(x: 401.19, y: 503.83, width: 59.61, height: 140.33),
+        ]
+        let drawings = frames.map { frame -> LayerNode in
+            var drawing = LayerNode(kind: .drawing)
+            drawing.frame = frame
+            drawing.scale = 0.7
+            return drawing
+        }
+        let (model, _) = makeModel(design([], canvas: drawings))
+        let before = model.store.tree
+        #expect(model.store.index.placement(of: drawings[0].id, in: before) == Placement(origin: .zero, scale: 0.7))
+
+        for id in drawings.map(\.id) {
+            #expect(try model.turnAloneAndBack(id), "only the angle is written as it turns")
+        }
+
+        #expect(model.store.tree == before)
+    }
+
     // MARK: Resizing
+
+    /// Fix round 1 (I2): a laid-out child's handle flicked out 40 points and back to within 0.3 of where it began puts
+    /// that axis back as it was, its size and its sizing, fit included: each frame is worked out from the start alone.
+    @Test func aRowChildsHandleFlickedOutAndBackPutsItBackExactly() throws {
+        let (a, b, c) = (fittingText("First"), fittingText("Second"), fittingText("Third"))
+        let r = container(.group, row(), frame: CGRect(x: 20, y: 100, width: 0, height: 0), fits: true, [a, b, c])
+        let (model, _) = makeModel(design([screen([r])]))
+        let before = model.store.tree
+        let start = try #require(model.store.node(b.id))
+        #expect(start.frame.width > 40, "wider than a text's least width, so only the flick changes it")
+        let ref = try model.ref(b.id)
+        let drags = CanvasDrags()
+        model.drags = drags
+        let owner = CanvasDrags.Owner()
+        func drag(by width: CGFloat) {
+            drags.moveNode(ref, by: CGSize(width: width, height: 0), startingAt: CGPoint(x: 1, y: 1), findsNewHome: false,
+                           owner: owner, model: model) { placed in
+                CanvasDrags.resizeRule(for: placed.node.kind, degrees: placed.degrees, corner: .bottomRight)
+            }
+        }
+
+        drag(by: 40)
+        #expect(model.store.node(b.id)?.frame.width == start.frame.width + 40)
+        #expect(model.store.node(b.id)?.width.mode == .fixed)
+        drag(by: 0.3)
+        drags.dropElement(ref, findsNewHome: false, owner: owner, model: model)
+
+        #expect(model.store.node(b.id)?.width == start.width, "its sizing is as it was: fit")
+        #expect(model.store.node(b.id)?.frame.size == start.frame.size)
+        #expect(model.store.tree == before)
+    }
 
     @Test func resizingARowChildFixesOnlyTheAxisItChanged() throws {
         let (a, b, c) = (fittingText("One"), fittingText("Two"), fittingText("Three"))
         let r = container(.group, row(), frame: CGRect(x: 20, y: 100, width: 0, height: 0), fits: true, [a, b, c])
         let (model, undo) = makeModel(design([screen([r])]))
         let store = model.store
-        let start = try #require(store.node(b.id)).frame.size
+        let began = try #require(store.node(b.id))
+        let start = began.frame.size
 
-        store.resizeLaidOut(b.id, to: CGSize(width: start.width + 40, height: start.height), from: start)
+        store.resizeLaidOut(b.id, to: CGSize(width: start.width + 40, height: start.height), from: began)
 
         let resized = try #require(store.node(b.id))
         #expect(resized.width.mode == .fixed)
