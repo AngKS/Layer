@@ -349,3 +349,134 @@ enum FixtureGenerator {
         return out
     }
 }
+
+// MARK: Structure fixtures
+
+/// The structure pass's fixtures (plan 5 Task 8), in the corpus's style: things on the screen, then one batch of sketches
+/// drawn with `SketchSamples`' strokes, each base clean, then jittered or noisy by a seeded amount. The counts per
+/// variant are fixed: rows 3/3/2, columns 2/2/2, grids 2/2/2, cards 2/1/1, and eight near misses.
+enum StructureFixtureGenerator {
+    private typealias Sketch = [[CGPoint]]
+
+    private struct Base {
+        var existing: [SketchFixture.ExistingFixture] = []
+        var sketches: [Sketch]
+        var label: String
+        var expected: String
+    }
+
+    private static func thing(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat,
+                              locked: Bool? = nil) -> SketchFixture.ExistingFixture {
+        .init(kind: kind, frame: [x, y, width, height], locked: locked)
+    }
+
+    private static func image(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> Sketch {
+        let rect = CGRect(x: x, y: y, width: width, height: height)
+        return [SketchSamples.box(rect, radius: 12)] + SketchSamples.cross(rect)
+    }
+
+    private static func field(_ x: CGFloat, _ y: CGFloat) -> Sketch {
+        [SketchSamples.box(CGRect(x: x, y: y, width: 330, height: 44), radius: 2)]
+    }
+
+    private static func line(_ x: CGFloat, _ y: CGFloat, width: CGFloat = 290) -> Sketch {
+        [SketchSamples.wave(CGRect(x: x, y: y, width: width, height: 28), humps: 8)]
+    }
+
+    private static func avatar(_ x: CGFloat, _ y: CGFloat) -> Sketch {
+        [SketchSamples.circle(center: CGPoint(x: x, y: y), radius: 30)]
+    }
+
+    private static func toggle(_ x: CGFloat, _ y: CGFloat) -> Sketch {
+        [SketchSamples.box(CGRect(x: x, y: y, width: 64, height: 30), radius: 15),
+         SketchSamples.circle(center: CGPoint(x: x + 49, y: y + 15), radius: 11)]
+    }
+
+    private static func outline(_ rect: CGRect) -> Sketch {
+        [SketchSamples.box(rect, radius: 16)]
+    }
+
+    private static func structureFixture(_ id: String, _ variant: StructureFixture.Variant, _ base: Base,
+                                         jitter: CGFloat = 0, seed: UInt64 = 0) -> StructureFixture {
+        let sketches = base.sketches.enumerated().map { index, paths in
+            jitter == 0 ? paths : paths.seededJitter(amount: jitter, seed: seed &+ UInt64(index))
+        }
+        return StructureFixture(
+            id: "structure-\(id)", label: base.label, variant: variant,
+            screenSize: [iPhone.width, iPhone.height], existing: base.existing,
+            sketches: sketches.map { $0.map { $0.map { [$0.x, $0.y] } } }, expected: base.expected
+        )
+    }
+
+    static func all() -> [StructureFixture] {
+        var out: [StructureFixture] = []
+        var seed: UInt64 = 1000
+
+        func add(_ name: String, _ bases: [Base], jittered: [Int], noisy: [Int]) {
+            for (index, base) in bases.enumerated() {
+                out.append(structureFixture("\(name)_clean_\(index + 1)", .clean, base))
+            }
+            for index in jittered {
+                seed += 10
+                out.append(structureFixture("\(name)_jittered_\(index + 1)", .jittered, bases[index], jitter: 1.5, seed: seed))
+            }
+            for index in noisy {
+                seed += 10
+                out.append(structureFixture("\(name)_noisy_\(index + 1)", .noisy, bases[index], jitter: 4.5, seed: seed))
+            }
+        }
+
+        add("row", [
+            Base(existing: [thing(.text, 150, 300, 130, 24)], sketches: [toggle(300, 296)], label: "row", expected: "apply"),
+            Base(sketches: [image(20, 300, 160, 120), image(200, 300, 160, 120)], label: "row", expected: "apply"),
+            Base(sketches: [avatar(100, 330), avatar(180, 330), avatar(260, 330)], label: "row", expected: "apply"),
+        ], jittered: [0, 1, 2], noisy: [0, 1])
+
+        add("column", [
+            Base(sketches: [field(30, 200), field(30, 264), field(30, 328)], label: "column", expected: "apply"),
+            Base(sketches: [line(52, 200), line(52, 278), line(52, 356), line(52, 434)], label: "column", expected: "apply"),
+        ], jittered: [0, 1], noisy: [0, 1])
+
+        add("grid", [
+            Base(sketches: [image(20, 200, 160, 120), image(200, 200, 160, 120),
+                            image(20, 340, 160, 120), image(200, 340, 160, 120)], label: "grid", expected: "apply"),
+            Base(sketches: [image(20, 150, 160, 100), image(200, 150, 160, 100), image(20, 270, 160, 100),
+                            image(200, 270, 160, 100), image(20, 390, 160, 100), image(200, 390, 160, 100)],
+                 label: "grid", expected: "apply"),
+        ], jittered: [0, 1], noisy: [0, 1])
+
+        add("card", [
+            Base(existing: [thing(.title, 96, 120, 200, 40), thing(.body, 20, 170, 353, 40)],
+                 sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 130))], label: "card", expected: "none"),
+            Base(existing: [thing(.text, 30, 120, 300, 24), thing(.text, 30, 156, 300, 24), thing(.text, 30, 192, 300, 24)],
+                 sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 140))], label: "card", expected: "apply"),
+        ], jittered: [0], noisy: [1])
+
+        func near(_ name: String, _ base: Base) {
+            var base = base
+            base.label = "none"
+            base.expected = "none"
+            out.append(structureFixture("near_\(name)", .nearMiss, base))
+        }
+        near("title_above_button", Base(existing: [thing(.title, 96, 120, 200, 40)],
+                                        sketches: [[SketchSamples.box(CGRect(x: 28, y: 280, width: 337, height: 60), radius: 30)]],
+                                        label: "", expected: ""))
+        near("two_things_40_apart", Base(existing: [thing(.image, 230, 300, 130, 120)],
+                                         sketches: [image(20, 300, 140, 120)], label: "", expected: ""))
+        near("heights_2_5_apart", Base(existing: [thing(.image, 20, 300, 100, 150)],
+                                       sketches: [avatar(162, 375)], label: "", expected: ""))
+        near("locked_divider_between_texts", Base(
+            existing: [thing(.body, 48, 100, 297, 44), thing(.body, 48, 176, 297, 44), thing(.divider, 48, 252, 297, 1, locked: true)],
+            sketches: [[SketchSamples.wave(CGRect(x: 52, y: 293, width: 290, height: 28), humps: 8)]], label: "", expected: ""))
+        near("an_L_of_three_images", Base(existing: [thing(.image, 20, 200, 160, 120), thing(.image, 200, 200, 160, 120)],
+                                          sketches: [image(20, 340, 160, 120)], label: "", expected: ""))
+        near("column_edge_6_off", Base(existing: [thing(.image, 22, 180, 160, 120), thing(.image, 28, 452, 160, 120)],
+                                       sketches: [image(22, 316, 160, 120)], label: "", expected: ""))
+        near("outline_half_over_a_text", Base(existing: [thing(.text, 30, 215, 300, 40)],
+                                              sketches: [outline(CGRect(x: 10, y: 100, width: 373, height: 130))],
+                                              label: "", expected: ""))
+        near("a_lone_text", Base(sketches: [[SketchSamples.wave(CGRect(x: 100, y: 300, width: 160, height: 24), humps: 6)]],
+                                 label: "", expected: ""))
+        return out
+    }
+}

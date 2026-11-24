@@ -3,9 +3,10 @@ import Foundation
 
 // A stand-in for `TurnedRect` (Layer/Model/Rotation.swift), which the tree's records, index,
 // edits and layout use, and for the `Rotation.rotate` it turns its corners with. The real file
-// also turns rects for the canvas (`ElementLayout.Corner`, `Viewport`), which needs much of the
-// app's model. What is here is copied from it unchanged, less `corner(_:)` and the `Viewport`
-// extension; keep it in step with Rotation.swift.
+// also turns rects for the canvas (`Viewport`), which needs much of the app's model. What is
+// here is copied from it unchanged, less the `Viewport` extension; keep it in step with
+// Rotation.swift. `corner(_:)` and `DesignElement.shapeBounds` are copied too, for ElementLayout.swift,
+// so a harness that uses this file compiles it.
 extension Rotation {
     /// The point turned clockwise on screen about `centre`.
     static func rotate(_ point: CGPoint, about centre: CGPoint, by degrees: Double) -> CGPoint {
@@ -29,6 +30,15 @@ struct TurnedRect: Equatable, Sendable {
         [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
          CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY)]
             .map { Rotation.rotate($0, about: centre, by: degrees) }
+    }
+
+    func corner(_ corner: ElementLayout.Corner) -> CGPoint {
+        switch corner {
+        case .topLeft: corners[0]
+        case .topRight: corners[1]
+        case .bottomRight: corners[2]
+        case .bottomLeft: corners[3]
+        }
     }
 
     /// The upright box round the turned one.
@@ -70,4 +80,12 @@ struct TurnedRect: Equatable, Sendable {
         let rect = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         return TurnedRect(rect: rect, degrees: degrees)
     }
+}
+
+extension DesignElement {
+    /// How far it is turned, 0 when upright.
+    var resolvedRotation: Double { rotation ?? 0 }
+
+    /// The upright box round the turned frame, in its host's points. The frame itself when upright.
+    var shapeBounds: CGRect { TurnedRect(rect: frame, degrees: resolvedRotation).bounds }
 }

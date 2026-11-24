@@ -5,7 +5,7 @@
 # `Layer/Sketch` files for macOS with stubs for the two UIKit/PencilKit-only types they
 # transitively need.
 #
-# Usage: Tools/SketchBenchmarkHarness/run.sh <generate|run|check|healthcheck> [args...]
+# Usage: Tools/SketchBenchmarkHarness/run.sh <generate|run|check|structure|healthcheck> [args...]
 set -eu
 cd "$(dirname "$0")/../.."
 REPO_ROOT="$(pwd)"
@@ -24,6 +24,9 @@ swiftc \
     "$REPO_ROOT/Layer/Document/JSONValue.swift" \
     "$REPO_ROOT/Layer/Debug/SketchSamples.swift" \
     "$REPO_ROOT/Layer/Debug/SketchBenchmark.swift" \
+    "$REPO_ROOT/Layer/Debug/StructureBenchmark.swift" \
+    "$REPO_ROOT/Layer/Model/ElementLayout.swift" \
+    "$REPO_ROOT/Layer/Sketch/SketchedNode.swift" \
     "$REPO_ROOT/Layer/Sketch/PromptOverrides.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchAnalyzer.swift" \
     "$REPO_ROOT/Layer/Sketch/SketchInterpreter.swift" \
