@@ -23,8 +23,6 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -p "$R"/Layer/Tree/*.swift "$R"/Layer/A2UI/*.swift "$STAGE/"
 cp -p "$R/Layer/Model/Design.swift" "$R/Layer/Model/ShapeKind.swift" "$STAGE/"
-# Design.swift's screens keep a ScreenDrawing.
-if [ -f "$R/Layer/Model/Projection/ScreenDrawing.swift" ]; then cp -p "$R/Layer/Model/Projection/ScreenDrawing.swift" "$STAGE/"; fi
 cp -p "$R/Layer/Components/ComponentSpec.swift" "$R/Layer/Components/Catalogue.swift" "$STAGE/"
 cp -p "$R/Layer/Document/JSONValue.swift" "$STAGE/"
 cp -p "$R/Layer/Sketch/PromptOverrides.swift" "$R/Layer/Sketch/ScreenPrompt.swift" \

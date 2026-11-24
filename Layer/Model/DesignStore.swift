@@ -185,10 +185,19 @@ final class DesignStore {
         }
     }
 
-    /// The area everything in the design covers, or nil for an empty design. A turned loose
-    /// element covers the box round its turned shape.
+    /// The area everything in the design covers, or nil for an empty design: each screen with its name, and the
+    /// shape of every node on the open canvas as the index has it. A turned one covers the box round its turned shape.
     var contentBounds: CGRect? {
-        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map { $0.placement.canvasRect(for: $0.element.shapeBounds) }
+        let tree = tree, index = index
+        var rects = tree.screens.map { screen in
+            let device = tree.device(of: screen)
+            return screen.canvasFrame(on: device).union(screen.labelFrame(on: device))
+        }
+        func cover(_ node: LayerNode) {
+            if let shape = index.canvasShape(of: node.id, in: tree) { rects.append(shape.bounds) }
+            node.children.forEach(cover)
+        }
+        tree.canvas.forEach(cover)
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
