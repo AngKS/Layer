@@ -223,18 +223,27 @@ final class DesignStore {
         return screen
     }
 
-    /// Adds an element where it was sketched. Returns nil if the screen no longer exists.
-    /// `adjust` finishes the element before it is added, in the same undoable step.
+    // PROJECTION: deleted in plan 6
+    /// Adds an element where it was sketched on a screen: `addSketched`, as the rules read it with confidence 1 (F27).
+    /// It lands where its centre is on the screen, laid out there, and remembers its sketch. `adjust` finishes the
+    /// element before it is added, in the same undoable step. Returns it as it is kept, or nil when the screen no longer
+    /// exists, the sketch's centre isn't on it (it is the topmost screen there), or the design can't hold another thing.
     @discardableResult
     func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
-        guard let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements, tokens: canvas.tokens)
-        adjust(&element)
-        return add(element, to: screenID)
+        guard self.screenID(under: sketch) == screenID else { return nil }
+        let added = addSketched(kind, from: sketch, confidence: 1, decidedBy: .rules) { node in
+            let shown = DesignElement(node: node, frame: node.frame, rotation: node.rotation, parent: screenID, scale: nil, group: nil)
+            var element = shown
+            adjust(&element)
+            node.take(element, shown: shown)
+        }
+        return added.flatMap { element($0) }
     }
 
-    /// The element a sketch drawn on a screen stands for, laid out among `others` there. A title drawn small or
-    /// large carries its size as its own font size, so that it is drawn and written at it (`sketchedTitleSize`).
+    // PROJECTION: deleted in plan 6
+    /// The element a sketch drawn on a screen stands for, laid out among `others` there, for today's `changeKind` until it
+    /// re-lays the node from its own sketch (F1). A title drawn small or large carries its size as its own font size, so
+    /// that it is drawn and written at it (`sketchedTitleSize`).
     private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement],
                                         tokens: DesignTokens) -> DesignElement {
         let existing = others.filter { !$0.isHidden }

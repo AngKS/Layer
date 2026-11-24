@@ -2690,12 +2690,15 @@ final class AppModel {
         let bounds = observation.bounds.applying(CGAffineTransform(scaleX: 1 / zoom, y: 1 / zoom))
         let canvasStrokes = group.map { $0.points.map { CGPoint(x: $0.x / zoom, y: $0.y / zoom) } }
 
-        let host = store.screen(under: bounds)
+        // The screen and what is on it, read from the tree.
+        let host = store.screenID(under: bounds).flatMap { id in
+            store.treeScreen(id).flatMap { screen in store.device(of: id).map { (screen: screen, device: $0) } }
+        }
         let placement: SketchPlacement = if let host {
             .onScreen(
-                local: host.localRect(for: bounds),
-                existing: host.elements.map { ExistingElement(kind: $0.kind, frame: $0.frame) },
-                size: host.size
+                local: host.screen.placement.localRect(for: bounds),
+                existing: store.sketchNeighbours(on: host.screen.id),
+                size: host.device.size
             )
         } else {
             .openCanvas
@@ -2704,7 +2707,8 @@ final class AppModel {
 
         var band: CGRect?
         if let host, !observation.form.isEnclosure, request.candidates != [.scratchOut] {
-            band = CGRect(x: host.canvasFrame.minX, y: bounds.midY, width: host.canvasFrame.width, height: 0)
+            let frame = host.screen.canvasFrame(on: host.device)
+            band = CGRect(x: frame.minX, y: bounds.midY, width: frame.width, height: 0)
         }
         let effect = RetraceEffect(strokes: canvasStrokes, band: band)
         withAnimation(.easeOut(duration: 0.2)) { effects.append(effect) }
@@ -2743,20 +2747,29 @@ final class AppModel {
                     _ = store.addScreen(from: bounds)
                     converted = true
                 case .element(let kind):
-                    if let host {
-                        if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {
+                    if host != nil {
+                        // Where it lands, laid out there, remembering its sketch and its reading. A design that can't
+                        // hold another thing leaves the sketch unread (F9).
+                        if let id = store.addSketched(kind, from: bounds, confidence: outcome.confidence, decidedBy: outcome.decidedBy,
+                                                      adjust: { $0.adoptMarks(of: observation) }) {
                             converted = true
-                            added = .init(host: .screen(host.id), element: element.id)
+                            added = store.ref(of: id)
                         }
                     } else if !kind.belongsOnScreens || kind == .text {
-                        added = store.addFloating(kind, from: bounds)
+                        let floating = store.addFloating(kind, from: bounds)
+                        // On the open canvas it remembers the sketch's canvas bounds, and no screen.
+                        store.update(floating.element) {
+                            $0.sketch = LayerNode.SketchIntent(sketched: bounds, on: nil, margin: 0,
+                                                               confidence: outcome.confidence, decidedBy: outcome.decidedBy)
+                        }
+                        added = floating
                         converted = true
                     }
                     if let added, let readingLogID {
                         Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
                     }
-                    if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
-                        store.update(added) { $0.text = recognizedText }
+                    if let added, let recognizedText, store.node(added.element)?.kind.hasText == true {
+                        store.update(added.element) { $0.content.text = recognizedText }
                     }
                     // A close call says what else it nearly was, in case that is what was meant.
                     if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
@@ -2769,8 +2782,8 @@ final class AppModel {
                 // Words the prompt gave for the element go on it, and a drawing read on request
                 // ends with what it became selected.
                 if let added, isDrawing {
-                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.resolve(added)?.element.kind.hasText == true {
-                        store.update(added) { $0.text = label }
+                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.node(added.element)?.kind.hasText == true {
+                        store.update(added.element) { $0.content.text = label }
                     }
                     selection = .element(added)
                 }

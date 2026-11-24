@@ -98,6 +98,28 @@ extension DesignElement {
     /// toggle's knob is at, whether a checkbox is ticked or a radio button has its dot,
     /// and how far a progress bar is shaded.
     mutating func adoptMarks(of observation: SketchObservation) {
+        let marks = SketchMarks(of: observation, for: kind)
+        if let on = marks.isOn { isOn = on }
+        if let shaded = marks.value { value = shaded }
+    }
+}
+
+extension LayerNode {
+    /// Takes what the marks inside an outline say about the node drawn, into its `content`: which end a toggle's knob is
+    /// at, whether a checkbox is ticked or a radio button has its dot, and how far a progress bar is shaded.
+    mutating func adoptMarks(of observation: SketchObservation) {
+        let marks = SketchMarks(of: observation, for: kind)
+        if let on = marks.isOn { content.isOn = on }
+        if let shaded = marks.value { content.value = shaded }
+    }
+}
+
+/// What the marks inside an outline say about a thing of `kind`: nil for what they say nothing of.
+private struct SketchMarks {
+    var isOn: Bool?
+    var value: Double?
+
+    init(of observation: SketchObservation, for kind: ElementKind) {
         guard case .enclosure(_, let inner) = observation.form, let marks = kind.spec.marks else { return }
         switch marks {
         case .knob:

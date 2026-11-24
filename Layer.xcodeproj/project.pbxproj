@@ -57,6 +57,7 @@
 		1F855C838C62373BB478BB08 /* VoiceDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DFE92C5BAAA58E0F2C8D526 /* VoiceDemo.swift */; };
 		2007659530D48618A76CFEBE /* profile-exact.swift.txt in Resources */ = {isa = PBXBuildFile; fileRef = F588178437828A50F852BEB5 /* profile-exact.swift.txt */; };
 		205FDC75C154A267402228D7 /* scratchOut_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 533F5E84767AE57833313771 /* scratchOut_jittered_1b.json */; };
+		21AE4FEBA4967DA915E65CFD /* SketchLanding.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF87173F54414F107E22EE9 /* SketchLanding.swift */; };
 		221A4331423E9F3874703254 /* ComponentRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A818B62756FBDE5EADAD1391 /* ComponentRule.swift */; };
 		2224E654D382FEC9C8CE47F5 /* radio_jittered_2a.json in Resources */ = {isa = PBXBuildFile; fileRef = C9CBBF0FBECCD252AE3E5B57 /* radio_jittered_2a.json */; };
 		2314A276D861B33A8F93F64F /* screen_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 3820232F948FDC753B7FCA84 /* screen_jittered_1a.json */; };
@@ -86,6 +87,7 @@
 		35BB7EB90390F01051DB1512 /* ComponentKinds.txt in Resources */ = {isa = PBXBuildFile; fileRef = D2D0F87EC6767B4EAD18470F /* ComponentKinds.txt */; };
 		35D24ECB092A0944D88AD577 /* ShareA2UIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F8FE73B6F1600F4471A90F /* ShareA2UIUITests.swift */; };
 		35E631087D51BB9F8DC1355F /* LayerEntities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B7F6B0BD58C2E5DA1D3D045 /* LayerEntities.swift */; };
+		36C1732D99481F706B6D9B78 /* SketchedNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65C984B2557BA67C651E9EE6 /* SketchedNode.swift */; };
 		3744BB7E1670851558AFE7B1 /* toggle_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 8CA71CEDBBD286B0C46D1361 /* toggle_noisy_2.json */; };
 		374BE98537B2BFCF7DD9A4BF /* SeveralThings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF33233009DAC3F3377B7B9B /* SeveralThings.swift */; };
 		37DB86035757431435936D9E /* toggle_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 668450F113C2467B09C2359A /* toggle_clean_2.json */; };
@@ -118,7 +120,9 @@
 		40DEEBF94B3D311133FFB68A /* TreeValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CD74B1AA8568D6868C290E /* TreeValidatorTests.swift */; };
 		42145175EFDE7E91C4F28249 /* NaturalSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16077A6A0599161263162A2 /* NaturalSize.swift */; };
 		42552151F70C3DD69852E3C0 /* CanvasScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D959168FAD665881CBAC9CD /* CanvasScreen.swift */; };
+		42EF53EA040B37FD324CA630 /* DesignStore+Sketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F3B794B664EB7960F939CD /* DesignStore+Sketch.swift */; };
 		434B90326EFB2DFD30C5DD7B /* textField_jittered_2b.json in Resources */ = {isa = PBXBuildFile; fileRef = EB4B972000CD48B0ADB8FD5A /* textField_jittered_2b.json */; };
+		43E8EC442E1CB8BAFCD3A31D /* SketchLandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD865A99EE27DF1EF541DF34 /* SketchLandingTests.swift */; };
 		43F8DBB1F69FE485F97B8BB9 /* Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBD93B0C0FF150B941E6741 /* Groups.swift */; };
 		44D55DFCF60BDA3E845463C7 /* button_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = CE58FFC7CA0721F21D766C10 /* button_clean_2.json */; };
 		45FDA81239342F017A20D462 /* progress_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 9055A81B6CD8E98592D9BC27 /* progress_noisy_1.json */; };
@@ -261,6 +265,7 @@
 		93E569B6431C568429C742A3 /* stickyNote_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 807E021B6A5C95E3E3B01891 /* stickyNote_noisy_1.json */; };
 		93FCDDD220E6599994A390AC /* divider_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 29F8C2525F9DB616AB0A57D1 /* divider_noisy_2.json */; };
 		9562FC7E12CE0D747B4C79D7 /* divider_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = C729E511A28042897902A214 /* divider_jittered_1b.json */; };
+		96D33B28B75FF2060CB34E99 /* SketchToNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D965F8A060CF60574CBFCC /* SketchToNodeTests.swift */; };
 		97A18DA4377B4957B2AD91E0 /* stickyNote_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 25AB0AA8BC013810EEFF269C /* stickyNote_jittered_1b.json */; };
 		97E531FFF54608A8F07C1E1D /* toggle_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 94C51370C1EF3A2B51195487 /* toggle_clean_1.json */; };
 		989F96908DC7BE1A5B4BDBA0 /* avatar_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 79B8A40EF02A85E637D35B6F /* avatar_clean_1.json */; };
@@ -515,6 +520,7 @@
 		06D49AD82D01E044088BBFA0 /* TreeContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeContent.swift; sourceTree = "<group>"; };
 		070053D99B0A7C97A3F03527 /* DrawingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTests.swift; sourceTree = "<group>"; };
 		0836F6346DA257E439EE7077 /* DictationRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationRouteTests.swift; sourceTree = "<group>"; };
+		08F3B794B664EB7960F939CD /* DesignStore+Sketch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignStore+Sketch.swift"; sourceTree = "<group>"; };
 		098FF6A3CD1011FAE07CB421 /* A2UIPackageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A2UIPackageTests.swift; sourceTree = "<group>"; };
 		0A0B6B7A0ED0DDEA89AEDE71 /* body_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_jittered_1a.json; sourceTree = "<group>"; };
 		0AA9B8CAA3E00D4460CB6213 /* screen_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = screen_jittered_2b.json; sourceTree = "<group>"; };
@@ -676,6 +682,7 @@
 		648F8E45F2B97A3BBAE52BAC /* design-profile.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "design-profile.json"; sourceTree = "<group>"; };
 		64B6362E744A11D2855E4335 /* radio_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = radio_noisy_2.json; sourceTree = "<group>"; };
 		6507A2CA2C335F8AF0345681 /* LayoutEngineFreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutEngineFreeTests.swift; sourceTree = "<group>"; };
+		65C984B2557BA67C651E9EE6 /* SketchedNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchedNode.swift; sourceTree = "<group>"; };
 		65F5F078306FE99EF1BB61AC /* SqueezeRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqueezeRouter.swift; sourceTree = "<group>"; };
 		665316E28E82F4A8C66AAB93 /* TreeReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeReconciler.swift; sourceTree = "<group>"; };
 		666C306910A1813C3D3D54BA /* progress_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_clean_1.json; sourceTree = "<group>"; };
@@ -797,6 +804,7 @@
 		AC17B009FF499090B9EFC578 /* checkbox_radio_radio_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_radio_3.json; sourceTree = "<group>"; };
 		AC2B71D39A49D089D6CA6D09 /* ScreenGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGenerator.swift; sourceTree = "<group>"; };
 		ACCF34B883E75964E9662547 /* progress_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = progress_noisy_2.json; sourceTree = "<group>"; };
+		AD865A99EE27DF1EF541DF34 /* SketchLandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchLandingTests.swift; sourceTree = "<group>"; };
 		ADBED814500825C7C9D467D7 /* VoiceAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgent.swift; sourceTree = "<group>"; };
 		ADE68211AABB6C9194FC62B8 /* TestWindows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestWindows.swift; sourceTree = "<group>"; };
 		AE20ECAF7534512F2EE03E44 /* GlyphMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphMatcher.swift; sourceTree = "<group>"; };
@@ -878,6 +886,7 @@
 		DBB42DA7B4B37DE827C65D44 /* ElementStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementStyle.swift; sourceTree = "<group>"; };
 		DBBBA926AD691E78D35E35C3 /* toggle_progress_progress_4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_progress_progress_4.json; sourceTree = "<group>"; };
 		DBC34B46661E4E975767AA7C /* CanvasHitTestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasHitTestTests.swift; sourceTree = "<group>"; };
+		DBF87173F54414F107E22EE9 /* SketchLanding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchLanding.swift; sourceTree = "<group>"; };
 		DD077F4F9A58B91E3DA0DCA1 /* avatar_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_noisy_2.json; sourceTree = "<group>"; };
 		DD31923B0188C018D7E2B875 /* GlyphTemplates.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = GlyphTemplates.json; sourceTree = "<group>"; };
 		DD3EE90A8924556916515556 /* divider_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_1a.json; sourceTree = "<group>"; };
@@ -940,6 +949,7 @@
 		F5D4F2761354FA99E453EBDB /* ScreenTidyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTidyTests.swift; sourceTree = "<group>"; };
 		F6FDB63AA9578320CE8896F4 /* title_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = title_jittered_1b.json; sourceTree = "<group>"; };
 		F72475F0E5ED37E3D2AE6287 /* LayoutDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutDrag.swift; sourceTree = "<group>"; };
+		F7D965F8A060CF60574CBFCC /* SketchToNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchToNodeTests.swift; sourceTree = "<group>"; };
 		F9668A83B61816A59A8CA63B /* unknown_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_clean_1.json; sourceTree = "<group>"; };
 		F98C9E2716B2EF27233D67D3 /* GeneratedCommitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedCommitTests.swift; sourceTree = "<group>"; };
 		FA0088127F1C2F44AF204829 /* VoiceCallTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallTests.swift; sourceTree = "<group>"; };
@@ -1011,6 +1021,7 @@
 				D16077A6A0599161263162A2 /* NaturalSize.swift */,
 				EB676264DEDBAE71CFCC6657 /* Outline.swift */,
 				DE0635EBB9749D38BC2D159B /* SketchIntent+Making.swift */,
+				DBF87173F54414F107E22EE9 /* SketchLanding.swift */,
 				CB39AEC21750D67EFC746A19 /* StructureConventions.swift */,
 				18789C9F4BC13625FB7BA14C /* StructureInference.swift */,
 				CF88529E7753C026EC47961F /* TextMeasure.swift */,
@@ -1130,6 +1141,7 @@
 				DF800BC07BBBF3367FD33C86 /* DesignStore.swift */,
 				EB68A118D9B886C61C86A1E8 /* DesignStore+Canvas.swift */,
 				9B559EBCECC4B4A549888D77 /* DesignStore+Generated.swift */,
+				08F3B794B664EB7960F939CD /* DesignStore+Sketch.swift */,
 				7690513B1180CEAFB853B117 /* DesignStore+Tree.swift */,
 				21E425BB63DD6A2017EA6A99 /* ElementLayout.swift */,
 				DBB42DA7B4B37DE827C65D44 /* ElementStyle.swift */,
@@ -1299,7 +1311,9 @@
 				DFEFB654B701753D17A905FE /* SiriIntentsTests.swift */,
 				73904A9517CA25EB858FAB2E /* SketchBenchmarkTests.swift */,
 				710DE5C1A2D22213DD36940A /* SketchIntentTests.swift */,
+				AD865A99EE27DF1EF541DF34 /* SketchLandingTests.swift */,
 				901F1846A502515BC823177E /* SketchReadingTests.swift */,
+				F7D965F8A060CF60574CBFCC /* SketchToNodeTests.swift */,
 				4A962BE1E5650EE6BBE4353A /* StoreChangeBenchmarkTests.swift */,
 				830C87645559A3E97F3635A7 /* StoreChangeBudgetTests.swift */,
 				1258B3BDFAA25BD9B54AA293 /* StoreOnTheTreeTests.swift */,
@@ -1353,6 +1367,7 @@
 				3E0900921ACCCC6C81E0525B /* ScreenStream.swift */,
 				E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */,
 				0F296EF7BB53596E9E6D60C7 /* SketchContextTool.swift */,
+				65C984B2557BA67C651E9EE6 /* SketchedNode.swift */,
 				3A834F3E5C52B77D1C250633 /* SketchEngine.swift */,
 				1E5D745E1FC169922426572F /* SketchInterpreter.swift */,
 				E5A7ADBEF98DF15132A6734D /* SketchReadingLog.swift */,
@@ -2065,7 +2080,9 @@
 				CF9F3B8C3003209A64C3249C /* SiriIntentsTests.swift in Sources */,
 				08E0CD9CF360324C85308E0E /* SketchBenchmarkTests.swift in Sources */,
 				625DC8226DFB7C061FEE8D4D /* SketchIntentTests.swift in Sources */,
+				43E8EC442E1CB8BAFCD3A31D /* SketchLandingTests.swift in Sources */,
 				FC981E1B7FA5148E088267A3 /* SketchReadingTests.swift in Sources */,
+				96D33B28B75FF2060CB34E99 /* SketchToNodeTests.swift in Sources */,
 				832AD4D4BB253C9414A51BA8 /* SketchedTitles.swift in Sources */,
 				3ADBD180BF1084006ED26272 /* StoreChangeBenchmarkTests.swift in Sources */,
 				743E435B90CFAA4F466D31CB /* StoreChangeBudgetTests.swift in Sources */,
@@ -2145,6 +2162,7 @@
 				1EED872311885B75B533D509 /* DesignPackage.swift in Sources */,
 				A87A6F0083DAD1658E627C7C /* DesignStore+Canvas.swift in Sources */,
 				653A775C78B1E62BA29F8033 /* DesignStore+Generated.swift in Sources */,
+				42EF53EA040B37FD324CA630 /* DesignStore+Sketch.swift in Sources */,
 				342E3F9FB8213F728B6C5D43 /* DesignStore+Tree.swift in Sources */,
 				8C8EA3739AA081F61BFB53E1 /* DesignStore.swift in Sources */,
 				FCEA447A925B131EF555F774 /* DesignTokens.swift in Sources */,
@@ -2226,8 +2244,10 @@
 				3F74BB724FD5F672444FF466 /* SketchEngine.swift in Sources */,
 				CA50927BD1C83B3DABB19186 /* SketchIntent+Making.swift in Sources */,
 				A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */,
+				21AE4FEBA4967DA915E65CFD /* SketchLanding.swift in Sources */,
 				B269981D9C7109BFC6A2AF76 /* SketchReadingLog.swift in Sources */,
 				74833BAB3D92098463F2D27E /* SketchSamples.swift in Sources */,
+				36C1732D99481F706B6D9B78 /* SketchedNode.swift in Sources */,
 				9F8BF1DFAE11054324BAF75B /* SqueezeRouter.swift in Sources */,
 				512F22D4F134B55390076E7D /* StatusChrome.swift in Sources */,
 				BC7071F7DCC1454ABF783A72 /* StrokeScript.swift in Sources */,
