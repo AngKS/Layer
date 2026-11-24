@@ -17,6 +17,185 @@ import Testing
         #expect(A2UIPrompt.instructions(for: Self.brief) == Self.a2ui)
     }
 
+    /// Every example either prompt can show, word for word, with what picks it: a change to one changes a measured
+    /// prompt, so it needs a harness run too.
+    @Test func theExamplesAreUnchanged() {
+        #expect(ScreenPrompt.library.map(\.name) == Self.outlineExamples.map(\.name))
+        for (example, pinned) in zip(ScreenPrompt.library, Self.outlineExamples) {
+            #expect(example == pinned, "the outline's \(pinned.name) example")
+        }
+        #expect(A2UIPrompt.library.map(\.name) == Self.a2uiExamples.map(\.name))
+        for (example, pinned) in zip(A2UIPrompt.library, Self.a2uiExamples) {
+            #expect(example == pinned, "the A2UI \(pinned.name) example")
+        }
+    }
+
+    private static let outlineExamples: [ScreenPrompt.Example] = [
+        ScreenPrompt.Example(
+            name: "settings",
+            keywords: ["setting", "preference", "notification", "privacy", "option", "toggle", "switch"],
+            lines: """
+                title: Notifications
+
+                row: text: Push notifications | toggle [on]
+                row: text: Daily summary | toggle [off]
+                row: text: Mentions only | toggle [on]
+                divider
+                row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]
+
+                button: Turn off all notifications [plain]
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "product",
+            keywords: ["product", "detail", "item", "article", "recipe", "post", "story", "listing", "shop", "store"],
+            lines: """
+                image
+                title: Cast-iron skillet, 26 cm
+                body: Pre-seasoned and oven-safe. Ships in two days.
+
+                card:
+                  row: text: Size | text: 26 cm [right]
+                  row: text: Colour | text: Black [right]
+
+                button: Add to bag
+                button: Save for later [plain]
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "profile",
+            keywords: ["profile", "user", "bio", "follower", "member", "person", "contact"],
+            lines: """
+                avatar
+                title: Maya Okafor
+                body: Ceramicist in Lisbon. Small-batch tableware.
+                row: button: Follow | button: Message [bordered]
+
+                text: Recent work [semibold]
+                grid 3:
+                  image
+                  image
+                  image
+                  image
+                  image
+                  image
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "form",
+            keywords: ["form", "checkout", "payment", "address", "order", "booking", "book", "delivery", "shipping", "edit"],
+            lines: """
+                title: Delivery address
+
+                text field: Full name
+                text field: Street and number
+                row:
+                  text field: Postcode
+                  text field: City
+                text field: Phone, for the courier
+
+                row: text: Same address for billing | toggle [on]
+
+                button: Continue to payment
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "empty",
+            keywords: ["empty", "no ", "nothing", "onboarding", "welcome", "intro", "get started", "permission", "success", "done"],
+            lines: """
+                symbol: tray
+                title: No orders yet
+                body: When you buy something, it shows up here with its tracking.
+
+                button: Browse the shop
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "sign in",
+            keywords: ["sign in", "sign-in", "log in", "login", "sign up", "sign-up", "register", "password", "account"],
+            lines: """
+                title: Sign in to Fieldnote
+                body: Pick up your notes where you left them.
+
+                text field: Email
+                text field: Password
+                button: Sign in
+                row: button: Forgot password? [plain] | button: Create account [plain]
+                """
+        ),
+    ]
+
+    private static let a2uiExamples: [ScreenPrompt.Example] = [
+        ScreenPrompt.Example(
+            name: "settings",
+            keywords: ["setting", "preference", "notification", "privacy", "option", "toggle", "switch"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","alerts","turn_off"]},{"id":"heading","component":"Text","text":"## Notifications"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]},{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]},{"id":"push_label","component":"Text","text":"Push notifications"},{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]},{"id":"summary_label","component":"Text","text":"Daily summary"},{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]},{"id":"mentions_label","component":"Text","text":"Mentions only"},{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"divider","component":"Divider"},{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]},{"id":"quiet_label","component":"Text","text":"Quiet hours"},{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}},{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}]}}
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "product",
+            keywords: ["product", "detail", "item", "article", "recipe", "post", "story", "listing", "shop", "store"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["photo","about","details","actions"]},{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"about","component":"Column","children":["name","summary"]},{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"},{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"details","component":"Card","child":"details_rows"},{"id":"details_rows","component":"Column","children":["size","colour"]},{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]},{"id":"size_label","component":"Text","text":"Size"},{"id":"size_value","component":"Text","text":"26 cm"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]},{"id":"colour_label","component":"Text","text":"Colour"},{"id":"colour_value","component":"Text","text":"Black"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"actions","component":"Column","children":["add","save"]},{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}},{"id":"add_label","component":"Text","text":"Add to bag"},{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}},{"id":"save_label","component":"Text","text":"Save for later"}]}}
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "profile",
+            keywords: ["profile", "user", "bio", "follower", "member", "person", "contact"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["person","work"]},{"id":"person","component":"Column","children":["avatar","name","bio","contact"]},{"id":"avatar","component":"Image","url":"","variant":"avatar","description":"Maya Okafor"},{"id":"name","component":"Text","text":"## Maya Okafor"},{"id":"bio","component":"Text","text":"Ceramicist in Lisbon. Small-batch tableware."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"contact","component":"Row","align":"center","children":["follow","message"]},{"id":"follow","component":"Button","child":"follow_label","variant":"primary","action":{"event":{"name":"follow"}}},{"id":"follow_label","component":"Text","text":"Follow"},{"id":"message","component":"Button","child":"message_label","variant":"default","action":{"event":{"name":"message"}}},{"id":"message_label","component":"Text","text":"Message"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"work","component":"Column","children":["work_heading","work_grid"]},{"id":"work_heading","component":"Text","text":"Recent work"},{"id":"work_grid","component":"LayerGrid","columns":3,"children":["bowl","plate","mug","vase","jug","cup"]},{"id":"bowl","component":"Image","url":"","description":"A speckled bowl"},{"id":"plate","component":"Image","url":"","description":"A blue-rimmed plate"},{"id":"mug","component":"Image","url":"","description":"A stoneware mug"},{"id":"vase","component":"Image","url":"","description":"A tall glazed vase"},{"id":"jug","component":"Image","url":"","description":"A cream jug"},{"id":"cup","component":"Image","url":"","description":"A handleless cup"}]}}
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "form",
+            keywords: ["form", "checkout", "payment", "address", "order", "booking", "book", "delivery", "shipping", "edit"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["heading","address","billing","next"]},{"id":"heading","component":"Text","text":"## Delivery address"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"address","component":"Column","children":["full_name","street","town","phone"]},{"id":"full_name","component":"TextField","label":"Full name","value":""},{"id":"street","component":"TextField","label":"Street and number","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"town","component":"Row","children":["postcode","city"]},{"id":"postcode","component":"TextField","label":"Postcode","value":""},{"id":"city","component":"TextField","label":"City","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"phone","component":"TextField","label":"Phone, for the courier","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"billing","component":"Row","justify":"spaceBetween","align":"center","children":["billing_label","billing_switch"]},{"id":"billing_label","component":"Text","text":"Same address for billing"},{"id":"billing_switch","component":"LayerToggle","label":"Same address for billing","value":true}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"next","component":"Button","child":"next_label","variant":"primary","action":{"event":{"name":"continueToPayment"}}},{"id":"next_label","component":"Text","text":"Continue to payment"}]}}
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "empty",
+            keywords: ["empty", "no ", "nothing", "onboarding", "welcome", "intro", "get started", "permission", "success", "done"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["message","browse"]},{"id":"message","component":"Column","children":["tray","heading","explanation"]},{"id":"tray","component":"LayerSymbol","name":"tray"},{"id":"heading","component":"Text","text":"## No orders yet"},{"id":"explanation","component":"Text","text":"When you buy something, it shows up here with its tracking."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"browse","component":"Button","child":"browse_label","variant":"primary","action":{"event":{"name":"browseTheShop"}}},{"id":"browse_label","component":"Text","text":"Browse the shop"}]}}
+                """
+        ),
+        ScreenPrompt.Example(
+            name: "sign in",
+            keywords: ["sign in", "sign-in", "log in", "login", "sign up", "sign-up", "register", "password", "account"],
+            lines: """
+                {"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"root","component":"Column","children":["intro","fields","links"]},{"id":"intro","component":"Column","children":["heading","subtitle"]},{"id":"heading","component":"Text","text":"## Sign in to Fieldnote"},{"id":"subtitle","component":"Text","text":"Pick up your notes where you left them."}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"fields","component":"Column","children":["email","password","sign_in"]},{"id":"email","component":"TextField","label":"Email","value":""},{"id":"password","component":"TextField","label":"Password","value":""}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}},{"id":"sign_in_label","component":"Text","text":"Sign in"}]}}
+                {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"links","component":"Row","justify":"spaceBetween","children":["forgot","create"]},{"id":"forgot","component":"Button","child":"forgot_label","variant":"borderless","action":{"event":{"name":"resetPassword"}}},{"id":"forgot_label","component":"Text","text":"Forgot password?"},{"id":"create","component":"Button","child":"create_label","variant":"borderless","action":{"event":{"name":"createAccount"}}},{"id":"create_label","component":"Text","text":"Create account"}]}}
+                """
+        ),
+    ]
+
     private static let compact = """
         You design phone app screens for a wireframing tool. Given a description of a screen, write it down.
 
@@ -32,7 +211,7 @@ import Testing
         - A short row can stay on one line, its elements separated by "|", such as row: text: Wi-Fi | toggle [on]
         - A blank line starts a new section.
         - For a symbol, the words are an SF Symbol name, such as bell or gearshape.
-        - Most lines need no look. Looks: filled, bordered or plain for a button; bold or semibold; a size such as 28pt; text grey for quieter words; a colour name; on or off; 40% for a progress bar; left, centre or right.
+        - Most lines need no look. Looks: filled, bordered or plain for a button; bold or semibold; text grey for quieter words; a colour name; on or off; 40% for a progress bar; left, centre or right.
 
         Write only the lines: no introduction, no explanation, no markdown.
 
@@ -72,7 +251,7 @@ import Testing
         - A short row can stay on one line, its elements separated by "|", such as row: text: Wi-Fi | toggle [on]
         - A blank line starts a new section.
         - For a symbol, the words are an SF Symbol name, such as bell or gearshape.
-        - Most lines need no look. Looks: filled, bordered or plain for a button; bold or semibold; a size such as 28pt; text grey for quieter words; a colour name; on or off; 40% for a progress bar; left, centre or right.
+        - Most lines need no look. Looks: filled, bordered or plain for a button; bold or semibold; text grey for quieter words; a colour name; on or off; 40% for a progress bar; left, centre or right.
 
         Write only the lines: no introduction, no explanation, no markdown.
 
@@ -86,7 +265,7 @@ import Testing
         divider
         row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]
 
-        button: Turn off all notifications [plain, red]
+        button: Turn off all notifications [plain]
 
         ---
 

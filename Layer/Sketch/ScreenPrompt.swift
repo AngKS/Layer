@@ -27,8 +27,7 @@ enum ScreenPrompt {
 
     static func instructions(_ room: Room, for description: String) -> String {
         let examples = examples(for: description, count: room == .compact ? 1 : 2)
-        // The compact rules forbid colour words, so the compact prompt's example shows none.
-        let shown = examples.map { room == .compact ? withoutColour($0.lines) : $0.lines }.joined(separator: "\n\n---\n\n")
+        let shown = examples.map(\.lines).joined(separator: "\n\n---\n\n")
         let heading = examples.count == 1
             ? "An example of the form. Write your own content; don't copy it:"
             : "Examples of the form, one screen each. Write your own content; don't copy them:"
@@ -39,15 +38,6 @@ enum ScreenPrompt {
             "\(heading)\n\n\(shown)",
             rules(room),
         ].joined(separator: "\n\n")
-    }
-
-    /// `lines` without the colours their looks give elements: each look word that names a colour is left out, and a
-    /// look left empty goes. "text grey" stays, since it colours the words, not the element.
-    private static func withoutColour(_ lines: String) -> String {
-        lines.replacing(#/( ?)\[([^\]]*)\]/#) { match in
-            let kept = match.output.2.split(separator: ",").filter { ColourWords.parse(String($0)) == nil }
-            return kept.isEmpty ? "" : "\(match.output.1)[\(kept.joined(separator: ","))]"
-        }
     }
 
     /// How a screen is written down: the outline `Outline.parse` reads. Shown with real lines
@@ -72,7 +62,7 @@ enum ScreenPrompt {
             - A blank line starts a new section.
             - For a symbol, the words are an SF Symbol name, such as bell or gearshape.
             - Most lines need no look. Looks: filled, bordered or plain for a button; bold or \
-            semibold; a size such as 28pt; text grey for quieter words; a colour name; on or off; \
+            semibold; text grey for quieter words; a colour name; on or off; \
             40% for a progress bar; left, centre or right.
 
             Write only the lines: no introduction, no explanation, no markdown.
@@ -180,7 +170,7 @@ enum ScreenPrompt {
                 divider
                 row: text: Quiet hours | text: 22:00 – 07:00 [right, text grey]
 
-                button: Turn off all notifications [plain, red]
+                button: Turn off all notifications [plain]
                 """
         ),
         Example(

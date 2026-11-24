@@ -64,11 +64,13 @@ the session's instructions, the description as the message, `streamResponse` wit
 The machine was quiet: no other lane and no `xcodebuild` ran during any run (checked before each, and sampled every
 15 seconds). The 1-minute load stayed between 3.8 and 9.5 in every run but round 1's second, where something outside
 the project raised it to between 12.9 and 17.8; its latencies are no slower than the others'. Round 3 ran later the
-same morning, after waiting for Spotlight's indexing to settle, at 1-minute loads of 7.3 to 9.4.
+same morning, after waiting for Spotlight's indexing to settle, at 1-minute loads of 7.3 to 9.4, and round 4 at 6.0
+to 9.2, again after waiting for it; nothing else was building during either.
 
 What each number is, from the whole answer:
 
 - **Valid**: the outline read by `Outline.parse` holds something and `TreeValidator.fixGenerated` had nothing to fix.
+  From round 4 the harness reads it as generation does, passing over text sizes (none was written in rounds 2 to 4).
 - **More than one filled button**: before the polish, from the lines as written; after `withOnePrimaryAction`, from
   the tree.
 - **Coloured nodes**: nodes given a colour (a tint). "text grey" is a text colour and isn't counted, as the blueprint's
@@ -81,26 +83,28 @@ What each number is, from the whole answer:
 - **First content**: from the request until `OutlineStream` first hands on a screen, what the canvas first shows.
   **Completion**: until the answer ends.
 
-| Per 24 screens | 2026-11-18 (new prompt, blueprint) | Round 0: today's prompt and parser | (a) `column:` taught | (b) the parser joins | Round 1 (2 runs) | Round 2 (3 runs) | **Round 3, final (the fix round)** |
-|---|---|---|---|---|---|---|---|
-| Valid | 24 (parsed) | 24 | 24 | 24 | 24, 24 | 24, 24, 24 | **24** |
-| More than one filled button, before polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | **0** |
-| More than one filled button, after polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | **0** |
-| Coloured nodes | 5 | 7 | 6 | 10 | 3, 3 | 0, 5, 1 | **0** |
-| Kinds per screen | 5.3 | 5.33 | 4.96 | 5.38 | 5.04, 4.83 | 5.58, 5.00, 5.12 | **5.42** |
-| Leaves per screen | 8.5 | 8.79 | 8.00 | 8.42 | 8.12, 8.17 | 8.92, 8.12, 8.42 | **8.67** |
-| Rows / cards / grids per screen | not measured | 1.71 / 0 / 0.17 | 1.92 / 0 / 0 | 1.50 / 0 / 0.25 | 1.92 / 0 / 0.04, 1.96 / 0.04 / 0.04 | 1.46 / 0.67 / 0.12, 1.46 / 0.62 / 0, 1.38 / 0.75 / 0.08 | **1.38 / 0.62 / 0.08** |
-| Split sections | not measured | 7 | 0 | 0 | 0, 0 | 0, 0, 1 | **0** |
-| Copied example lines | not measured | 10 | 7 | 8 | 6, 7 | 7, 12, 11 | **8** |
-| First content p50 / p95 ms | not measured | 1013 / 1121 | 987 / 1209 | 996 / 1077 | 968 / 1129, 975 / 1080 | 1041 / 1163, 1041 / 1167, 1037 / 1225 | **1000 / 1129** |
-| Completion p50 / p95 ms | not measured | 1701 / 2451 | 1655 / 2450 | 1731 / 2350 | 1669 / 2214, 1653 / 2245 | 1866 / 2596, 1809 / 2584, 1935 / 2598 | **2090 / 2904** |
+| Per 24 screens | 2026-11-18 (new prompt, blueprint) | Round 0: today's prompt and parser | (a) `column:` taught | (b) the parser joins | Round 1 (2 runs) | Round 2 (3 runs) | Round 3 (fix round 1) | **Round 4, final (fix round 2)** |
+|---|---|---|---|---|---|---|---|---|
+| Valid | 24 (parsed) | 24 | 24 | 24 | 24, 24 | 24, 24, 24 | 24 | **24** |
+| More than one filled button, before polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | 0 | **0** |
+| More than one filled button, after polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | 0 | **0** |
+| Coloured nodes | 5 | 7 | 6 | 10 | 3, 3 | 0, 5, 1 | 0 | **0** |
+| Kinds per screen | 5.3 | 5.33 | 4.96 | 5.38 | 5.04, 4.83 | 5.58, 5.00, 5.12 | 5.42 | **5.71** |
+| Leaves per screen | 8.5 | 8.79 | 8.00 | 8.42 | 8.12, 8.17 | 8.92, 8.12, 8.42 | 8.67 | **8.50** |
+| Rows / cards / grids per screen | not measured | 1.71 / 0 / 0.17 | 1.92 / 0 / 0 | 1.50 / 0 / 0.25 | 1.92 / 0 / 0.04, 1.96 / 0.04 / 0.04 | 1.46 / 0.67 / 0.12, 1.46 / 0.62 / 0, 1.38 / 0.75 / 0.08 | 1.38 / 0.62 / 0.08 | **1.08 / 0.50 / 0.29** |
+| Split sections | not measured | 7 | 0 | 0 | 0, 0 | 0, 0, 1 | 0 | **1** |
+| Copied example lines | not measured | 10 | 7 | 8 | 6, 7 | 7, 12, 11 | 8 | **7** |
+| First content p50 / p95 ms | not measured | 1013 / 1121 | 987 / 1209 | 996 / 1077 | 968 / 1129, 975 / 1080 | 1041 / 1163, 1041 / 1167, 1037 / 1225 | 1000 / 1129 | **1049 / 1127** |
+| Completion p50 / p95 ms | not measured | 1701 / 2451 | 1655 / 2450 | 1731 / 2350 | 1669 / 2214, 1653 / 2245 | 1866 / 2596, 1809 / 2584, 1935 / 2598 | 2090 / 2904 | **1891 / 2461** |
 
 The bar was the 2026-11-18 column: 24 valid, no screen with more than one filled button after the polish, at most 5
 coloured nodes, at least 5 kinds and 5 to 14 leaves per screen. Round 2's wording met it in all three runs; its 72
 screens together: 72 valid, 6 coloured nodes (2 per 24), 5.24 kinds and 8.49 leaves per screen, 0.68 cards per
-screen, first content p50 1041 ms and p95 1225 ms, completion p50 1936 ms and p95 2598 ms. Round 3, the final wording,
-meets it too (one run, as the fix round asked). Its completion is slower, p50 2090 ms: the settings screens came out
-longer (13 to 14 leaves), and more lines use "text grey" (23, against 13 to 18 in round 2's runs).
+screen, first content p50 1041 ms and p95 1225 ms, completion p50 1936 ms and p95 2598 ms. Rounds 3 and 4, one run
+each as the fix rounds asked, meet it too. Round 3's completion was slower, p50 2090 ms: its settings screens came out
+longer (13 to 14 leaves), and more lines used "text grey" (23, against 13 to 18 in round 2's runs). Round 4, the final
+wording, is back in round 2's range (p50 1891 ms) with the most kinds per screen of any run, 5.71, and grids at 0.29
+per screen; its one split section is a grid that starts a section, with lines straight after it.
 
 ### A heading with its container: the parser, not the prompt
 
@@ -141,13 +145,21 @@ a section once lines follow it, which changes its key mid-stream.
   quieter words use text grey, which isn't one." The example library itself is unchanged, so the full prompt and the
   Settings template keep the red Turn off button, which the full rules allow ("red only for something destructive").
   One run: 24 valid, no colour, 5.42 kinds and 8.67 leaves per screen.
+- Round 4, the second fix round, on the controller's rulings:
+  - Turning off notifications isn't destructive, so the settings example's button is `[plain]` in the library itself:
+    in both prompts and in the Settings template. No example carries a colour now, so round 3's filter for the compact
+    prompt is gone; `OutlinePromptTests.noExampleCarriesAColour` holds the library to it.
+  - No model picks a number (spec §14), text sizes included: the grammar no longer offers "a size such as 28pt", and an
+    outline a model writes is read without its text sizes (`Outline.parse(…, readsTextSizes: false)`, which
+    `OutlineStream` and Build Screen pass), so a `28pt` leaves the kind's token size. A hand-written or imported outline
+    still reads them. Build Screen's description no longer offers a size either.
+  - One run: 24 valid, no colour, 5.71 kinds and 8.50 leaves per screen.
 
-The grammar, the example library and the full rules are as they were, so hosted models' outline prompt is word for word
-unchanged; only the compact prompt changed, in its rules and in how it shows its example. Indentation cost nothing:
-every screen of every run was valid, and none needed a fix, so the compact grammar keeps teaching `row:`, `card:` and
-`grid 2:`. `ScreenPromptWordingTests` pins the final wording of both outline prompts and of the A2UI prompt, word for
-word, and `OutlinePromptTests.theCompactPromptsExampleShowsNoColour` checks that no example the compact prompt can show
-carries a colour, while the full prompt and the Settings template keep theirs.
+The compact prompt changed in rounds 1 to 4; the full prompt changed only in round 4, in its grammar's looks and its
+settings example. The A2UI prompt is unchanged. Indentation cost nothing: every screen of every run was valid, and none
+needed a fix, so the compact grammar keeps teaching `row:`, `card:` and `grid 2:`. `ScreenPromptWordingTests` pins the
+final wording of both outline prompts, of the A2UI prompt and of every example in both libraries, word for word, with
+the keywords that pick each, so a change to any example fails a pin.
 
 ### Hosted models: LM Studio, smoke only
 

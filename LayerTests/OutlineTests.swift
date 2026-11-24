@@ -160,6 +160,23 @@ import Testing
         }
     }
 
+    /// No model picks a number (spec §14): an outline a model writes is read without its text sizes, so a `28pt` leaves
+    /// the kind's token size, while its other looks apply. One written by hand still reads them.
+    @Test func aGeneratedOutlinesTextSizeLeavesTheTokenSize() throws {
+        let written = "body: Arrives Thursday [28pt, bold]\nrow: text: Total | text: £12 [32pt, right]\n"
+        var stream = OutlineStream(tokens: .standard)
+        let taken = stream.take(written, isComplete: true)
+        let generated = try #require(taken)
+        let leaves = all(generated).filter { !$0.isContainer }
+        #expect(leaves.map(\.style.fontSize) == [nil, nil, nil])
+        #expect(leaves.map(NaturalSize.fontSize(of:)) == [DesignTokens.standard.textSizes.body, DesignTokens.standard.textSizes.text,
+                                                        DesignTokens.standard.textSizes.text])
+        #expect(leaves[0].style.fontWeight == .bold)
+        #expect(leaves[2].style.textAlignment == .trailing)
+        let byHand = all(Outline.parse(written, isComplete: true)).filter { !$0.isContainer }
+        #expect(byHand.map(\.style.fontSize) == [28, nil, 32])
+    }
+
     @Test func awkwardIndentationIsTolerated() {
         let tabbed = Outline.parse("column:\n\ttitle: A\n\trow:\n\t\tavatar\n\t\ttext: T", isComplete: true)
         #expect(shape(tabbed) == "group(column)[group(column)[title,group(row)[avatar,text]]]")

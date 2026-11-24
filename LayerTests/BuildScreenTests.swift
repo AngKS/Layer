@@ -57,6 +57,18 @@ private final class BuildBundleMarker {}
         #expect(!undo.canUndo)
     }
 
+    /// Build Screen's outline is read as a generated one: a text size in it is passed over (spec §14).
+    @Test func aBuiltOutlinesTextSizeLeavesTheTokenSize() async throws {
+        let (model, _) = makeModel()
+
+        let id = try await build("title: Hi [40pt]\nbody: Small print [28pt, bold]", in: model)
+
+        let built = leaves(of: try #require(model.store.root(of: id)))
+        #expect(built.map(\.style.fontSize) == [nil, nil])
+        #expect(built.map(NaturalSize.fontSize(of:)) == [DesignTokens.standard.textSizes.title, DesignTokens.standard.textSizes.body])
+        #expect(built[1].style.fontWeight == .bold)
+    }
+
     @Test func aNewScreenIsBuiltFromA2UI() async throws {
         let (model, undo) = makeModel()
 

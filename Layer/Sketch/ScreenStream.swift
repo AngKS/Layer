@@ -18,7 +18,8 @@ struct OutlineStream: Sendable {
 
     /// The screen so far when it has more leaves than the last one handed on; nil otherwise.
     mutating func take(_ text: String, isComplete: Bool) -> LayerNode? {
-        var root = Outline.parse(text, isComplete: isComplete, tokens: tokens)
+        // A model wrote it, so its text sizes are passed over (spec §14).
+        var root = Outline.parse(text, isComplete: isComplete, tokens: tokens, readsTextSizes: false)
         // Clamps and drops what the tree can't hold; never re-keys.
         _ = TreeValidator.fixGenerated(&root)
         guard root.leafCount > handedOn else { return nil }
