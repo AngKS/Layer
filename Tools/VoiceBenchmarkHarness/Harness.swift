@@ -840,6 +840,10 @@ struct Main {
     @MainActor
     static func main() async {
         setvbuf(stdout, nil, _IONBF, 0)
+        if CommandLine.arguments.dropFirst().first == "check" {
+            check()
+            return
+        }
         let variant = CommandLine.arguments.dropFirst().first.flatMap(BenchProfile.Variant.init(rawValue:)) ?? .baseline
         let model = SystemLanguageModel.default
         guard case .available = model.availability else {
@@ -923,6 +927,23 @@ struct Main {
         let severalAtOnce = outcomes.filter { $0.calls.count > 1 }.count
         print("commands where more than one tool was called: \(severalAtOnce)")
     }
+}
+
+/// `check`: the app's tools, rules and canvas picture built as a call's are, and a container's line read back,
+/// without calling a model.
+@MainActor
+func check() {
+    let tools = VoiceTools.all(Recorder(picture: Canvas.one.picture))
+    var picture = Canvas.one.picture
+    picture.screens[0].elements.append(.init(
+        handle: "E4", kind: "group", text: "", frame: CGRect(x: 20, y: 720, width: 143, height: 31), layout: "row, spacing 12",
+        isContainer: true, children: [.init(handle: "E5", kind: "toggle", text: "", frame: CGRect(x: 112, y: 720, width: 51, height: 31))]
+    ))
+    guard !VoiceRules.compact.isEmpty, picture.text(.compact).contains("\n  E4 row, spacing 12 x20 y720 w143 h31:\n    E5 toggle") else {
+        print("harness FAILED: a row's line and what it holds aren't told as the app tells them")
+        exit(1)
+    }
+    print("harness ok: \(tools.count) tools")
 }
 
 /// The prompt's size before a word is spoken, for each canvas, as `main` prints it.

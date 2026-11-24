@@ -373,6 +373,7 @@
 		B501813A3C6F4CE0330A2AEE /* TreeRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F2E3A4DE0AF96D41BD0ACA /* TreeRules.swift */; };
 		B5588A2E7E43EB98574E552E /* TurnAndResizeOnTheTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1BCDE14055D63163F05C937 /* TurnAndResizeOnTheTreeTests.swift */; };
 		B564BA23AA9BCA692BA66F48 /* A2UIPackageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098FF6A3CD1011FAE07CB421 /* A2UIPackageTests.swift */; };
+		B596EBCEFFDF11B7AE80A1F0 /* CanvasPictureTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FD638670B7755FEEE851101 /* CanvasPictureTreeTests.swift */; };
 		B6AA41CC9DA4B18561C7F7E5 /* LayerNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 038228D4E98BB11926D47907 /* LayerNode.swift */; };
 		B7CDC2A6A937F9CF3CE7CCCF /* VoiceAgentLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CBB0C567E920CD0EDB9F33 /* VoiceAgentLiveTests.swift */; };
 		B864118BC7248D0EDB408350 /* DemoScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 055B2F810E6B0244E35A6D56 /* DemoScript.swift */; };
@@ -622,6 +623,7 @@
 		1F2F9E3C7D7BE0824538D30C /* toggle_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_jittered_1a.json; sourceTree = "<group>"; };
 		1F3F65930923986507700DF7 /* unknown_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_jittered_1a.json; sourceTree = "<group>"; };
 		1FBBF5A3BCE7E5D6FDC651B7 /* CanvasBenchmarkUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBenchmarkUITests.swift; sourceTree = "<group>"; };
+		1FD638670B7755FEEE851101 /* CanvasPictureTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPictureTreeTests.swift; sourceTree = "<group>"; };
 		212D1539287FCE5A1C9D6F0C /* textField_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = textField_jittered_2a.json; sourceTree = "<group>"; };
 		212F7CCE94FC2C4A4065FCDA /* CanvasDragWorkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDragWorkTests.swift; sourceTree = "<group>"; };
 		21367BB9CEF150145DCDC8DF /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
@@ -1412,6 +1414,7 @@
 				DBC34B46661E4E975767AA7C /* CanvasHitTestTests.swift */,
 				F25EEAE1CAEB2E4A2512D072 /* CanvasNeverLowersTests.swift */,
 				E8C5158C8C675FAC7691FC36 /* CanvasOnTheTreeTests.swift */,
+				1FD638670B7755FEEE851101 /* CanvasPictureTreeTests.swift */,
 				DA82AB91E8724D0E4F4664D3 /* CardReadingTests.swift */,
 				80D845F8818A2232952FAE11 /* ComponentCatalogueTests.swift */,
 				7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */,
@@ -2256,6 +2259,7 @@
 				AF4C99B81F7284071AF36346 /* CanvasHitTestTests.swift in Sources */,
 				EA90247DC5A65494A08FAE3D /* CanvasNeverLowersTests.swift in Sources */,
 				236DADBFD8A61E1CB0BF15BC /* CanvasOnTheTreeTests.swift in Sources */,
+				B596EBCEFFDF11B7AE80A1F0 /* CanvasPictureTreeTests.swift in Sources */,
 				A72CDC133037DA068489E3B9 /* CardReadingTests.swift in Sources */,
 				5181C5BE1B16E9E5B28426C9 /* CodeOfElements.swift in Sources */,
 				AE217498FB6664260CE3D179 /* ComponentCatalogueTests.swift in Sources */,

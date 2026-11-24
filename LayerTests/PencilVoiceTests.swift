@@ -250,7 +250,8 @@ struct PencilVoiceTests {
     }
 
     /// F6: a squeeze over a member of a selected group keeps the group, as one over part of
-    /// several things keeps them all; and what voice is told is selected is what is in it.
+    /// several things keeps them all; and what voice is told is selected is the group itself,
+    /// with what is in it under it (plan 6, call 7).
     @Test func aSqueezeOnAMemberOfASelectedGroupKeepsTheGroup() async throws {
         let bench = Bench()
         // Taken first: grouping can change where they are in the list.
@@ -264,8 +265,9 @@ struct PencilVoiceTests {
 
         let picture = CanvasPicture.capture(from: bench.app, handles: VoiceHandles())
         let selected = picture.screens.flatMap(\.elements).filter(\.isSelected)
-        #expect(Set(selected.map(\.kind)) == ["title", "button"])
-        #expect(selected.count == 2)
+        #expect(selected.map(\.kind) == ["group"])
+        #expect(Set(selected.flatMap(\.children).map(\.kind)) == ["title", "button"])
+        #expect(!selected.flatMap(\.children).map(\.isSelected).contains(true))
         bench.end()
     }
 

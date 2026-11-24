@@ -193,11 +193,17 @@ struct CanvasPictureTests {
         board.group(board.b, board.d)
         board.group(board.note1, board.note2, named: "N")
 
-        // Voice's picture of the board lists the members, and no group.
+        // Voice's picture of the board tells each group by its handle, with its two members under it (plan 6, call 7),
+        // and every member once.
         let picture = CanvasPicture.capture(from: board.model, handles: VoiceHandles())
-        #expect(picture.screens.first?.elements.count == 5)
-        #expect(picture.loose.count == 2)
-        #expect(!(picture.screens.flatMap(\.elements) + picture.loose).contains { $0.kind == ElementKind.group.layerName.lowercased() })
+        #expect(picture.screens.first?.elements.count == 4)
+        #expect(picture.loose.count == 1)
+        let top = picture.screens.flatMap(\.elements) + picture.loose
+        let groups = top.filter { $0.kind == ElementKind.group.layerName.lowercased() }
+        #expect(groups.map(\.children.count) == [2, 2])
+        let told = top + top.flatMap(\.children)
+        #expect(told.filter { !$0.isContainer }.count == 7)
+        #expect(Set(told.map(\.handle)).count == told.count)
     }
 }
 

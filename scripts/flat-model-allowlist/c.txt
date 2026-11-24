@@ -5,12 +5,9 @@
 
 # Voice: Tasks 6-8.
 Layer/Debug/VoiceDemo.swift
-Layer/Voice/CanvasPicture+Capture.swift
-Layer/Voice/PencilVoice.swift
 Layer/Voice/ScreenEditor.swift
 Layer/Voice/VoiceAgent.swift
 Layer/Voice/VoiceCall.swift
-Layer/Voice/VoiceHandles.swift
 Layer/Voice/VoiceToolbox.swift
 LayerTests/HostedToolCallingTests.swift
 LayerTests/PencilVoiceTests.swift
