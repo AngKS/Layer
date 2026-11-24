@@ -56,15 +56,46 @@ struct DesignTokens: Equatable, Sendable, Codable {
 
     init() {}
 
+    // MARK: Reading
+
+    /// A rhythm as the design keeps it: its steps that are finite and above zero, sorted and each once; the
+    /// standard's when none is. A file's rhythm is read this way, and so is one typed in the canvas settings (F25).
+    static func reading(rhythm: [CGFloat]) -> [CGFloat] {
+        let kept = Array(Set(rhythm.filter { $0.isFinite && $0 > 0 })).sorted()
+        return kept.isEmpty ? standard.rhythm : kept
+    }
+
+    /// A radius, padding or text size as the design keeps it: `size` when it is finite and above zero, else
+    /// `standard`. A file's are read this way, and so are those typed in the canvas settings (F25).
+    static func reading(size: CGFloat, standard: CGFloat) -> CGFloat {
+        size.isFinite && size > 0 ? size : standard
+    }
+
+    /// These tokens with every number read as a file's are (`reading(rhythm:)`, `reading(size:standard:)`): what a
+    /// design holding them keeps.
+    var asRead: DesignTokens {
+        let standard = Self.standard
+        var tokens = self
+        tokens.rhythm = Self.reading(rhythm: rhythm)
+        tokens.cornerRadii.small = Self.reading(size: cornerRadii.small, standard: standard.cornerRadii.small)
+        tokens.cornerRadii.medium = Self.reading(size: cornerRadii.medium, standard: standard.cornerRadii.medium)
+        tokens.cornerRadii.large = Self.reading(size: cornerRadii.large, standard: standard.cornerRadii.large)
+        tokens.card.padding = Self.reading(size: card.padding, standard: standard.card.padding)
+        tokens.card.radius = Self.reading(size: card.radius, standard: standard.card.radius)
+        tokens.textSizes.title = Self.reading(size: textSizes.title, standard: standard.textSizes.title)
+        tokens.textSizes.body = Self.reading(size: textSizes.body, standard: standard.textSizes.body)
+        tokens.textSizes.text = Self.reading(size: textSizes.text, standard: standard.textSizes.text)
+        return tokens
+    }
+
     /// Reads leniently: a number that isn't finite and above zero, or a part that can't be
     /// read, is the standard's. The rhythm is sorted and made unique, and the standard's
-    /// when nothing in it is usable.
+    /// when nothing in it is usable. The rules are `reading(rhythm:)` and `reading(size:standard:)`.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let standard = DesignTokens.standard
         let steps = ((try? container.decodeIfPresent([CGFloat].self, forKey: .rhythm)) ?? nil) ?? standard.rhythm
-        let kept = Array(Set(steps.filter { $0.isFinite && $0 > 0 })).sorted()
-        rhythm = kept.isEmpty ? standard.rhythm : kept
+        rhythm = Self.reading(rhythm: steps)
         cornerRadii = ((try? container.decodeIfPresent(CornerRadii.self, forKey: .cornerRadii)) ?? nil) ?? standard.cornerRadii
         card = ((try? container.decodeIfPresent(Card.self, forKey: .card)) ?? nil) ?? standard.card
         textSizes = ((try? container.decodeIfPresent(TextSizes.self, forKey: .textSizes)) ?? nil) ?? standard.textSizes
@@ -82,10 +113,10 @@ struct DesignTokens: Equatable, Sendable, Codable {
 }
 
 private extension KeyedDecodingContainer {
-    /// A number that is finite and above zero, or the standard's.
+    /// A number that is finite and above zero, or the standard's (`DesignTokens.reading(size:standard:)`).
     func size(_ key: Key, standard: CGFloat) -> CGFloat {
-        guard let value = (try? decodeIfPresent(CGFloat.self, forKey: key)) ?? nil, value.isFinite, value > 0 else { return standard }
-        return value
+        guard let value = (try? decodeIfPresent(CGFloat.self, forKey: key)) ?? nil else { return standard }
+        return DesignTokens.reading(size: value, standard: standard)
     }
 }
 

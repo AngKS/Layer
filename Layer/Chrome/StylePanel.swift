@@ -67,7 +67,7 @@ struct StylePanel: View {
 // MARK: What is selected
 
 /// What the panel shows of a node beyond `LayerNode+Look`'s rules, which it reads for the rest: which of its kind's
-/// traits it has, and its size and radius as an element's were (`ElementStyle`).
+/// traits it has, and its radius as an element's was (`ElementStyle`).
 private extension LayerNode {
     var traits: ComponentSpec.Traits { kind.spec.traits }
     var hasOnState: Bool { traits.contains(.onState) }
@@ -77,8 +77,15 @@ private extension LayerNode {
     var hasEffects: Bool { kind.spec.hasEffects }
 
     var shownTint: RGBColor { style.tint ?? kind.spec.tint }
-    var resolvedFontSize: CGFloat { style.fontSize ?? kind.spec.fontSize.points(in: frame) }
     var resolvedCornerRadius: CGFloat { style.cornerRadius ?? kind.spec.cornerRadius.points(in: frame) }
+}
+
+extension StylePanel {
+    /// What the font size field shows for a text: the size it is measured and drawn at, its own or the design's for
+    /// its kind (`LayerNode.resolvedFontSize(tokens:)`, F5), in whole points.
+    static func fontSizeShown(for node: LayerNode, tokens: DesignTokens) -> CGFloat {
+        node.resolvedFontSize(tokens: tokens).rounded()
+    }
 }
 
 /// How a node's frame and angle are written from the panel: through `place`, which keeps what the parent places and
@@ -210,7 +217,7 @@ private struct ElementSettings: View {
                     .padding(10)
                     .background(Color(uiColor: .tertiarySystemFill), in: .rect(cornerRadius: 12))
                 HStack(spacing: 8) {
-                    NumberField("pt", label: "Font size", value: Binding(get: { node.resolvedFontSize.rounded() }, set: { size in change { $0.style.fontSize = size } }), range: 6...400)
+                    NumberField("pt", label: "Font size", value: Binding(get: { StylePanel.fontSizeShown(for: node, tokens: model.store.tree.settings.tokens) }, set: { size in change { $0.style.fontSize = size } }), range: 6...400)
                         .frame(width: 84)
                     Spacer(minLength: 0)
                     Picker("Weight", selection: Binding(get: { node.resolvedFontWeight }, set: { weight in change { $0.style.fontWeight = weight } })) {
@@ -376,6 +383,8 @@ private struct CardLook: View {
 private struct FrameSettings: View {
     @Environment(AppModel.self) private var model
     let screen: TreeScreen
+    /// The device "Save as Device…" is making, while its sheet is up.
+    @State private var savingAsDevice: CustomDeviceSheet.Purpose?
 
     var body: some View {
         PanelHeader(
@@ -392,12 +401,9 @@ private struct FrameSettings: View {
         }
 
         PanelSection {
-            Picker("Device", selection: Binding(get: { screen.device.id }, set: { id in change { $0.deviceID = id == DeviceFrame.iPhone.id ? nil : id } })) {
-                ForEach(DeviceFrame.all) { device in
-                    Text("\(device.name)  \(Int(device.size.width)) × \(Int(device.size.height))").tag(device.id)
-                }
-            }
-            .labelsHidden()
+            DevicePicker(title: "Device", selection: screen.deviceID, showsSizes: true,
+                         choose: { id in model.adjusting { model.store.setDevice(of: screen.id, to: id) } },
+                         add: { device in model.store.addCustomDevice(device, forScreen: screen.id) })
             HStack(spacing: 8) {
                 NumberField("X", value: Binding(get: { screen.origin.x }, set: { x in change { $0.origin.x = x } }))
                 NumberField("Y", value: Binding(get: { screen.origin.y }, set: { y in change { $0.origin.y = y } }))
@@ -412,6 +418,20 @@ private struct FrameSettings: View {
         LayoutSection(id: screen.root.id, layout: screen.root.resolvedLayout, padding: screen.root.padding, isScreenRoot: true,
                       children: screen.root.children)
             .equatable()
+
+        // After everything the panel had: a device of the design's own, made from this one.
+        PanelSection {
+            Button("Save as Device…", systemImage: "plus.rectangle.on.rectangle") {
+                let device = model.store.tree.device(of: screen)
+                savingAsDevice = CustomDeviceSheet.Purpose.add(CustomDeviceDraft(from: device, named: "\(device.name) (Custom)"))
+            }
+            .foregroundStyle(.tint)
+        }
+        .sheet(item: $savingAsDevice) { purpose in
+            let id = screen.id
+            CustomDeviceSheet(purpose: purpose, add: { device in model.store.addCustomDevice(device, forScreen: id) })
+                .environment(model)
+        }
     }
 
     private func change(_ body: (inout TreeScreen) -> Void) {
@@ -599,7 +619,7 @@ private struct LeafStyleSections<Angle: View>: View {
             PanelSection {
                 HStack(spacing: 8) {
                     NumberField("pt", label: "Font size", value: Binding(
-                        get: { worded.resolvedFontSize.rounded() },
+                        get: { StylePanel.fontSizeShown(for: worded, tokens: model.store.tree.settings.tokens) },
                         set: { size in change(ids, where: \.kind.hasText) { $0.style.fontSize = size } }
                     ), range: 6...400)
                         .frame(width: 84)
@@ -660,6 +680,9 @@ struct BoardMenu: View {
     /// What the field said when the menu opened, to tell whether anything was typed.
     @State private var shown = ""
     @AppStorage("boardMenuTab") private var tab = Tab.canvas
+    /// The device the New Screens picker is making or editing, shown in place of the tab: a sheet over the popover
+    /// left its number fields unable to take the keyboard.
+    @State private var deviceForm: CustomDeviceSheet.Purpose?
 
     var body: some View {
         let sync = model.syncState
@@ -698,12 +721,16 @@ struct BoardMenu: View {
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        // A popover takes the height of the tab showing; a sheet scrolls.
+        // A popover takes the height of the tab showing, and scrolls once that is more than the window has room for
+        // below the bar and the menu's top: the Canvas tab's tokens made it taller than a short window. A sheet scrolls.
         if isSheet {
             ScrollView { settings }
                 .scrollBounceBehavior(.basedOnSize)
         } else {
-            settings
+            ScrollView { settings }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: max(240, model.canvasSize.height - 220), alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
         }
         }
         .frame(width: isSheet ? nil : 360, alignment: .top)
@@ -718,13 +745,20 @@ struct BoardMenu: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 0) {
-            switch tab {
-            case .canvas: CanvasTab()
-            case .magicPen: MagicPenTab()
-            case .code: CodeTab()
+            if let deviceForm {
+                CustomDeviceSheet(purpose: deviceForm, add: { device in model.store.addCustomDeviceForNewScreens(device) },
+                                  onClose: { self.deviceForm = nil })
+                    .id(deviceForm.id)
+            } else {
+                switch tab {
+                case .canvas: CanvasTab()
+                case .magicPen: MagicPenTab(showDevice: { deviceForm = $0 })
+                case .code: CodeTab()
+                }
             }
         }
         .padding(.bottom, 12)
+        .onChange(of: tab) { deviceForm = nil }
     }
 
     /// Names the board what was typed, once typing ends or the menu closes. Only if
@@ -801,11 +835,16 @@ private struct CanvasTab: View {
             Toggle("Show Spacing", isOn: canvasBinding(model, \.showsMeasurements))
             Toggle("Frame Names", isOn: canvasBinding(model, \.showsFrameNames))
         }
+
+        // After the canvas's own settings: the numbers the design is laid out and styled by.
+        DesignTokensSection()
     }
 }
 
 private struct MagicPenTab: View {
     @Environment(AppModel.self) private var model
+    /// Shows a device being made or edited from the New Screens picker in the menu.
+    let showDevice: (CustomDeviceSheet.Purpose) -> Void
 
     var body: some View {
         @Bindable var model = model
@@ -824,13 +863,10 @@ private struct MagicPenTab: View {
             HStack {
                 Text("New Screens")
                 Spacer(minLength: 8)
-                Picker("New Screens", selection: canvasBinding(model, \.sketchDeviceID)) {
-                    ForEach(DeviceFrame.all) { device in
-                        Text(device.name).tag(device == .iPhone ? String?.none : device.id)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
+                DevicePicker(title: "New Screens", selection: model.store.canvas.sketchDeviceID, tintsName: false,
+                             choose: { id in model.adjusting { model.store.updateCanvas { $0.sketchDeviceID = id } } },
+                             add: { device in model.store.addCustomDeviceForNewScreens(device) }, present: showDevice)
+                    .fixedSize()
             }
             // The model this design uses, saved in its file.
             HStack {

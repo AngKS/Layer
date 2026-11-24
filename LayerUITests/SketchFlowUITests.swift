@@ -1357,6 +1357,34 @@ final class SketchFlowUITests: XCTestCase {
         attach("arrange-after")
     }
 
+    // MARK: Layout
+
+    /// A size typed in the device picker's Custom Size… sheet becomes a device of the design's own, and the selected
+    /// screen takes it at once: the selection says the screen is that size.
+    func testACustomSizeBecomesTheScreensDevice() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        let label = app.staticTexts["Screen 1"]
+        XCTAssertTrue(label.waitForExistence(timeout: 10))
+        control("Draw").tap()
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1 · 393'", timeout: 5), "tapping a frame should select it")
+
+        showFormatPanel(with: "Device")
+        panelControl("Device")?.tap()
+        let customSize = app.buttons["Custom Size…"]
+        XCTAssertTrue(customSize.waitForExistence(timeout: 5), "the device picker should offer a custom size")
+        customSize.tap()
+        XCTAssertTrue(app.navigationBars["New Device"].waitForExistence(timeout: 5), "Custom Size… should open the device sheet")
+        setNumber("Width", to: "300")
+        setNumber("Height", to: "500")
+        app.navigationBars["New Device"].buttons["Save"].tap()
+
+        XCTAssertTrue(waitForDisappearance(of: app.navigationBars["New Device"]), "Save should close the sheet")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Screen 1 · 300 × 500'", timeout: 5), "the screen should take the new size")
+    }
+
     /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
     private func clearSelection() {
         let empty = emptyCanvasPoint
