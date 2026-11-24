@@ -192,7 +192,7 @@ private struct ToolsBar: View {
                 } label: {
                     ToolIcon(symbol: "paperclip")
                 }
-                .accessibilityLabel("Add Image")
+                .accessibilityLabel("Add Image or A2UI")
             }
         }
         .buttonStyle(.plain)
@@ -229,7 +229,7 @@ private struct ToolsMenu: View {
                 withAnimation(.smooth(duration: 0.3)) { model.addStickyNote() }
             }
             Button("Library", systemImage: "square.on.circle") { isLibraryOpen = true }
-            Menu("Add Image", systemImage: "paperclip") {
+            Menu("Add Image or A2UI", systemImage: "paperclip") {
                 ImageSources(files: $files, isPickingPhoto: $isPickingPhoto)
                 A2UISources(files: $files, report: $report)
             }
@@ -373,18 +373,10 @@ private struct ImageAttaching: ViewModifier {
         withAnimation(.smooth(duration: 0.3)) { model.addImage(prepared) }
     }
 
-    /// A file of A2UI, read while it can be, then imported. One that can't be read says so in the import's sheet.
+    /// A file of A2UI, imported: one too large or that can't be read says so in the import's sheet.
     private func importA2UI(_ result: Result<URL, any Error>) {
         guard case .success(let url) = result else { return }
-        let isScoped = url.startAccessingSecurityScopedResource()
-        let data = try? Data(contentsOf: url)
-        if isScoped { url.stopAccessingSecurityScopedResource() }
-        guard let data else {
-            report = A2UIImportReport(screens: [], diagnostics: [A2UIDiagnostic(
-                reason: .parseFailed, message: "\(url.lastPathComponent) couldn't be read.")])
-            return
-        }
-        Task { report = await model.importA2UI(data) }
+        Task { report = await model.importA2UI(contentsOf: url) }
     }
 
     /// The picker hands over the photo's data; nothing in Photos needs permission to read.

@@ -211,7 +211,7 @@ private struct CanvasDrops: ViewModifier {
     func body(content: Content) -> some View {
         content
             .dropDestination(for: CanvasDrop.DroppedText.self) { items, location in
-                switch CanvasDrop.payload(of: items.map(\.text)) {
+                switch CanvasDrop.payload(ofDropped: items) {
                 case .assets(let ids):
                     withAnimation(.smooth(duration: 0.3)) {
                         for (index, asset) in ids.compactMap(AssetLibrary.asset(id:)).enumerated() {
@@ -224,6 +224,9 @@ private struct CanvasDrops: ViewModifier {
                 case .a2ui(let data):
                     let point = model.viewport.canvasPoint(for: location)
                     Task { report = await model.importA2UI(data, near: point) }
+                    return true
+                case .tooLarge:
+                    report = A2UIImportReport(screens: [], diagnostics: [A2UIImporter.tooLarge])
                     return true
                 case nil:
                     return false

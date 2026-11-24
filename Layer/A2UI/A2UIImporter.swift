@@ -38,10 +38,10 @@ struct A2UIImport: Sendable {
 ///    `@metadata.extensions.layer` wins over the mapping.
 /// 6. The tree is fixed as every generated tree is, with `TreeValidator.fixGenerated`.
 ///
-/// What a payload can make it do is bounded, however it's written: nesting (`maximumJSONDepth`),
-/// data-model paths (`maximumPathSteps`, `maximumPathIndex`) and values (`maximumDataModelValues`),
-/// nodes (5,000 for the whole import, as for a design) and the children it considers
-/// (`maximumChildRequests`). Only components reached from a root are validated.
+/// What a payload can make it do is bounded, however it's written: its size (`maximumBytes`),
+/// nesting (`maximumJSONDepth`), data-model paths (`maximumPathSteps`, `maximumPathIndex`) and
+/// values (`maximumDataModelValues`), nodes (5,000 for the whole import, as for a design) and the
+/// children it considers (`maximumChildRequests`). Only components reached from a root are validated.
 ///
 /// It is all plain values and the SDK's nonisolated, Sendable API, so it runs off the main actor.
 /// Nothing is ever run: there is no processor and no action handler here. Actions, function
@@ -78,6 +78,17 @@ enum A2UIImporter {
 
     /// How many components one search for a button's words looks at.
     static let maximumWordSearch = 100
+
+    /// The most A2UI Layer reads at once: 16 MB, counted as the Files app counts them. Layer's own export of a screen
+    /// as full as a design can be, 4,999 texts of a line each, is about 5.9 MB, so this doesn't refuse what Layer
+    /// wrote. Anything larger, most likely a file picked or dropped by mistake, is refused before it is decoded, so it
+    /// can't hold the app's memory.
+    static let maximumBytes = 16_000_000
+
+    /// What is said of A2UI larger than `maximumBytes`, which isn't read.
+    static var tooLarge: A2UIDiagnostic {
+        A2UIDiagnostic(reason: .parseFailed, message: "This is larger than \(maximumBytes / 1_000_000) MB, so it isn't read.")
+    }
 
     /// Nonisolated; never throws. One screen per surface that has a resolvable root, and no more
     /// than 5,000 nodes in all, as a design holds.
@@ -146,7 +157,12 @@ extension A2UIImporter {
     /// one message per line, as a model streams them. Read line by line, each line is checked on
     /// its own, so a line nested too deep, or a stray bracket, costs only that line: it's skipped,
     /// said so, and the lines round it are still read.
+    ///
+    /// Anything larger than `maximumBytes` is refused first, before anything decodes it, with one
+    /// diagnostic: every way A2UI comes in (Build Screen, a model's stream, a drop, a paste, Files)
+    /// comes through here.
     static func guardedMessages(from data: Data) -> (messages: [OrderedJSON.JSONValue], diagnostics: [A2UIDiagnostic]) {
+        guard data.count <= maximumBytes else { return ([], [tooLarge]) }
         var diagnostics: [A2UIDiagnostic] = []
         let messages = items(in: data, into: &diagnostics)
         return (messages, diagnostics)

@@ -33,7 +33,7 @@ final class A2UIImportUITests: XCTestCase {
         openNewDesign()
         UIPasteboard.general.string = Self.loginForm
 
-        control("Add Image").tap()
+        control("Add Image or A2UI").tap()
         let paste = app.buttons["Paste"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5), "the paperclip should offer Paste in its A2UI section")
         XCTAssertTrue(app.buttons["Import A2UI…"].exists, "and Import A2UI… beside it")
@@ -53,7 +53,7 @@ final class A2UIImportUITests: XCTestCase {
 
     func testImportA2UIOpensFiles() {
         openNewDesign()
-        control("Add Image").tap()
+        control("Add Image or A2UI").tap()
         let importA2UI = app.buttons["Import A2UI…"].firstMatch
         XCTAssertTrue(importA2UI.waitForExistence(timeout: 5), "the paperclip should offer Import A2UI…")
         importA2UI.tap()

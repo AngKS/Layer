@@ -428,7 +428,7 @@ final class SketchFlowUITests: XCTestCase {
 
     func testImagesComeFromImagePlaygroundPhotosOrFiles() {
         openNewDesign()
-        control("Add Image").tap()
+        control("Add Image or A2UI").tap()
         XCTAssertTrue(app.buttons["Photos"].waitForExistence(timeout: 5), "the paperclip should offer Photos")
         XCTAssertTrue(app.buttons["Files"].exists, "the paperclip should offer Files")
         // Image Playground is offered only where Apple Intelligence can run it, which the
@@ -901,7 +901,7 @@ final class SketchFlowUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
-            "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image",
+            "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image or A2UI",
             "Share", "Zoom", "Magic Pen",
         ]
         for label in controls {

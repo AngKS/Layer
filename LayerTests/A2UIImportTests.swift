@@ -425,6 +425,43 @@ import UIKit
         #expect(read.diagnostics.isEmpty, "\(read.diagnostics)")
     }
 
+    /// A payload larger than Layer reads A2UI is refused before anything decodes it, however it would read: a byte past
+    /// the cap makes no screen and says why, and at the cap it is read (final review B-I1).
+    @Test func aPayloadPastTheByteCapIsRefusedUnread() async throws {
+        let login = try fixture("a2ui-scaffold-simple-login-form")
+        // The login form and then spaces, which JSON passes over: whole, it reads as the form.
+        func padded(to count: Int) -> Data { login + Data(repeating: UInt8(ascii: " "), count: count - login.count) }
+        let past = padded(to: A2UIImporter.maximumBytes + 1), at = padded(to: A2UIImporter.maximumBytes)
+
+        let refused = await Task.detached { A2UIImporter.importJSON(past, tokens: .standard, trustsLayerLook: false) }.value
+        #expect(refused.screens.isEmpty)
+        #expect(refused.diagnostics.map(\.reason) == [.parseFailed])
+        #expect(refused.diagnostics.map(\.message) == ["This is larger than 16 MB, so it isn't read."])
+        #expect(A2UIImporter.guardedMessages(from: past).messages.isEmpty)
+
+        let read = await Task.detached { A2UIImporter.importJSON(at, tokens: .standard, trustsLayerLook: false) }.value
+        #expect(read.screens.count == 1)
+    }
+
+    /// Layer's own A2UI of a design as full as a design can be is well inside the cap, so the cap doesn't refuse what
+    /// Layer wrote. The file grows by the same for each node, so a tenth of the nodes is measured and counted ten
+    /// times: 4,999 texts of a line each, pretty-printed as Share writes them, came to about 5.9 MB.
+    @Test func layersOwnExportOfAFullDesignIsWellInsideTheByteCap() throws {
+        var screen = TreeScreen(name: "Full", origin: .zero, scale: 1, deviceID: nil)
+        screen.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 12))
+        screen.root.children = (0..<TreeRules.maximumNodes / 10).map { index in
+            var text = LayerNode(kind: .text)
+            text.content.text = "A line of words for row \(index), as long as a row's words usually run"
+            text.style.fontWeight = .semibold
+            text.style.textColor = RGBColor(hex: 0x333333)
+            return text
+        }
+
+        let written = A2UIExporter.document(for: screen, surfaceID: "Full")
+
+        #expect(written.count * 10 < A2UIImporter.maximumBytes / 2, "\(written.count) bytes for a tenth")
+    }
+
     @Test func aStrayQuoteCantHideADeepLine() async throws {
         // Line 1 opens a string it never closes; line 2 is valid JSON 450 deep, which decoding on
         // its own would run a thread out of stack. A string can't run past a newline, so line 2's

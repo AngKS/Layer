@@ -164,7 +164,100 @@ import Testing
         #expect(CanvasDrop.payload(of: []) == nil)
     }
 
+    /// A file larger than Layer reads A2UI is never read: its size alone says so. This one can't be read at all, so
+    /// reading it would say that instead (final review B-I1).
+    @Test func aFilePastTheByteCapIsRefusedUnread() async throws {
+        let (model, undo) = makeModel()
+        let huge = try Self.unreadableFile(bytes: A2UIImporter.maximumBytes + 1)
+        defer { try? FileManager.default.removeItem(at: huge) }
+
+        let report = await model.importA2UI(contentsOf: huge)
+
+        #expect(report.screens.isEmpty)
+        #expect(model.store.tree.screens.isEmpty)
+        #expect(!undo.canUndo)
+        #expect(report.groups.flatMap(\.diagnostics).map(\.message) == ["This is larger than 16 MB, so it isn't read."])
+        #expect(report.needsShowing)
+
+        // A file inside the cap is read and imported.
+        let login = FileManager.default.temporaryDirectory.appendingPathComponent("Login-\(UUID().uuidString).json")
+        try fixture("a2ui-scaffold-simple-login-form").write(to: login)
+        defer { try? FileManager.default.removeItem(at: login) }
+        #expect(await model.importA2UI(contentsOf: login).screens.count == 1)
+    }
+
+    /// A file dropped on the canvas that is larger than Layer reads A2UI isn't read either, and the drop says so.
+    @Test func aDroppedFilePastTheByteCapIsRefusedUnread() throws {
+        let huge = try Self.unreadableFile(bytes: A2UIImporter.maximumBytes + 1)
+        defer { try? FileManager.default.removeItem(at: huge) }
+
+        let dropped = try CanvasDrop.DroppedText(file: huge)
+
+        #expect(dropped.isTooLarge)
+        #expect(dropped.text == nil)
+        #expect(CanvasDrop.payload(ofDropped: [dropped]) == .tooLarge)
+
+        // A file inside the cap is read as its text, and is A2UI.
+        let a2ui = #"{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"\#(Self.basic)"}}"#
+        let small = FileManager.default.temporaryDirectory.appendingPathComponent("Small-\(UUID().uuidString).json")
+        try Data(a2ui.utf8).write(to: small)
+        defer { try? FileManager.default.removeItem(at: small) }
+        let read = try CanvasDrop.DroppedText(file: small)
+        #expect(read.text == a2ui)
+        #expect(CanvasDrop.payload(ofDropped: [read, dropped]) == .a2ui(Data(a2ui.utf8)))
+    }
+
+    /// A surface's own name is made one line of at most 40 characters, as a name from its title is (final review B-m3).
+    @Test func aSurfacesOwnNameIsOneLineOfAtMost40Characters() async throws {
+        let (model, _) = makeModel()
+        let named = #"""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"\#(Self.basic)","metadata":{"extensions":{"layer":{"name":"  A name\nwritten over\t two lines, and on well past forty characters "}}}}}
+            {"version":"1.0","updateComponents":{"surfaceId":"s","components":[\#(column(saying: "# Title"))]}}
+            """#
+
+        let report = await model.importA2UI(Data(named.utf8))
+
+        let words = "A name written over two lines, and on well past forty characters"
+        #expect(name(of: report.screens.first, in: model) == String(words.prefix(40)))
+    }
+
+    /// A screen the design can't take is said with the reason it can't: here, the nodes it would take the design past,
+    /// written as a number is (final review B-m4).
+    @Test func aScreenTheDesignCantTakeIsSaidWithItsReason() async throws {
+        let (model, _) = makeModel()
+        // A screen of 4,998 texts, laid out as it is given: 4,999 nodes.
+        var crowd = TreeScreen(name: "Crowd", origin: .zero, scale: 1, deviceID: nil)
+        crowd.root.children = (0..<4_998).map { _ in
+            var text = LayerNode(kind: .text)
+            text.frame = CGRect(x: 20, y: 100, width: 80, height: 20)
+            return text
+        }
+        try #require(model.store.addLaidOutScreens([crowd]) == [crowd.id])
+
+        let report = await model.importA2UI(try fixture("a2ui-scaffold-simple-login-form"))
+
+        #expect(report.screens.isEmpty)
+        let said = report.groups.flatMap(\.diagnostics).map(\.message).first { $0.contains("isn't imported") } ?? ""
+        #expect(said.contains("past \(TreeRules.maximumNodes.formatted()) nodes"), "\(said)")
+        #expect(!said.contains("can't hold") && !said.contains("what a screen can't"), "\(said)")
+    }
+
+    @Test func idsAreWrittenAsIDs() {
+        #expect(A2UIImportReport.title(for: .duplicateID) == "IDs used twice")
+    }
+
     // MARK: - Helpers
+
+    /// A file of `bytes` bytes that can't be read: sparse, so nothing is written to the disk, and readable by no one.
+    private static func unreadableFile(bytes: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Huge-\(UUID().uuidString).json")
+        try #require(FileManager.default.createFile(atPath: url.path, contents: Data("{".utf8)))
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(bytes))
+        try handle.close()
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        return url
+    }
 
     private func makeModel() -> (AppModel, UndoManager) {
         let model = AppModel(document: LayerDocument())
