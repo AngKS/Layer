@@ -92,7 +92,7 @@ struct DrawingElementTests {
 struct DrawingSyncTests {
     /// The canvas as it is once it shows `content`.
     private func canvas(showing content: DesignContent, with sync: inout DrawingSync, holding current: [PKStroke] = []) -> [PKStroke] {
-        sync.strokes(showing: content, on: current) ?? current
+        sync.strokes(showing: content.tree, on: current) ?? current
     }
 
     @Test func strokesDrawnOnAnEmptyCanvasBecomeADrawing() throws {
@@ -100,7 +100,7 @@ struct DrawingSyncTests {
         var content = DesignContent()
         let strokes = cross(at: CGPoint(x: 400, y: 300))
 
-        let changes = sync.changes(for: strokes, in: content)
+        let changes = sync.changes(for: strokes, in: content.tree)
         changes.apply(to: &content)
 
         #expect(changes.drawings.count == 1)
@@ -110,7 +110,7 @@ struct DrawingSyncTests {
         #expect(drawing.strokeCount == 2)
         #expect(sync.drawing(owning: strokes[0].key) == drawing.id)
         // The canvas already shows what the design now holds: nothing to put there.
-        let toShow = sync.strokes(showing: content, on: strokes)
+        let toShow = sync.strokes(showing: content.tree, on: strokes)
         #expect(toShow == nil)
     }
 
@@ -118,16 +118,16 @@ struct DrawingSyncTests {
         var sync = DrawingSync()
         var content = DesignContent()
         var strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         let first = try #require(content.elements.first)
 
         strokes.append(stroke(from: CGPoint(x: 430, y: 300), to: CGPoint(x: 430, y: 360)))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         #expect(content.elements.map(\.id) == [first.id])
         #expect(content.elements.first?.strokeCount == 3)
 
         strokes.append(stroke(from: CGPoint(x: 1200, y: 800), to: CGPoint(x: 1300, y: 800)))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         #expect(content.elements.count == 2)
         #expect(content.elements.map(\.strokeCount) == [3, 1])
     }
@@ -136,9 +136,9 @@ struct DrawingSyncTests {
         var sync = DrawingSync()
         var content = DesignContent()
         let strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
 
-        let again = sync.changes(for: strokes, in: content)
+        let again = sync.changes(for: strokes, in: content.tree)
         #expect(again.isEmpty)
     }
 
@@ -147,11 +147,11 @@ struct DrawingSyncTests {
         var content = DesignContent()
         let kept = cross(at: CGPoint(x: 100, y: 100))
         let erased = cross(at: CGPoint(x: 900, y: 600))
-        sync.changes(for: kept + erased, in: content).apply(to: &content)
+        sync.changes(for: kept + erased, in: content.tree).apply(to: &content)
         #expect(content.elements.count == 2)
         let gone = try #require(sync.drawing(owning: erased[0].key))
 
-        let changes = sync.changes(for: kept, in: content)
+        let changes = sync.changes(for: kept, in: content.tree)
         changes.apply(to: &content)
 
         #expect(changes.removed == [gone])
@@ -162,12 +162,12 @@ struct DrawingSyncTests {
         var sync = DrawingSync()
         var content = DesignContent()
         var strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         let id = try #require(content.elements.first?.id)
         content.update(id) { $0.name = "Arrow" }
 
         strokes.append(stroke(from: CGPoint(x: 430, y: 300), to: CGPoint(x: 430, y: 360)))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
 
         #expect(content.element(id)?.name == "Arrow")
         #expect(content.element(id)?.strokeCount == 3)
@@ -177,19 +177,19 @@ struct DrawingSyncTests {
         var sync = DrawingSync()
         var content = DesignContent()
         let strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         let id = try #require(content.elements.first?.id)
 
         content.update(id) { $0.frame.origin.x += 500 }
-        let toShow = sync.strokes(showing: content, on: strokes)
+        let toShow = sync.strokes(showing: content.tree, on: strokes)
         let shown = try #require(toShow)
 
         #expect(shown.map(\.key) == strokes.map(\.key), "the same strokes, in the same order")
         #expect(close(try #require(InkGeometry.bounds(of: shown)), try #require(content.element(id)).frame))
         // Now that the canvas shows it, the two agree again.
-        let more = sync.strokes(showing: content, on: shown)
+        let more = sync.strokes(showing: content.tree, on: shown)
         #expect(more == nil)
-        let changes = sync.changes(for: shown, in: content)
+        let changes = sync.changes(for: shown, in: content.tree)
         #expect(changes.isEmpty)
     }
 
@@ -199,7 +199,7 @@ struct DrawingSyncTests {
         let first = cross(at: CGPoint(x: 100, y: 100))
         let second = cross(at: CGPoint(x: 900, y: 600))
         var held = first + second
-        sync.changes(for: held, in: content).apply(to: &content)
+        sync.changes(for: held, in: content.tree).apply(to: &content)
         let locked = try #require(sync.drawing(owning: first[0].key))
         let hidden = try #require(sync.drawing(owning: second[0].key))
 
@@ -207,7 +207,7 @@ struct DrawingSyncTests {
         held = canvas(showing: content, with: &sync, holding: held)
         #expect(held.map(\.key) == second.map(\.key), "a locked drawing is out of the eraser's reach")
         // Its strokes leaving the canvas is not the drawing being erased.
-        let afterLocking = sync.changes(for: held, in: content)
+        let afterLocking = sync.changes(for: held, in: content.tree)
         #expect(afterLocking.isEmpty)
         #expect(content.element(locked) != nil)
 
@@ -219,7 +219,7 @@ struct DrawingSyncTests {
         content.update(hidden) { $0.isHidden = false }
         held = canvas(showing: content, with: &sync, holding: held)
         #expect(Set(held.map(\.key)) == Set((first + second).map(\.key)))
-        let afterAll = sync.changes(for: held, in: content)
+        let afterAll = sync.changes(for: held, in: content.tree)
         #expect(afterAll.isEmpty)
     }
 
@@ -227,12 +227,12 @@ struct DrawingSyncTests {
         var sync = DrawingSync()
         var content = DesignContent()
         let strokes = cross(at: CGPoint(x: 400, y: 300))
-        sync.changes(for: strokes, in: content).apply(to: &content)
+        sync.changes(for: strokes, in: content.tree).apply(to: &content)
         let id = try #require(content.elements.first?.id)
 
         content.remove([id])
 
-        let toShow = sync.strokes(showing: content, on: strokes)
+        let toShow = sync.strokes(showing: content.tree, on: strokes)
         #expect(toShow?.isEmpty == true)
     }
 }
@@ -246,7 +246,7 @@ struct DrawingStoreTests {
         let store = DesignStore(content: DesignContent())
         store.undoManager = undo
         var sync = DrawingSync()
-        let changes = sync.changes(for: cross(at: CGPoint(x: 400, y: 300)), in: store.content)
+        let changes = sync.changes(for: cross(at: CGPoint(x: 400, y: 300)), in: store.content.tree)
         store.apply { changes.apply(to: &$0) }
         let drawing = try #require(store.floating.first)
         return (store, undo, DesignStore.ElementRef(host: .canvas, element: drawing.id))
@@ -291,11 +291,11 @@ struct DrawingStoreTests {
 
         // On the canvas, with a stroke then drawn elsewhere, the two stay two drawings.
         var sync = DrawingSync()
-        let toShow = sync.strokes(showing: store.content, on: [])
+        let toShow = sync.strokes(showing: store.content.tree, on: [])
         var held = try #require(toShow)
         held.append(stroke(from: CGPoint(x: 1500, y: 900), to: CGPoint(x: 1600, y: 900)))
         var content = store.content
-        sync.changes(for: held, in: content).apply(to: &content)
+        sync.changes(for: held, in: content.tree).apply(to: &content)
         #expect(content.elements.map(\.strokeCount) == [2, 2, 1])
         #expect(content.element(original.id)?.frame == original.frame)
         #expect(content.element(copied.id)?.frame == copied.frame)
@@ -391,11 +391,11 @@ struct TurnedDrawingTests {
         drawing.setRotation(20)
         content.add(drawing, to: nil, scale: 1)
         var sync = DrawingSync()
-        let first = sync.strokes(showing: content, on: [])
+        let first = sync.strokes(showing: content.tree, on: [])
         let shown = try #require(first)
         let kept = Array(shown.dropLast())
 
-        sync.changes(for: kept, in: content).apply(to: &content)
+        sync.changes(for: kept, in: content.tree).apply(to: &content)
 
         let after = try #require(content.element(drawing.id))
         #expect(after.resolvedRotation == 20)
@@ -425,12 +425,12 @@ struct TurnedDrawingTests {
         drawing.setRotation(20)
         content.add(drawing, to: nil, scale: 1)
         var sync = DrawingSync()
-        let first = sync.strokes(showing: content, on: [])
+        let first = sync.strokes(showing: content.tree, on: [])
         let kept = Array(try #require(first).dropLast())
         // The turn lands before the canvas has shown it.
         content.update(drawing.id) { $0.setRotation(50) }
 
-        sync.changes(for: kept, in: content).apply(to: &content)
+        sync.changes(for: kept, in: content.tree).apply(to: &content)
 
         let after = try #require(content.element(drawing.id))
         #expect(after.resolvedRotation == 50)
@@ -458,12 +458,12 @@ struct TurnedDrawingTests {
     @Test func aStrokeThatJoinsATurnedDrawingStaysWhereItWasDrawn() throws {
         var (content, drawing) = try turnedCross(by: 30)
         var sync = DrawingSync()
-        let first = sync.strokes(showing: content, on: [])
+        let first = sync.strokes(showing: content.tree, on: [])
         let shown = try #require(first)
         let area = try #require(InkGeometry.bounds(of: shown))
         let added = stroke(from: CGPoint(x: area.midX, y: area.midY), to: CGPoint(x: area.maxX + 40, y: area.midY))
         let all = shown + [added]
-        sync.changes(for: all, in: content).apply(to: &content)
+        sync.changes(for: all, in: content.tree).apply(to: &content)
 
         let after = try #require(content.element(drawing.id))
         #expect(content.elements.count == 1)
@@ -477,12 +477,12 @@ struct TurnedDrawingTests {
     @Test func turningADrawingRedrawsItsInkTurned() throws {
         var (content, drawing) = try turnedCross(by: 0)
         var sync = DrawingSync()
-        let first = sync.strokes(showing: content, on: [])
+        let first = sync.strokes(showing: content.tree, on: [])
         let shown = try #require(first)
         content.update(drawing.id) { $0.setRotation(45) }
         drawing = try #require(content.element(drawing.id))
 
-        let next = sync.strokes(showing: content, on: shown)
+        let next = sync.strokes(showing: content.tree, on: shown)
         let redrawn = try #require(next)
         let bounds = try #require(InkGeometry.bounds(of: redrawn))
         let expected = try #require(InkGeometry.bounds(of: drawing.canvasStrokes))
