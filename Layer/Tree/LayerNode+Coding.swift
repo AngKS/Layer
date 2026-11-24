@@ -3,9 +3,10 @@ import Foundation
 
 // How a node is saved. Like `DesignElement`, it reads every key but `id` and `kind` as
 // optional, so a node written before a field existed still opens; keeps the keys it
-// doesn't know; and reads its children one at a time, so one this version can't read
-// doesn't stop the rest from opening. Optionals are left out when nil. A node's content
-// is written among its own keys, apart from `ink`, which is saved apart.
+// doesn't know, its own and those inside its parts (its style, layout, padding, sizing,
+// accessibility, sketch and source); and reads its children one at a time, so one this
+// version can't read doesn't stop the rest from opening. Optionals are left out when nil.
+// A node's content is written among its own keys, apart from `ink`, which is saved apart.
 
 extension LayerNode: KeepsUnknownKeys {
     enum CodingKeys: String, CodingKey {
@@ -44,6 +45,12 @@ extension LayerNode: KeepsUnknownKeys {
         source = try container.decodeIfPresent(Source.self, forKey: .source)
         interaction = try container.decodeIfPresent(JSONValue.self, forKey: .interaction)
         unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
+        for part in Self.parts where container.contains(part) {
+            guard let known = Self.keys(readIn: part, layout: layout),
+                  let keys = try? UnknownKeys(from: container.superDecoder(forKey: part), besidesNamed: known),
+                  !keys.values.isEmpty else { continue }
+            unknownPartKeys[part.stringValue] = keys
+        }
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -56,10 +63,10 @@ extension LayerNode: KeepsUnknownKeys {
             var list = container.nestedUnkeyedContainer(forKey: .children)
             try Self.write(children, with: unreadChildren, to: &list)
         }
-        try container.encodeIfPresent(layout, forKey: .layout)
-        if padding != Padding() { try container.encode(padding, forKey: .padding) }
-        if width != Sizing(.fixed) { try container.encode(width, forKey: .width) }
-        if height != Sizing(.fixed) { try container.encode(height, forKey: .height) }
+        if let layout { try container.encode(part(layout, .layout), forKey: .layout) }
+        if padding != Padding() || has(.padding) { try container.encode(part(padding, .padding), forKey: .padding) }
+        if width != Sizing(.fixed) || has(.width) { try container.encode(part(width, .width), forKey: .width) }
+        if height != Sizing(.fixed) || has(.height) { try container.encode(part(height, .height), forKey: .height) }
         if frame != .zero { try container.encode(frame, forKey: .frame) }
         try container.encodeIfPresent(rotation, forKey: .rotation)
         try container.encodeIfPresent(scale, forKey: .scale)
@@ -70,14 +77,60 @@ extension LayerNode: KeepsUnknownKeys {
         if !content.isOn { try container.encode(false, forKey: .isOn) }
         try container.encodeIfPresent(content.value, forKey: .value)
         try container.encodeIfPresent(content.buttonLook, forKey: .buttonLook)
-        if style != Style() { try container.encode(style, forKey: .style) }
+        if style != Style() || has(.style) { try container.encode(part(style, .style), forKey: .style) }
         try container.encodeIfPresent(name, forKey: .name)
         if isLocked { try container.encode(true, forKey: .isLocked) }
         if isHidden { try container.encode(true, forKey: .isHidden) }
-        try container.encodeIfPresent(accessibility, forKey: .accessibility)
-        try container.encodeIfPresent(sketch, forKey: .sketch)
-        try container.encodeIfPresent(source, forKey: .source)
+        if let accessibility { try container.encode(part(accessibility, .accessibility), forKey: .accessibility) }
+        if let sketch { try container.encode(part(sketch, .sketch), forKey: .sketch) }
+        if let source { try container.encode(part(source, .source), forKey: .source) }
         try container.encodeIfPresent(interaction, forKey: .interaction)
+    }
+
+    // MARK: What a newer Layer saved inside the parts
+
+    /// The node's parts that are objects of their own, whose keys this version doesn't know are kept.
+    private static let parts: [CodingKeys] = [.layout, .padding, .width, .height, .style, .accessibility, .sketch, .source]
+
+    /// The keys this version reads in `part`: a layout's are its type's. Nil for a part that isn't one.
+    private static func keys(readIn part: CodingKeys, layout: Layout?) -> Set<String>? {
+        switch part {
+        case .layout:
+            switch layout {
+            case .free?: ["type"]
+            case .stack?: ["type", "axis", "spacing", "alignment", "justify"]
+            case .grid?: ["type", "columns", "columnSpacing", "rowSpacing", "horizontal", "vertical"]
+            case .overlay?: ["type", "horizontal", "vertical"]
+            case nil: nil
+            }
+        case .padding: ["top", "leading", "bottom", "trailing"]
+        case .width, .height: ["mode", "weight", "min", "max"]
+        case .style:
+            ["tint", "fontSize", "fontWeight", "textColor", "textAlignment", "cornerRadius", "opacity", "borderColor",
+             "borderWidth", "hasShadow"]
+        case .accessibility: ["label", "hint"]
+        case .sketch: ["originalBounds", "normalizedBounds", "confidence", "decidedBy", "placement", "structureDeclined"]
+        case .source: ["origin", "key"]
+        default: nil
+        }
+    }
+
+    /// Whether `part` held keys this version doesn't know.
+    private func has(_ part: CodingKeys) -> Bool { unknownPartKeys[part.stringValue] != nil }
+
+    /// `value` as `part` is saved: the keys it was read with but didn't know, then its own.
+    private func part<Value: Encodable>(_ value: Value, _ part: CodingKeys) -> Part<Value> {
+        Part(value: value, unknownKeys: unknownPartKeys[part.stringValue])
+    }
+
+    private struct Part<Value: Encodable>: Encodable {
+        let value: Value
+        let unknownKeys: UnknownKeys?
+
+        func encode(to encoder: any Encoder) throws {
+            try unknownKeys?.encode(to: encoder)
+            try value.encode(to: encoder)
+        }
     }
 
     /// Reads the children one at a time. One that can't be read comes back as unread, at
@@ -104,10 +157,10 @@ extension LayerNode: KeepsUnknownKeys {
         return (nodes, unread)
     }
 
-    /// Writes a list of nodes with those this build couldn't read among them. Each unread one goes
-    /// at its index, or at the first place after it that is free when another has that index; one
-    /// past the end of the list goes at the end. None is lost.
-    static func write(_ nodes: [LayerNode], with unreadNodes: [UnreadChild], to list: inout any UnkeyedEncodingContainer) throws {
+    /// Writes a list of nodes, or screens, with those this build couldn't read among them. Each unread
+    /// one goes at its index, or at the first place after it that is free when another has that index;
+    /// one past the end of the list goes at the end. None is lost.
+    static func write(_ nodes: [some Encodable], with unreadNodes: [UnreadChild], to list: inout any UnkeyedEncodingContainer) throws {
         let unread = unreadNodes.enumerated()
             .sorted { ($0.element.index, $0.offset) < ($1.element.index, $1.offset) }.map(\.element)
         var nextUnread = 0, nextNode = 0, position = 0

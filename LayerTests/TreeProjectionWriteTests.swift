@@ -621,4 +621,37 @@ import Testing
         #expect(content == unchanged)
     }
     #endif
+
+    /// A node moved from one screen to another by setting the screens' views whole, the screen it
+    /// goes to listed first, lands on that screen and keeps what only the tree holds: its sizing,
+    /// its sketch and its source.
+    @Test func aNodeMovedBetweenScreensByTheirViewsKeepsWhatOnlyTheTreeHolds() throws {
+        var sketched = Self.node(.button, CGRect(x: 30, y: 20, width: 120, height: 44))
+        sketched.width = LayerNode.Sizing(.fit)
+        sketched.sketch = LayerNode.SketchIntent(originalBounds: CGRect(x: 1, y: 2, width: 3, height: 4),
+                                                 normalizedBounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                                                 confidence: 0.75, decidedBy: .rules, placement: .leading)
+        sketched.source = LayerNode.Source(origin: .sketch, key: "k")
+        let other = Self.node(.text, CGRect(x: 20, y: 80, width: 100, height: 20))
+        let from = Self.screen([sketched, other])
+        var to = TreeScreen(name: "T", origin: CGPoint(x: 1000, y: 100), scale: 0.5, deviceID: nil)
+        let there = Self.node(.title, CGRect(x: 20, y: 20, width: 200, height: 40))
+        to.root.children = [there]
+        var content = DesignContent(tree: Self.content(screens: [from, to]))
+        var views = content.screens
+        let element = try #require(views[0].elements.first { $0.id == sketched.id })
+        views[0].elements.removeAll { $0.id == sketched.id }
+        views[1].elements.append(element)
+
+        content.screens = [views[1], views[0]]
+
+        #expect(content.tree.screens.map(\.id) == [to.id, from.id])
+        #expect(content.tree.screens[0].root.children.map(\.id) == [there.id, sketched.id])
+        #expect(content.tree.screens[1].root.children.map(\.id) == [other.id])
+        let moved = try Self.node(sketched.id, in: content.tree)
+        #expect(moved.frame == sketched.frame)
+        #expect(moved.width == sketched.width)
+        #expect(moved.sketch == sketched.sketch)
+        #expect(moved.source == sketched.source)
+    }
 }

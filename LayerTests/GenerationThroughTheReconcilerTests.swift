@@ -166,8 +166,8 @@ struct GenerationThroughTheReconcilerTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         app.store.undoManager = undo
-        let screen = app.store.addScreen(TreeScreen(name: "Settings", origin: .zero, scale: 1, deviceID: nil,
-                                                    root: Outline.parse("", isComplete: true)))
+        let screen = try #require(app.store.addScreen(TreeScreen(name: "Settings", origin: .zero, scale: 1, deviceID: nil,
+                                                                 root: Outline.parse("", isComplete: true))))
         undo.removeAllActions()
         let writer = GenerationWriter(screenID: screen)
 

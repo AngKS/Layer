@@ -1,0 +1,1006 @@
+{
+  "content": {
+    "canvas": [],
+    "screens": [
+      {
+        "id": "7E570036-0000-4000-8000-A11CE0000036",
+        "name": "Structures",
+        "origin": [
+          0,
+          0
+        ],
+        "root": {
+          "children": [
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570001-0000-4000-8000-A11CE0000001",
+                  "kind": "text",
+                  "text": "Label",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570002-0000-4000-8000-A11CE0000002",
+                  "kind": "body",
+                  "text": "Fills the gap",
+                  "width": {
+                    "mode": "fill",
+                    "weight": 1
+                  }
+                },
+                {
+                  "buttonLook": "filled",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570003-0000-4000-8000-A11CE0000003",
+                  "kind": "button",
+                  "text": "Go",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570004-0000-4000-8000-A11CE0000004",
+              "kind": "group",
+              "layout": {
+                "alignment": "center",
+                "axis": "horizontal",
+                "spacing": 12,
+                "type": "stack"
+              },
+              "name": "Row of three",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570005-0000-4000-8000-A11CE0000005",
+                  "kind": "text",
+                  "text": "One",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570006-0000-4000-8000-A11CE0000006",
+                  "kind": "text",
+                  "text": "Two",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570007-0000-4000-8000-A11CE0000007",
+                  "kind": "text",
+                  "text": "Three",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570008-0000-4000-8000-A11CE0000008",
+                  "kind": "text",
+                  "text": "Four",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570009-0000-4000-8000-A11CE0000009",
+                  "kind": "text",
+                  "text": "Five",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57000A-0000-4000-8000-A11CE000000A",
+                  "kind": "text",
+                  "text": "Six",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E57000B-0000-4000-8000-A11CE000000B",
+              "kind": "group",
+              "layout": {
+                "columnSpacing": 12,
+                "columns": 3,
+                "horizontal": "start",
+                "rowSpacing": 8,
+                "type": "grid",
+                "vertical": "center"
+              },
+              "name": "Grid of six",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fill",
+                    "weight": 1
+                  },
+                  "id": "7E57000C-0000-4000-8000-A11CE000000C",
+                  "kind": "image",
+                  "width": {
+                    "mode": "fill",
+                    "weight": 1
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57000D-0000-4000-8000-A11CE000000D",
+                  "kind": "title",
+                  "text": "On top",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "frame": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  353,
+                  120
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E57000E-0000-4000-8000-A11CE000000E",
+              "kind": "group",
+              "layout": {
+                "horizontal": "center",
+                "type": "overlay",
+                "vertical": "center"
+              },
+              "name": "Overlay",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "frame": [
+                    [
+                      20,
+                      20
+                    ],
+                    [
+                      100,
+                      30
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E57000F-0000-4000-8000-A11CE000000F",
+                  "kind": "text",
+                  "rotation": 30,
+                  "text": "Turned",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "frame": [
+                    [
+                      20,
+                      70
+                    ],
+                    [
+                      120,
+                      30
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E570010-0000-4000-8000-A11CE0000010",
+                  "isHidden": true,
+                  "kind": "body",
+                  "text": "Not in the code",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                }
+              ],
+              "frame": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  200,
+                  120
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570011-0000-4000-8000-A11CE0000011",
+              "kind": "group",
+              "layout": {
+                "type": "free"
+              },
+              "name": "Free group",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570014-0000-4000-8000-A11CE0000014",
+                  "kind": "title",
+                  "text": "Outer card",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "children": [
+                    {
+                      "height": {
+                        "mode": "fit"
+                      },
+                      "id": "7E570012-0000-4000-8000-A11CE0000012",
+                      "kind": "text",
+                      "text": "Inside the inner card",
+                      "width": {
+                        "mode": "fill",
+                        "weight": 1
+                      }
+                    }
+                  ],
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570013-0000-4000-8000-A11CE0000013",
+                  "kind": "card",
+                  "layout": {
+                    "alignment": "start",
+                    "axis": "vertical",
+                    "spacing": 8,
+                    "type": "stack"
+                  },
+                  "padding": {
+                    "bottom": 12,
+                    "leading": 12,
+                    "top": 12,
+                    "trailing": 12
+                  },
+                  "style": {
+                    "cornerRadius": 12
+                  },
+                  "width": {
+                    "mode": "fill",
+                    "weight": 1
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570015-0000-4000-8000-A11CE0000015",
+              "kind": "card",
+              "layout": {
+                "alignment": "start",
+                "axis": "vertical",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "padding": {
+                "bottom": 16,
+                "leading": 16,
+                "top": 16,
+                "trailing": 16
+              },
+              "style": {
+                "cornerRadius": 16
+              },
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570016-0000-4000-8000-A11CE0000016",
+              "kind": "text",
+              "name": "Say \"hi\" 👋",
+              "text": "Say \"hi\" 👋",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "buttonLook": "filled",
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570017-0000-4000-8000-A11CE0000017",
+              "kind": "button",
+              "text": "Filled",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "buttonLook": "bordered",
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570018-0000-4000-8000-A11CE0000018",
+              "kind": "button",
+              "text": "Bordered",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "buttonLook": "plain",
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570019-0000-4000-8000-A11CE0000019",
+              "kind": "button",
+              "text": "Plain",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001A-0000-4000-8000-A11CE000001A",
+                  "kind": "textField",
+                  "text": "Email",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001B-0000-4000-8000-A11CE000001B",
+                  "kind": "toggle",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E57001C-0000-4000-8000-A11CE000001C",
+              "kind": "group",
+              "layout": {
+                "alignment": "fill",
+                "axis": "vertical",
+                "spacing": 12,
+                "type": "stack"
+              },
+              "name": "Fill column",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "buttonLook": "filled",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001D-0000-4000-8000-A11CE000001D",
+                  "kind": "button",
+                  "text": "Save",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "buttonLook": "bordered",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57001E-0000-4000-8000-A11CE000001E",
+                  "kind": "button",
+                  "text": "Cancel",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E57001F-0000-4000-8000-A11CE000001F",
+              "kind": "group",
+              "layout": {
+                "alignment": "fill",
+                "axis": "vertical",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "name": "Buttons in a fill column",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570020-0000-4000-8000-A11CE0000020",
+                  "kind": "text",
+                  "text": "Hint",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "buttonLook": "filled",
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E570021-0000-4000-8000-A11CE0000021",
+                  "kind": "button",
+                  "text": "Retry",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570022-0000-4000-8000-A11CE0000022",
+              "kind": "group",
+              "layout": {
+                "alignment": "fill",
+                "axis": "horizontal",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "name": "Buttons in a fill row",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            },
+            {
+              "children": [],
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570023-0000-4000-8000-A11CE0000023",
+              "kind": "group",
+              "layout": {
+                "alignment": "start",
+                "axis": "horizontal",
+                "spacing": 8,
+                "type": "stack"
+              },
+              "name": "Empty row",
+              "width": {
+                "mode": "fill",
+                "weight": 1
+              }
+            }
+          ],
+          "frame": [
+            [
+              0,
+              0
+            ],
+            [
+              393,
+              852
+            ]
+          ],
+          "height": {
+            "mode": "fixed"
+          },
+          "id": "7E570024-0000-4000-8000-A11CE0000024",
+          "kind": "group",
+          "layout": {
+            "alignment": "start",
+            "axis": "vertical",
+            "spacing": 16,
+            "type": "stack"
+          },
+          "padding": {
+            "bottom": 34,
+            "leading": 20,
+            "top": 59,
+            "trailing": 20
+          },
+          "width": {
+            "mode": "fixed"
+          }
+        },
+        "scale": 1
+      },
+      {
+        "deviceID": "custom-7E57C0DE-0000-4000-8000-000000000045",
+        "id": "7E570037-0000-4000-8000-A11CE0000037",
+        "name": "Watch",
+        "origin": [
+          1000,
+          0
+        ],
+        "root": {
+          "children": [
+            {
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570025-0000-4000-8000-A11CE0000025",
+              "kind": "title",
+              "text": "Today",
+              "width": {
+                "mode": "fit"
+              }
+            },
+            {
+              "height": {
+                "mode": "fit"
+              },
+              "id": "7E570026-0000-4000-8000-A11CE0000026",
+              "kind": "toggle",
+              "width": {
+                "mode": "fit"
+              }
+            }
+          ],
+          "frame": [
+            [
+              0,
+              0
+            ],
+            [
+              198,
+              242
+            ]
+          ],
+          "height": {
+            "mode": "fixed"
+          },
+          "id": "7E570027-0000-4000-8000-A11CE0000027",
+          "kind": "group",
+          "layout": {
+            "alignment": "start",
+            "axis": "vertical",
+            "spacing": 8,
+            "type": "stack"
+          },
+          "padding": {
+            "bottom": 8,
+            "leading": 8,
+            "top": 8,
+            "trailing": 8
+          },
+          "width": {
+            "mode": "fixed"
+          }
+        },
+        "scale": 1
+      },
+      {
+        "id": "7E570038-0000-4000-8000-A11CE0000038",
+        "name": "Sketched",
+        "origin": [
+          2000,
+          0
+        ],
+        "root": {
+          "children": [
+            {
+              "frame": [
+                [
+                  20,
+                  80
+                ],
+                [
+                  228,
+                  40
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570028-0000-4000-8000-A11CE0000028",
+              "kind": "title",
+              "text": "Dashboard",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "buttonLook": "filled",
+              "frame": [
+                [
+                  20,
+                  140
+                ],
+                [
+                  160,
+                  50
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570029-0000-4000-8000-A11CE0000029",
+              "kind": "button",
+              "text": "Save",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "buttonLook": "bordered",
+              "frame": [
+                [
+                  200,
+                  140
+                ],
+                [
+                  160,
+                  50
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E57002A-0000-4000-8000-A11CE000002A",
+              "kind": "button",
+              "text": "Cancel",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "children": [
+                {
+                  "frame": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      100,
+                      24
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E57002B-0000-4000-8000-A11CE000002B",
+                  "kind": "text",
+                  "text": "Status",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "frame": [
+                    [
+                      40,
+                      60
+                    ],
+                    [
+                      100,
+                      24
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E57002C-0000-4000-8000-A11CE000002C",
+                  "kind": "text",
+                  "rotation": 15,
+                  "text": "Tilted",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                }
+              ],
+              "frame": [
+                [
+                  40,
+                  240
+                ],
+                [
+                  200,
+                  120
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E57002D-0000-4000-8000-A11CE000002D",
+              "kind": "group",
+              "layout": {
+                "type": "free"
+              },
+              "name": "Pair",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "children": [
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57002E-0000-4000-8000-A11CE000002E",
+                  "kind": "text",
+                  "text": "Notifications",
+                  "width": {
+                    "mode": "fit"
+                  }
+                },
+                {
+                  "height": {
+                    "mode": "fit"
+                  },
+                  "id": "7E57002F-0000-4000-8000-A11CE000002F",
+                  "kind": "toggle",
+                  "width": {
+                    "mode": "fit"
+                  }
+                }
+              ],
+              "frame": [
+                [
+                  20,
+                  400
+                ],
+                [
+                  353,
+                  44
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570030-0000-4000-8000-A11CE0000030",
+              "kind": "group",
+              "layout": {
+                "alignment": "center",
+                "axis": "horizontal",
+                "spacing": 12,
+                "type": "stack"
+              },
+              "name": "Setting row",
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "children": [
+                {
+                  "frame": [
+                    [
+                      16,
+                      16
+                    ],
+                    [
+                      48,
+                      48
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E570031-0000-4000-8000-A11CE0000031",
+                  "kind": "avatar",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "frame": [
+                    [
+                      80,
+                      28
+                    ],
+                    [
+                      200,
+                      24
+                    ]
+                  ],
+                  "height": {
+                    "mode": "fixed"
+                  },
+                  "id": "7E570032-0000-4000-8000-A11CE0000032",
+                  "kind": "text",
+                  "text": "Alex Tan",
+                  "width": {
+                    "mode": "fixed"
+                  }
+                }
+              ],
+              "frame": [
+                [
+                  20,
+                  500
+                ],
+                [
+                  353,
+                  100
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570033-0000-4000-8000-A11CE0000033",
+              "kind": "card",
+              "layout": {
+                "type": "free"
+              },
+              "name": "Profile card",
+              "padding": {
+                "bottom": 16,
+                "leading": 16,
+                "top": 16,
+                "trailing": 16
+              },
+              "width": {
+                "mode": "fixed"
+              }
+            },
+            {
+              "buttonLook": "filled",
+              "frame": [
+                [
+                  20,
+                  760
+                ],
+                [
+                  353,
+                  50
+                ]
+              ],
+              "height": {
+                "mode": "fixed"
+              },
+              "id": "7E570034-0000-4000-8000-A11CE0000034",
+              "kind": "button",
+              "text": "Continue",
+              "width": {
+                "mode": "fixed"
+              }
+            }
+          ],
+          "frame": [
+            [
+              0,
+              0
+            ],
+            [
+              393,
+              852
+            ]
+          ],
+          "height": {
+            "mode": "fixed"
+          },
+          "id": "7E570035-0000-4000-8000-A11CE0000035",
+          "kind": "group",
+          "layout": {
+            "type": "free"
+          },
+          "width": {
+            "mode": "fixed"
+          }
+        },
+        "scale": 1
+      }
+    ],
+    "settings": {
+      "customDevices": [
+        {
+          "cornerRadius": 0,
+          "family": "watch",
+          "hasHomeIndicator": false,
+          "hasIsland": false,
+          "id": "custom-7E57C0DE-0000-4000-8000-000000000045",
+          "margin": 8,
+          "name": "Watch 45",
+          "safeBottom": 0,
+          "safeTop": 0,
+          "size": [
+            198,
+            242
+          ]
+        }
+      ],
+      "tokens": {
+        "card": {
+          "fill": {
+            "blue": 1.0,
+            "green": 0.9411764705882353,
+            "red": 0.8980392156862745
+          },
+          "padding": 12,
+          "radius": 16
+        },
+        "rhythm": [
+          4,
+          8,
+          12,
+          20,
+          28
+        ]
+      }
+    }
+  },
+  "fileName": "Structures",
+  "version": 4
+}

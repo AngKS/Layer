@@ -177,7 +177,7 @@ struct TreePlaceTests {
         let model = AppModel(document: LayerDocument())
         model.canvasSize = CGSize(width: 1210, height: 834)
         let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
-        let added = model.store.addScreen(screen([r]))
+        let added = try #require(model.store.addScreen(screen([r])))
         let ref = DesignStore.ElementRef(host: .screen(added), element: r.id)
         model.selection = .element(ref)
         let before = try #require(model.store.node(r.id))
@@ -324,7 +324,7 @@ struct TreePlaceTests {
         model.canvasSize = CGSize(width: 1210, height: 834)
         let r = container(row(), [leaf(60), leaf(50)])
         let g = container(nil, at: CGPoint(x: 20, y: 100), [r, leaf(100, at: CGPoint(x: 0, y: 40))])
-        let added = model.store.addScreen(screen([g]))
+        let added = try #require(model.store.addScreen(screen([g])))
         model.selection = .element(DesignStore.ElementRef(host: .screen(added), element: g.id))
         let row = try #require(model.store.node(r.id))
 
@@ -338,5 +338,43 @@ struct TreePlaceTests {
         #expect(turned.children.map(\.id) == row.children.map(\.id))
         #expect(turned.children.map(\.frame) == row.children.map(\.frame))
         #expect(model.store.node(g.id)?.rotation == 30)
+    }
+
+    /// The rotation field's angle for a row alone turns it about its own middle, as one rigid part:
+    /// its frame stays, and what is in it goes round with it, laid out as it was.
+    @Test func aRowGivenAnAngleInTheRotationFieldTurnsWhole() throws {
+        let model = AppModel(document: LayerDocument())
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
+        let added = try #require(model.store.addScreen(screen([r])))
+        let before = try #require(model.store.node(r.id))
+
+        model.setAngle(of: [DesignStore.ElementRef(host: .screen(added), element: r.id)], to: 30)
+
+        let after = try #require(model.store.node(r.id))
+        #expect(after.rotation == 30)
+        #expect(after.layout == row())
+        #expect(after.frame == before.frame)
+        #expect(after.children.map(\.frame) == before.children.map(\.frame))
+        #expect(model.store.parent(of: r.id) == .screen(added))
+    }
+
+    /// The rotation field's angle for a group holding a row turns the group as one piece: the
+    /// row, a rigid part of it, stays in it, laid out as it was.
+    @Test func aGroupHoldingARowGivenAnAngleInTheRotationFieldKeepsTheRowInIt() throws {
+        let model = AppModel(document: LayerDocument())
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        let r = container(row(), [leaf(60), leaf(50)])
+        let g = container(nil, at: CGPoint(x: 20, y: 100), [r, leaf(100, at: CGPoint(x: 0, y: 40))])
+        let added = try #require(model.store.addScreen(screen([g])))
+        let row = try #require(model.store.node(r.id))
+
+        model.setAngle(of: [DesignStore.ElementRef(host: .screen(added), element: g.id)], to: 90)
+
+        let turned = try #require(model.store.node(r.id))
+        #expect(model.store.parent(of: r.id) == .node(g.id))
+        #expect(turned.layout == row.layout)
+        #expect(turned.children.map(\.frame) == row.children.map(\.frame))
+        #expect(model.store.node(g.id)?.rotation == 90)
     }
 }

@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// How the screen being generated is getting on, floating at the bottom of the canvas:
-/// thinking, writing (with how many elements so far), then done or what went wrong.
+/// thinking, writing (with how many elements so far), then done (or how many parts of it
+/// couldn't be brought in) or what went wrong.
 struct GenerationStatus: View {
     @Environment(AppModel.self) private var model
 
@@ -24,7 +25,7 @@ struct GenerationStatus: View {
                 case .finished:
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text("Wrote \(elements(generation.elementCount))")
+                    Text(Self.finishedText(generation))
                         .font(.subheadline.weight(.semibold))
                 case .failed(let reason):
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -50,10 +51,18 @@ struct GenerationStatus: View {
 
     private func progressText(_ generation: AppModel.ScreenGeneration) -> String {
         if generation.isThinking { return "Thinking…" }
-        return generation.elementCount == 0 ? "Writing…" : "Writing… \(elements(generation.elementCount))"
+        return generation.elementCount == 0 ? "Writing…" : "Writing… \(Self.elements(generation.elementCount))"
     }
 
-    private func elements(_ count: Int) -> String {
+    /// What a finished generation says: how much it wrote, or, when some of what the model wrote
+    /// couldn't be brought in, how much that was.
+    static func finishedText(_ generation: AppModel.ScreenGeneration) -> String {
+        guard generation.leftOut > 0 else { return "Wrote \(elements(generation.elementCount))" }
+        let parts = generation.leftOut == 1 ? "1 part" : "\(generation.leftOut) parts"
+        return "Finished. \(parts) couldn't be brought in."
+    }
+
+    private static func elements(_ count: Int) -> String {
         count == 1 ? "1 element" : "\(count) elements"
     }
 

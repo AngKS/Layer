@@ -144,7 +144,7 @@ struct TreeVerbTests {
         made.root.children = [leaf(.title, CGRect(x: 0, y: 0, width: 200, height: 40), text: "Hello")]
 
         #expect(store.addScreen(made) == made.id)
-        #expect(store.addScreen(made) == made.id)
+        #expect(store.addScreen(made) == nil)
 
         #expect(store.tree.screens.map(\.id) == [made.id])
         #expect(store.device(of: made.id) == .iPhone)
@@ -169,6 +169,53 @@ struct TreeVerbTests {
         #expect(store.node(g.id)?.children.map(\.id) == [a.id, b.id])
         undo.undo()
         #expect(store.node(g.id)?.name == nil)
+    }
+
+    /// A kind changes within its sort: a leaf's to a leaf's, a container's to a container's. A leaf
+    /// made a group would be an empty group, which the rules would take away with the leaf; a
+    /// container made a leaf would hold what a leaf can't. The rest of the change is made.
+    @Test func anUpdateKeepsAKindWithinItsSort() throws {
+        let a = leaf(.text, CGRect(x: 0, y: 0, width: 40, height: 20))
+        let b = leaf(.text, CGRect(x: 0, y: 40, width: 40, height: 20))
+        let g = container(.group, frame: CGRect(x: 20, y: 100, width: 40, height: 60), [a, b])
+        let lone = leaf(.text, CGRect(x: 200, y: 200, width: 40, height: 20))
+        let (store, _) = makeStore(design([screen([g, lone])]))
+
+        store.update(lone.id) { node in
+            node.kind = .group
+            node.name = "Was a leaf"
+        }
+        let kept = try #require(store.node(lone.id))
+        #expect(kept.kind == .text)
+        #expect(kept.name == "Was a leaf")
+
+        store.update(g.id) { $0.kind = .button }
+        #expect(store.node(g.id)?.kind == .group)
+        #expect(store.node(g.id)?.children.map(\.id) == [a.id, b.id])
+
+        store.update(lone.id) { $0.kind = .title }
+        #expect(store.node(lone.id)?.kind == .title)
+        store.update(g.id) { $0.kind = .card }
+        #expect(store.node(g.id)?.kind == .card)
+        #expect(store.node(g.id)?.children.map(\.id) == [a.id, b.id])
+    }
+
+    /// A screen the design can't take is refused with nil, never an id: refused for its id, the id
+    /// it brought names the screen already there, and a caller writing to it would write there.
+    @Test func aRefusedScreenGivesNoID() throws {
+        let (store, _) = makeStore(design([screen([leaf(.title, CGRect(x: 0, y: 0, width: 200, height: 40), text: "First")])]))
+        let first = try #require(store.tree.screens.first)
+        var sameID = TreeScreen(name: "Another", origin: CGPoint(x: 500, y: 0), scale: 1, deviceID: nil)
+        sameID.id = first.id
+        var holdingADrawing = TreeScreen(name: "Ink", origin: CGPoint(x: 1000, y: 0), scale: 1, deviceID: nil)
+        holdingADrawing.root.children = [leaf(.drawing, CGRect(x: 0, y: 0, width: 50, height: 50))]
+        let before = store.tree
+
+        #expect(store.addScreen(sameID) == nil)
+        #expect(store.addScreen(holdingADrawing) == nil)
+
+        #expect(store.tree == before)
+        #expect(store.tree.screens.first?.name == first.name)
     }
 
     // MARK: Move

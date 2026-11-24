@@ -83,8 +83,9 @@ enum DesignLibrary {
     }
 
     /// Reads one design, coordinating with iCloud and any app writing it. Nil for a design
-    /// this version refuses to open, one saved by an earlier or a newer version: it is
-    /// skipped, rather than listed as empty. Reads the disk.
+    /// this version can't open, one saved by an earlier or a newer version or one whose
+    /// design file can't be read at all: it is skipped, rather than listed as empty, and
+    /// Spotlight lets it go. Reads the disk.
     nonisolated static func read(_ url: URL) -> DesignSummary? {
         let name = url.deletingPathExtension().lastPathComponent
         let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate

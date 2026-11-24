@@ -54,11 +54,12 @@ enum TreeProjection {
         var screens: [DesignScreen] = []
         screens.reserveCapacity(content.screens.count)
         for screen in content.screens {
-            var lowering = Lowering(host: screen.id, pending: pending)
+            var lowering = Lowering(host: screen.id, pending: pending, card: content.settings.tokens.card)
             lowering.lowerRoot(screen.root)
             elements += lowering.raw
             var view = Self.view(of: screen)
             view.elements = lowering.shown
+            view.drawing = lowering.drawing
             let device = content.device(of: screen)
             if device != view.device { view.resolvedDevice = device }
             screens.append(view)
@@ -220,37 +221,52 @@ enum TreeProjection {
         var raw: [DesignElement] = []
         var shown: [DesignElement] = []
         var nodes: [LoweredNode] = []
+        /// The design's card tokens, for a card with no look of its own; nil where cards aren't drawn.
+        let card: DesignTokens.Card?
+        var drawing = ScreenDrawing()
 
-        init(host: DesignScreen.ID?, pending: [UUID: UUID], keepsNodes: Bool = false) {
+        init(host: DesignScreen.ID?, pending: [UUID: UUID], keepsNodes: Bool = false, card: DesignTokens.Card? = nil) {
             self.host = host
             self.pending = pending
             self.keepsNodes = keepsNodes
+            self.card = card
         }
 
         /// A screen's root's children, pointing at nothing. The screen's own lock isn't shown on them.
         mutating func lowerRoot(_ root: LayerNode) {
             let place = Place.host.placing(root).place
             for child in root.children {
-                emit(child, at: place, scale: nil, group: nil, locked: false, hidden: false)
+                emit(child, at: place, scale: nil, group: nil, locked: false, hidden: false, in: root.resolvedLayout)
             }
         }
 
         /// The canvas's nodes, each in its own points, at its own scale with everything in it.
         mutating func lowerCanvas(_ nodes: [LayerNode]) {
             for node in nodes {
-                emit(node, at: .host, scale: node.scale, group: nil, locked: false, hidden: false)
+                emit(node, at: .host, scale: node.scale, group: nil, locked: false, hidden: false, in: .free)
             }
         }
 
         /// `node`'s block: its children's blocks, back to front, then the node. `place` is its parent's,
-        /// and `locked` and `hidden` say whether a container above it is.
+        /// and `locked` and `hidden` say whether a container above it is. `layout` is its parent's.
         private mutating func emit(_ node: LayerNode, at place: Place, scale: CGFloat?, group: UUID?,
-                                   locked: Bool, hidden: Bool) {
+                                   locked: Bool, hidden: Bool, in layout: LayerNode.Layout) {
             let placed = place.placing(node)
             let lockedInside = locked || (node.isContainer && node.isLocked)
             let hiddenInside = hidden || (node.isContainer && node.isHidden)
+            if let card, node.kind == .card, !hiddenInside {
+                // Before what it holds, so that the outermost comes first.
+                var drawn = DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: host,
+                                          scale: scale, group: group)
+                drawn.kind = .card
+                drawn.tint = node.style.tint ?? card.fill
+                drawn.cornerRadius = node.style.cornerRadius ?? card.radius
+                drawing.cards.append(drawn)
+            }
+            if card != nil, !node.isContainer, layout != .free { drawing.laidOut.insert(node.id) }
             for child in node.children {
-                emit(child, at: placed.place, scale: scale, group: node.id, locked: lockedInside, hidden: hiddenInside)
+                emit(child, at: placed.place, scale: scale, group: node.id, locked: lockedInside, hidden: hiddenInside,
+                     in: node.resolvedLayout)
             }
             let element = DesignElement(node: node, frame: placed.frame, rotation: placed.rotation, parent: host,
                                         scale: scale, group: pending[node.id] ?? group)

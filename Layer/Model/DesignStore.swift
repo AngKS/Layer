@@ -359,7 +359,7 @@ final class DesignStore {
         copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
         copy.origin.x = frame.maxX + 60
-        return screen(addScreen(copy))
+        return addScreen(copy).flatMap { screen($0) }
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.

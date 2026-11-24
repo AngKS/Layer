@@ -123,6 +123,36 @@ import Testing
         }
     }
 
+    /// A pose is composed through every turned container above it, each about its own centre,
+    /// innermost first, and the angles add up. Worked by hand: the leaf's centre is (10, 5) in
+    /// I, (70, -15) in O, and (315, 170) on the screen; its angle is 90 + 90 + 30.
+    @Test func absolutePosesComposeThroughSeveralTurnedContainers() throws {
+        var leaf = Self.node(.text, CGRect(x: 0, y: 0, width: 20, height: 10))
+        leaf.rotation = 30
+        var inner = Self.node(.group, CGRect(x: 0, y: 0, width: 100, height: 50), [leaf])
+        inner.rotation = 90
+        var outer = Self.node(.group, CGRect(x: 100, y: 100, width: 200, height: 200), [inner])
+        outer.rotation = 90
+        var onCanvas = outer
+        onCanvas.scale = 0.5
+        let screens = Self.content(screens: [Self.screen([outer])]), canvas = Self.content(canvas: [onCanvas])
+
+        // On a screen, and on the canvas at half size: the same in the host's own points.
+        for lowered in [TreeProjection.lower(screens), TreeProjection.lower(canvas)] {
+            let turned = try Self.element(leaf.id, in: lowered.elements)
+            #expect(Self.close(turned.frame.midX, 315) && Self.close(turned.frame.midY, 170))
+            #expect(turned.frame.size == CGSize(width: 20, height: 10))
+            #expect(turned.rotation == 210)
+        }
+        // The index the store reads agrees, in the host's points: the canvas's are drawn at half size.
+        let onScreen = try #require(TreeIndex(screens)[leaf.id]?.hostShape)
+        #expect(Self.close(onScreen.centre.x, 315) && Self.close(onScreen.centre.y, 170))
+        #expect(onScreen.degrees == 210)
+        let drawn = try #require(TreeIndex(canvas)[leaf.id]?.hostShape)
+        #expect(Self.close(drawn.centre.x, 157.5) && Self.close(drawn.centre.y, 85))
+        #expect(drawn.rect.size == CGSize(width: 10, height: 5))
+    }
+
     @Test func canvasDescendantsShareTheirTopLevelsScale() throws {
         let child = Self.node(.text, CGRect(x: 10, y: 10, width: 40, height: 40))
         var g = Self.node(.group, CGRect(x: 100, y: 100, width: 200, height: 200), [child])

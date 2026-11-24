@@ -653,12 +653,40 @@ import UIKit
         #expect(result.diagnostics.count == 2, "\(result.diagnostics)")
     }
 
-    @Test func aFanOutPayloadIsReadQuickly() async throws {
+    /// The work an import does, counted by the import itself: each component's references are read once, each
+    /// reference is followed once by the walk, and each child or search step is charged to `maximumChildRequests`.
+    private static func workBound(components: Int, references: Int) -> Int {
+        components + references + A2UIImporter.maximumChildRequests
+    }
+
+    @Test func aButtonsWordsAreLookedForOnceForEachChild() throws {
+        // 500 buttons share one child: a row of 60 icons and then the words. Looked for afresh for each button,
+        // each component's references read again each time, that was 500 searches of 62 components.
+        let buttons = (0..<500).map { "b\($0)" }
+        let icons = (0..<60).map { "i\($0)" }
+        func list(_ ids: [String]) -> String { ids.map { "\"\($0)\"" }.joined(separator: ",") }
+        let components = [#"{"id":"root","component":"Column","children":[\#(list(buttons))]}"#,
+                          #"{"id":"label","component":"Row","children":[\#(list(icons + ["words"]))]}"#,
+                          #"{"id":"words","component":"Text","text":"Go"}"#]
+            + icons.map { #"{"id":"\#($0)","component":"Icon","name":"star"}"# }
+            + buttons.map { #"{"id":"\#($0)","component":"Button","child":"label"}"# }
+
+        let result = A2UIImporter.importJSON(surface(components.joined(separator: ",")))
+
+        let root = try #require(result.screens.first?.root)
+        #expect(root.children.count == buttons.count)
+        #expect(root.children.allSatisfy { $0.kind == .button && $0.content.text == "Go" })
+        // Every component read once, every reference followed once, every child considered once, and one search.
+        let read = 3 + icons.count + buttons.count
+        let followed = buttons.count + (icons.count + 1) + buttons.count
+        #expect(result.work <= read + followed + buttons.count + 2 * 100, "\(result.work)")
+    }
+
+    @Test func aFanOutsWorkIsBounded() async throws {
         // A column reached 4,096 times over, each time holding 1,000 references: half to nothing,
-        // half back up to an ancestor. Each is turned away, but each costs time, so an import
-        // considers no more than `maximumChildRequests` children in all. (Validating one component
-        // with 10,000 children takes the SDK's validator about 0.4 s in a debug build on its own,
-        // so the payload is kept to 1,000 in the one component, to time only the fan-out.)
+        // half back up to an ancestor. Each is turned away, but each costs work, so an import
+        // considers no more than `maximumChildRequests` children in all. Bounded by the work the import
+        // counts, not by the clock, which a loaded machine stretches (this was aFanOutPayloadIsReadQuickly).
         let levels = 12
         var components = (0..<levels).map { index in
             let id = index == 0 ? "root" : "level\(index)"
@@ -666,14 +694,41 @@ import UIKit
         }
         let references = Array(repeating: #""nowhere""#, count: 500) + Array(repeating: #""level1""#, count: 500)
         components.append(#"{"id":"level\#(levels)","component":"Column","children":[\#(references.joined(separator: ","))]}"#)
+
         let payload = surface(components.joined(separator: ","))
 
-        let clock = ContinuousClock()
-        let started = clock.now
+        // Off the main actor, where an import runs.
         let result = await Task.detached { A2UIImporter.importJSON(payload) }.value
-        let took = clock.now - started
-        #expect(took < .seconds(1), "\(took)")
+
         #expect(result.screens.count == 1)
+        #expect(result.work > 0)
+        #expect(result.work <= Self.workBound(components: levels + 1, references: 2 * levels + references.count), "\(result.work)")
+    }
+
+    @Test func buttonsWordsSearchesAreChargedToTheImportsChildren() throws {
+        // 400 buttons, each with a child of its own that holds one column of 200 empty columns and then the words.
+        // Each search looks at 100 components and finds no words, so in all they would look at more than
+        // `maximumChildRequests` allows.
+        let count = 400
+        let empties = (0..<200).map { "e\($0)" }
+        func list(_ ids: [String]) -> String { ids.map { "\"\($0)\"" }.joined(separator: ",") }
+        var components = [#"{"id":"root","component":"Column","children":[\#(list((0..<count).map { "b\($0)" }))]}"#,
+                          #"{"id":"deep","component":"Column","children":[\#(list(empties + ["words"]))]}"#,
+                          #"{"id":"words","component":"Text","text":"Go"}"#]
+        components += empties.map { #"{"id":"\#($0)","component":"Column","children":[]}"# }
+        for index in 0..<count {
+            components.append(#"{"id":"b\#(index)","component":"Button","child":"c\#(index)"}"#)
+            components.append(#"{"id":"c\#(index)","component":"Row","children":["deep"]}"#)
+        }
+
+        let result = A2UIImporter.importJSON(surface(components.joined(separator: ",")))
+
+        let reached = 3 + empties.count + 2 * count
+        let followed = 3 * count + empties.count + 1
+        #expect(result.work <= Self.workBound(components: reached, references: followed), "\(result.work)")
+        let root = try #require(result.screens.first?.root)
+        #expect(root.children.count == count)
+        #expect(root.children.allSatisfy { $0.content.text == ElementKind.button.placeholder })
     }
 
     @Test func componentsWithoutCreateSurfaceStillImport() throws {

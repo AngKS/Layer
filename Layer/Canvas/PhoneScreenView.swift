@@ -28,8 +28,15 @@ struct PhoneScreenView: View {
                 statusBar(for: device)
             }
 
+            ForEach(screen.drawing.cards) { card in
+                ElementView(element: card)
+                    .frame(width: card.frame.width, height: card.frame.height)
+                    .rotationEffect(.degrees(card.resolvedRotation))
+                    .offset(x: card.frame.minX, y: card.frame.minY)
+            }
+
             ForEach(screen.elements.filter { !$0.isHidden }) { element in
-                ElementView(element: element)
+                ElementView(element: element, isLaidOut: screen.drawing.laidOut.contains(element.id))
                     .frame(width: element.frame.width, height: element.frame.height)
                     .rotationEffect(.degrees(element.resolvedRotation))
                     .offset(x: element.frame.minX, y: element.frame.minY)
@@ -129,7 +136,29 @@ struct FloatingElementView: View {
 /// One element, drawn to fill whatever frame it is given.
 struct ElementView: View {
     let element: DesignElement
+    var isLaidOut = false
     @Environment(ImageLibrary.self) private var images
+
+    init(element: DesignElement, isLaidOut: Bool = false) {
+        self.element = element
+        self.isLaidOut = isLaidOut
+    }
+
+    struct TextFit: Equatable {
+        var lineLimit: Int?
+        var shrinks: Bool
+        var vertical: VerticalAlignment
+    }
+
+    /// Laid out: no line limit, no shrinking, top-aligned. Otherwise today's per-kind values.
+    static func textFit(for kind: ElementKind, isLaidOut: Bool) -> TextFit {
+        if isLaidOut { return TextFit(lineLimit: nil, shrinks: false, vertical: .top) }
+        switch kind {
+        case .title: return TextFit(lineLimit: 1, shrinks: true, vertical: .center)
+        case .text: return TextFit(lineLimit: nil, shrinks: false, vertical: .top)
+        default: return TextFit(lineLimit: nil, shrinks: false, vertical: .center)
+        }
+    }
 
     var body: some View {
         let radius = element.resolvedCornerRadius
@@ -164,21 +193,13 @@ struct ElementView: View {
     private var content: some View {
         let radius = element.resolvedCornerRadius
         switch element.kind {
-        case .title:
+        case .title, .body, .text:
+            let fit = Self.textFit(for: element.kind, isLaidOut: isLaidOut)
             label
-                .lineLimit(1)
-                .minimumScaleFactor(0.4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-
-        case .body:
-            label
+                .lineLimit(fit.lineLimit)
+                .minimumScaleFactor(fit.shrinks ? 0.4 : 1)
                 .multilineTextAlignment(textAlignment)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-
-        case .text:
-            label
-                .multilineTextAlignment(textAlignment)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .top))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: fit.vertical))
 
         case .image, .avatar:
             if let picture = images.image(element.imageID) {
@@ -285,7 +306,11 @@ struct ElementView: View {
             // it. Locked, it is off that canvas, out of the eraser's reach, and drawn here.
             if element.isLocked { InkPicture(ink: element.ink) }
 
-        case .group, .card:
+        case .card:
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(element.tint.color)
+
+        case .group:
             // A group draws nothing of its own: its members are drawn. A screen's elements
             // leave group items out, so one never reaches here.
             EmptyView()

@@ -18,6 +18,11 @@ struct A2UIImport: Sendable {
 
     var screens: [Screen] = []
     var diagnostics: [A2UIDiagnostic] = []
+    /// How many steps the import took through its graphs: each component whose references it read, each reference
+    /// it followed walking from a root, each child it considered making, and each step of a search for a button's
+    /// words. Each component is read once and each reference walked once, and the rest is charged to
+    /// `maximumChildRequests`, so this grows with the payload, never with how often a component is reached.
+    var work = 0
 }
 
 /// Reads A2UI 1.0 into the tree (spec §6, "A2UI import"):
@@ -66,9 +71,13 @@ enum A2UIImporter {
     static let maximumDataModelValues = 50_000
 
     /// How many children one import considers making, across every container and template,
-    /// whether they're made or turned away. A component reached many times over asks for its
-    /// children each time; past this, what is left isn't looked at.
+    /// whether they're made or turned away, and how many steps its searches for buttons' words take.
+    /// A component reached many times over asks for its children each time; past this, what is
+    /// left isn't looked at.
     static let maximumChildRequests = 10 * TreeRules.maximumNodes
+
+    /// How many components one search for a button's words looks at.
+    static let maximumWordSearch = 100
 
     /// Nonisolated; never throws. One screen per surface that has a resolvable root, and no more
     /// than 5,000 nodes in all, as a design holds.
@@ -92,6 +101,7 @@ enum A2UIImporter {
         let messages = parse(items, into: &diagnostics)
         var screens: [A2UIImport.Screen] = []
         var budget = ScreenBuilder.Budget(nodes: TreeRules.maximumNodes, childRequests: maximumChildRequests)
+        var work = 0
         for surface in gather(messages, trustsLayerLook: trustsLayerLook, into: &diagnostics) {
             guard budget.nodes > 0 else {
                 diagnostics.append(A2UIDiagnostic(
@@ -105,8 +115,9 @@ enum A2UIImporter {
             }
             diagnostics += builder.diagnostics
             budget = builder.budget
+            work += builder.work
         }
-        return A2UIImport(screens: screens, diagnostics: diagnostics)
+        return A2UIImport(screens: screens, diagnostics: diagnostics, work: work)
     }
 }
 
@@ -523,6 +534,8 @@ private struct ScreenBuilder {
     private(set) var diagnostics: [A2UIDiagnostic] = []
     /// What the import has left once this screen is built.
     private(set) var budget: Budget
+    /// The steps this screen took through its graph: see `A2UIImport.work`.
+    private(set) var work = 0
 
     /// The catalogue each component is read against, by id, found as the walk reaches it.
     private var catalogs: [String: AnyCatalog] = [:]
@@ -533,6 +546,11 @@ private struct ScreenBuilder {
     private var keysMade: [String: Int] = [:]
     /// Each diagnostic given so far, so a template's items don't repeat them.
     private var given: Set<String> = []
+    /// Each component's references, by id, read the first time they're asked for.
+    private var referencesOf: [String: [GraphTopologyValidator.Reference]] = [:]
+    /// The Text a button's words come from, by the id of the button's child: looked for once for each child, however
+    /// many buttons share it or however often one is reached. Nil when there is none.
+    private var wordsBelow: [String: String?] = [:]
 
     private static let strict = ValidationConfig(protocolVersion: .v10)
     private static let basicCatalog = BasicCatalog.makeCatalog(version: .v10)
@@ -650,6 +668,7 @@ private struct ScreenBuilder {
                 continue
             }
             stack[stack.count - 1].next += 1
+            work += 1
             let reference = top.references[top.next]
             let target = reference.referenceID
             if surface.components[target] == nil {
@@ -667,9 +686,11 @@ private struct ScreenBuilder {
         return done
     }
 
-    /// The ids a component holds in its child slots, in a steady order.
+    /// The ids a component holds in its child slots, in a steady order. Read once for each component.
     private mutating func references(of id: String) -> [GraphTopologyValidator.Reference] {
+        if let known = referencesOf[id] { return known }
         guard let component = surface.components[id] else { return [] }
+        work += 1
         let found: [GraphTopologyValidator.Reference]
         if let type = component["component"]?.stringValue, let schema = catalog(of: id)?.components[type]?.schema.jsonValue {
             found = GraphTopologyValidator.extractReferences(from: component, schema: schema)
@@ -691,7 +712,9 @@ private struct ScreenBuilder {
         let order = found.indices.sorted { a, b in
             properties[a] != properties[b] ? properties[a] < properties[b] : a < b
         }
-        return order.map { found[$0] }
+        let references = order.map { found[$0] }
+        referencesOf[id] = references
+        return references
     }
 
     private mutating func reportCycle(from id: String, field: String, to ancestor: String) {
@@ -722,12 +745,27 @@ private struct ScreenBuilder {
     /// How many of the `count` children component `id` asks for the import may still consider.
     /// Once it may consider no more, that's said once, and nothing more is asked for.
     private mutating func considered(_ count: Int, by id: String) -> Int {
+        let allowed = spend(count, by: id)
+        work += allowed
+        return allowed
+    }
+
+    /// Whether a search for button `id`'s words may take one more step. Each step it takes is charged to the
+    /// children the import may consider, so all its searches together take no more steps than that, and counted.
+    private mutating func mayLookFurther(for id: String) -> Bool {
+        guard spend(1, by: id) == 1 else { return false }
+        work += 1
+        return true
+    }
+
+    /// Takes up to `count` from what the import may still consider, and says once when that's spent.
+    private mutating func spend(_ count: Int, by id: String) -> Int {
         let allowed = min(count, max(0, budget.childRequests))
         budget.childRequests -= allowed
         if allowed < count, !budget.saidChildRequestsAreSpent {
             budget.saidChildRequestsAreSpent = true
             report(.invalidComponent, id, "children",
-                   "The import asks for more than \(A2UIImporter.maximumChildRequests) children in all, so from here on what it holds isn't imported.")
+                   "The import asks for more than \(A2UIImporter.maximumChildRequests) children in all, counting what it looks through for buttons' words, so from here on what it holds isn't imported.")
         }
         return allowed
     }
@@ -1068,19 +1106,35 @@ private struct ScreenBuilder {
             return string(child["text"], of: childID, field: "text", at: place).map { Markdown($0).words }
         }
         report(.nearestKind, id, "child", "Layer's buttons show words only, so only the first text inside it is kept.")
-        // Breadth first through what the child holds, each component once, looking at no more than 100.
+        let textID: String?
+        if let found = wordsBelow[childID] {
+            textID = found
+        } else {
+            textID = firstText(below: childID, for: id)
+            wordsBelow[childID] = textID
+        }
+        // Read where this button is, which in a template's item may bind to that item's data.
+        guard let textID, let text = surface.components[textID] else { return nil }
+        return string(text["text"], of: textID, field: "text", at: place).map { Markdown($0).words }
+    }
+
+    /// The first Text breadth first through what `childID` holds, each component once. It looks at no more than
+    /// `maximumWordSearch` components, and each component it looks at and each reference it follows is a step
+    /// charged to the import's children (`mayLookFurther`), so no payload can make the searches of all its buttons
+    /// cost more than those.
+    private mutating func firstText(below childID: String, for id: String) -> String? {
         var queue = [childID]
         var seen: Set<String> = [childID]
         var next = 0
-        while next < queue.count, next < 100 {
+        while next < queue.count, next < A2UIImporter.maximumWordSearch, mayLookFurther(for: id) {
             let current = queue[next]
             next += 1
             guard let component = surface.components[current] else { continue }
-            if component["component"]?.stringValue == "Text" {
-                return string(component["text"], of: current, field: "text", at: place).map { Markdown($0).words }
-            }
-            for reference in references(of: current) where seen.insert(reference.referenceID).inserted {
-                queue.append(reference.referenceID)
+            if component["component"]?.stringValue == "Text" { return current }
+            for reference in references(of: current) {
+                // Only as many as will be looked at are queued.
+                guard queue.count < A2UIImporter.maximumWordSearch, mayLookFurther(for: id) else { break }
+                if seen.insert(reference.referenceID).inserted { queue.append(reference.referenceID) }
             }
         }
         return nil

@@ -55,8 +55,9 @@ struct DesignContent: Equatable, Sendable {
     }
 
     /// Every string in what this version read but didn't understand: nodes of kinds it
-    /// doesn't know, on the canvas and inside containers; custom frames it can't use; and keys
-    /// it doesn't know on nodes, screens, the settings, the design and its file. Among them are
+    /// doesn't know, on the canvas and inside containers; screens it can't read; custom frames
+    /// it can't use; and keys it doesn't know on nodes and inside their parts, on screens, the
+    /// settings, the design and its file. Among them are
     /// the identifiers of drawings and pictures. The files they name are kept when the design
     /// is saved, so that the newer Layer that wrote them still finds them.
     var unreadNames: Set<String> {
@@ -67,8 +68,10 @@ struct DesignContent: Equatable, Sendable {
         for device in settings.customDevices where !device.unknownKeys.values.isEmpty { names.formUnion(device.unknownKeys.strings) }
         for json in settings.unreadDevices { names.formUnion(json.strings) }
         for unread in tree.unreadCanvas { names.formUnion(unread.raw.strings) }
+        for unread in tree.unreadScreens { names.formUnion(unread.raw.strings) }
         func visit(_ node: LayerNode) {
             if !node.unknownKeys.values.isEmpty { names.formUnion(node.unknownKeys.strings) }
+            for keys in node.unknownPartKeys.values { names.formUnion(keys.strings) }
             for unread in node.unreadChildren { names.formUnion(unread.raw.strings) }
             node.children.forEach(visit)
         }
@@ -266,6 +269,7 @@ struct DesignContent: Equatable, Sendable {
     /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
     func boardDiffers(from other: DesignContent) -> Bool {
         title != other.title || canvas != other.canvas || tree.unreadCanvas != other.tree.unreadCanvas
+            || tree.unreadScreens != other.tree.unreadScreens
             || tree.unknownKeys != other.tree.unknownKeys || tree.manifestUnknownKeys != other.tree.manifestUnknownKeys
     }
 
@@ -290,6 +294,7 @@ struct DesignContent: Equatable, Sendable {
     }
 }
 
+// PROJECTION: deleted in plan 6
 private extension DesignElement {
     func placed(on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
         var element = self
@@ -299,6 +304,7 @@ private extension DesignElement {
     }
 }
 
+// PROJECTION: deleted in plan 6
 /// The list operations that the projection's writes run on a host's lowered list, as the
 /// design's one list ran them (F15).
 extension [DesignElement] {
