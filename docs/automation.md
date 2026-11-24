@@ -17,7 +17,7 @@ All the actions are in `Layer/Intents/`. Each change goes through `DesignStore` 
 | Read | **Get Design Layout** | Returns the design as JSON: screens, elements with frames and look, loose elements, canvas settings and ink. Element `id`s are entity identifiers. |
 | | Describe Design, Find Designs / Screens / Elements | Return the design in words, or find things by name. |
 | Screens | **Add Screen** | Device, name and, optionally, canvas `x`, `y` and `scale` (%). |
-| | **Build Screen** | A whole screen from a description: one element per line (see below). |
+| | **Build Screen** | A whole screen from a description: one element per line, with containers and sections, or A2UI JSON (see below). |
 | | **Move or Scale Screen** | Canvas `x`, `y`, `scale` (%). |
 | | **Lock or Unlock Screen**, Rename, Change Device, Duplicate, Delete, Show | |
 | Elements | **Add Element** | Any of the 14 kinds, with text, symbol, colour, a **Look** string, and optional `x`, `y`, `width`, `height`. With **On Canvas** it goes on the open canvas, at canvas points. |
@@ -33,6 +33,34 @@ All the actions are in `Layer/Intents/`. Each change goes through `DesignStore` 
 | | **Erase Ink** | Ink touching an area, or all of it. |
 | | Convert Sketches, Clear Sketches | Read waiting Magic Pen sketches now, or throw them away. |
 
+## Build Screen's layout
+
+**Build Screen** reads its layout as an outline, one element per line from top to bottom, written `kind: words [look]`:
+
+- **Containers.** A line `card:`, `column:`, `row:` or `grid 2:` (any number of columns from 1 to 12) holds the lines indented under it, two spaces a step. `row: a | b` puts elements side by side on one line.
+- **Sections.** A blank line or `---` starts a new section. A container written straight after a section's lines, with no blank line between, joins that section.
+- **A2UI.** A layout that starts with `{` or `[` is read as A2UI 1.0 JSON instead, and Layer builds its components.
+
+Rebuilding a screen keeps what was built before where it is, and leaves what was added by hand alone.
+
+```
+title: Create account
+text field: Email
+text field: Password
+row: checkbox [off] | text: Remember me [left]
+progress [40%]
+button: Sign up [blue, bold]
+button: I have an account [plain]
+
+card:
+  text: Already a member?
+  row:
+    text: Sign in instead
+    button: Sign in [bordered]
+```
+
+Kinds: title, body, button, text field, image, symbol (`symbol: heart.fill`), divider, toggle, checkbox, radio, progress, avatar, text.
+
 ## Look words
 
 **Build Screen**'s square brackets, and the **Look** parameter of Add Element and Style Element, take comma-separated words:
@@ -42,28 +70,22 @@ All the actions are in `Layer/Intents/`. Each change goes through `DesignStore` 
 | `blue`, `#0A84FF` | Fill colour |
 | `text white`, `text #333333` | Text colour |
 | `regular`, `medium`, `semibold`, `bold` | Font weight |
-| `18pt` | Font size |
-| `radius 12` | Corner radius |
 | `fill`, `fit` | Width in Build Screen: stretch across, or keep the usual size |
 | `on`, `off`, `checked`, `unchecked`, `selected` | Toggles, checkboxes, radio buttons |
 | `40%` | How full a progress bar is |
 | `filled`, `bordered`, `plain` | Button style |
 | `left`, `centre`, `right` | Text alignment |
 | `shadow`, `no shadow` | Shadow |
-| `border red`, `border 2` | Outline colour or width |
+| `border red` | Outline colour |
+
+These numbers apply to Add Element's and Style Element's **Look** only. Build Screen passes them over, and each kind keeps its own size, corner and outline, as a generated screen does:
+
+| Words | Sets |
+|---|---|
+| `18pt` | Font size |
+| `radius 12` | Corner radius |
+| `border 2` | Outline width |
 | `opacity 50%` | Opacity |
-
-```
-title: Create account
-text field: Email
-text field: Password
-row: checkbox [off] | text: Remember me [left]
-progress [40%]
-button: Sign up [blue, bold, radius 12]
-button: I have an account [plain]
-```
-
-Kinds: title, body, button, text field, image, symbol (`symbol: heart.fill`), divider, toggle, checkbox, radio, progress, avatar, text, sticky note.
 
 ## Strokes
 
