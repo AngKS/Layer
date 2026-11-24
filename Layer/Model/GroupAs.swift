@@ -20,7 +20,10 @@ extension DesignStore {
     @discardableResult
     func group(_ selection: CanvasSelection, as shape: GroupShape) -> ElementRef? {
         guard let members = wrappable(selection, as: shape) else { return nil }
-        let layout = TreeEdit.groupedLayout(of: members.compactMap { node($0) }, as: shape, rhythm: tree.settings.tokens.rhythm)
+        // Worked out from the frames `wrap` lays out: on the canvas's top level, in the scale of the frontmost of them.
+        var nodes = members.compactMap { node($0) }
+        if let front = nodes.last, parent(of: front.id) == .canvas { nodes = Self.held(nodes, drawnAt: front.scale) }
+        let layout = TreeEdit.groupedLayout(of: nodes, as: shape, rhythm: tree.settings.tokens.rhythm)
         // Where each one's top-left is on the canvas before it is wrapped, for a container that may move them.
         var corners: [UUID: CGPoint] = [:]
         for id in members where layout != .free {
@@ -59,6 +62,45 @@ extension DesignStore {
         let at = now.placement.canvasRect(for: now.frame).origin
         let scale = container.placement.scale
         place(id, at: container.frame.offsetBy(dx: (corner.x - at.x) / scale, dy: (corner.y - at.y) / scale))
+    }
+
+    // MARK: Lining up among several things
+
+    /// Today's Align among several things (`align(_:_:)`), moving only what sits in a free parent (spec §10).
+    func alignInFreeParents(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) {
+        lineUpInFreeParents(selection) { ElementLayout.aligned($0, alignment) }
+    }
+
+    /// Today's Distribute among several things (`distribute(_:_:)`), moving only what sits in a free parent (spec §10).
+    func distributeInFreeParents(_ selection: CanvasSelection, _ distribution: ElementLayout.Distribution) {
+        lineUpInFreeParents(selection) { ElementLayout.distributed($0, distribution) }
+    }
+
+    /// Whether something selected sits in a free parent, a screen's or the open canvas's top level among them, or is a
+    /// screen: something `alignInFreeParents` and `distributeInFreeParents` can move.
+    func holdsSomethingInAFreeParent(_ selection: CanvasSelection) -> Bool {
+        things(in: selection).contains(where: isInAFreeParent)
+    }
+
+    /// Lines up what is selected as `rule` lines up their boxes on the canvas, as today's align and distribute do. What
+    /// a row, column, grid or overlay places stays where it is, and the others line up with it all the same, as they do
+    /// with a locked thing. What is already in place is left exactly where it is. One change.
+    private func lineUpInFreeParents(_ selection: CanvasSelection, _ rule: ([CGRect]) -> [CGRect]) {
+        let placed = things(in: selection).compactMap { thing in canvasFrame(of: thing).map { (thing, $0) } }
+        guard placed.count > 1 else { return }
+        let arranged = rule(placed.map(\.1))
+        var origins: [CanvasSelection: CGPoint] = [:]
+        for (index, (thing, frame)) in placed.enumerated() where isInAFreeParent(thing) {
+            let origin = arranged[index].origin
+            if abs(origin.x - frame.minX) >= 0.01 || abs(origin.y - frame.minY) >= 0.01 { origins[thing] = origin }
+        }
+        position(origins)
+    }
+
+    /// Whether a thing goes where it is put: a screen, or a thing in a free container, a free root or the open canvas.
+    private func isInAFreeParent(_ thing: CanvasSelection) -> Bool {
+        guard case .element(let ref) = thing else { return true }
+        return placed(ref).map { !$0.isLaidOut } ?? false
     }
 
     // MARK: Lining up in a laid-out parent

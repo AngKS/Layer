@@ -89,6 +89,11 @@ struct SelectionActions: View {
                 if let id = model.selectedScreenID {
                     ScreenEditField(screen: id).id(id)
                 }
+                // One thing can be put in a card: where Group is when several things are selected.
+                let offered = model.groupShapesOffered
+                if !offered.isEmpty {
+                    groupButton(offered)
+                }
                 ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
                     withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
                 }
@@ -143,7 +148,7 @@ struct SelectionActions: View {
     /// For several things at once: their settings, lining them up with one another, and
     /// what any selection can have done to it.
     @ViewBuilder private var severalActions: some View {
-        groupButton
+        groupButton(model.groupShapesOffered)
         ToolButton(symbol: "paintbrush", label: "Format selection", isActive: model.isInspectorOpen) {
             withAnimation(.smooth(duration: 0.3)) { model.isInspectorOpen.toggle() }
         }
@@ -156,13 +161,12 @@ struct SelectionActions: View {
                 .disabled(!model.canLineUpSelection(alignment))
             }
             Divider()
-            // What a row, column, grid or overlay holds, it spaces itself.
-            let canDistribute = model.canDistributeSelection && !model.isSelectionLaidOut
+            // What a row, column, grid or overlay holds, it spaces itself: see `lineUpSelection`.
             ForEach(ElementLayout.Distribution.allCases, id: \.self) { distribution in
                 Button(distribution.name, systemImage: distribution.symbol) {
-                    withAnimation(.smooth(duration: 0.25)) { model.distributeSelection(distribution) }
+                    withAnimation(.smooth(duration: 0.25)) { model.lineUpSelection(distribution) }
                 }
-                .disabled(!canDistribute)
+                .disabled(!model.canLineUpSelection(distribution))
             }
         } label: {
             ToolIcon(symbol: "align.horizontal.left")
@@ -183,10 +187,11 @@ struct SelectionActions: View {
         .keyboardShortcut(.delete, modifiers: .command)
     }
 
-    /// Group, ⌥⌘G: a tap groups, and a hold offers Group, Row, Column, Grid and Card (call 7). Each is off, and says
-    /// why, when what is selected can't be grouped so; the button is off when none can.
-    private var groupButton: some View {
-        let canGroup = GroupShape.allCases.contains { model.canGroupSelection(as: $0) }
+    /// Group, ⌥⌘G, with a menu of the shapes `offered` (`groupShapesOffered`), each of the others off and saying why
+    /// (call 7). When Group is offered a tap groups and a hold opens the menu; otherwise a tap opens it, so that the
+    /// button never does nothing. Off, and saying why, when nothing is offered.
+    private func groupButton(_ offered: [GroupShape]) -> some View {
+        let hint = groupHint
         return ZStack {
             // The shortcut is on a button of its own behind it, hidden and never off, as the
             // arrange shortcuts are: one switched on by the change before was at times still
@@ -195,24 +200,26 @@ struct SelectionActions: View {
                 .keyboardShortcut("g", modifiers: [.command, .option])
                 .hidden()
                 .frame(width: 0, height: 0)
-            Menu {
-                ForEach(GroupShape.allCases, id: \.self) { shape in
-                    let canGroupAsShape = model.canGroupSelection(as: shape)
-                    Button(shape.title, systemImage: shape.symbol) { group(as: shape) }
-                        .disabled(!canGroupAsShape)
-                        .accessibilityHint(groupHint(canGroup: canGroupAsShape))
-                }
-            } label: {
-                ToolIcon(symbol: "rectangle.3.group")
-            } primaryAction: {
-                group()
-            }
-            // In the order written, Group first, even when the menu opens upwards.
-            .menuOrder(.fixed)
-            .disabled(!canGroup)
-            .opacity(canGroup ? 1 : 0.35)
-            .accessibilityLabel("Group")
-            .accessibilityHint(groupHint(canGroup: model.canGroupSelection(as: .group)))
+            groupMenu(offered, hint: hint)
+                // In the order written, Group first, even when the menu opens upwards.
+                .menuOrder(.fixed)
+                .disabled(offered.isEmpty)
+                .opacity(offered.isEmpty ? 0.35 : 1)
+                .accessibilityLabel("Group")
+                .accessibilityHint(offered.isEmpty ? hint : "")
+        }
+    }
+
+    @ViewBuilder private func groupMenu(_ offered: [GroupShape], hint: String) -> some View {
+        let items = ForEach(GroupShape.allCases, id: \.self) { shape in
+            Button(shape.title, systemImage: shape.symbol) { group(as: shape) }
+                .disabled(!offered.contains(shape))
+                .accessibilityHint(offered.contains(shape) ? "" : hint)
+        }
+        if offered.contains(.group) {
+            Menu { items } label: { ToolIcon(symbol: "rectangle.3.group") } primaryAction: { group() }
+        } else {
+            Menu { items } label: { ToolIcon(symbol: "rectangle.3.group") }
         }
     }
 
@@ -220,10 +227,9 @@ struct SelectionActions: View {
         withAnimation(.smooth(duration: 0.25)) { model.groupSelection(as: shape) }
     }
 
-    /// Why Group is off, when it is because what is selected is on more than one screen, or on a screen and the open
+    /// Why a shape is off, when it is because what is selected is on more than one screen, or on a screen and the open
     /// canvas; nothing otherwise. Read from the selection's own refs, so that the bar lowers nothing.
-    private func groupHint(canGroup: Bool) -> String {
-        guard !canGroup else { return "" }
+    private var groupHint: String {
         let hosts = Set(model.selectedThings.compactMap { thing -> DesignStore.ElementRef.Host? in
             if case .element(let ref) = thing { ref.host } else { nil }
         })

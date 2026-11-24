@@ -221,16 +221,8 @@ extension DesignStore {
               memo.count < TreeRules.maximumNodes else { return nil }
 
         if first.host == .canvas, parentPath.isEmpty {
-            let scale = Self.drawn(siblings[front].scale)
             wrapper.scale = siblings[front].scale
-            for index in members.indices {
-                let own = Self.drawn(members[index].scale)
-                if own != scale {
-                    let onCanvas = Placement(origin: .zero, scale: own).canvasRect(for: members[index].frame)
-                    members[index].frame = Placement(origin: .zero, scale: scale).localRect(for: onCanvas)
-                }
-                members[index].scale = nil
-            }
+            members = Self.held(members, drawnAt: siblings[front].scale)
         }
         if layout != .free {
             members = TreeEdit.readingOrder(members, for: layout)
@@ -483,6 +475,23 @@ extension DesignStore {
         case .canvas:
             guard let top = entry.path.first, tree.canvas.indices.contains(top) else { return 1 }
             return Self.drawn(tree.canvas[top].scale)
+        }
+    }
+
+    /// Nodes from the canvas's top level as a container drawn at `scale` holds them, which is how `wrap` holds them: each
+    /// drawn at another scale is carried into it through canvas points, so it stays where it is, as large, and none keeps
+    /// a scale of its own.
+    static func held(_ nodes: [LayerNode], drawnAt scale: CGFloat?) -> [LayerNode] {
+        let scale = drawn(scale)
+        return nodes.map { node in
+            var held = node
+            let own = drawn(node.scale)
+            if own != scale {
+                let onCanvas = Placement(origin: .zero, scale: own).canvasRect(for: node.frame)
+                held.frame = Placement(origin: .zero, scale: scale).localRect(for: onCanvas)
+            }
+            held.scale = nil
+            return held
         }
     }
 

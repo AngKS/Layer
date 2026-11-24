@@ -194,7 +194,62 @@ struct GroupAsTests {
         #expect(try #require(canvas.store.placed(high.id)).canvasShape.rect.origin == corner)
     }
 
+    /// On the open canvas `wrap` frames things drawn at other scales in the frontmost one's, and the numbers are worked
+    /// out there too (I1). In the front one's points the gap is 50, so the spacing is 32, and the centres agree. Read
+    /// from the raw frames, the gap would be 0 and the tops would count as lined up: spacing 8, start.
+    @Test func onTheOpenCanvasTheNumbersAreWorkedOutAtTheFrontOnesScale() throws {
+        var back = text(0, 0, width: 100, height: 100), front = text(100, 12, width: 26, height: 26)
+        back.scale = 1
+        front.scale = 2
+        let (model, _) = makeModel(design([], canvas: [back, front]))
+        let store = model.store
+        let line = try store.canvasCentre(of: back.id).y
+        #expect(try store.canvasCentre(of: front.id).y == line)
+
+        let made = try #require(store.group(store.selection(of: [back.id, front.id]), as: .row))
+
+        let row = try #require(store.node(made.element))
+        #expect(row.resolvedLayout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 32, alignment: .center)))
+        // The first keeps its place, and the other stays on the line through their centres.
+        #expect(try #require(store.placed(back.id)).canvasShape.rect.origin == .zero)
+        #expect(try store.canvasCentre(of: front.id).y == line)
+    }
+
     // MARK: What can be grouped
+
+    /// The Group button offers the shapes what is selected can be grouped as (I2, call 8): a tap groups only when Group
+    /// is among them, and opens the menu otherwise. One thing is offered a card.
+    @Test func theGroupButtonOffersWhatCanBeGrouped() throws {
+        let a = text(0, 0), b = text(100, 0)
+        let g = container(frame: CGRect(x: 20, y: 100, width: 160, height: 24), [a, b])
+        var locked = text(120, 300)
+        locked.isLocked = true
+        let loose = text(20, 300), other = text(20, 400)
+        var ink = LayerNode(kind: .drawing)
+        ink.frame = CGRect(x: 600, y: 0, width: 40, height: 40)
+        let note = text(700, 0)
+        let (model, _) = makeModel(design([screen([g, loose, locked, other])], canvas: [ink, note]))
+        let store = model.store
+        func offered(_ ids: [UUID]) throws -> [GroupShape] {
+            model.selection = try store.selection(of: ids)
+            return model.groupShapesOffered
+        }
+
+        #expect(try offered([loose.id, other.id]) == GroupShape.allCases)
+        // All of a free group: everything but Group, which would make that group again.
+        #expect(try offered([a.id, b.id]) == [.row, .column, .grid, .card])
+        // A locked thing, or a drawing, is left out, leaving one thing: a card.
+        #expect(try offered([locked.id, loose.id]) == [.card])
+        #expect(try offered([ink.id, note.id]) == [.card])
+        #expect(try offered([loose.id]) == [.card])
+        model.selection = nil
+        #expect(model.groupShapesOffered.isEmpty)
+
+        model.selection = try store.selection(of: [loose.id])
+        model.groupSelection(as: .card)
+        #expect(model.selectedNode?.node.kind == .card)
+        #expect(model.selectedNode?.node.children.map(\.id) == [loose.id])
+    }
 
     @Test func aCardCanHoldOneThingAndTheOthersNeedTwo() throws {
         let one = text(20, 100)
@@ -332,6 +387,56 @@ struct GroupAsTests {
 
         #expect(linedUp.store.node(b.id)?.frame.minX == 20)
         #expect(linedUp.store.tree == aligned.store.tree)
+    }
+
+    /// Spec §10: Align and Distribute apply in free parents. Across parents, what a row places stays where it is, and the
+    /// rest line up with it all the same, as with a locked thing; today's align took it out of its row.
+    @Test func lineUpAcrossParentsMovesOnlyWhatIsInAFreeParent() throws {
+        let held = text(0, 0), beside = text(0, 0)
+        let row = container(.group, .stack(LayerNode.Stack(axis: .horizontal, spacing: 8)),
+                            frame: CGRect(x: 20, y: 100, width: 128, height: 24), [held, beside])
+        let wide = text(60, 300, width: 100)
+        let (model, _) = makeModel(design([screen([row, wide])]))
+        let store = model.store
+        let place = try #require(store.placed(held.id)).frame
+        model.selection = try store.selection(of: [held.id, wide.id])
+        #expect(!model.isSelectionLaidOut)
+        #expect(model.canLineUpSelection(.centerX))
+
+        model.lineUpSelection(.centerX)
+
+        // Centred in the area both cover, 20 to 160: the free one moves, and the row's stays in its row.
+        #expect(store.parent(of: held.id) == .node(row.id))
+        #expect(store.placed(held.id)?.frame == place)
+        #expect(store.placed(wide.id)?.frame.minX == 40)
+
+        // Distributed across: the ends stay, the row's child stays, and the other free one takes its even place.
+        let first = text(20, 200), middle = text(0, 0), third = text(220, 300), last = text(400, 400), alone = text(0, 0)
+        let holding = container(.group, .stack(LayerNode.Stack(axis: .horizontal, spacing: 8)),
+                                frame: CGRect(x: 150, y: 100, width: 60, height: 24), [middle])
+        let another = container(.group, .stack(LayerNode.Stack(axis: .horizontal, spacing: 8)),
+                                frame: CGRect(x: 20, y: 500, width: 60, height: 24), [alone])
+        let (spread, _) = makeModel(design([screen([first, holding, third, last, another])]))
+        let spreadStore = spread.store
+        let middlePlace = try #require(spreadStore.placed(middle.id)).frame
+        spread.selection = try spreadStore.selection(of: [first.id, middle.id, third.id, last.id])
+        #expect(spread.canLineUpSelection(.horizontal))
+
+        spread.lineUpSelection(.horizontal)
+
+        #expect(spreadStore.parent(of: middle.id) == .node(holding.id))
+        #expect(spreadStore.placed(middle.id)?.frame == middlePlace)
+        // 20 to 460 holds 240 of things and three gaps of 66.67: the third starts at 273.33, on a whole point.
+        #expect(spreadStore.placed(third.id)?.frame.minX == 273)
+        #expect(spreadStore.placed(first.id)?.frame.minX == 20)
+        #expect(spreadStore.placed(last.id)?.frame.minX == 400)
+
+        // Things in two rows, and nothing in a free parent: nothing to line up.
+        spread.selection = try spreadStore.selection(of: [middle.id, alone.id])
+        #expect(!spread.canLineUpSelection(.left))
+        let before = spreadStore.tree
+        spread.lineUpSelection(.left)
+        #expect(spreadStore.tree == before)
     }
 
     /// The popover asks after every change whether each shape can group, and whether each alignment applies: neither
