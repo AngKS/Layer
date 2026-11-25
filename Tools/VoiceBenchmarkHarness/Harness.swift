@@ -504,7 +504,9 @@ let newToolCases: [Case] = {
 /// Whether a position says before: "before", "above" or "left of", as the app reads it (`VoiceToolbox.isBefore`).
 private func saysBefore(_ position: String?) -> Bool {
     let said = Set((position ?? "").lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
-    return !said.isDisjoint(with: ["before", "above", "left"]) && said.isDisjoint(with: ["after", "below", "under", "right"])
+    let before = !said.isDisjoint(with: ["before", "above", "left"])
+    let after = !said.isDisjoint(with: ["after", "below", "under", "beneath", "underneath", "right"])
+    return before && !after
 }
 
 /// The structure tools added in plan 6 (`groupElements`, `setLayout`, `ungroup`, `reorder`), over a screen holding a
@@ -535,6 +537,15 @@ let structureCases: [Case] = [
          isRight: { $0["element"] == "E7" && ["yes", "true", "y"].contains(($0["takeOut"] ?? "").lowercased()) }),
     Case(canvas: .nested, command: "Make the button half width", tools: ["moveElement"], isRight: both(has("element", "E11"), has("width", "50"))),
 ]
+
+/// `--all-tools` anywhere in the arguments hands the model every tool, as a hosted model has them, in place of the
+/// on-device list (`VoiceTools.compact`): how the first runs of "Structure tools (plan 6)" were made.
+let handsAllTools = CommandLine.arguments.contains("--all-tools")
+
+/// The tools the model is handed with a screen on the canvas: the app's on-device list, or all of them with `--all-tools`.
+func withScreen(_ actor: any VoiceActing, canEndCall: Bool = true) -> [any Tool] {
+    handsAllTools ? VoiceTools.all(actor, canEndCall: canEndCall) : VoiceTools.compact(actor, canEndCall: canEndCall)
+}
 
 /// The on-device branch of the app's `VoiceProfile`, with optional changes to try.
 struct BenchProfile: LanguageModelSession.DynamicProfile {
@@ -585,12 +596,12 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
-            Instructions(VoiceRules.compact + (variant == .examples ? Self.examples : ""))
+            Instructions(VoiceRules.compact(hasScreens: picture.hasScreens) + (variant == .examples ? Self.examples : ""))
             if !variant.form.canvasInPrompt {
                 Instructions("The canvas now:\n\(picture.text(.compact))")
             }
             if picture.hasScreens {
-                VoiceTools.compact(actor, canEndCall: canEndCall)
+                withScreen(actor, canEndCall: canEndCall)
             } else {
                 VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall)
             }
@@ -757,12 +768,12 @@ struct CallProfile: LanguageModelSession.DynamicProfile {
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
-            Instructions(VoiceRules.compact)
+            Instructions(VoiceRules.compact(hasScreens: picture.hasScreens))
             if !form.canvasInPrompt {
                 BenchBrief()
             }
             if picture.hasScreens {
-                VoiceTools.compact(actor)
+                withScreen(actor)
             } else {
                 VoiceTools.forEmptyCanvas(actor)
             }
@@ -982,8 +993,8 @@ struct Main {
         for canvas in [Canvas.empty, .one, .three] {
             let picture = canvas.picture
             let recorder = Recorder(picture: picture)
-            let tools = picture.hasScreens ? VoiceTools.compact(recorder) : VoiceTools.forEmptyCanvas(recorder)
-            let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact))) ?? -1
+            let tools = picture.hasScreens ? withScreen(recorder) : VoiceTools.forEmptyCanvas(recorder)
+            let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact(hasScreens: picture.hasScreens)))) ?? -1
             let brief = (try? await model.tokenCount(for: Instructions("The canvas now:\n\(picture.text(.compact))"))) ?? -1
             let toolTokens = (try? await model.tokenCount(for: tools)) ?? -1
             print("canvas \(canvas.rawValue): rules \(rules) + canvas \(brief) + \(tools.count) tools \(toolTokens) = \(rules + brief + toolTokens) tokens")
@@ -1049,8 +1060,8 @@ func printPromptSize(canEndCall: Bool, canvases: [Canvas] = [.empty, .one, .thre
     for canvas in canvases {
         let picture = canvas.picture
         let recorder = Recorder(picture: picture)
-        let tools = picture.hasScreens ? VoiceTools.compact(recorder, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(recorder, canEndCall: canEndCall)
-        let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact))) ?? -1
+        let tools = picture.hasScreens ? withScreen(recorder, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(recorder, canEndCall: canEndCall)
+        let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact(hasScreens: picture.hasScreens)))) ?? -1
         let brief = (try? await model.tokenCount(for: Instructions("The canvas now:\n\(picture.text(.compact))"))) ?? -1
         let toolTokens = (try? await model.tokenCount(for: tools)) ?? -1
         print("canvas \(canvas.rawValue)\(canEndCall ? "" : " (pencil)"): rules \(rules) + canvas \(brief) + \(tools.count) tools \(toolTokens) = \(rules + brief + toolTokens) tokens")
@@ -1060,7 +1071,7 @@ func printPromptSize(canEndCall: Bool, canvases: [Canvas] = [.empty, .one, .thre
 /// Each of `newToolCases` run `runs` times; one line a run, then each case's rates.
 @MainActor
 func newTools(runs: Int, variant: BenchProfile.Variant) async {
-    print("newtools: \(runs) runs, variant \(variant.rawValue)")
+    print("newtools: \(runs) runs, variant \(variant.rawValue)\(handsAllTools ? ", all tools" : "")")
     print("context size: \(SystemLanguageModel.default.contextSize) tokens")
     await printPromptSize(canEndCall: true)
     await printPromptSize(canEndCall: false)
@@ -1070,7 +1081,7 @@ func newTools(runs: Int, variant: BenchProfile.Variant) async {
 /// Each of `structureCases` run `runs` times, as `newtools` runs its own, with the profile's size for the nested canvas.
 @MainActor
 func structure(runs: Int, variant: BenchProfile.Variant) async {
-    print("structure: \(runs) runs, variant \(variant.rawValue)")
+    print("structure: \(runs) runs, variant \(variant.rawValue)\(handsAllTools ? ", all tools" : "")")
     print("context size: \(SystemLanguageModel.default.contextSize) tokens")
     await printPromptSize(canEndCall: true, canvases: [.one, .nested])
     await printPromptSize(canEndCall: false, canvases: [.one, .nested])

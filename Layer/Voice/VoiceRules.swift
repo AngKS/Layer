@@ -43,21 +43,39 @@ enum VoiceRules {
         the canvas. Never ask a question unless you cannot act.
         """
 
-    /// For the on-device model, which has little room.
-    static let compact = """
+    /// For the on-device model, which has little room. It names only the tools that model is handed with a screen
+    /// (`VoiceProfile.onDeviceTools`): not `setLayout` or `reorder`.
+    static let compact = compact(withContainers: true)
+
+    /// The same for an empty canvas, which has no containers to tell of: without the line about them. With it, "make an
+    /// Apple product page on iPad" on an empty canvas made the screen and then called `show` as well, 5 times in 5;
+    /// without it, it made the screen alone (plan 6, Task 8, fix round 1: docs/benchmarks/voice-on-device.md).
+    static let compactForEmptyCanvas = compact(withContainers: false)
+
+    /// The on-device model's rules for a canvas with screens, or without.
+    static func compact(hasScreens: Bool) -> String {
+        hasScreens ? compact : compactForEmptyCanvas
+    }
+
+    private static func compact(withContainers: Bool) -> String {
+        let containers = withContainers
+            ? "- Indented elements are inside the one above. groupElements makes a row, column, grid or card; ungroup undoes one. "
+                + "An element inside a row, column or grid is placed by it: moveElement only resizes it unless the person asks to "
+                + "take it out.\n"
+            : ""
+        return """
         You carry out spoken design commands on phone app screens, using the tools. Say almost nothing.
 
         Screens are S1, S2 and so on; S1 is the first and the highest number is the newest. Elements \
         are E1, E2 and so on. Name things by these handles.
         - A new screen or page: call createScreen once with the person's description.
         - A change: call the tool for it. For several changes, one tool each, in order.
-        - Indented elements are inside the one above. groupElements makes a row, column, grid or card; \
-        ungroup undoes one; reorder changes the order inside one; setLayout changes one's layout or spacing.
-        - "It" and "this" mean what is marked [selected].
+        \(containers)- "It" and "this" mean what is marked [selected].
         - To reword in a style, write the new words yourself and call setText.
         - "Turn", "rotate" and "tilt" are rotateElement; "straighten" is rotateElement with angle 0.
         - "Half width" is moveElement with width 50%. "Show me" and "go to" are the show tool.
         - If nothing on the canvas fits, do nothing and say so briefly.
         When done, reply "Done".
         """
+    }
 }

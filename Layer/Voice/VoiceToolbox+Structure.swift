@@ -37,7 +37,7 @@ extension VoiceToolbox {
             let listed = Self.listed(found.map { handle(of: $0) })
             // Refused for what Group refuses besides: all of a free group as a group, or past the tree's limits.
             guard let together = CanvasSelection(found.map { .element($0.ref) }), let made = store.group(together, as: kind) else {
-                return failed("\(listed) can't be grouped as a \(kind.rawValue).")
+                return failed("\(listed) can't be put in a new \(kind.rawValue).")
             }
             reveal(.element(made), in: model)
             return done("Put \(listed) in a \(kind.rawValue), \(handles.handle(forNode: made.element)).")
@@ -169,8 +169,9 @@ extension VoiceToolbox {
     // MARK: reorder
 
     /// Puts a thing before or after another among those they share a parent with, as the Layers panel does: in a row,
-    /// column or grid that is its place in the layout; in a free parent, its place front to back, and nothing moves. This
-    /// is how a laid-out child is moved (call 8).
+    /// column or grid that is its place in the layout; in a free parent or an overlay, its place front to back, and
+    /// nothing moves. So there a side, such as "above", is refused with a pointer to `placeElement`: the person asked
+    /// for a place, which a new order wouldn't give. This is how a laid-out child is moved (call 8).
     func reorder(element: String, position: String, target: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -189,6 +190,10 @@ extension VoiceToolbox {
                 return failed("\(handle) and \(self.handle(of: other)) aren't in the same row, column, grid or group.")
             }
             guard !moving.placed.isLocked else { return failed("\(handle) is locked.") }
+            if !Self.laysOutInOrder(parent, in: store), let spoken = Self.side(in: position) {
+                let by = self.handle(of: other)
+                return failed("\(handle) and \(by) aren't in a row, column or grid, so their order is only which is in front. To put \(handle) \(spoken) \(by), call placeElement.")
+            }
             let order = Self.children(of: parent, in: store).map(\.id)
             let rest = order.filter { $0 != moving.id }
             guard let at = rest.firstIndex(of: other.id) else { return failed("\(handle) couldn't be moved.") }
@@ -209,6 +214,31 @@ extension VoiceToolbox {
         let before = !said.isDisjoint(with: ["before", "above", "left"])
         let after = !said.isDisjoint(with: ["after", "below", "under", "beneath", "underneath", "right"])
         return before == after ? nil : before
+    }
+
+    /// The side some position words name, as `placeElement` says it: above, below, left of or right of. Nil for "before"
+    /// and "after", which name an order.
+    static func side(in words: String) -> String? {
+        let said = Set(words.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+        if said.contains("above") { return "above" }
+        if !said.isDisjoint(with: ["below", "under", "beneath", "underneath"]) { return "below" }
+        if said.contains("left") { return "left of" }
+        if said.contains("right") { return "right of" }
+        return nil
+    }
+
+    /// Whether a parent places what it holds in its order: a row, column or grid. A free parent's order, and an
+    /// overlay's, is only which is in front.
+    private static func laysOutInOrder(_ parent: NodeParent, in store: DesignStore) -> Bool {
+        let layout: LayerNode.Layout? = switch parent {
+        case .node(let id): store.node(id)?.resolvedLayout
+        case .screen(let id): store.treeScreen(id)?.root.resolvedLayout
+        case .canvas: nil
+        }
+        switch layout {
+        case .stack?, .grid?: return true
+        case .free?, .overlay?, nil: return false
+        }
     }
 
     /// What a parent holds, back to front: a container's children, a screen's root's, or the open canvas's.
@@ -243,21 +273,51 @@ struct LayoutWords {
     init() {}
 
     /// Nil for a word that isn't one of these, or for two kinds named at once.
+    ///
+    /// A number is a spacing when "spacing" or "gap" is said beside it ("spacing 16", "16 spacing"), and a grid's count
+    /// when "column" or "columns" follows it ("2 column grid", "3 columns") or a grid is named ("grid of 3"). A number
+    /// that is neither is refused, rather than taken for a grid's count: "row 16" is no grid of 12.
     init?(_ written: String) {
-        let words = written.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
-        let numbers = ["one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
-                       "ten": 10, "eleven": 11, "twelve": 12]
+        let words = written.lowercased().matches(of: /-?[0-9]+(?:\.[0-9]+)?|[a-z]+/).map { String($0.output) }
         let filler: Set<String> = ["a", "an", "the", "of", "with", "and", "in", "to", "it", "columns", "layout", "aligned",
                                    "align", "alignment", "pt", "points"]
-        var afterSpacing = false
-        for word in words {
-            if afterSpacing {
-                guard let value = Self.points(word) else { return nil }
+        // A number not yet known to be a spacing or a grid's count.
+        var pending: String?
+        var index = 0
+        while index < words.count {
+            let word = words[index]
+            index += 1
+            if ["spacing", "gap", "spaced"].contains(word) {
+                // The number after it, or else the one before it: a spacing with no number is no spacing.
+                let number: String
+                if index < words.count, Self.isNumber(words[index]) {
+                    number = words[index]
+                    index += 1
+                } else if let before = pending {
+                    number = before
+                    pending = nil
+                } else {
+                    return nil
+                }
+                guard spacing == nil, let value = Self.points(number) else { return nil }
                 spacing = value
-                afterSpacing = false
                 continue
             }
-            afterSpacing = false
+            if Self.isNumber(word) {
+                if index < words.count, words[index] == "column" || words[index] == "columns" {
+                    guard columns == nil, let count = Self.count(word) else { return nil }
+                    columns = count
+                    index += 1
+                    continue
+                }
+                if let earlier = pending {
+                    // Two numbers: the first counts a grid named before it, and the second waits for its "spacing".
+                    guard choice == .grid, columns == nil, let count = Self.count(earlier) else { return nil }
+                    columns = count
+                }
+                pending = word
+                continue
+            }
             let kind: LayoutChoice?
             switch word {
             case "free", "freeform": kind = .free
@@ -271,24 +331,33 @@ struct LayoutWords {
             case "bottom": kind = nil; edges.insert(.bottom)
             case "centre", "center", "centred", "centered", "middle": kind = nil; edges.insert(.centre)
             case "stretched", "stretch", "fill", "filled": kind = nil; edges.insert(.stretched)
-            case "spacing", "gap", "spaced": kind = nil; afterSpacing = true
             default:
-                if let number = Int(word) ?? numbers[word] {
-                    guard columns == nil else { return nil }
-                    columns = number
-                    kind = nil
-                } else if filler.contains(word) {
-                    kind = nil
-                } else {
-                    return nil
-                }
+                guard filler.contains(word) else { return nil }
+                kind = nil
             }
             if let kind {
                 guard choice == nil || choice == kind else { return nil }
                 choice = kind
             }
         }
+        if let number = pending {
+            guard choice == .grid, columns == nil, let count = Self.count(number) else { return nil }
+            columns = count
+        }
         guard choice != nil || columns != nil || !edges.isEmpty || spacing != nil else { return nil }
+    }
+
+    private static let numberWords = ["one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                                      "nine": 9, "ten": 10, "eleven": 11, "twelve": 12]
+
+    private static func isNumber(_ word: String) -> Bool {
+        Double(word) != nil || numberWords[word] != nil
+    }
+
+    /// A grid's count of columns as written: a whole number of one or more, in figures or words.
+    private static func count(_ word: String) -> Int? {
+        guard let count = Int(word) ?? numberWords[word], count >= 1 else { return nil }
+        return count
     }
 
     /// A spacing as written: points, such as `16` or `16pt`, from 0 up to a screen's largest side, 4,000; nil for anything

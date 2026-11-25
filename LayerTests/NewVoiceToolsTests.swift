@@ -353,6 +353,148 @@ struct NewVoiceToolsTests {
             == ["Grouping…", "Changing the layout…", "Ungrouping…", "Reordering…"])
     }
 
+    // MARK: What each profile is told (fix round 1)
+
+    /// The on-device model is handed neither `setLayout` nor `reorder`, so nothing it is told names them: not its rules,
+    /// and not a refusal, which names what the person can do instead (ruling I1).
+    @Test func theOnDeviceRulesAndLinesNameOnlyItsTools() {
+        let bench = bench()
+        let all = VoiceTools.all(bench.box).map(\.name)
+        let handed = Set(VoiceProfile.onDeviceTools(bench.box, canEndCall: true, hasScreens: true).map(\.name))
+        let missing = all.filter { !handed.contains($0) }
+        #expect(Set(missing) == ["setLayout", "reorder"])
+        #expect(all.filter { VoiceRules.compact.contains($0) }.allSatisfy(handed.contains))
+
+        bench.box.offersStructureTools = false
+        let placed = bench.box.moveElement(element: "E6", x: "40", y: "600", width: nil, height: nil, takeOut: nil)
+        #expect(placed == "E6 is in the row E5, which places it. To change its place in E5, drag it in the Layers panel. To take it out of E5, call moveElement again with takeOut yes and where it goes.")
+        let aligned = bench.box.alignElement(element: "E6", alignment: "left")
+        #expect(aligned == "E6 is in the row E5, which places it. To line things up in E5, set E5's alignment in the Format panel's Layout section.")
+        for line in [placed, aligned] {
+            #expect(!missing.contains(where: line.contains), "\(line)")
+        }
+    }
+
+    /// An empty canvas has no containers to tell of, so the on-device model isn't told of them there (ruling 2).
+    @Test func theEmptyCanvasRulesLeaveOutContainers() {
+        #expect(VoiceRules.compact(hasScreens: true) == VoiceRules.compact)
+        #expect(VoiceRules.compact.contains("groupElements"))
+        let empty = VoiceRules.compact(hasScreens: false)
+        #expect(!empty.contains("groupElements") && !empty.contains("Indented"))
+        #expect(empty == VoiceRules.compact.replacingOccurrences(of: Self.containersLine, with: ""))
+    }
+
+    private static let containersLine = "- Indented elements are inside the one above. groupElements makes a row, column, grid or card; "
+        + "ungroup undoes one. An element inside a row, column or grid is placed by it: moveElement only resizes it unless "
+        + "the person asks to take it out.\n"
+
+    /// A hosted model, and a test's stand-in, have every tool, and are told to use them.
+    @Test func aModelWithEveryToolIsToldToUseThem() {
+        let bench = bench()
+        #expect(bench.box.offersStructureTools)
+        #expect(bench.box.moveElement(element: "E6", x: "40", y: "600", width: nil, height: nil, takeOut: nil).contains("To change its place in E5, call reorder."))
+        #expect(bench.box.alignElement(element: "E6", alignment: "left").contains("call setLayout on E5 with an alignment, such as row centred."))
+        #expect(VoiceRules.full.contains("reorder") && VoiceRules.full.contains("setLayout"))
+    }
+
+    /// Which profile a command's model is in: every tool for a test's stand-in or a hosted model this system can run,
+    /// and the on-device list otherwise. The agent tells the toolbox this before each command.
+    @Test func theToolsAModelIsHandedFollowItsChoice() {
+        #expect(!VoiceProfile.handsAllTools(.appleIntelligence, hasTestModel: false))
+        #expect(VoiceProfile.handsAllTools(.appleIntelligence, hasTestModel: true))
+        #expect(VoiceProfile.handsAllTools(.hosted(.anthropic, model: "claude-test"), hasTestModel: false) == HostedLanguageModel.isSupported)
+    }
+
+    // MARK: Fix round 1's minors
+
+    /// A number is a spacing beside "spacing", a grid's count beside "column" or with a grid named, and otherwise
+    /// nothing: it never makes a row a grid (M2).
+    @Test func numbersInLayoutWordsAreReadByWhatIsSaidBesideThem() {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.setLayout(target: "E5", layout: "16", spacing: nil) == "I didn't understand the layout “16”.")
+        #expect(bench.box.setLayout(target: "E5", layout: "row 12", spacing: nil) == "I didn't understand the layout “row 12”.")
+        #expect(bench.box.setLayout(target: "E5", layout: "row, spacing", spacing: nil) == "I didn't understand the layout “row, spacing”.")
+        #expect(bench.store.tree == before)
+
+        #expect(bench.box.setLayout(target: "E5", layout: "24 spacing", spacing: nil) == "E5 is now a row, spacing 24, centred.")
+        func columns() -> Int? {
+            if case .grid(let grid)? = bench.store.node(bench.login.card)?.layout { grid.columns } else { nil }
+        }
+        _ = bench.box.setLayout(target: "E2", layout: "2 column grid", spacing: nil)
+        #expect(columns() == 2)
+        _ = bench.box.setLayout(target: "E2", layout: "three-column grid", spacing: nil)
+        #expect(columns() == 3)
+        _ = bench.box.setLayout(target: "E2", layout: "4 columns", spacing: nil)
+        #expect(columns() == 4)
+        #expect(bench.box.setLayout(target: "E2", layout: "grid of 2, 16 spacing", spacing: nil) == "E2 is now a grid of 2, spacing 16.")
+        #expect(!bench.box.lastFailed)
+    }
+
+    /// In a free parent the order is only which is in front, so a side such as "above" is refused with a pointer to
+    /// placing it, rather than said to have moved it (M9). "After" there still changes the order.
+    @Test func aSideInAFreeParentIsRefusedWithAPointerToPlacing() {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.reorder(element: "E1", position: "above", target: "E5")
+            == "E1 and E5 aren't in a row, column or grid, so their order is only which is in front. To put E1 above E5, call placeElement.")
+        #expect(bench.box.reorder(element: "E1", position: "left of", target: "E5")
+            == "E1 and E5 aren't in a row, column or grid, so their order is only which is in front. To put E1 left of E5, call placeElement.")
+        #expect(bench.store.tree == before)
+        #expect(bench.box.reorder(element: "E1", position: "after", target: "E5") == "Moved E1 after E5.")
+    }
+
+    @Test func allOfAFreeGroupIsntGroupedAgain() {
+        let bench = bench()
+        #expect(bench.box.groupElements(elements: "E8, E9", as: "group") == "Put E8 and E9 in a group, E11.")
+        let before = bench.store.tree
+        #expect(bench.box.groupElements(elements: "E8, E9", as: "group") == "E8 and E9 can't be put in a new group.")
+        #expect(bench.store.tree == before)
+    }
+
+    /// A typed edit for one screen leaves the selection alone, whichever tool it runs (M5).
+    @Test func aScopedEditLeavesTheSelectionAloneForEveryNewTool() {
+        let bench = bench { login, _, _ in
+            login.model.selection = .element(DesignStore.ElementRef(host: .screen(login.screen), element: login.title))
+        }
+        bench.box.scope = bench.login.screen
+        let selection = bench.login.model.selection
+        #expect(bench.box.setLayout(target: "E2", layout: "column", spacing: nil).hasPrefix("E2 is now a column"))
+        #expect(bench.login.model.selection == selection)
+        #expect(bench.box.reorder(element: "E7", position: "before", target: "E6") == "Moved E7 before E6.")
+        #expect(bench.login.model.selection == selection)
+        // The toggle is first now.
+        #expect(bench.box.ungroup(element: "E5") == "Took E7 and E6 out of E5.")
+        #expect(bench.login.model.selection == selection)
+    }
+
+    @Test func aThingAlreadyInPlaceIsANote() {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.reorder(element: "E7", position: "after", target: "E6") == "E7 is after E6 already.")
+        #expect(!bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+    }
+
+    @Test func anEmptyContainerIsTakenApart() {
+        let empty = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12)),
+                                        frame: CGRect(x: 20, y: 500, width: 0, height: 0), children: [])
+        let bench = bench { login, _, _ in login.model.store.add(empty, to: .screen(login.screen)) }
+        let handle = bench.handles.handle(forNode: empty.id)
+        #expect(bench.box.ungroup(element: handle) == "Took \(handle) apart. It held nothing.")
+        #expect(bench.store.node(empty.id) == nil)
+    }
+
+    @Test func lockedThingsArentChanged() {
+        let bench = bench { login, _, _ in login.model.store.update(login.row) { $0.isLocked = true } }
+        let before = bench.store.tree
+        #expect(bench.box.setLayout(target: "E5", layout: nil, spacing: "24") == "E5 is locked.")
+        #expect(bench.box.ungroup(element: "E5") == "E5 is locked.")
+        // Locked by the row it is in.
+        #expect(bench.box.reorder(element: "E7", position: "before", target: "E6") == "E7 is locked.")
+        #expect(bench.store.tree == before)
+    }
+
     /// With all 25 tools the on-device profile of a call with one screen was 3,578 tokens, over the 3,400 allowed it
     /// (call 10), so the on-device model is handed every tool but `setLayout` and `reorder`. A hosted model, and the
     /// test model, still have all of them.

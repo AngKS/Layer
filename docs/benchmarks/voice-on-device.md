@@ -466,6 +466,10 @@ room set for it: 3,400 tokens with one screen (call 10).
 | `run.sh structure 5`, the on-device list | 10:25:23 | 3.03, 3.84, 10.58 | 23 |
 | `run.sh newtools 5`, the on-device list | 10:27:38 | 2.47, 3.36, 9.40 | 23 |
 
+The all-tools runs were made before the harness took the on-device list. `run.sh structure 5 baseline --all-tools`
+and `run.sh newtools 5 baseline --all-tools` hand the model all 25 tools again, with the compact rules as they now are
+(fix round 1 changed them).
+
 - Each case ran five times in the baseline variant: greedy, as the app has it. All five runs of every case gave the
   same calls.
 - The harness printed the model's `contextSize` as **8,192 tokens**.
@@ -538,8 +542,8 @@ Changes from 2026-11-21:
 controls passed: 20 of 25 against the bar's 13. So the on-device model is now handed `VoiceTools.compact`: every tool
 but `setLayout` and `reorder` (`VoiceProfile.onDeviceTools`). That brings the profile to 3,278 tokens, with the
 controls unchanged at 20 of 25. It costs the spacing case, the one structure case `setLayout` won. A hosted model
-still has all 25 tools. The compact rules and the app's refusal lines still name `setLayout` and `reorder`; the
-on-device model isn't handed either.
+still has all 25 tools. At first the compact rules and two refusal lines still named `setLayout` and `reorder`; fix
+round 1, below, took them out.
 
 **A live model in LM Studio.** `VoiceAgentLiveTests` ran with `TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b`
 and passed 9 of 9, with all 25 tools as a hosted model has them.
@@ -548,6 +552,54 @@ and passed 9 of 9, with all 25 tools as a hosted model has them.
 - "Move the toggle before the label" called `reorder` once: "Moved E7 before E6."
 
 The run was made under other lanes' builds, at a load of 64 to 91, so its times aren't recorded here.
+
+### Fix round 1 (2026-11-25)
+
+**What changed.**
+- On the on-device profile, nothing names a tool the model isn't handed.
+  - The compact rules' line about containers names only `groupElements` and `ungroup`. It also gains the full rules'
+    sentence: "An element inside a row, column or grid is placed by it: moveElement only resizes it unless the
+    person asks to take it out."
+  - Task 7's refusals for a laid-out child point at the Layers panel for its order, and at the Format panel's Layout
+    section for an alignment, in place of "call reorder" and "call setLayout".
+- The empty canvas's rules leave the containers line out (`VoiceRules.compactForEmptyCanvas`). This was ruling 2's
+  second step, tried because the new-screen row was still below 25 of 30.
+
+**What was run.** Each run started with no `xcodebuild` running, in the quiet window.
+
+| Run | Start | Load (1, 5, 15 min) before |
+|---|---|---|
+| `run.sh structure 5`, the new wording | 11:18:25 | 18.65, 34.60, 41.76 |
+| `run.sh newtools 5`, the new wording | 11:20:39 | 3.95, 22.94, 36.02 |
+| `run.sh newtools 5`, with the empty canvas's rules too | 11:37:28 | 3.91, 6.11, 14.89 |
+
+**The profile's size.**
+- The rules are 321 tokens with a screen, up from 309.
+- With one screen the profile is **3,290** tokens; the pencil's is 3,231. The nested canvas is 3,503.
+- On an empty canvas, the rules without the containers line are 264 tokens, and the profile is 846.
+
+**The structure cases.** They scored 10 of 40, as before.
+- "Take the toggle out of the row" still went to `ungroup` 5 times in 5: the take-out sentence didn't move it.
+- "Put these in a column" now names only the two fields, E8 and E9, but still goes to `stackElements`.
+
+**The older tools.**
+
+| Commands | Before the fix | The new wording | With the empty canvas's rules too |
+|---|---|---|---|
+| Tidy, 11 commands | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 |
+| Change device, 5 commands | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 |
+| New screen, 6 commands | 20 of 30, 30 of 30 | **15 of 30**, 30 of 30 | **20 of 30**, 30 of 30 |
+| Controls, 5 commands | 20 of 25, 20 of 25 | **15 of 25**, 20 of 25 | 15 of 25, 20 of 25 |
+
+- **"Make an Apple product page on iPad" on an empty canvas** made the screen and then called `show` as well, 5 times
+  in 5, with the containers line in its rules. Without the line it made the screen alone, 5 times in 5.
+- **"A Chinese calligraphy webpage"** still sets no device, 0 of 5 on an empty canvas and 0 of 5 with the pencil.
+  It wasn't chased further: the app reads "webpage" from the spoken words when the model gives no device, so the
+  person still gets a web page.
+- **"Centre these two"** went back to `vertical centre`, 5 times in 5. That costs the controls 5.
+
+**The bar still holds.** The profile with one screen is 3,290 tokens, under 3,400. The controls are 15 of 25, at or
+over the 13 the bar needs.
 
 ## Not measured here
 

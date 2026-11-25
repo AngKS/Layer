@@ -207,6 +207,8 @@ final class VoiceAgent: VoiceCommandRunner {
         let session = session ?? makeSession()
         self.session = session
         session.properties.voiceModel = model.modelChoice
+        // The profile follows the design's model from this command on, and so do the toolbox's refusals.
+        toolbox.offersStructureTools = VoiceProfile.handsAllTools(model.modelChoice, hasTestModel: testModel != nil)
         lookAtTheCanvas()
         // Pointed at a thing: said outright, as a model left to find "[selected]" in the
         // canvas restyled the avatar for "the phone" and deleted what "it" was before (iPad).

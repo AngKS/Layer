@@ -15,6 +15,7 @@ import Foundation
 /// that isn't there is told so in a line, and can try again or say so.
 @MainActor
 final class VoiceToolbox: VoiceActing {
+    // Internal, not private, only for VoiceToolbox+Structure.swift, as are the helpers it calls here; nothing else uses them.
     private(set) weak var model: AppModel?
     let handles: VoiceHandles
 
@@ -57,6 +58,10 @@ final class VoiceToolbox: VoiceActing {
     }
 
     var correctionUndo = CorrectionUndo.allowed
+
+    /// Whether the model of the command under way is handed `setLayout` and `reorder`: not the on-device one, which has
+    /// no room for them (`VoiceProfile.handsAllTools`). Its refusals then say what the person can do instead.
+    var offersStructureTools = true
 
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
@@ -138,7 +143,7 @@ final class VoiceToolbox: VoiceActing {
             }
             guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
             guard !moving.placed.isLocked else { return failed("\(handle(of: moving)) is locked.") }
-            if let placer = placer(of: moving) { return failed(Self.placedLine(handle(of: moving), placer)) }
+            if let placer = placer(of: moving) { return failed(placedLine(handle(of: moving), placer)) }
             let store = model.store
             guard let frame = store.canvasFrame(of: .element(moving.ref)), let by = store.canvasFrame(of: .element(other.ref)) else {
                 return failed("That couldn't be placed.")
@@ -209,7 +214,7 @@ final class VoiceToolbox: VoiceActing {
                 case .failure(let refusal): return failed(refusal.line)
                 case .success(let one):
                     guard !one.placed.isLocked else { return failed("\(self.handle(of: one)) is locked.") }
-                    if let placer = placer(of: one) { return failed(Self.placedLine(self.handle(of: one), placer)) }
+                    if let placer = placer(of: one) { return failed(placedLine(self.handle(of: one), placer)) }
                     if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
                 }
             }
@@ -713,9 +718,9 @@ final class VoiceToolbox: VoiceActing {
                 let isTakingOut = Self.saysYes(takeOut)
                 let placer = placer(of: found)
                 if let placer {
-                    if !placer.canTakeOut, isPositioned || isTakingOut { return failed(Self.placedLine(handle, placer)) }
+                    if !placer.canTakeOut, isPositioned || isTakingOut { return failed(placedLine(handle, placer)) }
                     if isTakingOut, !isPositioned { return failed("Say where \(handle) goes: x and y.") }
-                    if !isTakingOut, isPositioned { return failed(Self.placedLine(handle, placer)) }
+                    if !isTakingOut, isPositioned { return failed(placedLine(handle, placer)) }
                 }
                 guard given.contains(where: { $0 != nil }) else { return failed("Say where it should go or how big it should be.") }
                 // On a screen, shares are of the screen. A loose element has no screen to share.
@@ -783,7 +788,7 @@ final class VoiceToolbox: VoiceActing {
         case .refused:
             var nowhere = placer
             nowhere.canTakeOut = false
-            return failed(Self.placedLine(handle, nowhere))
+            return failed(placedLine(handle, nowhere))
         }
     }
 
@@ -871,7 +876,7 @@ final class VoiceToolbox: VoiceActing {
                 let handle = handle(of: found)
                 guard found.screen != nil else { return failed("\(handle) isn't on a screen to line up with.") }
                 guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
-                if let placer = placer(of: found) { return failed(Self.alignedLine(handle, placer)) }
+                if let placer = placer(of: found) { return failed(alignedLine(handle, placer)) }
                 reveal(.element(found.ref), in: model)
                 model.store.align(found.ref, edge)
                 return done("Aligned \(Self.describe(found.node)) to the \(name).")
@@ -911,7 +916,7 @@ final class VoiceToolbox: VoiceActing {
         // All in one that places them along this edge, or each placed by one: nothing of theirs can move.
         if store.laidOutParent(of: together) != nil || !store.holdsSomethingInAFreeParent(together),
            let placed = found.first(where: { $0.placed.isLaidOut }), let placer = placer(of: placed) {
-            return failed(Self.alignedLine(handle(of: placed), placer))
+            return failed(alignedLine(handle(of: placed), placer))
         }
         reveal(.element(found[0].ref), in: model)
         store.alignInFreeParents(together, edge)
@@ -1150,16 +1155,21 @@ final class VoiceToolbox: VoiceActing {
     /// Why a thing that is placed by a row, column, grid or overlay wasn't moved, and what to do instead (call 8):
     /// `E6 is in the row E5, which places it. To change its place in E5, call reorder. To take it out of E5, call
     /// moveElement again with takeOut yes and where it goes.` Under a screen's root that lays things out, there is
-    /// nowhere to take it, so the last sentence isn't said (F15).
-    private static func placedLine(_ handle: String, _ placer: Placer) -> String {
-        let line = "\(handle) is in the \(placer.word) \(placer.handle), which places it. To change its place in \(placer.handle), call reorder."
+    /// nowhere to take it, so the last sentence isn't said (F15). A model without `reorder` is told the Layers panel.
+    private func placedLine(_ handle: String, _ placer: Placer) -> String {
+        let reorder = offersStructureTools ? "call reorder" : "drag it in the Layers panel"
+        let line = "\(handle) is in the \(placer.word) \(placer.handle), which places it. To change its place in \(placer.handle), \(reorder)."
         guard placer.canTakeOut else { return line }
         return line + " To take it out of \(placer.handle), call moveElement again with takeOut yes and where it goes."
     }
 
-    /// Why a thing that is placed by a row, column, grid or overlay wasn't lined up, and what lines it up instead.
-    private static func alignedLine(_ handle: String, _ placer: Placer) -> String {
-        "\(handle) is in the \(placer.word) \(placer.handle), which places it. To line things up in \(placer.handle), call setLayout on \(placer.handle) with an alignment, such as \(placer.word) centred."
+    /// Why a thing that is placed by a row, column, grid or overlay wasn't lined up, and what lines it up instead: for a
+    /// model without `setLayout`, the Format panel's Layout section.
+    private func alignedLine(_ handle: String, _ placer: Placer) -> String {
+        let how = offersStructureTools
+            ? "call setLayout on \(placer.handle) with an alignment, such as \(placer.word) centred"
+            : "set \(placer.handle)'s alignment in the Format panel's Layout section"
+        return "\(handle) is in the \(placer.word) \(placer.handle), which places it. To line things up in \(placer.handle), \(how)."
     }
 
     var gone: String { failed("The design has closed.") }

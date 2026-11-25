@@ -81,7 +81,7 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             // The on-device model has little: one screen in full, the tools that make
             // sense for the canvas as it is, and only the last couple of commands.
             Profile {
-                Instructions(VoiceRules.compact)
+                Instructions(VoiceRules.compact(hasScreens: picture.hasScreens))
                 CanvasBrief(detail: .compact)
                 offered(Self.onDeviceTools(actor, canEndCall: canEndCall, hasScreens: picture.hasScreens))
             }
@@ -93,6 +93,12 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             .samplingMode(.greedy)
             .reporting(to: hooks, turns: turns)
         }
+    }
+
+    /// Whether the model of the profile in force is handed every tool: a test's stand-in, or a hosted model this system
+    /// can run, as `body`'s first two branches choose. False for the on-device model (`onDeviceTools`).
+    static func handsAllTools(_ choice: ModelChoice, hasTestModel: Bool) -> Bool {
+        hasTestModel || (choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported)
     }
 
     /// The tools the on-device model is handed: with a screen, all but the two it has no room for (`VoiceTools.compact`);
