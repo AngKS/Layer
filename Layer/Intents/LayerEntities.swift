@@ -73,7 +73,7 @@ enum EntityKey {
         "\(design)\(separator)\(screen.uuidString)"
     }
 
-    static func element(design: String, host: DesignStore.ElementRef.Host, element: UUID) -> String {
+    static func element(design: String, host: NodeRef.Host, element: UUID) -> String {
         let hostKey = switch host {
         case .screen(let id): id.uuidString
         case .canvas: "canvas"
@@ -86,11 +86,11 @@ enum EntityKey {
         return (String(id[..<split]), screen)
     }
 
-    static func parseElement(_ id: String) -> (design: String, ref: DesignStore.ElementRef)? {
+    static func parseElement(_ id: String) -> (design: String, ref: NodeRef)? {
         let parts = id.split(separator: separator, omittingEmptySubsequences: false)
         guard parts.count >= 3, let element = UUID(uuidString: String(parts[parts.count - 1])) else { return nil }
         let hostKey = String(parts[parts.count - 2])
-        let host: DesignStore.ElementRef.Host
+        let host: NodeRef.Host
         if hostKey == "canvas" {
             host = .canvas
         } else if let screen = UUID(uuidString: hostKey) {
@@ -99,7 +99,7 @@ enum EntityKey {
             return nil
         }
         let design = parts.dropLast(2).joined(separator: String(separator))
-        return (design, DesignStore.ElementRef(host: host, element: element))
+        return (design, NodeRef(host: host, node: element))
     }
 }
 
@@ -267,14 +267,14 @@ struct ElementEntity: AppEntity {
     var isLocked: Bool
 
     var designID: String { EntityKey.parseElement(id)?.design ?? "" }
-    var ref: DesignStore.ElementRef? { EntityKey.parseElement(id)?.ref }
+    var ref: NodeRef? { EntityKey.parseElement(id)?.ref }
 
     /// A leaf on `host`, called `hostName`, locked or hidden as `isLocked` and `isHidden` say: with the containers
     /// above it, as the design's index has it.
     init(design: String, host: TreeIndex.Host, hostName: String, node: LayerNode, isLocked: Bool, isHidden: Bool) {
         // Until plan 6's Task 11 renames the ref, the index's host and a ref's are two enums of one shape, converted
         // here alone (F29).
-        id = EntityKey.element(design: design, host: DesignStore.ElementRef.Host(host), element: node.id)
+        id = EntityKey.element(design: design, host: host, element: node.id)
         kind = ElementKindChoice(node.kind)
         text = node.content.text
         name = node.name ?? node.kind.layerName

@@ -182,11 +182,11 @@ struct DesignStoreTests {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
 
         store.beginEdit()
         for step in 1...20 {
-            store.update(ref.element) { $0.frame.origin.y = 112 + CGFloat(step) }
+            store.update(ref.node) { $0.frame.origin.y = 112 + CGFloat(step) }
         }
         store.endEdit()
         #expect(store.shownLeaves(onScreenAt: 0)?.first?.frame.minY == 132)
@@ -204,17 +204,17 @@ struct DesignStoreTests {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
         let before = store.tree
 
         store.beginHeldEdit()
-        store.actingForCommand { store.update(ref.element) { $0.content.text = "One" } }
+        store.actingForCommand { store.update(ref.node) { $0.content.text = "One" } }
         undo.undo()
         // The command's change so far is what goes; the title added before it stays.
         #expect(store.tree == before)
-        store.actingForCommand { store.update(ref.element) { $0.content.text = "Two" } }
+        store.actingForCommand { store.update(ref.node) { $0.content.text = "Two" } }
         store.endHeldEdit()
-        #expect(store.node(ref.element)?.content.text == "Two")
+        #expect(store.node(ref.node)?.content.text == "Two")
 
         undo.undo()
         #expect(store.tree == before)
@@ -278,7 +278,7 @@ struct DesignStoreTests {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
         let before = try #require(store.placed(ref)).placement.canvasRect(for: title.frame)
 
         store.updateTreeScreen(screen.id) { $0.origin.x += 300 }
@@ -293,14 +293,14 @@ struct DesignStoreTests {
         let (store, _) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
-        let onScreen = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let onScreen = NodeRef(host: .screen(screen.id), node: title.id)
 
-        store.update(onScreen.element) { $0.frame.origin.x += 900 }
+        store.update(onScreen.node) { $0.frame.origin.x += 900 }
         let dropped = try #require(store.placed(onScreen))
         let droppedAt = dropped.placement.canvasRect(for: dropped.frame)
 
         let home = store.rehost(onScreen)
-        #expect(home == DesignStore.ElementRef(host: .canvas, element: title.id))
+        #expect(home == NodeRef(host: .canvas, node: title.id))
         #expect(store.screenLeaves(screen.id).isEmpty)
         let floating = try #require(store.tree.canvas.first)
         #expect(floating.scale == screen.scale)
@@ -313,16 +313,16 @@ struct DesignStoreTests {
         let left = store.addScreen(from: leftScreenSketch)
         let right = store.addScreen(from: rightScreenSketch)
         let title = try #require(store.sketched(.title, from: left.placement.canvasRect(for: titleSketch), to: left.id))
-        let ref = DesignStore.ElementRef(host: .screen(left.id), element: title.id)
+        let ref = NodeRef(host: .screen(left.id), node: title.id)
 
         // Drag it across to the middle of the other screen.
         let target = left.placement.localPoint(for: center(right.canvasFrame(on: right.device)))
         store.beginEdit()
-        store.update(ref.element) { $0.frame.origin = CGPoint(x: target.x - 114, y: target.y - 20) }
+        store.update(ref.node) { $0.frame.origin = CGPoint(x: target.x - 114, y: target.y - 20) }
         let home = store.rehost(ref)
         store.endEdit()
 
-        #expect(home == DesignStore.ElementRef(host: .screen(right.id), element: title.id))
+        #expect(home == NodeRef(host: .screen(right.id), node: title.id))
         #expect(store.screenLeaves(left.id).isEmpty)
         let moved = try #require(store.shownLeaves(on: right.id).first)
         #expect(moved.frame.size == CGSize(width: 228, height: 40))
@@ -559,7 +559,7 @@ struct AppModelTests {
         let screen = model.store.addScreen(from: leftScreenSketch)
         let title = try #require(model.store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         model.tool = .select
-        model.selection = .element(.init(host: .screen(screen.id), element: title.id))
+        model.selection = .element(.init(host: .screen(screen.id), node: title.id))
 
         undo.undo()
         #expect(model.selection == nil)

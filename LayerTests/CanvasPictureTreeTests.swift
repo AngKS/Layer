@@ -17,7 +17,7 @@ struct CanvasPictureTreeTests {
 
     /// One thing on the fixture's screen selected.
     private func select(_ id: UUID, in login: TreeFixture.Login) {
-        login.model.selection = .element(.init(host: .screen(login.screen), element: id))
+        login.model.selection = .element(.init(host: .screen(login.screen), node: id))
     }
 
     /// A column screen "Feed", 24 apart, to the right of Login, out of view: a title "Today", then a card padded 16
@@ -165,7 +165,7 @@ struct CanvasPictureTreeTests {
         let handles = VoiceHandles()
         _ = told(login, handles: handles)
         // Ungrouped by hand, as the Format panel's Ungroup does.
-        _ = try #require(login.model.store.ungroup(.init(host: .screen(login.screen), element: login.row)))
+        _ = try #require(login.model.store.ungroup(.init(host: .screen(login.screen), node: login.row)))
         #expect(login.model.store.node(login.row) == nil)
 
         let lines = told(login, handles: handles)
@@ -191,7 +191,7 @@ struct CanvasPictureTreeTests {
 
         // The card's empty area, below what it holds: the view shows the canvas unscrolled and unzoomed.
         pencil.squeezeBegan(at: CGPoint(x: 300, y: 280), azimuth: nil)
-        #expect(model.selection == .element(.init(host: .screen(login.screen), element: login.card)))
+        #expect(model.selection == .element(.init(host: .screen(login.screen), node: login.card)))
         let pointed = try #require(CanvasPicture.capture(from: model, handles: VoiceHandles()).selectionInWords)
         #expect(VoiceAgent.thingHint(pointed).contains("E2, the card"))
 

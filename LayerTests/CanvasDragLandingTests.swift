@@ -16,8 +16,8 @@ private struct TwoScreens {
     let undo = UndoManager()
     let a: TreeScreen.ID
     let b: TreeScreen.ID
-    let button: DesignStore.ElementRef
-    let title: DesignStore.ElementRef
+    let button: NodeRef
+    let title: NodeRef
     let drags = CanvasDrags()
 
     var store: DesignStore { model.store }
@@ -40,14 +40,14 @@ private struct TwoScreens {
     }
 
     /// Where `ref`'s element is now: the same element, wherever it lives.
-    func now(_ ref: DesignStore.ElementRef) -> DesignStore.ElementRef? {
-        store.ref(of: ref.element)
+    func now(_ ref: NodeRef) -> NodeRef? {
+        store.ref(of: ref.node)
     }
 
     /// The button as it is on B, if it is there.
-    var buttonOnB: DesignStore.ElementRef { DesignStore.ElementRef(host: .screen(b), element: button.element) }
+    var buttonOnB: NodeRef { NodeRef(host: .screen(b), node: button.node) }
 
-    func canvasFrame(_ ref: DesignStore.ElementRef) -> CGRect? {
+    func canvasFrame(_ ref: NodeRef) -> CGRect? {
         now(ref).flatMap { store.canvasFrame(of: .element($0)) }
     }
 }
@@ -57,14 +57,14 @@ private struct TwoScreens {
 /// goes on calling the same closure until the view is drawn again.
 @MainActor
 private struct Touch {
-    let ref: DesignStore.ElementRef
+    let ref: NodeRef
     let frame: CGRect
     let placement: Placement
     let start: CGPoint
     let owner: CanvasDrags.Owner
     var findsNewHome = true
 
-    init(_ ref: DesignStore.ElementRef, on board: TwoScreens, at start: CGPoint, owner: CanvasDrags.Owner = .init(), findsNewHome: Bool = true) {
+    init(_ ref: NodeRef, on board: TwoScreens, at start: CGPoint, owner: CanvasDrags.Owner = .init(), findsNewHome: Bool = true) {
         let placed = board.store.placed(ref)!
         self.ref = ref
         self.frame = placed.frame
@@ -152,7 +152,7 @@ struct CanvasDragLandingTests {
         board.model.close()
         #expect(board.store.placed(board.buttonOnB) != nil)
         let saved = board.model.document.current.content
-        #expect(TreeIndex(saved)[board.button.element]?.host == .screen(board.b), "the design is saved with the button on B")
+        #expect(TreeIndex(saved)[board.button.node]?.host == .screen(board.b), "the design is saved with the button on B")
     }
 
     /// Draw on: the Pencil lands on what a finger is dragging, which lets go of it, and the
@@ -178,10 +178,10 @@ struct CanvasDragLandingTests {
         let mark = board.store.historyMark
         let touch = dragOntoB(board)
 
-        board.store.asOwnStep { board.store.update(board.button.element) { $0.isLocked = true } }
+        board.store.asOwnStep { board.store.update(board.button.node) { $0.isLocked = true } }
         for _ in 0..<5 { await Task.yield() }
         #expect(!board.drags.isDragging)
-        #expect(board.store.node(board.buttonOnB.element)?.isLocked == true)
+        #expect(board.store.node(board.buttonOnB.node)?.isLocked == true)
         #expect(board.store.historyMark == mark + 2, "the drag and the lock are a step each")
         touch.lift(board)
         #expect(board.store.historyMark == mark + 2)
@@ -269,7 +269,7 @@ struct CanvasDragLandingTests {
         board.drags.moveGroup(by: CGSize(width: 300, height: 0), startingAt: CGPoint(x: 180, y: 210), owner: owner, model: board.model)
 
         board.drags.cancel(owner, model: board.model)
-        let titleOnB = DesignStore.ElementRef(host: .screen(board.b), element: board.title.element)
+        let titleOnB = NodeRef(host: .screen(board.b), node: board.title.node)
         #expect(board.store.placed(board.buttonOnB) != nil && board.store.placed(titleOnB) != nil)
         #expect(board.model.selection == CanvasSelection([.element(board.buttonOnB), .element(titleOnB), .element(note)]))
         #expect(board.store.historyMark == mark + 1)
@@ -297,7 +297,7 @@ struct CanvasDragLandingTests {
         let labels = board.store.add((0..<6).map { index in
             element(.body, 60 + CGFloat(index) * 4, 500 + CGFloat(index) * 4, 120, 40)
         }, onScreen: board.a)
-        let ids = labels.map(\.element)
+        let ids = labels.map(\.node)
         let order = { (screen: TreeScreen.ID) in board.store.listed(on: .screen(screen)).filter { ids.contains($0.id) }.map(\.id) }
         #expect(order(board.a) == ids)
         board.model.selection = CanvasSelection(labels.map { .element($0) })
@@ -327,7 +327,7 @@ struct CanvasDragLandingTests {
     @Test func aDragEndedByALockIsntStartedAgainByItsLaterFrames() async {
         let board = TwoScreens()
         let touch = dragOntoB(board)
-        board.store.asOwnStep { board.store.update(board.button.element) { $0.isLocked = true } }
+        board.store.asOwnStep { board.store.update(board.button.node) { $0.isLocked = true } }
         for _ in 0..<5 { await Task.yield() }
         let landed = board.store.placed(board.buttonOnB)?.frame
         touch.move(board, by: 360)
@@ -457,7 +457,7 @@ struct LayoutDragTests {
         print("BENCH drag row child frames=60 writes=\(ListWork.elementsWritten - written) versions=\(board.store.contentVersion - version)")
         #expect(ListWork.elementsWritten == written, "nodes written during a 60-frame lift")
         #expect(board.store.contentVersion == version, "versions made during a 60-frame lift")
-        #expect(board.drags.lift?.ref.element == board.b)
+        #expect(board.drags.lift?.ref.node == board.b)
         #expect(board.drags.lift?.start == CGRect(x: 120, y: 100, width: 80, height: 40))
         #expect(board.drags.lift?.translation == CGSize(width: 120, height: 120))
         #expect(board.drags.dropTarget == board.drags.lift?.target)
@@ -494,7 +494,7 @@ struct LayoutDragTests {
         #expect(node.frame == CGRect(x: 120, y: 300, width: 80, height: 40))
         #expect(node.width.mode == .fixed && node.height.mode == .fixed)
         #expect(board.children(of: board.row) == [board.a, board.c])
-        #expect(board.model.selection == .element(DesignStore.ElementRef(host: .screen(board.screen), element: board.b)))
+        #expect(board.model.selection == .element(NodeRef(host: .screen(board.screen), node: board.b)))
     }
 
     @Test func droppingIntoAnotherRowJoinsItAtTheLine() throws {
@@ -519,7 +519,7 @@ struct LayoutDragTests {
         board.store.setLayout(rootB, .stack(LayerNode.Stack(axis: .vertical, spacing: 12)))
         let (second, third) = try (#require(board.store.placed(lines[1].id)), #require(board.store.placed(lines[2].id)))
         let gap = CGPoint(x: second.canvasShape.rect.midX, y: (second.canvasShape.rect.maxY + third.canvasShape.rect.minY) / 2)
-        let title = board.title.element
+        let title = board.title.node
         let start = try #require(board.store.placed(title)).canvasShape.centre
         let owner = CanvasDrags.Owner()
 
@@ -537,14 +537,14 @@ struct LayoutDragTests {
 
         #expect(board.store.parent(of: title) == .screen(board.b))
         #expect(board.store.treeScreen(board.b)?.root.children.map(\.id) == [lines[0].id, lines[1].id, title, lines[2].id])
-        #expect(board.model.selection == .element(DesignStore.ElementRef(host: .screen(board.b), element: title)))
+        #expect(board.model.selection == .element(NodeRef(host: .screen(board.b), node: title)))
     }
 
     /// A free thing dropped on a free screen lands on top there, as it always has: where it was let go on the canvas,
     /// at its own size.
     @Test func aFreeThingDroppedOnAFreeScreenIsRehostedAsToday() throws {
         let board = TwoScreens()
-        let button = board.button.element
+        let button = board.button.node
         let before = try #require(board.store.placed(button))
         let start = before.canvasShape.centre
         let owner = CanvasDrags.Owner()

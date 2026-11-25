@@ -75,7 +75,7 @@ struct VoiceScreenLayoutTests {
         let bench = bench()
         bench.app.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 9000, y: 9000), scale: 0.6)
         let button = try #require(bench.app.store.screenLeaves(bench.screen).first { $0.kind == .button })
-        bench.app.selection = .element(.init(host: .screen(bench.screen), element: button.id))
+        bench.app.selection = .element(.init(host: .screen(bench.screen), node: button.id))
         #expect(bench.box.tidyScreen(screen: nil) == "Tidied the layout of S1.")
         #expect(bench.box.changeScreenDevice(screen: "E2", device: "iPad").hasPrefix("Made S1 an iPad screen"))
         #expect(bench.app.store.treeScreen(bench.screen)?.deviceID == "ipad")

@@ -267,8 +267,8 @@ struct VoiceAgentTests {
         let session = LanguageModelSession(profile: VoiceProfile(actor: VoiceToolbox(model: app, handles: handles), hooks: hooks, turns: turns, testModel: model))
         turns.session = session
         // The command before: the button says Ahoy, a step of its own.
-        let button = DesignStore.ElementRef(host: .screen(screen), element: app.store.screenLeaves(screen)[1].id)
-        app.store.update(button.element) { $0.content.text = "Ahoy" }
+        let button = NodeRef(host: .screen(screen), node: app.store.screenLeaves(screen)[1].id)
+        app.store.update(button.node) { $0.content.text = "Ahoy" }
         session.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
 
         // Held as one step, as `VoiceAgent.run` holds a command.
@@ -276,7 +276,7 @@ struct VoiceAgentTests {
         _ = try await session.respond(to: "undo that and make it blue")
         app.store.endHeldEdit()
 
-        let after = try #require(app.store.node(button.element))
+        let after = try #require(app.store.node(button.node))
         #expect(after.content.text == "Sign in")
         #expect(after.resolvedTint == ColourWords.parse("blue"))
     }
@@ -296,7 +296,7 @@ struct VoiceAgentTests {
     func aThingPointedAtIsNamedWithItsCommand() async throws {
         let bench = bench([:])
         let button = try #require(bench.button)
-        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), element: button.id))
+        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), node: button.id))
         bench.app.selection = selection
         _ = await bench.agent.run("remove this", about: .thing(selection))
         let prompt = try #require(bench.recorder.requests.last?.prompts.last)
@@ -518,10 +518,10 @@ struct VoiceAgentTests {
             Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
         ]])
         let button = try #require(bench.button)
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        let ref = NodeRef(host: .screen(bench.screen), node: button.id)
         async let first = bench.agent.run("make the button blue and say ahoy")
         #expect(await eventually { bench.button?.resolvedTint == ColourWords.parse("blue") })
-        bench.app.store.update(ref.element) { $0.frame.origin.y = 300 }
+        bench.app.store.update(ref.node) { $0.frame.origin.y = 300 }
         _ = await first
         #expect(bench.button?.content.text == "Ahoy")
         _ = await bench.agent.run("No, that's wrong.")
@@ -547,10 +547,10 @@ struct VoiceAgentTests {
             "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
         ])
         let button = try #require(bench.button)
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
+        let ref = NodeRef(host: .screen(bench.screen), node: button.id)
         async let first = bench.agent.run("make the button blue and say ahoy")
         #expect(await eventually { bench.button?.resolvedTint == ColourWords.parse("blue") })
-        bench.app.store.update(ref.element) { $0.frame.origin.y = 300 }
+        bench.app.store.update(ref.node) { $0.frame.origin.y = 300 }
         _ = await first
 
         _ = await bench.agent.run("No, make it red")
@@ -569,13 +569,13 @@ struct VoiceAgentTests {
             "make the button blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)],
             "no, that's wrong.": [Step(tool: "undo", arguments: "{}")],
         ])
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        let ref = NodeRef(host: .screen(bench.screen), node: try #require(bench.button).id)
         // A move by hand, then "undo": the move is undone.
-        bench.app.store.update(ref.element) { $0.frame.origin.y = 300 }
+        bench.app.store.update(ref.node) { $0.frame.origin.y = 300 }
         _ = await bench.agent.run("undo")
         #expect(bench.buttonFrame?.origin.y == 420)
         // A move by hand, then "No, that's wrong.": the move stays.
-        bench.app.store.update(ref.element) { $0.frame.origin.y = 300 }
+        bench.app.store.update(ref.node) { $0.frame.origin.y = 300 }
         _ = await bench.agent.run("No, that's wrong.")
         #expect(bench.buttonFrame?.origin.y == 300)
         // A command, then "undo": the command is undone.
@@ -616,12 +616,12 @@ struct VoiceAgentTests {
             Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#, delay: .milliseconds(300)),
         ]])
         let image = try #require(bench.app.store.screenLeaves(bench.screen).last)
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: image.id)
+        let ref = NodeRef(host: .screen(bench.screen), node: image.id)
         async let first = bench.agent.run("make the button blue and say ahoy")
         #expect(await eventually { bench.button?.resolvedTint == ColourWords.parse("blue") })
         let drag = bench.app.store.beginEdit()
-        bench.app.store.act(for: drag) { bench.app.store.update(ref.element) { $0.frame.origin.x = 60 } }
-        bench.app.store.act(for: drag) { bench.app.store.update(ref.element) { $0.frame.origin.x = image.frame.origin.x } }
+        bench.app.store.act(for: drag) { bench.app.store.update(ref.node) { $0.frame.origin.x = 60 } }
+        bench.app.store.act(for: drag) { bench.app.store.update(ref.node) { $0.frame.origin.x = image.frame.origin.x } }
         bench.app.store.endEdit(drag)
         _ = await first
         _ = await bench.agent.run("No, that's wrong.")
@@ -655,10 +655,10 @@ struct VoiceAgentTests {
         #expect(bench.button?.resolvedTint == Theme.accent)
         #expect(bench.app.store.tree.canvasLeaves.contains { $0.kind == .drawing })
         // A move by hand of what the command changed: neither it nor the command is undone.
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.button).id)
+        let ref = NodeRef(host: .screen(bench.screen), node: try #require(bench.button).id)
         async let second = bench.agent.run("make the button blue and say ahoy")
         #expect(await eventually { bench.button?.resolvedTint == ColourWords.parse("blue") })
-        bench.app.store.update(ref.element) { $0.frame.origin.y = 300 }
+        bench.app.store.update(ref.node) { $0.frame.origin.y = 300 }
         _ = await second
         try await Task.sleep(for: .milliseconds(5))
         _ = await bench.agent.run("No, that's wrong.")
@@ -920,12 +920,12 @@ struct VoiceAgentTests {
     func aCorrectionAfterAChangeByHandLeavesThatChange() async throws {
         let bench = bench(["make the button say ahoy": [Step(tool: "setText", arguments: #"{"element":"E2","text":"Ahoy"}"#)]])
         _ = await bench.agent.run("make the button say ahoy")
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: bench.app.store.screenLeaves(bench.screen)[2].id)
-        bench.app.store.update(image.element) { $0.frame.origin.x = 60 }
+        let image = NodeRef(host: .screen(bench.screen), node: bench.app.store.screenLeaves(bench.screen)[2].id)
+        bench.app.store.update(image.node) { $0.frame.origin.x = 60 }
 
         _ = await bench.agent.run("No, that's wrong.")
 
-        #expect(bench.app.store.ownFrame(image.element)?.origin.x == 60)
+        #expect(bench.app.store.ownFrame(image.node)?.origin.x == 60)
         #expect(bench.button?.content.text == "Ahoy")
     }
 
@@ -1047,9 +1047,9 @@ struct VoiceAgentTests {
         let bench = screenBench(["make the button green and say continue": Self.greenAndContinue])
         let start = try #require(bench.button)
         let startFrame = try #require(bench.buttonFrame)
-        let ref = DesignStore.ElementRef(host: .screen(bench.login), element: start.id)
+        let ref = NodeRef(host: .screen(bench.login), node: start.id)
         let drag = bench.app.store.beginEdit()
-        bench.app.store.act(for: drag) { bench.app.store.update(ref.element) { $0.frame.origin.x += 10 } }
+        bench.app.store.act(for: drag) { bench.app.store.update(ref.node) { $0.frame.origin.x += 10 } }
 
         _ = await bench.agent.run("make the button green and say continue", about: .screenEdit(bench.login))
 
@@ -1071,7 +1071,7 @@ struct VoiceAgentTests {
     func aCommandIsFoundInTheScriptBehindItsHint() async throws {
         let bench = bench(["make it blue": [Step(tool: "styleElement", arguments: #"{"element":"E2","look":"blue"}"#)]])
         let button = try #require(bench.button)
-        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), element: button.id))
+        let selection = CanvasSelection.element(.init(host: .screen(bench.screen), node: button.id))
         bench.app.selection = selection
         _ = await bench.agent.run("make it blue", about: .thing(selection))
         #expect(bench.button?.resolvedTint == ColourWords.parse("blue"))
@@ -1161,27 +1161,27 @@ struct VoiceAgentTests {
     @Test func theOneScreenAStepChanged() throws {
         let (app, login, profile) = VoiceFixture.loginAndProfile()
         let store = app.store
-        let title = DesignStore.ElementRef(host: .screen(login), element: try #require(store.screenLeaves(login).first?.id))
-        let profileTitle = DesignStore.ElementRef(host: .screen(profile), element: try #require(store.screenLeaves(profile).first?.id))
+        let title = NodeRef(host: .screen(login), node: try #require(store.screenLeaves(login).first?.id))
+        let profileTitle = NodeRef(host: .screen(profile), node: try #require(store.screenLeaves(profile).first?.id))
         func screen(changedBy body: () -> Void) -> TreeScreen.ID? {
             let edit = store.beginEdit(by: .app)
             store.act(for: edit, body)
             store.endEdit(edit)
             return store.onlyScreen(changedBy: edit)
         }
-        #expect(screen { store.update(title.element) { $0.frame.origin.x += 5 } } == login)
+        #expect(screen { store.update(title.node) { $0.frame.origin.x += 5 } } == login)
         #expect(screen { store.updateTreeScreen(profile) { $0.name = "Me" } } == profile)
         #expect(screen {
-            store.update(title.element) { $0.frame.origin.x += 5 }
-            store.update(profileTitle.element) { $0.frame.origin.x += 5 }
+            store.update(title.node) { $0.frame.origin.x += 5 }
+            store.update(profileTitle.node) { $0.frame.origin.x += 5 }
         } == nil)
         // Login and something on the open canvas, or Login and the board's name.
         #expect(screen {
-            store.update(title.element) { $0.frame.origin.x += 5 }
+            store.update(title.node) { $0.frame.origin.x += 5 }
             store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
         } == nil)
         #expect(screen {
-            store.update(title.element) { $0.frame.origin.x += 5 }
+            store.update(title.node) { $0.frame.origin.x += 5 }
             store.setTitle("Board")
         } == nil)
         #expect(screen {} == nil)
@@ -1237,16 +1237,16 @@ struct VoiceAgentTests {
             "make the profile title red": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"red"}"#)],
             "make the profile title green": [Step(tool: "styleElement", arguments: #"{"element":"E4","look":"green"}"#)],
         ])
-        let image = DesignStore.ElementRef(host: .screen(bench.login), element: bench.app.store.screenLeaves(bench.login)[2].id)
+        let image = NodeRef(host: .screen(bench.login), node: bench.app.store.screenLeaves(bench.login)[2].id)
         _ = await bench.agent.run("make the profile title red")
-        bench.app.store.update(image.element) { $0.frame.origin.x = 60 }
+        bench.app.store.update(image.node) { $0.frame.origin.x = 60 }
         _ = await bench.agent.run("No, make it blue", about: .screenEdit(bench.login))
         let prompt = try #require(bench.recorder.requests.last?.prompts.last)
         #expect(prompt.contains(VoiceAgent.notUndoneHint))
         #expect(!prompt.contains(VoiceAgent.notThisScreensHint))
 
         _ = await bench.agent.run("make the profile title green")
-        bench.app.store.update(image.element) { $0.frame.origin.x = 80 }
+        bench.app.store.update(image.node) { $0.frame.origin.x = 80 }
         let refused = await bench.agent.run("No.", about: .screenEdit(bench.login))
         #expect(refused.problem != nil)
         #expect(refused.problem != VoiceToolbox.notThisScreens)

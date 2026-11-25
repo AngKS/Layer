@@ -86,12 +86,12 @@ struct TurnSession: Equatable {
             // Locked by itself or by a container above it, it stays where it is (F4), and so does everything in it.
             // Unlocked, a container turns all of it, whatever their own locks.
             guard !placed.isLocked else {
-                held.insert(ref.element)
+                held.insert(ref.node)
                 continue
             }
-            parts.append(Part(id: ref.element, base: Pose(centre: shape.centre, degrees: placed.degrees), turnsInPlace: placed.isLaidOut))
-            if let parentSpace = store.index.posed(ref.element, in: store.tree)?.parentSpace {
-                starts[ref.element] = Start(frame: placed.node.frame, rotation: placed.node.rotation, parentSpace: parentSpace)
+            parts.append(Part(id: ref.node, base: Pose(centre: shape.centre, degrees: placed.degrees), turnsInPlace: placed.isLaidOut))
+            if let parentSpace = store.index.posed(ref.node, in: store.tree)?.parentSpace {
+                starts[ref.node] = Start(frame: placed.node.frame, rotation: placed.node.rotation, parentSpace: parentSpace)
             }
         }
         // Things all at one angle turn from that angle. One thing's outline is its own shape, so that it turns
@@ -176,7 +176,7 @@ struct TurnSession: Equatable {
         var ids: Set<UUID> = []
         for thing in selection.things {
             guard case .element(let ref) = thing else { return nil }
-            ids.insert(ref.element)
+            ids.insert(ref.node)
         }
         guard ids == Set(parts.map(\.id)).union(held) else { return nil }
         var session = TurnSession(selection: selection, pivot: pivot, outline: outline, turned: turned, parts: parts, held: held,

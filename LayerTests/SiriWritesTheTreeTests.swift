@@ -15,7 +15,7 @@ struct SiriWritesTheTreeTests {
     /// The global constraints' line for a laid-out child.
     private static let laidOutLine = "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first."
 
-    private func ref(_ id: UUID, in login: TreeFixture.Login) throws -> DesignStore.ElementRef {
+    private func ref(_ id: UUID, in login: TreeFixture.Login) throws -> NodeRef {
         try #require(login.model.store.ref(of: id))
     }
 
@@ -125,10 +125,10 @@ struct SiriWritesTheTreeTests {
         store.addFreeScreen([], name: "Small", origin: CGPoint(x: 453, y: 0), scale: 0.5)
         let added = try AddElementIntent.add(.standard(.stickyNote), to: .canvas, in: login.model, x: 40, y: 60, width: 100,
                                              height: 80, undoManager: nil)
-        #expect(added.host == DesignStore.ElementRef.Host.canvas)
-        #expect(store.node(added.element)?.scale == 0.5)
-        #expect(store.ownFrame(added.element) == CGRect(x: 80, y: 120, width: 200, height: 160))
-        #expect(store.index[added.element]?.hostShape.rect == CGRect(x: 40, y: 60, width: 100, height: 80))
+        #expect(added.host == NodeRef.Host.canvas)
+        #expect(store.node(added.node)?.scale == 0.5)
+        #expect(store.ownFrame(added.node) == CGRect(x: 80, y: 120, width: 200, height: 160))
+        #expect(store.index[added.node]?.hostShape.rect == CGRect(x: 40, y: 60, width: 100, height: 80))
     }
 
     @Test func movingARowChildTakesItOutWhereAsked() throws {
@@ -265,9 +265,9 @@ struct SiriWritesTheTreeTests {
         let added = try AddElementIntent.add(.standard(.button), to: .screen(login.screen), in: login.model, x: nil, y: nil,
                                              width: nil, height: nil, undoManager: nil)
 
-        #expect(added.host == DesignStore.ElementRef.Host.screen(login.screen))
-        #expect(store.ownFrame(added.element)?.minY == 367, "the toggle's maxY 351, and 16")
-        #expect(store.ownFrame(added.element) == expected)
+        #expect(added.host == NodeRef.Host.screen(login.screen))
+        #expect(store.ownFrame(added.node)?.minY == 367, "the toggle's maxY 351, and 16")
+        #expect(store.ownFrame(added.node) == expected)
     }
 
     @Test func addingToAColumnScreenAppendsIt() throws {
@@ -280,12 +280,12 @@ struct SiriWritesTheTreeTests {
         let added = try AddElementIntent.add(more, to: .screen(screen), in: model, x: 40, y: 600, width: 200, height: nil,
                                              undoManager: nil)
 
-        #expect(store.treeScreen(screen)?.root.children.map(\.id) == [t1.id, t2.id, added.element])
-        let node = try #require(store.node(added.element))
+        #expect(store.treeScreen(screen)?.root.children.map(\.id) == [t1.id, t2.id, added.node])
+        let node = try #require(store.node(added.node))
         #expect(node.content.text == "More")
         #expect(node.width.mode == .fixed)
         #expect(node.frame.width == 200)
-        #expect(store.ownFrame(added.element)?.minX == 20)
+        #expect(store.ownFrame(added.node)?.minX == 20)
     }
 
     // MARK: - Devices by name
@@ -372,7 +372,7 @@ struct SiriWritesTheTreeTests {
             Write(name: "Add") { login, _, siri in
                 let added = try AddElementIntent.add(.standard(.button), to: .screen(login.screen), in: login.model, x: nil, y: nil,
                                                      width: nil, height: nil, undoManager: siri)
-                return { login.model.store.update(added.element) { $0.content.text = "By hand" } }
+                return { login.model.store.update(added.node) { $0.content.text = "By hand" } }
             },
             Write(name: "Edit Text") { login, _, siri in
                 try EditElementTextIntent.setText("Siri", of: try ref(login.about, in: login), in: login.model, undoManager: siri)
@@ -396,7 +396,7 @@ struct SiriWritesTheTreeTests {
             },
             Write(name: "Duplicate") { login, _, siri in
                 let copy = try DuplicateElementIntent.duplicate(try ref(login.about, in: login), in: login.model, undoManager: siri)
-                return { login.model.store.update(copy.element) { $0.content.text = "By hand" } }
+                return { login.model.store.update(copy.node) { $0.content.text = "By hand" } }
             },
             Write(name: "Delete") { login, _, siri in
                 try DeleteElementIntent.delete(try ref(login.body, in: login), in: login.model, undoManager: siri)
@@ -464,7 +464,7 @@ struct SiriWritesTheTreeTests {
         let moved = try MoveElementToScreenIntent.move(try ref(login.about, in: login), toScreen: second, x: 40, y: 40,
                                                        in: login.model, undoManager: nil)
 
-        #expect(moved == DesignStore.ElementRef(host: .screen(second), element: login.about))
+        #expect(moved == NodeRef(host: .screen(second), node: login.about))
         #expect(store.parent(of: login.about) == .screen(second))
         #expect(store.ownFrame(login.about) == CGRect(x: 40, y: 40, width: 200, height: 24))
         #expect(store.node(login.about)?.width.mode == .fixed)
@@ -595,7 +595,7 @@ struct SiriWritesTheTreeTests {
         let moved = try MoveElementToScreenIntent.move(try ref(login.title, in: login), toScreen: nil, x: 600, y: 400,
                                                        in: login.model, undoManager: nil)
 
-        #expect(moved == DesignStore.ElementRef(host: .canvas, element: login.title))
+        #expect(moved == NodeRef(host: .canvas, node: login.title))
         #expect(store.frameOnCanvas(of: login.title) == CGRect(x: 600, y: 400, width: 228, height: 40))
         login.undo.undo()
         #expect(store.ref(of: login.title)?.host == .screen(login.screen))

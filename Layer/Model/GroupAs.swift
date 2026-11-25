@@ -18,7 +18,7 @@ extension DesignStore {
     /// Nil, and nothing changes, when `canGroup(_:as:)` is false. A group is wrapped as Group wraps one, and nothing
     /// moves. In a row, column, grid or overlay the parent places the new container, so there is no top-left to keep.
     @discardableResult
-    func group(_ selection: CanvasSelection, as shape: GroupShape) -> ElementRef? {
+    func group(_ selection: CanvasSelection, as shape: GroupShape) -> NodeRef? {
         guard let members = wrappable(selection, as: shape) else { return nil }
         // Worked out from the frames `wrap` lays out: on the canvas's top level, in the scale of the frontmost of them.
         var nodes = members.compactMap { node($0) }
@@ -30,7 +30,7 @@ extension DesignStore {
             guard let placed = placed(id) else { continue }
             corners[id] = placed.placement.canvasRect(for: placed.frame).origin
         }
-        var made: ElementRef?
+        var made: NodeRef?
         asOneStep {
             guard let id = wrap(members, in: shape.kind, layout: layout), let ref = ref(of: id) else { return }
             made = ref
@@ -107,7 +107,7 @@ extension DesignStore {
     func laidOutParent(of selection: CanvasSelection) -> UUID? {
         var shared: NodeParent?
         for thing in things(in: selection) {
-            guard case .element(let ref) = thing, let parent = parent(of: ref.element), shared == nil || shared == parent
+            guard case .element(let ref) = thing, let parent = parent(of: ref.node), shared == nil || shared == parent
             else { return nil }
             shared = parent
         }

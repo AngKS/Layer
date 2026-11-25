@@ -405,16 +405,16 @@ extension HostedModelTests {
         let handles = VoiceHandles()
         _ = CanvasPicture.capture(from: app, handles: handles)
         let box = VoiceToolbox(model: app, handles: handles)
-        let image = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screenLeaves(screen).last).id)
+        let image = NodeRef(host: .screen(screen), node: try #require(app.store.screenLeaves(screen).last).id)
 
         app.store.beginHeldEdit()                  // the spoken command starts
         app.store.beginEdit()                      // a finger starts to drag the image
-        app.store.update(image.element) { $0.frame.origin.x = 40 }
+        app.store.update(image.node) { $0.frame.origin.x = 40 }
         let mark = app.store.historyMark           // the drag's step, from its first change
         _ = try await box.createScreen(name: nil, description: "a simple login screen")
         app.store.endHeldEdit()                    // the command is over; the finger is still down
-        app.store.update(image.element) { $0.frame.origin.x = 60 }
-        app.store.update(image.element) { $0.frame.origin.x = 80 }
+        app.store.update(image.node) { $0.frame.origin.x = 60 }
+        app.store.update(image.node) { $0.frame.origin.x = 80 }
 
         #expect(app.store.tree.screens.count == 2)
         // The command's screen is one step; no streamed element or move was a step of its own.
@@ -422,7 +422,7 @@ extension HostedModelTests {
         app.store.endEdit()                        // the finger lifts
         undo.undo()
         #expect(app.store.tree.screens.count == 1)
-        #expect(app.store.ownFrame(image.element)?.origin.x == 80)
+        #expect(app.store.ownFrame(image.node)?.origin.x == 80)
         undo.undo()
         #expect(app.store.content == before)
         #expect(!undo.canUndo)

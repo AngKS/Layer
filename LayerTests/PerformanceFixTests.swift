@@ -30,7 +30,7 @@ struct PerformanceFixTests {
 
         // A change to the design is read as it is: one more session, and a new outline.
         let grown = CanvasWork.turnSessionsFormed
-        board.store.update(board.b.element) { $0.frame.origin.x += 40 }
+        board.store.update(board.b.node) { $0.frame.origin.x += 40 }
         let after = try #require(board.model.selectionShape)
         for _ in 0..<50 { _ = board.model.selectionShape }
         #expect(CanvasWork.turnSessionsFormed - grown <= 1, "formed \(CanvasWork.turnSessionsFormed - grown)")
@@ -44,7 +44,7 @@ struct PerformanceFixTests {
         let listed = CanvasWork.thingsListed
         for _ in 0..<50 { _ = board.model.selectedThings }
         #expect(CanvasWork.thingsListed - listed <= 1, "listed \(CanvasWork.thingsListed - listed) times")
-        board.store.update(board.a.element) { $0.frame.origin.x += 3 }
+        board.store.update(board.a.node) { $0.frame.origin.x += 3 }
         _ = board.model.selectedThings
         #expect(CanvasWork.thingsListed - listed <= 2)
     }
@@ -54,7 +54,7 @@ struct PerformanceFixTests {
         guard let selection = board.model.selection else { return }
         #expect(board.model.selectedThings == board.store.things(in: selection), "things, \(label)")
         let isGroup: Bool
-        if case .element(let ref) = selection { isGroup = board.store.node(ref.element)?.kind == .group } else { isGroup = false }
+        if case .element(let ref) = selection { isGroup = board.store.node(ref.node)?.kind == .group } else { isGroup = false }
         guard selection.isSeveral || isGroup else { return }
         let fresh = TurnSession.form(for: selection, in: board.store)
         if let fresh {
@@ -71,7 +71,7 @@ struct PerformanceFixTests {
 
         board.undo.groupsByEvent = false
         board.undo.beginUndoGrouping()
-        board.store.update(board.b.element) { $0.frame.origin.x += 60 }
+        board.store.update(board.b.node) { $0.frame.origin.x += 60 }
         board.undo.endUndoGrouping()
         expectFresh(board, "moved")
         let moved = board.model.selectionShape
@@ -82,28 +82,28 @@ struct PerformanceFixTests {
         expectFresh(board, "redone")
         #expect(board.model.selectionShape == moved)
 
-        board.store.update(board.b.element) { $0.isLocked = true }
+        board.store.update(board.b.node) { $0.isLocked = true }
         expectFresh(board, "member locked")
-        board.store.update(board.b.element) { $0.isHidden = true }
+        board.store.update(board.b.node) { $0.isHidden = true }
         expectFresh(board, "member hidden")
-        board.store.update(g.element) { $0.isLocked = true }
+        board.store.update(g.node) { $0.isLocked = true }
         expectFresh(board, "group locked")
         #expect(!board.model.canTurnSelection)
-        board.store.update(g.element) { $0.isLocked = false }
+        board.store.update(g.node) { $0.isLocked = false }
         #expect(board.model.canTurnSelection)
 
         // A member added to the group and one taken out.
-        board.store.move(board.a.element, to: .node(g.element))
+        board.store.move(board.a.node, to: .node(g.node))
         expectFresh(board, "member added")
-        board.store.move(board.d.element, to: .screen(board.screen))
+        board.store.move(board.d.node, to: .screen(board.screen))
         expectFresh(board, "member taken out")
 
         // Several things selected, and one of them changed.
         board.model.selection = CanvasSelection([.element(board.a), .element(board.c), .element(board.e)])
         expectFresh(board, "several")
-        board.store.update(board.c.element) { $0.isLocked = true }
+        board.store.update(board.c.node) { $0.isLocked = true }
         expectFresh(board, "several, one locked")
-        board.store.update(board.e.element) { $0.rotation = 20 }
+        board.store.update(board.e.node) { $0.rotation = 20 }
         expectFresh(board, "several, one turned")
         board.store.delete(board.a)
         expectFresh(board, "several, one deleted")
@@ -137,7 +137,7 @@ extension HostedWindowSuites {
             let screen = board.screen
             let written = CodeWork.generated(for: screen)
             for step in 0..<30 {
-                board.store.update(board.a.element) { $0.frame.origin.x += step.isMultiple(of: 2) ? 1 : -1 }
+                board.store.update(board.a.node) { $0.frame.origin.x += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(20))
             }
             #expect(CodeWork.generated(for: screen) - written == 0, "code written \(CodeWork.generated(for: screen) - written) times over 30 frames")
@@ -168,9 +168,9 @@ extension PerformanceFixTests {
 extension PerformanceFixTests {
     /// What `targetElements` was before: a group is a target when something in it shows, found
     /// by walking its leaves, each looked up on its own.
-    private func referenceTargets(_ store: DesignStore, entered: Set<UUID>) -> [DesignStore.ElementRef.Host: [UUID]] {
+    private func referenceTargets(_ store: DesignStore, entered: Set<UUID>) -> [NodeRef.Host: [UUID]] {
         let content = store.tree
-        var found: [DesignStore.ElementRef.Host: [UUID]] = [:]
+        var found: [NodeRef.Host: [UUID]] = [:]
         for node in content.listedEverywhere {
             guard !node.isHidden, node.kind != .drawing || node.isLocked else { continue }
             if node.kind == .group, !node.leaves.contains(where: { !store.isHiddenWithItsContainers($0.id) }) { continue }
@@ -212,32 +212,32 @@ extension PerformanceFixTests {
             #expect(now == was, "\(label)")
         }
         same("nothing hidden")
-        same("outer gone into", entered: [outer.element])
+        same("outer gone into", entered: [outer.node])
         // Per host as well: each host's targets, in order, are the reference walk's (final review A1 m2: the loop
         // compared the targets with themselves, and ran once nothing on either host could be touched).
-        let reference = referenceTargets(board.store, entered: [outer.element])
-        for host in [DesignStore.ElementRef.Host.screen(board.screen), .canvas] {
-            let per = board.store.treeTargets(entered: [outer.element]).refs(on: host).map(\.element)
+        let reference = referenceTargets(board.store, entered: [outer.node])
+        for host in [NodeRef.Host.screen(board.screen), .canvas] {
+            let per = board.store.treeTargets(entered: [outer.node]).refs(on: host).map(\.node)
             #expect(!per.isEmpty, "\(host) has things to touch")
             #expect(per == reference[host] ?? [], "\(host)")
         }
-        same("outer and inner gone into", entered: [outer.element, inner.element])
-        board.store.update(board.b.element) { $0.isHidden = true }
+        same("outer and inner gone into", entered: [outer.node, inner.node])
+        board.store.update(board.b.node) { $0.isHidden = true }
         same("one of two members hidden", entered: [])
-        board.store.update(board.c.element) { $0.isHidden = true }
+        board.store.update(board.c.node) { $0.isHidden = true }
         same("inner has nothing showing", entered: [])
-        same("inner has nothing showing, outer gone into", entered: [outer.element])
-        board.store.update(board.d.element) { $0.isHidden = true }
+        same("inner has nothing showing, outer gone into", entered: [outer.node])
+        board.store.update(board.d.node) { $0.isHidden = true }
         same("outer has nothing showing")
-        board.store.update(notes.element) { $0.isHidden = true }
+        board.store.update(notes.node) { $0.isHidden = true }
         same("a hidden group")
-        board.store.update(notes.element) { $0.isHidden = false }
-        board.store.update(board.note1.element) { $0.isHidden = true }
-        board.store.update(board.note2.element) { $0.isHidden = true }
+        board.store.update(notes.node) { $0.isHidden = false }
+        board.store.update(board.note1.node) { $0.isHidden = true }
+        board.store.update(board.note2.node) { $0.isHidden = true }
         same("members of notes hidden")
-        board.store.update(empty.element) { $0.isHidden = true }
-        board.store.update(board.a.element) { $0.isHidden = false }
-        same("a hidden group over a shown member", entered: [empty.element])
+        board.store.update(empty.node) { $0.isHidden = true }
+        board.store.update(board.a.node) { $0.isHidden = false }
+        same("a hidden group over a shown member", entered: [empty.node])
     }
 }
 
@@ -324,7 +324,7 @@ extension PerformanceFixTests {
         let before = CanvasWork.readingLogTasks
         board.store.delete(g)
         #expect(CanvasWork.readingLogTasks - before == 1, "tasks started \(CanvasWork.readingLogTasks - before) for 5 elements")
-        #expect(board.store.node(g.element) == nil && board.store.node(board.c.element) == nil)
+        #expect(board.store.node(g.node) == nil && board.store.node(board.c.node) == nil)
 
         let again = CanvasWork.readingLogTasks
         board.store.delete([board.note1, board.note2])

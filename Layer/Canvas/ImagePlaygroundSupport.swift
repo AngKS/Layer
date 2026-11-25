@@ -8,7 +8,7 @@ struct ImagePlaygroundRequest: Identifiable, Equatable, Sendable {
         /// A new image element, on this screen, or in the middle of the view when nil.
         case newImage(onScreen: TreeScreen.ID?)
         /// A new picture for this image element, which keeps its place and size.
-        case replace(DesignStore.ElementRef)
+        case replace(NodeRef)
     }
 
     let id = UUID()
@@ -46,7 +46,7 @@ extension AppModel {
     }
 
     /// Opens Image Playground to make a new picture for an image element.
-    func remakeImageWithPlayground(_ ref: DesignStore.ElementRef, prompt: String? = nil, style: GeneratedImageStyle? = nil) {
+    func remakeImageWithPlayground(_ ref: NodeRef, prompt: String? = nil, style: GeneratedImageStyle? = nil) {
         imagePlaygroundRequest = ImagePlaygroundRequest(target: .replace(ref), prompt: prompt, style: style)
     }
 
@@ -94,7 +94,7 @@ extension AppModel {
     /// Puts the picture Image Playground made where it was asked for, selected, as one
     /// undo step. Returns where it is.
     @discardableResult
-    func placeGeneratedImage(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest) -> DesignStore.ElementRef? {
+    func placeGeneratedImage(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest) -> NodeRef? {
         imagePlaygroundRequest = nil
         if case .newImage(nil) = request.target {
             addImage(prepared)
@@ -102,12 +102,12 @@ extension AppModel {
         }
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
-        let ref: DesignStore.ElementRef
+        let ref: NodeRef
         switch request.target {
         case .replace(let existing):
             // A picture for the image where it is, in whatever holds it: its frame and its place stay.
             guard store.placed(existing) != nil else { return nil }
-            store.update(existing.element) { $0.content.imageID = id }
+            store.update(existing.node) { $0.content.imageID = id }
             ref = existing
         case .newImage(let screenID?):
             guard let device = store.device(of: screenID) else { return nil }
@@ -125,7 +125,7 @@ extension AppModel {
                 size: size
             )
             guard store.add(image, to: .screen(screenID)) else { return nil }
-            ref = DesignStore.ElementRef(host: .screen(screenID), element: image.id)
+            ref = NodeRef(host: .screen(screenID), node: image.id)
         case .newImage(nil):
             return nil
         }

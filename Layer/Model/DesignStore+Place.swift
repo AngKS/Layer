@@ -12,7 +12,7 @@ extension DesignStore {
     /// Only the size of `node.frame` is read. On a free root its corner goes on whole points of the screen's, kept
     /// inside the screen's edges on each axis it fits across; on the canvas, on whole points of its own.
     @discardableResult
-    func place(_ node: LayerNode, centredAt point: CGPoint) -> ElementRef? {
+    func place(_ node: LayerNode, centredAt point: CGPoint) -> NodeRef? {
         var placed = node
         let size = node.frame.size
         func cornered(on centre: CGPoint) -> CGPoint {
@@ -30,13 +30,13 @@ extension DesignStore {
             }
             placed.scale = nil
             guard add(placed, to: .screen(screen.id)) else { return nil }
-            return ElementRef(host: .screen(screen.id), element: placed.id)
+            return NodeRef(host: .screen(screen.id), node: placed.id)
         }
 
         let scale = looseScale
         placed.frame.origin = cornered(on: Placement(origin: .zero, scale: scale).localPoint(for: point))
         placed.scale = scale
         guard add(placed, to: .canvas) else { return nil }
-        return ElementRef(host: .canvas, element: placed.id)
+        return NodeRef(host: .canvas, node: placed.id)
     }
 }

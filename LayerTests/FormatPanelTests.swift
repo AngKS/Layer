@@ -537,11 +537,11 @@ struct PanelChangesBesideADragTests {
             model.store.add(titleNode, to: .screen(screen))
             model.store.add(buttonNode, to: .screen(screen))
         }
-        let (title, button) = (titleNode.id, DesignStore.ElementRef(host: .screen(screen), element: buttonNode.id))
+        let (title, button) = (titleNode.id, NodeRef(host: .screen(screen), node: buttonNode.id))
         undo.removeAllActions()
         func frame(_ id: UUID) -> CGRect? { model.store.ownFrame(id) }
         let titleBefore = try #require(frame(title))
-        let buttonBefore = try #require(frame(button.element))
+        let buttonBefore = try #require(frame(button.node))
 
         // A finger drags the button, as a drag on it does: read from the tree as the drag begins.
         let drags = CanvasDrags()
@@ -580,7 +580,7 @@ struct PanelChangesBesideADragTests {
         drags.dropElement(button, findsNewHome: false, owner: owner, model: model)
         for _ in 0..<100 where model.store.isEditing { try await Task.sleep(for: .milliseconds(20)) }
         #expect(!model.store.isEditing)
-        let moved = try #require(frame(button.element))
+        let moved = try #require(frame(button.node))
         #expect(moved.minX == buttonBefore.minX + 30)
 
         // Undo takes each back on its own, the last first: the typed number, the finger's
@@ -593,9 +593,9 @@ struct PanelChangesBesideADragTests {
         #expect(frame(title)?.width == titleBefore.width + 5)
         undo.undo()
         #expect(frame(title) == titleBefore)
-        #expect(frame(button.element) == moved)
+        #expect(frame(button.node) == moved)
         undo.undo()
-        #expect(frame(button.element) == buttonBefore)
+        #expect(frame(button.node) == buttonBefore)
     }
 }
 

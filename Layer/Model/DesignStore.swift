@@ -10,18 +10,6 @@ import Observation
 /// every change, undo and redo.
 @MainActor @Observable
 final class DesignStore {
-    /// Points at one element: where it lives, and which one it is there.
-    struct ElementRef: Hashable, Sendable {
-        enum Host: Hashable, Sendable {
-            case screen(TreeScreen.ID)
-            /// The open canvas, outside every screen.
-            case canvas
-        }
-
-        var host: Host
-        var element: UUID
-    }
-
     private(set) var content: TreeContent {
         didSet {
             guard content != oldValue else { return }
@@ -170,15 +158,15 @@ final class DesignStore {
     /// any depth, whatever their own locks: a group is one thing. What held it keeps the rest
     /// of what it holds, laid out again if it lays them out. The sketch reading log is told
     /// once, of everything that went (`delete(nodes:)`).
-    func delete(_ refs: [ElementRef]) {
-        delete(nodes: Set(refs.map(\.element)))
+    func delete(_ refs: [NodeRef]) {
+        delete(nodes: Set(refs.map(\.node)))
     }
 
     /// Deletes an element, or a container with everything in it, as one undo step: see
     /// `delete(_ refs:)`.
-    func delete(_ ref: ElementRef) {
+    func delete(_ ref: NodeRef) {
         guard placed(ref) != nil else { return }
-        delete(nodes: [ref.element])
+        delete(nodes: [ref.node])
     }
 
     /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
@@ -201,9 +189,9 @@ final class DesignStore {
     /// in it keeps its own lock and hide, and a drawing's copy has strokes of its own. Nil
     /// when it is gone, or the copy would take the design past 5,000 things.
     @discardableResult
-    func duplicate(_ ref: ElementRef) -> ElementRef? {
-        guard placed(ref) != nil, let copy = duplicate(node: ref.element) else { return nil }
-        return ElementRef(host: ref.host, element: copy)
+    func duplicate(_ ref: NodeRef) -> NodeRef? {
+        guard placed(ref) != nil, let copy = duplicate(node: ref.node) else { return nil }
+        return NodeRef(host: ref.host, node: copy)
     }
 
     /// A copy of a screen and everything on it, to its right, as one change. What is on it is
@@ -266,12 +254,12 @@ final class DesignStore {
 
     /// Moves an element up or down among its siblings, the children of its parent: see
     /// `arrange(_ selection:_:)`. Siri's Change Element Order comes this way.
-    func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
+    func arrange(_ ref: NodeRef, _ arrangement: Arrangement) {
         arrange(.element(ref), arrangement)
     }
 
     /// Whether an element can go further up, or further down, among its neighbours.
-    func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
+    func canArrange(_ ref: NodeRef, _ arrangement: Arrangement) -> Bool {
         canArrange(.element(ref), arrangement)
     }
 
@@ -280,14 +268,14 @@ final class DesignStore {
     /// tree and written to it, so that an Align tap lowers nothing: a container by `position`, and
     /// anything else through its parent (`place`), which in a row, column, grid or overlay takes it
     /// out as a new place does (My call 20).
-    func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
+    func align(_ ref: NodeRef, _ alignment: ElementLayout.Alignment) {
         guard case .screen(let id) = ref.host, let screen = treeScreen(id), let placed = placed(ref) else { return }
         // A turned thing lines up by the box round its shape; its frame moves with it.
         let shape = TurnedRect(rect: placed.frame, degrees: placed.degrees).bounds
         let aligned = ElementLayout.aligned(shape, alignment, in: tree.device(of: screen).size)
         let distance = CGSize(width: aligned.minX - shape.minX, height: aligned.minY - shape.minY)
         guard placed.node.isContainer else {
-            return place(ref.element, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height))
+            return place(ref.node, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height))
         }
         // `position` takes canvas points.
         let box = placed.canvasShape.bounds, scale = screen.placement.scale
@@ -346,14 +334,14 @@ final class DesignStore {
     /// stay on the canvas, and so does a container holding one, which the move refuses. Read from
     /// the tree. Returns where the thing now lives.
     @discardableResult
-    func rehost(_ ref: ElementRef) -> ElementRef {
+    func rehost(_ ref: NodeRef) -> NodeRef {
         guard let placed = placed(ref) else { return ref }
         let middle = placed.canvasShape.centre
         let goesOnScreens = placed.node.isContainer || placed.node.kind.belongsOnScreens
         let target = goesOnScreens ? treeScreen(at: middle) : nil
-        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host, move(ref.element, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
-        return self.ref(of: ref.element) ?? ref
+        let host: NodeRef.Host = target.map { .screen($0.id) } ?? .canvas
+        guard host != ref.host, move(ref.node, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
+        return self.ref(of: ref.node) ?? ref
     }
 
     /// Moves an element onto a screen, or onto the open canvas when `screenID` is nil.
@@ -363,12 +351,12 @@ final class DesignStore {
     /// where it now lives, or nil when the element or screen is gone or the element can't go on
     /// screens. One step to undo.
     @discardableResult
-    func move(_ ref: ElementRef, toScreen screenID: TreeScreen.ID?, origin: CGPoint?) -> ElementRef? {
+    func move(_ ref: NodeRef, toScreen screenID: TreeScreen.ID?, origin: CGPoint?) -> NodeRef? {
         guard let placed = placed(ref) else { return nil }
         if let screenID {
             guard treeScreen(screenID) != nil, placed.node.isContainer || placed.node.kind.belongsOnScreens else { return nil }
         }
-        let host: ElementRef.Host = screenID.map { .screen($0) } ?? .canvas
+        let host: NodeRef.Host = screenID.map { .screen($0) } ?? .canvas
 
         guard host != ref.host else {
             var frame = placed.frame
@@ -380,21 +368,21 @@ final class DesignStore {
                 frame.origin = CGPoint(x: (center.x - placed.frame.width / 2).rounded(), y: (center.y - placed.frame.height / 2).rounded())
             }
             let distance = CGSize(width: frame.minX - placed.frame.minX, height: frame.minY - placed.frame.minY)
-            if placed.node.isContainer, let moved = self.origin(of: ref.element, movedBy: distance) {
+            if placed.node.isContainer, let moved = self.origin(of: ref.node, movedBy: distance) {
                 // A container moves by its own frame, and what is in it rides along.
-                update(ref.element) { $0.frame.origin = moved }
+                update(ref.node) { $0.frame.origin = moved }
             } else {
-                place(ref.element, at: frame)
+                place(ref.node, at: frame)
             }
             return ref
         }
         // It lands at the top level of its new host, on top, where its own frame is in the host's points.
         var moved = false
         asOneStep {
-            moved = move(ref.element, to: screenID.map { .screen($0) } ?? .canvas)
-            if moved, let origin { update(ref.element) { $0.frame.origin = origin } }
+            moved = move(ref.node, to: screenID.map { .screen($0) } ?? .canvas)
+            if moved, let origin { update(ref.node) { $0.frame.origin = origin } }
         }
-        return moved ? ElementRef(host: host, element: ref.element) : nil
+        return moved ? NodeRef(host: host, node: ref.node) : nil
     }
 
     // MARK: Changes made gradually

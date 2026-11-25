@@ -70,14 +70,14 @@ struct ChangedKindTests {
 @Suite("Offering what a sketch nearly was")
 @MainActor
 struct KindSuggestionTests {
-    private func makeModel() throws -> (model: AppModel, ref: DesignStore.ElementRef, suggestion: KindSuggestion) {
+    private func makeModel() throws -> (model: AppModel, ref: NodeRef, suggestion: KindSuggestion) {
         let model = AppModel(document: LayerDocument())
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
         let field = try #require(model.store.sketched(.textField, from: boxSketch, to: screen))
-        let ref = DesignStore.ElementRef(host: .screen(screen), element: field.id)
+        let ref = NodeRef(host: .screen(screen), node: field.id)
         let observation = try #require(SketchAnalyzer.observe(SketchSamples.strokes([SketchSamples.box(boxSketch, radius: 10)])))
         return (model, ref, KindSuggestion(ref: ref, kind: .button, sketch: boxSketch, observation: observation))
     }
@@ -89,7 +89,7 @@ struct KindSuggestionTests {
 
         model.acceptSuggestion()
 
-        #expect(model.store.node(ref.element)?.kind == .button)
+        #expect(model.store.node(ref.node)?.kind == .button)
         #expect(model.suggestion == nil)
     }
 
@@ -97,7 +97,7 @@ struct KindSuggestionTests {
         let (model, ref, suggestion) = try makeModel()
         model.offer(suggestion)
         model.dismissSuggestion()
-        #expect(model.store.node(ref.element)?.kind == .textField)
+        #expect(model.store.node(ref.node)?.kind == .textField)
         #expect(model.suggestion == nil)
     }
 
@@ -117,22 +117,22 @@ struct KindSuggestionTests {
         model.offer(suggestion)
         guard case .screen(let screen) = ref.host else { return }
         switch change {
-        case "moved": model.store.update(ref.element) { $0.frame.origin.y += 100 }
-        case "resized": model.store.update(ref.element) { $0.frame.size.width -= 40 }
-        case "turned": model.store.update(ref.element) { $0.rotation = 15 }
+        case "moved": model.store.update(ref.node) { $0.frame.origin.y += 100 }
+        case "resized": model.store.update(ref.node) { $0.frame.size.width -= 40 }
+        case "turned": model.store.update(ref.node) { $0.rotation = 15 }
         default: model.store.updateTreeScreen(screen) { $0.origin.x += 200 }
         }
-        let changed = try #require(model.store.node(ref.element))
+        let changed = try #require(model.store.node(ref.node))
         #expect(model.suggestion == nil)
         model.acceptSuggestion()
-        #expect(model.store.node(ref.element) == changed)
+        #expect(model.store.node(ref.node) == changed)
     }
 
     /// Words put on it, as Magic Pen does just after offering, don't take the offer away.
     @Test func aSuggestionStaysWhenOnlyItsWordsChange() throws {
         let (model, ref, suggestion) = try makeModel()
         model.offer(suggestion)
-        model.store.update(ref.element) { $0.content.text = "Email" }
+        model.store.update(ref.node) { $0.content.text = "Email" }
         #expect(model.suggestion == suggestion)
     }
 }

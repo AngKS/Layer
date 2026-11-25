@@ -100,10 +100,10 @@ private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: C
 private struct TurnBoard {
     let model: AppModel
     let screen: TreeScreen.ID
-    let title: DesignStore.ElementRef
-    let body: DesignStore.ElementRef
-    let button: DesignStore.ElementRef
-    let note: DesignStore.ElementRef
+    let title: NodeRef
+    let body: NodeRef
+    let button: NodeRef
+    let note: NodeRef
     let undo = UndoManager()
 
     var store: DesignStore { model.store }
@@ -119,22 +119,22 @@ private struct TurnBoard {
         let store = model.store
         let screenID = store.addFreeScreen(nodes, origin: CGPoint(x: 100, y: 50), scale: 0.5)
         screen = screenID
-        let placed = nodes.map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
+        let placed = nodes.map { NodeRef(host: .screen(screenID), node: $0.id) }
         (title, body, button) = (placed[0], placed[1], placed[2])
         note = store.addOnCanvas(element(.stickyNote, 500, 100, 140, 130), scale: 1)
         undo.groupsByEvent = false
         model.store.undoManager = undo
     }
 
-    func canvasFrame(_ ref: DesignStore.ElementRef) -> CGRect {
+    func canvasFrame(_ ref: NodeRef) -> CGRect {
         store.canvasFrame(of: .element(ref)) ?? .null
     }
 
-    func turn(_ ref: DesignStore.ElementRef, to degrees: Double) {
-        store.update(ref.element) { $0.rotation = Rotation.kept(degrees) }
+    func turn(_ ref: NodeRef, to degrees: Double) {
+        store.update(ref.node) { $0.rotation = Rotation.kept(degrees) }
     }
 
-    func rotation(of ref: DesignStore.ElementRef) -> Double? {
+    func rotation(of ref: NodeRef) -> Double? {
         store.placed(ref).flatMap { Rotation.kept($0.degrees) }
     }
 }
@@ -317,7 +317,7 @@ struct TurningOneElementTests {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         #expect(board.model.canTurnSelection)
-        board.store.update(board.note.element) { $0.isLocked = true }
+        board.store.update(board.note.node) { $0.isLocked = true }
         #expect(!board.model.canTurnSelection)
         board.model.beginTurn()
         board.model.turnSelection(by: 30, snaps: false)
@@ -327,7 +327,7 @@ struct TurningOneElementTests {
         #expect(board.rotation(of: board.note) == nil)
 
         // With an element that could turn on its own, the screen alone is what stops it.
-        board.store.update(board.note.element) { $0.isLocked = false }
+        board.store.update(board.note.node) { $0.isLocked = false }
         let before = board.store.tree
         board.model.selection = .screen(board.screen)
         #expect(!board.model.canTurnSelection)
@@ -349,7 +349,7 @@ struct TurningOneElementTests {
         board.model.selection = .element(board.note)
         // A spoken command holds its step open while it works.
         board.store.beginHeldEdit()
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         // Ending a turn that never began leaves the command's step alone.
         board.model.endTurn()
         #expect(board.store.isHoldingEdit)
@@ -357,7 +357,7 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the turn must leave the command's step open")
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         #expect(board.rotation(of: board.note) == 20)
         board.undo.undo()
@@ -395,8 +395,8 @@ struct TurningOneElementTests {
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's step must still be open")
         let mark = board.store.historyMark
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         #expect(board.store.historyMark == mark + 1, "the command's changes are one step")
         board.undo.undo()
@@ -414,7 +414,7 @@ struct TurningOneElementTests {
         board.model.selection = .element(board.note)
         let frame = try #require(board.store.placed(board.note)).frame
         board.store.beginEdit()
-        board.store.update(board.note.element) { $0.frame.origin.x += 3 }
+        board.store.update(board.note.node) { $0.frame.origin.x += 3 }
         board.model.beginTurn()
         board.store.endEdit()
         #expect(board.model.isTurning && board.store.isEditing(by: .turn))
@@ -440,7 +440,7 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the second command's step must still be open")
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         board.undo.undo()
         #expect(board.store.placed(board.title)?.frame.minX == 80)
@@ -457,7 +457,7 @@ struct TurningOneElementTests {
         board.model.beginTurn()
         // Another finger moves the title and lets go while the knob is still held.
         board.store.beginEdit()
-        board.store.update(board.title.element) { $0.frame.origin.x += 10 }
+        board.store.update(board.title.node) { $0.frame.origin.x += 10 }
         board.store.endEdit()
         board.model.turnSelection(by: 10, snaps: false)
         // The command finishes before the knob is let go.
@@ -488,7 +488,7 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's hold must still be open")
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         board.store.endHeldEdit()
         board.undo.undo()
         #expect(board.store.placed(board.title)?.frame.minX == 80)
@@ -505,7 +505,7 @@ struct TurningOneElementTests {
         board.model.beginTurn()
         board.model.turnSelection(by: 10, snaps: false)
         board.store.beginEdit()
-        board.store.update(board.note.element) { $0.frame.size.width += 20 }
+        board.store.update(board.note.node) { $0.frame.size.width += 20 }
         board.store.endEdit()
         #expect(board.model.isTurning && board.store.isEditing(by: .turn))
         board.model.turnSelection(by: 20, snaps: false)
@@ -526,11 +526,11 @@ struct TurningOneElementTests {
         board.model.turnSelection(by: 10, snaps: false)
         // A second finger starts dragging a handle, and is still dragging when the knob is let go.
         board.store.beginEdit()
-        board.store.update(board.note.element) { $0.frame.size.width += 20 }
+        board.store.update(board.note.node) { $0.frame.size.width += 20 }
         let mark = board.store.historyMark
         board.model.endTurn()
-        board.store.update(board.note.element) { $0.frame.size.width += 20 }
-        board.store.update(board.note.element) { $0.frame.size.width += 20 }
+        board.store.update(board.note.node) { $0.frame.size.width += 20 }
+        board.store.update(board.note.node) { $0.frame.size.width += 20 }
         #expect(board.store.historyMark == mark, "nothing is a step of its own while the finger is still down")
         board.store.endEdit()
         board.undo.undo()
@@ -566,13 +566,13 @@ struct TurningOneElementTests {
         let board = TurnBoard()
         board.model.selection = .element(board.note)
         let generation = board.store.beginEdit(by: .app)
-        board.store.act(for: generation) { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.act(for: generation) { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         board.model.beginTurn()
         board.model.turnSelection(by: 20, snaps: false)
         board.model.endTurn()
         let mark = board.store.historyMark
-        board.store.act(for: generation) { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
-        board.store.act(for: generation) { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.act(for: generation) { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
+        board.store.act(for: generation) { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         #expect(board.store.historyMark == mark, "nothing is a step of its own while the screen is still being written")
         board.store.endEdit(generation)
         // Finished last, and touching nothing the turn did, the screen's step is taken back first.
@@ -590,7 +590,7 @@ struct TurningOneElementTests {
         let frame = try #require(board.store.placed(board.note)).frame
         // One finger was already moving the note when the turn began, and that drag ends.
         board.store.beginEdit()
-        board.store.update(board.note.element) { $0.frame.origin.x += 3 }
+        board.store.update(board.note.node) { $0.frame.origin.x += 3 }
         board.model.beginTurn()
         board.store.endEdit()
         // A command starts during the turn, and is still working when the turn ends.
@@ -599,8 +599,8 @@ struct TurningOneElementTests {
         board.model.endTurn()
         #expect(board.store.isHoldingEdit, "the command's step must still be open")
         let mark = board.store.historyMark
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
-        board.store.actingForCommand { board.store.update(board.title.element) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
+        board.store.actingForCommand { board.store.update(board.title.node) { $0.frame.origin.x += 10 } }
         #expect(board.store.historyMark == mark + 1)
         board.store.endHeldEdit()
         board.undo.undo()
@@ -621,7 +621,7 @@ struct TurningOneElementTests {
         board.model.adjustmentPause = .milliseconds(20)
         board.model.selection = .element(board.note)
         let before = board.store.tree
-        let panel = { board.model.adjusting { board.store.update(board.title.element) { $0.frame.origin.x += 10 } } }
+        let panel = { board.model.adjusting { board.store.update(board.title.node) { $0.frame.origin.x += 10 } } }
         if panelFirst {
             panel()
             board.model.beginTurn()
@@ -656,7 +656,7 @@ struct TurningOneElementTests {
         board.model.close()
         #expect(!board.model.isTurning)
         #expect(!board.store.isEditing)
-        #expect(board.model.document.current.content.node(board.note.element)?.rotation == 20)
+        #expect(board.model.document.current.content.node(board.note.node)?.rotation == 20)
     }
 
     /// What the knob was turning let go of mid-turn, by the Pencil landing on it with the
@@ -776,22 +776,22 @@ private struct Placed: Equatable {
 }
 
 private extension TurnBoard {
-    func placed(_ refs: [DesignStore.ElementRef]) -> [Placed?] {
+    func placed(_ refs: [NodeRef]) -> [Placed?] {
         refs.map { ref in store.placed(ref).map { Placed(frame: $0.frame, rotation: Rotation.kept($0.degrees)) } }
     }
 
     /// The middle of an element on the canvas, which it turns about on its own.
-    func centre(of ref: DesignStore.ElementRef) -> CGPoint {
+    func centre(of ref: NodeRef) -> CGPoint {
         store.canvasShape(of: .element(ref))?.centre ?? CGPoint(x: CGFloat.nan, y: .nan)
     }
 
     /// An element's own frame on the canvas, before it is turned.
-    func canvasRect(_ ref: DesignStore.ElementRef) -> CGRect {
+    func canvasRect(_ ref: NodeRef) -> CGRect {
         store.canvasShape(of: .element(ref))?.rect ?? .null
     }
 
     /// Selects several elements together, as a lasso round them would.
-    func select(_ refs: [DesignStore.ElementRef]) {
+    func select(_ refs: [NodeRef]) {
         model.selection = CanvasSelection(refs.map { .element($0) })
     }
 
@@ -805,7 +805,7 @@ private extension TurnBoard {
 
     /// A drawing on the open canvas off whole points: where it is doesn't survive the
     /// arithmetic of being turned there and back unless it is put back exactly.
-    func addDrawing() -> DesignStore.ElementRef {
+    func addDrawing() -> NodeRef {
         store.addOnCanvas(element(.drawing, 612.37, 288.91, 87.13, 41.77), scale: 1)
     }
 }
@@ -870,7 +870,7 @@ struct TurningSeveralThingsTests {
 
     @Test func aLockedMemberStaysWhileTheRestTurn() {
         let board = TurnBoard()
-        board.store.update(board.note.element) { $0.isLocked = true }
+        board.store.update(board.note.node) { $0.isLocked = true }
         board.select([board.title, board.button, board.note])
         let note = board.placed([board.note])
         // The note is far to the right: the middle the others turn about is pulled towards it.
@@ -900,7 +900,7 @@ struct TurningSeveralThingsTests {
         #expect(board.rotation(of: board.button) == 90)
         #expect(isClose(board.centre(of: board.button), wanted))
         // It still belongs to the screen, overhanging it.
-        #expect(board.store.hostScreen(of: board.button.element) == board.screen)
+        #expect(board.store.hostScreen(of: board.button.node) == board.screen)
         #expect(board.model.selection == CanvasSelection([.element(board.button), .element(far)]))
     }
 
@@ -1060,7 +1060,7 @@ struct TurningSeveralThingsTests {
         // Selected again, the selection has formed anew: its knob starts from 0.
         #expect(board.model.selectionTurn == 0)
         // Once their angles differ, the outline stands upright round them.
-        board.store.update(other.element) { $0.rotation = 45 }
+        board.store.update(other.node) { $0.rotation = 45 }
         #expect(try #require(board.model.selectionShape).degrees == 0)
     }
 
@@ -1082,7 +1082,7 @@ struct TurningSeveralThingsTests {
 
     @Test func aMemberUnlockedAfterATurnTurnsWithTheRest() {
         let board = TurnBoard()
-        board.store.update(board.button.element) { $0.isLocked = true }
+        board.store.update(board.button.node) { $0.isLocked = true }
         let things = [board.title, board.button, board.note]
         board.select(things)
         board.knobTurn(30)
@@ -1112,7 +1112,7 @@ struct TurningSeveralThingsTests {
         board.store.position(origins)
         board.model.selectionMoved(by: delta)
         board.model.rehostSelection()
-        let button = DesignStore.ElementRef(host: .canvas, element: board.button.element)
+        let button = NodeRef(host: .canvas, node: board.button.node)
         #expect(board.model.selection == CanvasSelection([.element(button), .element(far)]))
         // Still the same turn: the knob reads it, and a double tap undoes it.
         #expect(board.model.selectionTurn == 90)
@@ -1142,7 +1142,7 @@ struct TurningSeveralThingsTests {
         board.store.position(origins)
         board.model.selectionMoved(by: CGSize(width: 10, height: 6))
         board.model.rehostSelection()
-        let button = DesignStore.ElementRef(host: .canvas, element: board.button.element)
+        let button = NodeRef(host: .canvas, node: board.button.node)
         #expect(board.model.selection == CanvasSelection([.element(button), .element(far)]))
         #expect(board.model.isTurning)
         board.model.turnSelection(by: 100, snaps: false)
@@ -1201,7 +1201,7 @@ struct RotationFieldTests {
 
     @Test func settingTheAngleOfSeveralSetsEachOnItsOwn() {
         let board = TurnBoard()
-        board.store.update(board.note.element) { $0.rotation = 10 }
+        board.store.update(board.note.node) { $0.rotation = 10 }
         board.select([board.title, board.note])
         let before = [board.title, board.note].map(board.canvasRect)
         board.model.setAngle(of: [board.title, board.note], to: 30)
@@ -1236,14 +1236,14 @@ private func finger(at degrees: Double, _ length: Double) -> CGPoint {
 private extension TurnBoard {
     /// A finger dragging an element by `dx` across the glass so far, from `start`, as
     /// `SelectionLayer`'s drag reports it.
-    func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
+    func drag(_ drags: CanvasDrags, _ ref: NodeRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
         guard store.placed(ref) != nil else { return }
         drags.moveNode(ref, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: model) { placed in
             drags.moveRule(for: placed, model: model)
         }
     }
 
-    func frame(of ref: DesignStore.ElementRef) -> CGRect? {
+    func frame(of ref: NodeRef) -> CGRect? {
         store.placed(ref)?.frame
     }
 }
@@ -1364,7 +1364,7 @@ struct TwistTests {
         #expect(!drags.isDragging)
         #expect(board.store.isEditing(by: .turn) && !board.store.isEditing(by: .hand))
         #expect(board.model.isAdjusting, "the twist is still adjusting the selection")
-        let onScreen = DesignStore.ElementRef(host: .screen(board.screen), element: button.element)
+        let onScreen = NodeRef(host: .screen(board.screen), node: button.node)
         #expect(board.model.selection == .element(onScreen), "it lands on the screen it lies over as its drag is cut short")
         let landed = try #require(board.frame(of: onScreen))
         let middle = board.canvasFrame(onScreen)

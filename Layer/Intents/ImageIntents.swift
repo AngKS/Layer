@@ -140,7 +140,7 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
             model = found
             request = ImagePlaygroundRequest(target: .newImage(onScreen: target.id))
         }
-        let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> DesignStore.ElementRef? in
+        let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> NodeRef? in
             guard let ref = model.placeGeneratedImage(prepared, for: request) else { return nil }
             if element == nil, x != nil || y != nil || width != nil || height != nil, let placed = model.store.placed(ref) {
                 // In its host's points, as Move Element takes them: a screen root that lays it out keeps its place.
@@ -153,7 +153,7 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
                 if let height { frame.size.height = CGFloat(height) }
                 if let x { frame.origin.x = CGFloat(x) }
                 if let y { frame.origin.y = CGFloat(y) }
-                model.store.place(ref.element, at: frame)
+                model.store.place(ref.node, at: frame)
             }
             return ref
         }

@@ -30,7 +30,7 @@ struct InkGhost: Identifiable, Equatable {
 struct KindSuggestion: Identifiable, Equatable {
     let id = UUID()
     /// The element the sketch became.
-    var ref: DesignStore.ElementRef
+    var ref: NodeRef
     /// What it nearly was instead.
     var kind: ElementKind
     /// Where it was sketched, in canvas points, so that the other kind is laid out from
@@ -271,8 +271,8 @@ final class AppModel {
     var screensBeingDraggedFrom: Set<TreeScreen.ID> {
         guard isAdjusting else { return [] }
         var ids: [UUID] = []
-        for case .element(let ref) in selection?.things ?? [] { ids.append(ref.element) }
-        if let lifted = drags?.lifted { ids.append(lifted.element) }
+        for case .element(let ref) in selection?.things ?? [] { ids.append(ref.node) }
+        if let lifted = drags?.lifted { ids.append(lifted.node) }
         return Set(ids.compactMap { id in
             if case .screen(let screen)? = store.ref(of: id)?.host { screen } else { nil }
         })
@@ -1289,7 +1289,7 @@ final class AppModel {
         // With the palette up, a finger tap reaches the canvas for elements too: their own
         // handles stay out of the Pencil's way while it draws. A drawing has no handle
         // of its own until it is selected, so a tap on its ink always reaches here.
-        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.node(ref.element)?.kind == .drawing {
+        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.node(ref.node)?.kind == .drawing {
             pick(target)
         } else if case .screen(let id)? = target, let frame = screenFrame(id), !frame.contains(point) {
             // `hoverTarget` gives the screen for its name strip as well as for itself.
@@ -1333,7 +1333,7 @@ final class AppModel {
     /// to spare.
     private func isNearMiss(_ viewPoint: CGPoint) -> Bool {
         selectedThings.contains { thing in
-            if case .element(let ref) = thing, store.node(ref.element)?.kind == .drawing { return false }
+            if case .element(let ref) = thing, store.node(ref.node)?.kind == .drawing { return false }
             guard let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) else { return false }
             return Self.distance(from: viewPoint, toEdgeOf: shape) <= Self.nearMiss
         }
@@ -1359,10 +1359,10 @@ final class AppModel {
     func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
         if let drawing = inkTarget(at: viewPoint) {
             pick(.element(drawing))
-        } else if case .element(let ref) = thing, store.node(ref.element)?.isContainer == true {
+        } else if case .element(let ref) = thing, store.node(ref.node)?.isContainer == true {
             let point = viewport.canvasPoint(for: viewPoint)
-            let leaf = TreeTargets.leaf(at: point, in: ref.element, content: store.tree, index: store.index)
-            pick(.element(leaf.map { DesignStore.ElementRef(host: ref.host, element: $0) } ?? ref))
+            let leaf = TreeTargets.leaf(at: point, in: ref.node, content: store.tree, index: store.index)
+            pick(.element(leaf.map { NodeRef(host: ref.host, node: $0) } ?? ref))
         } else {
             pick(thing)
         }
@@ -1370,7 +1370,7 @@ final class AppModel {
 
     /// The drawing whose ink is at a point in the view. It lies over everything else and
     /// takes a touch there, even where an element's target is under it.
-    func inkTarget(at viewPoint: CGPoint) -> DesignStore.ElementRef? {
+    func inkTarget(at viewPoint: CGPoint) -> NodeRef? {
         drawing(at: viewport.canvasPoint(for: viewPoint))
     }
 
@@ -1405,7 +1405,7 @@ final class AppModel {
     private func enteredGroups(in selection: CanvasSelection?) -> Set<UUID> {
         var entered: Set<UUID> = []
         for case .element(let ref) in selection?.things ?? [] {
-            entered.formUnion(store.groups(holding: ref).map(\.element))
+            entered.formUnion(store.groups(holding: ref).map(\.node))
         }
         return entered
     }
@@ -1493,10 +1493,10 @@ final class AppModel {
             var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
             if case .screen(let id) = ref.host { holders.append(.screen(id)) }
             things.subtract(holders.filter(current.contains))
-            if let node = store.node(ref.element), node.isContainer {
+            if let node = store.node(ref.node), node.isContainer {
                 let inside = Set(TreeEdit.ids(in: node).dropFirst())
                 things = things.filter { thing in
-                    if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
+                    if case .element(let selected) = thing { !inside.contains(selected.node) } else { true }
                 }
             }
         }
@@ -1625,7 +1625,7 @@ final class AppModel {
     /// `land` lands each instead, when the drag knows better where it goes: one thing let go
     /// over a row's insertion line, say. Each is named afresh from the index (`ref(of:)`),
     /// wherever it went.
-    func rehost(_ things: [CanvasSelection], landing land: ((DesignStore.ElementRef) -> Void)? = nil) {
+    func rehost(_ things: [CanvasSelection], landing land: ((NodeRef) -> Void)? = nil) {
         let selected = selection
         let session = turnSession.flatMap { $0.selection == selected && $0.matches(store) ? $0 : nil }
         // Moved to its new host, an element drops out of the selection until it is named again.
@@ -1638,7 +1638,7 @@ final class AppModel {
         store.asOneStep {
             for case .element(let ref) in inOrder {
                 if let land { land(ref) } else { store.rehost(ref) }
-                if let now = store.ref(of: ref.element), now != ref { renamed[.element(ref)] = .element(now) }
+                if let now = store.ref(of: ref.node), now != ref { renamed[.element(ref)] = .element(now) }
             }
         }
         guard let selected, selected.things.contains(where: { renamed[$0] != nil }) else { return }
@@ -1655,8 +1655,8 @@ final class AppModel {
     @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
-    private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
-        ink?.drawing(at: point, tolerance: 14 / viewport.scale).map { .init(host: .canvas, element: $0) }
+    private func drawing(at point: CGPoint) -> NodeRef? {
+        ink?.drawing(at: point, tolerance: 14 / viewport.scale).map { .init(host: .canvas, node: $0) }
     }
 
     /// What Apple Pencil is hovering over: on the canvas, or in the layers list. It is
@@ -1702,17 +1702,17 @@ final class AppModel {
     /// The topmost of one host's targets, given back to front, that holds a canvas point: see
     /// `hoverTarget(at:skippingDrawings:)`.
     private func topmost(
-        at point: CGPoint, among targets: [TreeTargets.Target], on host: DesignStore.ElementRef.Host, skippingDrawings: Bool
-    ) -> DesignStore.ElementRef? {
+        at point: CGPoint, among targets: [TreeTargets.Target], on host: NodeRef.Host, skippingDrawings: Bool
+    ) -> NodeRef? {
         for target in targets.reversed() where target.shape.contains(point) {
             if target.isContainer {
                 if let leaf = TreeTargets.leaf(at: point, in: target.id, content: store.tree, index: store.index) {
-                    return .init(host: host, element: leaf)
+                    return .init(host: host, node: leaf)
                 }
             } else if skippingDrawings, store.node(target.id)?.kind == .drawing {
                 continue
             }
-            return .init(host: host, element: target.id)
+            return .init(host: host, node: target.id)
         }
         return nil
     }
@@ -1777,7 +1777,7 @@ final class AppModel {
     /// Whether the things selected are on more than one screen, or on a screen and the open
     /// canvas: why Group is off, when it is. Read from the index.
     var groupSelectionSpansHosts: Bool {
-        Set(selectedThings.compactMap { thing -> DesignStore.ElementRef.Host? in
+        Set(selectedThings.compactMap { thing -> NodeRef.Host? in
             if case .element(let ref) = thing { ref.host } else { nil }
         }).count > 1
     }
@@ -1818,26 +1818,26 @@ final class AppModel {
     /// Hides or shows a thing, or a container with everything in it, by its own flag. Hiding
     /// one lets go of it, and of anything selected inside it, at any depth, since none of it
     /// can be touched: found through the index.
-    func toggleHidden(_ ref: DesignStore.ElementRef) {
+    func toggleHidden(_ ref: NodeRef) {
         guard store.placed(ref) != nil else { return }
-        store.update(ref.element) { $0.isHidden.toggle() }
-        guard store.node(ref.element)?.isHidden == true, let selection else { return }
+        store.update(ref.node) { $0.isHidden.toggle() }
+        guard store.node(ref.node)?.isHidden == true, let selection else { return }
         let index = store.index
         let kept = selection.things.filter { thing in
             guard case .element(let selected) = thing else { return true }
-            return selected.element != ref.element && !index.ancestors(of: selected.element).contains(ref.element)
+            return selected.node != ref.node && !index.ancestors(of: selected.node).contains(ref.node)
         }
         if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
     /// Locks a thing, or unlocks it, which also unlocks the locked containers above it, so that
     /// a thing locked only by its container, which offers Unlock, is unlocked and never locked.
-    func toggleLock(_ ref: DesignStore.ElementRef) {
+    func toggleLock(_ ref: NodeRef) {
         guard let placed = store.placed(ref) else { return }
         if placed.isLocked {
             store.unlock(.element(ref))
         } else {
-            store.update(ref.element) { $0.isLocked = true }
+            store.update(ref.node) { $0.isLocked = true }
         }
     }
 
@@ -1892,7 +1892,7 @@ final class AppModel {
     private enum TurnStart {
         /// One thing, its angle on the canvas, and its own angle with that of what held it: put
         /// back as it was if the turn comes back round to where it began.
-        case element(DesignStore.ElementRef, degrees: Double, own: DesignStore.OwnAngle?)
+        case element(NodeRef, degrees: Double, own: DesignStore.OwnAngle?)
         /// Several things, and how far their session had turned them.
         case several(turned: Double)
     }
@@ -1918,7 +1918,7 @@ final class AppModel {
     /// angle is written, less the angles of what holds it (`DesignStore.setCanvasAngles`). Given
     /// `start`, it takes back the own angle it had then, exactly.
     private func setCanvasAngle(of placed: PlacedNode, to degrees: Double, puttingBack start: DesignStore.OwnAngle? = nil) {
-        store.setCanvasAngles([placed.ref.element: degrees], puttingBack: start.map { [placed.ref.element: $0] } ?? [:])
+        store.setCanvasAngles([placed.ref.node: degrees], puttingBack: start.map { [placed.ref.node: $0] } ?? [:])
     }
 
     /// What turns several things selected: the session kept from their last turn or move,
@@ -1947,7 +1947,7 @@ final class AppModel {
         guard !isTurning, canTurnSelection else { return false }
         let start: Double
         if let turnable = turnableNode {
-            turnStart = .element(turnable.ref, degrees: turnable.degrees, own: store.ownAngle(of: turnable.ref.element))
+            turnStart = .element(turnable.ref, degrees: turnable.degrees, own: store.ownAngle(of: turnable.ref.node))
             turnBegan = (store.tree, store.contentVersion)
             start = turnable.degrees
         } else if let session = severalTurn {
@@ -2119,7 +2119,7 @@ final class AppModel {
     /// The Format panel's Rotation for several things: each of `refs` that isn't locked, by
     /// itself or by a container above it, turned to `degrees` on its own pivot, in the panel's own
     /// edit. A container among them turns as one piece about its middle.
-    func setAngle(of refs: [DesignStore.ElementRef], to degrees: Double) {
+    func setAngle(of refs: [NodeRef], to degrees: Double) {
         adjusting { turnEach(refs.filter { !store.isLocked(.element($0)) }, to: degrees) }
     }
 
@@ -2127,7 +2127,7 @@ final class AppModel {
     /// turns it as one piece about its middle, everything in it going round with it, to `degrees`
     /// on the canvas, in the panel's own edit. Only while it is still the one thing selected, as a
     /// turn goes by the selection: a field set once the selection has moved on changes nothing (M5).
-    func setGroupRotation(_ ref: DesignStore.ElementRef, to degrees: Double) {
+    func setGroupRotation(_ ref: NodeRef, to degrees: Double) {
         guard selection == .element(ref), let container = store.placed(ref), container.node.isContainer else { return }
         adjusting { rotateSelection(by: degrees - container.degrees) }
     }
@@ -2143,7 +2143,7 @@ final class AppModel {
     ///   scale nothing (L8).
     ///
     /// Nothing happens to a container that is locked, by itself or by one above it. Read from the tree.
-    func setGroupBox(_ ref: DesignStore.ElementRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+    func setGroupBox(_ ref: NodeRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
         adjusting {
             if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
                 let box = item.canvasShape.bounds
@@ -2165,9 +2165,9 @@ final class AppModel {
     /// Turns each of `refs` to `degrees` on the canvas, in one step, each about its own middle:
     /// a container as one piece, everything in it going round with it, as one selected alone
     /// turns, and a laid-out child in place. Only their angles are written.
-    private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
+    private func turnEach(_ refs: [NodeRef], to degrees: Double) {
         var angles: [UUID: Double] = [:]
-        for ref in refs where store.placed(ref) != nil { angles[ref.element] = degrees }
+        for ref in refs where store.placed(ref) != nil { angles[ref.node] = degrees }
         store.setCanvasAngles(angles)
     }
 
@@ -2247,7 +2247,7 @@ final class AppModel {
         if let selection {
             let present = selection.things.filter { thing in
                 switch thing {
-                case .element(let ref): store.ref(of: ref.element) == ref
+                case .element(let ref): store.ref(of: ref.node) == ref
                 case .screen(let id): store.treeScreen(id) != nil
                 case .several: false
                 }
@@ -2340,12 +2340,12 @@ final class AppModel {
         dismissSuggestion()
         // The node remembers where it was drawn; the suggestion's own sketch is only for one that doesn't.
         guard case .screen(let screenID) = suggestion.ref.host, let screen = store.treeScreen(screenID) else { return }
-        let changed = store.changeKind(of: suggestion.ref.element, to: suggestion.kind,
+        let changed = store.changeKind(of: suggestion.ref.node, to: suggestion.kind,
                                        fallback: screen.placement.localRect(for: suggestion.sketch)) {
             $0.adoptMarks(of: suggestion.observation)
         }
         guard changed != nil else { return }
-        Task { await SketchReadingLog.shared.noteCorrected(suggestion.ref.element, to: suggestion.kind.rawValue) }
+        Task { await SketchReadingLog.shared.noteCorrected(suggestion.ref.node, to: suggestion.kind.rawValue) }
     }
 
     func dismissSuggestion() {
@@ -2439,7 +2439,7 @@ final class AppModel {
     /// it joins the screen, kept inside its edges. Nil, and nothing changes, when the design
     /// can't take it.
     @discardableResult
-    private func add(_ node: LayerNode, at point: CGPoint? = nil) -> DesignStore.ElementRef? {
+    private func add(_ node: LayerNode, at point: CGPoint? = nil) -> NodeRef? {
         guard let ref = store.place(node, centredAt: point ?? middleOfView) else { return nil }
         tool = .select
         selection = .element(ref)
@@ -2666,7 +2666,7 @@ final class AppModel {
     /// Reads one sketch, given at its on-screen size, and puts what it means on the canvas.
     /// A Magic Pen sketch is read on its own; `drawing` is set instead for a drawing
     /// that was selected and asked to be read, with the `prompt` typed for it.
-    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: DesignStore.ElementRef? = nil, prompt: String? = nil) async {
+    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: NodeRef? = nil, prompt: String? = nil) async {
         let keys = Set(group.map(\.key))
         let isDrawing = drawing != nil
         defer { if !isDrawing { inFlight.subtract(keys) } }
@@ -2733,7 +2733,7 @@ final class AppModel {
             defer { store.endEdit(conversion) }
             store.act(for: conversion) {
                 var converted = false
-                var added: DesignStore.ElementRef?
+                var added: NodeRef?
                 switch reading {
                 case .screen:
                     _ = store.addScreen(from: bounds)
@@ -2751,7 +2751,7 @@ final class AppModel {
                               let floating = store.place(looseNode(kind, sketchedAs: bounds),
                                                          centredAt: CGPoint(x: bounds.midX, y: bounds.midY)) {
                         // On the open canvas it remembers the sketch's canvas bounds, and no screen.
-                        store.update(floating.element) {
+                        store.update(floating.node) {
                             $0.sketch = LayerNode.SketchIntent(sketched: bounds, on: nil, margin: 0,
                                                                confidence: outcome.confidence, decidedBy: outcome.decidedBy)
                         }
@@ -2759,10 +2759,10 @@ final class AppModel {
                         converted = true
                     }
                     if let added, let readingLogID {
-                        Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                        Task { await SketchReadingLog.shared.link(element: added.node, toEntry: readingLogID) }
                     }
-                    if let added, let recognizedText, store.node(added.element)?.kind.hasText == true {
-                        store.update(added.element) { $0.content.text = recognizedText }
+                    if let added, let recognizedText, store.node(added.node)?.kind.hasText == true {
+                        store.update(added.node) { $0.content.text = recognizedText }
                     }
                     // A close call says what else it nearly was, in case that is what was meant.
                     if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
@@ -2775,8 +2775,8 @@ final class AppModel {
                 // Words the prompt gave for the element go on it, and a drawing read on request
                 // ends with what it became selected.
                 if let added, isDrawing {
-                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.node(added.element)?.kind.hasText == true {
-                        store.update(added.element) { $0.content.text = label }
+                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.node(added.node)?.kind.hasText == true {
+                        store.update(added.node) { $0.content.text = label }
                     }
                     selection = .element(added)
                 }
@@ -2789,7 +2789,7 @@ final class AppModel {
                 // What a reading made on a screen joins the batch, and the last reading of the batch ends it: the pass
                 // over what it made is part of this step, so that a structure it is sure of undoes with this reading,
                 // or is the step itself when this reading made nothing (call 1).
-                if let added, case .screen = added.host { sketchBatch.append(added.element) }
+                if let added, case .screen = added.host { sketchBatch.append(added.node) }
                 if conversionsUnderWay == 1 { endSketchBatch() }
             }
         }

@@ -20,7 +20,7 @@ private func stroke(from start: CGPoint, length: CGFloat) -> PKStroke {
 private struct BusyBoard {
     let model = AppModel(document: LayerDocument())
     let screen: TreeScreen.ID
-    let lines: [DesignStore.ElementRef]
+    let lines: [NodeRef]
     static let strokes = 200
 
     var store: DesignStore { model.store }
@@ -41,12 +41,12 @@ private struct BusyBoard {
     }
 
     /// Lines 5, 6 and 7 put in a group, as Group does.
-    func groupThreeLines() -> DesignStore.ElementRef? {
+    func groupThreeLines() -> NodeRef? {
         store.group(CanvasSelection(lines[5...7].map { CanvasSelection.element($0) })!)
     }
 
     /// One frame of a finger dragging a group's target `dx` across the glass since it landed.
-    func drag(_ drags: CanvasDrags, group: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
+    func drag(_ drags: CanvasDrags, group: NodeRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
         guard store.placed(group) != nil else { return }
         drags.moveOnTarget(group, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model)
     }
@@ -56,7 +56,7 @@ private struct BusyBoard {
     static let outAndBack = Array(1...30) + Array((0...29).reversed())
 
     /// One frame of a finger dragging `ref` `dx` across the glass since it landed.
-    func drag(_ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
+    func drag(_ drags: CanvasDrags, _ ref: NodeRef, by dx: CGFloat, owner: CanvasDrags.Owner) {
         guard store.placed(ref) != nil else { return }
         drags.moveNode(ref, by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model) { placed in
             drags.moveRule(for: placed, model: model)
@@ -250,7 +250,7 @@ struct CanvasDragWorkTests {
         let coordinator = InkCanvas.Coordinator(model: board.model)
         board.model.ink = coordinator
         let drawing = try #require(board.store.tree.canvas.first { $0.kind == .drawing })
-        let ref = DesignStore.ElementRef(host: .canvas, element: drawing.id)
+        let ref = NodeRef(host: .canvas, node: drawing.id)
         let area = try #require(board.store.canvasRect(of: drawing.id))
         /// Its strokes, wherever they are now: those in its row that start past `x`.
         func strokes(startingPast x: CGFloat) -> Int {
@@ -310,12 +310,12 @@ struct CanvasDragWorkTests {
         board.drag(drags, board.lines[5], by: 10, owner: owner)
         let checks = CanvasWork.dragChecks
         for index in 20..<23 {
-            board.store.asOwnStep { board.store.update(board.lines[index].element) { $0.content.text = "Changed" } }
+            board.store.asOwnStep { board.store.update(board.lines[index].node) { $0.content.text = "Changed" } }
         }
         #expect(CanvasWork.dragChecks - checks == 1)
         for _ in 0..<5 { await Task.yield() }
         #expect(drags.isDragging, "what it drags is still there")
-        board.store.asOwnStep { board.store.update(board.lines[5].element) { $0.isLocked = true } }
+        board.store.asOwnStep { board.store.update(board.lines[5].node) { $0.isLocked = true } }
         for _ in 0..<5 { await Task.yield() }
         #expect(!drags.isDragging, "locked meanwhile, it is let go of")
     }
@@ -343,10 +343,10 @@ extension HostedWindowSuites {
         /// Nudges a line, now and then, until a change to the design builds at most its own
         /// target. For a while after a window first shows, SwiftUI builds every view on every
         /// update whatever it is given (see `LayersPanelWorkTests`).
-        private func waitForTargetsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
+        private func waitForTargetsToSettle(nudging ref: NodeRef, in model: AppModel, view: UIView) async throws {
             for step in 0..<40 {
                 let before = targetsBuilt(in: model.store)
-                model.store.update(ref.element) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
+                model.store.update(ref.node) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(50))
                 if targetsBuilt(in: model.store) - before <= 1 { return }
             }
@@ -456,7 +456,7 @@ extension HostedWindowSuites {
             try await settle(view)
             let start = targetsBuilt(in: board.store)
             for frame in 1...60 {
-                board.store.update(board.lines[5].element) { $0.frame.origin.x = 20 + CGFloat(frame) }
+                board.store.update(board.lines[5].node) { $0.frame.origin.x = 20 + CGFloat(frame) }
                 view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(4))
             }

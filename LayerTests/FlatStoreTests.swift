@@ -22,7 +22,7 @@ struct FlatStoreTests {
     /// Two screens side by side with a title on the first, a note on the open canvas, and
     /// a button on the second, added in that order.
     private func board() throws -> (store: DesignStore, undo: UndoManager, first: TreeScreen.ID, second: TreeScreen.ID,
-                                    title: (id: UUID, frame: CGRect), note: DesignStore.ElementRef, button: (id: UUID, frame: CGRect)) {
+                                    title: (id: UUID, frame: CGRect), note: NodeRef, button: (id: UUID, frame: CGRect)) {
         let (store, undo) = makeStore()
         let first = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
         let second = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1)).id
@@ -41,9 +41,9 @@ struct FlatStoreTests {
     @Test func everythingOnTheBoardIsInOneListAndSaysWhatItIsOn() throws {
         let (store, _, first, second, title, note, button) = try board()
 
-        #expect(Set(store.tree.listedEverywhere.map(\.id)) == [title.id, note.element, button.id])
+        #expect(Set(store.tree.listedEverywhere.map(\.id)) == [title.id, note.node, button.id])
         let lists = [first, nil, second].map(store.tree.listed(on:))
-        #expect(lists.map { $0.map(\.id) } == [[title.id], [note.element], [button.id]])
+        #expect(lists.map { $0.map(\.id) } == [[title.id], [note.node], [button.id]])
         #expect(lists.map { $0.map { store.hostScreen(of: $0.id) } } == [[first], [nil], [second]])
         // On the open canvas an element says how large it is drawn; on a screen the screen does.
         #expect(lists.map { $0.map(\.scale) } == [[nil], [store.looseScale], [nil]])
@@ -52,7 +52,7 @@ struct FlatStoreTests {
     @Test func theScreensAndTheOpenCanvasAreViewsOfTheList() throws {
         let (store, _, _, _, title, note, button) = try board()
         #expect(store.tree.screens.map { store.screenLeaves($0.id).map(\.id) } == [[title.id], [button.id]])
-        #expect(store.tree.canvasLeaves.map(\.id) == [note.element])
+        #expect(store.tree.canvasLeaves.map(\.id) == [note.node])
         #expect(store.tree.canvas.first?.scale == store.looseScale)
     }
 
@@ -66,19 +66,19 @@ struct FlatStoreTests {
 
     @Test func movingToAnotherScreenChangesWhatItIsOnAndPutsItOnTopThere() throws {
         let (store, _, first, second, title, note, button) = try board()
-        let ref = DesignStore.ElementRef(host: .screen(first), element: title.id)
+        let ref = NodeRef(host: .screen(first), node: title.id)
 
         let moved = try #require(store.move(ref, toScreen: second, origin: CGPoint(x: 20, y: 80)))
 
-        #expect(moved == DesignStore.ElementRef(host: .screen(second), element: title.id))
+        #expect(moved == NodeRef(host: .screen(second), node: title.id))
         #expect(store.hostScreen(of: title.id) == second)
-        #expect(lists(on: [first, second, nil], in: store) == [[], [button.id, title.id], [note.element]])
+        #expect(lists(on: [first, second, nil], in: store) == [[], [button.id, title.id], [note.node]])
         #expect(store.tree.screens.map { store.screenLeaves($0.id).map(\.id) } == [[], [button.id, title.id]])
     }
 
     @Test func leavingAScreenForTheOpenCanvasKeepsTheSizeItWasDrawnAt() throws {
         let (store, _, first, _, title, _, _) = try board()
-        let ref = DesignStore.ElementRef(host: .screen(first), element: title.id)
+        let ref = NodeRef(host: .screen(first), node: title.id)
 
         let moved = try #require(store.move(ref, toScreen: nil, origin: nil))
 
@@ -92,12 +92,12 @@ struct FlatStoreTests {
     @Test func arrangingReordersOnlyAmongWhatSharesItsScreen() throws {
         let (store, _, first, second, title, note, button) = try board()
         let body = try #require(store.sketched(.body, from: boxSketch, to: first))
-        #expect(lists(on: [first, nil, second], in: store) == [[title.id, body.id], [note.element], [button.id]])
+        #expect(lists(on: [first, nil, second], in: store) == [[title.id, body.id], [note.node], [button.id]])
 
-        store.arrange(DesignStore.ElementRef(host: .screen(first), element: body.id), .back)
+        store.arrange(NodeRef(host: .screen(first), node: body.id), .back)
 
         // The body and the title swap places; the note and the button stay where they are.
-        #expect(lists(on: [first, nil, second], in: store) == [[body.id, title.id], [note.element], [button.id]])
+        #expect(lists(on: [first, nil, second], in: store) == [[body.id, title.id], [note.node], [button.id]])
         #expect(store.screenLeaves(first).map(\.id) == [body.id, title.id])
     }
 
@@ -105,11 +105,11 @@ struct FlatStoreTests {
         let (store, undo, first, second, title, note, button) = try board()
 
         store.deleteScreen(first)
-        #expect(Set(store.tree.listedEverywhere.map(\.id)) == [note.element, button.id])
-        #expect(lists(on: [first, nil, second], in: store) == [[], [note.element], [button.id]])
+        #expect(Set(store.tree.listedEverywhere.map(\.id)) == [note.node, button.id])
+        #expect(lists(on: [first, nil, second], in: store) == [[], [note.node], [button.id]])
 
         undo.undo()
-        #expect(lists(on: [first, nil, second], in: store) == [[title.id], [note.element], [button.id]])
+        #expect(lists(on: [first, nil, second], in: store) == [[title.id], [note.node], [button.id]])
     }
 
     @Test func aCopiedScreenBringsCopiesOfWhatIsOnIt() throws {

@@ -3,7 +3,7 @@ import Foundation
 /// What is selected on the canvas: one thing, or several at once. A drawing is an element
 /// like any other.
 enum CanvasSelection: Hashable, Sendable {
-    case element(DesignStore.ElementRef)
+    case element(NodeRef)
     case screen(TreeScreen.ID)
     /// Two or more elements and screens, each a single thing. Made with `init(_:)`.
     case several(Set<CanvasSelection>)

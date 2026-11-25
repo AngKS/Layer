@@ -76,7 +76,7 @@ struct LayerRowsTests {
         #expect(rows.map(\.isOpen) == [false, true, false, false, false])
         #expect(lines(store, .screen(screen), open: []).map(\.id) == [d.id, g.id, a.id], "a closed container hides what it holds")
         #expect(rows[2].list == .node(g.id) && rows[0].list == .screen(screen))
-        #expect(rows[0].ref == DesignStore.ElementRef(host: .screen(screen), element: d.id))
+        #expect(rows[0].ref == NodeRef(host: .screen(screen), node: d.id))
     }
 
     @Test func aColumnsChildrenAreInLayoutOrder() {

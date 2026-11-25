@@ -74,7 +74,7 @@ private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
 @MainActor
 private extension AppModel {
     /// What the selection names for the node `id`, where the index has it.
-    func ref(_ id: UUID) throws -> DesignStore.ElementRef {
+    func ref(_ id: UUID) throws -> NodeRef {
         try #require(store.ref(of: id))
     }
 
@@ -325,8 +325,8 @@ struct TurnAndResizeOnTheTreeTests {
         let (model, _) = makeModel(design([screen([a, b, c])]))
         let pair = try #require(CanvasSelection([.element(try model.ref(a.id)), .element(try model.ref(b.id))]))
         let g = try #require(model.store.group(pair))
-        #expect(model.store.node(g.element)?.frame == CGRect(x: 100, y: 100, width: 150, height: 50))
-        #expect(model.store.node(g.element)?.width.mode == .fit, "Group makes a group sized to fit")
+        #expect(model.store.node(g.node)?.frame == CGRect(x: 100, y: 100, width: 150, height: 50))
+        #expect(model.store.node(g.node)?.width.mode == .fit, "Group makes a group sized to fit")
         #expect(model.ownFrame(of: a.id) == CGRect(x: 0, y: 0, width: 50, height: 50))
         model.selection = CanvasSelection([.element(try model.ref(a.id)), .element(try model.ref(c.id))])
         return (model, model.store.tree, a.id, b.id, c.id)
@@ -398,7 +398,7 @@ struct TurnAndResizeOnTheTreeTests {
         let (model, _) = makeModel(design([screen([card, k])]))
         let pair = try #require(CanvasSelection([.element(try model.ref(card.id)), .element(try model.ref(k.id))]))
         let g = try #require(model.store.group(pair))
-        #expect(model.store.node(g.element)?.frame == CGRect(x: 100, y: 100, width: 200, height: 50))
+        #expect(model.store.node(g.node)?.frame == CGRect(x: 100, y: 100, width: 200, height: 50))
         let before = model.store.tree
         let ref = try model.ref(card.id)
         let pose = try #require(model.store.groupPose(of: ref))
@@ -406,7 +406,7 @@ struct TurnAndResizeOnTheTreeTests {
 
         // Half as large again about its bottom-right corner: out past the group's left and top edges.
         model.store.resizeGroup(ref, to: CGRect(x: 50, y: 75, width: 150, height: 75), from: pose)
-        #expect(model.store.node(g.element)?.frame.origin == CGPoint(x: 50, y: 75), "the group hugs it")
+        #expect(model.store.node(g.node)?.frame.origin == CGPoint(x: 50, y: 75), "the group hugs it")
         model.store.resizeGroup(ref, to: pose.box, from: pose)
 
         #expect(model.store.placed(card.id)?.frame == pose.box)

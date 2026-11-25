@@ -82,7 +82,7 @@ struct GroupAsTests {
 
         let made = try #require(store.group(store.selection(of: [right.id, left.id, middle.id]), as: .row))
 
-        let row = try #require(store.node(made.element))
+        let row = try #require(store.node(made.node))
         #expect(row.kind == .group)
         #expect(row.width.mode == .fit && row.height.mode == .fit)
         #expect(row.children.map(\.id) == [left.id, middle.id, right.id])
@@ -104,7 +104,7 @@ struct GroupAsTests {
 
         let made = try #require(store.group(store.selection(of: [low.id, high.id, middle.id]), as: .column))
 
-        let column = try #require(store.node(made.element))
+        let column = try #require(store.node(made.node))
         #expect(column.children.map(\.id) == [high.id, middle.id, low.id])
         #expect(column.resolvedLayout == .stack(LayerNode.Stack(axis: .vertical, spacing: 32, alignment: .start)))
         #expect(store.placed(high.id)?.frame == CGRect(x: 20, y: 100, width: 80, height: 24))
@@ -125,7 +125,7 @@ struct GroupAsTests {
 
         let made = try #require(store.group(store.selection(of: [a.id, b.id, c.id, d.id]), as: .grid))
 
-        let grid = try #require(store.node(made.element))
+        let grid = try #require(store.node(made.node))
         #expect(grid.children.map(\.id) == [b.id, a.id, d.id, c.id])
         guard case .grid(let layout) = grid.resolvedLayout else {
             Issue.record("Grouped as a grid, it is \(grid.resolvedLayout)")
@@ -152,7 +152,7 @@ struct GroupAsTests {
 
         let made = try #require(store.group(store.selection(of: [top.id, bottom.id]), as: .card))
 
-        let card = try #require(store.node(made.element))
+        let card = try #require(store.node(made.node))
         #expect(card.kind == .card)
         guard case .stack(let stack) = card.resolvedLayout else {
             Issue.record("A card of two holds a \(card.resolvedLayout)")
@@ -208,7 +208,7 @@ struct GroupAsTests {
 
         let made = try #require(store.group(store.selection(of: [back.id, front.id]), as: .row))
 
-        let row = try #require(store.node(made.element))
+        let row = try #require(store.node(made.node))
         #expect(row.resolvedLayout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 32, alignment: .center)))
         // The first keeps its place, and the other stays on the line through their centres.
         #expect(try #require(store.placed(back.id)).canvasShape.rect.origin == .zero)

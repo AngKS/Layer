@@ -33,10 +33,10 @@ private struct Board {
     let model: AppModel
     let undo = UndoManager()
     let screen: TreeScreen.ID
-    let title: DesignStore.ElementRef
-    let body: DesignStore.ElementRef
-    let button: DesignStore.ElementRef
-    let note: DesignStore.ElementRef
+    let title: NodeRef
+    let body: NodeRef
+    let button: NodeRef
+    let note: NodeRef
 
     var store: DesignStore { model.store }
 
@@ -51,7 +51,7 @@ private struct Board {
         let store = model.store
         let screenID = store.addFreeScreen(nodes, origin: CGPoint(x: 100, y: 50), scale: 0.5)
         screen = screenID
-        let placed = nodes.map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
+        let placed = nodes.map { NodeRef(host: .screen(screenID), node: $0.id) }
         (title, body, button) = (placed[0], placed[1], placed[2])
         note = store.addOnCanvas(element(.stickyNote, 500, 100, 140, 130), scale: 1)
         // Building the board is not something these tests undo.
@@ -59,7 +59,7 @@ private struct Board {
         model.store.undoManager = undo
     }
 
-    func canvasFrame(_ ref: DesignStore.ElementRef) -> CGRect {
+    func canvasFrame(_ ref: NodeRef) -> CGRect {
         store.canvasFrame(of: .element(ref)) ?? .null
     }
 }
@@ -69,7 +69,7 @@ struct SeveralThingsSelectedTests {
     private let other = UUID()
 
     private func onScreen(_ id: UUID = UUID()) -> CanvasSelection {
-        .element(.init(host: .screen(screen), element: id))
+        .element(.init(host: .screen(screen), node: id))
     }
 
     @Test func noThingsAreNoSelectionAndOneThingIsItself() {
@@ -91,8 +91,8 @@ struct SeveralThingsSelectedTests {
 
     @Test func anElementWhoseScreenIsSelectedIsNotSelectedApartFromIt() {
         let title = onScreen()
-        let note = CanvasSelection.element(.init(host: .canvas, element: UUID()))
-        let elsewhere = CanvasSelection.element(.init(host: .screen(other), element: UUID()))
+        let note = CanvasSelection.element(.init(host: .canvas, node: UUID()))
+        let elsewhere = CanvasSelection.element(.init(host: .screen(other), node: UUID()))
         let selection = CanvasSelection([.screen(screen), title, note, elsewhere])
         #expect(selection?.things == [.screen(screen), note, elsewhere])
     }
@@ -245,8 +245,8 @@ struct PickedByALoopTests {
 
     @Test func lockedAndHiddenThingsAreLeftOutOfALoop() {
         let board = Board()
-        board.store.update(board.title.element) { $0.isLocked = true }
-        board.store.update(board.body.element) { $0.isHidden = true }
+        board.store.update(board.title.node) { $0.isLocked = true }
+        board.store.update(board.body.node) { $0.isHidden = true }
         let area = board.canvasFrame(board.title).union(board.canvasFrame(board.button)).insetBy(dx: -6, dy: -6)
         #expect(board.store.things(enclosedBy: loop(round: area)) == [.element(board.button)])
     }
@@ -303,7 +303,7 @@ struct SeveralThingsChangedTogetherTests {
 
     @Test func aLockedThingStaysPutAndTheOthersLineUpWithIt() throws {
         let board = Board()
-        board.store.update(board.button.element) { $0.isLocked = true }
+        board.store.update(board.button.node) { $0.isLocked = true }
         let selection = try #require(CanvasSelection([.element(board.title), .element(board.button)]))
         board.store.align(selection, .right)
         // The button's right edge was the furthest right, and the title joins it there.
@@ -317,7 +317,7 @@ struct SeveralThingsChangedTogetherTests {
 
     @Test func aLockedThingIsNotMovedToLineUpWithTheOthers() throws {
         let board = Board()
-        board.store.update(board.title.element) { $0.isLocked = true }
+        board.store.update(board.title.node) { $0.isLocked = true }
         let selection = try #require(CanvasSelection([.element(board.title), .element(board.body), .element(board.button)]))
         board.store.align(selection, .left)
         // The body joins the button at the edge furthest left. The title would too, but for its lock.
@@ -365,10 +365,10 @@ struct SeveralThingsChangedTogetherTests {
         let before = board.store.tree
         let red = RGBColor(hex: 0xFF0000)
         board.store.asOneStep {
-            for ref in [board.title, board.button, board.note] { board.store.update(ref.element) { $0.style.tint = red } }
+            for ref in [board.title, board.button, board.note] { board.store.update(ref.node) { $0.style.tint = red } }
         }
-        #expect([board.title, board.button, board.note].map { board.store.node($0.element)?.style.tint } == [red, red, red])
-        #expect(board.store.node(board.body.element)?.style.tint != red)
+        #expect([board.title, board.button, board.note].map { board.store.node($0.node)?.style.tint } == [red, red, red])
+        #expect(board.store.node(board.body.node)?.style.tint != red)
         board.undo.undo()
         #expect(board.store.tree == before)
     }
@@ -388,7 +388,7 @@ struct SeveralThingsChangedTogetherTests {
 
     @Test func severalThingsAreDeletedInOneStepAndLockedOnesAreLeft() throws {
         let board = Board()
-        board.store.update(board.body.element) { $0.isLocked = true }
+        board.store.update(board.body.node) { $0.isLocked = true }
         let before = board.store.tree
         let selection = try #require(CanvasSelection([.element(board.title), .element(board.body), .element(board.note)]))
         board.store.delete(selection)
@@ -427,7 +427,7 @@ struct SeveralThingsOnTheCanvasTests {
         #expect(board.model.selection == CanvasSelection([.element(board.title), .element(board.body)]))
         // No one of them is the selected element; together they are the selected elements.
         #expect(board.model.selectedNode == nil)
-        #expect(board.model.selectedThings.compactMap { thing -> DesignStore.ElementRef? in
+        #expect(board.model.selectedThings.compactMap { thing -> NodeRef? in
             if case .element(let ref) = thing { ref } else { nil }
         } == [board.title, board.body])
     }
@@ -517,11 +517,11 @@ struct SeveralThingsOnTheCanvasTests {
         let board = Board()
         board.model.selection = CanvasSelection([.element(board.title), .element(board.button), .element(board.note)])
         let red = RGBColor(hex: 0xFF0000)
-        board.model.changeNodes(board.model.selectedLeafNodes.map(\.ref.element), where: \.hasFill) { $0.style.tint = red }
+        board.model.changeNodes(board.model.selectedLeafNodes.map(\.ref.node), where: \.hasFill) { $0.style.tint = red }
         // A title has no fill of its own to colour.
-        #expect(board.store.node(board.button.element)?.style.tint == red)
-        #expect(board.store.node(board.note.element)?.style.tint == red)
-        #expect(board.store.node(board.title.element)?.style.tint != red)
+        #expect(board.store.node(board.button.node)?.style.tint == red)
+        #expect(board.store.node(board.note.node)?.style.tint == red)
+        #expect(board.store.node(board.title.node)?.style.tint != red)
     }
 
     @Test func severalThingsAreLockedCopiedLinedUpAndDeletedTogether() throws {
@@ -531,8 +531,8 @@ struct SeveralThingsOnTheCanvasTests {
 
         board.model.setSelectionLocked(true)
         #expect(board.model.isSelectionLocked)
-        #expect(board.store.node(board.title.element)?.isLocked == true)
-        #expect(board.store.node(board.note.element)?.isLocked == true)
+        #expect(board.store.node(board.title.node)?.isLocked == true)
+        #expect(board.store.node(board.note.node)?.isLocked == true)
         board.model.deleteSelection()
         #expect(board.store.placed(board.title) != nil, "locked things are not deleted")
         board.model.setSelectionLocked(false)
@@ -761,7 +761,7 @@ struct TapToAddTests {
 @Suite("Dragging on the canvas")
 @MainActor
 struct CanvasDragTests {
-    private func move(_ board: Board, _ drags: CanvasDrags, _ ref: DesignStore.ElementRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
+    private func move(_ board: Board, _ drags: CanvasDrags, _ ref: NodeRef, by dx: CGFloat, from start: CGPoint, owner: CanvasDrags.Owner) {
         drags.moveNode(ref, by: CGSize(width: dx, height: 0), startingAt: start, owner: owner, model: board.model) { placed in
             drags.moveRule(for: placed, model: board.model)
         }
@@ -854,7 +854,7 @@ struct CanvasDragTests {
         #expect(drags.isDragging)
 
         switch event {
-        case "lock": board.store.update(board.note.element) { $0.isLocked = true }
+        case "lock": board.store.update(board.note.node) { $0.isLocked = true }
         case "delete": board.store.delete(board.note)
         case "tool": board.model.tool = .draw
         default: board.model.close()

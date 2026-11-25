@@ -40,7 +40,7 @@ extension VoiceToolbox {
                 return failed("\(listed) can't be put in a new \(kind.rawValue).")
             }
             reveal(.element(made), in: model)
-            return done("Put \(listed) in a \(kind.rawValue), \(handles.handle(forNode: made.element)).")
+            return done("Put \(listed) in a \(kind.rawValue), \(handles.handle(forNode: made.node)).")
         }
     }
 
@@ -159,7 +159,7 @@ extension VoiceToolbox {
                 // An empty one is taken away, and there is nothing to select.
                 guard let first = held.first else { return done("Took \(handle) apart. It held nothing.") }
                 guard let members else { return failed("\(handle) couldn't be taken apart.") }
-                reveal(.element(DesignStore.ElementRef(host: found.ref.host, element: first)), in: model)
+                reveal(.element(NodeRef(host: found.ref.host, node: first)), in: model)
                 select(members, in: model)
                 return done("Took \(Self.listed(held.map { handles.handle(forNode: $0) })) out of \(handle).")
             }

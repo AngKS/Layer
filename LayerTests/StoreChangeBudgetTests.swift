@@ -123,8 +123,8 @@ struct StoreChangeBudgetTests {
         #expect(freeRoot.resolvedLayout == .free)
         #expect(freeRoot.children.reduce(0) { $0 + $1.children.count } == 100)
         let freeRow = freeRoot.children[12]
-        let rowRef = DesignStore.ElementRef(host: .screen(freeID), element: freeRow.id)
-        let move = measure("move", reading: freeModel.store) { _ in freeModel.store.update(rowRef.element) { $0.frame.origin.x += 1 } }
+        let rowRef = NodeRef(host: .screen(freeID), node: freeRow.id)
+        let move = measure("move", reading: freeModel.store) { _ in freeModel.store.update(rowRef.node) { $0.frame.origin.x += 1 } }
         let moved = try #require(freeModel.store.node(freeRow.id))
         #expect(moved.frame.origin.x == freeRow.frame.origin.x + CGFloat(Self.runs), "the row moved a point each run")
         #expect(moved.children.map(\.frame) == freeRow.children.map(\.frame), "what it holds rode in it")
@@ -132,15 +132,15 @@ struct StoreChangeBudgetTests {
         // What the other runs change: row 12's text (edited) and its body (resized), and what is
         // added to row 12 and taken away again after each run.
         let row = root.children[12]
-        let text = DesignStore.ElementRef(host: .screen(screenID), element: row.children[0].id)
-        let body = DesignStore.ElementRef(host: .screen(screenID), element: row.children[1].id)
+        let text = NodeRef(host: .screen(screenID), node: row.children[0].id)
+        let body = NodeRef(host: .screen(screenID), node: row.children[1].id)
 
         // A laid-out child resized as a handle resizes it: the axis it changed is fixed at its new size.
         let resize = measure("resize", reading: store) { _ in
-            guard let now = store.node(body.element) else { return }
-            store.resizeLaidOut(body.element, to: CGSize(width: now.frame.width + 1, height: now.frame.height), from: now)
+            guard let now = store.node(body.node) else { return }
+            store.resizeLaidOut(body.node, to: CGSize(width: now.frame.width + 1, height: now.frame.height), from: now)
         }
-        let edit = measure("text", reading: store) { _ in store.update(text.element) { $0.content.text += "a" } }
+        let edit = measure("text", reading: store) { _ in store.update(text.node) { $0.content.text += "a" } }
         var added: UUID?
         let add = measure("add", reading: store) { run in
             let node = Self.generated(.text, "Added \(run)")
@@ -188,7 +188,7 @@ struct StoreChangeBudgetTests {
         let others = Self.containers(in: root).filter { $0 != root.id }
         #expect(others.count == 4, "the row, the group, the card and its row")
 
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: dragged.id)
+        let ref = NodeRef(host: .screen(screenID), node: dragged.id)
         let drags = CanvasDrags()
         model.drags = drags
         let owner = CanvasDrags.Owner()

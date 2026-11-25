@@ -12,8 +12,8 @@ struct PanelStepTests {
     @MainActor private struct Board {
         let model = AppModel(document: LayerDocument())
         let undo = UndoManager()
-        let first: DesignStore.ElementRef
-        let second: DesignStore.ElementRef
+        let first: NodeRef
+        let second: NodeRef
         var store: DesignStore { model.store }
 
         init() {
@@ -25,14 +25,14 @@ struct PanelStepTests {
                 store.add(one, to: .screen(screen))
                 store.add(two, to: .screen(screen))
             }
-            (first, second) = (.init(host: .screen(screen), element: one.id), .init(host: .screen(screen), element: two.id))
+            (first, second) = (.init(host: .screen(screen), node: one.id), .init(host: .screen(screen), node: two.id))
             undo.groupsByEvent = false
             model.store.undoManager = undo
             // The pause doesn't run out during a test unless it waits for it.
             model.adjustmentPause = .seconds(30)
         }
 
-        func tint(of ref: DesignStore.ElementRef) -> RGBColor? {
+        func tint(of ref: NodeRef) -> RGBColor? {
             store.placed(ref)?.node.resolvedTint
         }
     }
@@ -40,7 +40,7 @@ struct PanelStepTests {
     @Test func aDeleteRightAfterAColourChangeIsAStepOfItsOwn() {
         let board = Board()
         board.model.selection = .element(board.first)
-        board.model.adjusting { board.store.update(board.first.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.adjusting { board.store.update(board.first.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         board.model.deleteSelection()
         #expect(board.store.placed(board.first) == nil)
 
@@ -53,9 +53,9 @@ struct PanelStepTests {
     @Test func aColourChangedOnAnotherSelectionIsAStepOfItsOwn() {
         let board = Board()
         board.model.selection = .element(board.first)
-        board.model.adjusting { board.store.update(board.first.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.adjusting { board.store.update(board.first.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         board.model.selection = .element(board.second)
-        board.model.adjusting { board.store.update(board.second.element) { $0.style.tint = RGBColor(hex: 0x0000FF) } }
+        board.model.adjusting { board.store.update(board.second.node) { $0.style.tint = RGBColor(hex: 0x0000FF) } }
 
         board.undo.undo()
         #expect(board.tint(of: board.second) == RGBColor(hex: 0x000000))
@@ -70,7 +70,7 @@ struct PanelStepTests {
         let things = CanvasSelection([.element(board.first), .element(board.second)])
         board.model.selection = things
         board.model.adjusting {
-            for ref in [board.first, board.second] { board.store.update(ref.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
+            for ref in [board.first, board.second] { board.store.update(ref.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         }
         let count = board.store.thingCount
         board.model.duplicateSelection()
@@ -88,7 +88,7 @@ struct PanelStepTests {
         let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5)).id
         board.undo.removeAllActions()
         board.model.selection = CanvasSelection([.element(board.second), .screen(other)])
-        board.model.adjusting { board.store.update(board.second.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.adjusting { board.store.update(board.second.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         board.model.deleteSelection()
         #expect(board.store.treeScreen(other) == nil && board.store.placed(board.second) == nil)
 
@@ -102,7 +102,7 @@ struct PanelStepTests {
         let board = Board()
         board.model.selection = .element(board.first)
         for hex in [0x110000, 0x220000, 0x330000] {
-            board.model.adjusting { board.store.update(board.first.element) { $0.style.tint = RGBColor(hex: UInt32(hex)) } }
+            board.model.adjusting { board.store.update(board.first.node) { $0.style.tint = RGBColor(hex: UInt32(hex)) } }
         }
         board.undo.undo()
         #expect(board.tint(of: board.first) == RGBColor(hex: 0x000000))

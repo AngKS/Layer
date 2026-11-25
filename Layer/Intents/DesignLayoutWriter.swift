@@ -76,7 +76,7 @@ enum DesignLayoutWriter {
 
 /// Writes one design's nodes, each found in the design's index.
 private struct Writer {
-    typealias Host = DesignStore.ElementRef.Host
+    typealias Host = NodeRef.Host
 
     /// What a screen's root or the open canvas holds: its leaves and its containers, each depth first and back to front,
     /// so each container comes before what it holds.

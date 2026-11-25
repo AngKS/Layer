@@ -150,6 +150,7 @@
 		49830721068FF2AADE0CA47E /* A2UIImportFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16E3B8187F232332A0F937A /* A2UIImportFlowTests.swift */; };
 		4995E98CFF1F2B59FB0E8144 /* LayoutDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72475F0E5ED37E3D2AE6287 /* LayoutDrag.swift */; };
 		4A6045545339CF28D5A23BBD /* TreeReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 665316E28E82F4A8C66AAB93 /* TreeReconciler.swift */; };
+		4ADD314170CD6A14D102936C /* NodeRef.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF1A2C7A6226D160D83DA337 /* NodeRef.swift */; };
 		4B19C390DB9861E648043211 /* structure-row_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 3047AB082304CFB92D6EC936 /* structure-row_clean_1.json */; };
 		4C35D312E363AC073EB0330E /* LayoutSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57E3FB05F2B36FB3AE8E221 /* LayoutSection.swift */; };
 		4CCCD18BC3EEFA21999FD550 /* TextMeasureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF52F7D20462293795E8BFC2 /* TextMeasureTests.swift */; };
@@ -284,6 +285,7 @@
 		892C3568ED48E506CD7E134E /* TopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050FBC0FE953D9E89F917CD /* TopBar.swift */; };
 		894C3C7C32B7A621F626F9A2 /* design-sketch.json in Resources */ = {isa = PBXBuildFile; fileRef = 454E825DC90519D50A9E5B82 /* design-sketch.json */; };
 		89B24EE17C1A854EB8CB03A4 /* UnfixedIssuesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DA7768B9968606719BE6FF7 /* UnfixedIssuesTests.swift */; };
+		89DBB6B5B8AF32D6B72A2EEA /* OneModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B6FA203F56476F598AE653E /* OneModelTests.swift */; };
 		8B47EEF601851602790856A1 /* TreeTargetsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1B86044F0017D6556814D3 /* TreeTargetsTests.swift */; };
 		8B4C2F17F41E8E0B32FB83EC /* checkbox_image_image_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FC604495DD92C4B520D5402 /* checkbox_image_image_3.json */; };
 		8C8EA3739AA081F61BFB53E1 /* DesignStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF800BC07BBBF3367FD33C86 /* DesignStore.swift */; };
@@ -754,6 +756,7 @@
 		5B0F5DA2A3FD075C29339026 /* button_textField_textField_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_textField_textField_3.json; sourceTree = "<group>"; };
 		5B1B2054F83E13F71E27A7CB /* structure-column_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "structure-column_clean_1.json"; sourceTree = "<group>"; };
 		5B60D59B43806202E8FBB607 /* CanvasDrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDrop.swift; sourceTree = "<group>"; };
+		5B6FA203F56476F598AE653E /* OneModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneModelTests.swift; sourceTree = "<group>"; };
 		5B913915C2B0A41F3C06545B /* body_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_noisy_1.json; sourceTree = "<group>"; };
 		5B9EE5D6438233990ED19B2F /* DesignStore+NewElement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignStore+NewElement.swift"; sourceTree = "<group>"; };
 		5D122FA3665A59285EC5D151 /* unknown_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_jittered_2b.json; sourceTree = "<group>"; };
@@ -961,6 +964,7 @@
 		BD5F337AEE453D703CC09CB7 /* ScreenIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenIntents.swift; sourceTree = "<group>"; };
 		BE1E197B6F63662AC0C02BD1 /* GroupFinalFixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupFinalFixTests.swift; sourceTree = "<group>"; };
 		BF13ED18EDD9FD912060042C /* text_jittered_1a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_jittered_1a.json; sourceTree = "<group>"; };
+		BF1A2C7A6226D160D83DA337 /* NodeRef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeRef.swift; sourceTree = "<group>"; };
 		BF572451F75F5F56DFF44B33 /* StylePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StylePanel.swift; sourceTree = "<group>"; };
 		BF6C13AFD16D85C93ACE1CAE /* structure-grid_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "structure-grid_noisy_1.json"; sourceTree = "<group>"; };
 		BF7DFE35D1FFBE7D9175C90B /* a2ui-music-player.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "a2ui-music-player.json"; sourceTree = "<group>"; };
@@ -1170,6 +1174,7 @@
 				ED46511B65B6353CE7AECFE0 /* ListWork.swift */,
 				25F26546E0DF81AFA5653189 /* LookWords.swift */,
 				D16077A6A0599161263162A2 /* NaturalSize.swift */,
+				BF1A2C7A6226D160D83DA337 /* NodeRef.swift */,
 				EB676264DEDBAE71CFCC6657 /* Outline.swift */,
 				6AD266C7AB3740F2CF53D6B7 /* ShapeBuckets.swift */,
 				DE0635EBB9749D38BC2D159B /* SketchIntent+Making.swift */,
@@ -1460,6 +1465,7 @@
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
 				224B8E710AD2C0F38C8C96B2 /* NewVoiceToolsTests.swift */,
 				A4AA816C80BCEB5DFA71CA1C /* NodeViewTests.swift */,
+				5B6FA203F56476F598AE653E /* OneModelTests.swift */,
 				CED676BA058F4BBFBFC7ED02 /* OutlinePromptTests.swift */,
 				8BDE7F449A84CACB19D513E2 /* OutlineTests.swift */,
 				61FFCF33D10A4C78E35864A6 /* PanelStepTests.swift */,
@@ -2316,6 +2322,7 @@
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
 				9710F17CC565F6A74FD28BA2 /* NewVoiceToolsTests.swift in Sources */,
 				3A417FA16C3DF8E3C4BC4EFC /* NodeViewTests.swift in Sources */,
+				89DBB6B5B8AF32D6B72A2EEA /* OneModelTests.swift in Sources */,
 				6F701EE0D0E6648794D617A0 /* OutlinePromptTests.swift in Sources */,
 				68A051131105B9524DBA52BE /* OutlineTests.swift in Sources */,
 				F6F261FBE0256D6E766CB712 /* PanelStepTests.swift in Sources */,
@@ -2491,6 +2498,7 @@
 				6C550A2C8CEC7316A715F0A0 /* ModelChoice.swift in Sources */,
 				52D0E757FF88AE6B826D54BA /* ModelSettingsView.swift in Sources */,
 				42145175EFDE7E91C4F28249 /* NaturalSize.swift in Sources */,
+				4ADD314170CD6A14D102936C /* NodeRef.swift in Sources */,
 				7548A7A3C5FBDB09C946CBBE /* NodeView.swift in Sources */,
 				241EEF700A965CE22C52D81A /* OnscreenContext.swift in Sources */,
 				EB2BD5345F2BE29AC7B7AC46 /* OpenDesigns.swift in Sources */,

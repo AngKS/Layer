@@ -110,7 +110,7 @@ struct EntityKeyTests {
         let screen = UUID(), element = UUID()
         let onScreen = try #require(EntityKey.parseElement(EntityKey.element(design: "local:A.layer", host: .screen(screen), element: element)))
         #expect(onScreen.design == "local:A.layer")
-        #expect(onScreen.ref == DesignStore.ElementRef(host: .screen(screen), element: element))
+        #expect(onScreen.ref == NodeRef(host: .screen(screen), node: element))
 
         let loose = try #require(EntityKey.parseElement(EntityKey.element(design: "local:A.layer", host: .canvas, element: element)))
         #expect(loose.ref.host == .canvas)
@@ -135,7 +135,7 @@ struct EntityKeyTests {
         // Siri's elements are the members too.
         let entities = DesignSnapshot(id: "design", name: "Design", content: content, modified: nil).elements
         #expect(entities.count == 8)
-        #expect(!entities.contains { $0.ref?.element == g.element || $0.ref?.element == notes.element })
+        #expect(!entities.contains { $0.ref?.node == g.node || $0.ref?.node == notes.node })
     }
 }
 
@@ -726,7 +726,7 @@ struct DesignActionTests {
         button.frame.origin.y = 200
         let title = LayerNode.standard(.title)
         let screen = model.store.addFreeScreen([title, button])
-        let refs = [title.id, button.id].map { DesignStore.ElementRef(host: .screen(screen), element: $0) }
+        let refs = [title.id, button.id].map { NodeRef(host: .screen(screen), node: $0) }
         let both = try #require(CanvasSelection(refs.map(CanvasSelection.element)))
         let g = try #require(model.store.group(both))
         // What Siri is offered, as the design's snapshot lists it: the title, then the button.
@@ -762,7 +762,7 @@ struct DesignActionTests {
         try SetElementLockedIntent.setLocked(false, board.c, in: board.model, undoManager: nil)
 
         #expect(!board.store.isLocked(.element(board.c)))
-        #expect(board.store.node(i.element)?.isLocked == false && board.store.node(g.element)?.isLocked == false)
+        #expect(board.store.node(i.node)?.isLocked == false && board.store.node(g.node)?.isLocked == false)
         board.undo.undo()
         #expect(board.store.tree == locked, "one step")
 
@@ -770,8 +770,8 @@ struct DesignActionTests {
         let inner = unlocked.group(unlocked.c, unlocked.e, named: "I")
         let outer = unlocked.group(unlocked.a, inner, named: "G")
         try SetElementLockedIntent.setLocked(true, unlocked.c, in: unlocked.model, undoManager: nil)
-        #expect(unlocked.store.node(unlocked.c.element)?.isLocked == true)
-        #expect(unlocked.store.node(inner.element)?.isLocked == false && unlocked.store.node(outer.element)?.isLocked == false)
+        #expect(unlocked.store.node(unlocked.c.node)?.isLocked == true)
+        #expect(unlocked.store.node(inner.node)?.isLocked == false && unlocked.store.node(outer.node)?.isLocked == false)
         #expect(!unlocked.store.isLocked(.element(unlocked.e)))
     }
 
@@ -797,9 +797,9 @@ struct DesignActionTests {
 
         // What isn't locked is moved and deleted.
         try MoveElementIntent.move(board.a, in: board.model, x: 10, y: nil, width: nil, height: nil, undoManager: nil)
-        #expect(board.store.ownFrame(board.a.element)?.minX == 10)
+        #expect(board.store.ownFrame(board.a.node)?.minX == 10)
         try DeleteElementIntent.delete(board.c, in: board.model, undoManager: nil)
-        #expect(board.store.node(board.c.element) == nil)
+        #expect(board.store.node(board.c.node) == nil)
     }
 
     @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
@@ -975,7 +975,7 @@ struct ImagePlaygroundTests {
         model.imagePlaygroundRequest = request
         let ref = try #require(model.placeGeneratedImage(try picture(), for: request))
         let placed = try #require(model.store.placed(ref)?.node)
-        let frame = try #require(model.store.ownFrame(ref.element))
+        let frame = try #require(model.store.ownFrame(ref.node))
         #expect(placed.kind == .image)
         #expect(placed.content.imageID != nil)
         #expect(model.document.current.images[placed.content.imageID!.uuidString] != nil)
@@ -991,7 +991,7 @@ struct ImagePlaygroundTests {
         let (model, screen) = modelWithScreen()
         let image = LayerNode.leaf(.image, frame: CGRect(x: 30, y: 400, width: 200, height: 120))
         model.store.add(image, to: .screen(screen))
-        let ref = DesignStore.ElementRef(host: .screen(screen), element: image.id)
+        let ref = NodeRef(host: .screen(screen), node: image.id)
 
         let request = ImagePlaygroundRequest(target: .replace(ref), prompt: "mountains")
         #expect(model.imageSize(for: request) == CGSize(width: 200, height: 120))
@@ -1156,7 +1156,7 @@ struct MovingTests {
         let button = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50))
         let first = model.store.addFreeScreen([button], scale: 0.5)
         let second = model.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 400, y: 0), scale: 0.5)
-        let ref = DesignStore.ElementRef(host: .screen(first), element: button.id)
+        let ref = NodeRef(host: .screen(first), node: button.id)
 
         let moved = try MoveElementToScreenIntent.move(ref, toScreen: second, x: 20, y: 100, in: model, undoManager: nil)
         #expect(moved.host == .screen(second))
@@ -1172,7 +1172,7 @@ struct MovingTests {
         let model = model()
         let title = LayerNode.leaf(.title, frame: CGRect(x: 40, y: 80, width: 200, height: 40))
         let screen = model.store.addFreeScreen([title], origin: CGPoint(x: 100, y: 100), scale: 0.5)
-        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
+        let ref = NodeRef(host: .screen(screen), node: title.id)
         let before = try #require(model.store.placed(ref)).placement.canvasRect(for: title.frame)
 
         let moved = try MoveElementToScreenIntent.move(ref, toScreen: nil, x: nil, y: nil, in: model, undoManager: nil)
@@ -1184,7 +1184,7 @@ struct MovingTests {
     @Test func stickyNotesStayOffScreens() {
         let model = model()
         let screen = model.store.addFreeScreen([])
-        let note = DesignStore.ElementRef(host: .canvas, element: model.store.addCanvasNode(.standard(.stickyNote)))
+        let note = NodeRef(host: .canvas, node: model.store.addCanvasNode(.standard(.stickyNote)))
         let refused = #expect(throws: LayerIntentError.self) {
             try MoveElementToScreenIntent.move(note, toScreen: screen, x: 0, y: 0, in: model, undoManager: nil)
         }

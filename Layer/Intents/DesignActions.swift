@@ -99,7 +99,7 @@ enum DesignActions {
 
     /// Throws `locked` when an element is locked, by itself or by a group above it: Siri
     /// doesn't move, align or delete it, as a finger can't (F4).
-    static func requireUnlocked(_ ref: DesignStore.ElementRef, in model: AppModel) throws {
+    static func requireUnlocked(_ ref: NodeRef, in model: AppModel) throws {
         guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
     }
 
@@ -107,7 +107,7 @@ enum DesignActions {
 
     /// The node an entity names, with where it is. Throws `elementNotFound` when it is gone, or has gone to another
     /// host since.
-    static func node(_ entity: ElementEntity) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+    static func node(_ entity: ElementEntity) async throws -> (model: AppModel, ref: NodeRef, node: LayerNode) {
         guard let ref = entity.ref else { throw LayerIntentError.elementNotFound }
         let model = try await model(for: entity.designID)
         guard let placed = model.store.placed(ref) else { throw LayerIntentError.elementNotFound }
@@ -116,7 +116,7 @@ enum DesignActions {
 
     /// The node named, or else the one leaf selected: see `selectedLeaf(in:)`. Throws `elementNotFound` when nothing
     /// is named and no one leaf is selected.
-    static func nodeOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+    static func nodeOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: NodeRef, node: LayerNode) {
         if let entity { return try await node(entity) }
         let model = try await model(for: nil as String?)
         let selected = try selected(in: model)
@@ -155,7 +155,7 @@ enum DesignActions {
     /// rest as `elements` has them.
     static func suggested(_ elements: [ElementEntity], in model: AppModel) -> [ElementEntity] {
         guard let selected = selectedLeaf(in: model),
-              let index = elements.firstIndex(where: { $0.ref?.element == selected.node.id }) else {
+              let index = elements.firstIndex(where: { $0.ref?.node == selected.node.id }) else {
             return elements
         }
         var elements = elements
@@ -165,9 +165,9 @@ enum DesignActions {
 
     /// The entity of the leaf a ref points at, locked or hidden as it is with the containers above it. Nil when it is
     /// gone, has gone to another host, or is a container, which Siri doesn't see (My call 9).
-    static func entity(for ref: DesignStore.ElementRef, in model: AppModel) -> ElementEntity? {
+    static func entity(for ref: NodeRef, in model: AppModel) -> ElementEntity? {
         guard let id = model.designID, let placed = model.store.placed(ref), !placed.node.isContainer,
-              let host = model.store.index[ref.element]?.host else { return nil }
+              let host = model.store.index[ref.node]?.host else { return nil }
         let hostName = switch host {
         case .screen(let screenID): model.store.treeScreen(screenID)?.name ?? "Screen"
         case .canvas: "Canvas"

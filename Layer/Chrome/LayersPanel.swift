@@ -424,7 +424,7 @@ private func rowToggle(_ label: String, symbol: String, action: @escaping () -> 
 @MainActor
 @ViewBuilder
 private func rowToggles(
-    model: AppModel, ref: DesignStore.ElementRef, name: String,
+    model: AppModel, ref: NodeRef, name: String,
     isLocked: Bool, isHidden: Bool, isLockedByGroup: Bool, isSelected: Bool
 ) -> some View {
     let locked = isLocked || isLockedByGroup

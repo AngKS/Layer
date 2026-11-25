@@ -276,7 +276,7 @@ struct DrawStrokesIntent: AppIntent {
         }
         model.tool = .select
         // The strokes just drawn are a drawing now, or part of the one they touch.
-        model.selection = ink.drawing(owning: keys).map { .element(.init(host: .canvas, element: $0)) }
+        model.selection = ink.drawing(owning: keys).map { .element(.init(host: .canvas, node: $0)) }
         model.convertSelection(prompt: reading)
         await model.waitForConversions()
         return .result(value: Self.contents(of: model), dialog: "Drew \(paths.count) strokes and read them as \(reading).")

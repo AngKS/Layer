@@ -113,7 +113,7 @@ struct SelectionLayer: View {
                 if model.isAdjusting, !model.isTurning, !drags.isLifting, !selected.node.isContainer, store.canvas.showsMeasurements,
                    case .screen(let id) = selected.ref.host, let screen = store.treeScreen(id) {
                     let device = tree.device(of: screen)
-                    let others = store.leafBounds(on: selected.ref.host, besides: selected.ref.element, in: selected.placement)
+                    let others = store.leafBounds(on: selected.ref.host, besides: selected.ref.node, in: selected.placement)
                     SpacingOverlay(guides: .measure(TurnedRect(rect: selected.frame, degrees: selected.degrees).bounds, among: others,
                                                     in: CGRect(origin: .zero, size: device.size)),
                                    placement: screen.placement, screenFrame: screen.canvasFrame(on: device), viewport: viewport)
@@ -307,13 +307,13 @@ final class CanvasDrags {
         /// For an element's target: where its drag began, and the drawing whose ink was
         /// there, which the drag moves instead (see `moveOnTarget`). Kept for the whole drag,
         /// since the ink moves away from where the drag began.
-        fileprivate var ink: (start: CGPoint, drawing: DesignStore.ElementRef?)?
+        fileprivate var ink: (start: CGPoint, drawing: NodeRef?)?
     }
 
     /// A thing in a row, column, grid or overlay as a drag of it goes (plan 4, call 3): it stays where it is, and
     /// nothing is written until it is let go, while a copy follows the finger (`LayoutDrag`).
     struct Lift: Equatable {
-        var ref: DesignStore.ElementRef
+        var ref: NodeRef
         /// Its own frame as the drag began, in its host's own points.
         var start: CGRect
         /// How far the finger has taken it, in its host's own points.
@@ -334,7 +334,7 @@ final class CanvasDrags {
     /// frame, as what reads `lift` is.
     private(set) var isLifting = false
     /// What a lift under way lifts, unobserved: the canvas keeps its screen on top (`AppModel.screensBeingDraggedFrom`).
-    @ObservationIgnored private(set) var lifted: DesignStore.ElementRef?
+    @ObservationIgnored private(set) var lifted: NodeRef?
     /// The drag under way: whose it is, and where on the glass it began.
     @ObservationIgnored private var session: (owner: Owner, start: CGPoint)?
     /// The frame an element had when the current drag began.
@@ -354,7 +354,7 @@ final class CanvasDrags {
     @ObservationIgnored private var laidOutStart: LayerNode?
     /// The one thing a drag moves on its own, and how its host's points sit on the canvas, read from the tree as the
     /// drag began. Nil while several things are dragged together, and for a screen.
-    @ObservationIgnored private var oneThing: (ref: DesignStore.ElementRef, placement: Placement)?
+    @ObservationIgnored private var oneThing: (ref: NodeRef, placement: Placement)?
     /// The boxes on the canvas, as the drag began, of the free containers round the one thing placed freely: while
     /// the finger is in one, it keeps the thing (`TreeDrop`). Its box grows round the thing as it is dragged.
     @ObservationIgnored private var startBoxes: [UUID: TurnedRect] = [:]
@@ -542,7 +542,7 @@ final class CanvasDrags {
     /// Lifts one thing a drag begins on, out of the row, column, grid or overlay that lays it out: nothing is
     /// written until it is let go (plan 4, call 3).
     private func beginLift(of placed: PlacedNode) {
-        lift = Lift(ref: placed.ref, start: placed.frame, translation: .zero, target: .free(on: TreeIndex.Host(placed.ref.host)))
+        lift = Lift(ref: placed.ref, start: placed.frame, translation: .zero, target: .free(on: placed.ref.host))
         lifted = placed.ref
         isLifting = true
     }
@@ -553,15 +553,15 @@ final class CanvasDrags {
         guard var moved = lift, let placement = oneThing?.placement else { return }
         moved.translation = translation
         let centre = placement.canvasPoint(for: CGPoint(x: moved.start.midX + translation.width, y: moved.start.midY + translation.height))
-        moved.target = TreeDrop.target(for: moved.ref.element, at: finger, centre: centre, in: model.store.tree, index: model.store.index)
+        moved.target = TreeDrop.target(for: moved.ref.node, at: finger, centre: centre, in: model.store.tree, index: model.store.index)
         if lift != moved { lift = moved }
         if dropTarget != moved.target { dropTarget = moved.target }
     }
 
     /// Where one thing placed freely, its middle now at `centre` on the canvas, would go if it were let go with the
     /// finger at `finger`: the line shows. True when it shows a line, which no snapping guide shows beside.
-    private func aim(_ ref: DesignStore.ElementRef, centre: CGPoint, finger: CGPoint, model: AppModel) -> Bool {
-        let target = TreeDrop.target(for: ref.element, at: finger, centre: centre, in: model.store.tree, index: model.store.index,
+    private func aim(_ ref: NodeRef, centre: CGPoint, finger: CGPoint, model: AppModel) -> Bool {
+        let target = TreeDrop.target(for: ref.node, at: finger, centre: centre, in: model.store.tree, index: model.store.index,
                                      startBoxes: startBoxes)
         if dropTarget != target { dropTarget = target }
         isInItsGroupsBox = startBoxes.values.contains { $0.contains(finger) }
@@ -574,16 +574,16 @@ final class CanvasDrags {
     /// shows, or onto whatever it lies on (`rehost`), unless it is `stayingInItsGroup`, let go in its free group's box
     /// as the drag began, which keeps it as a free move. Back in the slot it was in, it stays as it is. A move the
     /// store refuses changes nothing (F15).
-    private static func land(_ ref: DesignStore.ElementRef, lift: Lift?, at target: TreeDrop.Target?,
+    private static func land(_ ref: NodeRef, lift: Lift?, at target: TreeDrop.Target?,
                              stayingInItsGroup: Bool = false, in store: DesignStore) {
         switch target {
         case .insert(let parent, let index, _)?:
-            let isWhereItIs = store.parent(of: ref.element) == parent && store.index[ref.element]?.siblingIndex == index
-            if !isWhereItIs { store.move(ref.element, to: parent, at: index) }
+            let isWhereItIs = store.parent(of: ref.node) == parent && store.index[ref.node]?.siblingIndex == index
+            if !isWhereItIs { store.move(ref.node, to: parent, at: index) }
         case .free(let host)? where lift != nil:
-            guard let lift, let placement = store.placed(ref.element)?.placement else { return }
+            guard let lift, let placement = store.placed(ref.node)?.placement else { return }
             let letGo = CGPoint(x: lift.start.midX + lift.translation.width, y: lift.start.midY + lift.translation.height)
-            store.takeOut(ref.element, to: host, centredAt: placement.canvasPoint(for: letGo))
+            store.takeOut(ref.node, to: host, centredAt: placement.canvasPoint(for: letGo))
         case .free?, nil:
             if !stayingInItsGroup { store.rehost(ref) }
         }
@@ -648,7 +648,7 @@ final class CanvasDrags {
         let zoom = model.zoomScale
         let placement = placed.placement
         // What the thing can line up with, in its own host's points.
-        let others = store.leafBounds(on: placed.ref.host, besides: placed.ref.element, in: placement)
+        let others = store.leafBounds(on: placed.ref.host, besides: placed.ref.node, in: placement)
         let container: CGRect? = if case .screen(let id) = placed.ref.host, let screen = store.treeScreen(id) {
             CGRect(origin: .zero, size: store.tree.device(of: screen).size)
         } else {
@@ -678,7 +678,7 @@ final class CanvasDrags {
 
     /// A drag that moves or resizes one thing. The translation is measured in the view's
     /// points, where the finger landed too. `rule` is asked for once, when the drag begins.
-    func adjust(_ ref: DesignStore.ElementRef, findsNewHome: Bool, model: AppModel, owner: Owner,
+    func adjust(_ ref: NodeRef, findsNewHome: Bool, model: AppModel, owner: Owner,
                 rule: @escaping (PlacedNode) -> Rule) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .named(SelectionLayer.space))
             .onChanged { [self] value in
@@ -699,7 +699,7 @@ final class CanvasDrags {
     /// Resized, it takes `rule`'s frame: a thing laid out only the size of each axis it changed (`resizeLaidOut`), a
     /// container from its pose as the drag began (`resizeGroup`), and anything else through its parent (`resize`).
     func moveNode(
-        _ ref: DesignStore.ElementRef, by glassTranslation: CGSize, startingAt start: CGPoint, findsNewHome: Bool = true,
+        _ ref: NodeRef, by glassTranslation: CGSize, startingAt start: CGPoint, findsNewHome: Bool = true,
         owner: Owner, model: AppModel, rule makeRule: (PlacedNode) -> Rule
     ) {
         let turn = begins(owner, at: start, moving: [.element(ref)], model: model)
@@ -722,7 +722,7 @@ final class CanvasDrags {
             if findsNewHome, placed.isLaidOut {
                 beginLift(of: placed)
             } else {
-                if findsNewHome { startBoxes = Self.freeBoxes(round: ref.element, in: model.store) }
+                if findsNewHome { startBoxes = Self.freeBoxes(round: ref.node, in: model.store) }
                 // Laid out, only its size is written, and the engine places it. A container's frame is the box round what
                 // is in it: they are resized, from where they were as the drag began, and the box is fitted round them.
                 laidOutStart = !findsNewHome && placed.isLaidOut ? placed.node : nil
@@ -746,13 +746,13 @@ final class CanvasDrags {
         if guidePlacement != placement { guidePlacement = placement }
         model.store.act(for: edit) {
             if let laidOutStart = self.laidOutStart {
-                model.store.resizeLaidOut(ref.element, to: frame.size, from: laidOutStart)
+                model.store.resizeLaidOut(ref.node, to: frame.size, from: laidOutStart)
             } else if let groupPose {
                 model.store.resizeGroup(ref, to: frame, from: groupPose)
             } else if self.findsNewHome {
-                model.store.place(ref.element, at: frame)
+                model.store.place(ref.node, at: frame)
             } else {
-                model.store.resize(ref.element, to: frame)
+                model.store.resize(ref.node, to: frame)
             }
         }
         let showsLine = self.findsNewHome
@@ -765,14 +765,14 @@ final class CanvasDrags {
     /// it does when it is moved, though not when a handle resizes it. A lift lands in the slot its line shows, or out
     /// where it was let go; a thing placed freely joins the row, column or grid whose line shows, or whatever it lies
     /// on. Selected where it lands.
-    func dropElement(_ ref: DesignStore.ElementRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
+    func dropElement(_ ref: NodeRef, findsNewHome: Bool, owner: Owner, model: AppModel) {
         guard ends(owner) else { return }
         let (lift, target, staying) = (lift, dropTarget, isInItsGroupsBox)
         finish(model: model)
         if findsNewHome {
             let store = model.store
             store.act(for: edit) { Self.land(ref, lift: lift, at: target, stayingInItsGroup: staying, in: store) }
-            model.selection = .element(store.ref(of: ref.element) ?? ref)
+            model.selection = .element(store.ref(of: ref.node) ?? ref)
         }
         endEdit(model: model)
     }
@@ -782,7 +782,7 @@ final class CanvasDrags {
     /// tap there picks it. What it moves is read from the tree as the drag begins, so that
     /// its target is built again only when where it lies changes, not with every change to
     /// it or to its screen (audit C6).
-    func adjustOnTarget(_ ref: DesignStore.ElementRef, model: AppModel, owner: Owner) -> some Gesture {
+    func adjustOnTarget(_ ref: NodeRef, model: AppModel, owner: Owner) -> some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .named(SelectionLayer.space))
             .onChanged { [self] value in
                 moveOnTarget(ref, by: value.translation, startingAt: value.startLocation, owner: owner, model: model)
@@ -795,9 +795,9 @@ final class CanvasDrags {
     /// Moves what a drag on a thing's target moves: the thing, or the drawing whose ink lay
     /// over it where the drag began. A container's target moves the container, as a tap there
     /// picks it, with whatever else is selected along with it. `start` is in the view's points.
-    func moveOnTarget(_ ref: DesignStore.ElementRef, by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
+    func moveOnTarget(_ ref: NodeRef, by translation: CGSize, startingAt start: CGPoint, owner: Owner, model: AppModel) {
         let moving = ink(under: start, for: owner, model: model) ?? ref
-        if moving == ref, model.store.node(ref.element)?.isContainer == true {
+        if moving == ref, model.store.node(ref.node)?.isContainer == true {
             moveGroup(by: translation, startingAt: start, owner: owner, model: model, selecting: .element(ref))
             return
         }
@@ -806,7 +806,7 @@ final class CanvasDrags {
         }
     }
 
-    func dropOnTarget(_ ref: DesignStore.ElementRef, startingAt start: CGPoint, owner: Owner, model: AppModel) {
+    func dropOnTarget(_ ref: NodeRef, startingAt start: CGPoint, owner: Owner, model: AppModel) {
         let drawing = owner.ink.flatMap { $0.start == start ? $0.drawing : nil }
         owner.ink = nil
         if drawing == nil, groupOrigins != nil {
@@ -819,7 +819,7 @@ final class CanvasDrags {
     /// The drawing with ink where a drag on a target began, looked up once for each drag: as
     /// it begins, and kept while it is this owner's drag under way. A drag ended any other
     /// way, and then begun again from the same point, looks again.
-    private func ink(under start: CGPoint, for owner: Owner, model: AppModel) -> DesignStore.ElementRef? {
+    private func ink(under start: CGPoint, for owner: Owner, model: AppModel) -> NodeRef? {
         if let ink = owner.ink, ink.start == start, session?.owner === owner { return ink.drawing }
         let drawing = model.inkTarget(at: start)
         owner.ink = (start, drawing)
@@ -879,7 +879,7 @@ final class CanvasDrags {
                 if placed.isLaidOut {
                     beginLift(of: placed)
                 } else {
-                    startBoxes = Self.freeBoxes(round: ref.element, in: model.store)
+                    startBoxes = Self.freeBoxes(round: ref.node, in: model.store)
                 }
             }
             model.isAdjusting = true
@@ -1069,9 +1069,9 @@ private struct ElementTargets: View {
 
     /// A thing's target, or a container's: its box. Locked by itself or by a container above it,
     /// it doesn't drag; what is in a container, locked on its own, doesn't stop the container.
-    private func target(_ target: TreeTargets.Target, on host: DesignStore.ElementRef.Host, minimum: CGFloat) -> some View {
+    private func target(_ target: TreeTargets.Target, on host: NodeRef.Host, minimum: CGFloat) -> some View {
         ElementTarget(
-            ref: .init(host: host, element: target.id), shape: target.shape, isLocked: target.isLocked,
+            ref: .init(host: host, node: target.id), shape: target.shape, isLocked: target.isLocked,
             minimum: minimum, model: model, drags: drags
         )
         .equatable()
@@ -1091,7 +1091,7 @@ private func targetArea(_ rect: CGRect, degrees: Double = 0, minimum: CGFloat) -
 /// be dragged. It reads nothing from the model that would build it again otherwise: what
 /// a tap or a drag acts on is looked up as it happens.
 private struct ElementTarget: View, Equatable {
-    let ref: DesignStore.ElementRef
+    let ref: NodeRef
     /// Its turned shape, in canvas points.
     let shape: TurnedRect
     let isLocked: Bool
@@ -1106,7 +1106,7 @@ private struct ElementTarget: View, Equatable {
 
     var body: some View {
         #if DEBUG
-        let _ = CanvasWork.builtTarget(ref.element)
+        let _ = CanvasWork.builtTarget(ref.node)
         #endif
         targetArea(shape.rect, degrees: shape.degrees, minimum: minimum)
             // Ink lies over the element: where it does, a tap or a drag is the drawing's.

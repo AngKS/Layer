@@ -16,8 +16,8 @@ private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: C
 private struct HitBoard {
     let model: AppModel
     let screen: TreeScreen.ID
-    let button: DesignStore.ElementRef
-    let note: DesignStore.ElementRef
+    let button: NodeRef
+    let note: NodeRef
 
     var store: DesignStore { model.store }
 
@@ -27,7 +27,7 @@ private struct HitBoard {
         model.viewport = Viewport(offset: .zero, scale: 1)
         let one = element(.button, 20, 300, 353, 50)
         screen = model.store.addFreeScreen([one], origin: CGPoint(x: 100, y: 100), scale: 1)
-        button = DesignStore.ElementRef(host: .screen(screen), element: one.id)
+        button = NodeRef(host: .screen(screen), node: one.id)
         note = model.store.addOnCanvas(element(.stickyNote, 600, 100, 140, 130), scale: 1)
     }
 
@@ -68,7 +68,7 @@ struct HiddenHitTestTests {
         let drawing = board.store.addOnCanvas(ink, scale: 1)
         let point = board.middle(of: .element(board.button))
         #expect(board.model.hoverTarget(at: point) == .element(drawing))
-        board.store.update(drawing.element) { $0.isHidden = true }
+        board.store.update(drawing.node) { $0.isHidden = true }
         #expect(board.model.hoverTarget(at: point) == .element(board.button))
     }
 
@@ -111,13 +111,13 @@ struct HiddenHitTestTests {
 @Suite("Ink over an element")
 struct InkOverAnElementTests {
     /// A line of ink drawn with a pen straight across the board's button, through its middle.
-    private func inkAcrossTheButton(on board: HitBoard) throws -> (coordinator: InkCanvas.Coordinator, drawing: DesignStore.ElementRef) {
+    private func inkAcrossTheButton(on board: HitBoard) throws -> (coordinator: InkCanvas.Coordinator, drawing: NodeRef) {
         let coordinator = InkCanvas.Coordinator(model: board.model)
         board.model.ink = coordinator
         let middle = board.middle(of: .element(board.button))
         coordinator.appendInk([[CGPoint(x: middle.x - 120, y: middle.y), CGPoint(x: middle.x + 120, y: middle.y)]], ink: PKInk(.pen, color: .black), width: 4)
         let drawing = try #require(board.store.tree.canvas.first { $0.kind == .drawing })
-        return (coordinator, .init(host: .canvas, element: drawing.id))
+        return (coordinator, .init(host: .canvas, node: drawing.id))
     }
 
     @Test func aTapOnInkOverAnElementPicksTheDrawing() throws {

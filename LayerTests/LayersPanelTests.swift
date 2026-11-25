@@ -13,7 +13,7 @@ extension HostedWindowSuites {
         /// A phone screen of 20 lines of text, and 8 drawings on the open canvas: 30 rows with
         /// the two headings. Kept small, since the panel is laid out again and again, and the
         /// main thread it takes is the other suites' too.
-        private func board() -> (model: AppModel, lines: [DesignStore.ElementRef]) {
+        private func board() -> (model: AppModel, lines: [NodeRef]) {
             let model = AppModel(document: LayerDocument())
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
             let lines = (0..<20).map { index in
@@ -28,7 +28,7 @@ extension HostedWindowSuites {
                 drawing.frame = CGRect(x: 700, y: 100 + CGFloat(index) * 60, width: 100, height: 40)
                 store.addCanvasNode(drawing, scale: 1)
             }
-            return (model, lines.map { DesignStore.ElementRef(host: .screen(screen), element: $0.id) })
+            return (model, lines.map { NodeRef(host: .screen(screen), node: $0.id) })
         }
 
         /// Every id on the board, which is what its panel counts its rows and code under (F9, clause (k)):
@@ -65,9 +65,9 @@ extension HostedWindowSuites {
         }
 
         /// 60 frames of a drag, one every few milliseconds, as touches come in.
-        private func drag(_ ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
+        private func drag(_ ref: NodeRef, in model: AppModel, view: UIView) async throws {
             for step in 1...60 {
-                model.store.update(ref.element) { $0.frame.origin.x = 20 + CGFloat(step) }
+                model.store.update(ref.node) { $0.frame.origin.x = 20 + CGFloat(step) }
                 view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(4))
             }
@@ -78,10 +78,10 @@ extension HostedWindowSuites {
         /// after a window first shows, as the app finishes launching, or while another suite's
         /// window comes and goes, SwiftUI builds every row on every update whatever it is given;
         /// a drag in use comes long after. Gently: each nudge then builds every row.
-        private func waitForRowsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws -> Bool {
+        private func waitForRowsToSettle(nudging ref: NodeRef, in model: AppModel, view: UIView) async throws -> Bool {
             for step in 0..<40 {
                 let before = rows(in: model)
-                model.store.update(ref.element) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
+                model.store.update(ref.node) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(50))
                 if rows(in: model) == before { return true }
             }
@@ -158,12 +158,12 @@ extension HostedWindowSuites {
             let store = model.store
             var made: UUID?
             store.asOneStep {
-                made = store.wrap(lines[2...4].map(\.element), in: .group, layout: .free)
+                made = store.wrap(lines[2...4].map(\.node), in: .group, layout: .free)
                 if let made { store.update(made) { $0.name = "Group" } }
             }
-            let g = DesignStore.ElementRef(host: lines[0].host, element: try #require(made))
+            let g = NodeRef(host: lines[0].host, node: try #require(made))
             model.selection = .element(lines[3])
-            #expect(model.enteredGroups.contains(g.element), "the group is open while a member is selected")
+            #expect(model.enteredGroups.contains(g.node), "the group is open while a member is selected")
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))
             let host = UIHostingController(rootView: LayersPanel(isSheet: true).environment(model))
             window.rootViewController = host

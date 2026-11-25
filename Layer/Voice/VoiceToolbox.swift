@@ -225,7 +225,7 @@ final class VoiceToolbox: VoiceActing {
             // screen they are on: a gap of 12 of those is less on a screen drawn small.
             let store = model.store
             let gap = 12 * found[0].placed.placement.scale
-            var placed: [(ref: DesignStore.ElementRef, frame: CGRect)] = found.compactMap { one in
+            var placed: [(ref: NodeRef, frame: CGRect)] = found.compactMap { one in
                 store.canvasFrame(of: .element(one.ref)).map { (one.ref, $0) }
             }
             guard placed.count == found.count else { return failed("Those couldn't be stacked.") }
@@ -605,7 +605,7 @@ final class VoiceToolbox: VoiceActing {
                 guard store.add(node, to: parent, at: side == .below || side == .rightOf ? slot + 1 : slot) else {
                     return failed("That couldn't be added.")
                 }
-                reveal(.element(DesignStore.ElementRef(host: .screen(host.id), element: node.id)), in: model)
+                reveal(.element(NodeRef(host: .screen(host.id), node: node.id)), in: model)
                 let added = done("Added \(Self.describe(node, article: "a")) as \(handles.handle(forNode: node.id)).")
                 return added + " " + done("Put \(Self.describe(node)) \(side.rawValue) \(Self.describe(other.node)) in \(placer.handle).")
             }
@@ -613,7 +613,7 @@ final class VoiceToolbox: VoiceActing {
             // Below what is on a free root; last in a root that lays things out, which places it.
             if host.root.resolvedLayout == .free, let frame = store.newElementFrame(kind, on: host.id) { node.frame = frame }
             guard store.add(node, to: .screen(host.id)) else { return failed("That couldn't be added.") }
-            reveal(.element(DesignStore.ElementRef(host: .screen(host.id), element: node.id)), in: model)
+            reveal(.element(NodeRef(host: .screen(host.id), node: node.id)), in: model)
             let handle = handles.handle(forNode: node.id)
             let added = done("Added \(Self.describe(node, article: "a")) as \(handle).")
             // "Add an image below the title": put by the other one as it is added.
@@ -799,7 +799,7 @@ final class VoiceToolbox: VoiceActing {
     /// - W or H scales everything in it in proportion, both sides by the side given, from its top-left: by the width
     ///   whenever a width is given, so a width as it is with a new height changes nothing. A row, column, grid or
     ///   overlay is scaled the same way, and fixed on both axes that change (`resizeGroup`).
-    private static func setBox(of ref: DesignStore.ElementRef, x: CGFloat?, y: CGFloat?, width: CGFloat?, height: CGFloat?,
+    private static func setBox(of ref: NodeRef, x: CGFloat?, y: CGFloat?, width: CGFloat?, height: CGFloat?,
                                in store: DesignStore) {
         if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
             let box = item.canvasShape.bounds
@@ -931,7 +931,7 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 guard let copy = model.store.duplicate(node: found.id) else { return failed("That couldn't be duplicated.") }
-                reveal(.element(DesignStore.ElementRef(host: found.ref.host, element: copy)), in: model)
+                reveal(.element(NodeRef(host: found.ref.host, node: copy)), in: model)
                 return done("Duplicated \(Self.describe(found.node)) as \(handles.handle(forNode: copy)).")
             }
         }
@@ -1099,7 +1099,7 @@ final class VoiceToolbox: VoiceActing {
 
         var id: UUID { placed.node.id }
         var node: LayerNode { placed.node }
-        var ref: DesignStore.ElementRef { placed.ref }
+        var ref: NodeRef { placed.ref }
     }
 
     /// What places a thing a row, column, grid or overlay lays out: that one's handle, or its screen's for a screen's

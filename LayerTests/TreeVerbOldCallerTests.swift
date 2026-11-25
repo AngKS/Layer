@@ -52,7 +52,7 @@ private func row(spacing: CGFloat = 8) -> LayerNode.Layout {
     .stack(LayerNode.Stack(axis: .horizontal, spacing: spacing))
 }
 
-/// Delete, duplicate, group and ungroup, which today's callers reach through `ElementRef`s and
+/// Delete, duplicate, group and ungroup, which today's callers reach through `NodeRef`s and
 /// selections, made with the tree's verbs, so that a row or a card survives them (plan 2, Task 10).
 @Suite("Old callers on the tree's verbs")
 @MainActor
@@ -66,7 +66,7 @@ struct TreeVerbOldCallerTests {
         let r = container(row(), frame: CGRect(x: 20, y: 100, width: 0, height: 0), [a, g, c])
         let (store, undo) = makeStore(design([r]))
         let screenID = try #require(store.tree.screens.first?.id)
-        func ref(_ id: UUID) -> DesignStore.ElementRef { .init(host: .screen(screenID), element: id) }
+        func ref(_ id: UUID) -> NodeRef { .init(host: .screen(screenID), node: id) }
 
         let members = try #require(store.ungroup(ref(g.id)))
 
@@ -91,11 +91,11 @@ struct TreeVerbOldCallerTests {
         let (store, undo) = makeStore(design([r]))
         let screenID = try #require(store.tree.screens.first?.id)
 
-        let copy = try #require(store.duplicate(.init(host: .screen(screenID), element: b.id)))
+        let copy = try #require(store.duplicate(.init(host: .screen(screenID), node: b.id)))
 
         #expect(copy.host == .screen(screenID))
         let laid = try #require(store.node(r.id))
-        #expect(laid.children.map(\.id) == [a.id, b.id, copy.element, c.id])
+        #expect(laid.children.map(\.id) == [a.id, b.id, copy.node, c.id])
         #expect(laid.children[2].frame.minX == laid.children[1].frame.maxX + 8)
 
         undo.undo()
@@ -111,7 +111,7 @@ struct TreeVerbOldCallerTests {
         let (store, undo) = makeStore(design([t, r, u], layout: column()))
         let screenID = try #require(store.tree.screens.first?.id)
 
-        store.delete(.init(host: .screen(screenID), element: r.id))
+        store.delete(.init(host: .screen(screenID), node: r.id))
 
         let root = try #require(store.tree.screens.first?.root)
         #expect(root.layout == column())
@@ -127,7 +127,7 @@ struct TreeVerbOldCallerTests {
         let things = (0..<5).map { leaf(CGRect(x: 20 + 30 * CGFloat($0), y: 100 + 50 * CGFloat($0), width: 80, height: 20)) }
         let (store, undo) = makeStore(design(things))
         let screenID = try #require(store.tree.screens.first?.id)
-        func ref(_ node: LayerNode) -> DesignStore.ElementRef { .init(host: .screen(screenID), element: node.id) }
+        func ref(_ node: LayerNode) -> NodeRef { .init(host: .screen(screenID), node: node.id) }
         let b = try #require(store.canvasFrame(of: .element(ref(things[1]))))
         let d = try #require(store.canvasFrame(of: .element(ref(things[3]))))
         let selection = try #require(CanvasSelection([.element(ref(things[1])), .element(ref(things[3]))]))
@@ -135,13 +135,13 @@ struct TreeVerbOldCallerTests {
         let g = try #require(store.group(selection))
 
         #expect(g.host == .screen(screenID))
-        let node = try #require(store.node(g.element))
+        let node = try #require(store.node(g.node))
         #expect(node.kind == .group)
         #expect(node.layout == nil)
         #expect(node.width.mode == .fit && node.height.mode == .fit)
         #expect(node.children.map(\.id) == [things[1].id, things[3].id])
         // In the frontmost member's slot, once the members have left theirs.
-        #expect(store.tree.screens.first?.root.children.map(\.id) == [things[0].id, things[2].id, g.element, things[4].id])
+        #expect(store.tree.screens.first?.root.children.map(\.id) == [things[0].id, things[2].id, g.node, things[4].id])
         // Nothing moves.
         #expect(store.canvasFrame(of: .element(ref(things[1]))) == b)
         #expect(store.canvasFrame(of: .element(ref(things[3]))) == d)
@@ -162,7 +162,7 @@ struct TreeVerbOldCallerTests {
 
         #expect(store.replaceChildren(of: .screen(screenID), with: [title, button]))
 
-        let refs = [title, button].map { DesignStore.ElementRef(host: .screen(screenID), element: $0.id) }
+        let refs = [title, button].map { NodeRef(host: .screen(screenID), node: $0.id) }
         #expect(refs.allSatisfy { store.placed($0) != nil })
         let root = try #require(store.tree.screens.first?.root)
         #expect(root.layout == column())
@@ -184,10 +184,10 @@ struct TreeVerbOldCallerTests {
         let (store, undo) = makeStore(design([r]))
         let screenID = try #require(store.tree.screens.first?.id)
 
-        let copy = try #require(store.duplicate(.init(host: .screen(screenID), element: r.id)))
+        let copy = try #require(store.duplicate(.init(host: .screen(screenID), node: r.id)))
 
         let original = try #require(store.node(r.id))
-        let made = try #require(store.node(copy.element))
+        let made = try #require(store.node(copy.node))
         #expect(made.kind == .group)
         #expect(made.layout == row())
         #expect(made.width == original.width && made.height == original.height)
@@ -195,7 +195,7 @@ struct TreeVerbOldCallerTests {
         #expect(Set(TreeEdit.ids(in: made)).isDisjoint(with: TreeEdit.ids(in: original)))
         #expect(made.frame.origin == CGPoint(x: original.frame.minX + 16, y: original.frame.minY + 16))
         // On top of what is on the screen.
-        #expect(store.tree.screens.first?.root.children.map(\.id) == [r.id, copy.element])
+        #expect(store.tree.screens.first?.root.children.map(\.id) == [r.id, copy.node])
 
         undo.undo()
         #expect(store.tree.screens.first?.root.children.map(\.id) == [r.id])
@@ -208,9 +208,9 @@ struct TreeVerbOldCallerTests {
         let (store, _) = makeStore(design([card]))
         let screenID = try #require(store.tree.screens.first?.id)
 
-        let copy = try #require(store.duplicate(.init(host: .screen(screenID), element: card.id)))
+        let copy = try #require(store.duplicate(.init(host: .screen(screenID), node: card.id)))
 
-        let made = try #require(store.node(copy.element))
+        let made = try #require(store.node(copy.node))
         #expect(made.kind == .card)
         #expect(made.padding == LayerNode.Padding(all: 16))
         #expect(made.children.count == 1)
@@ -256,7 +256,7 @@ struct TreeVerbOldCallerTests {
         // Given to the screen's root in one change: the rules at its end put the note on the canvas.
         store.apply { $0.screens[0].root.children += [title, note] }
 
-        #expect([title.id, note.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: note.id)])
+        #expect([title.id, note.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), node: title.id), .init(host: .canvas, node: note.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
         let landed = try #require(store.tree.canvas.first { $0.id == note.id })
         #expect(landed.frame == CGRect(x: 40 + 100 / 0.5, y: 60 + 50 / 0.5, width: 150, height: 150))
@@ -277,7 +277,7 @@ struct TreeVerbOldCallerTests {
         let screenID = try #require(store.tree.screens.first?.id)
         let before = store.tree
 
-        #expect(store.ungroup(.init(host: .screen(screenID), element: g.id)) == nil)
+        #expect(store.ungroup(.init(host: .screen(screenID), node: g.id)) == nil)
 
         #expect(store.tree == before)
         #expect(!undo.canUndo)
@@ -295,7 +295,7 @@ struct TreeVerbOldCallerTests {
         card.padding = LayerNode.Padding(all: 16)
         let (store, undo) = makeStore(design([r, card]))
         let screenID = try #require(store.tree.screens.first?.id)
-        func ref(_ id: UUID) -> DesignStore.ElementRef { .init(host: .screen(screenID), element: id) }
+        func ref(_ id: UUID) -> NodeRef { .init(host: .screen(screenID), node: id) }
 
         let rowAlone = try #require(CanvasSelection([.element(ref(r.id))]))
         let copies = try #require(store.duplicate(rowAlone))
@@ -303,7 +303,7 @@ struct TreeVerbOldCallerTests {
             Issue.record("One row was copied, as \(copies)")
             return
         }
-        let copy = try #require(store.node(copyRef.element))
+        let copy = try #require(store.node(copyRef.node))
         #expect(copy.layout == row())
         #expect(copy.children.count == 2)
         undo.undo()
@@ -345,7 +345,7 @@ struct TreeVerbOldCallerTests {
         // Given to the screen's root in one change: the rules at its end put the drawing on the canvas.
         store.apply { $0.screens[0].root.children += [title, drawing] }
 
-        #expect([title.id, drawing.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
+        #expect([title.id, drawing.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), node: title.id), .init(host: .canvas, node: drawing.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
         let landed = try #require(store.tree.canvas.first { $0.id == drawing.id })
         #expect(landed.kind == .drawing)

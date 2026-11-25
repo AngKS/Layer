@@ -124,10 +124,10 @@ extension HostedWindowSuites {
 
             // A line dragged 60 frames, then let go.
             let line = try #require(board.store.ref(of: board.lines[5]))
-            let lineStart = board.start(of: line.element)
+            let lineStart = board.start(of: line.node)
             // What the finger takes there: the line, or the drawing whose ink is on top within a finger's reach of it,
             // which among drawings 18 points apart is the one above it.
-            let taken = model.inkTarget(at: lineStart)?.element ?? line.element
+            let taken = model.inkTarget(at: lineStart)?.node ?? line.node
             #expect(board.store.node(taken)?.kind == (linesAreDrawings ? .drawing : .text))
             let takenCentre = try #require(board.store.placed(taken)).canvasShape.centre
             let lineOwner = CanvasDrags.Owner()
@@ -144,13 +144,13 @@ extension HostedWindowSuites {
 
             // A child of the row lifted 60 frames, along the row past its last child, and let go there.
             let child = try #require(board.store.ref(of: board.rowChildren[0]))
-            let childStart = board.start(of: child.element)
+            let childStart = board.start(of: child.node)
             let childOwner = CanvasDrags.Owner()
             for step in 1...60 {
                 drags.moveOnTarget(child, by: CGSize(width: CGFloat(step) * 3.5 * model.zoomScale, height: 0), startingAt: childStart, owner: childOwner, model: model)
                 try await frame(host.view)
             }
-            #expect(drags.lift?.ref.element == child.element, "the row's child is lifted")
+            #expect(drags.lift?.ref.node == child.node, "the row's child is lifted")
             drags.dropOnTarget(child, startingAt: childStart, owner: childOwner, model: model)
             try await settle(host.view)
             #expect(board.store.node(board.row)?.children.map(\.id) == [board.rowChildren[1], board.rowChildren[2], board.rowChildren[0]],

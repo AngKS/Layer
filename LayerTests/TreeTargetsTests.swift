@@ -67,8 +67,8 @@ private struct TreeBoard {
         screenID = screen.id
     }
 
-    func ref(_ id: UUID) -> DesignStore.ElementRef {
-        store.ref(of: id) ?? DesignStore.ElementRef(host: .canvas, element: id)
+    func ref(_ id: UUID) -> NodeRef {
+        store.ref(of: id) ?? NodeRef(host: .canvas, node: id)
     }
 
     func thing(_ id: UUID) -> CanvasSelection { .element(ref(id)) }

@@ -25,7 +25,7 @@ private func leaf(_ kind: ElementKind, _ frame: CGRect) -> LayerNode {
 private func suggestion(for id: UUID, on screen: TreeScreen.ID, kind: ElementKind) throws -> KindSuggestion {
     let observation = try #require(SketchAnalyzer.observe(SketchSamples.strokes([SketchSamples.box(fieldSketch, radius: 10)])))
     // Its own rect is wrong on purpose: the node remembers where it was drawn.
-    return KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: id), kind: kind, sketch: .zero,
+    return KindSuggestion(ref: NodeRef(host: .screen(screen), node: id), kind: kind, sketch: .zero,
                           observation: observation)
 }
 

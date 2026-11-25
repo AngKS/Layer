@@ -106,10 +106,10 @@ struct FreeformBehaviourTests {
         let original = try #require(store.sketched(.button, from: CGRect(x: 20, y: 700, width: 353, height: 50), to: screen))
         store.update(original.id) { $0.isLocked = true }
 
-        let copy = try #require(store.duplicate(.init(host: .screen(screen), element: original.id)))
+        let copy = try #require(store.duplicate(.init(host: .screen(screen), node: original.id)))
         let elements = store.screenLeaves(screen)
         #expect(elements.count == 2)
-        #expect(elements.last?.id == copy.element)
+        #expect(elements.last?.id == copy.node)
         #expect(elements.last.flatMap { store.ownFrame($0.id) } == original.frame.offsetBy(dx: 16, dy: 16))
         // A copy of a locked element can be moved.
         #expect(elements.last?.isLocked == false)
@@ -135,7 +135,7 @@ struct FreeformBehaviourTests {
         let a = element(.image, 0, 0, 100, 100), b = element(.title, 0, 0, 100, 40), c = element(.button, 0, 0, 100, 50)
         let (store, _) = makeStore()
         let id = store.addFreeScreen([a, b, c])
-        let ref = DesignStore.ElementRef(host: .screen(id), element: a.id)
+        let ref = NodeRef(host: .screen(id), node: a.id)
 
         #expect(!store.canArrange(ref, .backward))
         store.arrange(ref, .forward)
@@ -160,7 +160,7 @@ struct FreeformBehaviourTests {
         let model = AppModel(document: LayerDocument())
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
-        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
+        let ref = NodeRef(host: .screen(screen), node: title.id)
         model.selection = .element(ref)
         model.toggleLockOfSelection()
         model.deleteSelection()
@@ -174,7 +174,7 @@ struct FreeformBehaviourTests {
         let model = AppModel(document: LayerDocument())
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
-        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
+        let ref = NodeRef(host: .screen(screen), node: title.id)
         model.selection = .element(ref)
         model.toggleHidden(ref)
         #expect(model.selection == nil)

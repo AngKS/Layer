@@ -242,7 +242,7 @@ struct SelectionActions: View {
     /// Why a shape is off, when it is because what is selected is on more than one screen, or on a screen and the open
     /// canvas; nothing otherwise. Read from the selection's own refs, so that the bar lowers nothing.
     private var groupHint: String {
-        let hosts = Set(model.selectedThings.compactMap { thing -> DesignStore.ElementRef.Host? in
+        let hosts = Set(model.selectedThings.compactMap { thing -> NodeRef.Host? in
             if case .element(let ref) = thing { ref.host } else { nil }
         })
         return hosts.count > 1 ? "Things on different screens can't be grouped" : ""

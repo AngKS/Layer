@@ -364,13 +364,13 @@ struct ScreenGenerationLifecycleTests {
         note.frame.origin = CGPoint(x: 40, y: 600)
         try #require(app.store.add(note, to: .screen(screen)))
         app.store.update(note.id) { $0.content.text = "typed" }
-        app.selection = .element(.init(host: .screen(screen), element: title.id))
+        app.selection = .element(.init(host: .screen(screen), node: title.id))
 
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
         #expect(await eventually { app.store.screenLeaves(screen).count == 3 })
         #expect(app.store.node(note.id)?.content.text == "typed")
         #expect(app.store.node(title.id)?.kind == .title, "the title is the same element")
-        #expect(app.selection == .element(.init(host: .screen(screen), element: title.id)))
+        #expect(app.selection == .element(.init(host: .screen(screen), node: title.id)))
         feed.finish()
         await app.waitForGeneration()
         #expect(app.store.node(note.id)?.content.text == "typed")
@@ -385,16 +385,16 @@ struct ScreenGenerationLifecycleTests {
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
         #expect(await eventually { app.store.screenLeaves(screen).count == 2 })
         let written = app.store.screenLeaves(screen)
-        let title = DesignStore.ElementRef(host: .screen(screen), element: written[0].id)
-        let button = DesignStore.ElementRef(host: .screen(screen), element: written[1].id)
-        app.store.update(title.element) { $0.content.text = "Mine"; $0.frame.origin.y += 40 }
+        let title = NodeRef(host: .screen(screen), node: written[0].id)
+        let button = NodeRef(host: .screen(screen), node: written[1].id)
+        app.store.update(title.node) { $0.content.text = "Mine"; $0.frame.origin.y += 40 }
         app.store.delete(button)
-        let moved = try #require(app.store.node(title.element))
+        let moved = try #require(app.store.node(title.node))
 
         feed.yield(Self.written("title: Settings\nbutton: Save\ntext: Notifications\n"))
         #expect(await eventually { app.store.screenLeaves(screen).count == 2 })
-        #expect(app.store.node(title.element) == moved)
-        #expect(app.store.node(button.element) == nil, "a deleted element isn't brought back")
+        #expect(app.store.node(title.node) == moved)
+        #expect(app.store.node(button.node) == nil, "a deleted element isn't brought back")
         feed.finish()
         await app.waitForGeneration()
     }

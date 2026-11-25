@@ -70,7 +70,7 @@ private final class Bench {
 
     func element(_ index: Int) -> CanvasSelection {
         let id = app.store.screenLeaves(screen)[index].id
-        return .element(.init(host: .screen(screen), element: id))
+        return .element(.init(host: .screen(screen), node: id))
     }
 
     var title: CanvasSelection { element(0) }
@@ -229,7 +229,7 @@ struct PencilVoiceTests {
         var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = DesignStore.ElementRef(host: .canvas, element: bench.app.store.addCanvasNode(ink, scale: 1))
+        let drawing = NodeRef(host: .canvas, node: bench.app.store.addCanvasNode(ink, scale: 1))
         #expect(bench.app.hoverTarget(at: Bench.overButton) == .element(drawing))
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         #expect(bench.app.selection == bench.button)
@@ -1033,7 +1033,7 @@ struct PencilVoiceTests {
         var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = DesignStore.ElementRef(host: .canvas, element: bench.app.store.addCanvasNode(ink, scale: 1))
+        let drawing = NodeRef(host: .canvas, node: bench.app.store.addCanvasNode(ink, scale: 1))
         let both = CanvasSelection([.element(drawing), bench.title])
         bench.app.selection = both
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)

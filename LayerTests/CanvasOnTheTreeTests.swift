@@ -227,7 +227,7 @@ struct CanvasOnTheTreeTests {
         let g = container(frame: CGRect(x: 20, y: 100, width: 80, height: 60), [a, b])
         let (store, _) = makeStore(design([screen([t, g])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        func thing(_ node: LayerNode) -> CanvasSelection { .element(.init(host: .screen(screenID), element: node.id)) }
+        func thing(_ node: LayerNode) -> CanvasSelection { .element(.init(host: .screen(screenID), node: node.id)) }
         let both = try #require(CanvasSelection([thing(a), thing(b)]))
 
         #expect(store.groupable(thing(t), minimum: 2, refusingAllOfAFreeGroup: true) == nil)
@@ -246,8 +246,8 @@ struct CanvasOnTheTreeTests {
         let (store, _) = makeStore(design([screen([card])], canvas: [note]))
         let s = try #require(store.tree.screens.first)
 
-        #expect(store.ref(of: text.id) == DesignStore.ElementRef(host: .screen(s.id), element: text.id))
-        #expect(store.ref(of: note.id) == DesignStore.ElementRef(host: .canvas, element: note.id))
+        #expect(store.ref(of: text.id) == NodeRef(host: .screen(s.id), node: text.id))
+        #expect(store.ref(of: note.id) == NodeRef(host: .canvas, node: note.id))
         #expect(store.ref(of: s.root.id) == nil)
         #expect(store.ref(of: UUID()) == nil)
     }
@@ -258,7 +258,7 @@ struct CanvasOnTheTreeTests {
                              [text, leaf(.text, CGRect(x: 0, y: 0, width: 80, height: 20))])
         let model = makeModel(design([screen([card])]))
         let screenID = try #require(model.store.tree.screens.first?.id)
-        let selection = CanvasSelection.element(.init(host: .screen(screenID), element: text.id))
+        let selection = CanvasSelection.element(.init(host: .screen(screenID), node: text.id))
         model.selection = selection
 
         for round in 0..<10 {
@@ -278,7 +278,7 @@ struct CanvasOnTheTreeTests {
         let model = makeModel(design([screen([card])]))
         let screenID = try #require(model.store.tree.screens.first?.id)
 
-        model.selection = .element(.init(host: .screen(screenID), element: card.id))
+        model.selection = .element(.init(host: .screen(screenID), node: card.id))
 
         #expect(model.selectedLeafNodes.map(\.node.id) == [t1.id, t2.id, t3.id])
     }

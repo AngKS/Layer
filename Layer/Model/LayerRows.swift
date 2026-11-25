@@ -5,7 +5,7 @@ import Foundation
 /// drag.
 struct LayerLine: Equatable, Identifiable, Sendable {
     var id: UUID
-    var ref: DesignStore.ElementRef
+    var ref: NodeRef
     var name: String
     var symbol: String
     var depth: Int
@@ -76,7 +76,7 @@ enum LayerRows {
     ) -> LayerLine? {
         guard let entry = index[node.id] else { return nil }
         return LayerLine(
-            id: node.id, ref: DesignStore.ElementRef(host: DesignStore.ElementRef.Host(entry.host), element: node.id),
+            id: node.id, ref: NodeRef(host: entry.host, node: node.id),
             name: node.displayName, symbol: symbol(for: node), depth: depth,
             isContainer: node.isContainer, isOpen: node.isContainer && open.contains(node.id),
             isLocked: node.isLocked, isHidden: node.isHidden,

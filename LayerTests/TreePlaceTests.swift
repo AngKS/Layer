@@ -68,7 +68,7 @@ struct TreePlaceTests {
         let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
         let (store, _) = makeStore(design([screen([r])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: r.id)
+        let ref = NodeRef(host: .screen(screenID), node: r.id)
         let before = try #require(store.node(r.id))
         let box = try #require(store.canvasFrame(of: .element(ref)))
 
@@ -93,7 +93,7 @@ struct TreePlaceTests {
         let o = container(.overlay(LayerNode.Alignment()), at: CGPoint(x: 20, y: 300), [p, q])
         let (store, _) = makeStore(design([screen([r, o])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        func ref(_ node: LayerNode) -> DesignStore.ElementRef { .init(host: .screen(screenID), element: node.id) }
+        func ref(_ node: LayerNode) -> NodeRef { .init(host: .screen(screenID), node: node.id) }
 
         // A row's children have one order, the row's own: the layout's, never stepped through by hand (My call 15).
         for arrangement in DesignStore.Arrangement.allCases {
@@ -118,7 +118,7 @@ struct TreePlaceTests {
         let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
         let (store, undo) = makeStore(design([screen([r])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: r.id)
+        let ref = NodeRef(host: .screen(screenID), node: r.id)
         let before = try #require(store.node(r.id))
         #expect(before.frame.size == CGSize(width: 196, height: 20))
 
@@ -151,7 +151,7 @@ struct TreePlaceTests {
         let g = container(nil, at: CGPoint(x: 20, y: 100), [r, t])
         let (store, _) = makeStore(design([screen([g])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: g.id)
+        let ref = NodeRef(host: .screen(screenID), node: g.id)
         let rowBefore = try #require(store.node(r.id))
         #expect(rowBefore.frame.size == CGSize(width: 118, height: 20))
         let box = try #require(store.groupPose(of: ref)).box
@@ -178,7 +178,7 @@ struct TreePlaceTests {
         model.canvasSize = CGSize(width: 1210, height: 834)
         let r = container(row(), at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50), leaf(70)])
         let added = try #require(model.store.addScreen(screen([r])))
-        let ref = DesignStore.ElementRef(host: .screen(added), element: r.id)
+        let ref = NodeRef(host: .screen(added), node: r.id)
         model.selection = .element(ref)
         let before = try #require(model.store.node(r.id))
 
@@ -202,13 +202,13 @@ struct TreePlaceTests {
         let first = screen([r])
         let second = screen([], at: CGPoint(x: 480, y: 0), scale: 0.5)
         let (store, undo) = makeStore(design([first, second]))
-        let ref = DesignStore.ElementRef(host: .screen(first.id), element: r.id)
+        let ref = NodeRef(host: .screen(first.id), node: r.id)
         let before = try #require(store.node(r.id))
         let shape = try #require(store.canvasFrame(of: .element(ref)))
 
         let landed = store.rehost(ref)
 
-        #expect(landed == DesignStore.ElementRef(host: .screen(second.id), element: r.id))
+        #expect(landed == NodeRef(host: .screen(second.id), node: r.id))
         #expect(store.parent(of: r.id) == .screen(second.id))
         #expect(store.tree.screens.first?.root.children.isEmpty == true)
         let after = try #require(store.node(r.id))
@@ -248,7 +248,7 @@ struct TreePlaceTests {
         // Arranged on the open canvas: a screen's things are no part of it, and the drawings keep their places.
         let onScreen = leaf(100, at: CGPoint(x: 20, y: 20))
         let (store, _) = makeStore(design([screen([onScreen], at: CGPoint(x: 1000, y: 0))], canvas: nodes))
-        store.arrange(.element(.init(host: .canvas, element: a.id)), .front)
+        store.arrange(.element(.init(host: .canvas, node: a.id)), .front)
         #expect(store.tree.canvas.map(\.id) == [first.id, b.id, second.id, a.id])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [onScreen.id])
     }
@@ -288,7 +288,7 @@ struct TreePlaceTests {
         outer.rotation = 90
         let (store, _) = makeStore(design([screen([outer])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: inner.id)
+        let ref = NodeRef(host: .screen(screenID), node: inner.id)
         let box = try #require(store.canvasFrame(of: .element(ref)))
         let children = try #require(store.node(inner.id)).children
 
@@ -305,7 +305,7 @@ struct TreePlaceTests {
         let g = container(nil, at: CGPoint(x: 20, y: 100), [leaf(60), leaf(50, at: CGPoint(x: 80, y: 0))])
         let (store, _) = makeStore(design([screen([g])]))
         let screenID = try #require(store.tree.screens.first?.id)
-        let ref = DesignStore.ElementRef(host: .screen(screenID), element: g.id)
+        let ref = NodeRef(host: .screen(screenID), node: g.id)
         let before = try #require(store.node(g.id))
 
         #expect(store.move(ref, toScreen: screenID, origin: CGPoint(x: 40, y: 300)) == ref)
@@ -323,7 +323,7 @@ struct TreePlaceTests {
         let r = container(row(), [leaf(60), leaf(50)])
         let g = container(nil, at: CGPoint(x: 20, y: 100), [r, leaf(100, at: CGPoint(x: 0, y: 40))])
         let added = try #require(model.store.addScreen(screen([g])))
-        model.selection = .element(DesignStore.ElementRef(host: .screen(added), element: g.id))
+        model.selection = .element(NodeRef(host: .screen(added), node: g.id))
         let row = try #require(model.store.node(r.id))
 
         #expect(model.beginTurn())
@@ -347,7 +347,7 @@ struct TreePlaceTests {
         let added = try #require(model.store.addScreen(screen([r])))
         let before = try #require(model.store.node(r.id))
 
-        model.setAngle(of: [DesignStore.ElementRef(host: .screen(added), element: r.id)], to: 30)
+        model.setAngle(of: [NodeRef(host: .screen(added), node: r.id)], to: 30)
 
         let after = try #require(model.store.node(r.id))
         #expect(after.rotation == 30)
@@ -367,7 +367,7 @@ struct TreePlaceTests {
         let added = try #require(model.store.addScreen(screen([g])))
         let row = try #require(model.store.node(r.id))
 
-        model.setAngle(of: [DesignStore.ElementRef(host: .screen(added), element: g.id)], to: 90)
+        model.setAngle(of: [NodeRef(host: .screen(added), node: g.id)], to: 90)
 
         let turned = try #require(model.store.node(r.id))
         #expect(model.store.parent(of: r.id) == .node(g.id))

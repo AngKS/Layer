@@ -39,7 +39,7 @@ enum DemoScript {
                   let leaf = screen.root.leaves.first(where: { $0.kind == kind })
             else { return }
             model.tool = .select
-            model.selection = .element(.init(host: .screen(screen.id), element: leaf.id))
+            model.selection = .element(.init(host: .screen(screen.id), node: leaf.id))
             model.isAdjusting = parts[0] == "adjust"
         default:
             break

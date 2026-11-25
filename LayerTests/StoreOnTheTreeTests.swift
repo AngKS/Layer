@@ -71,7 +71,7 @@ struct StoreOnTheTreeTests {
         let roots = store.tree.screens.map(\.root.id)
         let before = roots.map(LayoutEngine.timesLaidOut)
 
-        store.update(onA[0].element) { $0.frame.origin.x += 10 }
+        store.update(onA[0].node) { $0.frame.origin.x += 10 }
 
         let laid = zip(roots.map(LayoutEngine.timesLaidOut), before).map(-)
         #expect(laid == [1, 0])
@@ -100,7 +100,7 @@ struct StoreOnTheTreeTests {
         TreeRules.apply(to: &tree, after: nil)
         let (store, undo) = makeStore(tree)
         let before = store.content
-        let ref = DesignStore.ElementRef(host: .screen(tree.screens[0].id), element: group.id)
+        let ref = NodeRef(host: .screen(tree.screens[0].id), node: group.id)
 
         func node(_ id: UUID, in tree: TreeContent) throws -> LayerNode {
             try #require(TreeIndex(tree).node(id, in: tree))

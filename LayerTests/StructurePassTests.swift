@@ -313,7 +313,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         let row = try #require(rootChildren(model, screen).first)
         #expect(row.sketch?.decidedBy == .structure)
 
-        #expect(model.store.ungroup(DesignStore.ElementRef(host: .screen(screen), element: row.id)) != nil)
+        #expect(model.store.ungroup(NodeRef(host: .screen(screen), node: row.id)) != nil)
 
         #expect(rootChildren(model, screen).map(\.id) == [a.id, b.id])
         #expect(isDeclined(a.id, in: model))
@@ -373,7 +373,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(isDeclined(fields[2].id, in: model))
         undo.undo()
 
-        #expect(model.store.ungroup(DesignStore.ElementRef(host: .screen(screen), element: column.id)) != nil)
+        #expect(model.store.ungroup(NodeRef(host: .screen(screen), node: column.id)) != nil)
         #expect(fields.allSatisfy { isDeclined($0.id, in: model) })
         undo.undo()
         #expect(model.store.node(column.id)?.children.map(\.id) == fields.map(\.id))
@@ -445,7 +445,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         let (model, screen, _) = makeModel()
         let fieldSketch = CGRect(x: 30, y: 600, width: 330, height: 44)
         let field = try #require(model.store.addSketched(.textField, from: fieldSketch, confidence: 0.6, decidedBy: .rules))
-        model.offer(KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: field), kind: .button,
+        model.offer(KindSuggestion(ref: NodeRef(host: .screen(screen), node: field), kind: .button,
                                    sketch: fieldSketch, observation: try observation(of: fieldSketch)))
 
         _ = raggedRow(in: model, on: screen)
@@ -467,7 +467,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         let offer = try #require(model.shownStructureOffer)
         #expect(model.structureOfferExpiry != nil, "its time runs while it shows")
 
-        model.offer(KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: field), kind: .button,
+        model.offer(KindSuggestion(ref: NodeRef(host: .screen(screen), node: field), kind: .button,
                                    sketch: fieldSketch, observation: try observation(of: fieldSketch)))
 
         #expect(model.shownStructureOffer == nil)
@@ -520,7 +520,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         let a = text(20, 100), b = text(133, 100)
         add([a, b], to: screen, in: model)
         let sketch = CGRect(x: 133, y: 100, width: 100, height: 24)
-        model.offer(KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: b.id), kind: .button,
+        model.offer(KindSuggestion(ref: NodeRef(host: .screen(screen), node: b.id), kind: .button,
                                    sketch: sketch, observation: try observation(of: sketch)))
 
         model.structurePass(over: [a.id, b.id])
@@ -700,7 +700,7 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         let field = try #require(model.store.addSketched(.textField, from: fieldSketch, confidence: 0.6, decidedBy: .rules))
         let other = text(20, 700)
         add([other], to: screen, in: model)
-        model.offer(KindSuggestion(ref: DesignStore.ElementRef(host: .screen(screen), element: field), kind: .button,
+        model.offer(KindSuggestion(ref: NodeRef(host: .screen(screen), node: field), kind: .button,
                                    sketch: fieldSketch, observation: try observation(of: fieldSketch)))
         var round = 0
         func change() {

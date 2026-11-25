@@ -11,13 +11,13 @@ extension OrderBoard {
     /// is drawn `scale` canvas points to each of its own.
     @discardableResult
     func group(
-        _ refs: DesignStore.ElementRef..., named name: String = "G", scale: CGFloat? = nil,
+        _ refs: NodeRef..., named name: String = "G", scale: CGFloat? = nil,
         adjust: (inout LayerNode) -> Void = { _ in }
-    ) -> DesignStore.ElementRef {
+    ) -> NodeRef {
         var made: UUID?
-        store.apply { made = $0.group(refs.map(\.element), named: name, scale: scale, adjust: adjust) }
+        store.apply { made = $0.group(refs.map(\.node), named: name, scale: scale, adjust: adjust) }
         if made == nil { Issue.record("The board's things couldn't be grouped") }
-        return DesignStore.ElementRef(host: refs[0].host, element: made ?? UUID())
+        return NodeRef(host: refs[0].host, node: made ?? UUID())
     }
 
     /// A group on the board's screen, in `content` alone, with no rules run: what `TreeRules`
@@ -74,9 +74,9 @@ struct GroupModelTests {
     @Test func aGroupsBoxHoldsItsMembers() throws {
         let board = OrderBoard()
         // D narrower and further in than B, so that the box is neither member's frame.
-        board.store.update(board.d.element) { $0.frame = CGRect(x: 90, y: 490, width: 150, height: 60) }
+        board.store.update(board.d.node) { $0.frame = CGRect(x: 90, y: 490, width: 150, height: 60) }
         var content = board.store.tree
-        let g = OrderBoard.addGroup(named: "G", holding: [board.b.element, board.d.element], to: board.screen, in: &content)
+        let g = OrderBoard.addGroup(named: "G", holding: [board.b.node, board.d.node], to: board.screen, in: &content)
         #expect(content.ownFrame(g) == .zero)
 
         TreeRules.apply(to: &content, after: nil)
@@ -87,9 +87,9 @@ struct GroupModelTests {
 
     @Test func aTurnedGroupsBoxIsAtItsAngle() throws {
         let board = OrderBoard()
-        board.store.update(board.d.element) { $0.rotation = 15 }
+        board.store.update(board.d.node) { $0.rotation = 15 }
         var content = board.store.tree
-        let g = OrderBoard.addGroup(named: "G", holding: [board.b.element, board.d.element], to: board.screen, in: &content) { $0.rotation = 30 }
+        let g = OrderBoard.addGroup(named: "G", holding: [board.b.node, board.d.node], to: board.screen, in: &content) { $0.rotation = 30 }
 
         TreeRules.apply(to: &content, after: nil)
 
@@ -119,11 +119,11 @@ struct GroupModelTests {
         let board = OrderBoard()
         board.store.updateTreeScreen(board.screen) { $0.scale = 0.66 }
         let g = board.group(board.b, board.d)
-        #expect(board.store.ownFrame(g.element) == CGRect(x: 40, y: 190, width: 300, height: 400))
+        #expect(board.store.ownFrame(g.node) == CGRect(x: 40, y: 190, width: 300, height: 400))
 
         for origin in [CGPoint(x: 100.3, y: 51.7), CGPoint(x: -12.9, y: 333.1), CGPoint(x: 7.77, y: 0.1)] {
             board.store.updateTreeScreen(board.screen) { $0.origin = origin }
-            #expect(board.store.ownFrame(g.element) == CGRect(x: 40, y: 190, width: 300, height: 400))
+            #expect(board.store.ownFrame(g.node) == CGRect(x: 40, y: 190, width: 300, height: 400))
         }
     }
 
@@ -132,7 +132,7 @@ struct GroupModelTests {
     @Test func aFloatingGroupsBoxHoldsMembersOfMixedScales() throws {
         let board = OrderBoard()
         let bigNote = OrderBoard.element(.stickyNote, named: "big note", CGRect(x: 400, y: 300, width: 140, height: 130))
-        let big = DesignStore.ElementRef(host: .canvas, element: board.store.addCanvasNode(bigNote, scale: 2))
+        let big = NodeRef(host: .canvas, node: board.store.addCanvasNode(bigNote, scale: 2))
         let g = board.group(board.note1, big, scale: 1)
 
         let small = try #require(board.store.canvasFrame(of: .element(board.note1)))
@@ -159,18 +159,18 @@ struct GroupModelTests {
         let d = try #require(board.store.canvasFrame(of: .element(board.d)))
         #expect(shape.rect == b.union(d))
         #expect(board.store.canvasFrame(of: .element(g)) == shape.bounds)
-        #expect(board.store.node(g.element)?.kind == .group)
-        #expect(board.store.node(board.b.element)?.kind != .group)
-        #expect(board.store.listed(on: .screen(board.screen)).filter { $0.kind == .group }.map(\.id) == [g.element])
+        #expect(board.store.node(g.node)?.kind == .group)
+        #expect(board.store.node(board.b.node)?.kind != .group)
+        #expect(board.store.listed(on: .screen(board.screen)).filter { $0.kind == .group }.map(\.id) == [g.node])
         #expect(board.store.listed(on: .screen(board.screen)).map { $0.name ?? "" } == ["A", "C", "B", "D", "G", "E"])
 
         // Selected, it is the one element selected, locked by its own flag, and let go of
         // once it has gone.
         board.model.selection = .element(g)
-        #expect(board.model.selectedNode?.node.id == g.element)
+        #expect(board.model.selectedNode?.node.id == g.node)
         #expect(board.model.selectedNode?.placement == placement)
         #expect(!board.store.isLocked(.element(g)))
-        board.store.update(g.element) { $0.isLocked = true }
+        board.store.update(g.node) { $0.isLocked = true }
         #expect(board.store.isLocked(.element(g)))
         #expect(board.model.isSelectionLocked)
         board.store.delete(board.d)
@@ -183,13 +183,13 @@ struct GroupModelTests {
     @Test func aGroupInsideAGroupIsGatheredAndBoxedInnermostFirst() throws {
         let board = OrderBoard()
         var content = board.store.tree
-        let inner = OrderBoard.addGroup(named: "I", holding: [board.c.element, board.e.element], to: board.screen, in: &content)
-        let outer = OrderBoard.addGroup(named: "G", holding: [board.a.element, inner], to: board.screen, in: &content)
+        let inner = OrderBoard.addGroup(named: "I", holding: [board.c.node, board.e.node], to: board.screen, in: &content)
+        let outer = OrderBoard.addGroup(named: "G", holding: [board.a.node, inner], to: board.screen, in: &content)
 
         TreeRules.apply(to: &content, after: nil)
 
         #expect(names(content, on: board.screen) == ["B", "D", "A", "C", "E", "I", "G"])
-        #expect(content.containers(above: board.c.element) == [inner, outer])
+        #expect(content.containers(above: board.c.node) == [inner, outer])
         #expect(content.node(outer)?.children.map { $0.name ?? "" } == ["A", "I"])
         #expect(content.node(outer)?.leaves.map { $0.name ?? "" } == ["A", "C", "E"])
         #expect(content.ownFrame(inner) == CGRect(x: 40, y: 340, width: 300, height: 400))
@@ -207,16 +207,16 @@ struct GroupModelTests {
 
         board.store.delete(board.d)
 
-        #expect(board.store.node(g.element) == nil)
-        #expect(board.store.container(of: board.b.element) == nil)
+        #expect(board.store.node(g.node) == nil)
+        #expect(board.store.container(of: board.b.node) == nil)
         #expect(board.screenOrder == ["A", "C", "B", "E"])
 
         board.undo.undo()
 
         #expect(board.store.tree == grouped)
         #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
-        #expect(board.store.container(of: board.b.element) == g.element)
-        #expect(board.store.container(of: board.d.element) == g.element)
+        #expect(board.store.container(of: board.b.node) == g.node)
+        #expect(board.store.container(of: board.d.node) == g.node)
     }
 
     @Test func aDissolvingHiddenGroupLeavesItsMemberHidden() {
@@ -225,12 +225,12 @@ struct GroupModelTests {
             $0.isHidden = true
             $0.isLocked = true
         }
-        #expect(board.store.node(board.b.element)?.isHidden == false)
+        #expect(board.store.node(board.b.node)?.isHidden == false)
 
         board.store.delete(board.d)
 
-        let b = board.store.node(board.b.element)
-        #expect(board.store.container(of: board.b.element) == nil)
+        let b = board.store.node(board.b.node)
+        #expect(board.store.container(of: board.b.node) == nil)
         #expect(b?.isHidden == true)
         #expect(b?.isLocked == true)
     }
@@ -241,13 +241,13 @@ struct GroupModelTests {
         let board = OrderBoard()
         let inner = board.group(board.c, board.e, named: "I")
         let outer = board.group(board.a, inner)
-        #expect(board.store.groups(holding: board.c).map(\.element) == [inner.element, outer.element])
+        #expect(board.store.groups(holding: board.c).map(\.node) == [inner.node, outer.node])
 
         board.store.delete(board.e)
 
-        #expect(board.store.node(inner.element) == nil)
-        #expect(board.store.container(of: board.c.element) == outer.element)
-        #expect(board.store.node(outer.element)?.children.map { $0.name ?? "" } == ["A", "C"])
+        #expect(board.store.node(inner.node) == nil)
+        #expect(board.store.container(of: board.c.node) == outer.node)
+        #expect(board.store.node(outer.node)?.children.map { $0.name ?? "" } == ["A", "C"])
         let a = try #require(board.store.canvasFrame(of: .element(board.a)))
         let c = try #require(board.store.canvasFrame(of: .element(board.c)))
         #expect(board.store.canvasFrame(of: .element(outer)) == a.union(c))
@@ -260,10 +260,10 @@ struct GroupModelTests {
         let g = board.group(board.b, board.d)
         // A drag begins, and moves A.
         let drag = board.store.beginEdit()
-        board.store.act(for: drag) { board.store.update(board.a.element) { $0.frame.origin.x += 5 } }
+        board.store.act(for: drag) { board.store.update(board.a.node) { $0.frame.origin.x += 5 } }
         // Meanwhile D is deleted, as a step of its own, which dissolves G.
         board.store.asOwnStep { board.store.delete(board.d) }
-        #expect(board.store.node(g.element) == nil)
+        #expect(board.store.node(g.node) == nil)
         // The drag's edit goes on, and takes B away.
         board.store.act(for: drag) { board.store.delete(board.b) }
         board.store.endEdit(drag)
@@ -271,9 +271,9 @@ struct GroupModelTests {
         // Undoing the deletion brings D and G back, but G's other member has gone since.
         board.undo.undo()
 
-        #expect(board.store.node(board.d.element) != nil)
-        #expect(board.store.container(of: board.d.element) == nil)
-        #expect(board.store.node(g.element) == nil)
+        #expect(board.store.node(board.d.node) != nil)
+        #expect(board.store.container(of: board.d.node) == nil)
+        #expect(board.store.node(g.node) == nil)
         #expect(board.screenOrder == ["A", "C", "D", "E"])
     }
 
@@ -291,10 +291,10 @@ struct GroupModelTests {
 
         #expect(reopened == board.store.tree)
         #expect(names(reopened, on: board.screen) == ["A", "C", "B", "D", "G", "E"])
-        #expect(reopened.node(g.element)?.children.map { $0.name ?? "" } == ["B", "D"])
-        #expect(reopened.node(notes.element)?.children.map { $0.name ?? "" } == ["note 1", "note 2"])
-        #expect(reopened.node(g.element)?.rotation == 30)
-        #expect(reopened.node(g.element)?.isHidden == true)
+        #expect(reopened.node(g.node)?.children.map { $0.name ?? "" } == ["B", "D"])
+        #expect(reopened.node(notes.node)?.children.map { $0.name ?? "" } == ["note 1", "note 2"])
+        #expect(reopened.node(g.node)?.rotation == 30)
+        #expect(reopened.node(g.node)?.isHidden == true)
         #expect((reopened.listed(on: board.screen) + reopened.listed(on: nil)).allSatisfy { $0.unknownKeys.values.isEmpty })
 
         // A member is written inside its group; nothing else says it is in one.
@@ -331,8 +331,8 @@ struct GroupModelTests {
         // on a free root of their own give.
         let without = DesignStore()
         without.putBack(board.store.tree)
-        without.unwrap(g.element)
-        without.unwrap(notes.element)
+        without.unwrap(g.node)
+        without.unwrap(notes.node)
         let plain = without.shownLeaves(on: board.screen)
         #expect(plain.map(\.id) == leaves.map(\.id))
         #expect(SwiftUICodeGenerator.code(forFreeScreenHolding: leaves, settings: CodeSettings())
@@ -358,8 +358,8 @@ struct GroupModelTests {
         #expect(board.store.listed(on: .canvas).filter(\.isLocked).map { $0.name ?? "" } == ["N"])
         #expect(board.store.isLocked(.element(board.note1)))
         #expect(!board.store.isLocked(.element(board.b)))
-        #expect(board.store.isHiddenWithItsContainers(board.b.element))
-        #expect(board.store.isLockedWithItsContainers(board.note2.element))
+        #expect(board.store.isHiddenWithItsContainers(board.b.node))
+        #expect(board.store.isLockedWithItsContainers(board.note2.node))
     }
 
     /// Conflict D: Unlock on a member locked only by its group unlocks the group, in one step.
@@ -372,7 +372,7 @@ struct GroupModelTests {
 
         board.model.setSelectionLocked(false)
 
-        #expect(board.store.node(g.element)?.isLocked == false)
+        #expect(board.store.node(g.node)?.isLocked == false)
         #expect(!board.model.isSelectionLocked)
         #expect(!board.store.isLocked(.element(board.d)))
 
@@ -385,7 +385,7 @@ struct GroupModelTests {
     @Test func aMemberOfALockedGroupIsntResizedOrTurnedOnItsOwn() throws {
         let board = OrderBoard()
         board.group(board.b, board.d) { $0.isLocked = true }
-        #expect(board.store.node(board.b.element)?.isLocked == false)
+        #expect(board.store.node(board.b.node)?.isLocked == false)
         board.model.selection = .element(board.b)
         let before = try #require(board.store.placed(board.b))
 
@@ -403,7 +403,7 @@ struct GroupModelTests {
         }
         drags.dropElement(board.b, findsNewHome: false, owner: owner, model: board.model)
 
-        #expect(board.store.ownFrame(board.b.element) == before.frame)
+        #expect(board.store.ownFrame(board.b.node) == before.frame)
         #expect(!drags.isDragging)
         #expect(!board.model.isAdjusting)
     }
@@ -418,22 +418,22 @@ struct GroupModelTests {
         board.model.rotateSelection(by: 30)
 
         #expect(board.store.placed(board.a)?.degrees == 30)
-        #expect(board.store.ownFrame(board.b.element) == before.frame)
+        #expect(board.store.ownFrame(board.b.node) == before.frame)
         #expect(board.store.placed(board.b)?.degrees == before.degrees)
     }
 
     /// VoiceOver's Reset rotation on several things stands up only those that aren't locked.
     @Test func resettingSeveralLeavesAMemberOfALockedGroupTurned() {
         let board = OrderBoard()
-        board.store.update(board.a.element) { $0.rotation = 20 }
-        board.store.update(board.b.element) { $0.rotation = 20 }
+        board.store.update(board.a.node) { $0.rotation = 20 }
+        board.store.update(board.b.node) { $0.rotation = 20 }
         board.group(board.b, board.d) { $0.isLocked = true }
         board.model.selection = board.selection(board.a, board.b)
 
         board.model.resetSelectionRotation()
 
-        #expect(board.store.node(board.a.element)?.rotation == nil)
-        #expect(board.store.node(board.b.element)?.rotation == 20)
+        #expect(board.store.node(board.a.node)?.rotation == nil)
+        #expect(board.store.node(board.b.node)?.rotation == 20)
     }
 
     /// The Format panel's corners, opacity and angle for several things change only those that
@@ -444,27 +444,27 @@ struct GroupModelTests {
         board.model.selection = board.selection(board.a, board.b)
 
         let unlocked = board.model.selectedThings.filter { !board.store.isLocked($0) }.compactMap { thing -> UUID? in
-            if case .element(let ref) = thing { ref.element } else { nil }
+            if case .element(let ref) = thing { ref.node } else { nil }
         }
-        #expect(unlocked == [board.a.element])
-        board.model.changeNodes([board.a.element, board.b.element], unlockedOnly: true, where: { _ in true }) { $0.style.opacity = 0.5 }
+        #expect(unlocked == [board.a.node])
+        board.model.changeNodes([board.a.node, board.b.node], unlockedOnly: true, where: { _ in true }) { $0.style.opacity = 0.5 }
 
-        #expect(board.store.node(board.a.element)?.style.opacity == 0.5)
-        #expect(board.store.node(board.b.element)?.style.opacity == nil)
+        #expect(board.store.node(board.a.node)?.style.opacity == 0.5)
+        #expect(board.store.node(board.b.node)?.style.opacity == nil)
     }
 }
 
 extension OrderBoard {
     /// The names of what is on the board's screen, back to front, with group items called
     /// as given: Group leaves a new group unnamed, shown as its kind until it is renamed.
-    fileprivate func screenOrder(calling groups: [DesignStore.ElementRef: String]) -> [String] {
-        let called = Dictionary(groups.map { ($0.key.element, $0.value) }, uniquingKeysWith: { first, _ in first })
+    fileprivate func screenOrder(calling groups: [NodeRef: String]) -> [String] {
+        let called = Dictionary(groups.map { ($0.key.node, $0.value) }, uniquingKeysWith: { first, _ in first })
         return store.listed(on: .screen(screen)).map { called[$0.id] ?? $0.name ?? "" }
     }
 
     /// A group's members, by name, back to front.
-    fileprivate func members(of group: DesignStore.ElementRef) -> [String] {
-        store.members(of: group.element).map { $0.name ?? "" }
+    fileprivate func members(of group: NodeRef) -> [String] {
+        store.members(of: group.node).map { $0.name ?? "" }
     }
 }
 
@@ -489,7 +489,7 @@ struct GroupCommandTests {
         #expect(board.model.selection == .element(g.ref))
         #expect(g.node.kind == .group)
         #expect(g.ref.host == .screen(board.screen))
-        #expect(board.store.container(of: g.ref.element) == nil)
+        #expect(board.store.container(of: g.ref.node) == nil)
         // Named as its kind until it is renamed.
         #expect(g.node.name == nil)
         #expect(board.screenOrder(calling: [g.ref: "G"]) == ["A", "C", "B", "D", "G", "E"])
@@ -512,9 +512,9 @@ struct GroupCommandTests {
         let g = try #require(board.store.group(board.selection(board.note1, big)))
 
         #expect(g.host == .canvas)
-        #expect(board.store.node(g.element)?.scale == 2)
+        #expect(board.store.node(g.node)?.scale == 2)
         #expect(board.store.canvasFrame(of: .element(g)) == small.union(large))
-        #expect(board.store.members(of: g.element).map(\.id) == [board.note1.element, big.element])
+        #expect(board.store.members(of: g.node).map(\.id) == [board.note1.node, big.node])
     }
 
     @Test func lockedThingsAndDrawingsAreLeftOut() throws {
@@ -524,7 +524,7 @@ struct GroupCommandTests {
         let g = try #require(board.store.group(board.selection(board.b, board.c, board.d)))
 
         #expect(board.members(of: g) == ["C", "D"])
-        #expect(board.store.container(of: board.b.element) == nil)
+        #expect(board.store.container(of: board.b.node) == nil)
         #expect(board.screenOrder(calling: [g: "G"]) == ["A", "B", "C", "D", "G", "E"])
 
         // With the locked one left out, one is left: Group is off and does nothing.
@@ -542,8 +542,8 @@ struct GroupCommandTests {
         // A drawing is left out likewise.
         let drawn = OrderBoard()
         let notes = try #require(drawn.store.group(drawn.selection(drawn.note1, drawn.note2, drawn.drawing)))
-        #expect(drawn.store.members(of: notes.element).map(\.id) == [drawn.note1.element, drawn.note2.element])
-        #expect(drawn.store.container(of: drawn.drawing.element) == nil)
+        #expect(drawn.store.members(of: notes.node).map(\.id) == [drawn.note1.node, drawn.note2.node])
+        #expect(drawn.store.container(of: drawn.drawing.node) == nil)
         #expect(!drawn.store.canGroup(drawn.selection(drawn.note2, drawn.drawing)))
 
         // So is what a locked group locks: entered, its members can't be grouped.
@@ -604,9 +604,9 @@ struct GroupCommandTests {
         let g = locked.group(locked.b, locked.c, locked.d)
         locked.store.setLocked(true, .element(locked.c))
         let inner = try #require(locked.store.group(locked.selection(locked.b, locked.c, locked.d)))
-        #expect(locked.store.container(of: inner.element) == g.element)
+        #expect(locked.store.container(of: inner.node) == g.node)
         #expect(locked.members(of: inner) == ["B", "D"])
-        #expect(locked.store.members(of: g.element).map(\.id) == [locked.c.element, inner.element])
+        #expect(locked.store.members(of: g.node).map(\.id) == [locked.c.node, inner.node])
     }
 
     /// Review Focus 1: the things grouped weren't next to each other.
@@ -630,8 +630,8 @@ struct GroupCommandTests {
         #expect(board.store.tree == before)
         #expect(board.screenOrder == ["A", "B", "C", "D", "E"])
         #expect(board.store.listed(on: .screen(board.screen)).filter { $0.kind == .group }.isEmpty)
-        #expect(board.store.container(of: board.b.element) == nil)
-        #expect(board.store.container(of: board.d.element) == nil)
+        #expect(board.store.container(of: board.b.node) == nil)
+        #expect(board.store.container(of: board.d.node) == nil)
 
         board.undo.redo()
         #expect(board.screenOrder(calling: [g: "G"]) == ["A", "C", "B", "D", "G", "E"])
@@ -651,17 +651,17 @@ struct GroupCommandTests {
 
         board.model.ungroupSelection()
 
-        #expect(board.store.node(g.element) == nil)
+        #expect(board.store.node(g.node) == nil)
         #expect(board.screenOrder == ["A", "C", "B", "D", "E"])
         #expect(board.model.selection == board.selection(board.b, board.d))
         for (ref, was) in [(board.b, b), (board.d, d)] {
-            let now = try #require(board.store.placed(ref.element))
-            #expect(board.store.container(of: ref.element) == nil)
+            let now = try #require(board.store.placed(ref.node))
+            #expect(board.store.container(of: ref.node) == nil)
             #expect(now.node.isHidden)
             #expect(!now.node.isLocked)
             #expect(now.frame == was.frame)
         }
-        #expect(board.store.node(board.a.element)?.isHidden == false)
+        #expect(board.store.node(board.a.node)?.isHidden == false)
 
         // Only a group is ungrouped.
         board.model.selection = .element(board.a)
@@ -675,10 +675,10 @@ struct GroupCommandTests {
         locked.model.selection = .element(l)
         #expect(!locked.model.canUngroupSelection)
         locked.model.ungroupSelection()
-        #expect(locked.store.node(l.element) != nil)
+        #expect(locked.store.node(l.node) != nil)
         #expect(locked.store.ungroup(l) == locked.selection(locked.b, locked.d))
-        #expect(locked.store.node(locked.b.element)?.isLocked == true)
-        #expect(locked.store.node(locked.d.element)?.isLocked == true)
+        #expect(locked.store.node(locked.b.node)?.isLocked == true)
+        #expect(locked.store.node(locked.d.node)?.isLocked == true)
     }
 
     /// Review Focus 1: one undo brings the group back with its members, their own flags and
@@ -699,7 +699,7 @@ struct GroupCommandTests {
         #expect(board.store.tree == grouped)
         #expect(board.screenOrder == ["A", "C", "B", "D", "G", "E"])
         #expect(board.members(of: g) == ["B", "D"])
-        #expect(board.store.node(board.b.element)?.isHidden == false)
+        #expect(board.store.node(board.b.node)?.isHidden == false)
         // The step before is the group's own making.
         board.undo.undo()
         #expect(board.store.tree == start)
@@ -711,13 +711,13 @@ struct GroupCommandTests {
         let g2 = try #require(board.store.group(board.selection(g1, board.d)))
         let called = [g1: "G1", g2: "G2"]
 
-        #expect(board.store.containers(above: board.b.element) == [g1.element, g2.element])
+        #expect(board.store.containers(above: board.b.node) == [g1.node, g2.node])
         #expect(board.screenOrder(calling: called) == ["A", "B", "C", "G1", "D", "G2", "E"])
 
         #expect(board.store.ungroup(g2) == board.selection(g1, board.d))
 
-        #expect(board.store.containers(above: board.b.element) == [g1.element])
-        #expect(board.store.container(of: g1.element) == nil)
+        #expect(board.store.containers(above: board.b.node) == [g1.node])
+        #expect(board.store.container(of: g1.node) == nil)
         #expect(board.members(of: g1) == ["B", "C"])
         #expect(board.screenOrder(calling: called) == ["A", "B", "C", "G1", "D", "E"])
 
@@ -726,11 +726,11 @@ struct GroupCommandTests {
         let nested = OrderBoard()
         let outer = nested.group(nested.b, nested.c, nested.d)
         let inner = try #require(nested.store.group(nested.selection(nested.b, nested.c)))
-        #expect(nested.store.container(of: inner.element) == outer.element)
-        #expect(nested.store.containers(above: nested.b.element) == [inner.element, outer.element])
+        #expect(nested.store.container(of: inner.node) == outer.node)
+        #expect(nested.store.containers(above: nested.b.node) == [inner.node, outer.node])
         #expect(nested.screenOrder(calling: [inner: "I"]) == ["A", "B", "C", "I", "D", "G", "E"])
         nested.store.ungroup(inner)
-        #expect(nested.store.containers(above: nested.b.element) == [outer.element])
+        #expect(nested.store.containers(above: nested.b.node) == [outer.node])
         #expect(nested.members(of: outer) == ["B", "C", "D"])
     }
 
@@ -856,7 +856,7 @@ final class TapClock {
 extension OrderBoard {
     /// The middle of something, in the view: the board shows the canvas unscrolled and
     /// unzoomed, so it is the same point on the canvas.
-    fileprivate func middle(of ref: DesignStore.ElementRef) -> CGPoint {
+    fileprivate func middle(of ref: NodeRef) -> CGPoint {
         let frame = store.canvasFrame(of: .element(ref)) ?? .null
         return CGPoint(x: frame.midX, y: frame.midY)
     }
@@ -1015,7 +1015,7 @@ struct SelectingGroupsTests {
         clock.wait(100)
         board.model.pick(.element(x))
         #expect(board.model.selection == .element(x))
-        #expect(board.model.enteredGroups == [i.element, g2.element])
+        #expect(board.model.enteredGroups == [i.node, g2.node])
 
         clock.wait(1000)
         board.model.pick(.element(y))
@@ -1038,7 +1038,7 @@ struct SelectingGroupsTests {
         let c = try #require(board.store.canvasFrame(of: .element(board.c)))
         let gap = CGPoint(x: b.midX, y: (b.maxY + c.minY) / 2)
         #expect(try #require(board.store.canvasShape(of: .element(g))).contains(gap))
-        #expect(TreeTargets.leaf(at: gap, in: g.element, content: board.store.tree, index: board.store.index) == nil)
+        #expect(TreeTargets.leaf(at: gap, in: g.node, content: board.store.tree, index: board.store.index) == nil)
 
         board.model.targetTapped(.element(g), at: gap)
         #expect(board.model.selection == .element(g))
@@ -1060,23 +1060,23 @@ struct SelectingGroupsTests {
     /// one target is swapped for its members' own.
     @Test func aGroupIsOneTargetUntilItIsEntered() {
         let board = OrderBoard()
-        let host = DesignStore.ElementRef.Host.screen(board.screen)
+        let host = NodeRef.Host.screen(board.screen)
         let g = board.group(board.b, board.d)
         #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, board.c, g, board.e])
 
         board.model.selection = .element(board.b)
-        #expect(board.model.enteredGroups == [g.element])
+        #expect(board.model.enteredGroups == [g.node])
         #expect(board.store.treeTargets(entered: board.model.enteredGroups).refs(on: host) == [board.a, board.c, board.b, board.d, board.e])
 
         // Inside a group gone into, a group in it is one target, and the rest are their own.
         let g2 = board.group(g, board.c, named: "G2")
         #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, g2, board.e])
-        #expect(board.store.treeTargets(entered: [g2.element]).refs(on: host) == [board.a, board.c, g, board.e])
+        #expect(board.store.treeTargets(entered: [g2.node]).refs(on: host) == [board.a, board.c, g, board.e])
 
         // A hidden group has none, and nor do its members.
-        board.store.update(g2.element) { $0.isHidden = true }
+        board.store.update(g2.node) { $0.isHidden = true }
         #expect(board.store.treeTargets(entered: []).refs(on: host) == [board.a, board.e])
-        #expect(board.store.treeTargets(entered: [g.element, g2.element]).refs(on: host) == [board.a, board.e])
+        #expect(board.store.treeTargets(entered: [g.node, g2.node]).refs(on: host) == [board.a, board.e])
 
         // On the open canvas a drawing is picked by its ink, and has no target.
         #expect(board.store.treeTargets(entered: []).refs(on: .canvas) == [board.note1, board.note2])
@@ -1099,7 +1099,7 @@ struct SelectingGroupsTests {
         board.store.setLocked(true, .element(g))
         #expect(Set(board.store.things(enclosedBy: board.loop(round: all))) == [.element(board.a), .element(board.c), .element(board.e)])
         board.store.setLocked(false, .element(g))
-        board.store.update(g.element) { $0.isHidden = true }
+        board.store.update(g.node) { $0.isHidden = true }
         #expect(Set(board.store.things(enclosedBy: board.loop(round: all))) == [.element(board.a), .element(board.c), .element(board.e)])
     }
 
@@ -1187,7 +1187,7 @@ struct SelectingGroupsTests {
 
         // Hidden, it isn't there to hover over.
         board.model.selection = nil
-        board.store.update(g.element) { $0.isHidden = true }
+        board.store.update(g.node) { $0.isHidden = true }
         #expect(board.model.hoverTarget(at: onB) == .screen(board.screen))
         #expect(CanvasWork.targetPasses - start == 3)
     }
@@ -1240,20 +1240,20 @@ extension OrderBoard {
     }
 
     /// An element's own frame, wherever it lives.
-    fileprivate func frame(of ref: DesignStore.ElementRef) -> CGRect? {
-        store.ownFrame(ref.element)
+    fileprivate func frame(of ref: NodeRef) -> CGRect? {
+        store.ownFrame(ref.node)
     }
 
     /// The middle of an element's own frame on the canvas, wherever it now lives.
-    fileprivate func canvasCentre(of ref: DesignStore.ElementRef) -> CGPoint? {
-        guard let here = store.placed(ref.element) else { return nil }
+    fileprivate func canvasCentre(of ref: NodeRef) -> CGPoint? {
+        guard let here = store.placed(ref.node) else { return nil }
         let rect = here.placement.canvasRect(for: here.frame)
         return CGPoint(x: rect.midX, y: rect.midY)
     }
 
     /// One frame of a finger dragging a group's target `translation` across the glass since
     /// it landed at `start`, as `ElementTarget`'s drag makes it.
-    fileprivate func dragTarget(_ ref: DesignStore.ElementRef, by translation: CGSize, from start: CGPoint, owner: CanvasDrags.Owner, drags: CanvasDrags) {
+    fileprivate func dragTarget(_ ref: NodeRef, by translation: CGSize, from start: CGPoint, owner: CanvasDrags.Owner, drags: CanvasDrags) {
         guard store.placed(ref) != nil else { return }
         drags.moveOnTarget(ref, by: translation, startingAt: start, owner: owner, model: model)
     }
@@ -1262,9 +1262,9 @@ extension OrderBoard {
 extension OrderBoard {
     /// How far each of a group's members' middles is from the middle of the group's box, in
     /// their own points (all on one host, at one scale).
-    fileprivate func offsets(in group: DesignStore.ElementRef, of members: [DesignStore.ElementRef]) -> [CGPoint] {
-        guard let box = store.ownFrame(group.element) else { return [] }
-        return members.compactMap { store.ownFrame($0.element) }.map { CGPoint(x: $0.midX - box.midX, y: $0.midY - box.midY) }
+    fileprivate func offsets(in group: NodeRef, of members: [NodeRef]) -> [CGPoint] {
+        guard let box = store.ownFrame(group.node) else { return [] }
+        return members.compactMap { store.ownFrame($0.node) }.map { CGPoint(x: $0.midX - box.midX, y: $0.midY - box.midY) }
     }
 }
 
@@ -1355,7 +1355,7 @@ struct GroupGeometryTests {
     @Test func aMemberLockedOnItsOwnMovesWithItsGroup() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
-        board.store.update(board.b.element) { $0.isLocked = true }
+        board.store.update(board.b.node) { $0.isLocked = true }
         let box = try #require(board.store.canvasFrame(of: .element(g)))
         let (b, d) = (try #require(board.frame(of: board.b)), try #require(board.frame(of: board.d)))
 
@@ -1363,7 +1363,7 @@ struct GroupGeometryTests {
 
         #expect(board.frame(of: board.b) == b.offsetBy(dx: 40, dy: -20))
         #expect(board.frame(of: board.d) == d.offsetBy(dx: 40, dy: -20))
-        #expect(board.store.node(board.b.element)?.isLocked == true)
+        #expect(board.store.node(board.b.node)?.isLocked == true)
     }
 
     @Test func droppingAGroupOnAnotherScreenMovesItWhole() throws {
@@ -1386,13 +1386,13 @@ struct GroupGeometryTests {
         board.dragTarget(g, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
         drags.dropOnTarget(g, startingAt: start, owner: owner, model: board.model)
 
-        let moved = DesignStore.ElementRef(host: .screen(second), element: g.element)
+        let moved = NodeRef(host: .screen(second), node: g.node)
         #expect(board.model.selection == .element(moved))
         #expect(board.order(on: .screen(second)) == ["B", "C", "D", "G"])
         #expect(board.screenOrder == ["A", "E"])
         for (ref, centre) in zip(members, centres) {
-            #expect(board.store.hostScreen(of: ref.element) == second)
-            #expect(board.store.container(of: ref.element) == g.element)
+            #expect(board.store.hostScreen(of: ref.node) == second)
+            #expect(board.store.container(of: ref.node) == g.node)
             // Each keeps its place on the canvas, to half a point of the screen's own.
             #expect(isNear(board.canvasCentre(of: ref), CGPoint(x: centre.x + 800, y: centre.y), within: 0.25))
         }
@@ -1410,9 +1410,9 @@ struct GroupGeometryTests {
         drags.dropOnTarget(notes, startingAt: onNote, owner: other, model: board.model)
         #expect(board.model.selection == .element(notes))
         for ref in [board.note1, board.note2, notes] {
-            #expect(board.store.hostScreen(of: ref.element) == nil)
+            #expect(board.store.hostScreen(of: ref.node) == nil)
         }
-        #expect(board.store.container(of: board.note1.element) == notes.element)
+        #expect(board.store.container(of: board.note1.node) == notes.node)
         #expect(isNear(board.canvasCentre(of: board.note1), CGPoint(x: note1.x - 500, y: note1.y), within: 0.001))
     }
 
@@ -1433,7 +1433,7 @@ struct GroupGeometryTests {
         let g = board.group(board.b, board.c, board.d)
         let drags = CanvasDrags()
         board.model.drags = drags
-        let landed = DesignStore.ElementRef(host: .screen(second), element: g.element)
+        let landed = NodeRef(host: .screen(second), node: g.node)
         let before = board.store.tree
         let mark = board.store.historyMark
 
@@ -1466,9 +1466,9 @@ struct GroupGeometryTests {
             // What SwiftUI still reports of the drag lands nothing.
             board.dragTarget(landed, by: CGSize(width: 820, height: 0), from: start, owner: owner, drags: drags)
             drags.dropOnTarget(landed, startingAt: start, owner: owner, model: board.model)
-            #expect(board.store.rotation(of: g.element) == 30)
+            #expect(board.store.rotation(of: g.node) == 30)
             for (ref, centre) in zip([board.b, board.c, board.d], centres) {
-                #expect(board.store.rotation(of: ref.element) == 30)
+                #expect(board.store.rotation(of: ref.node) == 30)
                 #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
             }
             #expect(board.undo.undoActionName == "Move and Rotate")
@@ -1508,7 +1508,7 @@ struct GroupGeometryTests {
         // Half-size screen to the full-size one.
         board.store.position([.element(g): CGPoint(x: box.minX + 900, y: box.minY)])
         let landed = board.store.rehost(g)
-        #expect(landed == DesignStore.ElementRef(host: .screen(big), element: g.element))
+        #expect(landed == NodeRef(host: .screen(big), node: g.node))
         for (now, was) in zip(board.offsets(in: landed, of: pair), offsets) { #expect(isNear(now, was, within: 0.5)) }
         let (p, q) = (try #require(board.frame(of: pair[0])), try #require(board.frame(of: pair[1])))
         #expect(q.minX - p.maxX == 10, "still 10 of their own points apart")
@@ -1526,7 +1526,7 @@ struct GroupGeometryTests {
         let looseBox = try #require(board.store.canvasFrame(of: .element(h)))
         board.store.position([.element(h): CGPoint(x: looseBox.minX - 405, y: looseBox.minY - 320)])
         let onScreen = board.store.rehost(h)
-        #expect(onScreen == DesignStore.ElementRef(host: .screen(board.screen), element: h.element))
+        #expect(onScreen == NodeRef(host: .screen(board.screen), node: h.node))
         for (now, was) in zip(board.offsets(in: onScreen, of: loose), looseOffsets) { #expect(isNear(now, was, within: 0.5)) }
         #expect(board.frame(of: loose[0])?.size == CGSize(width: 100, height: 40))
     }
@@ -1547,7 +1547,7 @@ struct GroupGeometryTests {
         let start = board.middle(of: board.b)
         board.dragTarget(g, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
         #expect(board.model.beginTwist())
-        let landed = DesignStore.ElementRef(host: .screen(big), element: g.element)
+        let landed = NodeRef(host: .screen(big), node: g.node)
         #expect(board.model.selection == .element(landed))
         for (now, was) in zip(board.offsets(in: landed, of: [board.b, board.d]), offsets) { #expect(isNear(now, was, within: 0.5)) }
         let frames = try [board.b, board.d].map { try #require(board.frame(of: $0)) }
@@ -1558,7 +1558,7 @@ struct GroupGeometryTests {
         #expect(try [board.b, board.d].map { try #require(board.frame(of: $0)) } == frames, "held where it landed, nothing moves")
         board.model.twist(by: 30)
         for (ref, centre) in zip([board.b, board.d], centres) {
-            #expect(board.store.rotation(of: ref.element) == 30)
+            #expect(board.store.rotation(of: ref.node) == 30)
             #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.75))
         }
         board.model.endTwist()
@@ -1581,9 +1581,9 @@ struct GroupGeometryTests {
         board.dragTarget(board.b, by: CGSize(width: 800, height: 0), from: start, owner: owner, drags: drags)
         drags.dropOnTarget(board.b, startingAt: start, owner: owner, model: board.model)
 
-        #expect(board.model.selection == .element(DesignStore.ElementRef(host: .screen(second), element: board.b.element)))
-        #expect(board.store.hostScreen(of: board.b.element) == second)
-        #expect(board.store.container(of: board.b.element) == nil)
+        #expect(board.model.selection == .element(NodeRef(host: .screen(second), node: board.b.node)))
+        #expect(board.store.hostScreen(of: board.b.node) == second)
+        #expect(board.store.container(of: board.b.node) == nil)
         #expect(board.members(of: g) == ["C", "D"])
         #expect(board.screenOrder == ["A", "C", "D", "G", "E"])
     }
@@ -1612,10 +1612,10 @@ struct GroupGeometryTests {
         board.model.turnSelection(by: 30, snaps: false)
         board.model.endTurn()
 
-        #expect(board.store.rotation(of: g.element) == 30)
-        #expect(board.store.rotation(of: inner.element) == 40)
+        #expect(board.store.rotation(of: g.node) == 30)
+        #expect(board.store.rotation(of: inner.node) == 40)
         for (ref, centre) in zip(members, centres) {
-            #expect(board.store.rotation(of: ref.element) == 30)
+            #expect(board.store.rotation(of: ref.node) == 30)
             #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
         }
         // The outline and the knob went round rigidly, and the group's box is at its angle.
@@ -1634,11 +1634,11 @@ struct GroupGeometryTests {
         board.model.selection = nil
         board.model.selection = .element(g)
         board.model.rotateSelection(by: 30)
-        #expect(board.store.rotation(of: g.element) == 50)
+        #expect(board.store.rotation(of: g.node) == 50)
         board.model.resetSelectionTurn()
-        #expect(board.store.rotation(of: g.element) == nil)
-        #expect(board.store.rotation(of: inner.element) == 10)
-        #expect(board.store.rotation(of: button.element) == nil)
+        #expect(board.store.rotation(of: g.node) == nil)
+        #expect(board.store.rotation(of: inner.node) == 10)
+        #expect(board.store.rotation(of: button.node) == nil)
     }
 
     /// Carried from Task 3: the session reads the lock a group gives, and a turning group
@@ -1646,7 +1646,7 @@ struct GroupGeometryTests {
     @Test func aMemberLockedOnItsOwnTurnsWithItsGroup() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
-        board.store.update(board.b.element) { $0.isLocked = true }
+        board.store.update(board.b.node) { $0.isLocked = true }
         board.model.selection = .element(g)
         let box = try #require(board.store.canvasShape(of: .element(g)))
         let centres = try [board.b, board.d].map { try #require(board.canvasCentre(of: $0)) }
@@ -1654,9 +1654,9 @@ struct GroupGeometryTests {
 
         board.model.rotateSelection(by: 30)
 
-        #expect(board.store.rotation(of: g.element) == 30)
+        #expect(board.store.rotation(of: g.node) == 30)
         for (ref, centre) in zip([board.b, board.d], centres) {
-            #expect(board.store.rotation(of: ref.element) == 30)
+            #expect(board.store.rotation(of: ref.node) == 30)
             #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(centre, about: box.centre, by: 30), within: 0.5))
         }
 
@@ -1695,7 +1695,7 @@ struct GroupGeometryTests {
     @Test func manyTurnsOfAGroupAddUpWithoutDrift() {
         let board = OrderBoard()
         let button = board.store.addOnCanvas(OrderBoard.element(.button, named: "button", CGRect(x: 480, y: 560, width: 320, height: 60)), scale: 1)
-        board.store.update(button.element) { $0.rotation = 20 }
+        board.store.update(button.node) { $0.rotation = 20 }
         let inner = board.group(board.note1, board.note2, named: "I") { $0.rotation = 10 }
         let g = board.group(button, inner)
         board.model.selection = .element(g)
@@ -1706,9 +1706,9 @@ struct GroupGeometryTests {
             board.model.turnSelection(by: angle, snaps: false)
             board.model.endTurn()
             if index == 1 {
-                #expect(board.store.rotation(of: g.element) == 46)
-                #expect(board.store.rotation(of: inner.element) == 56)
-                #expect(board.store.rotation(of: button.element) == 66)
+                #expect(board.store.rotation(of: g.node) == 46)
+                #expect(board.store.rotation(of: inner.node) == 56)
+                #expect(board.store.rotation(of: button.node) == 66)
             }
         }
         #expect(board.store.tree == before)
@@ -1790,7 +1790,7 @@ struct GroupGeometryTests {
             #expect(board.frame(of: ref) == CGRect(x: 40 + (was.minX - 40) * 2, y: 190 + (was.minY - 190) * 2, width: was.width * 2, height: was.height * 2))
         }
         #expect(board.frame(of: g) == doubled)
-        #expect(board.store.node(t.element)?.style.fontSize == 17)
+        #expect(board.store.node(t.node)?.style.fontSize == 17)
 
         // A handle dragged out and back again, 30 frames: each frame is worked out from the
         // group as it was when the drag began, so it lands exactly where it began.
@@ -1823,7 +1823,7 @@ struct GroupGeometryTests {
 
     @Test func aTurnedGroupResizesWithoutShear() throws {
         let board = OrderBoard()
-        board.store.update(board.b.element) { $0.rotation = 10 }
+        board.store.update(board.b.node) { $0.rotation = 10 }
         let g = board.group(board.b, board.d) { $0.rotation = 30 }
         let item = try #require(board.store.placed(g))
         let placement = item.placement
@@ -1836,9 +1836,9 @@ struct GroupGeometryTests {
         #expect(abs(frame.height / item.frame.height - s) < 0.000_001)
         board.store.resizeGroup(g, to: frame)
 
-        #expect(board.store.rotation(of: board.b.element) == 10)
-        #expect(board.store.rotation(of: board.d.element) == nil)
-        #expect(board.store.rotation(of: g.element) == 30)
+        #expect(board.store.rotation(of: board.b.node) == 10)
+        #expect(board.store.rotation(of: board.d.node) == nil)
+        #expect(board.store.rotation(of: g.node) == 30)
         for (ref, was) in [(board.b, b), (board.d, d)] {
             let now = try #require(board.frame(of: ref))
             #expect(abs(now.width - was.width * s) < 0.000_1 && abs(now.height - was.height * s) < 0.000_1)
@@ -1870,7 +1870,7 @@ struct GroupAsOneThingTests {
     /// and selects the copy. A member locked on its own is copied as it is.
     @Test func duplicatingANestedGroupCopiesItWhole() throws {
         let board = OrderBoard()
-        board.store.update(board.e.element) { $0.isLocked = true }
+        board.store.update(board.e.node) { $0.isLocked = true }
         let i = board.group(board.c, board.e, named: "I")
         let g = board.group(board.a, i, named: "G")
         #expect(board.screenOrder == ["B", "D", "A", "C", "E", "I", "G"])
@@ -1889,7 +1889,7 @@ struct GroupAsOneThingTests {
         func container(_ name: String) -> UUID? { copy[name].flatMap { board.store.container(of: $0.id) } }
         let copiedG = try #require(copy["G"]?.id)
         let copiedI = try #require(copy["I"]?.id)
-        #expect(board.model.selection == .element(.init(host: g.host, element: copiedG)), "the copy is selected")
+        #expect(board.model.selection == .element(.init(host: g.host, node: copiedG)), "the copy is selected")
         #expect(container("G") == nil)
         #expect(container("A") == copiedG && container("I") == copiedG)
         #expect(container("C") == copiedI && container("E") == copiedI)
@@ -1927,8 +1927,8 @@ struct GroupAsOneThingTests {
             return
         }
         #expect(copy != board.b)
-        #expect(board.store.container(of: copy.element) == g.element)
-        #expect(board.frame(of: copy) == before.ownFrame(board.b.element)?.offsetBy(dx: 16, dy: 16))
+        #expect(board.store.container(of: copy.node) == g.node)
+        #expect(board.frame(of: copy) == before.ownFrame(board.b.node)?.offsetBy(dx: 16, dy: 16))
         board.undo.undo()
         #expect(board.store.tree == before, "one step")
 
@@ -1942,8 +1942,8 @@ struct GroupAsOneThingTests {
             Issue.record("the copy should be selected")
             return
         }
-        #expect(nested.store.container(of: copiedI.element) == outer.element)
-        #expect(nested.store.members(of: copiedI.element).map { $0.name ?? "" } == ["C", "E"])
+        #expect(nested.store.container(of: copiedI.node) == outer.node)
+        #expect(nested.store.members(of: copiedI.node).map { $0.name ?? "" } == ["C", "E"])
     }
 
     /// Carried from Task 3: a screen's copy has copies of its groups, with new ids, their
@@ -1987,7 +1987,7 @@ struct GroupAsOneThingTests {
     /// a member locked on its own too, in one step. A locked group stays.
     @Test func deletingAGroupDeletesItsMembersEvenLockedOnes() {
         let board = OrderBoard()
-        board.store.update(board.e.element) { $0.isLocked = true }
+        board.store.update(board.e.node) { $0.isLocked = true }
         let i = board.group(board.c, board.e, named: "I")
         let g = board.group(board.a, i, named: "G")
         let before = board.store.tree
@@ -2001,7 +2001,7 @@ struct GroupAsOneThingTests {
         #expect(board.store.tree == before, "one step")
 
         // Locked, by itself or by a group above it, a group isn't deleted.
-        board.store.update(g.element) { $0.isLocked = true }
+        board.store.update(g.node) { $0.isLocked = true }
         let locked = board.store.tree
         board.model.selection = .element(g)
         board.model.deleteSelection()
@@ -2011,7 +2011,7 @@ struct GroupAsOneThingTests {
         #expect(board.store.tree == locked)
 
         // Several things with a group among them: it goes with everything in it.
-        board.store.update(g.element) { $0.isLocked = false }
+        board.store.update(g.node) { $0.isLocked = false }
         board.model.selection = board.selection(board.b, g)
         board.model.deleteSelection()
         #expect(board.screenOrder == ["D"])
@@ -2029,9 +2029,9 @@ struct GroupAsOneThingTests {
 
         board.model.toggleHidden(g)
 
-        #expect(board.store.node(g.element)?.isHidden == true, "the group's own flag")
+        #expect(board.store.node(g.node)?.isHidden == true, "the group's own flag")
         #expect(board.store.shownLeaves(on: board.screen).filter(\.isHidden).map { $0.name ?? "" } == ["B", "D"])
-        #expect(board.store.node(board.b.element)?.isHidden == false && board.store.node(board.d.element)?.isHidden == false)
+        #expect(board.store.node(board.b.node)?.isHidden == false && board.store.node(board.d.node)?.isHidden == false)
         #expect(board.model.selection == nil, "the member selected is let go of")
 
         // Among several things, only what is in the group hidden is let go of.
@@ -2074,7 +2074,7 @@ struct GroupAsOneThingTests {
         for width: CGFloat in [box.width / 10, 3, 7, 70, 706] {
             board.model.setGroupBox(g, width: width)
             #expect(board.model.selection == .element(g), "the group stays selected after \(width)")
-            #expect(board.store.node(g.element) != nil)
+            #expect(board.store.node(g.node) != nil)
         }
 
         let frame = try #require(board.frame(of: g))
@@ -2143,9 +2143,9 @@ struct GroupAsOneThingTests {
 
         board.model.setGroupRotation(g, to: 90)
 
-        #expect(board.store.rotation(of: g.element) == 90)
-        #expect(board.store.rotation(of: board.b.element) == 90)
-        #expect(board.store.rotation(of: board.d.element) == 90)
+        #expect(board.store.rotation(of: g.node) == 90)
+        #expect(board.store.rotation(of: board.b.node) == 90)
+        #expect(board.store.rotation(of: board.d.node) == 90)
         for (ref, start) in zip([board.b, board.d], starts) {
             #expect(isNear(board.canvasCentre(of: ref), Rotation.rotate(start, about: middle, by: 90), within: 0.5))
         }
@@ -2153,15 +2153,15 @@ struct GroupAsOneThingTests {
 
         // Typed again, it turns to the angle typed, not by it.
         board.model.setGroupRotation(g, to: 45)
-        #expect(board.store.rotation(of: g.element) == 45)
-        #expect(board.store.rotation(of: board.b.element) == 45)
+        #expect(board.store.rotation(of: g.node) == 45)
+        #expect(board.store.rotation(of: board.b.node) == 45)
     }
 
     /// Carried from Task 6: Align lines a group up with its screen as one block: everything
     /// in it moves by as much as its box. Set on the item alone, its box was fitted back.
     @Test func aGroupAlignsWithItsScreenAsOneBlock() throws {
         let board = OrderBoard()
-        board.store.update(board.d.element) { $0.frame.origin.x = 80 }
+        board.store.update(board.d.node) { $0.frame.origin.x = 80 }
         let g = board.group(board.b, board.d)
         let offsets = board.offsets(in: g, of: [board.b, board.d])
         let width = try #require(board.store.device(of: board.screen)?.size.width)
@@ -2187,11 +2187,11 @@ struct GroupAsOneThingTests {
         board.model.selection = board.selection(board.a, g)
         #expect(board.model.selectedLeafNodes.map(\.ref) == [board.a, board.b, board.c, board.e])
         let red = RGBColor(hex: 0xFF0000)
-        board.model.changeNodes(board.model.selectedLeafNodes.map(\.ref.element), where: \.hasFill) { $0.style.tint = red }
+        board.model.changeNodes(board.model.selectedLeafNodes.map(\.ref.node), where: \.hasFill) { $0.style.tint = red }
         for ref in [board.a, board.b, board.c, board.e] {
-            #expect(board.store.node(ref.element)?.style.tint == red)
+            #expect(board.store.node(ref.node)?.style.tint == red)
         }
-        #expect(board.store.node(board.d.element)?.style.tint != red)
+        #expect(board.store.node(board.d.node)?.style.tint != red)
         #expect(board.undo.undoActionName == "Format")
     }
 
@@ -2206,10 +2206,10 @@ struct GroupAsOneThingTests {
 
         board.model.setAngle(of: [board.a, g], to: 90)
 
-        #expect(board.store.rotation(of: board.a.element) == 90)
+        #expect(board.store.rotation(of: board.a.node) == 90)
         #expect(isNear(board.canvasCentre(of: board.a), a, within: 0.5), "A turns on its own pivot")
-        #expect(board.store.rotation(of: g.element) == 90)
-        #expect(board.store.rotation(of: board.b.element) == 90)
+        #expect(board.store.rotation(of: g.node) == 90)
+        #expect(board.store.rotation(of: board.b.node) == 90)
         #expect(isNear(board.canvasCentre(of: board.b), Rotation.rotate(b, about: middle, by: 90), within: 0.5), "B goes round G's middle")
         #expect(board.undo.undoActionName == "Format")
     }
@@ -2241,7 +2241,7 @@ struct LayerTreeTests {
         // Was: top level ["E", "H", "C"]; under H ["G", "A"]; under G ["D", "B"]: each under its container by depth.
         #expect(names(lines) == ["E", "H", "G", "D", "B", "A", "C"])
         #expect(lines.map(\.depth) == [0, 0, 1, 2, 2, 1, 0])
-        #expect(lines.map(\.id) == [board.e, outer, g, board.d, board.b, board.a, board.c].map(\.element))
+        #expect(lines.map(\.id) == [board.e, outer, g, board.d, board.b, board.a, board.c].map(\.node))
         // Was: the canvas's tree's names.
         #expect(names(rows(board, on: .canvas)) == ["note 2", "note 1"])
     }
@@ -2249,15 +2249,15 @@ struct LayerTreeTests {
     @Test func rowsKnowWhatIsHiddenAndLockedAboveThem() throws {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
-        board.store.update(g.element) { $0.isLocked = true; $0.isHidden = true }
+        board.store.update(g.node) { $0.isLocked = true; $0.isHidden = true }
         let lines = rows(board, on: .screen(board.screen))
         let node = try #require(lines.first { $0.ref == g })
         #expect(node.isDimmed && (node.isLocked || node.isLockedByAncestor))
-        for child in lines.filter({ $0.list == .node(g.element) }) {
+        for child in lines.filter({ $0.list == .node(g.node) }) {
             #expect(child.isDimmed && (child.isLocked || child.isLockedByAncestor))
             #expect(!child.isHidden && !child.isLocked, "its own flags are its own")
         }
-        #expect(lines.filter { $0.list == .node(g.element) }.count == 2)
+        #expect(lines.filter { $0.list == .node(g.node) }.count == 2)
         let other = try #require(lines.first { $0.name == "E" })
         #expect(!other.isDimmed && !(other.isLocked || other.isLockedByAncestor))
     }
@@ -2265,9 +2265,9 @@ struct LayerTreeTests {
     @Test func drawingsAreNotInTheTree() {
         let board = OrderBoard()
         #expect(!rows(board, on: .canvas).contains { $0.ref == board.drawing })
-        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.node])
         board.addNote(named: "note 3", at: CGPoint(x: 900, y: 100))
-        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.element])
+        #expect(LayerRows.drawings(in: board.store.tree) == [board.drawing.node])
     }
 
     @Test func aRowTapAddsOrTakesOutExactlyThatThing() {
@@ -2323,22 +2323,22 @@ struct LayerTreeTests {
     @Test func unlockingAMemberLockedOnlyByItsGroupUnlocksTheGroup() {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
-        board.store.update(g.element) { $0.isLocked = true }
-        #expect(board.store.isLockedWithItsContainers(board.b.element))
+        board.store.update(g.node) { $0.isLocked = true }
+        #expect(board.store.isLockedWithItsContainers(board.b.node))
         board.model.toggleLock(board.b)
-        #expect(board.store.node(g.element)?.isLocked == false)
-        #expect(board.store.node(board.b.element)?.isLocked == false, "never locks the member it was asked to unlock")
+        #expect(board.store.node(g.node)?.isLocked == false)
+        #expect(board.store.node(board.b.node)?.isLocked == false, "never locks the member it was asked to unlock")
         board.model.toggleLock(board.b)
-        #expect(board.store.node(board.b.element)?.isLocked == true)
+        #expect(board.store.node(board.b.node)?.isLocked == true)
     }
 
     @Test func aLockedDrawingIsTouchedAboveTheNoteItIsDrawnAbove() throws {
         let board = OrderBoard()
-        board.store.update(board.drawing.element) { $0.isLocked = true }
+        board.store.update(board.drawing.node) { $0.isLocked = true }
         let note = board.addNote(named: "note 3", at: CGPoint(x: 540, y: 380))
-        let ink = try #require(board.store.ownFrame(board.drawing.element))
+        let ink = try #require(board.store.ownFrame(board.drawing.node))
         let point = CGPoint(x: ink.midX, y: ink.midY)
-        #expect(board.store.ownFrame(note.element)?.contains(point) == true, "they overlap there")
+        #expect(board.store.ownFrame(note.node)?.contains(point) == true, "they overlap there")
 
         #expect(board.model.hoverTarget(at: point) == .element(board.drawing))
         let targets = board.store.treeTargets(entered: []).refs(on: .canvas)
@@ -2346,6 +2346,6 @@ struct LayerTreeTests {
         let noteIndex = try #require(targets.firstIndex(of: note))
         #expect(drawingIndex > noteIndex, "the targets lie as the canvas draws")
         let elements = try #require(board.store.treeTargets(entered: []).byHost[.canvas])
-        #expect(elements.last?.id == board.drawing.element)
+        #expect(elements.last?.id == board.drawing.node)
     }
 }

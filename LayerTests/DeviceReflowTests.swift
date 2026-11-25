@@ -322,7 +322,7 @@ struct DeviceReflowTests {
         #expect(row.width.mode == .fit)
         #expect(row.sketch?.placement == .leading)
 
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: row.id)
+        let ref = NodeRef(host: .screen(screen.id), node: row.id)
         model.store.resizeGroup(ref, to: CGRect(x: 20, y: 600, width: 353, height: 44))
 
         let stretched = try #require(model.store.node(row.id))

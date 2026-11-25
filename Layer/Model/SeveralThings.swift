@@ -59,9 +59,9 @@ extension DesignStore {
         let memo = index, screens = tree.screens
         let screenRank = Dictionary(screens.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         var ordered: [CanvasSelection] = screens.map { .screen($0.id) }.filter(picked.contains)
-        var elements: [(rank: Int, path: [Int], ref: ElementRef)] = []
+        var elements: [(rank: Int, path: [Int], ref: NodeRef)] = []
         for case .element(let ref) in picked {
-            guard let entry = memo[ref.element], !entry.path.isEmpty, ElementRef.Host(entry.host) == ref.host else { continue }
+            guard let entry = memo[ref.node], !entry.path.isEmpty, entry.host == ref.host else { continue }
             let rank = switch entry.host {
             case .screen(let id): screenRank[id] ?? screens.count
             case .canvas: screens.count
@@ -73,8 +73,8 @@ extension DesignStore {
         elements.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.path.lexicographicallyPrecedes($1.path) }
         // What is in a container selected goes with it: a member picked beside its container would be
         // copied or moved twice, and the lone copy would join the original.
-        let selected = Set(elements.map(\.ref.element))
-        for element in elements where memo.ancestors(of: element.ref.element).allSatisfy({ !selected.contains($0) }) {
+        let selected = Set(elements.map(\.ref.node))
+        for element in elements where memo.ancestors(of: element.ref.node).allSatisfy({ !selected.contains($0) }) {
             ordered.append(.element(element.ref))
         }
         return ordered
@@ -89,13 +89,13 @@ extension DesignStore {
     func canvasFrames(besides things: Set<CanvasSelection>) -> [CGRect] {
         let tree = tree
         var moving: Set<UUID> = []
-        for case .element(let ref) in things { moving.insert(ref.element) }
+        for case .element(let ref) in things { moving.insert(ref.node) }
         var frames: [CGRect] = []
-        func visit(_ node: LayerNode, in space: TreeIndex.OwnSpace, on host: ElementRef.Host, at placement: Placement) {
+        func visit(_ node: LayerNode, in space: TreeIndex.OwnSpace, on host: NodeRef.Host, at placement: Placement) {
             guard !node.isHidden else { return }
             let placed = space.placing(node)
             guard node.isContainer else {
-                guard !things.contains(.element(ElementRef(host: host, element: node.id))) else { return }
+                guard !things.contains(.element(NodeRef(host: host, node: node.id))) else { return }
                 let shape = TurnedRect(rect: placed.frame, degrees: Rotation.kept(placed.degrees) ?? 0)
                 frames.append(placement.canvasRect(for: shape.bounds))
                 return
@@ -148,13 +148,13 @@ extension DesignStore {
                 let target = placed.placement.localPoint(for: origin), current = placed.placement.localPoint(for: box.origin)
                 let distance = CGSize(width: target.x - current.x, height: target.y - current.y)
                 guard placed.node.isContainer, !placed.isLaidOut else {
-                    if let placing = placing(ref.element, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height)) {
+                    if let placing = placing(ref.node, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height)) {
                         placings.append(placing)
                     }
                     continue
                 }
                 // Where the container is, from the index `placed` built for this version.
-                guard let entry = index[ref.element], let moved = self.origin(of: ref.element, movedBy: distance) else { continue }
+                guard let entry = index[ref.node], let moved = self.origin(of: ref.node, movedBy: distance) else { continue }
                 let landed = CGPoint(x: moved.x.rounded(), y: moved.y.rounded())
                 if landed != placed.node.frame.origin { containers.append((entry.host, entry.path, landed)) }
             case .screen(let id):
@@ -222,7 +222,7 @@ extension DesignStore {
         var screens: [TreeScreen.ID] = []
         for thing in things(in: selection) {
             switch thing {
-            case .element(let ref): nodes.append(ref.element)
+            case .element(let ref): nodes.append(ref.node)
             case .screen(let id): screens.append(id)
             case .several: continue
             }
@@ -265,7 +265,7 @@ extension DesignStore {
             for thing in originals {
                 switch thing {
                 case .element(let ref):
-                    if let copy = duplicate(node: ref.element) { copies.append(.element(ElementRef(host: ref.host, element: copy))) }
+                    if let copy = duplicate(node: ref.node) { copies.append(.element(NodeRef(host: ref.host, node: copy))) }
                 case .screen(let id):
                     guard let original = treeScreen(id), let copy = duplicateTreeScreen(id) else { continue }
                     updateTreeScreen(copy) { $0.origin.x = original.origin.x + shift }
@@ -285,7 +285,7 @@ extension DesignStore {
         let things = things(in: selection).filter { !isLocked($0) }
         asOneStep {
             delete(nodes: Set(things.compactMap { thing -> UUID? in
-                if case .element(let ref) = thing { ref.element } else { nil }
+                if case .element(let ref) = thing { ref.node } else { nil }
             }))
             for case .screen(let id) in things { deleteScreen(id) }
         }

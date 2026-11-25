@@ -47,10 +47,10 @@ struct SiriOnTheTreeTests {
         #expect(note.id == "\(login.designID)|canvas|\(login.note.uuidString)")
         let parsedAbout = try #require(EntityKey.parseElement(about.id))
         #expect(parsedAbout.design == login.designID)
-        #expect(parsedAbout.ref == DesignStore.ElementRef(host: .screen(login.screen), element: login.about))
+        #expect(parsedAbout.ref == NodeRef(host: .screen(login.screen), node: login.about))
         let parsedNote = try #require(EntityKey.parseElement(note.id))
         #expect(parsedNote.design == login.designID)
-        #expect(parsedNote.ref == DesignStore.ElementRef(host: .canvas, element: login.note))
+        #expect(parsedNote.ref == NodeRef(host: .canvas, node: login.note))
     }
 
     @Test func aSelectedContainerIsInvisibleToSiri() throws {
@@ -60,11 +60,11 @@ struct SiriOnTheTreeTests {
 
         model.selection = .element(try #require(model.store.ref(of: login.card)))
         #expect(DesignActions.selectedLeaf(in: model) == nil)
-        #expect(DesignActions.suggested(elements, in: model).first?.ref?.element == login.title, "the title, as listed")
+        #expect(DesignActions.suggested(elements, in: model).first?.ref?.node == login.title, "the title, as listed")
 
         model.selection = .element(try #require(model.store.ref(of: login.about)))
         #expect(DesignActions.selectedLeaf(in: model)?.node.id == login.about)
-        #expect(DesignActions.suggested(elements, in: model).first?.ref?.element == login.about)
+        #expect(DesignActions.suggested(elements, in: model).first?.ref?.node == login.about)
     }
 
     @Test func lockedByAnAncestorIsLocked() throws {

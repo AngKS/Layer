@@ -17,7 +17,7 @@ extension CanvasPicture {
         var selectedScreens: Set<TreeScreen.ID> = []
         for thing in model.selectedThings {
             switch thing {
-            case .element(let ref): selectedNodes.insert(ref.element)
+            case .element(let ref): selectedNodes.insert(ref.node)
             case .screen(let id): selectedScreens.insert(id)
             case .several: break
             }

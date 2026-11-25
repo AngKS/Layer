@@ -134,13 +134,13 @@ extension DesignStore {
         for screen in open {
             let placement = screen.placement, root = TreeIndex.OwnSpace.host.placing(screen.root).space
             for node in screen.root.children where isPicked(node, root.placing(node), placement) {
-                found.append(.element(ElementRef(host: .screen(screen.id), element: node.id)))
+                found.append(.element(NodeRef(host: .screen(screen.id), node: node.id)))
             }
         }
         for node in tree.canvas {
             let placement = Placement(origin: .zero, scale: node.scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1)
             guard isPicked(node, TreeIndex.OwnSpace.host.placing(node), placement) else { continue }
-            found.append(.element(ElementRef(host: .canvas, element: node.id)))
+            found.append(.element(NodeRef(host: .canvas, node: node.id)))
         }
         return found
     }

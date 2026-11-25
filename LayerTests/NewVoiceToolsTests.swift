@@ -49,7 +49,7 @@ struct NewVoiceToolsTests {
         #expect(row.children.allSatisfy { $0.width.mode == .fixed && $0.height.mode == .fixed })
         #expect(bench.store.ownFrame(bench.x)?.origin == CGPoint(x: 20, y: 400))
         // Made as the popover's Group as makes one, and selected, so that "it" means it next.
-        #expect(bench.login.model.selection == .element(DesignStore.ElementRef(host: .screen(bench.login.screen), element: row.id)))
+        #expect(bench.login.model.selection == .element(NodeRef(host: .screen(bench.login.screen), node: row.id)))
     }
 
     @Test func threeAreListedAsNamed() {
@@ -492,7 +492,7 @@ struct NewVoiceToolsTests {
     /// A typed edit for one screen leaves the selection alone, whichever tool it runs (M5).
     @Test func aScopedEditLeavesTheSelectionAloneForEveryNewTool() {
         let bench = bench { login, _, _ in
-            login.model.selection = .element(DesignStore.ElementRef(host: .screen(login.screen), element: login.title))
+            login.model.selection = .element(NodeRef(host: .screen(login.screen), node: login.title))
         }
         bench.box.scope = bench.login.screen
         let selection = bench.login.model.selection

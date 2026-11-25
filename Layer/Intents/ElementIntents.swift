@@ -103,7 +103,7 @@ struct AddElementIntent: AppIntent, UndoableIntent {
     /// `designTooLarge` when the design can hold no more. Returns where it is.
     @MainActor
     static func add(_ node: LayerNode, to host: TreeIndex.Host, in model: AppModel, x: Double?, y: Double?,
-                    width: Double?, height: Double?, undoManager: UndoManager?) throws -> DesignStore.ElementRef {
+                    width: Double?, height: Double?, undoManager: UndoManager?) throws -> NodeRef {
         let store = model.store
         var node = node
         let parent: NodeParent
@@ -152,7 +152,7 @@ struct AddElementIntent: AppIntent, UndoableIntent {
             store.add(made, to: parent)
         }
         guard added else { throw LayerIntentError.designTooLarge }
-        return DesignStore.ElementRef(host: DesignStore.ElementRef.Host(host), element: made.id)
+        return NodeRef(host: host, node: made.id)
     }
 }
 
@@ -183,10 +183,10 @@ struct EditElementTextIntent: AppIntent, UndoableIntent {
 
     /// Gives the node the words, as one step, "Change Text". Throws `elementNotFound` when it has gone.
     @MainActor
-    static func setText(_ text: String, of ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+    static func setText(_ text: String, of ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws {
         guard model.store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: "Change Text") {
-            model.store.update(ref.element) { $0.content.text = text }
+            model.store.update(ref.node) { $0.content.text = text }
         }
     }
 }
@@ -295,7 +295,7 @@ struct StyleElementIntent: AppIntent, UndoableIntent {
     /// then each setting given. Throws `invalidColour` for a hex code that isn't one, and `elementNotFound` when it has
     /// gone.
     @MainActor
-    func style(_ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+    func style(_ ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws {
         let fill = try ColourOption.resolve(colour, hex: colourHex)
         let ink = try ColourOption.resolve(textColour, hex: textColourHex)
         let outline = try ColourOption.resolve(borderColour, hex: borderColourHex)
@@ -305,7 +305,7 @@ struct StyleElementIntent: AppIntent, UndoableIntent {
         let (fontSize, weight, alignment, cornerRadius, opacity) = (fontSize, weight, alignment, cornerRadius, opacity)
         let (borderWidth, shadow, isOn, progress, buttonStyle) = (borderWidth, shadow, isOn, progress, buttonStyle)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Style \(kind.layerName)") {
-            model.store.update(ref.element) { node in
+            model.store.update(ref.node) { node in
                 words?.apply(to: &node)
                 if let fill { node.style.tint = fill }
                 if let ink { node.style.textColor = ink }
@@ -384,9 +384,9 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
     /// of a screen's laid-out root sent where it can't be kept (F15), `locked` for a locked one, and `elementNotFound`
     /// when it has gone.
     @MainActor
-    static func move(_ ref: DesignStore.ElementRef, in model: AppModel, x: Double?, y: Double?, width: Double?, height: Double?, undoManager: UndoManager?) throws {
+    static func move(_ ref: NodeRef, in model: AppModel, x: Double?, y: Double?, width: Double?, height: Double?, undoManager: UndoManager?) throws {
         let store = model.store
-        guard let placed = store.placed(ref), let shown = store.index[ref.element]?.hostShape.rect else {
+        guard let placed = store.placed(ref), let shown = store.index[ref.node]?.hostShape.rect else {
             throw LayerIntentError.elementNotFound
         }
         try DesignActions.requireUnlocked(ref, in: model)
@@ -408,7 +408,7 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
         // points ÷ its scale.
         let frame = ref.host == .canvas ? placed.placement.localRect(for: asked) : asked
         let outcome = DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(placed.node.kind.layerName)") {
-            store.move(ref.element, toHostFrame: frame, size: newX == nil && newY == nil)
+            store.move(ref.node, toHostFrame: frame, size: newX == nil && newY == nil)
         }
         if outcome == .refused { throw LayerIntentError.laidOut }
     }
@@ -470,8 +470,8 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
     /// Throws `screenNotFound` for a screen that has gone, `cantGoOnScreens` for a sticky note asked onto one, `locked`
     /// and `elementNotFound`.
     @MainActor
-    static func move(_ ref: DesignStore.ElementRef, toScreen screenID: TreeScreen.ID?, x: Double?, y: Double?, in model: AppModel,
-                     undoManager: UndoManager?) throws -> DesignStore.ElementRef {
+    static func move(_ ref: NodeRef, toScreen screenID: TreeScreen.ID?, x: Double?, y: Double?, in model: AppModel,
+                     undoManager: UndoManager?) throws -> NodeRef {
         let store = model.store
         guard let placed = store.placed(ref) else { throw LayerIntentError.elementNotFound }
         try DesignActions.requireUnlocked(ref, in: model)
@@ -487,7 +487,7 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
             target = .canvas
             points = Placement(origin: .zero, scale: 1)
         }
-        guard target != TreeIndex.Host(ref.host) else {
+        guard target != ref.host else {
             if x != nil || y != nil {
                 try MoveElementIntent.move(ref, in: model, x: x, y: y, width: nil, height: nil, undoManager: undoManager)
             }
@@ -500,9 +500,9 @@ struct MoveElementToScreenIntent: AppIntent, UndoableIntent {
         let kept = points.localPoint(for: placed.canvasShape.centre)
         let middle = CGPoint(x: x.map { CGFloat($0) + size.width / 2 } ?? kept.x, y: y.map { CGFloat($0) + size.height / 2 } ?? kept.y)
         let isMoved = DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(placed.node.kind.layerName)") {
-            store.takeOut(ref.element, to: target, centredAt: points.canvasPoint(for: middle))
+            store.takeOut(ref.node, to: target, centredAt: points.canvasPoint(for: middle))
         }
-        guard isMoved, let moved = store.ref(of: ref.element) else { throw LayerIntentError.elementNotFound }
+        guard isMoved, let moved = store.ref(of: ref.node) else { throw LayerIntentError.elementNotFound }
         return moved
     }
 }
@@ -537,7 +537,7 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
     /// one a row, column, grid or overlay places, a screen's root among them, `screenNotFound` for one off a screen,
     /// `locked` and `elementNotFound`.
     @MainActor
-    static func align(_ ref: DesignStore.ElementRef, in model: AppModel, _ alignment: ElementLayout.Alignment, undoManager: UndoManager?) throws {
+    static func align(_ ref: NodeRef, in model: AppModel, _ alignment: ElementLayout.Alignment, undoManager: UndoManager?) throws {
         let store = model.store
         guard store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         try DesignActions.requireUnlocked(ref, in: model)
@@ -581,7 +581,7 @@ struct ArrangeElementIntent: AppIntent, UndoableIntent {
     /// a row, column or grid orders, which its order there places (`laidOut`); one in an overlay,
     /// which stacks what it holds, is arranged (My call 15, F14).
     @MainActor
-    static func arrange(_ ref: DesignStore.ElementRef, in model: AppModel, _ arrangement: DesignStore.Arrangement, undoManager: UndoManager?) throws {
+    static func arrange(_ ref: NodeRef, in model: AppModel, _ arrangement: DesignStore.Arrangement, undoManager: UndoManager?) throws {
         let store = model.store
         guard let placed = store.placed(ref) else { throw LayerIntentError.elementNotFound }
         guard placed.node.kind != .drawing else { throw LayerIntentError.drawingsStayOnTop }
@@ -591,7 +591,7 @@ struct ArrangeElementIntent: AppIntent, UndoableIntent {
         case .free, .overlay: break
         }
         guard store.canArrange(ref, arrangement) else {
-            let isInAContainer = if case .node = store.parent(of: ref.element) { true } else { false }
+            let isInAContainer = if case .node = store.parent(of: ref.node) { true } else { false }
             throw LayerIntentError.cantGoFurther(withinGroup: isInAContainer)
         }
         DesignActions.edit(model, undoManager: undoManager, actionName: arrangement.name) {
@@ -624,13 +624,13 @@ struct DuplicateElementIntent: AppIntent, UndoableIntent {
     /// A copy beside the node (`DesignStore.duplicate(node:)`), as one step, "Duplicate". Throws `elementNotFound` when
     /// it has gone, and `designTooLarge` when the design can't hold the copy. Returns where the copy is.
     @MainActor
-    static func duplicate(_ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws -> DesignStore.ElementRef {
+    static func duplicate(_ ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws -> NodeRef {
         guard model.store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         let copy = DesignActions.edit(model, undoManager: undoManager, actionName: "Duplicate") {
-            model.store.duplicate(node: ref.element)
+            model.store.duplicate(node: ref.node)
         }
         guard let copy else { throw LayerIntentError.designTooLarge }
-        return DesignStore.ElementRef(host: ref.host, element: copy)
+        return NodeRef(host: ref.host, node: copy)
     }
 }
 
@@ -659,11 +659,11 @@ struct DeleteElementIntent: AppIntent, UndoableIntent {
 
     /// Deletes a node, unless it is locked, as one step (`DesignStore.delete(nodes:)`).
     @MainActor
-    static func delete(_ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+    static func delete(_ ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws {
         guard model.store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         try DesignActions.requireUnlocked(ref, in: model)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Delete") {
-            model.store.delete(nodes: [ref.element])
+            model.store.delete(nodes: [ref.node])
         }
     }
 }
@@ -695,14 +695,14 @@ struct SetElementHiddenIntent: AppIntent, UndoableIntent {
 
     /// Hides a node, or shows it, as one undo step.
     @MainActor
-    static func setHidden(_ hidden: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+    static func setHidden(_ hidden: Bool, _ ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws {
         let store = model.store
         guard store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         // Shown, it has to be showing: the hidden containers above it are shown too, as unlocking
         // unlocks the ones above (ruling D), or a node hidden only by its container stays hidden.
-        let containers = hidden ? [] : store.index.ancestors(of: ref.element).filter { store.node($0)?.isHidden == true }
+        let containers = hidden ? [] : store.index.ancestors(of: ref.node).filter { store.node($0)?.isHidden == true }
         DesignActions.edit(model, undoManager: undoManager, actionName: hidden ? "Hide" : "Show") {
-            store.update(ref.element) { $0.isHidden = hidden }
+            store.update(ref.node) { $0.isHidden = hidden }
             for id in containers { store.update(id) { $0.isHidden = false } }
         }
         if hidden { model.deselect(.element(ref)) }
@@ -739,7 +739,7 @@ struct SetElementLockedIntent: AppIntent, UndoableIntent {
     /// panel do, or a member locked only by its group would stay locked (ruling D). Locking
     /// locks only the element.
     @MainActor
-    static func setLocked(_ locked: Bool, _ ref: DesignStore.ElementRef, in model: AppModel, undoManager: UndoManager?) throws {
+    static func setLocked(_ locked: Bool, _ ref: NodeRef, in model: AppModel, undoManager: UndoManager?) throws {
         guard model.store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock" : "Unlock") {
             if locked {
@@ -779,11 +779,11 @@ struct RenameElementIntent: AppIntent, UndoableIntent {
     /// Names the node, or takes its name away for a name of nothing but space, as one step, "Rename". Throws
     /// `elementNotFound` when it has gone.
     @MainActor
-    static func rename(_ ref: DesignStore.ElementRef, to name: String, in model: AppModel, undoManager: UndoManager?) throws {
+    static func rename(_ ref: NodeRef, to name: String, in model: AppModel, undoManager: UndoManager?) throws {
         guard model.store.placed(ref) != nil else { throw LayerIntentError.elementNotFound }
         let isBlank = name.trimmingCharacters(in: .whitespaces).isEmpty
         DesignActions.edit(model, undoManager: undoManager, actionName: "Rename") {
-            model.store.update(ref.element) { $0.name = isBlank ? nil : name }
+            model.store.update(ref.node) { $0.name = isBlank ? nil : name }
         }
     }
 }

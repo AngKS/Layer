@@ -240,7 +240,7 @@ struct DrawingSyncTests {
 @Suite("Drawings in the design")
 @MainActor
 struct DrawingStoreTests {
-    private func storeWithDrawing() throws -> (store: DesignStore, undo: UndoManager, ref: DesignStore.ElementRef) {
+    private func storeWithDrawing() throws -> (store: DesignStore, undo: UndoManager, ref: NodeRef) {
         let undo = UndoManager()
         undo.groupsByEvent = false
         let store = DesignStore()
@@ -249,7 +249,7 @@ struct DrawingStoreTests {
         let changes = sync.changes(for: cross(at: CGPoint(x: 400, y: 300)), in: store.tree)
         store.apply { changes.apply(to: &$0) }
         let drawing = try #require(store.tree.canvas.first)
-        return (store, undo, DesignStore.ElementRef(host: .canvas, element: drawing.id))
+        return (store, undo, NodeRef(host: .canvas, node: drawing.id))
     }
 
     @Test func inkDrawnOnTheCanvasIsAnUndoStepOfTheDesigns() throws {
@@ -266,7 +266,7 @@ struct DrawingStoreTests {
     @Test func aDrawingIsLockedHiddenCopiedAndDeletedLikeAnyElement() throws {
         let (store, undo, ref) = try storeWithDrawing()
 
-        store.update(ref.element) { $0.isLocked = true }
+        store.update(ref.node) { $0.isLocked = true }
         #expect(store.placed(ref)?.node.isLocked == true)
 
         let copy = try #require(store.duplicate(ref))
@@ -276,7 +276,7 @@ struct DrawingStoreTests {
         #expect(store.placed(copy)?.node.isLocked == false)
 
         store.delete(ref)
-        #expect(store.tree.canvasLeaves.map(\.id) == [copy.element])
+        #expect(store.tree.canvasLeaves.map(\.id) == [copy.node])
         undo.undo()
         #expect(store.tree.canvasLeaves.count == 2)
     }

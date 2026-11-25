@@ -133,7 +133,7 @@ extension TreeContent {
 @MainActor
 extension DesignStore {
     /// `TreeContent.listed(on:)` for a host of the store's design.
-    func listed(on host: ElementRef.Host) -> [LayerNode] {
+    func listed(on host: NodeRef.Host) -> [LayerNode] {
         let screenID: TreeScreen.ID? = if case .screen(let id) = host { id } else { nil }
         return tree.listed(on: screenID)
     }
@@ -164,7 +164,7 @@ extension DesignStore {
     /// on it: a sticky note or a drawing, which the tree keeps on the open canvas, goes there where the screen would have
     /// shown it, at the screen's scale. Where each now lives.
     @discardableResult
-    func add(_ nodes: [LayerNode], onScreen screenID: TreeScreen.ID) -> [ElementRef] {
+    func add(_ nodes: [LayerNode], onScreen screenID: TreeScreen.ID) -> [NodeRef] {
         guard let screen = treeScreen(screenID) else { return [] }
         let scale = screen.scale.isFinite && screen.scale > 0 ? screen.scale : 1
         asOneStep {
@@ -180,19 +180,19 @@ extension DesignStore {
                 add(loose, to: .canvas)
             }
         }
-        return nodes.map { ElementRef(host: $0.kind.belongsOnScreens ? .screen(screenID) : .canvas, element: $0.id) }
+        return nodes.map { NodeRef(host: $0.kind.belongsOnScreens ? .screen(screenID) : .canvas, node: $0.id) }
     }
 
     /// `addCanvasNode(_:scale:)`, as a ref.
     @discardableResult
-    func addOnCanvas(_ node: LayerNode, scale: CGFloat = 1) -> ElementRef {
-        ElementRef(host: .canvas, element: addCanvasNode(node, scale: scale))
+    func addOnCanvas(_ node: LayerNode, scale: CGFloat = 1) -> NodeRef {
+        NodeRef(host: .canvas, node: addCanvasNode(node, scale: scale))
     }
 
     /// What the flat store's loose sketch made of `sketch` (canvas points): a new leaf of `kind`, about as large as it was
     /// drawn at `looseScale` as its kind's loose size allows, centred on it through `place(_:centredAt:)`.
     @discardableResult
-    func addLoose(_ kind: ElementKind, from sketch: CGRect) -> ElementRef? {
+    func addLoose(_ kind: ElementKind, from sketch: CGRect) -> NodeRef? {
         var node = LayerNode.standard(kind)
         let drawn = CGSize(width: sketch.width / looseScale, height: sketch.height / looseScale)
         node.frame.size = kind.spec.looseSize.size(from: node.frame.size, drawn: drawn)

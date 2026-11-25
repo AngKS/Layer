@@ -41,8 +41,8 @@ extension DesignStore {
         var moving: [NodeParent: Set<UUID>] = [:]
         for case .element(let ref) in selection.things {
             guard let placed = placed(ref), placed.node.kind != .drawing, !placed.isLocked,
-                  let parent = parent(of: ref.element), !isOrderedByItsLayout(parent) else { continue }
-            moving[parent, default: []].insert(ref.element)
+                  let parent = parent(of: ref.node), !isOrderedByItsLayout(parent) else { continue }
+            moving[parent, default: []].insert(ref.node)
         }
         var orders: [NodeParent: [UUID]] = [:]
         for (parent, moved) in moving {
@@ -103,7 +103,7 @@ typealias LayerList = NodeParent
 
 extension NodeParent {
     /// A screen's top level, or the open canvas's, as the Layers panel names it.
-    static func host(_ host: DesignStore.ElementRef.Host) -> NodeParent {
+    static func host(_ host: NodeRef.Host) -> NodeParent {
         switch host {
         case .screen(let id): .screen(id)
         case .canvas: .canvas

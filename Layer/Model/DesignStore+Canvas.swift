@@ -5,7 +5,7 @@ import Foundation
 /// points sit on the canvas, and what holds it. Built from the store's index and one walk down the
 /// node's path, never from the projection.
 struct PlacedNode: Equatable {
-    var ref: DesignStore.ElementRef
+    var ref: NodeRef
     var node: LayerNode
     /// Its own pose: its upright frame in its host's own points, centred on its turned shape's centre.
     var frame: CGRect
@@ -33,26 +33,6 @@ struct PlacedNode: Equatable {
     var isPickedByItsFrame: Bool { node.kind != .drawing || isLocked }
 }
 
-extension DesignStore.ElementRef.Host {
-    /// Where the index has a node.
-    init(_ host: TreeIndex.Host) {
-        switch host {
-        case .screen(let id): self = .screen(id)
-        case .canvas: self = .canvas
-        }
-    }
-}
-
-extension TreeIndex.Host {
-    /// Where a ref says a node is.
-    init(_ host: DesignStore.ElementRef.Host) {
-        switch host {
-        case .screen(let id): self = .screen(id)
-        case .canvas: self = .canvas
-        }
-    }
-}
-
 /// The canvas's reads and writes on the tree, beside plan 2's verbs (`DesignStore+Tree.swift`). Each read
 /// comes from the store's index, worked out once per version, and a walk down one node's path; none lowers
 /// the projection. Each write is one change, made as the store's verbs make theirs.
@@ -66,9 +46,9 @@ extension DesignStore {
 
     /// Where a node is, as the selection points at it: its host as the index has it. Nil for a screen's root,
     /// which is the screen rather than a thing on it, and for an id the design doesn't have.
-    func ref(of id: UUID) -> ElementRef? {
+    func ref(of id: UUID) -> NodeRef? {
         guard let entry = index[id], !entry.path.isEmpty else { return nil }
-        return ElementRef(host: ElementRef.Host(entry.host), element: id)
+        return NodeRef(host: entry.host, node: id)
     }
 
     /// A node with where it is: see `PlacedNode`. Nil for a screen's root and an id the design doesn't have.
@@ -83,8 +63,8 @@ extension DesignStore {
 
     /// `placed(_:)` for what a ref points at, when it is still where the ref says: nil when it is gone, or
     /// has gone to another host since.
-    func placed(_ ref: ElementRef) -> PlacedNode? {
-        placed(ref.element).flatMap { $0.ref == ref ? $0 : nil }
+    func placed(_ ref: NodeRef) -> PlacedNode? {
+        placed(ref.node).flatMap { $0.ref == ref ? $0 : nil }
     }
 
     /// The topmost screen whose frame on the canvas holds a canvas point, drawn as its device, a design's own included.
@@ -97,7 +77,7 @@ extension DesignStore {
     /// of `placement` (the screen's, or on the open canvas a top-level node's): what a thing dragged there lines up
     /// with and is measured to. Its shapes come from the index; the walk only finds which leaves there are, back to
     /// front, the open canvas's drawings among them.
-    func leafBounds(on host: ElementRef.Host, besides id: UUID, in placement: Placement) -> [CGRect] {
+    func leafBounds(on host: NodeRef.Host, besides id: UUID, in placement: Placement) -> [CGRect] {
         let memo = index, tree = tree
         let nodes: [LayerNode]
         switch host {

@@ -40,7 +40,7 @@ struct CanvasPictureTests {
     @Test func thePictureListsScreensAndElements() throws {
         let (app, screen) = VoiceFixture.login()
         let button = try #require(app.store.screenLeaves(screen).first { $0.kind == .button })
-        app.selection = .element(.init(host: .screen(screen), element: button.id))
+        app.selection = .element(.init(host: .screen(screen), node: button.id))
         let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         #expect(picture.hasScreens)
         let text = picture.text(.full)
@@ -83,8 +83,8 @@ struct CanvasPictureTests {
         let (app, screen) = VoiceFixture.login()
         let elements = app.store.screenLeaves(screen)
         app.selection = .several([
-            .element(.init(host: .screen(screen), element: elements[0].id)),
-            .element(.init(host: .screen(screen), element: elements[2].id)),
+            .element(.init(host: .screen(screen), node: elements[0].id)),
+            .element(.init(host: .screen(screen), node: elements[2].id)),
         ])
         let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         #expect(picture.screens.first?.elements.map(\.isSelected) == [true, false, true])
@@ -108,7 +108,7 @@ struct CanvasPictureTests {
             .leaf(.button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Edit profile", tint: Theme.accent),
         ], name: "Profile", origin: CGPoint(x: 4400, y: 4000), scale: 0.6)
         let title = try #require(app.store.screenLeaves(login).first)
-        app.selection = .element(.init(host: .screen(login), element: title.id))
+        app.selection = .element(.init(host: .screen(login), node: title.id))
 
         let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         let compact = picture.text(.compact)
@@ -240,7 +240,7 @@ struct VoiceToolsTests {
         #expect(button.style.textColor == ColourWords.parse("blue"))
         #expect(button.style.fontWeight == .bold)
         // The element it changed is the one selected, so "it" means that one next.
-        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), element: button.id)))
+        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), node: button.id)))
         #expect(!line.isEmpty)
         #expect(bench.box.lines == [line])
         #expect(bench.box.failures.isEmpty)
@@ -683,7 +683,7 @@ struct VoiceToolsTests {
         _ = bench.box.show(target: "S1")
         #expect(bench.app.selection == .screen(bench.screen))
         _ = bench.box.show(target: "e3")
-        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)))
+        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)))
         #expect(bench.box.show(target: "all") == "Showing everything.")
         #expect(bench.box.show(target: "S9") == "There is no S9.")
         // Showing changes nothing in the design.
@@ -943,7 +943,7 @@ struct VoiceToolsTests {
         box.reset()
         let button = try #require(handles.element("E2"))
         _ = box.styleElement(element: "E2", look: "red")
-        #expect(app.selection == .element(.init(host: .screen(login), element: button)))
+        #expect(app.selection == .element(.init(host: .screen(login), node: button)))
     }
 
     /// The screen a change is for is taken away while the change is under way: what it
@@ -1087,15 +1087,15 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.beginEdit()
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        store.update(image.node) { $0.frame.origin.x = 40 }
         store.endHeldEdit()
         let mark = store.historyMark
-        store.update(image.element) { $0.frame.origin.x = 60 }
-        store.update(image.element) { $0.frame.origin.x = 80 }
+        store.update(image.node) { $0.frame.origin.x = 60 }
+        store.update(image.node) { $0.frame.origin.x = 80 }
         // No move is a step of its own while the finger is still down.
         #expect(store.historyMark == mark)
         store.endEdit()
@@ -1113,14 +1113,14 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
         store.beginEdit()
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        store.update(image.node) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         let mark = store.historyMark
-        store.update(image.element) { $0.frame.origin.x = 60 }
+        store.update(image.node) { $0.frame.origin.x = 60 }
         #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
@@ -1140,17 +1140,17 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
         bench.app.adjustmentPause = .milliseconds(20)
         store.beginHeldEdit()
         for width in [180, 160, 140] {
-            bench.app.adjusting { store.update(image.element) { $0.frame.size.width = CGFloat(width) } }
+            bench.app.adjusting { store.update(image.node) { $0.frame.size.width = CGFloat(width) } }
         }
         #expect(await eventually { !store.isEditing }, "the panel's pause ends the slider's step")
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         #expect(!store.isEditing && !store.isHoldingEdit)
-        store.update(image.element) { $0.frame.origin.y = 520 }
+        store.update(image.node) { $0.frame.origin.y = 520 }
         undo.undo()
         #expect(try #require(bench.frame("E3")).origin.y == 500)
         #expect(try #require(bench.frame("E3")).size.width == 140)
@@ -1170,10 +1170,10 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         store.beginEdit()
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        store.update(image.node) { $0.frame.origin.x = 40 }
         store.endEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
@@ -1190,11 +1190,11 @@ struct VoiceToolsTests {
     @Test func undoForACorrectionNeverTakesBackAChangeByHand() throws {
         let bench = bench()
         let store = bench.app.store
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        store.update(image.node) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         bench.box.spokenCommand = "No, that's wrong."
         let said = bench.box.undo()
@@ -1210,8 +1210,8 @@ struct VoiceToolsTests {
         let bench = bench()
         let store = bench.app.store
         let undo = try #require(store.undoManager)
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
+        store.update(image.node) { $0.frame.origin.x = 40 }
         undo.undo()
         store.beginHeldEdit()
         bench.box.spokenCommand = "No, that's wrong."
@@ -1228,8 +1228,8 @@ struct VoiceToolsTests {
     @Test func undoSaidOutrightTakesBackTheLastChangeWhoeverMadeIt() throws {
         let bench = bench()
         let store = bench.app.store
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
-        store.update(image.element) { $0.frame.origin.x = 40 }
+        let image = NodeRef(host: .screen(bench.screen), node: try #require(bench.node("E3")).id)
+        store.update(image.node) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         bench.box.spokenCommand = "Undo that."
         #expect(bench.box.undo() == "Undid the last change.")

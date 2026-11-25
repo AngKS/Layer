@@ -228,9 +228,9 @@ struct VoiceOnTheTreeTests {
     @Test func aSelectedContainerIsCalledWhatItIs() {
         let bench = bench()
         let model = bench.login.model
-        model.selection = .element(.init(host: .screen(bench.login.screen), element: bench.login.row))
+        model.selection = .element(.init(host: .screen(bench.login.screen), node: bench.login.row))
         #expect(CanvasPicture.capture(from: model, handles: bench.handles).selectionInWords == "E5, the row on S1")
-        model.selection = .element(.init(host: .screen(bench.login.screen), element: bench.login.card))
+        model.selection = .element(.init(host: .screen(bench.login.screen), node: bench.login.card))
         #expect(CanvasPicture.capture(from: model, handles: bench.handles).selectionInWords == "E2, the card on S1")
     }
 
@@ -514,6 +514,6 @@ struct VoiceOnTheTreeTests {
         #expect(store.node(login.label)?.style.tint == ColourWords.named["blue"])
         #expect(store.ownFrame(login.card)?.minX == 30)
         // What the last tool changed is shown, and so selected: the card it moved.
-        #expect(login.model.selection == .element(DesignStore.ElementRef(host: .screen(login.screen), element: login.card)))
+        #expect(login.model.selection == .element(NodeRef(host: .screen(login.screen), node: login.card)))
     }
 }

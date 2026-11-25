@@ -13,11 +13,11 @@ extension DesignStore {
 
     /// The containers that hold something, at any depth, the nearest first: a card, row, column, grid or
     /// overlay as much as a group. A screen's root isn't one: it is the screen. Read from the index.
-    func groups(holding ref: ElementRef) -> [ElementRef] {
+    func groups(holding ref: NodeRef) -> [NodeRef] {
         let memo = index
-        return memo.ancestors(of: ref.element).compactMap { id in
+        return memo.ancestors(of: ref.node).compactMap { id in
             guard let entry = memo[id], !entry.path.isEmpty else { return nil }
-            return ElementRef(host: ref.host, element: id)
+            return NodeRef(host: ref.host, node: id)
         }
     }
 
@@ -25,13 +25,13 @@ extension DesignStore {
     /// in each is selected): the outermost of it and the containers above it that hasn't been,
     /// which is `leaf` itself once all of them have. A container stands for a tap in the gap
     /// between what it holds.
-    func pickTarget(for leaf: ElementRef, entered: Set<UUID>) -> ElementRef {
-        groups(holding: leaf).last { !entered.contains($0.element) } ?? leaf
+    func pickTarget(for leaf: NodeRef, entered: Set<UUID>) -> NodeRef {
+        groups(holding: leaf).last { !entered.contains($0.node) } ?? leaf
     }
 
     /// One level in from `outer` towards `leaf`: the container just inside `outer` on the way to
     /// `leaf`, or `leaf` itself. `leaf` when `outer` is `leaf`, or doesn't hold it.
-    func nextLevel(in outer: ElementRef, towards leaf: ElementRef) -> ElementRef {
+    func nextLevel(in outer: NodeRef, towards leaf: NodeRef) -> NodeRef {
         let path = [leaf] + groups(holding: leaf)
         guard let index = path.firstIndex(of: outer), index > 0 else { return leaf }
         return path[index - 1]
@@ -60,9 +60,9 @@ extension DesignStore {
     /// A container as it is now, read from the tree: see `GroupPose`. Nil when `ref` isn't a container
     /// where the ref says. A row, column, grid or overlay in it counts as one leaf, and one resized
     /// itself is its own one leaf: what is in it is laid out by the engine, never scaled.
-    func groupPose(of ref: ElementRef) -> GroupPose? {
+    func groupPose(of ref: NodeRef) -> GroupPose? {
         guard let placed = placed(ref), placed.node.isContainer,
-              let parentSpace = index.posed(ref.element, in: tree)?.parentSpace else { return nil }
+              let parentSpace = index.posed(ref.node, in: tree)?.parentSpace else { return nil }
         let isLaidOut = placed.node.resolvedLayout != .free
         var pose = GroupPose(box: placed.frame, node: placed.node, smallestScale: 0, isLaidOut: isLaidOut, parentSpace: parentSpace)
         func consider(_ leaf: LayerNode) {
@@ -97,7 +97,7 @@ extension DesignStore {
     /// A row, column, grid or overlay in it is one leaf, scaled as one and fixed at its new size,
     /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
     /// on each axis whose size changed, and the engine lays out what is in it.
-    func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
+    func resizeGroup(_ ref: NodeRef, to frame: CGRect, from start: GroupPose? = nil) {
         // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds the store's
         // index and never lowers the design to its list (clause (m)).
         guard let group = placed(ref), group.node.isContainer, !group.isLocked,
@@ -120,7 +120,7 @@ extension DesignStore {
             let centre = CGPoint(x: fixed.x + (from.x - fixed.x) * scale, y: fixed.y + (from.y - fixed.y) * scale)
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
-        guard let entry = index[ref.element], let posed = index.posed(ref.element, in: tree) else { return }
+        guard let entry = index[ref.node], let posed = index.posed(ref.node, in: tree) else { return }
         // Read from the pose, not the design: each frame of a handle's drag scales what was there as it began.
         var resized = posed.node
         // Back where it began, in a parent where it was, exactly as it was, with no arithmetic to round.
@@ -191,7 +191,7 @@ extension DesignStore {
     /// is named as its kind until it is renamed. Group as a group (`group(_:as:)`), which also refuses a wrap past the
     /// store's depth and node limits (F15).
     @discardableResult
-    func group(_ selection: CanvasSelection) -> ElementRef? {
+    func group(_ selection: CanvasSelection) -> NodeRef? {
         group(selection, as: .group)
     }
 
@@ -210,7 +210,7 @@ extension DesignStore {
         for thing in things(in: selection) {
             guard case .element(let ref) = thing else { return nil }
             guard let placed = placed(ref), placed.node.kind != .drawing, !placed.isLocked else { continue }
-            members.append(ref.element)
+            members.append(ref.node)
         }
         guard members.count >= max(minimum, 1), let first = members.first, let shared = parent(of: first),
               members.allSatisfy({ parent(of: $0) == shared }) else { return nil }
@@ -233,15 +233,15 @@ extension DesignStore {
     /// that the pass never puts it back (plan 5, call 11). The marks are part of the step
     /// (plan 5's final review, A9): undoing it puts the container back with nothing declined.
     @discardableResult
-    func ungroup(_ ref: ElementRef) -> CanvasSelection? {
+    func ungroup(_ ref: NodeRef) -> CanvasSelection? {
         guard let item = placed(ref), item.node.isContainer else { return nil }
         let wasThePasses = item.node.sketch?.decidedBy == .structure
         var members: [UUID] = []
         asOneStep {
-            members = unwrap(ref.element)
+            members = unwrap(ref.node)
             if wasThePasses { apply { $0 = Self.declining(Set(members), in: $0) } }
         }
-        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0)) })
+        return CanvasSelection(members.map { .element(NodeRef(host: ref.host, node: $0)) })
     }
 
     /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as
@@ -254,8 +254,8 @@ extension DesignStore {
         for thing in things(in: selection) {
             switch thing {
             case .element(let ref):
-                nodes.append(ref.element)
-                nodes += memo.ancestors(of: ref.element).filter { id in
+                nodes.append(ref.node)
+                nodes += memo.ancestors(of: ref.node).filter { id in
                     memo[id].map { !$0.path.isEmpty } == true && memo.node(id, in: tree)?.isLocked == true
                 }
             case .screen(let id):
@@ -268,7 +268,7 @@ extension DesignStore {
     }
 }
 
-extension DesignStore.ElementRef.Host {
+extension NodeRef.Host {
     /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
     var parent: TreeScreen.ID? {
         if case .screen(let id) = self { id } else { nil }

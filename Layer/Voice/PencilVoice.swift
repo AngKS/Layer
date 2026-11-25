@@ -663,7 +663,7 @@ final class PencilVoice {
 
     private static func isDrawing(_ thing: CanvasSelection?, in store: DesignStore) -> Bool {
         guard case .element(let ref)? = thing else { return false }
-        return store.node(ref.element)?.kind == .drawing
+        return store.node(ref.node)?.kind == .drawing
     }
 
     /// Whether what the pen is over is part of what is selected: one of the things selected,
@@ -671,10 +671,10 @@ final class PencilVoice {
     private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection, in store: DesignStore) -> Bool {
         if selection.contains(hit) { return true }
         guard case .element(let ref) = hit else { return false }
-        let holders = Set(store.index.ancestors(of: ref.element))
+        let holders = Set(store.index.ancestors(of: ref.node))
         return selection.things.contains { thing in
             switch thing {
-            case .element(let selected): holders.contains(selected.element)
+            case .element(let selected): holders.contains(selected.node)
             // A thing on a screen that is selected is part of it too.
             case .screen(let id): ref.host == .screen(id)
             case .several: false

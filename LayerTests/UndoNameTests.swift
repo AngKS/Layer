@@ -12,14 +12,14 @@ struct UndoNameTests {
     @MainActor private struct Board {
         let model = AppModel(document: LayerDocument())
         let undo = UndoManager()
-        let button: DesignStore.ElementRef
+        let button: NodeRef
         let drags = CanvasDrags()
         var store: DesignStore { model.store }
 
         init() {
             let one = LayerNode.leaf(.button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: Theme.accent)
             let screen = model.store.addFreeScreen([one], origin: CGPoint(x: 100, y: 50), scale: 0.5)
-            button = DesignStore.ElementRef(host: .screen(screen), element: one.id)
+            button = NodeRef(host: .screen(screen), node: one.id)
             model.store.updateCanvas { $0.snapsToGuides = false }
             model.drags = drags
             undo.groupsByEvent = false
@@ -86,7 +86,7 @@ struct UndoNameTests {
 
     @Test func theFormatPanelsChangesAreFormat() {
         let board = Board()
-        board.model.adjusting { board.store.update(board.button.element) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
+        board.model.adjusting { board.store.update(board.button.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }
         #expect(board.undo.undoActionName == "Format")
     }
 }
