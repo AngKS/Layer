@@ -21,7 +21,8 @@ A screen holds elements and containers, and a container holds more of either, ne
   - on each screen: `deviceName`, `layout` and `padding` (how its root lays out what it holds), and `containers`, each with the keys an element has plus `layout`, `padding` and `children` (its children's ids, in order);
   - at the top, `canvasContainers` for the open canvas, and in `canvas`, `newScreenDeviceName`.
   - `device` and `newScreenDevice` are the device's id: `iphone`, `ipad` and the others, or `custom-…` for one of the design's own.
-- **What a row, column or grid holds is placed by it.** Move or Resize Element with a position moves such a child as a drag would: to the place in a row, column or grid on its screen where its middle lands, or, when that is in none, out onto its screen at the position, fixed at its size. A size alone resizes it where it is. Under a screen whose root is a column there is nowhere to take it out to, and a position that lands in its own place changes nothing: both throw the `laidOut` error below, and nothing is changed. Align throws `laidOut` for a child its container places, an overlay's included, and Change Element Order for a row's, column's or grid's. Move Element to Screen takes anything out of its container onto the other screen.
+- **What a row, column or grid holds is placed by it.** Move or Resize Element with a position moves such a child as a drag would: to the place in a row, column or grid on its screen where its middle lands, or, when that is in none, out onto its screen at the position, fixed at its size. A size alone resizes it where it is. Under a screen whose root is a column there is nowhere to take it out to, and a position that lands in its own place changes nothing: both throw the `laidOut` error below, and nothing is changed. Change Element Order throws `laidOut` for a row's, column's or grid's child. Move Element to Screen takes anything out of its container onto the other screen.
+- **Align lines a laid-out child up by its container**, as Align in the Format panel and voice's `alignElement` do: a child of a row, column, grid or overlay, a laid-out screen root's included, sets that container's alignment. A column takes the left edge, horizontal centre and right edge; a row the top edge, vertical middle and bottom edge; a grid or an overlay any of them. One the container has no use for, such as the top edge in a column, throws `alignmentNotTaken` and changes nothing. An element in a free container or on a free screen lines up with its screen.
 - **Add Element on a laid-out screen** adds the element last in the column; X and Y are passed over, and a width or height given is kept.
 
 ## Actions
@@ -40,7 +41,7 @@ A screen holds elements and containers, and a container holds more of either, ne
 | | **Style Element** | Look string; fill, text and outline colour (named or hex); font size and weight; alignment; corner radius; opacity; outline width; shadow; **on/off**; **progress**; **button style**; **SF Symbol**. |
 | | **Move or Resize Element** | `x`, `y`, `width`, `height`: screen points, or canvas points for loose elements. In a row, column or grid, see "The design's tree". |
 | | **Move Element to Screen** | Onto another screen or off onto the canvas, at an optional `x`/`y`, out of any container it was in. |
-| | **Align Element** | Lines it up with an edge or the middle of its screen. Only what sits where it is put moves: not a row's, column's, grid's or overlay's child. |
+| | **Align Element** | Lines it up with an edge or the middle of its screen. In a row, column, grid or overlay, sets that container's alignment instead: see "The design's tree". |
 | | **Change Element Order** | Front, forward, backward or back, among the things its container or screen holds. |
 | | Change Text, Duplicate, Delete, Hide or Show, Lock or Unlock, Rename, Select | A duplicate goes beside the original, in its container. |
 | Canvas | **Change Canvas Settings** | Grid, grid style and spacing, snapping, frame names, spacing guides, background (named or hex), device for sketched screens (or **Custom Device for New Screens**), code layout, `#Preview`, navigation title, Magic Pen convert-after-pause and scratch-out. |
@@ -56,9 +57,10 @@ Add Screen, Build Screen and Change Screen Device take a **Custom Device**, and 
 
 ## Errors
 
-Two errors came with the tree. Each says why nothing was changed:
+Three errors came with the tree. Each says why nothing was changed:
 
-- **`laidOut`**: "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first." Thrown by Move or Resize Element, Align and Change Element Order for a child its container places.
+- **`laidOut`**: "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first." Thrown by Move or Resize Element and Change Element Order for a child its container places.
+- **`alignmentNotTaken`**: "That element is in a row, which aligns what it holds only to the top edge, vertical middle or bottom edge. Nothing was changed." Thrown by Align for an alignment along a row or column, which it has no use for; a screen's laid-out root is "its screen's column".
 - **`deviceNotFound`**: "This design has no device called “Kiosk”. Make one with Custom Size… in the device picker." Thrown for a Custom Device the design doesn't have, or has but can't use, before anything is written.
 
 A change that would take the design past 5,000 things, or 32 deep, says so and changes nothing.
@@ -68,7 +70,7 @@ A change that would take the design past 5,000 things, or 32 deep, says so and c
 Voice mode (the call pill, and Squeeze to Talk) hands its model the canvas as a picture: each screen and what is on it, containers with what they hold indented under them, each with a handle such as `S1` or `E5`, its frame in screen points, its look, and `[locked]` for anything locked by itself or by a container above it. Its tools take those handles:
 
 - **Screens:** `createScreen` (on a device of the design's own by its name too), `renameScreen`, `deleteScreen`, `tidyScreen`, `changeScreenDevice`.
-- **Elements:** `addElement`, `setText`, `styleElement`, `moveElement` (with `takeOut` to take a row's, column's or grid's child out of it), `rotateElement`, `alignElement`, `stackElements`, `placeElement`, `duplicateElement`, `deleteElement`.
+- **Elements:** `addElement`, `setText`, `styleElement`, `moveElement` (with `takeOut` to take a row's, column's or grid's child out of it), `rotateElement`, `alignElement` (in a row, column, grid or overlay, by that container's alignment, as Siri's Align), `stackElements`, `placeElement`, `duplicateElement`, `deleteElement`.
 - **Structure:** `groupElements` puts things in a new group, row, column, grid or card; `setLayout` changes how a container or a screen lays out what it holds (`free`, `row`, `column`, `grid of 2`, `overlay`, an alignment and a spacing); `ungroup` takes one apart, leaving what it held where it is; `reorder` puts a thing before or after another in the container they share. In a row, column or grid that is its place; elsewhere it is only which is in front.
 - **The view:** `show`, `pan`, `zoom`, `undo`, `redo`, `endCall`.
 
