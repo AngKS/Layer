@@ -227,7 +227,7 @@ extension HostedWindowSuites {
             undo.groupsByEvent = false
             model.store.undoManager = undo
             model.adjustmentPause = .milliseconds(10)
-            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+            let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1))).id
             var button = LayerNode.standard(.button)
             button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
             try #require(model.store.add(button, to: .screen(screen)))
@@ -530,7 +530,7 @@ struct PanelChangesBesideADragTests {
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .milliseconds(10)
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let titleNode = LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent)
         let buttonNode = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent)
         model.store.asOneStep {

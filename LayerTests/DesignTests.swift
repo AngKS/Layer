@@ -158,7 +158,7 @@ struct ViewportTests {
 struct DesignStoreTests {
     @Test func sketchesBecomeScreensAndElementsAndEachCanBeUndoneAndRedone() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         #expect(screen.name == "Screen 1")
 
         let sketch = screen.placement.canvasRect(for: titleSketch)
@@ -180,7 +180,7 @@ struct DesignStoreTests {
 
     @Test func aGradualEditUndoesAsOneStep() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = NodeRef(host: .screen(screen.id), node: title.id)
 
@@ -202,7 +202,7 @@ struct DesignStoreTests {
     /// close then put that earlier step back, so undo behaved as redo.
     @Test func undoWhileAnEditIsHeldTakesBackWhatItHasDoneSoFar() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = NodeRef(host: .screen(screen.id), node: title.id)
         let before = store.tree
@@ -224,7 +224,7 @@ struct DesignStoreTests {
 
     @Test func redoWhileAnEditIsHeldStillRedoes() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         _ = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let withTitle = store.tree
         undo.undo()
@@ -242,7 +242,7 @@ struct DesignStoreTests {
     @Test func theHistoryMarkMovesWithEveryStep() throws {
         let (store, undo) = makeStore()
         let start = store.historyMark
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let afterAdd = store.historyMark
         #expect(afterAdd != start)
         store.setTitle("Quiet", undoable: false)
@@ -276,7 +276,7 @@ struct DesignStoreTests {
 
     @Test func movingAScreenTakesItsElementsWithIt() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = NodeRef(host: .screen(screen.id), node: title.id)
         let before = try #require(store.placed(ref)).placement.canvasRect(for: title.frame)
@@ -291,7 +291,7 @@ struct DesignStoreTests {
 
     @Test func anElementDroppedOffItsScreenFloatsWhereItWasDropped() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let onScreen = NodeRef(host: .screen(screen.id), node: title.id)
 
@@ -310,8 +310,8 @@ struct DesignStoreTests {
 
     @Test func anElementDroppedOnAnotherScreenJoinsItAndTheMoveUndoes() throws {
         let (store, undo) = makeStore()
-        let left = store.addScreen(from: leftScreenSketch)
-        let right = store.addScreen(from: rightScreenSketch)
+        let left = try #require(store.addScreen(from: leftScreenSketch))
+        let right = try #require(store.addScreen(from: rightScreenSketch))
         let title = try #require(store.sketched(.title, from: left.placement.canvasRect(for: titleSketch), to: left.id))
         let ref = NodeRef(host: .screen(left.id), node: title.id)
 
@@ -336,7 +336,7 @@ struct DesignStoreTests {
 
     @Test func aSymbolLandsOnTheScreenUnderItOrOnTheOpenCanvas() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
 
         let onScreen = try #require(store.place(LayerNode.standard(.symbol, symbol: "heart.fill"), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(onScreen.host == .screen(screen.id))
@@ -359,7 +359,7 @@ struct DesignStoreTests {
     @Test func aDeviceFrameIsAddedAtItsOwnSizeAndElementsKeepTheirMarginsOnIt() throws {
         let (store, _) = makeStore()
         let iPad = try #require(DeviceFrame.all.first { $0.id == "ipad" })
-        let screen = store.addScreen(iPad, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
+        let screen = try #require(store.addScreen(iPad, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5)))
         #expect(screen.device.size == CGSize(width: 820, height: 1180))
         #expect(screen.canvasFrame(on: screen.device) == CGRect(x: 100, y: 100, width: 410, height: 590))
 
@@ -370,13 +370,13 @@ struct DesignStoreTests {
         #expect(button.frame.maxY <= iPad.size.height - iPad.safeBottom)
 
         // Sketched screens are iPhones, and say nothing more about it in the file.
-        #expect(store.addScreen(from: leftScreenSketch).deviceID == nil)
+        #expect(try #require(store.addScreen(from: leftScreenSketch)).deviceID == nil)
         #expect(DeviceFrame.named("no-such-device") == .iPhone)
     }
 
     @Test func aStickyNoteStaysOnTheCanvasEvenOverAScreen() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let note = try #require(store.place(LayerNode.standard(.stickyNote), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(note.host == .canvas)
         #expect(store.rehost(note) == note)
@@ -449,7 +449,7 @@ struct DesignStoreTests {
         let (store, _) = makeStore()
         #expect(store.contentBounds == nil)
 
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         store.place(LayerNode.standard(.symbol, symbol: "star"), centredAt: CGPoint(x: 3000, y: 2500))
         let bounds = try #require(store.contentBounds)
         #expect(bounds.contains(screen.canvasFrame(on: screen.device)))
@@ -472,9 +472,9 @@ struct AppModelTests {
         return (model, undo)
     }
 
-    @Test func tappingAScreenSelectsItAndTappingEmptyCanvasLetsGo() {
+    @Test func tappingAScreenSelectsItAndTappingEmptyCanvasLetsGo() throws {
         let (model, _) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
         model.tool = .select
         model.viewport = Viewport(offset: CGPoint(x: 200, y: 100), scale: 2)
 
@@ -556,7 +556,7 @@ struct AppModelTests {
 
     @Test func undoingOrDeletingTheSelectedThingClearsTheSelection() throws {
         let (model, undo) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
         let title = try #require(model.store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         model.tool = .select
         model.selection = .element(.init(host: .screen(screen.id), node: title.id))
@@ -593,9 +593,9 @@ struct AppModelTests {
         #expect(model.store.treeScreen(screen) == nil)
     }
 
-    @Test func leavingTheSelectToolLetsGoOfTheSelection() {
+    @Test func leavingTheSelectToolLetsGoOfTheSelection() throws {
         let (model, _) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
         model.tool = .select
         model.selection = .screen(screen.id)
         model.tool = .draw
@@ -1710,18 +1710,18 @@ struct FormatPanelEditTests {
         }
         return !model.store.isEditing
     }
-    private func makeModel() -> (model: AppModel, undo: UndoManager, screen: TreeScreen) {
+    private func makeModel() throws -> (model: AppModel, undo: UndoManager, screen: TreeScreen) {
         let undo = UndoManager()
         undo.groupsByEvent = false
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .milliseconds(20)
-        let added = model.store.addScreen(from: leftScreenSketch)
-        return (model, undo, model.store.treeScreen(added.id)!)
+        let added = try #require(model.store.addScreen(from: leftScreenSketch))
+        return (model, undo, try #require(model.store.treeScreen(added.id)))
     }
 
     @Test func thePanelsPauseEndsItsOwnEdit() async throws {
-        let (model, undo, screen) = makeModel()
+        let (model, undo, screen) = try makeModel()
         let before = model.store.tree
         model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
         model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout 2" } }
@@ -1735,7 +1735,7 @@ struct FormatPanelEditTests {
     /// halfway, and every later move of the drag was an undo step of its own. The pause
     /// ends the panel's own step; the drag is one step of its own.
     @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
-        let (model, undo, screen) = makeModel()
+        let (model, undo, screen) = try makeModel()
         let before = model.store.tree
         let x = screen.origin.x
         model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
@@ -1762,7 +1762,7 @@ struct FormatPanelEditTests {
     /// by hand" the panel had begun. Every later change then joined that one step.
     @Test(arguments: [true, false])
     func aPanelChangeAroundASpokenCommandLeavesNoEditOpen(panelFirst: Bool) async throws {
-        let (model, _, screen) = makeModel()
+        let (model, _, screen) = try makeModel()
         let panel = { model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } } }
         if panelFirst {
             panel()
@@ -1785,7 +1785,7 @@ struct FormatPanelEditTests {
     /// The command ends before the panel's pause: the step the hold left open for the
     /// panel's edit by hand is the panel's to end.
     @Test func aPanelChangeInACommandThatEndsBeforeThePauseLeavesNoEditOpen() async throws {
-        let (model, _, screen) = makeModel()
+        let (model, _, screen) = try makeModel()
         model.adjustmentPause = .milliseconds(200)
         model.store.beginHeldEdit()
         model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
@@ -1802,7 +1802,7 @@ struct FormatPanelEditTests {
     /// A change in the panel during a drag is a step of its own, which the panel's pause
     /// ends while the drag goes on in its own.
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
-        let (model, undo, screen) = makeModel()
+        let (model, undo, screen) = try makeModel()
         let before = model.store.tree
         let x = screen.origin.x
         // The drag's frames are made for its edit, as a canvas drag's are.

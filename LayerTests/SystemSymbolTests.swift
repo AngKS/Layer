@@ -130,7 +130,7 @@ struct SystemSymbolTests {
         let screen = [mail, github, heart]
 
         for layout in CodeSettings.Layout.allCases {
-            let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen, named: "Footer", settings: CodeSettings(layout: layout))
+            let code = SwiftUICodeGenerator.code(forFreeScreenHolding: screen, named: "Footer", settings: CodeSettings(layout: layout))
             #expect(code.contains(#"Image(systemName: "envelope")"#), "\(layout)")
             #expect(code.contains(#"Image(systemName: "link")"#), "\(layout)")
             #expect(code.contains(#"Image(systemName: "heart.fill")"#), "\(layout)")

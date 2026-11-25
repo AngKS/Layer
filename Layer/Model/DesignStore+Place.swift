@@ -39,4 +39,16 @@ extension DesignStore {
         guard add(placed, to: .canvas) else { return nil }
         return NodeRef(host: .canvas, node: placed.id)
     }
+
+    /// A new leaf of `kind` for a sketch read off every screen (canvas points): about as large as it was drawn, at the
+    /// scale loose things are drawn at (`looseScale`), as its kind's loose size allows, put where the sketch's middle is
+    /// (`place(_:centredAt:)`). One step. Nil if refused.
+    @discardableResult
+    func placeLoose(_ kind: ElementKind, sketchedAs sketch: CGRect) -> NodeRef? {
+        var node = LayerNode.standard(kind)
+        let scale = looseScale
+        let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
+        node.frame.size = kind.spec.looseSize.size(from: node.frame.size, drawn: drawn)
+        return place(node, centredAt: CGPoint(x: sketch.midX, y: sketch.midY))
+    }
 }

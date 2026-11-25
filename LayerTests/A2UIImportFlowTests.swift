@@ -28,7 +28,7 @@ import Testing
     #if DEBUG
     @Test func anImportLaysOutOffTheMainActor() async throws {
         let (model, _) = makeModel()
-        let other = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5))
+        let other = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5)))
         let before = Set(model.store.tree.screens.flatMap { TreeEdit.ids(in: $0.root) } + [other.id])
 
         let report = await model.importA2UI(try fixture("a2ui-scaffold-simple-login-form"))
@@ -113,7 +113,7 @@ import Testing
         let report = await model.importA2UI(data)
 
         #expect(report.screens.count == 2)
-        let frames = report.screens.compactMap { model.store.screenFrameOnCanvas($0) }
+        let frames = report.screens.compactMap { model.store.canvasFrame(ofScreen: $0) }
         #expect(frames.count == 2)
         #expect(frames[1].minX > frames[0].maxX, "\(frames)")
         #expect(report.screens.map { name(of: $0, in: model) } == ["One", "Two"])
@@ -238,7 +238,7 @@ import Testing
 
         #expect(report.screens.isEmpty)
         let said = report.groups.flatMap(\.diagnostics).map(\.message).first { $0.contains("isn't imported") } ?? ""
-        #expect(said.contains("past \(TreeRules.maximumNodes.formatted()) nodes"), "\(said)")
+        #expect(said.contains("more than \(TreeRules.maximumNodes.formatted()) things"), "\(said)")
         #expect(!said.contains("can't hold") && !said.contains("what a screen can't"), "\(said)")
     }
 

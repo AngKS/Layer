@@ -1232,9 +1232,9 @@ struct PencilVoiceTests {
     /// starts. Profile stays selected, so its field, and a hold or words typed there, stay
     /// too. A spoken command about a thing still selects it as it starts: the agent reads
     /// what was pointed at from the selection.
-    @Test func aQueuedChangeForLoginLeavesProfileSelected() async {
+    @Test func aQueuedChangeForLoginLeavesProfileSelected() async throws {
         let bench = Bench()
-        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6)).id
+        let profile = try #require(bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))).id
         bench.runner.holds = true
         #expect(await bench.hold())
         bench.routes[0].send(.command("make it blue"))

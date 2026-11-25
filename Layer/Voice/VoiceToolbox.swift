@@ -885,9 +885,9 @@ final class VoiceToolbox: VoiceActing {
     }
 
     /// Lines several elements up with one another: by an edge, or through the middle, of
-    /// the area they cover together. As the popover's Align does (`AppModel.lineUpSelection`): in one row, column,
-    /// grid or overlay, by that one's alignment; otherwise only what is in a free parent moves (spec §10), and what
-    /// is placed stays where it is, the rest lining up with it all the same.
+    /// the area they cover together, through the popover's Align (`DesignStore.lineUp`): in one row, column, grid or
+    /// overlay, by that one's alignment; otherwise only what is in a free parent moves (spec §10), and what is placed
+    /// stays where it is, the rest lining up with it all the same.
     private func alignTogether(_ named: [String], alignment: String) -> String {
         guard let model else { return gone }
         guard let (edge, name) = Self.alignment(named: alignment) else {
@@ -907,19 +907,14 @@ final class VoiceToolbox: VoiceActing {
         let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
         let store = model.store
         let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
-        if let aligned = store.layoutAligned(together, edge) {
-            reveal(.element(found[0].ref), in: model)
-            store.update(aligned.parent) { $0.layout = aligned.layout }
-            select(together, in: model)
-            return done("Lined up \(found.count) elements by their \(by).")
-        }
         // All in one that places them along this edge, or each placed by one: nothing of theirs can move.
-        if store.laidOutParent(of: together) != nil || !store.holdsSomethingInAFreeParent(together),
+        if store.layoutAligned(together, edge) == nil,
+           store.laidOutParent(of: together) != nil || !store.holdsSomethingInAFreeParent(together),
            let placed = found.first(where: { $0.placed.isLaidOut }), let placer = placer(of: placed) {
             return failed(alignedLine(handle(of: placed), placer))
         }
         reveal(.element(found[0].ref), in: model)
-        store.alignInFreeParents(together, edge)
+        store.lineUp(together, edge)
         select(together, in: model)
         return done("Lined up \(found.count) elements by their \(by).")
     }
@@ -1293,17 +1288,8 @@ final class VoiceToolbox: VoiceActing {
     /// "the button “Sign in”", "a text field “Email”", or for a container what it is, as the Layers panel calls it:
     /// "the card", "the row".
     private static func describe(_ node: LayerNode, article: String = "the") -> String {
-        let what: String
-        if node.isContainer {
-            what = node.kindName.lowercased()
-        } else if node.kind == .symbol, let symbol = node.content.symbol {
-            what = "\(symbol) symbol"
-        } else {
-            // As Siri describes a leaf (`DesignDescriber`).
-            let words = node.content.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let kind = node.kind.layerName.lowercased()
-            what = words.isEmpty ? kind : "\(kind) “\(words)”"
-        }
+        // A container by its kind's name; a leaf as Siri describes one (plan 6, Task 7 review M3).
+        let what = node.isContainer ? node.kindName.lowercased() : DesignDescriber.describe(node)
         // "An image", not "a image".
         let isVowel = what.first.map { "aeiou".contains($0.lowercased()) } == true
         return "\(article == "a" && isVowel ? "an" : article) \(what)"

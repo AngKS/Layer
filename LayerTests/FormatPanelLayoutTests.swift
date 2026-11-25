@@ -271,6 +271,7 @@ struct FormatPanelLayoutTests {
         let a = text(20, 100), b = text(20, 200), c = text(20, 300)
         let (model, _) = makeModel(design([screen([a, b, c])]))
         let store = model.store
+        try #require(store.tree.screens.first != nil)
         model.selection = CanvasSelection([a.id, b.id, c.id].compactMap(store.ref(of:)).map(CanvasSelection.element))
         _ = model.selectedThings
         _ = model.selectedLeafNodes

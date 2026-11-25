@@ -109,7 +109,7 @@ struct InkOnTheTreeTests {
     @Test func showingDrawingsReadsNoStrokesWhenNoneChanged() throws {
         let model = AppModel(document: LayerDocument())
         let store = model.store
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         var sync = DrawingSync()
         let strokes = cross(at: CGPoint(x: 700, y: 300))
         model.inkChanged(sync.changes(for: strokes, in: store.tree))

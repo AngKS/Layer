@@ -42,12 +42,6 @@ final class VoiceHandles {
         Self.number(in: handle, after: "E").flatMap { nodes[$0] }
     }
 
-    /// `handle(forNode:)`, by the name the voice tests written before the tree read a handle by.
-    func handle(forElement id: UUID) -> String { handle(forNode: id) }
-
-    /// `node(_:)`, by the name the voice tests written before the tree read a handle by.
-    func element(_ handle: String) -> UUID? { node(handle) }
-
     /// The handle as it is written here, such as `E7` from ` e 7`. Nil if it isn't one.
     static func tidied(_ handle: String) -> String? {
         for letter in ["S", "E"] {

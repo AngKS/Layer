@@ -25,8 +25,8 @@ private struct TwoScreens {
     init() {
         model = AppModel(document: LayerDocument())
         model.canvasSize = CGSize(width: 1210, height: 834)
-        a = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
-        b = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5)).id
+        a = model.store.addEmptyScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5))
+        b = model.store.addEmptyScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5))
         let placed = model.store.add([
             element(.button, 100, 300, 120, 40),
             element(.title, 80, 100, 228, 40),

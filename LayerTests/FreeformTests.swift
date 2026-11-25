@@ -102,7 +102,7 @@ struct SettingsTests {
 struct FreeformBehaviourTests {
     @Test func duplicatingAnElementPutsACopyBesideItOnTop() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let original = try #require(store.sketched(.button, from: CGRect(x: 20, y: 700, width: 353, height: 50), to: screen))
         store.update(original.id) { $0.isLocked = true }
 
@@ -120,11 +120,11 @@ struct FreeformBehaviourTests {
 
     @Test func duplicatingAScreenCopiesItsElementsToTheRight() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5)).id
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5))).id
         _ = store.sketched(.title, from: CGRect(x: 40, y: 50, width: 100, height: 20), to: screen)
         let copy = try #require(store.duplicateTreeScreen(screen).flatMap(store.treeScreen))
         #expect(copy.name == "Screen 1 Copy")
-        let original = try #require(store.screenFrameOnCanvas(screen))
+        let original = try #require(store.canvasFrame(ofScreen: screen))
         #expect(copy.origin.x > original.maxX)
         #expect(copy.root.leaves.count == 1)
         #expect(copy.root.leaves.first?.id != store.screenLeaves(screen).first?.id)
@@ -158,7 +158,7 @@ struct FreeformBehaviourTests {
 
     @Test func aLockedElementCanNotBeDeleted() throws {
         let model = AppModel(document: LayerDocument())
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let ref = NodeRef(host: .screen(screen), node: title.id)
         model.selection = .element(ref)
@@ -172,7 +172,7 @@ struct FreeformBehaviourTests {
 
     @Test func hidingTheSelectedElementLetsGoOfIt() throws {
         let model = AppModel(document: LayerDocument())
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let ref = NodeRef(host: .screen(screen), node: title.id)
         model.selection = .element(ref)
@@ -223,10 +223,10 @@ struct FreeformBehaviourTests {
         #expect(resized.origin == avatar.origin)
     }
 
-    @Test func sketchedScreensUseTheChosenDevice() {
+    @Test func sketchedScreensUseTheChosenDevice() throws {
         let (store, _) = makeStore()
         store.updateCanvas { $0.sketchDeviceID = "iphone-se" }
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 300, height: 530)).id
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 300, height: 530))).id
         #expect(store.device(of: screen)?.id == "iphone-se")
     }
 }
@@ -283,9 +283,9 @@ struct MoreMagicPenTests {
 
     @Test func aStickyNoteSketchedBesideTheScreensLandsWhereItWasDrawn() throws {
         let (store, _) = makeStore()
-        let note = try #require(store.addLooseSketch(.stickyNote, from: CGRect(x: 900, y: 100, width: 140, height: 120)))
-        let onCanvas = try #require(store.frameOnCanvas(of: note))
-        #expect(store.ref(of: note)?.host == .canvas)
+        let note = try #require(store.placeLoose(.stickyNote, sketchedAs: CGRect(x: 900, y: 100, width: 140, height: 120)))
+        let onCanvas = try #require(store.canvasRect(of: note.node))
+        #expect(store.ref(of: note.node)?.host == .canvas)
         #expect(abs(onCanvas.midX - 970) <= 1)
         #expect(abs(onCanvas.midY - 160) <= 1)
     }
@@ -295,14 +295,14 @@ struct MoreMagicPenTests {
 struct MoreCodeTests {
     /// The code of a free screen of `nodes`, a line at a time, without its indent.
     private func lines(_ nodes: [LayerNode], _ settings: CodeSettings = CodeSettings()) -> [String] {
-        SwiftUICodeGenerator.code(ofAFreeScreenHolding: nodes, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        SwiftUICodeGenerator.code(forFreeScreenHolding: nodes, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     @Test func eachFileEndsWithAPreviewUnlessAskedNotTo() {
         let screen = [element(.title, 82.5, 112, 228, 40)]
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen)
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: screen)
         #expect(code.hasSuffix("#Preview {\n    Screen1()\n}"))
-        #expect(!SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen, settings: CodeSettings(includesPreview: false)).contains("#Preview"))
+        #expect(!SwiftUICodeGenerator.code(forFreeScreenHolding: screen, settings: CodeSettings(includesPreview: false)).contains("#Preview"))
     }
 
     @Test func hiddenElementsAreLeftOut() {
@@ -389,7 +389,7 @@ struct MoreCodeTests {
         var body = element(.body, 48, 580, 297, 44)
         body.content.text = "a\r\nb\tc\u{7}d"
         body.name = "Hero\r\nText"
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [body])
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [body])
         #expect(!code.contains("\r") && !code.contains("\t") && !code.contains("\u{7}"))
         #expect(code.contains(#"Text("a\r\nb\tc\u{07}d")"#))
         #expect(code.contains("// Hero  Text"))
@@ -400,7 +400,7 @@ struct MoreCodeTests {
     @Test func aHugeNumberIsWrittenRatherThanATrap() {
         var wide = element(.button, 20, 744, 353, 50)
         wide.frame.size.width = 1e19
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
         #expect(code.contains("Button"))
     }
 
@@ -420,7 +420,7 @@ struct MoreCodeTests {
         var wide = element(.button, 20, 744, 353, 50)
         wide.frame.size.width = .infinity
         wide.frame.size.height = .nan
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
         #expect(!code.contains("inf,") && !code.contains("nan"))
     }
 
@@ -500,7 +500,7 @@ struct ScrubbingTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let start = title.frame.width
 
@@ -527,7 +527,7 @@ struct ScrubbingTests {
         #expect(undo.canUndo == false)
         #expect(model.store.isEditing == false)
 
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let start = title.frame.width
         model.scrubber.begin(Scrubber.Target(

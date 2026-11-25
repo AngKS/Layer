@@ -189,16 +189,6 @@ extension DesignStore {
         NodeRef(host: .canvas, node: addCanvasNode(node, scale: scale))
     }
 
-    /// What the flat store's loose sketch made of `sketch` (canvas points): a new leaf of `kind`, about as large as it was
-    /// drawn at `looseScale` as its kind's loose size allows, centred on it through `place(_:centredAt:)`.
-    @discardableResult
-    func addLoose(_ kind: ElementKind, from sketch: CGRect) -> NodeRef? {
-        var node = LayerNode.standard(kind)
-        let drawn = CGSize(width: sketch.width / looseScale, height: sketch.height / looseScale)
-        node.frame.size = kind.spec.looseSize.size(from: node.frame.size, drawn: drawn)
-        return place(node, centredAt: CGPoint(x: sketch.midX, y: sketch.midY))
-    }
-
     /// A screen's frame on the canvas, drawn as its device. Nil for a screen the design doesn't have.
     func canvasFrame(ofScreen id: TreeScreen.ID) -> CGRect? {
         let tree = tree
@@ -253,6 +243,12 @@ extension DesignStore {
     /// Whether a node is locked, by itself or by a container above it.
     func isLockedWithItsContainers(_ id: UUID) -> Bool {
         index[id]?.isLockedWithAncestors ?? false
+    }
+
+    /// How many things the board holds, containers included, on every screen and the open canvas, the screens' roots
+    /// left out: what a test counted as the flat content's elements.
+    var thingCount: Int {
+        index.count - tree.screens.count
     }
 }
 

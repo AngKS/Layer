@@ -66,6 +66,18 @@ extension DesignStore {
 
     // MARK: Lining up among several things
 
+    /// Align among several things, and of one a row, column, grid or overlay places: when everything shares a laid-out
+    /// parent that has the alignment, that parent takes it (`layoutAligned`), as one change; otherwise what sits in a free
+    /// parent moves (`alignInFreeParents`). The popover's and the Format panel's Align (`AppModel.lineUpSelection`) and
+    /// voice's (`VoiceToolbox.alignTogether`) both come this way (plan 6, Task 7 review M2).
+    func lineUp(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) {
+        if let aligned = layoutAligned(selection, alignment) {
+            update(aligned.parent) { $0.layout = aligned.layout }
+        } else {
+            alignInFreeParents(selection, alignment)
+        }
+    }
+
     /// Today's Align among several things (`align(_:_:)`), moving only what sits in a free parent (spec §10): what a row,
     /// column, grid or overlay places stays where it is, and the others line up with it all the same, as they do with a
     /// locked thing.

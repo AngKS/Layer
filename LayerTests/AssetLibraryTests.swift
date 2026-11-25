@@ -151,13 +151,13 @@ struct AddingAssetsTests {
         #expect(added.node.kind == .shape)
         #expect(added.node.content.shape == .arrowRight)
         #expect(added.node.content.isOn == false, "an outline isn't filled")
-        let frame = try #require(model.store.tree.canvas.first.flatMap { model.store.frameOnCanvas(of: $0.id) })
+        let frame = try #require(model.store.tree.canvas.first.flatMap { model.store.canvasRect(of: $0.id) })
         #expect(abs(frame.midX - 300) <= 1 && abs(frame.midY - 200) <= 1)
     }
 
     @Test func aComponentDroppedOnAScreenJoinsItInsideItsEdges() throws {
         let model = makeModel()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1))).id
         let button = try #require(AssetLibrary.asset(id: "component:button"))
         // Dropped near the screen's right edge: a full-width button can't sit centred there.
         model.addAsset(button, at: CGPoint(x: 470, y: 400))
@@ -209,7 +209,7 @@ struct AddingAssetsTests {
         // New frames come in unselected.
         #expect(model.selection == nil)
         #expect(model.store.device(of: screen)?.family == .desktop)
-        let frame = try #require(model.store.screenFrameOnCanvas(screen))
+        let frame = try #require(model.store.canvasFrame(ofScreen: screen))
         #expect(frame.height <= 834 - 200, "even an iMac fits in the view")
     }
 
@@ -217,7 +217,7 @@ struct AddingAssetsTests {
         let model = makeModel()
         let iPad = try #require(AssetLibrary.asset(id: "frame:ipad"))
         model.addAsset(iPad, at: CGPoint(x: 500, y: 420))
-        let frame = try #require(model.store.tree.screens.last.flatMap { model.store.screenFrameOnCanvas($0.id) })
+        let frame = try #require(model.store.tree.screens.last.flatMap { model.store.canvasFrame(ofScreen: $0.id) })
         #expect(abs(frame.midX - 500) <= 1 && abs(frame.midY - 420) <= 1)
     }
 }
@@ -251,7 +251,7 @@ struct ShapeTests {
         triangle.content.isOn = false
         triangle.frame = CGRect(x: 20, y: 300, width: 100, height: 100)
 
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [circle, triangle], named: "Shapes")
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [circle, triangle], named: "Shapes")
         let lines = code.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         #expect(lines.contains("Ellipse()"))
         #expect(lines.contains(".frame(width: 80, height: 80)"))

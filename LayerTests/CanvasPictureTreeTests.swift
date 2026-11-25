@@ -149,10 +149,14 @@ struct CanvasPictureTreeTests {
     @Test func aDeviceTooLargeForAWholeNumberIsToldWithoutTrapping() {
         let login = TreeFixture.loginWithACardAndARow()
         let huge = DeviceFrame.custom(name: "Huge", size: CGSize(width: 1e300, height: 1e19), family: .other)
-        // As a file holds it: one the design is given by hand is refused (`DeviceFrame.problems`).
+        // As a file holds them: a device that can't be used (`DeviceFrame.problems`), and a screen on it. The store
+        // refuses either, given by hand.
         login.model.store.changeTree(writing: 0) { $0.settings.customDevices.append(huge) }
         let far = LayerNode.leaf(.title, frame: CGRect(x: 1e300, y: 20, width: 100, height: 40), text: "Far")
-        login.model.store.addFreeScreen([far], name: "Huge", device: huge, origin: CGPoint(x: 2000, y: 0))
+        var root = LayerNode(kind: .group)
+        root.children = [far]
+        let screen = TreeScreen(name: "Huge", origin: CGPoint(x: 2000, y: 0), scale: 1, deviceID: huge.id, root: root)
+        login.model.store.changeTree(writing: 0) { $0.screens.append(screen) }
 
         let lines = told(login)
         #expect(lines.contains(#"S2 "Huge" 1000000x1000000"#))

@@ -35,7 +35,7 @@ private func inner(_ paths: [[CGPoint]]) throws -> SketchObservation.InnerMark? 
 private func makeStore() -> (store: DesignStore, screen: TreeScreen.ID) {
     let store = DesignStore()
     store.undoManager = UndoManager()
-    return (store, store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id)
+    return (store, store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
 }
 
 private let tinySquare = CGRect(x: 40, y: 300, width: 30, height: 30)
@@ -181,7 +181,7 @@ struct NewControlCodeTests {
         var cancel = LayerNode.leaf(.button, frame: CGRect(x: 203, y: 700, width: 170, height: 50), text: "Cancel", tint: Theme.accent)
         cancel.content.buttonLook = .bordered
         let done = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 170, height: 50), text: "Done", tint: Theme.accent)
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [cancel, done], settings: CodeSettings(includesPreview: false))
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [cancel, done], settings: CodeSettings(includesPreview: false))
         #expect(code.contains("HStack(alignment: .center, spacing: 13) {"))
         #expect(code.range(of: "Done")!.lowerBound < code.range(of: "Cancel")!.lowerBound, "leading first")
         #expect(code.contains(".strokeBorder("))
@@ -193,7 +193,7 @@ struct NewControlCodeTests {
         var progress = LayerNode.leaf(.progress, frame: CGRect(x: 20, y: 300, width: 353, height: 6), text: "", tint: Theme.accent)
         progress.content.value = 0.25
         let checkbox = LayerNode.leaf(.checkbox, frame: CGRect(x: 20, y: 100, width: 24, height: 24), text: "", tint: Theme.accent)
-        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [checkbox, radio, progress])
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [checkbox, radio, progress])
         #expect(code.contains("Image(systemName: \"checkmark.square.fill\")"))
         #expect(code.contains("Image(systemName: \"circle\")"))
         #expect(code.contains("ProgressView(value: 0.25)"))

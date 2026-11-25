@@ -136,22 +136,24 @@ final class DesignStore {
 
     // MARK: Changes made in one step
 
-    /// Adds the screen a sketch stands for: an iPhone, as large as it was drawn.
+    /// Adds the screen a sketch stands for: of the design's device for new screens (`sketchDevice`), as large as it was
+    /// drawn. Nil, and nothing is added, as `addScreen(_:at:)` refuses.
     @discardableResult
-    func addScreen(from sketch: CGRect) -> TreeScreen {
+    func addScreen(from sketch: CGRect) -> TreeScreen? {
         let device = canvas.sketchDevice
         return addScreen(device, at: ElementLayout.screenPlacement(for: sketch, device: device))
     }
 
     /// Adds an empty screen of `device` where `placement` puts it, on a free root, as one step. Named by how many screens
-    /// the tree holds. Its root takes the screen's identifier.
+    /// the tree holds. Its root takes the screen's identifier. Nil, and nothing is added, for a device that can't be used
+    /// (`DeviceFrame.problems`), such as one of the design's own a file held broken, and as `addScreen(_:)` refuses.
     @discardableResult
-    func addScreen(_ device: DeviceFrame, at placement: Placement) -> TreeScreen {
+    func addScreen(_ device: DeviceFrame, at placement: Placement) -> TreeScreen? {
+        guard device.problems.isEmpty else { return nil }
         var screen = TreeScreen(name: "Screen \(tree.screens.count + 1)", origin: placement.origin, scale: placement.scale,
                                 deviceID: device == .iPhone ? nil : device.id)
         screen.root.id = screen.id
-        change { $0.screens.append(screen) }
-        return treeScreen(screen.id) ?? screen
+        return addScreen(screen).flatMap(treeScreen)
     }
 
     /// Deletes several elements as one undo step. A container goes with everything in it, at

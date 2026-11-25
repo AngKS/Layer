@@ -11,7 +11,7 @@ private func makeStore() -> (store: DesignStore, screen: TreeScreen.ID, undo: Un
     undo.groupsByEvent = false
     let store = DesignStore()
     store.undoManager = undo
-    return (store, store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id, undo)
+    return (store, store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)), undo)
 }
 
 private let titleSketch = CGRect(x: 150, y: 112, width: 96, height: 40)
@@ -75,7 +75,7 @@ struct KindSuggestionTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let field = try #require(model.store.sketched(.textField, from: boxSketch, to: screen))
         let ref = NodeRef(host: .screen(screen), node: field.id)
         let observation = try #require(SketchAnalyzer.observe(SketchSamples.strokes([SketchSamples.box(boxSketch, radius: 10)])))

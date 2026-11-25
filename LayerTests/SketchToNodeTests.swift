@@ -10,8 +10,7 @@ private func makeStore(_ device: DeviceFrame = .iPhone, origin: CGPoint = .zero,
     undo.groupsByEvent = false
     let store = DesignStore()
     store.undoManager = undo
-    let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
-    return (store, screen.id, undo)
+    return (store, store.addEmptyScreen(device, at: Placement(origin: origin, scale: scale)), undo)
 }
 
 @MainActor
@@ -365,7 +364,7 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
     /// it moves down by exactly that padding, nothing moves sideways, and nothing leaves the iPhone.
     @Test func aCardRoundTwoFieldsOfABuiltColumnTakesThemWhereTheyAre() async throws {
         let (model, undo) = makeModel()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
         let fields = (0..<4).map { leaf(.textField, CGRect(x: 20, y: 100 + 60 * CGFloat($0), width: 353, height: 44)) }
         for field in fields { #expect(model.store.add(field, to: .screen(screen))) }
         model.structurePass(over: fields.map(\.id))
@@ -909,7 +908,7 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
 
     @Test func aConversionMakesANodeWithItsReading() async throws {
         let (model, undo) = makeModel()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
         #expect(model.viewport.scale == 1)
         let sketch = try strokes("pill 30 700 330 56")
         let observation = try #require(SketchAnalyzer.observe(sketch))
@@ -967,7 +966,7 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(try root(of: screen, in: store).children.isEmpty)
 
         let (model, _) = makeModel()
-        let onModel = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let onModel = try #require(model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
         #expect(model.store.replaceChildren(of: .canvas, with: full.map(TreeEdit.copyWithNewIDs)))
         model.sketchChanged(try strokes("pill 30 700 330 56"))
         model.convertNow()

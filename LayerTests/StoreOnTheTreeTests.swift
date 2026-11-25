@@ -27,7 +27,7 @@ private func buttonNode(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, heig
 struct StoreOnTheTreeTests {
     @Test func theStoreHoldsTheTree() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 393, height: 852))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 393, height: 852)))
         let frame = screen.canvasFrame(on: store.tree.device(of: screen))
         let centre = CGPoint(x: frame.midX, y: frame.midY)
         store.place(LayerNode.standard(.button), centredAt: centre)
@@ -40,7 +40,7 @@ struct StoreOnTheTreeTests {
     /// dissolve the group, so the member is on the screen's root, and the change is one step.
     @Test func aGroupOfOneMadeInAChangeIsGoneByItsEnd() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
         undo.removeAllActions()
         let member = buttonNode()
         let item = LayerNode.container(children: [member])
@@ -64,8 +64,8 @@ struct StoreOnTheTreeTests {
     /// A leaf moved on one free screen lays out that screen's root once, and the other screen's not at all (F8).
     @Test func aLeafEditLaysOutOnlyItsScreen() throws {
         let (store, _) = makeStore()
-        let a = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let b = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 0), scale: 1))
+        let a = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
+        let b = try #require(store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 0), scale: 1)))
         let onA = store.add([buttonNode()], onScreen: a.id)
         _ = store.add([buttonNode()], onScreen: b.id)
         let roots = store.tree.screens.map(\.root.id)

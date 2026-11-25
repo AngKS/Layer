@@ -83,6 +83,17 @@ extension DesignStore {
                        origin: origin, scale: scale)
     }
 
+    /// An empty screen of `device` where `placement` puts it (`addScreen(_:at:)`), for a setup that can't throw: the
+    /// store's refusal is recorded as an issue, as `addFreeScreen`'s is. Its id.
+    @discardableResult
+    func addEmptyScreen(_ device: DeviceFrame, at placement: Placement) -> TreeScreen.ID {
+        guard let screen = addScreen(device, at: placement) else {
+            Issue.record("The store refused an empty \(device.name) screen")
+            return UUID()
+        }
+        return screen.id
+    }
+
     /// `node` on the open canvas, in front of what is there, drawn `scale` canvas points to each of its own: one step.
     /// Its id.
     @discardableResult

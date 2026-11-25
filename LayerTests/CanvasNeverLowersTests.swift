@@ -232,7 +232,7 @@ struct ControlsLowerNothingTests {
         model.selection = .element(cardRef)
         model.ungroupSelection()
         #expect(store.node(card.id) == nil, "Ungroup takes the card apart")
-        let added = model.addFrame(.iPhone)
+        let added = try #require(model.addFrame(.iPhone))
         #expect(store.tree.screens.map(\.name) == ["Screen", "Screen 2"], "a library frame is named by the screens' count")
         #expect(added.name == "Screen 2")
         model.selection = .screen(screen.id)

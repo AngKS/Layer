@@ -24,10 +24,10 @@ struct FlatStoreTests {
     private func board() throws -> (store: DesignStore, undo: UndoManager, first: TreeScreen.ID, second: TreeScreen.ID,
                                     title: (id: UUID, frame: CGRect), note: NodeRef, button: (id: UUID, frame: CGRect)) {
         let (store, undo) = makeStore()
-        let first = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
-        let second = store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1)).id
+        let first = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))).id
+        let second = try #require(store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))).id
         let title = try #require(store.sketched(.title, from: titleSketch, to: first))
-        let note = try #require(store.addLoose(.stickyNote, from: noteSketch))
+        let note = try #require(store.placeLoose(.stickyNote, sketchedAs: noteSketch))
         let button = try #require(store.sketched(.button, from: boxSketch.offsetBy(dx: 500, dy: 0), to: second))
         return (store, undo, first, second, title, note, button)
     }
@@ -138,7 +138,7 @@ struct GradualEditStepTests {
     /// began, and leaves no step that undoes nothing. The step before is still on top.
     @Test func anEditThatEndsWhereItBeganLeavesNoStep() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         store.beginEdit()
         store.updateTreeScreen(screen.id) { $0.name = "Settings" }
         store.updateTreeScreen(screen.id) { $0.name = "Screen 1" }
@@ -149,10 +149,10 @@ struct GradualEditStepTests {
         #expect(!undo.canUndo)
     }
 
-    @Test func anEditThatEndsWhereItBeganOnAnEmptyHistoryLeavesUndoOff() {
+    @Test func anEditThatEndsWhereItBeganOnAnEmptyHistoryLeavesUndoOff() throws {
         let (store, undo) = makeStore()
         store.beginEdit()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         store.deleteScreen(screen.id)
         store.endEdit()
         #expect(!undo.canUndo && !undo.canRedo)
@@ -164,12 +164,12 @@ struct GradualEditStepTests {
 
     /// The app's history groups by event, as a document's does: the step taken out leaves
     /// no empty group behind for Undo to light up for.
-    @Test func anEditThatEndsWhereItBeganLeavesNoEmptyGroupWhenGroupedByEvent() async {
+    @Test func anEditThatEndsWhereItBeganLeavesNoEmptyGroupWhenGroupedByEvent() async throws {
         let undo = UndoManager()
         let store = DesignStore()
         store.undoManager = undo
         store.beginEdit()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         store.deleteScreen(screen.id)
         store.endEdit()
         // The event's group closes when the run loop turns.
@@ -179,12 +179,12 @@ struct GradualEditStepTests {
 
     /// The same when the edit ends in a later event than its first change, as a failed
     /// generation's does.
-    @Test func anEditEndedInALaterEventWhereItBeganLeavesNoStepWhenGroupedByEvent() async {
+    @Test func anEditEndedInALaterEventWhereItBeganLeavesNoStepWhenGroupedByEvent() async throws {
         let undo = UndoManager()
         let store = DesignStore()
         store.undoManager = undo
         store.beginEdit()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         try? await Task.sleep(for: .milliseconds(50))
         #expect(undo.canUndo)
         store.deleteScreen(screen.id)
@@ -194,10 +194,10 @@ struct GradualEditStepTests {
     }
 
     /// An edit that changed something still undoes as one step.
-    @Test func anEditThatChangedSomethingKeepsItsStep() {
+    @Test func anEditThatChangedSomethingKeepsItsStep() throws {
         let (store, undo) = makeStore()
         store.beginEdit()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         store.updateTreeScreen(screen.id) { $0.name = "Settings" }
         store.endEdit()
         #expect(undo.canUndo)
@@ -208,7 +208,7 @@ struct GradualEditStepTests {
     /// An edit's step goes in at its first change, which is when the system hears there is
     /// something to save. When the edit ends it is told again, so that the rest of a long
     /// edit isn't lost to an autosave made part way through it.
-    @Test func theEndOfAnEditInTheHistoryAsksForASave() {
+    @Test func theEndOfAnEditInTheHistoryAsksForASave() throws {
         let (store, undo) = makeStore()
         let asked = Tally()
         let observer = NotificationCenter.default.addObserver(forName: .NSUndoManagerWillCloseUndoGroup, object: undo, queue: nil) { _ in
@@ -216,7 +216,7 @@ struct GradualEditStepTests {
         }
         defer { NotificationCenter.default.removeObserver(observer) }
         store.beginEdit()
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400))
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)))
         let afterFirstChange = asked.count
         #expect(afterFirstChange >= 1)
         store.updateTreeScreen(screen.id) { $0.name = "Settings" }

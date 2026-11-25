@@ -15,7 +15,7 @@ extension HostedWindowSuites {
         /// main thread it takes is the other suites' too.
         private func board() -> (model: AppModel, lines: [NodeRef]) {
             let model = AppModel(document: LayerDocument())
-            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
+            let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1))
             let lines = (0..<20).map { index in
                 LayerNode.leaf(.text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
             }
@@ -189,8 +189,8 @@ extension HostedWindowSuites {
         /// screens' unique view names, G2).
         @Test func theCodeFollowsTheNameItsViewIsGivenAmongTheScreens() async throws {
             let model = AppModel(document: LayerDocument())
-            let first = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-            let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 100), scale: 1)).id
+            let first = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1))).id
+            let second = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 100), scale: 1))).id
             model.store.updateTreeScreen(first) { $0.name = "Login" }
             model.store.updateTreeScreen(second) { $0.name = "Login" }
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))

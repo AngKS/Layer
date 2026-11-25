@@ -17,7 +17,7 @@ struct PanelStepTests {
         var store: DesignStore { model.store }
 
         init() {
-            let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
+            let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5))
             let one = LayerNode.leaf(.button, frame: CGRect(x: 40, y: 300, width: 200, height: 50), text: "One", tint: RGBColor(hex: 0x000000))
             let two = LayerNode.leaf(.button, frame: CGRect(x: 40, y: 400, width: 200, height: 50), text: "Two", tint: RGBColor(hex: 0x000000))
             let store = model.store
@@ -83,9 +83,9 @@ struct PanelStepTests {
         #expect(board.tint(of: board.first) == RGBColor(hex: 0x000000))
     }
 
-    @Test func deletingAScreenAndAnElementRightAfterAColourChangeIsOneStep() {
+    @Test func deletingAScreenAndAnElementRightAfterAColourChangeIsOneStep() throws {
         let board = Board()
-        let other = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5)).id
+        let other = try #require(board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 50), scale: 0.5))).id
         board.undo.removeAllActions()
         board.model.selection = CanvasSelection([.element(board.second), .screen(other)])
         board.model.adjusting { board.store.update(board.second.node) { $0.style.tint = RGBColor(hex: 0xFF0000) } }

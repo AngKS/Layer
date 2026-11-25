@@ -7,7 +7,7 @@ import Foundation
 @MainActor
 func sketchedTitles() -> (store: DesignStore, titles: [UUID]) {
     let store = DesignStore()
-    let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+    let screen = store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
     let titles = [(150, 24), (300, 44), (450, 64)].compactMap { top, height in
         store.sketched(.title, from: CGRect(x: 120, y: CGFloat(top), width: 160, height: CGFloat(height)), to: screen)?.id
     }

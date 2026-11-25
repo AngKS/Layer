@@ -2424,16 +2424,6 @@ final class AppModel {
         viewport.canvasPoint(for: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 
-    /// A new leaf for the open canvas, about as large as `sketch` (canvas points) was drawn, at the scale loose things are
-    /// drawn at (`looseScale`), as its kind's loose size allows.
-    private func looseNode(_ kind: ElementKind, sketchedAs sketch: CGRect) -> LayerNode {
-        var node = LayerNode.standard(kind)
-        let scale = store.looseScale
-        let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
-        node.frame.size = kind.spec.looseSize.size(from: node.frame.size, drawn: drawn)
-        return node
-    }
-
     /// Puts a new leaf in the middle of the view, or centred on `point` in canvas points,
     /// selected and ready to be dragged: see `DesignStore.place(_:centredAt:)`. Over a screen
     /// it joins the screen, kept inside its edges. Nil, and nothing changes, when the design
@@ -2482,11 +2472,12 @@ final class AppModel {
         guard let root = AssetLibrary.template(named: name, tokens: store.canvas.tokens) else { return }
         let device = store.canvas.sketchDevice
         let placement = framePlacement(device, centeredAt: point)
-        // Its own step even in the middle of a drag, which it leaves open (M3).
-        store.asOwnStep {
+        // Its own step even in the middle of a drag, which it leaves open (M3). Refused by the store, nothing changes.
+        let added = store.asOwnStep {
             store.addScreen(TreeScreen(name: name, origin: placement.origin, scale: placement.scale,
                                        deviceID: device == .iPhone ? nil : device.id, root: root))
         }
+        guard added != nil else { return }
         tool = .select
         selection = nil
         suggestTitleIfNeeded()
@@ -2520,13 +2511,14 @@ final class AppModel {
     }
 
     /// Adds a device frame in the middle of the view, or centred on `point` in canvas
-    /// points, sized to fit comfortably in the view.
+    /// points, sized to fit comfortably in the view. Nil, and nothing changes, when the store
+    /// refuses it: a device of the design's own that can't be used, or no room for a screen.
     @discardableResult
-    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> TreeScreen {
+    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> TreeScreen? {
         let placement = framePlacement(device, centeredAt: point)
         let screen = TreeScreen(name: "Screen \(store.tree.screens.count + 1)", origin: placement.origin,
                                 scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
-        store.addScreen(screen)
+        guard store.addScreen(screen) != nil else { return nil }
         tool = .select
         // A new frame comes in unselected.
         selection = nil
@@ -2736,8 +2728,9 @@ final class AppModel {
                 var added: NodeRef?
                 switch reading {
                 case .screen:
-                    _ = store.addScreen(from: bounds)
-                    converted = true
+                    // A design that can't hold another screen, or whose device for new screens can't be used, leaves
+                    // the sketch unread (F9).
+                    converted = store.addScreen(from: bounds) != nil
                 case .element(let kind):
                     if host != nil {
                         // Where it lands, laid out there, remembering its sketch and its reading. A design that can't
@@ -2748,8 +2741,7 @@ final class AppModel {
                             added = store.ref(of: id)
                         }
                     } else if !kind.belongsOnScreens || kind == .text,
-                              let floating = store.place(looseNode(kind, sketchedAs: bounds),
-                                                         centredAt: CGPoint(x: bounds.midX, y: bounds.midY)) {
+                              let floating = store.placeLoose(kind, sketchedAs: bounds) {
                         // On the open canvas it remembers the sketch's canvas bounds, and no screen.
                         store.update(floating.node) {
                             $0.sketch = LayerNode.SketchIntent(sketched: bounds, on: nil, margin: 0,

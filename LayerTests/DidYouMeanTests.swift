@@ -11,8 +11,7 @@ private func makeModel() -> (model: AppModel, screen: TreeScreen.ID, undo: UndoM
     let undo = UndoManager()
     undo.groupsByEvent = false
     model.store.undoManager = undo
-    let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-    return (model, screen.id, undo)
+    return (model, model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)), undo)
 }
 
 private func leaf(_ kind: ElementKind, _ frame: CGRect) -> LayerNode {

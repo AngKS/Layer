@@ -35,15 +35,15 @@ struct ConcurrentEditTests {
         // A name the app suggests has no step, so undo leaves it: landing at a moment of
         // its own choosing, it made "everything undone is the start" fail now and then.
         model.suggestsTitle = false
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let refs = model.store.add([
             LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], onScreen: screen.id)
+        ], onScreen: screen)
         undo.removeAllActions()
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         model.screenStream = { _ in stream }
-        return (Board(model: model, undo: undo, screen: screen.id, title: refs[0], button: refs[1]), feed)
+        return (Board(model: model, undo: undo, screen: screen, title: refs[0], button: refs[1]), feed)
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
@@ -254,7 +254,7 @@ struct ConcurrentEditTests {
         undo.groupsByEvent = false
         let store = DesignStore()
         store.undoManager = undo
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
         let refs = store.add([
             LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
@@ -397,14 +397,14 @@ struct ConcurrentEditsGroupedByEventTests {
         // A name the app suggests has no step, so undo leaves it: landing at a moment of
         // its own choosing, it made "everything undone is the start" fail now and then.
         model.suggestsTitle = false
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
         let refs = model.store.add([
             LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
             LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], onScreen: screen.id)
+        ], onScreen: screen)
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         model.screenStream = { _ in stream }
-        return (model, undo, screen.id, refs[0], refs[1], feed)
+        return (model, undo, screen, refs[0], refs[1], feed)
     }
 
     /// The run loop turns, as between two touches, and the event's group closes.

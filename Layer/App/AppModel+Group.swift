@@ -30,10 +30,8 @@ extension AppModel {
     /// places what it holds, so nothing is moved on its own either.
     func lineUpSelection(_ alignment: ElementLayout.Alignment) {
         guard let selection, canLineUpSelection(alignment) else { return }
-        if let aligned = store.layoutAligned(selection, alignment) {
-            store.update(aligned.parent) { $0.layout = aligned.layout }
-        } else if selection.isSeveral {
-            store.alignInFreeParents(selection, alignment)
+        if selection.isSeveral || store.layoutAligned(selection, alignment) != nil {
+            store.lineUp(selection, alignment)
         } else {
             alignSelection(alignment)
         }

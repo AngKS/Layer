@@ -626,4 +626,31 @@ struct TreeVerbTests {
         #expect(store.device(of: custom.id) == frame)
         #expect(store.device(of: UUID()) == nil)
     }
+
+    /// A device of the design's own that a file held broken (`DeviceFrame.problems`) makes no screen, however a screen is
+    /// added: the store refuses it, as it refuses a device change to it (plan 6, Task 7 review). One that can be used
+    /// still makes one.
+    @Test func aScreenOnADeviceThatCantBeUsedIsRefused() throws {
+        let huge = DeviceFrame.custom(name: "Huge", size: CGSize(width: 1e300, height: 1e300), family: .other)
+        let kiosk = DeviceFrame.custom(name: "Kiosk", size: CGSize(width: 600, height: 400), family: .other)
+        let model = AppModel(document: LayerDocument())
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        let store = model.store
+        // As a file holds them: one given to the design by hand is checked first.
+        store.changeTree(writing: 0) { $0.settings.customDevices += [huge, kiosk] }
+
+        #expect(store.addScreen(huge, at: Placement(origin: .zero, scale: 1)) == nil)
+        #expect(store.addScreen(TreeScreen(name: "Huge", origin: .zero, scale: 1, deviceID: huge.id)) == nil)
+        #expect(model.addFrame(huge) == nil)
+        model.generateScreen(from: "a shop", device: huge)
+        #expect(model.generation == nil)
+        // As the device new screens are made on: a sketched screen, and a template.
+        store.changeTree(writing: 0) { $0.settings.sketchDeviceID = huge.id }
+        #expect(store.addScreen(from: CGRect(x: 0, y: 0, width: 200, height: 400)) == nil)
+        model.addTemplate("Product")
+        #expect(store.tree.screens.isEmpty)
+
+        let made = try #require(store.addScreen(kiosk, at: Placement(origin: .zero, scale: 1)))
+        #expect(store.device(of: made.id) == kiosk)
+    }
 }

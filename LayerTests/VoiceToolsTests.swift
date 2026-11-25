@@ -10,27 +10,27 @@ struct VoiceHandlesTests {
     @Test func handlesAreStableAndForgiving() {
         let handles = VoiceHandles()
         let (first, second, screen) = (UUID(), UUID(), UUID())
-        #expect(handles.handle(forElement: first) == "E1")
-        #expect(handles.handle(forElement: second) == "E2")
-        #expect(handles.handle(forElement: first) == "E1")
+        #expect(handles.handle(forNode: first) == "E1")
+        #expect(handles.handle(forNode: second) == "E2")
+        #expect(handles.handle(forNode: first) == "E1")
         #expect(handles.handle(forScreen: screen) == "S1")
         #expect(handles.handle(forScreen: screen) == "S1")
 
-        #expect(handles.element("E1") == first)
-        #expect(handles.element("e1") == first)
-        #expect(handles.element(" E1 ") == first)
-        #expect(handles.element("#E1") == first)
-        #expect(handles.element("E 2") == second)
+        #expect(handles.node("E1") == first)
+        #expect(handles.node("e1") == first)
+        #expect(handles.node(" E1 ") == first)
+        #expect(handles.node("#E1") == first)
+        #expect(handles.node("E 2") == second)
         #expect(handles.screen("s1") == screen)
 
         // One kind's handle is never taken for the other's, and unknown ones are nobody's.
-        #expect(handles.element("S1") == nil)
+        #expect(handles.node("S1") == nil)
         #expect(handles.screen("E1") == nil)
-        #expect(handles.element("E9") == nil)
-        #expect(handles.element("the button") == nil)
+        #expect(handles.node("E9") == nil)
+        #expect(handles.node("the button") == nil)
 
         // Numbers only go up, so a handle is never handed to something else later.
-        #expect(handles.handle(forElement: UUID()) == "E3")
+        #expect(handles.handle(forNode: UUID()) == "E3")
     }
 }
 
@@ -75,7 +75,7 @@ struct CanvasPictureTests {
         #expect(picture.screens.first?.elements.map(\.kind) == ["title", "button", "image"])
         #expect(!picture.text(.full).contains("drawing"))
         // Nothing was given the next handle on the quiet.
-        #expect(handles.element("E4") == nil)
+        #expect(handles.node("E4") == nil)
     }
 
     /// With several things selected, "these" are all of them.
@@ -215,7 +215,7 @@ struct VoiceToolsTests {
 
         /// The leaf a handle names, on one of the design's screens.
         @MainActor func node(_ handle: String) -> LayerNode? {
-            guard let id = handles.element(handle) else { return nil }
+            guard let id = handles.node(handle) else { return nil }
             return app.store.tree.screens.flatMap(\.root.leaves).first { $0.id == id }
         }
 
@@ -250,8 +250,8 @@ struct VoiceToolsTests {
     /// back whole, a restyle made the group's lock or hide the member's own.
     @Test func restylingAMemberOfAHiddenOrLockedGroupKeepsItsOwnFlags() throws {
         let bench = bench()
-        let button = try #require(bench.handles.element("E2"))
-        let image = try #require(bench.handles.element("E3"))
+        let button = try #require(bench.handles.node("E2"))
+        let image = try #require(bench.handles.node("E3"))
         let group = try #require(bench.app.store.wrap([button, image], in: .group, layout: .free))
         bench.app.store.update(group) { $0.isHidden = true }
 
@@ -361,7 +361,7 @@ struct VoiceToolsTests {
         #expect(try #require(bench.app.store.ownFrame(added.id)).minY > 700)
         // The model is told what to call it from now on.
         #expect(line.contains("E4"))
-        #expect(bench.handles.element("E4") == added.id)
+        #expect(bench.handles.node("E4") == added.id)
 
         let before = bench.app.store.content
         let unknown = bench.box.addElement(screen: "S1", kind: "hologram", text: nil, look: nil)
@@ -658,7 +658,7 @@ struct VoiceToolsTests {
         let bench = bench()
         let note = LayerNode.leaf(.stickyNote, frame: CGRect(x: 0, y: 0, width: 200, height: 120), text: "A note", tint: Theme.accent)
         bench.app.store.addCanvasNode(note, scale: 1)
-        let handle = bench.handles.handle(forElement: note.id)
+        let handle = bench.handles.handle(forNode: note.id)
         let line = bench.box.moveElement(element: handle, x: nil, y: nil, width: "50%", height: nil)
         #expect(line == "That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
         #expect(bench.app.store.ownFrame(note.id)?.width == 200)
@@ -803,7 +803,7 @@ struct VoiceToolsTests {
         let bench = bench()
         _ = bench.box.addElement(screen: "S1", kind: "text field", text: "Email", look: nil)
         let field = try #require(bench.app.store.screenLeaves(bench.screen).first { $0.kind == .textField })
-        let handle = bench.handles.handle(forElement: field.id)
+        let handle = bench.handles.handle(forNode: field.id)
         #expect(bench.box.deleteElement(element: handle, named: "password field").hasPrefix("There is no password field here."))
         #expect(bench.node(handle) != nil)
         _ = bench.box.deleteElement(element: handle, named: "the email field")
@@ -861,7 +861,7 @@ struct VoiceToolsTests {
         let box = VoiceToolbox(model: app, handles: handles)
         box.scope = login
         func element(_ handle: String) throws -> LayerNode {
-            let id = try #require(handles.element(handle))
+            let id = try #require(handles.node(handle))
             return try #require(app.store.tree.screens.flatMap(\.root.leaves).first { $0.id == id })
         }
         let scopeLine = "Only S1 “Login” can be changed here."
@@ -875,7 +875,7 @@ struct VoiceToolsTests {
         #expect(try element("E4").resolvedTint == profileTint)
         #expect(box.lastFailed)
         // Nor what is loose on the canvas, E5.
-        #expect(handles.element("E5") == note)
+        #expect(handles.node("E5") == note)
         #expect(box.setText(element: "E5", text: "Hello").contains("isn't on S1"))
         #expect(app.store.node(note)?.content.text != "Hello")
 
@@ -941,7 +941,7 @@ struct VoiceToolsTests {
 
         // Without a scope, what a tool changed is selected, as before.
         box.reset()
-        let button = try #require(handles.element("E2"))
+        let button = try #require(handles.node("E2"))
         _ = box.styleElement(element: "E2", look: "red")
         #expect(app.selection == .element(.init(host: .screen(login), node: button)))
     }

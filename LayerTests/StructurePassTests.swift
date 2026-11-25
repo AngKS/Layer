@@ -14,8 +14,7 @@ private func makeModel() -> (model: AppModel, screen: TreeScreen.ID, undo: UndoM
     model.store.undoManager = undo
     // No word is read out of the strokes: what they are is the shape's alone.
     model.engine.readHandwriting = { _ in nil }
-    let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-    return (model, screen.id, undo)
+    return (model, model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)), undo)
 }
 
 private func leaf(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> LayerNode {

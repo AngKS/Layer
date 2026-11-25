@@ -88,8 +88,8 @@ private func describe(_ kind: ElementKind) throws -> [String] {
 
     // On the open canvas, drawn large and drawn small.
     let store = DesignStore()
-    let large = store.addLooseSketch(kind, from: CGRect(x: 0, y: 0, width: 300, height: 200)).flatMap { store.node($0) }
-    let small = store.addLooseSketch(kind, from: CGRect(x: 0, y: 0, width: 30, height: 20)).flatMap { store.node($0) }
+    let large = store.placeLoose(kind, sketchedAs: CGRect(x: 0, y: 0, width: 300, height: 200)).flatMap { store.node($0.node) }
+    let small = store.placeLoose(kind, sketchedAs: CGRect(x: 0, y: 0, width: 30, height: 20)).flatMap { store.node($0.node) }
     lines.append("loose, drawn large: \(s(large?.frame.size ?? .zero)) | drawn small: \(s(small?.frame.size ?? .zero))")
 
     // In a written or generated screen: the leaf the one-line outline of its first written name makes, its natural

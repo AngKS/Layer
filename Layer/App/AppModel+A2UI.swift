@@ -200,7 +200,7 @@ extension AppModel {
         if TreeEdit.holds(root, where: { !$0.kind.belongsOnScreens }) {
             return "its screen holds a sticky note or a drawing, which a screen can't hold"
         }
-        return "its screen would take this design past \(TreeRules.maximumNodes.formatted()) nodes"
+        return "its screen would take this design to more than \(TreeRules.maximumNodes.formatted()) things"
     }
 
     /// The name the surface gives its screen (Layer's own export), else its first title's words, either made one line

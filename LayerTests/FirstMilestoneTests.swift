@@ -18,8 +18,7 @@ private func makeModel() -> (model: AppModel, screen: TreeScreen.ID) {
     let model = AppModel(document: LayerDocument())
     // No word is read out of the strokes: what they are is the shape's alone.
     model.engine.readHandwriting = { _ in nil }
-    let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-    return (model, screen.id)
+    return (model, model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
 }
 
 /// One batch: every sketch in `script` read at once, as when the pen rests once, and waited for. Its strokes are keyed

@@ -1495,7 +1495,7 @@ struct GroupGeometryTests {
     /// two buttons 10 points apart on the half-size screen overlapped on a full-size one.
     @Test func aGroupLandingWhereThingsAreDrawnAtAnotherScaleArrivesWhole() throws {
         let board = OrderBoard()
-        let big = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1)).id
+        let big = try #require(board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1))).id
         let pair = board.store.add([
             OrderBoard.element(.button, named: "P", CGRect(x: 40, y: 760, width: 100, height: 40)),
             OrderBoard.element(.button, named: "Q", CGRect(x: 150, y: 760, width: 100, height: 40)),
@@ -1537,7 +1537,7 @@ struct GroupGeometryTests {
         let board = OrderBoard()
         board.store.updateCanvas { $0.snapsToGuides = false }
         board.model.tool = .select
-        let big = board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1)).id
+        let big = try #require(board.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 900, y: 50), scale: 1))).id
         let g = board.group(board.b, board.d)
         let drags = CanvasDrags()
         board.model.drags = drags

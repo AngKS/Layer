@@ -258,7 +258,7 @@ private struct Picture {
 
     @Test func theBoardSnapshotDrawsTheTree() throws {
         let model = AppModel(document: LayerDocument())
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5)))
         let card = Self.node(.card, CGRect(x: 40, y: 300, width: 200, height: 100))
         try #require(model.store.add(card, to: .screen(screen.id)))
         let parts = try #require(BoardSnapshot.thumbnailParts(of: model))

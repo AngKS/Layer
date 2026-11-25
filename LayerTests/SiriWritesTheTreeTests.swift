@@ -596,7 +596,7 @@ struct SiriWritesTheTreeTests {
                                                        in: login.model, undoManager: nil)
 
         #expect(moved == NodeRef(host: .canvas, node: login.title))
-        #expect(store.frameOnCanvas(of: login.title) == CGRect(x: 600, y: 400, width: 228, height: 40))
+        #expect(store.canvasRect(of: login.title) == CGRect(x: 600, y: 400, width: 228, height: 40))
         login.undo.undo()
         #expect(store.ref(of: login.title)?.host == .screen(login.screen))
         #expect(!login.undo.canUndo, "one step")
@@ -635,6 +635,8 @@ struct SiriWritesTheTreeTests {
 
         #expect(try subtitle(login.screen) == "Kiosk · Design")
         #expect(try subtitle(second) == "\(DeviceChoice.displayName(of: .iPhone)) · Design")
+        // Written out, so that a change to the built-in's Siri name shows here (plan 6, Task 10 review minor 2).
+        #expect(try subtitle(second) == "Phone · Design")
         #expect(try subtitle(second) != "iPhone · Design")
     }
 }

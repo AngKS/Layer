@@ -27,7 +27,7 @@ private struct BusyBoard {
 
     init() {
         model.canvasSize = CGSize(width: 1210, height: 834)
-        screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5)).id
+        screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 50), scale: 0.5))
         lines = model.store.add((0..<40).map { index in
             LayerNode.leaf(.text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
         }, onScreen: screen)
