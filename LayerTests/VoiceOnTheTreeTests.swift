@@ -503,4 +503,37 @@ struct VoiceOnTheTreeTests {
         #expect(store.node(login.label)?.style.tint == ColourWords.named["blue"])
         #expect(store.ownFrame(login.card)?.minX == 30)
     }
+
+    /// The same command said to the whole canvas, not typed for one screen: each tool shows what it changed, selecting it
+    /// through `DesignActions.reveal`, which reads the tree since lane B's Task 3. Still nothing lowers the design (plan 6,
+    /// Task 7 review M5, after lane B's merge).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
+    func aCommandToTheWholeCanvasLowersNothing() async throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let store = login.model.store
+        // Out of its file and out of the open designs, as above: only the command's own work is counted (F17, F18).
+        login.model.fileURL = nil
+        OpenDesigns.shared.closed(login.model)
+        // The counter is live: a change through a tree verb, then a read of the flat list, lowers the design once.
+        store.update(login.title) { $0.content.text = "Hello" }
+        let live = TreeProjection.lowerings(of: login.screen)
+        _ = store.screens
+        #expect(TreeProjection.lowerings(of: login.screen) - live == 1)
+
+        store.update(login.title) { $0.content.text = "Welcome" }
+        let agent = VoiceAgent(model: login.model, testModel: ScriptedLanguageModel(script: [
+            "make the wi-fi row blue": [
+                ScriptedLanguageModel.Step(tool: "styleElement", arguments: #"{"element":"E5","look":"blue"}"#),
+                ScriptedLanguageModel.Step(tool: "moveElement", arguments: #"{"element":"E2","x":"30"}"#),
+            ],
+        ]))
+        let before = TreeProjection.lowerings(of: login.screen)
+        let outcome = await agent.run("Make the Wi-Fi row blue")
+        #expect(outcome.problem == nil)
+        #expect(TreeProjection.lowerings(of: login.screen) - before == 0)
+        #expect(store.node(login.label)?.style.tint == ColourWords.named["blue"])
+        #expect(store.ownFrame(login.card)?.minX == 30)
+        // What the last tool changed is shown, and so selected: the card it moved.
+        #expect(login.model.selection == .element(DesignStore.ElementRef(host: .screen(login.screen), element: login.card)))
+    }
 }

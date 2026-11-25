@@ -246,6 +246,43 @@ struct NewVoiceToolsTests {
         #expect(bench.store.node(bench.y)?.sketch?.structureDeclined == true)
     }
 
+    /// Voice's ungroup of a row the structure pass built is one step of the command, its declines included (plan 5's
+    /// final review, A9): one undo brings the row back, and neither of what it holds is declined any more (plan 6, Task 8
+    /// review M6).
+    @Test func oneUndoOfVoicesUngroupBringsTheRowBackAndItsDeclinesGo() throws {
+        var built: UUID?
+        let bench = bench { login, x, y in
+            let store = login.model.store
+            guard let root = store.treeScreen(login.screen)?.root, var first = store.node(x), var second = store.node(y) else { return }
+            first.frame.origin = .zero
+            second.frame.origin = CGPoint(x: 116, y: 0)
+            let row = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 16)),
+                                          frame: CGRect(x: 20, y: 400, width: 216, height: 24), children: [first, second])
+            built = store.build(StructureInference.Structure(kind: .row, parent: root.id, members: [x, y], container: row,
+                                                             confidence: 1, movement: 0))
+        }
+        let row = try #require(built)
+        let store = bench.store
+        let before = store.tree
+
+        // As a spoken command makes its changes: in the command's own step, held open until it ends.
+        store.beginHeldEdit()
+        _ = store.actingForCommand { bench.box.ungroup(element: bench.handles.handle(forNode: row)) }
+        store.endHeldEdit()
+        #expect(!bench.box.lastFailed)
+        #expect(store.node(row) == nil)
+        #expect(store.node(bench.x)?.sketch?.structureDeclined == true)
+        #expect(store.node(bench.y)?.sketch?.structureDeclined == true)
+        #expect(store.lastStepIsCommand)
+
+        bench.login.undo.undo()
+        #expect(store.node(row)?.children.map(\.id) == [bench.x, bench.y], "the row is back, holding what it held")
+        #expect(store.node(bench.x)?.sketch?.structureDeclined != true)
+        #expect(store.node(bench.y)?.sketch?.structureDeclined != true)
+        #expect(store.tree == before)
+        #expect(!bench.login.undo.canUndo, "the ungroup and its declines were one step")
+    }
+
     // MARK: reorder
 
     @Test func reorderingInARow() {
