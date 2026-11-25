@@ -116,9 +116,12 @@ struct StoreChangeBenchmarkTests {
     ///   the screen at plan 2's frames: 100 leaves.
     /// - Screens 1, 3, 5, 7 and 9 have a column root of 20 rows (`listRow`), the first row's text a title: 100 nodes.
     /// - The canvas holds 10 sticky notes, 10 texts, 5 free groups of 3 shapes and a row of 4 texts.
-    private static func largeDesign() -> TreeContent {
+    ///
+    /// With `screens`, as many screens alike, taking turns free and a column: 49 of them make 4,994 nodes with the loose
+    /// things, near the 5,000 cap.
+    private static func largeDesign(screens: Int = 10) -> TreeContent {
         var tree = TreeContent()
-        for number in 0..<10 {
+        for number in 0..<screens {
             var screen = TreeScreen(name: "Screen \(number + 1)", origin: CGPoint(x: 100 + 500 * CGFloat(number), y: 50), scale: 1,
                                     deviceID: nil)
             if number.isMultiple(of: 2) {
@@ -322,5 +325,35 @@ struct StoreChangeBenchmarkTests {
         let result = Self.percentiles(times)
         print(String(format: "BENCH large siriElements p50=%.3f p95=%.3f", result.p50, result.p95))
         #expect(result.p95.isFinite && result.p95 < 1000)
+    }
+
+    /// What opening a design costs: its file read (`DesignFile(wrapper:)`, which decodes it and lays it out in full),
+    /// and the store's check made since the sweep, that the design follows the rules (`DesignStore.init` applies them
+    /// in full to a copy and compares). On the large design (1,055 nodes) and on 49 of its screens with its loose things
+    /// (4,994 nodes, near the 5,000 cap). Each read once untimed, so that its text is measured as the read before an open
+    /// has measured it, then 10 times. It prints `BENCH <large or capped> openRead` and `BENCH <large or capped> open`.
+    @Test func openingALargeDesign() throws {
+        for (name, screens) in [("large", 10), ("capped", 49)] {
+            let tree = Self.largeDesign(screens: screens)
+            #expect(tree.screens.reduce(tree.canvas.reduce(0) { $0 + TreeEdit.count(of: $1) }) { $0 + TreeEdit.count(of: $1.root) }
+                    == (screens == 10 ? 1_055 : 4_994))
+            let wrapper = try DesignFile(content: tree).wrapper()
+            let read = try DesignFile(wrapper: wrapper)
+            #expect(read.content == tree, "the design was laid out already, so its read changes nothing")
+            _ = DesignStore(content: read.content)
+            var reads: [Double] = [], checks: [Double] = []
+            for _ in 0..<10 {
+                var start = ContinuousClock.now
+                let file = try DesignFile(wrapper: wrapper)
+                reads.append(Self.milliseconds(ContinuousClock.now - start))
+                start = ContinuousClock.now
+                let store = DesignStore(content: file.content)
+                checks.append(Self.milliseconds(ContinuousClock.now - start))
+                withExtendedLifetime(store) {}
+            }
+            let read50 = Self.percentiles(reads), check50 = Self.percentiles(checks)
+            print(String(format: "BENCH %@ openRead p50=%.3f p95=%.3f", name, read50.p50, read50.p95))
+            print(String(format: "BENCH %@ open p50=%.3f p95=%.3f", name, check50.p50, check50.p95))
+        }
     }
 }
