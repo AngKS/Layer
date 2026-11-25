@@ -277,6 +277,174 @@ struct VoiceOnTheTreeTests {
         #expect(bench.store.treeScreen(bench.login.screen)?.deviceID == nil)
     }
 
+    /// A file's device that can't be one (`DeviceFrame.problems`), reached by its name or as the design's New Screens
+    /// device, makes no screen, and voice says so rather than "Made the screen …" (review I1).
+    @Test func aNewScreenOnADeviceThatCantBeUsedIsRefused() async throws {
+        let huge = DeviceFrame.custom(name: "Huge", size: CGSize(width: 1e300, height: 1e300), family: .other)
+        let bench = bench { login in
+            login.model.store.changeTree(writing: 0) { $0.settings.customDevices.append(huge) }
+        }
+        let line = "Couldn't make a Huge screen (1000000 × 1000000). Width is 1 to 4,000 points. Height is 1 to 4,000 points."
+        #expect(try await bench.box.createScreen(name: "Shop", description: "a shop", device: "Huge") == line)
+        #expect(bench.box.lastFailed)
+        // By the person's own words, when the model names no device.
+        bench.box.spokenCommand = "a shop screen on the huge"
+        #expect(try await bench.box.createScreen(name: "Shop", description: "a shop", device: nil) == line)
+        // As the device new screens are made on.
+        bench.box.spokenCommand = nil
+        bench.store.changeTree(writing: 0) { $0.settings.sketchDeviceID = huge.id }
+        #expect(try await bench.box.createScreen(name: "Shop", description: "a shop", device: nil) == line)
+        #expect(bench.store.tree.screens.count == 1)
+        #expect(bench.login.model.generation == nil)
+    }
+
+    @Test func aNewScreenIsMadeOnTheDesignsOwnDeviceByName() async throws {
+        let kiosk = DeviceFrame.custom(name: "Kiosk", size: CGSize(width: 1080, height: 1920), family: .other)
+        let bench = bench { $0.model.store.addCustomDevice(kiosk) }
+        let made = try #require(bench.store.tree.settings.customDevices.first)
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        bench.login.model.screenStream = { _ in stream }
+        let making = Task { try await bench.box.createScreen(name: "Shop", description: "a shop", device: "the kiosk") }
+        #expect(await eventually { bench.login.model.isGenerating })
+        #expect(bench.store.tree.screens.last?.deviceID == made.id)
+        feed.finish()
+        _ = try await making.value
+    }
+
+    // MARK: A container's size (review M1): as the Format panel's W and H
+
+    @Test func aContainersWidthOrHeightScalesItInProportion() throws {
+        let bench = bench()
+        #expect(bench.box.moveElement(element: "E2", x: nil, y: nil, width: "706", height: nil, takeOut: nil) == "Resized the card.")
+        #expect(bench.store.ownFrame(bench.login.card) == CGRect(x: 20, y: 140, width: 706, height: 320))
+        #expect(bench.store.node(bench.login.about)?.frame.size == CGSize(width: 400, height: 48))
+
+        let tall = self.bench()
+        _ = tall.box.moveElement(element: "E2", x: nil, y: nil, width: nil, height: "320", takeOut: nil)
+        #expect(tall.store.ownFrame(tall.login.card) == CGRect(x: 20, y: 140, width: 706, height: 320))
+    }
+
+    /// Given both, the width decides, as the panel's fields do: a width as it is with a new height changes nothing.
+    @Test func aContainersWidthAsItIsWithANewHeightChangesNothing() {
+        let bench = bench()
+        let before = bench.store.tree
+        _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "353", height: "200", takeOut: nil)
+        #expect(bench.store.tree == before)
+    }
+
+    /// A row in a free parent is scaled in proportion too, and fixed on both axes, as the panel fixes it.
+    @Test func aRowResizedInAFreeParentIsScaledAndFixedBothWays() throws {
+        let bench = bench()
+        _ = bench.box.moveElement(element: "E5", x: nil, y: nil, width: "286", height: nil, takeOut: nil)
+        let row = try #require(bench.store.node(bench.login.row))
+        #expect(row.width.mode == .fixed)
+        #expect(row.height.mode == .fixed)
+        #expect(bench.store.ownFrame(bench.login.row)?.size == CGSize(width: 286, height: 62))
+        #expect(row.children.map(\.id) == [bench.login.label, bench.login.toggle])
+    }
+
+    // MARK: Width words (review M4)
+
+    /// "Make the row full width" stretches the row, not what it holds.
+    @Test func aWidthWordGoesToTheContainerNamed() throws {
+        let first = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 80, height: 24), text: "Wi-Fi")
+        let second = LayerNode.leaf(.toggle, frame: CGRect(x: 0, y: 0, width: 51, height: 31))
+        let row = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12)), children: [first, second])
+        let bench = bench { login in
+            login.model.store.addColumnScreen([row], name: "Settings", origin: CGPoint(x: 2000, y: 0))
+        }
+        let handle = bench.handles.handle(forNode: row.id)
+        #expect(bench.box.styleElement(element: handle, look: "full width") == "Restyled the row.")
+        let styled = try #require(bench.store.node(row.id))
+        #expect(styled.width.mode == .fill(weight: 1))
+        #expect(styled.children.map(\.width.mode) == [.fixed, .fixed])
+        #expect(bench.store.ownFrame(row.id)?.width == 353)
+    }
+
+    /// A width word where it changes nothing is said so, and isn't kept: on a leaf in a free parent, and fill on a
+    /// container in one. The rest of the look still goes on.
+    @Test func aWidthWordWhereItChangesNothingIsSaidSo() throws {
+        let bench = bench()
+        let before = bench.store.tree
+        let leaf = "E1 isn't in a row, column or grid, so fill and fit don't apply to it. To change its width, call moveElement with a width."
+        #expect(bench.box.styleElement(element: "E1", look: "full width") == leaf)
+        #expect(bench.box.lastFailed)
+        #expect(bench.box.styleElement(element: "E5", look: "fill")
+            == "E5 isn't in a row, column or grid, so fill doesn't apply to it. To change its width, call moveElement with a width.")
+        #expect(bench.store.tree == before)
+
+        #expect(bench.box.styleElement(element: "E1", look: "blue, full width") == "Restyled the title “Welcome”. " + leaf)
+        let title = try #require(bench.store.node(bench.login.title))
+        #expect(title.style.tint == ColourWords.named["blue"])
+        #expect(title.width.mode == .fixed)
+
+        // A container's fit is as wide as what it holds, wherever it is.
+        _ = bench.box.styleElement(element: "E2", look: "fit")
+        #expect(bench.store.node(bench.login.card)?.width.mode == .fit)
+    }
+
+    // MARK: Taking out, adding and looks: the other outcomes (review M7)
+
+    /// The frame's middle falls in its own row, past the toggle: it goes there, after the toggle.
+    @Test func takingOutIntoItsOwnRowMovesItThere() throws {
+        let bench = bench()
+        #expect(bench.box.moveElement(element: "E6", x: "112", y: "324", width: nil, height: nil, takeOut: "yes")
+            == "Moved E6 to another place in E5.")
+        #expect(bench.store.node(bench.login.row)?.children.map(\.id) == [bench.login.toggle, bench.login.label])
+    }
+
+    @Test func takingOutToWhereItIsChangesNothing() {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.moveElement(element: "E6", x: "20", y: "324", width: nil, height: nil, takeOut: "yes") == "E6 is there already.")
+        #expect(!bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+    }
+
+    /// In a row on a column screen, a frame that falls nowhere it could go is refused: the column has no free top to
+    /// take it out to.
+    @Test func takingOutWhereThereIsNowhereToGoIsRefused() {
+        let first = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 80, height: 24), text: "Wi-Fi")
+        let second = LayerNode.leaf(.toggle, frame: CGRect(x: 0, y: 0, width: 51, height: 31))
+        let row = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12)), children: [first, second])
+        let bench = bench { login in
+            login.model.store.addColumnScreen([row], name: "Settings", origin: CGPoint(x: 2000, y: 0))
+        }
+        let handle = bench.handles.handle(forNode: first.id), holder = bench.handles.handle(forNode: row.id)
+        let before = bench.store.tree
+        #expect(bench.box.moveElement(element: handle, x: "40", y: "5000", width: nil, height: nil, takeOut: "yes")
+            == "\(handle) is in the row \(holder), which places it. To change its place in \(holder), call reorder.")
+        #expect(bench.store.tree == before)
+    }
+
+    @Test func addingLeftOfOrAboveARowChildPutsItBefore() throws {
+        let left = bench()
+        _ = left.box.addElement(screen: nil, kind: "text", text: "Bluetooth", look: nil, relation: "left of", target: "E6")
+        let leftRow = try #require(left.store.node(left.login.row))
+        #expect(leftRow.children.map(\.content.text) == ["Bluetooth", "Wi-Fi", ""])
+
+        let above = bench()
+        _ = above.box.addElement(screen: nil, kind: "text", text: "Bluetooth", look: nil, relation: "above", target: "E7")
+        let aboveRow = try #require(above.store.node(above.login.row))
+        #expect(aboveRow.children.first?.id == above.login.label)
+        #expect(aboveRow.children[1].content.text == "Bluetooth")
+        #expect(aboveRow.children.last?.id == above.login.toggle)
+    }
+
+    /// A row that holds nothing has nothing to take a look: said so, not "Restyled".
+    @Test func aLookOnAnEmptyRowSaysNothingChanged() {
+        let empty = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12)),
+                                        frame: CGRect(x: 20, y: 500, width: 0, height: 0), children: [])
+        let bench = bench { login in
+            login.model.store.add(empty, to: .screen(login.screen))
+        }
+        let handle = bench.handles.handle(forNode: empty.id)
+        let before = bench.store.tree
+        #expect(bench.box.styleElement(element: handle, look: "blue") == "\(handle) holds nothing, so nothing was restyled.")
+        #expect(bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+    }
+
     // MARK: Gone, scoped, and nothing lowered
 
     @Test func handlesOfGoneThingsSayTheyAreGone() {

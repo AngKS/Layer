@@ -330,6 +330,10 @@ final class VoiceToolbox: VoiceActing {
         // design's own goes by its name.
         let frame = device.flatMap { Self.device(named: $0, preferring: usual, custom: settings.customDevices) }
             ?? spokenCommand.flatMap { Self.device(named: $0, preferring: usual, custom: settings.customDevices) }
+        // One of the design's own that a file held broken (`DeviceFrame.problems`) is refused, as a device change refuses
+        // it: no screen is made on it, and none is said to be.
+        let chosen = frame ?? usual
+        guard chosen.problems.isEmpty else { return failed(Self.cantMake(Self.screenNamed(chosen), on: chosen)) }
         // What the voice model asked for, so that a session log shows it beside the screen made.
         VoiceLog.log.info("tool: createScreen \"\(description, privacy: .public)\" on \((frame ?? usual).id, privacy: .public) (said \(device ?? "nothing", privacy: .public))")
         // Inside a command the screen is part of the command's own undo step.
@@ -427,20 +431,29 @@ final class VoiceToolbox: VoiceActing {
             case .success(let found):
                 let store = model.store
                 let handle = handles.handle(forScreen: found.id)
-                // A size a file held may be too large for a whole number: said as the device picker says it.
-                let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(frame.size.width.wholePoints) × \(frame.size.height.wholePoints))"
+                let named = Self.screenNamed(frame)
                 guard store.device(of: found.id)?.id != frame.id else { return done("\(handle) is already \(named).") }
                 store.changeDevice(of: found.id, to: frame)
                 // The store refuses one of the design's own that a file held broken (`DeviceFrame.problems`): said so,
                 // not that it was made.
-                guard store.device(of: found.id)?.id == frame.id else {
-                    let problems = frame.problems
-                    return failed("Couldn't make \(handle) \(named). \(problems.isEmpty ? "That device can't be used." : problems.joined(separator: " "))")
-                }
+                guard store.device(of: found.id)?.id == frame.id else { return failed(Self.cantMake("\(handle) \(named)", on: frame)) }
                 reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
         }
+    }
+
+    /// A screen of a device in words, such as `an iPad screen (820 × 1180)`. A size a file held may be too large for a
+    /// whole number: said as the device picker says it.
+    private static func screenNamed(_ device: DeviceFrame) -> String {
+        "\(article(for: device.name)) \(device.name) screen (\(device.size.width.wholePoints) × \(device.size.height.wholePoints))"
+    }
+
+    /// Why `what` can't be made on a device that can't be used (`DeviceFrame.problems`), such as `Couldn't make S1 a Huge
+    /// screen (1000000 × 1000000). Width is 1 to 4,000 points.`
+    private static func cantMake(_ what: String, on device: DeviceFrame) -> String {
+        let problems = device.problems
+        return "Couldn't make \(what). \(problems.isEmpty ? "That device can't be used." : problems.joined(separator: " "))"
     }
 
     /// Why no device was found for some words: the built-in families, and the design's own devices by name.
@@ -635,6 +648,9 @@ final class VoiceToolbox: VoiceActing {
     /// A look goes to the thing named, or, for a plain group (a free one, a row, a column, a grid or an overlay), to
     /// each thing it holds, in one step: "make these blue" with a group selected recolours what is in it. A card takes
     /// it itself (call 7).
+    ///
+    /// A width word (fill, fit) is about the thing named, never what it holds: "make the row full width" stretches the
+    /// row. It is told where it changes nothing, rather than kept there (`widthRefusal`).
     func styleElement(element: String, look: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -644,19 +660,43 @@ final class VoiceToolbox: VoiceActing {
                 guard let words = Self.look(look) else {
                     return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
                 }
+                var rest = words
+                rest.width = nil
+                let refusal = words.width.flatMap { widthRefusal($0, for: found) }
+                let width = refusal == nil ? words.width : nil
+                let restyled = rest == Look() ? [] : found.node.kind == .group ? found.node.leaves.map(\.id) : [found.id]
+                guard width != nil || !restyled.isEmpty else {
+                    // Only a width that changes nothing where it is, or a group that holds nothing to restyle.
+                    return failed(refusal ?? "\(handle(of: found)) holds nothing, so nothing was restyled.")
+                }
                 reveal(.element(found.ref), in: model)
                 let store = model.store
-                let restyled = found.node.kind == .group ? found.node.leaves.map(\.id) : [found.id]
                 store.asOneStep {
-                    for id in restyled { store.update(id) { words.apply(to: &$0) } }
+                    if let width { store.update(found.id) { Look(width: width).apply(to: &$0) } }
+                    for id in restyled { store.update(id) { rest.apply(to: &$0) } }
                 }
-                return done("Restyled \(Self.describe(found.node)).")
+                let line = done("Restyled \(Self.describe(found.node)).")
+                return refusal.map { line + " " + noted($0) } ?? line
             }
         }
     }
 
-    /// In a free parent, a position or a size is where it goes or how big it is, in its host's points; a container
-    /// goes whole, and is resized as the Format panel resizes one. A thing a row, column, grid or overlay places is
+    /// Why a width word changes nothing on `found`, or nil where it does. Fill takes the room a row, column or grid
+    /// gives, and fit is as wide as what is in it: in a free parent, which gives no room and places a leaf by its frame,
+    /// only a container's fit does anything.
+    private func widthRefusal(_ width: Look.Width, for found: Found) -> String? {
+        guard !found.placed.isLaidOut else { return nil }
+        let handle = handle(of: found)
+        switch (found.node.isContainer, width) {
+        case (true, .fit): return nil
+        case (true, .fill): return "\(handle) isn't in a row, column or grid, so fill doesn't apply to it. To change its width, call moveElement with a width."
+        case (false, _): return "\(handle) isn't in a row, column or grid, so fill and fit don't apply to it. To change its width, call moveElement with a width."
+        }
+    }
+
+    /// In a free parent, a position or a size is where it goes or how big it is, in its host's points. A container goes
+    /// whole, moved and resized exactly as the Format panel's X, Y, W and H move and resize one (`setBox`): a size
+    /// scales it in proportion. A thing a row, column, grid or overlay places is
     /// only resized by its numbers, which fixes the axes they change: a position changes nothing, and the model is
     /// told how to reorder it or take it out, which `takeOut` does through the drag rule (call 8). Under a screen's
     /// root that lays things out, there is nowhere to take it out to (F15).
@@ -715,8 +755,8 @@ final class VoiceToolbox: VoiceActing {
                     }
                     return self.takeOut(found, handle: handle, from: placer, to: frame)
                 }
-                if found.node.isContainer, isResize {
-                    store.resizeGroup(found.ref, to: Self.containerFrame(frame, from: found))
+                if found.node.isContainer {
+                    Self.setBox(of: found.ref, x: values[0], y: values[1], width: values[2], height: values[3], in: store)
                 } else {
                     store.place(found.id, at: frame)
                 }
@@ -747,16 +787,29 @@ final class VoiceToolbox: VoiceActing {
         }
     }
 
-    /// A free container's new frame as the Format panel gives one (`AppModel.setGroupBox`): a width or a height scales
-    /// everything in it in proportion, by the width when both are given. A row, column, grid or overlay takes the frame
-    /// as it is, and is fixed on the axes it changes.
-    private static func containerFrame(_ frame: CGRect, from found: Found) -> CGRect {
-        let box = found.placed.frame
-        guard found.node.resolvedLayout == .free, box.width > 0, box.height > 0 else { return frame }
-        let size = frame.width != box.width
-            ? CGSize(width: frame.width, height: box.height * frame.width / box.width)
-            : CGSize(width: box.width * frame.height / box.height, height: frame.height)
-        return CGRect(origin: frame.origin, size: size)
+    /// A container's X, Y, W and H, in its host's points, as the Format panel sets them: a copy of the body of
+    /// `AppModel.setGroupBox(_:x:y:width:height:)` (AppModel.swift), which runs in the panel's own edit (`adjusting`) and
+    /// so can't join a spoken command's step. Keep the two the same.
+    /// - X or Y moves everything in it as one piece, by as far as the box moves (`position` takes canvas points).
+    /// - W or H scales everything in it in proportion, both sides by the side given, from its top-left: by the width
+    ///   whenever a width is given, so a width as it is with a new height changes nothing. A row, column, grid or
+    ///   overlay is scaled the same way, and fixed on both axes that change (`resizeGroup`).
+    private static func setBox(of ref: DesignStore.ElementRef, x: CGFloat?, y: CGFloat?, width: CGFloat?, height: CGFloat?,
+                               in store: DesignStore) {
+        if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
+            let box = item.canvasShape.bounds
+            let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
+            let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
+            store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
+        }
+        if width != nil || height != nil, let item = store.placed(ref), item.node.isContainer,
+           item.frame.width > 0, item.frame.height > 0 {
+            // The side given exactly; given both, the width, as the ratio is the widths'.
+            let box = item.frame
+            let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
+                ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
+            store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
+        }
     }
 
     /// Whether the words say yes: `yes`, `true` or `y`.
