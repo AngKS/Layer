@@ -570,6 +570,29 @@ struct AppModelTests {
         #expect(model.store.tree.screens.isEmpty)
     }
 
+    /// A generation that wrote only an empty card has written nothing: its screen goes as it ends, as one that wrote no
+    /// line at all does. An empty row, column or card holds no element.
+    @Test func aGenerationThatWroteOnlyAnEmptyCardLeavesNoScreen() async throws {
+        let (model, _) = makeModel()
+        model.suggestsTitle = false
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        model.screenStream = { _ in stream }
+        model.generateScreen(from: "a settings screen")
+        let screen = try #require(model.generation?.screenID)
+        var written = Outline.parse("card:\n  text: About", isComplete: true)
+        try #require(written.children.first?.kind == .card)
+        written.children[0].children = []
+        feed.yield(.screen(written))
+        // Merged and laid out off the main actor first: given time, as a run of every suite at once is slow.
+        #expect(await eventually(within: .seconds(10)) { model.store.treeScreen(screen)?.root.children.first?.kind == .card })
+        #expect(model.store.treeScreen(screen)?.root.leafCount == 0)
+
+        feed.finish()
+        await model.waitForGeneration()
+
+        #expect(model.store.treeScreen(screen) == nil)
+    }
+
     @Test func leavingTheSelectToolLetsGoOfTheSelection() {
         let (model, _) = makeModel()
         let screen = model.store.addScreen(from: leftScreenSketch)

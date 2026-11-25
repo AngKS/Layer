@@ -1051,8 +1051,9 @@ struct SelectingGroupsTests {
         #expect(board.model.selection == .element(g))
         #expect(board.model.hoverTarget(at: gap) == .element(g))
 
-        // Voice looks through a group's gap, as through ink: it sees elements, not groups.
-        #expect(board.model.hoverTarget(at: gap, skippingDrawings: true) == .screen(board.screen))
+        // Looking through ink, as voice does, the gap is still the group's: voice sees containers (plan 6, call 7;
+        // ruling: pointing under ink, Task 6's review).
+        #expect(board.model.hoverTarget(at: gap, skippingDrawings: true) == .element(g))
     }
 
     /// Review Focus 6: a group is one target until something in it is selected; then its
@@ -1694,7 +1695,7 @@ struct GroupGeometryTests {
     @Test func manyTurnsOfAGroupAddUpWithoutDrift() {
         let board = OrderBoard()
         let button = board.store.addOnCanvas(OrderBoard.element(.button, named: "button", CGRect(x: 480, y: 560, width: 320, height: 60)), scale: 1)
-        board.store.update(button) { $0.rotation = 20 }
+        board.store.update(button.element) { $0.rotation = 20 }
         let inner = board.group(board.note1, board.note2, named: "I") { $0.rotation = 10 }
         let g = board.group(button, inner)
         board.model.selection = .element(g)

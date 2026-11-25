@@ -517,11 +517,7 @@ struct SeveralThingsOnTheCanvasTests {
         let board = Board()
         board.model.selection = CanvasSelection([.element(board.title), .element(board.button), .element(board.note)])
         let red = RGBColor(hex: 0xFF0000)
-        board.store.asOneStep {
-            for case .element(let ref) in board.model.selectedThings where board.store.node(ref.element)?.hasFill == true {
-                board.store.update(ref.element) { $0.style.tint = red }
-            }
-        }
+        board.model.changeNodes(board.model.selectedLeafNodes.map(\.ref.element), where: \.hasFill) { $0.style.tint = red }
         // A title has no fill of its own to colour.
         #expect(board.store.node(board.button.element)?.style.tint == red)
         #expect(board.store.node(board.note.element)?.style.tint == red)

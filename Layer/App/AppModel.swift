@@ -668,8 +668,9 @@ final class AppModel {
             return
         }
         // A screen nothing was written on isn't left behind, unless something was put on it
-        // by hand meanwhile: it stays, with that on it (M1).
-        if finished.elementCount == 0, screen.root.children.isEmpty {
+        // by hand meanwhile: it stays, with that on it (M1). An empty row, column or card isn't
+        // something: what counts is what it holds.
+        if finished.elementCount == 0, screen.root.leafCount == 0 {
             store.act(for: edit) { store.deleteScreen(finished.screenID) }
         }
         // Stopped before it wrote anything: there is nothing to say (G10).
@@ -1712,8 +1713,8 @@ final class AppModel {
     /// makes either what a tap picks. Read from the tree.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing; and through a container's gaps, a card's padding among them, so that
-    /// voice sees elements, not groups.
+    /// change a drawing. A container's gap, a card's padding among them, is still the
+    /// container: voice sees containers (plan 6, call 7).
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
@@ -1747,7 +1748,6 @@ final class AppModel {
                 if let leaf = TreeTargets.leaf(at: point, in: target.id, content: store.tree, index: store.index) {
                     return .init(host: host, element: leaf)
                 }
-                if skippingDrawings { continue }
             } else if skippingDrawings, store.node(target.id)?.kind == .drawing {
                 continue
             }

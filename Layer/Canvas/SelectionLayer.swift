@@ -689,6 +689,7 @@ final class CanvasDrags {
             }
     }
 
+    // PROJECTION: deleted in plan 6
     // Kept for `FormatPanelTests` (lane B's, plan 6 Task 10), which still calls it: its port moves it to
     // `moveNode(_:by:startingAt:findsNewHome:owner:model:rule:)`, and this goes once nothing calls it.
     /// `moveNode` as its first callers made it: the frame and placement given aren't read, and the rule is asked for
