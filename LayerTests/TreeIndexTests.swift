@@ -303,7 +303,55 @@ extension TreeIndexTests {
         check("a redo")
         store.restore(content)
         check("a whole design put back")
-        #expect(checked == 25)
+        // Several versions before one read, as a spoken command's writes come before the canvas draws again.
+        store.update(ids.title) { $0.frame.origin.y += 12 }
+        #expect(store.add(Self.node(.shape, CGRect(x: 0, y: 0, width: 30, height: 30)), to: .node(ids.columnRows[2]), at: nil))
+        store.update(ids.toggle) { $0.isHidden = true }
+        store.delete(nodes: [ids.columnRows[0]])
+        check("four changes before one read")
+        store.setDevice(of: ids.column, to: "ipad")
+        #expect(store.tree.screens.first { $0.id == ids.column }?.deviceID == "ipad")
+        check("a screen's device changed")
+        store.delete(nodes: [ids.shapes[0]])
+        #expect(store.node(ids.group) == nil, "the rules dissolved the group left holding one shape")
+        check("a group of one dissolved by the rules")
+        undo.undo()
+        undo.undo()
+        check("two undos before one read")
+        #expect(checked == 29)
+    }
+
+    /// A seeded run of 200 steps of random changes through the store's verbs (`RandomChanges`), undo and redo among them,
+    /// read in batches of one to three. After each read the kept index is a fresh build's, and the design follows the
+    /// rules in full: laying all of it out again changes nothing, so every change's rules looked at all they had to.
+    @MainActor
+    @Test(arguments: [UInt64(20_261_125), 7, 42])
+    func aSeededRunOfMixedChangesKeepsTheIndexAFreshBuild(seed: UInt64) {
+        let (content, _) = Self.mixedDesign()
+        let store = DesignStore(content: content)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        store.undoManager = undo
+        var run = RandomChanges(store: store, undo: undo, random: SeededGenerator(seed: seed))
+        var done: [String] = []
+        for step in 1...200 {
+            let batch = Int.random(in: 1...3, using: &run.random)
+            var made: [String] = []
+            for _ in 0..<batch { made.append(run.change()) }
+            done += made
+            guard store.index == TreeIndex(store.tree) else {
+                Issue.record("seed \(seed), step \(step): the kept index isn't a fresh build's after \(made)")
+                return
+            }
+            var laidOut = store.tree
+            TreeRules.apply(to: &laidOut, after: nil)
+            guard laidOut == store.tree else {
+                Issue.record("seed \(seed), step \(step): the design doesn't follow the rules in full after \(made)")
+                return
+            }
+        }
+        // The run made most kinds of change, not one over and over.
+        #expect(Set(done).count >= 18, "\(Set(done).sorted())")
     }
 
     /// Brought up to date in place where only frames, angles, locks and hides change; and refused, to be built again,

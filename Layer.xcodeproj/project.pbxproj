@@ -286,6 +286,7 @@
 		851D9BCB060ACC24F37E0137 /* divider_noisy_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 7E9A47BE672AF5C474731DD7 /* divider_noisy_1.json */; };
 		85D055C8BE967A08B470B92C /* TreeRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4846A01DE529740062611EFC /* TreeRecords.swift */; };
 		868CCDF5AFCC0FE44EC03ADF /* RotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAEF8C4DCEF91DBDCF039C6C /* RotationTests.swift */; };
+		8752C585460079152C768EB5 /* RandomChanges.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB599C1074D5AAB104A4836 /* RandomChanges.swift */; };
 		88F9B1213EC5FDC9275E9630 /* VoiceToolbox+Elements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE11D2CFD41B2D0BEBC1429 /* VoiceToolbox+Elements.swift */; };
 		892C3568ED48E506CD7E134E /* TopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D050FBC0FE953D9E89F917CD /* TopBar.swift */; };
 		894C3C7C32B7A621F626F9A2 /* design-sketch.json in Resources */ = {isa = PBXBuildFile; fileRef = 454E825DC90519D50A9E5B82 /* design-sketch.json */; };
@@ -892,6 +893,7 @@
 		974487F1CBD0722BAF59DF69 /* ParsersTakeTokensTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsersTakeTokensTests.swift; sourceTree = "<group>"; };
 		99EAC237096FE313DDC2746A /* structure-row_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "structure-row_noisy_2.json"; sourceTree = "<group>"; };
 		9A373E7C69DAD824CE8C64EA /* body_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = body_clean_1.json; sourceTree = "<group>"; };
+		9AB599C1074D5AAB104A4836 /* RandomChanges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandomChanges.swift; sourceTree = "<group>"; };
 		9AB824C266471EE47CF6DE90 /* StructureGridTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructureGridTests.swift; sourceTree = "<group>"; };
 		9AC0B78BFD698A9A1CBF6129 /* text_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = text_jittered_2a.json; sourceTree = "<group>"; };
 		9ADE56752B3A2E9E14019D6F /* structure-near_locked_divider_between_texts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "structure-near_locked_divider_between_texts.json"; sourceTree = "<group>"; };
@@ -1218,6 +1220,7 @@
 			isa = PBXGroup;
 			children = (
 				30CFF4DB25DC67AC8E7EA074 /* PlacedLeaves.swift */,
+				9AB599C1074D5AAB104A4836 /* RandomChanges.swift */,
 				A669134FE96884A767A7C1AD /* SketchedTitles.swift */,
 				CD55C8F80091F3426CAB6784 /* TargetHosts.swift */,
 				8E1CD40492EA531D646C655E /* TreeBuilders.swift */,
@@ -2350,6 +2353,7 @@
 				058D4DF089BB2A16C353FB1C /* PerformanceFixTests.swift in Sources */,
 				F997EC4625D66DA01E70C75A /* PerformanceTests.swift in Sources */,
 				FF39CE9F7C9A2A839231BB21 /* PlacedLeaves.swift in Sources */,
+				8752C585460079152C768EB5 /* RandomChanges.swift in Sources */,
 				868CCDF5AFCC0FE44EC03ADF /* RotationTests.swift in Sources */,
 				31B81AF7B11953438E382C6B /* ScreenGenerationTests.swift in Sources */,
 				C9EA89DD04E6425D00D14ECA /* ScreenPromptWordingTests.swift in Sources */,
