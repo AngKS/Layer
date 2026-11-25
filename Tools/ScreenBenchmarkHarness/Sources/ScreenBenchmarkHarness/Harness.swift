@@ -184,7 +184,8 @@ import Foundation
     }
 
     /// Runs one answer through the app's stream reader as it arrives, timing the first screen handed on (what the
-    /// canvas first shows) and the end, then scores the whole answer. `answer` hands each answer-so-far to `take` and
+    /// canvas first shows), when the answer itself began (after any reasoning) and the end, then scores the whole
+    /// answer. `answer` hands each answer-so-far to `take` and
     /// returns the output tokens, when the model says.
     private static func measure(
         _ brief: String, _ format: Format, into summary: inout Summary,
@@ -195,16 +196,19 @@ import Foundation
         var reader = ScreenReader(format, tokens: .standard)
         var text = ""
         var firstContent: Duration?
+        var answerStart: Duration?
         var completion = Duration.zero
         do {
             let tokens = try await answer { soFar in
                 text = soFar
+                if answerStart == nil, !soFar.isEmpty { answerStart = clock.now - start }
                 if reader.take(soFar, isComplete: false) != nil, firstContent == nil { firstContent = clock.now - start }
             }
             if reader.take(text, isComplete: true) != nil, firstContent == nil { firstContent = clock.now - start }
             completion = clock.now - start
             summary.completion.append(completion)
             if let firstContent { summary.firstContent.append(firstContent) }
+            if let answerStart { summary.answerStart.append(answerStart) }
             if let tokens { summary.outputTokens.append(tokens) }
         } catch {
             print("=== \(summary.label) · \(brief)\nERR \(error)\n")
@@ -213,6 +217,7 @@ import Foundation
         }
         let score = format == .outline ? Score.outline(text) : Score.a2ui(text)
         let timing = "firstContent=\(firstContent.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms completion=\(Int((completion / .milliseconds(1)).rounded()))ms"
+            + " answerStart=\(answerStart.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms"
         print("=== \(summary.label) · \(brief)\n\(text)\n\(score.line) \(timing)\n")
         summary.scores.append(score)
     }
