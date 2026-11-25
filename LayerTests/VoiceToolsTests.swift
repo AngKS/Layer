@@ -1091,11 +1091,11 @@ struct VoiceToolsTests {
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.beginEdit()
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         store.endHeldEdit()
         let mark = store.historyMark
-        store.update(image) { $0.frame.origin.x = 60 }
-        store.update(image) { $0.frame.origin.x = 80 }
+        store.update(image.element) { $0.frame.origin.x = 60 }
+        store.update(image.element) { $0.frame.origin.x = 80 }
         // No move is a step of its own while the finger is still down.
         #expect(store.historyMark == mark)
         store.endEdit()
@@ -1115,12 +1115,12 @@ struct VoiceToolsTests {
         let before = store.content
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginEdit()
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         let mark = store.historyMark
-        store.update(image) { $0.frame.origin.x = 60 }
+        store.update(image.element) { $0.frame.origin.x = 60 }
         #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
@@ -1144,13 +1144,13 @@ struct VoiceToolsTests {
         bench.app.adjustmentPause = .milliseconds(20)
         store.beginHeldEdit()
         for width in [180, 160, 140] {
-            bench.app.adjusting { store.update(image) { $0.frame.size.width = CGFloat(width) } }
+            bench.app.adjusting { store.update(image.element) { $0.frame.size.width = CGFloat(width) } }
         }
         #expect(await eventually { !store.isEditing }, "the panel's pause ends the slider's step")
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         #expect(!store.isEditing && !store.isHoldingEdit)
-        store.update(image) { $0.frame.origin.y = 520 }
+        store.update(image.element) { $0.frame.origin.y = 520 }
         undo.undo()
         #expect(try #require(bench.frame("E3")).origin.y == 500)
         #expect(try #require(bench.frame("E3")).size.width == 140)
@@ -1173,7 +1173,7 @@ struct VoiceToolsTests {
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         store.beginEdit()
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         store.endEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
@@ -1194,7 +1194,7 @@ struct VoiceToolsTests {
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         bench.box.spokenCommand = "No, that's wrong."
         let said = bench.box.undo()
@@ -1211,7 +1211,7 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         undo.undo()
         store.beginHeldEdit()
         bench.box.spokenCommand = "No, that's wrong."
@@ -1229,7 +1229,7 @@ struct VoiceToolsTests {
         let bench = bench()
         let store = bench.app.store
         let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
-        store.update(image) { $0.frame.origin.x = 40 }
+        store.update(image.element) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         bench.box.spokenCommand = "Undo that."
         #expect(bench.box.undo() == "Undid the last change.")

@@ -152,25 +152,4 @@ struct SiriOnTheTreeTests {
         #expect(try written() == "absolute")
         #expect(CodeLayoutOption(rawValue: try #require(try written()))?.layout == .absolute)
     }
-
-    /// Reading the design for Siri lowers nothing (F18). Counted for the fixture's own screen, so that other suites'
-    /// designs lowered meanwhile don't add to it. Its lowering lines are retired in Task 11 under (s).
-    @Test func readingDoesNotLower() throws {
-        let login = TreeFixture.loginWithACardAndARow()
-        let store = login.model.store
-
-        // After a change through a tree verb, a read of the projection lowers the design: the counter is live.
-        store.update(login.title) { $0.content.text = "Hello" }
-        let live = TreeProjection.lowerings(of: login.screen)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: login.screen) - live == 1)
-
-        store.update(login.title) { $0.content.text = "Hello again" }
-        let before = TreeProjection.lowerings(of: login.screen)
-        let read = try snapshot(login)
-        _ = read.elements
-        _ = read.screens
-        _ = DesignLayoutWriter.json(for: read)
-        #expect(TreeProjection.lowerings(of: login.screen) - before == 0)
-    }
 }

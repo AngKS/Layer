@@ -60,56 +60,6 @@ enum DrawingInk {
     }
 }
 
-// PROJECTION: deleted in plan 6
-// A drawing as an element, for what still holds elements: plan 5's sketch path, voice and Siri, and the projection's tests.
-extension DesignElement {
-    /// A drawing made of these strokes, given where they lie on the canvas. Its frame is
-    /// the area they cover. Nil when there are no strokes.
-    static func drawing(_ strokes: [PKStroke], id: UUID = UUID()) -> DesignElement? {
-        guard let parts = DrawingInk.parts(of: strokes) else { return nil }
-        var element = DesignStore.newElement(.drawing)
-        element.id = id
-        element.frame = parts.frame
-        element.ink = parts.ink
-        return element
-    }
-
-    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched
-    /// to it if the frame has been resized since they were drawn, and then turned about
-    /// the frame's middle by the drawing's angle.
-    var canvasStrokes: [PKStroke] {
-        guard kind == .drawing else { return [] }
-        return DrawingInk.canvasStrokes(id: id, ink: ink, frame: frame, rotation: resolvedRotation)
-    }
-
-    /// Strokes as they lie on the canvas, already turned by `degrees` about `centre`, made
-    /// into a drawing that keeps that angle and looks exactly the same. The ink is
-    /// kept upright, and the frame is moved so that turning about its own middle puts
-    /// the strokes where they are. Nil when there are no strokes.
-    static func drawing(_ strokes: [PKStroke], id: UUID, keepingTurn degrees: Double, about centre: CGPoint) -> DesignElement? {
-        guard let parts = DrawingInk.parts(of: strokes, keepingTurn: degrees, about: centre) else { return nil }
-        var element = DesignStore.newElement(.drawing)
-        element.id = id
-        element.frame = parts.frame
-        element.ink = parts.ink
-        element.setRotation(degrees)
-        return element
-    }
-
-    /// How many strokes a drawing is made of.
-    var strokeCount: Int {
-        guard kind == .drawing, let ink, let drawing = DecodedInk.drawing(id, ink: ink) else { return 0 }
-        return drawing.strokes.count
-    }
-
-    /// Whether a touch anywhere in the element's frame picks it. A drawing on the ink
-    /// canvas is picked by its strokes instead, which leaves the space round and inside
-    /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
-    var isPickedByItsFrame: Bool {
-        kind != .drawing || isLocked
-    }
-}
-
 extension LayerNode {
     /// A drawing node made of these strokes, given where they lie on the canvas. Its frame is the area
     /// they cover. Nil when there are no strokes.

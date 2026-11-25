@@ -93,29 +93,6 @@ struct CanvasDragWorkTests {
     }
 
     #if DEBUG
-    /// Each frame of a drag is a new version of the design, and the tree is lowered to its list at most
-    /// once for each, by the store's memo. The ink canvas, which follows every change, reads the drawings
-    /// off the tree, and nothing else a change sets off lowers the tree again. Both counts are taken on
-    /// the main thread alone, in this one synchronous test, so no other test adds to them (F8).
-    @Test func aDragLowersTheTreeOnlyThroughTheStoresMemo() throws {
-        let board = BusyBoard()
-        let coordinator = InkCanvas.Coordinator(model: board.model)
-        board.model.ink = coordinator
-        let drags = CanvasDrags()
-        board.model.drags = drags
-        let owner = CanvasDrags.Owner()
-
-        let (version, byStore, everywhere) = (board.store.contentVersion, board.store.timesLowered, TreeProjection.lowerings)
-        for frame in 1...60 { board.drag(drags, board.lines[5], by: CGFloat(frame), owner: owner) }
-        let versions = board.store.contentVersion - version + 1
-        let lowered = board.store.timesLowered - byStore, all = TreeProjection.lowerings - everywhere
-        drags.dropElement(board.lines[5], findsNewHome: true, owner: owner, model: board.model)
-
-        #expect(versions > 1)
-        #expect(lowered <= versions, "lowered \(lowered) times over \(versions) versions")
-        #expect(all == lowered, "lowered \(all - lowered) times outside the store's memo during a 60-frame drag")
-    }
-
     /// Where each node is in the tree (the store's index) is worked out again with every version of
     /// the design, so a gesture's frames read it only when a container moves. A drag of several
     /// lines, a twist of them, and a group's handle build it at most once, for the version the
@@ -178,11 +155,10 @@ struct CanvasDragWorkTests {
         #expect(groupDragged <= versions, "index built \(groupDragged) times over \(versions) versions of a group's drag")
     }
 
-    /// A drag of several things and a group's corner handle read the tree on every frame, so that a frame builds
-    /// the store's index alone and never lowers the design to its list (plan 4 Task 1, with clause (m)). Counted
-    /// for this board's own screen (F9), after a change through a tree verb has left the store's memo stale, and
-    /// once that count is shown to be live (F11).
-    @Test func aDragOfSeveralThingsAndAGroupsHandleLowerNothing() throws {
+    /// A drag of several things and a group's corner handle read the tree on every frame, and each frame is a new
+    /// version of the design (plan 4 Task 1). Their checks that no frame lowered the design to the flat list went with
+    /// the list (plan 6, Task 11, clause (s)).
+    @Test func aDragOfSeveralThingsAndAGroupsHandleWriteEveryFrame() throws {
         let board = BusyBoard()
         let g = try #require(board.groupThreeLines())
         let pose = try #require(board.store.groupPose(of: g))
@@ -191,46 +167,31 @@ struct CanvasDragWorkTests {
         let lines = try #require(CanvasSelection(board.lines[10...12].map { CanvasSelection.element($0) }))
         board.model.selection = lines
 
-        // After a change through a tree verb, a read of the list lowers the design: the count is live.
-        board.store.update(board.lines[0].element) { $0.content.text = "Changed" }
-        let live = TreeProjection.lowerings(of: board.screen)
-        _ = board.store.screens
-        #expect(TreeProjection.lowerings(of: board.screen) - live == 1)
-
         // Several lines dragged together, out and back.
-        board.store.update(board.lines[0].element) { $0.content.text = "Changed again" }
         let owner = CanvasDrags.Owner()
         let dragStart = board.store.contentVersion
-        var before = TreeProjection.lowerings(of: board.screen)
         for dx in BusyBoard.outAndBack {
             drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: board.model)
         }
         let dragVersions = board.store.contentVersion - dragStart + 1
-        let dragged = TreeProjection.lowerings(of: board.screen) - before
         drags.dropGroup(owner: owner, model: board.model)
         #expect(dragVersions > 1)
-        #expect(dragged == 0, "lowered \(dragged) times over \(dragVersions) versions of a 60-frame drag of three lines")
 
         // The group's corner handle, from the pose taken as it began, a point a frame.
-        board.store.update(board.lines[0].element) { $0.content.text = "Changed once more" }
         let resizeStart = board.store.contentVersion
-        before = TreeProjection.lowerings(of: board.screen)
         for width in 1...60 {
             let size = CGSize(width: pose.box.width + CGFloat(width), height: pose.box.height * (pose.box.width + CGFloat(width)) / pose.box.width)
             board.store.resizeGroup(g, to: CGRect(origin: pose.box.origin, size: size), from: pose)
         }
         let resizeVersions = board.store.contentVersion - resizeStart + 1
-        let resized = TreeProjection.lowerings(of: board.screen) - before
         #expect(resizeVersions > 1)
-        #expect(resized == 0, "lowered \(resized) times over \(resizeVersions) versions of a 60-frame resize of a group")
     }
 
     /// Final review A2-I2: a drag of several things with a screen among them writes each of them on the tree, on every
     /// frame: the screen's origin, a text on another screen through its parent, and a text in a row there, taken out of
-    /// the row on the first frame (My call 20) and moved freely after. Nothing lowers the design, a screen's list, or a
-    /// node on its own to write it, counted for this board's own screens (F9), once a change through a tree verb has
-    /// left the store's memo stale and each count is shown to be live (F11).
-    @Test func aDragOfSeveralThingsWithAScreenAmongThemLowersNothing() throws {
+    /// the row on the first frame (My call 20) and moved freely after. Its checks that nothing lowered the design to the
+    /// flat list went with the list (plan 6, Task 11, clause (s)).
+    @Test func aDragOfSeveralThingsWithAScreenAmongThemWritesEachOnTheTree() throws {
         func text(_ words: String, _ frame: CGRect) -> LayerNode {
             var node = LayerNode(kind: .text)
             node.frame = frame
@@ -265,40 +226,21 @@ struct CanvasDragWorkTests {
         store.updateCanvas { $0.snapsToGuides = false }
         let drags = CanvasDrags()
         model.drags = drags
-        let screens = [first.id, second.id]
         model.selection = CanvasSelection([.screen(first.id), .element(try #require(store.ref(of: loose.id))),
                                            .element(try #require(store.ref(of: inRow.id)))])
         #expect(store.parent(of: inRow.id) == .node(row.id))
         let (startScreen, startLoose) = (first.origin, try #require(store.placed(loose.id)).frame.origin)
 
-        // After a change through a tree verb, a read of the list lowers the design, a projection write to a screen
-        // lowers its list, and one to a node on a screen lowers that node: each count is live.
-        store.update(first.root.children[0].id) { $0.content.text = "Changed" }
-        let live = screens.map(TreeProjection.lowerings(of:))
-        _ = store.screens
-        #expect(screens.map(TreeProjection.lowerings(of:)) == live.map { $0 + 1 })
-        let hostLive = screens.map(TreeProjection.hostLowerings(of:))
-        store.updateScreen(first.id) { $0.name = "Renamed" }
-        store.update(try #require(store.ref(of: loose.id))) { $0.text = "Changed" }
-        #expect(screens.map(TreeProjection.hostLowerings(of:)) == hostLive.map { $0 + 1 })
-
         // Out 30 points across the glass, a point a frame.
-        store.update(first.root.children[0].id) { $0.content.text = "Changed again" }
         let owner = CanvasDrags.Owner()
-        let (lowered, hostLowered) = (screens.map(TreeProjection.lowerings(of:)), screens.map(TreeProjection.hostLowerings(of:)))
         for dx in 1...30 {
             drags.moveGroup(by: CGSize(width: dx, height: 0), startingAt: CGPoint(x: 150, y: 150), owner: owner, model: model)
         }
-        let afterLowered = zip(screens.map(TreeProjection.lowerings(of:)), lowered).map { $0 - $1 }
-        let afterHost = zip(screens.map(TreeProjection.hostLowerings(of:)), hostLowered).map { $0 - $1 }
         // Each went 30 canvas points across: the screen by its origin, the texts by 60 of their screen's half-size points.
         #expect(store.treeScreen(first.id)?.origin == CGPoint(x: startScreen.x + 30, y: startScreen.y))
         #expect(store.placed(loose.id)?.frame.origin == CGPoint(x: startLoose.x + 60, y: startLoose.y))
         #expect(store.parent(of: inRow.id) == .screen(second.id), "taken out of its row")
         drags.dropGroup(owner: owner, model: model)
-
-        #expect(afterLowered == [0, 0], "designs lowered over 30 frames, by screen: \(afterLowered)")
-        #expect(afterHost == [0, 0], "lists and nodes lowered alone over 30 frames, by screen: \(afterHost)")
     }
     #endif
 

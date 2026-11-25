@@ -136,14 +136,13 @@ struct CanvasOnTheTreeTests {
         let g = container(frame: CGRect(x: 100, y: 200, width: 50, height: 50), [x, y])
         let (store, _) = makeStore(design([screen([g])]))
         let sibling = try #require(store.node(y.id))
-        let written = ListWork.elementsWritten, lowered = TreeProjection.lowerings
+        let written = ListWork.elementsWritten
 
         store.place(x.id, at: CGRect(x: 130, y: 250, width: 30, height: 40))
 
         #expect(store.node(x.id)?.frame == CGRect(x: 30, y: 50, width: 30, height: 40))
         #expect(store.node(y.id) == sibling)
         #expect(ListWork.elementsWritten - written == 1)
-        #expect(TreeProjection.lowerings - lowered == 0)
     }
 
     @Test func placingAContainerCarriesItsSubtree() throws {
@@ -253,7 +252,7 @@ struct CanvasOnTheTreeTests {
         #expect(store.ref(of: UUID()) == nil)
     }
 
-    @Test func theCanvasReadsTheSelectionWithoutLowering() throws {
+    @Test func theCanvasReadsTheSelectionFromTheTree() throws {
         let text = leaf(.text, CGRect(x: 0, y: 0, width: 80, height: 20))
         let card = container(.card, column(), frame: CGRect(x: 20, y: 100, width: 0, height: 0), fits: true,
                              [text, leaf(.text, CGRect(x: 0, y: 0, width: 80, height: 20))])
@@ -262,14 +261,6 @@ struct CanvasOnTheTreeTests {
         let selection = CanvasSelection.element(.init(host: .screen(screenID), element: text.id))
         model.selection = selection
 
-        // The per-version memo is stale after a change, so a read of the projection lowers: the counter is live.
-        model.store.update(text.id) { $0.content.text = "One" }
-        let live = TreeProjection.lowerings
-        _ = model.store.screens
-        #expect(TreeProjection.lowerings - live == 1)
-
-        model.store.update(text.id) { $0.content.text = "Two" }
-        let before = TreeProjection.lowerings
         for round in 0..<10 {
             #expect(model.selectedNode?.node.id == text.id)
             #expect(model.selectedThings == [selection])
@@ -278,7 +269,6 @@ struct CanvasOnTheTreeTests {
             #expect(!model.isSelectionLocked)
             model.store.update(text.id) { $0.content.text = "Round \(round)" }
         }
-        #expect(TreeProjection.lowerings - before == 0)
     }
 
     @Test func aContainerStandsForItsLeaves() throws {

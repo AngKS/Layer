@@ -239,26 +239,20 @@ struct LayerRowsTests {
         #expect(lines(store, .canvas, open: []).map(\.id) == [note.id], "drawings are left out of the rows")
     }
 
-    @Test func listingDoesNotLower() throws {
+    /// Listing reads the tree and its index (F26). The check that it lowered nothing went with the flat list (plan 6,
+    /// Task 11, clause (s)).
+    @Test func listingReadsTheTree() throws {
         let (a, b) = (leaf("A"), leaf("B"))
         let g = group(named: "G", [a, b])
         let (content, screen) = design([g])
         let store = makeStore(content)
         let open: Set<UUID> = [g.id]
 
-        // The counter is live: a read of the projection after a change lowers it once.
-        store.update(a.id) { $0.name = "A2" }
-        var lowered = TreeProjection.lowerings(of: screen)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: screen) == lowered + 1)
-
         store.update(a.id) { $0.name = "A3" }
-        lowered = TreeProjection.lowerings(of: screen)
         let rows = lines(store, .screen(screen), open: open)
         _ = LayerRows.drawings(in: store.tree)
         _ = LayerRows.lines(in: .node(g.id), content: store.tree, index: store.index)
         #expect(rows.map(\.name) == ["G", "B", "A3"])
-        #expect(TreeProjection.lowerings(of: screen) == lowered, "listing reads the tree and its index")
     }
 
     // MARK: Several rows at once

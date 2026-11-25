@@ -6,11 +6,11 @@ import UIKit
 @testable import Layer
 
 extension HostedWindowSuites {
-    /// The canvas as a person uses it, with the Layers and Format panels open, never lowers the design to the
-    /// projection's list: not as an edit is drawn, nor on any frame of a drag, a lift or a screen's drag (plan 4,
-    /// Task 12; F9, F11, F13). `TreeProjection.lowerings(of:)` is the check, read for this board's own screen.
+    /// The canvas as a person uses it, with the Layers and Format panels open: a line dragged, a row's child lifted
+    /// and a screen dragged, each 60 frames, go where the finger takes them (plan 4, Task 12). The checks that none of
+    /// it lowered the design to the flat list went with the list (plan 6, Task 11, clause (s)).
     @MainActor
-    @Suite("The canvas never lowers the projection", .serialized)
+    @Suite("The canvas with every panel open", .serialized)
     struct CanvasNeverLowersTests {
         /// A screen whose root is free, holding a card, a row of three and 40 lines of text; or, with
         /// `linesAreDrawings`, the card and the row, and 40 drawings of one stroke each on the open canvas beside it.
@@ -101,7 +101,7 @@ extension HostedWindowSuites {
         }
 
         @Test(arguments: [false, true])
-        func aDragWithEveryPanelOpenLowersNothing(linesAreDrawings: Bool) async throws {
+        func aDragWithEveryPanelOpenGoesWithTheFinger(linesAreDrawings: Bool) async throws {
             let board = Board(linesAreDrawings: linesAreDrawings)
             let model = board.model
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
@@ -122,19 +122,6 @@ extension HostedWindowSuites {
             #expect(LayersPanelWork.rows(of: board.card) >= 1, "the Layers panel lists the card")
             #expect(model.isLayersOpen && model.isInspectorOpen, "both panels are open")
 
-            // The design changed through a tree verb, so the store's kept projection is stale; then proof the counter
-            // is live; then changed again, so that nothing measured can be served from what that read kept (F11).
-            board.store.update(board.cardText) { $0.content.text = "Changed" }
-            let live = TreeProjection.lowerings(of: board.screen)
-            _ = board.store.screens
-            #expect(TreeProjection.lowerings(of: board.screen) - live == 1, "a read of the projection is counted")
-            let hostLive = TreeProjection.hostLowerings(of: board.screen)
-            board.store.updateScreen(board.screen) { $0.name = "Renamed" }
-            #expect(TreeProjection.hostLowerings(of: board.screen) - hostLive == 1, "a write through the projection to the screen is counted")
-            board.store.update(board.cardText) { $0.content.text = "Changed again" }
-            let before = TreeProjection.lowerings(of: board.screen)
-            let hostBefore = TreeProjection.hostLowerings(of: board.screen)
-
             // A line dragged 60 frames, then let go.
             let line = try #require(board.store.ref(of: board.lines[5]))
             let lineStart = board.start(of: line.element)
@@ -150,16 +137,12 @@ extension HostedWindowSuites {
             }
             drags.dropOnTarget(line, startingAt: lineStart, owner: lineOwner, model: model)
             try await settle(host.view)
-            let afterLine = TreeProjection.lowerings(of: board.screen) - before
-            // The frames moved what the finger took, a text or a drawing, 60 points across the glass: lowering nothing
-            // proves only as much as the frames did (final review A1 m3).
+            // The frames moved what the finger took, a text or a drawing, 60 points across the glass (final review A1 m3).
             let takenMoved = try #require(board.store.placed(taken)).canvasShape.centre
             #expect(abs(takenMoved.x - takenCentre.x - 60 / model.zoomScale) <= 1, "it went across with the finger: \(takenCentre) to \(takenMoved)")
             #expect(abs(takenMoved.y - takenCentre.y) <= 1, "and no further down")
 
-            // A child of the row lifted 60 frames, along the row past its last child, and let go there. A lift writes
-            // nothing, so the design is changed first (F11).
-            board.store.update(board.cardText) { $0.content.text = "Changed for the lift" }
+            // A child of the row lifted 60 frames, along the row past its last child, and let go there.
             let child = try #require(board.store.ref(of: board.rowChildren[0]))
             let childStart = board.start(of: child.element)
             let childOwner = CanvasDrags.Owner()
@@ -172,7 +155,6 @@ extension HostedWindowSuites {
             try await settle(host.view)
             #expect(board.store.node(board.row)?.children.map(\.id) == [board.rowChildren[1], board.rowChildren[2], board.rowChildren[0]],
                     "let go past the row's last child, it lands at the end")
-            let afterLift = TreeProjection.lowerings(of: board.screen) - before
 
             // The screen dragged 60 frames by its name, then let go.
             let screenStart = model.viewport.viewPoint(for: try #require(board.store.treeScreen(board.screen)).origin)
@@ -183,28 +165,22 @@ extension HostedWindowSuites {
             }
             drags.dropScreen(owner: screenOwner, model: model)
             try await settle(host.view, for: .milliseconds(300))
-            let afterScreen = TreeProjection.lowerings(of: board.screen) - before
-            let hostLowered = TreeProjection.hostLowerings(of: board.screen) - hostBefore
 
             let zoom = model.zoomScale
             #expect(board.store.treeScreen(board.screen)?.origin == CGPoint(x: (340 + 60 / zoom).rounded(), y: (40 + 30 / zoom).rounded()),
                     "the screen moved with the finger")
-            #expect(afterLine == 0, "lowerings over a 60-frame drag of a line: \(afterLine)")
-            #expect(afterLift - afterLine == 0, "lowerings over a 60-frame lift of a row's child: \(afterLift - afterLine)")
-            #expect(afterScreen - afterLift == 0, "lowerings over a 60-frame drag of the screen: \(afterScreen - afterLift)")
-            #expect(hostLowered == 0, "the screen's list, or a node on it, lowered alone over the three drags: \(hostLowered)")
         }
     }
 }
 
 /// What the popover and the panels ask of the selection, and what their taps do (Ungroup, Arrange, Align, Duplicate, a
-/// drop in the Layers panel, a frame added from the library), read and write the tree: none of it lowers the design to
-/// the projection's list (plan 4, Task 12; the carries from Tasks 6 and 8, and fix round 1). Synchronous on the main
-/// actor, so no other suite adds to the count meanwhile.
+/// drop in the Layers panel, a frame added from the library), read and write the tree (plan 4, Task 12; the carries
+/// from Tasks 6 and 8, and fix round 1). The check that none of it lowered the design to the flat list went with the
+/// list (plan 6, Task 11, clause (s)).
 @MainActor
-@Suite("The selection's controls lower nothing")
+@Suite("The selection's controls on the tree")
 struct ControlsLowerNothingTests {
-    @Test func theGroupArrangeAlignAndDuplicateControlsALayersDropAndALibraryFrameLowerNothing() throws {
+    @Test func theGroupArrangeAlignAndDuplicateControlsALayersDropAndALibraryFrameWorkOnTheTree() throws {
         func text(_ words: String, _ frame: CGRect) -> LayerNode {
             var node = LayerNode(kind: .text)
             node.frame = frame
@@ -227,14 +203,6 @@ struct ControlsLowerNothingTests {
         model.canvasSize = CGSize(width: 1210, height: 834)
         let store = model.store
         let cardRef = try #require(store.ref(of: card.id)), lineRef = try #require(store.ref(of: line.id))
-
-        // Changed through a tree verb, the count shown to be live, and changed again (F11).
-        store.update(line.id) { $0.content.text = "Changed" }
-        let live = TreeProjection.lowerings(of: screen.id)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: screen.id) - live == 1, "a read of the projection is counted")
-        store.update(line.id) { $0.content.text = "Changed again" }
-        let before = TreeProjection.lowerings(of: screen.id)
 
         // What the popover and the Format panel ask, the card selected, then the screen.
         model.selection = .element(cardRef)
@@ -270,9 +238,6 @@ struct ControlsLowerNothingTests {
         model.selection = .screen(screen.id)
         model.duplicateSelection()
         #expect(store.tree.screens.count == 3, "the screen is copied")
-
-        #expect(TreeProjection.lowerings(of: screen.id) - before == 0,
-                "lowerings over the controls' reads and taps: \(TreeProjection.lowerings(of: screen.id) - before)")
     }
 }
 

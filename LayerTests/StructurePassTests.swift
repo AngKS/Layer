@@ -692,8 +692,8 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(cards.map(LayoutEngine.timesLaidOut) == cardsBefore)
     }
 
-    /// F15: with a "Did you mean" up, a change elsewhere on its screen is checked against it from the tree, and never
-    /// lowers the design. The counter is first shown to be live, as plan 4's F11 does it.
+    /// F15: with a "Did you mean" up, a change elsewhere on its screen is checked against it from the tree. The check that
+    /// it never lowered the design went with the flat list (plan 6, Task 11, clause (s)).
     @Test func theSuggestionsPlaceIsReadFromTheTree() throws {
         let (model, screen, _) = makeModel()
         let fieldSketch = CGRect(x: 30, y: 300, width: 330, height: 44)
@@ -708,18 +708,11 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
             model.store.update(other.id) { $0.name = "Other \(round)" }
         }
 
-        change()
-        let live = TreeProjection.lowerings(of: screen)
-        _ = model.store.screens
-        #expect(TreeProjection.lowerings(of: screen) - live == 1)
-
-        let before = TreeProjection.lowerings(of: screen)
         for _ in 0..<3 {
             change()
             model.store.update(other.id) { $0.frame.origin.y += 4 }
         }
         #expect(model.suggestion != nil)
-        #expect(TreeProjection.lowerings(of: screen) - before == 0)
     }
 }
 

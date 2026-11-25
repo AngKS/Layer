@@ -104,7 +104,9 @@ struct InkOnTheTreeTests {
     }
 
     #if DEBUG
-    @Test func showingDrawingsDoesNotLower() throws {
+    /// The canvas follows the drawings off the tree, and reads its own strokes only when a drawing changed. The check that
+    /// following them lowered nothing went with the flat list (plan 6, Task 11, clause (s)).
+    @Test func showingDrawingsReadsNoStrokesWhenNoneChanged() throws {
         let model = AppModel(document: LayerDocument())
         let store = model.store
         let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
@@ -115,14 +117,9 @@ struct InkOnTheTreeTests {
         let held = strokes
         #expect(sync.strokes(showing: store.tree, on: held) == nil)
 
-        // A change elsewhere, so the store's memo of the lowered design is stale, and proof the counter is live.
+        // A change elsewhere, which no drawing is part of.
         store.updateTreeScreen(screen) { $0.name = "Elsewhere" }
-        let live = TreeProjection.lowerings(of: screen)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: screen) == live + 1, "a read of the projection is counted")
-
-        store.updateTreeScreen(screen) { $0.name = "Elsewhere again" }
-        let (lowered, counted) = (TreeProjection.lowerings(of: screen), CanvasWork.strokesRead)
+        let counted = CanvasWork.strokesRead
         var reads = 0
         let shown = sync.strokes(showing: store.tree, reading: { reads += 1; return held })
         let changes = sync.changes(for: held, in: store.tree)
@@ -131,7 +128,6 @@ struct InkOnTheTreeTests {
         #expect(changes.isEmpty)
         #expect(reads == 0, "the canvas's strokes are not read when no drawing changed")
         #expect(CanvasWork.strokesRead == counted)
-        #expect(TreeProjection.lowerings(of: screen) == lowered, "following the drawings lowers nothing")
     }
     #endif
 }

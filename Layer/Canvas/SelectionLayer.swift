@@ -689,18 +689,6 @@ final class CanvasDrags {
             }
     }
 
-    // PROJECTION: deleted in plan 6
-    // Kept for `FormatPanelTests` (lane B's, plan 6 Task 10), which still calls it: its port moves it to
-    // `moveNode(_:by:startingAt:findsNewHome:owner:model:rule:)`, and this goes once nothing calls it.
-    /// `moveNode` as its first callers made it: the frame and placement given aren't read, and the rule is asked for
-    /// once, as the drag begins.
-    func moveElement(
-        _ ref: DesignStore.ElementRef, from frame: CGRect, placement: Placement, by glassTranslation: CGSize,
-        startingAt start: CGPoint, findsNewHome: Bool = true, owner: Owner, model: AppModel, rule makeRule: () -> Rule
-    ) {
-        moveNode(ref, by: glassTranslation, startingAt: start, findsNewHome: findsNewHome, owner: owner, model: model) { _ in makeRule() }
-    }
-
     /// One frame of a drag that moves or resizes one thing, read from the tree as the drag begins (`placed(_:)`): its
     /// frame, how its host's points sit on the canvas, and what holds it. `start` is where the finger landed, in the
     /// view's points, and `glassTranslation` how far it has gone since.

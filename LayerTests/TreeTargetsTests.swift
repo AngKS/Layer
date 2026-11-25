@@ -373,8 +373,9 @@ struct TreeTargetsTests {
 
     // MARK: What it costs
 
-    /// Review Focus 2, F11: what can be touched, what the pen is over and what a tap picks are read from the tree.
-    @Test func findingTargetsDoesNotLower() {
+    /// Review Focus 2, F11: what can be touched, what the pen is over and what a tap picks are read from the tree, after
+    /// every change. The check that none of it lowered the design went with the flat list (plan 6, Task 11, clause (s)).
+    @Test func findingTargetsReadsTheTree() {
         let b = CardBoard()
         let screen = b.board.screenID
         let onT2 = b.board.middle(b.t2.id)
@@ -384,13 +385,6 @@ struct TreeTargetsTests {
             b.store.update(b.a.id) { $0.name = "A \(round)" }
         }
 
-        // The per-version memo is stale after a change, so a read of the projection lowers: the counter is live.
-        change()
-        let live = TreeProjection.lowerings(of: screen)
-        _ = b.store.screens
-        #expect(TreeProjection.lowerings(of: screen) - live == 1)
-
-        let before = TreeProjection.lowerings(of: screen)
         for _ in 0..<3 {
             change()
             #expect(b.store.treeTargets(entered: b.model.enteredGroups).hosts[.screen(screen)]?.isEmpty == false)
@@ -399,7 +393,6 @@ struct TreeTargetsTests {
             change()
             b.model.pick(b.model.hoverTarget(at: onT2))
         }
-        #expect(TreeProjection.lowerings(of: screen) - before == 0)
     }
 
     /// F10: ten reads build the targets at most once, and after a change exactly once more.

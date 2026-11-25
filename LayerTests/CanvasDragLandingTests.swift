@@ -408,7 +408,7 @@ private struct RowBoard {
     func centre(_ id: UUID) -> CGPoint { store.placed(id)?.canvasShape.centre ?? .zero }
 
     /// One frame of a finger on `id`'s target, `translation` across the glass since it landed at `start`, as the
-    /// canvas drives it: with node values, never through the projection.
+    /// canvas drives it: with node values.
     func drag(_ id: UUID, by translation: CGSize, from start: CGPoint, owner: CanvasDrags.Owner) {
         guard let ref = store.ref(of: id) else { return }
         drags.moveOnTarget(ref, by: translation, startingAt: start, owner: owner, model: model)
@@ -437,18 +437,11 @@ private struct RowBoard {
 @MainActor
 @Suite("Drags in rows, columns and grids")
 struct LayoutDragTests {
-    /// F11: a lift writes nothing, so its frames change no version and lower nothing. The design is changed through a
-    /// tree verb first, and the count is shown to be live, so that the memo can't hide a lowering.
+    /// F11: a lift writes nothing, so its frames change no version. Its check that they lowered nothing went with the
+    /// flat list (plan 6, Task 11, clause (s)).
     @Test func draggingARowChildWritesNothingUntilTheDrop() throws {
         let board = RowBoard()
-        board.store.update(board.a) { $0.content.text = "Changed" }
-        let live = TreeProjection.lowerings(of: board.screen)
-        _ = board.store.screens
-        #expect(TreeProjection.lowerings(of: board.screen) - live == 1)
-        board.store.update(board.a) { $0.content.text = "Changed again" }
-
-        let (written, version, lowered) = (ListWork.elementsWritten, board.store.contentVersion,
-                                           TreeProjection.lowerings(of: board.screen))
+        let (written, version) = (ListWork.elementsWritten, board.store.contentVersion)
         let start = board.centre(board.b), owner = CanvasDrags.Owner()
         var targets: [TreeDrop.Target?] = []
         // Right along the row past c, then down out of it: 60 frames.
@@ -464,7 +457,6 @@ struct LayoutDragTests {
         print("BENCH drag row child frames=60 writes=\(ListWork.elementsWritten - written) versions=\(board.store.contentVersion - version)")
         #expect(ListWork.elementsWritten == written, "nodes written during a 60-frame lift")
         #expect(board.store.contentVersion == version, "versions made during a 60-frame lift")
-        #expect(TreeProjection.lowerings(of: board.screen) == lowered, "lowerings during a 60-frame lift")
         #expect(board.drags.lift?.ref.element == board.b)
         #expect(board.drags.lift?.start == CGRect(x: 120, y: 100, width: 80, height: 40))
         #expect(board.drags.lift?.translation == CGSize(width: 120, height: 120))
@@ -708,16 +700,10 @@ struct LayoutDragTests {
         #expect(board.store.historyMark == mark + 1, "the drag is one step")
     }
 
-    /// F13: a screen dragged snaps among the tree's screens and writes the tree, so its frames lower nothing.
+    /// F13: a screen dragged snaps among the tree's screens and writes the tree. Its check that its frames lowered
+    /// nothing went with the flat list (plan 6, Task 11, clause (s)).
     @Test func aScreenDragReadsTheTree() throws {
         let board = RowBoard()
-        board.store.update(board.a) { $0.content.text = "Changed" }
-        let live = TreeProjection.lowerings(of: board.screen)
-        _ = board.store.screens
-        #expect(TreeProjection.lowerings(of: board.screen) - live == 1)
-        board.store.update(board.a) { $0.content.text = "Changed again" }
-
-        let lowered = TreeProjection.lowerings(of: board.screen)
         let owner = CanvasDrags.Owner()
         for frame in 1...60 {
             board.drags.moveScreen(board.screen, by: CGSize(width: CGFloat(frame) * 3, height: 0), startingAt: CGPoint(x: 100, y: 10),
@@ -726,7 +712,6 @@ struct LayoutDragTests {
         let moved = board.store.treeScreen(board.screen)?.origin
         board.drags.dropScreen(owner: owner, model: board.model)
 
-        #expect(TreeProjection.lowerings(of: board.screen) == lowered, "lowerings during a 60-frame screen drag")
         #expect(moved == CGPoint(x: 180, y: 0))
         #expect(!board.store.isEditing)
     }

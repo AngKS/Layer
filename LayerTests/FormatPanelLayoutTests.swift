@@ -233,21 +233,12 @@ struct FormatPanelLayoutTests {
         let (model, undo) = makeModel(design([screen([line])]))
         let store = model.store
         let id = try #require(store.tree.screens.first?.id)
-        // The memo is stale after a tree-verb change, so a read of the projection lowers: the counter is live.
-        store.update(line.id) { $0.content.text = "One" }
-        let live = TreeProjection.lowerings(of: id)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: id) - live == 1)
-
-        store.update(line.id) { $0.content.text = "Two" }
         undo.removeAllActions()
-        let before = TreeProjection.lowerings(of: id)
         model.adjusting {
             store.updateTreeScreen(id) { $0.name = "Home" }
             store.updateTreeScreen(id) { $0.scale = 0.5 }
         }
 
-        #expect(TreeProjection.lowerings(of: id) - before == 0)
         #expect(store.treeScreen(id)?.name == "Home")
         #expect(store.treeScreen(id)?.scale == 0.5)
         #expect(undo.canUndo)
@@ -274,26 +265,18 @@ struct FormatPanelLayoutTests {
         #expect(model.store.node(locked.id) != nil)
     }
 
-    /// What the Several panel's body asks lowers nothing: the counter is the screen's own, proved live first.
-    @Test func theSeveralPanelsBodyLowersNothing() throws {
+    /// What the Several panel's body asks is read from the tree. The check that it lowered nothing went with the flat list
+    /// (plan 6, Task 11, clause (s)).
+    @Test func theSeveralPanelsBodyReadsTheTree() throws {
         let a = text(20, 100), b = text(20, 200), c = text(20, 300)
         let (model, _) = makeModel(design([screen([a, b, c])]))
         let store = model.store
-        let id = try #require(store.tree.screens.first?.id)
         model.selection = CanvasSelection([a.id, b.id, c.id].compactMap(store.ref(of:)).map(CanvasSelection.element))
-        store.update(a.id) { $0.content.text = "One" }
-        let live = TreeProjection.lowerings(of: id)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: id) - live == 1)
-
-        store.update(a.id) { $0.content.text = "Two" }
-        let before = TreeProjection.lowerings(of: id)
         _ = model.selectedThings
         _ = model.selectedLeafNodes
         #expect(model.canTurnSelection)
         _ = ElementLayout.Alignment.allCases.map(model.canLineUpSelection)
         _ = ElementLayout.Distribution.allCases.map(model.canLineUpSelection)
         _ = model.groupShapesOffered
-        #expect(TreeProjection.lowerings(of: id) - before == 0)
     }
 }

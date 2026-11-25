@@ -469,68 +469,48 @@ struct VoiceOnTheTreeTests {
 
     private static let supported = "Foundation Models runs models of the app's own from iPadOS 27.2"
 
-    /// A spoken command reads and writes the tree alone: the design is never lowered to its flat list (F18).
+    /// A spoken command reads and writes the tree (F18). Its check that the design was never lowered to the flat list
+    /// went with the list (plan 6, Task 11, clause (s)).
     ///
-    /// The command is one typed for the screen, which shows nothing it changes: what a tool shows goes through
-    /// `DesignActions.reveal`, Siri's, which reads the tree from plan 6's Task 3, in lane B, and the flat list before it.
+    /// The command is one typed for the screen, which shows nothing it changes.
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
-    func aCommandLowersNothing() async throws {
+    func aCommandWorksOnTheTree() async throws {
         let login = TreeFixture.loginWithACardAndARow()
         let store = login.model.store
-        // Out of its file and out of the open designs. Spotlight's indexing of a design in a file a few seconds after it
-        // changes, and what other suites ask Siri of every open design, both snapshot it (`DesignActions.snapshot`),
-        // which reads the flat list until plan 6's Task 3 (lane B). Either can land while the command awaits its model.
-        // Only the command's own work is counted (F17, F18).
+        // Out of its file and out of the open designs, so that nothing else reads it while the command awaits its model
+        // (F17).
         login.model.fileURL = nil
         OpenDesigns.shared.closed(login.model)
-        // The counter is live: a change through a tree verb, then a read of the flat list, lowers the design once.
-        store.update(login.title) { $0.content.text = "Hello" }
-        let live = TreeProjection.lowerings(of: login.screen)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: login.screen) - live == 1)
-
-        store.update(login.title) { $0.content.text = "Welcome" }
         let agent = VoiceAgent(model: login.model, testModel: ScriptedLanguageModel(script: [
             "make the wi-fi row blue": [
                 ScriptedLanguageModel.Step(tool: "styleElement", arguments: #"{"element":"E5","look":"blue"}"#),
                 ScriptedLanguageModel.Step(tool: "moveElement", arguments: #"{"element":"E2","x":"30"}"#),
             ],
         ]))
-        let before = TreeProjection.lowerings(of: login.screen)
         let outcome = await agent.run("Make the Wi-Fi row blue", about: .screenEdit(login.screen))
         #expect(outcome.problem == nil)
-        #expect(TreeProjection.lowerings(of: login.screen) - before == 0)
         #expect(store.node(login.label)?.style.tint == ColourWords.named["blue"])
         #expect(store.ownFrame(login.card)?.minX == 30)
     }
 
     /// The same command said to the whole canvas, not typed for one screen: each tool shows what it changed, selecting it
-    /// through `DesignActions.reveal`, which reads the tree since lane B's Task 3. Still nothing lowers the design (plan 6,
-    /// Task 7 review M5, after lane B's merge).
+    /// through `DesignActions.reveal`, which reads the tree (plan 6, Task 7 review M5). Its check that nothing lowered the
+    /// design went with the flat list (Task 11, clause (s)).
     @Test(.enabled(if: HostedLanguageModel.isSupported, Comment(rawValue: supported)))
-    func aCommandToTheWholeCanvasLowersNothing() async throws {
+    func aCommandToTheWholeCanvasWorksOnTheTree() async throws {
         let login = TreeFixture.loginWithACardAndARow()
         let store = login.model.store
-        // Out of its file and out of the open designs, as above: only the command's own work is counted (F17, F18).
+        // Out of its file and out of the open designs, as above (F17).
         login.model.fileURL = nil
         OpenDesigns.shared.closed(login.model)
-        // The counter is live: a change through a tree verb, then a read of the flat list, lowers the design once.
-        store.update(login.title) { $0.content.text = "Hello" }
-        let live = TreeProjection.lowerings(of: login.screen)
-        _ = store.screens
-        #expect(TreeProjection.lowerings(of: login.screen) - live == 1)
-
-        store.update(login.title) { $0.content.text = "Welcome" }
         let agent = VoiceAgent(model: login.model, testModel: ScriptedLanguageModel(script: [
             "make the wi-fi row blue": [
                 ScriptedLanguageModel.Step(tool: "styleElement", arguments: #"{"element":"E5","look":"blue"}"#),
                 ScriptedLanguageModel.Step(tool: "moveElement", arguments: #"{"element":"E2","x":"30"}"#),
             ],
         ]))
-        let before = TreeProjection.lowerings(of: login.screen)
         let outcome = await agent.run("Make the Wi-Fi row blue")
         #expect(outcome.problem == nil)
-        #expect(TreeProjection.lowerings(of: login.screen) - before == 0)
         #expect(store.node(login.label)?.style.tint == ColourWords.named["blue"])
         #expect(store.ownFrame(login.card)?.minX == 30)
         // What the last tool changed is shown, and so selected: the card it moved.

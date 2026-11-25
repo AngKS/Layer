@@ -20,45 +20,6 @@ struct TreeBuildersTests {
 
     // MARK: Leaves and containers
 
-    /// A bridge, retired in Task 11 under (s): a leaf built with the old element's labels says what that element said.
-    @Test func aLeafLowersToTheElementItReplaces() {
-        let red = RGBColor(hex: 0xFF3B30), white = RGBColor(hex: 0xFFFFFF), black = RGBColor(hex: 0x000000)
-        let button = DesignElement(
-            kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), rotation: 15, text: "Sign in", tint: red,
-            symbol: "arrow.right", shape: .capsule, imageID: UUID(), fontSize: 17, fontWeight: .semibold, textColor: white,
-            cornerRadius: 12, opacity: 0.9, textAlignment: .leading, borderColor: black, borderWidth: 2, hasShadow: true,
-            name: "Sign in button", isLocked: true, isHidden: true, isOn: false, value: 0.4, buttonLook: .bordered)
-        let text = DesignElement(
-            kind: .text, frame: CGRect(x: 20, y: 140, width: 200, height: 24), text: "About me", tint: Theme.accent,
-            fontSize: 20, fontWeight: .bold, textColor: RGBColor(hex: 0x333333), textAlignment: .center)
-        let symbol = DesignElement(
-            kind: .symbol, frame: CGRect(x: 20, y: 180, width: 44, height: 44), text: "", tint: Theme.accent, symbol: "heart.fill")
-        let image = DesignElement(
-            kind: .image, frame: CGRect(x: 20, y: 240, width: 333, height: 200), text: "", tint: Theme.accent, imageID: UUID())
-        let toggle = DesignElement(
-            kind: .toggle, frame: CGRect(x: 322, y: 460, width: 51, height: 31), text: "Wi-Fi", tint: Theme.accent, isOn: false)
-        let progress = DesignElement(
-            kind: .progress, frame: CGRect(x: 20, y: 510, width: 353, height: 8), text: "", tint: Theme.accent, value: 0.3)
-
-        let pairs: [(element: DesignElement, leaf: LayerNode)] = [
-            (button, .leaf(.button, frame: button.frame, text: "Sign in", tint: red, symbol: "arrow.right", shape: .capsule,
-                           imageID: button.imageID, fontSize: 17, fontWeight: .semibold, textColor: white, cornerRadius: 12,
-                           opacity: 0.9, textAlignment: .leading, borderColor: black, borderWidth: 2, hasShadow: true,
-                           rotation: 15, name: "Sign in button", isLocked: true, isHidden: true, isOn: false, value: 0.4,
-                           buttonLook: .bordered, id: button.id)),
-            (text, .leaf(.text, frame: text.frame, text: "About me", tint: Theme.accent, fontSize: 20, fontWeight: .bold,
-                         textColor: RGBColor(hex: 0x333333), textAlignment: .center, id: text.id)),
-            (symbol, .leaf(.symbol, frame: symbol.frame, text: "", tint: Theme.accent, symbol: "heart.fill", id: symbol.id)),
-            (image, .leaf(.image, frame: image.frame, text: "", tint: Theme.accent, imageID: image.imageID, id: image.id)),
-            (toggle, .leaf(.toggle, frame: toggle.frame, text: "Wi-Fi", tint: Theme.accent, isOn: false, id: toggle.id)),
-            (progress, .leaf(.progress, frame: progress.frame, text: "", tint: Theme.accent, value: 0.3, id: progress.id)),
-        ]
-        for (element, leaf) in pairs {
-            let lowered = DesignElement(node: leaf, frame: element.frame, rotation: element.rotation, parent: nil, scale: nil, group: nil)
-            #expect(lowered == element, "\(element.kind)")
-        }
-    }
-
     @Test func aLeafIsFixedAndKeepsItsKindsOwnTint() {
         let leaf = LayerNode.leaf(.text, frame: CGRect(x: 20, y: 80, width: 200, height: 24), text: "Hi")
         #expect(leaf.width.mode == .fixed)
@@ -311,16 +272,15 @@ struct TreeBuildersTests {
 
     // MARK: The sketch path
 
-    /// A bridge line, removed in Task 11 under (s): plan 5's wrapper gave the same frame, on a twin store (F12).
-    @Test func sketchedIsWhatTheWrapperGave() throws {
-        let store = DesignStore(), twin = DesignStore()
-        let screen = store.addFreeScreen([]), twinScreen = twin.addFreeScreen([])
+    /// A sketch read on its screen adds a leaf of the kind there, and one off every screen adds nothing (F12). Its bridge
+    /// to plan 5's wrapper, which gave the same frame on a twin store, went with the wrapper (plan 6, Task 11, clause (s)).
+    @Test func sketchedAddsALeafOnItsScreen() throws {
+        let store = DesignStore()
+        let screen = store.addFreeScreen([])
         let sketch = CGRect(x: 120, y: 150, width: 160, height: 24)
 
         let made = try #require(store.sketched(.title, from: sketch, to: screen))
-        let wrapped = try #require(twin.addElement(.title, from: sketch, to: twinScreen))
 
-        #expect(made.frame == wrapped.frame)
         #expect(store.node(made.id)?.kind == .title)
         #expect(store.sketched(.title, from: CGRect(x: 2000, y: 2000, width: 160, height: 24), to: screen) == nil)
     }

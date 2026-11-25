@@ -1208,21 +1208,6 @@ final class AppModel {
 
     // MARK: Selection
 
-    // PROJECTION: deleted in plan 6
-    /// The one element that is selected. Nil when several things are: see `selectedElements`.
-    /// The canvas reads `selectedNode`.
-    var selectedElement: (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
-        guard case .element(let ref) = selection, let found = store.resolve(ref) else { return nil }
-        return (ref, found.element, found.placement)
-    }
-
-    // PROJECTION: deleted in plan 6
-    /// The one screen that is selected. Nil when several things are. The canvas reads `selectedScreenID`.
-    var selectedScreen: DesignScreen? {
-        guard case .screen(let id) = selection else { return nil }
-        return store.screen(id)
-    }
-
     /// The one thing on a screen or the open canvas that is selected, where it is. Nil when several
     /// things are, or it is gone.
     var selectedNode: PlacedNode? {
@@ -1248,31 +1233,6 @@ final class AppModel {
     /// `selectedThings` for the selection and design it was last worked out for: it is asked
     /// for by several views on every frame of a drag or a pan.
     @ObservationIgnored private var thingsKept: (selection: CanvasSelection?, version: Int, things: [CanvasSelection])?
-
-    // PROJECTION: deleted in plan 6
-    /// Every element selected, alone or among other things, from the back to the front.
-    var selectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        selectedThings.compactMap { thing in
-            guard case .element(let ref) = thing, let found = store.resolve(ref) else { return nil }
-            return (ref, found.element, found.placement)
-        }
-    }
-
-    // PROJECTION: deleted in plan 6
-    /// Every element selected, with each group among them standing for what is in it, at any
-    /// depth, that isn't a group itself: what the Format panel styles, and what voice is told
-    /// is selected, neither of which knows of groups (F6). From the back to the front.
-    /// The canvas reads `selectedLeafNodes`.
-    var selectedLeaves: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        var seen: Set<DesignElement.ID> = []
-        return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
-            guard selected.element.kind == .group else { return [selected] }
-            return store.leaves(of: selected.element.id).compactMap { leaf in
-                let ref = DesignStore.ElementRef(host: selected.ref.host, element: leaf.id)
-                return store.resolve(ref).map { (ref, $0.element, $0.placement) }
-            }
-        }.filter { seen.insert($0.ref.element).inserted }
-    }
 
     /// What is selected, each container standing for its leaves at any depth; back to front, once each.
     /// Hidden and locked ones included: what the Format panel styles, and what voice is told is selected.

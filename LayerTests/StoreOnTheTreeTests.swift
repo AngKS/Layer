@@ -17,16 +17,11 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
         && abs(a.height - b.height) < tolerance
 }
 
-private func button(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, height: 50)) -> DesignElement {
-    DesignElement(kind: .button, frame: frame, text: "Go", tint: Theme.accent)
-}
-
 private func buttonNode(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, height: 50)) -> LayerNode {
     .leaf(.button, frame: frame, text: "Go", tint: Theme.accent)
 }
 
-/// The store keeps the design as a tree: its rules run inside every change, undo and redo, and
-/// what hasn't moved onto the tree yet reads and writes it through the projection (plan 2, Task 7).
+/// The store keeps the design as a tree: its rules run inside every change, undo and redo (plan 2, Task 7).
 @Suite("The store on the tree")
 @MainActor
 struct StoreOnTheTreeTests {
@@ -64,27 +59,6 @@ struct StoreOnTheTreeTests {
         #expect(!undo.canUndo)
     }
 
-    /// A pointer to a group that never comes waits while the change is made, and is cut when it ends.
-    @Test func pendingPointersEndWithTheChange() throws {
-        let (store, _) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let ghost = UUID()
-        var member = button()
-        member.group = ghost
-        var waiting: [UUID: UUID] = [:]
-
-        store.apply { content in
-            content.add(member, to: screen.id)
-            waiting = content.pendingPointers
-        }
-
-        #expect(waiting == [member.id: ghost])
-        let root = try #require(store.content.tree.screens.first?.root)
-        #expect(root.children.map(\.id) == [member.id])
-        #expect(store.content.pendingPointers.isEmpty)
-        #expect(store.element(member.id)?.group == nil)
-    }
-
     #if DEBUG
     /// A leaf moved on one free screen lays out that screen's root once, and the other screen's not at all (F8).
     @Test func aLeafEditLaysOutOnlyItsScreen() throws {
@@ -100,24 +74,6 @@ struct StoreOnTheTreeTests {
 
         let laid = zip(roots.map(LayoutEngine.timesLaidOut), before).map(-)
         #expect(laid == [1, 0])
-    }
-
-    /// Reading the screens, the open canvas and an element ten times each lowers the tree once (F8).
-    @Test func theProjectionIsLoweredOncePerVersion() throws {
-        let (store, _) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let refs = store.setElements([button()], on: screen.id)
-        store.addFloating(DesignStore.newElement(.stickyNote), scale: 1)
-        store.update(refs[0]) { $0.text = "Changed" }
-        let before = TreeProjection.lowerings
-
-        for _ in 0..<10 {
-            _ = store.screens
-            _ = store.floating
-            _ = store.element(refs[0].element)
-        }
-
-        #expect(TreeProjection.lowerings - before == 1)
     }
     #endif
 

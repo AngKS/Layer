@@ -90,22 +90,13 @@ struct LibraryOnTheTreeTests {
         try withOwnSettings { settings in
             let model = makeModel(settings)
             model.addAsset(try #require(AssetLibrary.customFrames([watch]).first))
-            let screenID = try #require(model.store.tree.screens.first?.id)
-            // The per-version memo is stale after a change, so a projection read lowers: the counter is live.
-            model.store.updateTreeScreen(screenID) { $0.name = "One" }
-            let live = TreeProjection.lowerings
-            _ = model.store.screens
-            #expect(TreeProjection.lowerings - live == 1)
-
-            model.store.updateTreeScreen(screenID) { $0.name = "Two" }
-            let before = TreeProjection.lowerings
+            try #require(model.store.tree.screens.first != nil)
             let devices = model.store.tree.settings.customDevices
             let extras = AssetLibrary.customFrames(devices)
             _ = AssetLibrary.matching("", in: .wireframes, including: extras)
             _ = AssetLibrary.searchEverywhere("screen", including: extras)
             for template in AssetLibrary.templates { #expect(AssetLibrary.templateRoot(named: template.name) != nil) }
             _ = AssetLibrary.recents(from: "frame:\(watch.id)", among: devices)
-            #expect(TreeProjection.lowerings - before == 0)
         }
     }
     #endif

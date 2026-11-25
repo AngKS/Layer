@@ -439,9 +439,10 @@ struct GroupAsTests {
         #expect(spreadStore.tree == before)
     }
 
-    /// The popover asks after every change whether each shape can group, and whether each alignment applies: neither
-    /// that nor grouping and lining up lowers the design.
-    @Test func groupingAndLiningUpLowerNothing() throws {
+    /// The popover asks after every change whether each shape can group, and whether each alignment applies, and then
+    /// groups and lines up, all on the tree. The check that none of it lowered the design went with the flat list (plan
+    /// 6, Task 11, clause (s)).
+    @Test func groupingAndLiningUpWorkOnTheTree() throws {
         let narrow = text(0, 0, width: 60), wide = text(0, 0, width: 100)
         let column = container(.group, .stack(LayerNode.Stack(axis: .vertical, spacing: 8)),
                                frame: CGRect(x: 20, y: 100, width: 100, height: 56), [narrow, wide])
@@ -450,14 +451,6 @@ struct GroupAsTests {
         let store = model.store
         let inColumn = try store.selection(of: [narrow.id]), loose = try store.selection(of: [a.id, b.id])
 
-        // The per-version memo is stale after a change, so a read of the projection lowers: the counter is live.
-        store.update(a.id) { $0.content.text = "One" }
-        let live = TreeProjection.lowerings
-        _ = store.screens
-        #expect(TreeProjection.lowerings - live == 1)
-
-        store.update(a.id) { $0.content.text = "Two" }
-        let before = TreeProjection.lowerings
         model.selection = inColumn
         #expect(model.isSelectionLaidOut)
         #expect(ElementLayout.Alignment.allCases.filter(model.canLineUpSelection) == [.left, .centerX, .right])
@@ -467,8 +460,6 @@ struct GroupAsTests {
         #expect(GroupShape.allCases.allSatisfy(model.canGroupSelection(as:)))
         model.groupSelection(as: .row)
         #expect(model.selectedNode?.node.children.map(\.id) == [a.id, b.id])
-
-        #expect(TreeProjection.lowerings - before == 0)
     }
 
     /// My call 15: a row's children have the one order its layout gives them; an overlay stacks what it holds.
