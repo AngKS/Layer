@@ -43,7 +43,8 @@ enum A2UIPrompt {
         order. Then each section the root names, each followed by what it holds, a line for each component. Every id \
         a component names has a line of its own.
 
-        Every component has an id, its own on the screen, and a component. Use only these:
+        Every component has an id and a component. An id says what its component is, in words joined by underscores, \
+        such as total_label or pace_value, and no two components share one. Use only these:
         - Column: children, a list of ids, from top to bottom.
         - Row: children, side by side. align center lines them up; justify spaceBetween puts them at both ends.
         - Card: child, the id of one component, usually a Column.
@@ -82,8 +83,8 @@ enum A2UIPrompt {
         variant caption for small print.
         - Group into sections, each a Column, Row, Card or LayerGrid in the root: a form's fields together, a list's \
         rows together. Two to four sections.
-        - Use 5 to 14 components that show something, such as Text, Image, Button and TextField. Fewer, better \
-        elements beat a crowded screen.
+        - Show 5 to 14 things, such as Text, Image, Button and TextField; the Columns, Rows and Cards that hold them \
+        don't count. Fewer, better things beat a crowded screen.
         """
     }
 

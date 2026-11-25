@@ -386,6 +386,32 @@ struct A2UIGenerationTests {
         #expect(A2UIPrompt.library.allSatisfy { !$0.lines.contains(#""component":"Icon""#) })
     }
 
+    /// A model gave two components one id (`label` for three labels) and broke the line of a component it named `s3`
+    /// three times out of three, its `"s` taken for `"surfaceId` (2026-11-26). So an id says what its component is, in
+    /// words, and is its own; every example's ids are.
+    @Test func theA2UIPromptAsksForIdsInWordsThatAreEachComponentsOwn() throws {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(prompt.contains("An id says what its component is, in words joined by underscores, such as total_label or pace_value, and no two components share one."))
+        for example in A2UIPrompt.library {
+            var ids: [String] = []
+            for line in example.lines.split(separator: "\n").dropFirst() {
+                let message = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+                let components = (message["updateComponents"] as? [String: Any])?["components"] as? [[String: Any]] ?? []
+                ids += components.compactMap { $0["id"] as? String }
+            }
+            #expect(Set(ids).count == ids.count, "\(example.name): \(ids)")
+            #expect(ids.allSatisfy { $0.wholeMatch(of: /[a-z]+(_[a-z]+)*/) != nil }, "\(example.name): \(ids)")
+        }
+    }
+
+    /// A model asked for "5 to 14 components that show something" spent its thinking counting its Columns and Rows too,
+    /// and thought a third longer before A2UI than before the outline (2026-11-26). The containers don't count.
+    @Test func theA2UIPromptCountsOnlyWhatShows() {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(prompt.contains("- Show 5 to 14 things, such as Text, Image, Button and TextField; the Columns, Rows and Cards that hold them don't count. Fewer, better things beat a crowded screen."))
+        #expect(!prompt.contains("Use 5 to 14 components"))
+    }
+
     /// A model left a LayerToggle's label out beside a Text saying the same (2026-11-26), and a label is required.
     @Test func theA2UIPromptSaysAControlAlwaysHasItsLabel() {
         let prompt = A2UIPrompt.instructions(for: "a profile")

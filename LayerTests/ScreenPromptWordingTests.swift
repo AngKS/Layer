@@ -13,7 +13,8 @@ import Testing
     }
 
     /// The A2UI prompt a model is told when it writes A2UI, as measured on 2026-11-26: a component a message, one way to
-    /// write an icon, and a control's label always. A change to them changes this literal.
+    /// write an icon, a control's label always, ids in words, and only what shows counted. A change to them changes this
+    /// literal.
     @Test func theA2UIPromptIsUnchanged() {
         #expect(A2UIPrompt.instructions(for: Self.brief) == Self.a2ui)
     }
@@ -369,7 +370,7 @@ import Testing
         {"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"…","component":"…",…}]}}
         The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in order. Then each section the root names, each followed by what it holds, a line for each component. Every id a component names has a line of its own.
 
-        Every component has an id, its own on the screen, and a component. Use only these:
+        Every component has an id and a component. An id says what its component is, in words joined by underscores, such as total_label or pace_value, and no two components share one. Use only these:
         - Column: children, a list of ids, from top to bottom.
         - Row: children, side by side. align center lines them up; justify spaceBetween puts them at both ends.
         - Card: child, the id of one component, usually a Column.
@@ -438,6 +439,6 @@ import Testing
         - Leave colour, size and spacing to the design: write none of them, and no @metadata.
         - Make hierarchy with the heading and variant caption, not colour: one heading, Text for whatever explains, variant caption for small print.
         - Group into sections, each a Column, Row, Card or LayerGrid in the root: a form's fields together, a list's rows together. Two to four sections.
-        - Use 5 to 14 components that show something, such as Text, Image, Button and TextField. Fewer, better elements beat a crowded screen.
+        - Show 5 to 14 things, such as Text, Image, Button and TextField; the Columns, Rows and Cards that hold them don't count. Fewer, better things beat a crowded screen.
         """
 }
