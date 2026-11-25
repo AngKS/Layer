@@ -272,8 +272,9 @@ struct ScreenGenerationLifecycleTests {
         let first = try #require(app.generateScreen(from: "a settings screen"))
         feed.yield(Self.written("title: Settings\n"))
         feed.finish()
-        // Given time to finish under load: the refusal below needs no generation under way.
-        try #require(await eventually(within: .seconds(15)) { !app.isGenerating })
+        // The refusal below needs no generation under way.
+        await app.waitForGeneration()
+        try #require(!app.isGenerating)
         #expect(app.generation?.screenID == first)
 
         let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)

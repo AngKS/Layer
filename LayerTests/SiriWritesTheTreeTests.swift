@@ -284,6 +284,40 @@ struct SiriWritesTheTreeTests {
         #expect(store.tree == inOverlay)
     }
 
+    /// Siri's Align lines up what sits in a free parent with its screen, as the popover's Align does: a leaf on the free
+    /// root, one in a free card, and one in a turned card by the box round its turned shape, each its own step, "Align".
+    /// A column screen's child, which its root places, is refused and nothing changes (plan 6 final review C, I1).
+    @Test func aligningThingsInFreeParentsLinesThemUpWithTheScreen() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let store = login.model.store
+        func seen(_ id: UUID) throws -> CGRect { try #require(store.index[id]?.hostShape.bounds) }
+
+        try AlignElementIntent.align(try ref(login.title, in: login), in: login.model, .left, undoManager: nil)
+        #expect(try seen(login.title).minX == 0)
+        #expect(login.undo.undoActionName == "Align")
+        try AlignElementIntent.align(try ref(login.about, in: login), in: login.model, .right, undoManager: nil)
+        #expect(try seen(login.about).maxX == 393)
+        #expect(store.parent(of: login.about) == .node(login.card))
+        store.update(login.card) { $0.rotation = 30 }
+        try AlignElementIntent.align(try ref(login.body, in: login), in: login.model, .bottom, undoManager: nil)
+        // Its corner goes on whole points of the screen, as any thing placed does, so its turned box is within half a
+        // point of the edge.
+        let bottom = try seen(login.body).maxY
+        #expect(abs(bottom - 852) <= 0.5, "\(bottom)")
+        #expect(store.parent(of: login.body) == .node(login.card))
+
+        let t1 = text("One"), t2 = text("Two")
+        let (model, _, screen) = columnScreen([t1, t2])
+        let child = try #require(model.store.ref(of: t2.id))
+        let before = model.store.tree
+        let refused = #expect(throws: LayerIntentError.self) {
+            try AlignElementIntent.align(child, in: model, .left, undoManager: nil)
+        }
+        #expect(isLaidOut(refused))
+        #expect(model.store.tree == before)
+        #expect(model.store.treeScreen(screen)?.root.children.map(\.id) == [t1.id, t2.id])
+    }
+
     @Test func arrangingInAFreeCardStillWorks() throws {
         let login = TreeFixture.loginWithACardAndARow()
 
@@ -451,6 +485,14 @@ struct SiriWritesTheTreeTests {
             Write(name: "Rename") { login, _, siri in
                 try RenameElementIntent.rename(try ref(login.toggle, in: login), to: "Wi-Fi switch", in: login.model, undoManager: siri)
                 return { login.model.store.update(login.toggle) { $0.name = "By hand" } }
+            },
+            Write(name: "Align") { login, _, siri in
+                try AlignElementIntent.align(try ref(login.about, in: login), in: login.model, .left, undoManager: siri)
+                return { login.model.store.update(login.about) { $0.frame.origin.x += 5 } }
+            },
+            Write(name: "Arrange") { login, _, siri in
+                try ArrangeElementIntent.arrange(try ref(login.about, in: login), in: login.model, .forward, undoManager: siri)
+                return { login.model.store.reorder([.node(login.card): [login.about, login.body]]) }
             },
             Write(name: "Change Screen Device") { login, _, siri in
                 _ = try ChangeScreenDeviceIntent.change(login.screen, to: .iPhone, custom: "Kiosk", in: login.model, undoManager: siri)

@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import PencilKit
 import Testing
+import UIKit
 @testable import Layer
 
 private func leaf(_ kind: ElementKind = .text, _ frame: CGRect, text: String = "Text") -> LayerNode {
@@ -316,6 +317,39 @@ struct TreeTargetsTests {
     }
 
     // MARK: The lasso and the box
+
+    /// With the lasso in hand, every recogniser on or inside either canvas, PencilKit's own drawing and lasso among
+    /// them, waits for the app's lasso to fail, so a hurried first touch can't hand the loop to PencilKit (cb3754a).
+    /// The tap and the box on the canvases' container don't, and nothing waits for a recogniser that isn't the lasso
+    /// (plan 6 final review C, I2).
+    @Test func everythingOnTheCanvasesWaitsForTheLasso() {
+        let coordinator = InkCanvas.Coordinator(model: TreeBoard([]).model)
+        let container = UIView()
+        for canvas in coordinator.canvases { container.addSubview(canvas) }
+        for recogniser in [coordinator.tap, coordinator.lasso, coordinator.box] { container.addGestureRecognizer(recogniser) }
+        let inside = UIView()
+        coordinator.sketchCanvas.addSubview(inside)
+        let onASubview = UITapGestureRecognizer()
+        inside.addGestureRecognizer(onASubview)
+        let lasso = coordinator.lasso
+        func waits(for other: UIGestureRecognizer, asking: UIGestureRecognizer? = nil) -> Bool {
+            coordinator.gestureRecognizer(asking ?? lasso, shouldBeRequiredToFailBy: other)
+        }
+
+        for canvas in coordinator.canvases {
+            #expect(waits(for: canvas.panGestureRecognizer))
+            #expect(waits(for: canvas.drawingGestureRecognizer), "PencilKit's drawing")
+        }
+        let onTheSketchCanvas = coordinator.sketchCanvas.gestureRecognizers?.filter { $0 is UIHoverGestureRecognizer } ?? []
+        #expect(!onTheSketchCanvas.isEmpty)
+        #expect(onTheSketchCanvas.allSatisfy { waits(for: $0) })
+        #expect(waits(for: onASubview), "inside a canvas")
+
+        #expect(!waits(for: coordinator.tap))
+        #expect(!waits(for: coordinator.box))
+        #expect(!waits(for: coordinator.documentCanvas.drawingGestureRecognizer, asking: coordinator.tap))
+        #expect(!waits(for: coordinator.sketchCanvas.panGestureRecognizer, asking: coordinator.box))
+    }
 
     @Test func theLassoPicksTopLevelContainersWhole() throws {
         let b = CardBoard()

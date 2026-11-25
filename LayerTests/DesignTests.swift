@@ -583,8 +583,8 @@ struct AppModelTests {
         try #require(written.children.first?.kind == .card)
         written.children[0].children = []
         feed.yield(.screen(written))
-        // Merged and laid out off the main actor first: given time, as a run of every suite at once is slow.
-        #expect(await eventually(within: .seconds(10)) { model.store.treeScreen(screen)?.root.children.first?.kind == .card })
+        // Merged and laid out off the main actor first: looked at again each time the design changes, not polled.
+        #expect(await until { model.store.treeScreen(screen)?.root.children.first?.kind == .card })
         #expect(model.store.treeScreen(screen)?.root.leafCount == 0)
 
         feed.finish()

@@ -1178,7 +1178,7 @@ struct VoiceAgentTests {
         // Login and something on the open canvas, or Login and the board's name.
         #expect(screen {
             store.update(title.node) { $0.frame.origin.x += 5 }
-            store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+            store.placeLoose(.stickyNote, sketchedAs: CGRect(x: 3000, y: 3000, width: 160, height: 160))
         } == nil)
         #expect(screen {
             store.update(title.node) { $0.frame.origin.x += 5 }

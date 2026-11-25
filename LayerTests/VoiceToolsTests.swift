@@ -159,7 +159,7 @@ struct CanvasPictureTests {
     /// so that "like Profile" still means something.
     @Test func aChangeForOneScreenIsToldThatScreenAndTheOthersByName() throws {
         let (app, _, _) = VoiceFixture.loginAndProfile()
-        app.store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        try #require(app.store.placeLoose(.stickyNote, sketchedAs: CGRect(x: 3000, y: 3000, width: 160, height: 160)) != nil)
         var picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         #expect(picture.text(.full).contains("Loose on the canvas"))
 
@@ -855,7 +855,7 @@ struct VoiceToolsTests {
     /// an element on one or loose on the canvas, and no new screen.
     @Test func aChangeForOneScreenTouchesNothingElse() async throws {
         let (app, login, profile) = VoiceFixture.loginAndProfile()
-        let note = app.store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        let note = try #require(app.store.placeLoose(.stickyNote, sketchedAs: CGRect(x: 3000, y: 3000, width: 160, height: 160))).node
         let handles = VoiceHandles()
         _ = CanvasPicture.capture(from: app, handles: handles)
         let box = VoiceToolbox(model: app, handles: handles)
@@ -1000,11 +1000,14 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         bench.app.screenStream = { _ in stream }
+        // The last generation's outcome stays up through the refusal below, however long the run takes.
+        bench.app.generationOutcomePause = .seconds(600)
         let last = try #require(bench.app.generateScreen(from: "a settings screen"))
         feed.yield(.screen(Outline.parse("title: Settings\n", isComplete: true)))
         feed.finish()
-        // Given time to finish under load: the refusal below needs no generation under way.
-        try #require(await eventually(within: .seconds(15)) { !bench.app.isGenerating })
+        // The refusal below needs no generation under way.
+        await bench.app.waitForGeneration()
+        try #require(!bench.app.isGenerating)
         #expect(bench.app.generation?.screenID == last)
         // A screen of texts that brings the design to 5,000 nodes, its root among them.
         let room = TreeRules.maximumNodes - store.index.count - 1

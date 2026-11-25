@@ -304,11 +304,13 @@ struct VoiceOnTheTreeTests {
         let made = try #require(bench.store.tree.settings.customDevices.first)
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
         bench.login.model.screenStream = { _ in stream }
-        let making = Task { try await bench.box.createScreen(name: "Shop", description: "a shop", device: "the kiosk") }
-        #expect(await eventually { bench.login.model.isGenerating })
-        #expect(bench.store.tree.screens.last?.deviceID == made.id)
+        // Written in full before it starts: the screen it makes is there, on its device, once it has finished.
+        feed.yield(.screen(Outline.parse("title: Shop\n", isComplete: true)))
         feed.finish()
-        _ = try await making.value
+        let line = try await bench.box.createScreen(name: "Shop", description: "a shop", device: "the kiosk")
+        #expect(!bench.box.lastFailed, "\(line)")
+        #expect(bench.store.tree.screens.last?.name == "Shop")
+        #expect(bench.store.tree.screens.last?.deviceID == made.id)
     }
 
     // MARK: A container's size (review M1): as the Format panel's W and H
