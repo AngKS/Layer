@@ -285,19 +285,24 @@ enum StructureInference {
     // MARK: - The neighbourhood
 
     /// The new nodes the pass may take, then every arrangeable child whose frame, grown by `reach`, meets one already
-    /// in it, until nothing joins: in the parent's order, as places among its children.
+    /// in it, until nothing joins: in the parent's order, as places among its children. One that holds the one it joined
+    /// by lies under it, as a background does, and brings in nothing more: what it lies under isn't near (plan 5's
+    /// final review, follow-up to A5).
     private static func neighbourhood(of parent: LayerNode, new: Set<UUID>) -> [Int] {
         let reach = StructureConventions.reach
         let arrangeable = parent.children.indices.filter { parent.children[$0].isArrangeable }
         var inside = arrangeable.filter { new.contains(parent.children[$0].id) }
         var outside = arrangeable.filter { !new.contains(parent.children[$0].id) }
+        var under: Set<Int> = []
         var next = 0
         while next < inside.count, !outside.isEmpty {
+            defer { next += 1 }
+            guard !under.contains(inside[next]) else { continue }
             let frame = parent.children[inside[next]].frame
             let joining = outside.filter { meets(parent.children[$0].frame.insetBy(dx: -reach, dy: -reach), frame) }
             inside += joining
             outside.removeAll { joining.contains($0) }
-            next += 1
+            under.formUnion(joining.filter { parent.children[$0].frame.contains(frame) })
         }
         return inside.sorted()
     }
@@ -329,7 +334,9 @@ enum StructureInference {
         var frame: CGRect { node.frame }
     }
 
-    /// Something that may lie between members: a visible child's turned shape, or a structure proposed just before.
+    /// Something that may lie between members: a visible child's turned shape, or a structure proposed just before. One
+    /// that holds what it would lie between, both neighbours or a grid's whole box, lies under them instead, as a
+    /// full-screen background does, locked or not (plan 5's final review, follow-up to A5): `Obstacles.meet` passes it by.
     private struct Obstacle {
         var id: UUID
         var shape: CGRect
@@ -355,10 +362,14 @@ enum StructureInference {
             buckets = all.count < fewestSorted ? nil : ShapeBuckets(all.map { $0.shape })
         }
 
-        /// Whether one that `ignoring` doesn't name shares some area with `box`.
-        func meet(_ box: CGRect, ignoring: (UUID) -> Bool) -> Bool {
-            guard let buckets else { return all.contains { overlaps($0.shape, box) && !ignoring($0.id) } }
-            return buckets.contains(near: box) { overlaps(all[$0].shape, box) && !ignoring(all[$0].id) }
+        /// Whether one that `ignoring` doesn't name shares some area with `box`, the space between what `under` holds,
+        /// and doesn't lie under all of `under`.
+        func meet(_ box: CGRect, under: [CGRect], ignoring: (UUID) -> Bool) -> Bool {
+            func isIn(_ obstacle: Obstacle) -> Bool {
+                overlaps(obstacle.shape, box) && !ignoring(obstacle.id) && !under.allSatisfy(obstacle.shape.contains)
+            }
+            guard let buckets else { return all.contains(where: isIn) }
+            return buckets.contains(near: box) { isIn(all[$0]) }
         }
     }
 
@@ -675,7 +686,8 @@ enum StructureInference {
                 if let variation = rule.gapVariation, max(gapSpan.high, gap) - min(gapSpan.low, gap) > variation { continue }
                 let id = facts[next].id
                 let between = rule.space(between: last, and: frame)
-                if obstacles.meet(between, ignoring: { other in other == id || run.contains { facts[$0].id == other } }) { continue }
+                if obstacles.meet(between, under: [last, frame],
+                                  ignoring: { other in other == id || run.contains { facts[$0].id == other } }) { continue }
                 run.append(next)
                 gaps.append(gap)
                 last = frame
@@ -868,7 +880,7 @@ enum StructureInference {
 
             let ids = Set(indices.map { facts[$0].id })
             let box = frames.dropFirst().reduce(frames[0]) { $0.union($1) }
-            guard !obstacles.meet(box, ignoring: { ids.contains($0) }) else { return nil }
+            guard !obstacles.meet(box, under: [box], ignoring: { ids.contains($0) }) else { return nil }
 
             let kind = Structure.Kind.grid(columns: columns.count)
             let members = cells.flatMap { $0 }

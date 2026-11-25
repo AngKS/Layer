@@ -239,6 +239,45 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(model.store.node(badge.id)?.frame == badge.frame, "where it was drawn")
     }
 
+    /// A full-screen background, locked or not, is no obstacle to the pass (plan 5's final review, follow-up to A5): it
+    /// holds both neighbours of each gap, so it lies under them. A field drawn under two makes a column, and an image
+    /// drawn as a grid's fourth cell makes the grid.
+    @Test(arguments: [false, true])
+    func aBackgroundIsNoObstacle(locked: Bool) throws {
+        var background = leaf(.shape, 0, 0, 393, 852)
+        background.isLocked = locked
+        let (model, screen, _) = makeModel()
+        let fields = [leaf(.textField, 20, 100, 353, 48), leaf(.textField, 20, 172, 353, 48), leaf(.textField, 20, 244, 353, 48)]
+        add([background] + fields, to: screen, in: model)
+        model.structurePass(over: [fields[2].id])
+        #expect(rootChildren(model, screen).map(\.id).first == background.id)
+        #expect(rootChildren(model, screen).last?.children.map(\.id) == fields.map(\.id))
+
+        let (gridModel, gridScreen, _) = makeModel()
+        let cells = [image(30, 300), image(203, 300), image(30, 436), image(203, 436)]
+        add([background] + cells, to: gridScreen, in: gridModel)
+        gridModel.structurePass(over: [cells[3].id])
+        let grid = rootChildren(gridModel, gridScreen).last
+        #expect(grid?.layout?.isGrid == true)
+        #expect(grid?.children.map(\.id) == cells.map(\.id))
+    }
+
+    /// A background reached from what a batch drew doesn't bring in all it lies under: the pass still looks only near
+    /// the new node. Fields 200 pt apart up the screen, regular as they are, aren't taken into a column with one drawn
+    /// 200 pt under the last.
+    @Test func aBackgroundBringsNothingFarIntoTheNeighbourhood() throws {
+        let (model, screen, _) = makeModel()
+        let background = leaf(.shape, 0, 0, 393, 852)
+        let fields = [100, 300, 500, 700].map { leaf(.textField, 20, CGFloat($0), 353, 48) }
+        add([background] + fields, to: screen, in: model)
+        let before = rootChildren(model, screen)
+
+        model.structurePass(over: [fields[3].id])
+
+        #expect(rootChildren(model, screen) == before)
+        #expect(model.structureOffer == nil)
+    }
+
     // MARK: - Declines
 
     @Test func decliningMarksThemAndTheyAreNeverOfferedAgain() throws {

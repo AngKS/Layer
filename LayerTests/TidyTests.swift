@@ -244,6 +244,53 @@ struct TidyTests {
                 == label.frame.offsetBy(dx: moved.minX - shape.frame.minX, dy: moved.minY - shape.frame.minY))
     }
 
+    // MARK: - A background (plan 5's final review, follow-up to A5)
+
+    /// A background that fills the screen is no host: nothing is laid on it, so the title, the field and the button on
+    /// top of it are tidied as usual and the background stays (ported from ScreenTidy's `aFullScreenBackgroundIsNotAHost`,
+    /// retired under (o), its assertions kept: the three are on the margin, the button as wide as the column). Holding
+    /// both neighbours of each gap, it lies under them, not between them.
+    @Test func aFullScreenBackgroundIsNotAHost() throws {
+        for kind in [ElementKind.shape, .image] {
+            let background = node(kind, CGRect(x: 0, y: 0, width: 393, height: 852))
+            let title = node(.title, CGRect(x: 20, y: 100, width: 353, height: 40))
+            let field = node(.textField, CGRect(x: 20, y: 172, width: 353, height: 48))
+            let button = node(.button, CGRect(x: 20, y: 300, width: 353, height: 50))
+            let (model, screen, _) = makeModel([background, title, field, button])
+            let margin = DeviceFrame.iPhone.margin
+
+            #expect(!model.store.tidy(screen).isEmpty, "\(kind)")
+
+            let root = try root(of: screen, in: model)
+            #expect(root.children.first?.id == background.id, "\(kind): behind what is tidied, still")
+            #expect(root.children.last?.children.map(\.id) == [title.id, field.id, button.id], "\(kind)")
+            #expect(model.store.placed(background.id)?.frame == background.frame, "\(kind)")
+            #expect(model.store.placed(title.id)?.frame.minX == margin, "\(kind)")
+            #expect(model.store.placed(button.id)?.frame.minX == margin, "\(kind)")
+            #expect(model.store.placed(button.id)?.frame.width == 393 - margin * 2, "\(kind)")
+            #expect(model.store.placed(button.id)?.frame.minY != button.frame.minY, "\(kind): tidied, not carried")
+        }
+    }
+
+    /// A locked background that fills the screen is no obstacle: the rest is still tidied (ported from ScreenTidy's
+    /// `aLockedFullScreenBackgroundIsNotAnObstacle`, retired under (o), its assertions kept).
+    @Test func aLockedFullScreenBackgroundIsNotAnObstacle() throws {
+        var background = node(.image, CGRect(x: 0, y: 0, width: 393, height: 852))
+        background.isLocked = true
+        let title = node(.title, CGRect(x: 20, y: 100, width: 353, height: 40))
+        let field = node(.textField, CGRect(x: 20, y: 172, width: 353, height: 48))
+        let button = node(.button, CGRect(x: 20, y: 300, width: 353, height: 50))
+        let (model, screen, _) = makeModel([background, title, field, button])
+        let margin = DeviceFrame.iPhone.margin
+
+        #expect(!model.store.tidy(screen).isEmpty)
+
+        #expect(try root(of: screen, in: model).children.last?.children.map(\.id) == [title.id, field.id, button.id])
+        #expect(model.store.placed(background.id)?.frame == background.frame)
+        #expect(model.store.placed(title.id)?.frame.minX == margin)
+        #expect(model.store.placed(button.id)?.frame.minX == margin)
+    }
+
     /// What lies on a locked picture stays where it is, with the picture, while the rest is tidied. Ported from
     /// ScreenTidy's `whatRidesOnALockedPictureStaysPut`, retired under (o), with the rest on one margin.
     @Test func whatRidesOnALockedPictureStaysPut() throws {
