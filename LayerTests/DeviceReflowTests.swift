@@ -396,6 +396,39 @@ struct DeviceReflowTests {
         #expect(!TreeValidator.check(root, on: .iPhone).contains { $0.kind == .clipped })
     }
 
+    /// A column the pass made of drawn cards of one width, such as a card duplicated below itself, keeps their size on
+    /// a device change, as they would loose (A3): a card is as wide as the column there, but holds nothing filling it,
+    /// so only its own intent counts, here centred (plan 6's Task P5C, follow-up). The pass makes a column of three or
+    /// more, so this one is built as the pass builds one.
+    @Test func aColumnOfDrawnCardsOfOneWidthKeepsTheirSize() throws {
+        let cards = [0, 144].map { y -> LayerNode in
+            var card = node(CGRect(x: 0, y: y, width: 200, height: 120), .card)
+            card.padding = LayerNode.Padding(all: 16)
+            card.children = [node(CGRect(x: 16, y: 16, width: 168, height: 30), .title)]
+            card.sketch = LayerNode.SketchIntent(sketched: CGRect(x: 97, y: 200 + y, width: 200, height: 120),
+                                                 on: DeviceFrame.iPhone.size, margin: DeviceFrame.iPhone.margin,
+                                                 confidence: 0.95, decidedBy: .rules)
+            return card
+        }
+        #expect(cards.map(\.sketch?.placement) == [.centered, .centered])
+        var column = LayerNode(kind: .group)
+        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 24, alignment: .center))
+        (column.width, column.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        column.frame = CGRect(x: 97, y: 200, width: 200, height: 264)
+        column.children = cards
+        column.sketch = LayerNode.SketchIntent(sketched: column.frame, on: DeviceFrame.iPhone.size,
+                                               margin: DeviceFrame.iPhone.margin, confidence: 1, decidedBy: .structure)
+        let screen = freeScreen([column])
+        let (model, _) = makeModel([screen])
+        #expect(cards.map { model.store.placed($0.id)?.frame.size } == Array(repeating: CGSize(width: 200, height: 120), count: 2))
+
+        model.store.changeDevice(of: screen.id, to: iPad)
+
+        // Centred on the iPad, each as it was.
+        #expect(model.store.placed(cards[0].id)?.frame == CGRect(x: 310, y: 200, width: 200, height: 120))
+        #expect(model.store.placed(cards[1].id)?.frame == CGRect(x: 310, y: 344, width: 200, height: 120))
+    }
+
     /// A background that fills the screen fills the new one; a locked one stays (A5, ported from ScreenTidy's
     /// `aBackgroundFillsTheNewDevice`, retired under (o)).
     @Test func aBackgroundFillsTheNewDevice() throws {

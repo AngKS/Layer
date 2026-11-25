@@ -85,10 +85,11 @@ enum DeviceReflow {
     /// A row, column or grid the pass made whose every visible member is proportional, by its saved intent or else by
     /// where it is on the old screen (A3): each member upright, unlocked and fixed across scales its width by W′ / W, the
     /// container its x, and the engine fits the container round them, as it will lay it out; it is then kept inside
-    /// the new screen. A card as wide as the container, as a card drawn round full-width members is, counts as
-    /// proportional whatever was drawn, and scales with it; what it holds that fills it follows it as the store lays it
-    /// out (plan 6's Task P5C). Its frame and each member's that changes; nil for anything else, which moves by its own
-    /// intent.
+    /// the new screen. A card as wide as the container that holds something filling it across, as a card drawn round
+    /// full-width members does, counts as proportional whatever was drawn, and scales with it; what fills it follows it
+    /// as the store lays it out (plan 6's Task P5C). A card that holds nothing filling it is judged as any member is, so
+    /// a column of drawn cards of one width keeps their size, as they would loose. Its frame and each member's that
+    /// changes; nil for anything else, which moves by its own intent.
     private static func scaled(_ node: LayerNode, from old: DeviceFrame, to new: DeviceFrame,
                                tokens: DesignTokens) -> [UUID: CGRect]? {
         let frame = node.frame
@@ -101,8 +102,11 @@ enum DeviceReflow {
         let shown = node.children.filter { !$0.isHidden }
         let inside = frame.width - node.padding.leading - node.padding.trailing
         guard !shown.isEmpty, shown.allSatisfy({ member in
-            // A card as wide as what holds it, as one drawn round full-width members is, fills it, whatever was drawn.
-            if member.kind == .card, member.frame.width >= inside - 0.5 { return true }
+            // A card as wide as what holds it, with something filling it across, as one drawn round full-width members
+            // has, fills it, whatever was drawn.
+            if member.kind == .card, member.frame.width >= inside - 0.5, member.children.contains(where: fillsAcross) {
+                return true
+            }
             let onScreen = member.frame.offsetBy(dx: frame.minX, dy: frame.minY)
             return (member.sketch?.placement ?? .of(onScreen, screenWidth: old.size.width, margin: old.margin)) == .proportional
         }) else { return nil }
@@ -161,6 +165,12 @@ enum DeviceReflow {
     private static let slack: CGFloat = 0.001
 
     private static func isLength(_ value: CGFloat) -> Bool { value.isFinite && value > 0 }
+
+    /// Whether a visible node fills what holds it across.
+    private static func fillsAcross(_ node: LayerNode) -> Bool {
+        guard !node.isHidden, case .fill = node.width.mode else { return false }
+        return true
+    }
 
     /// A number a rule works out, in whole points: a half rounds to even, so it doesn't creep one way.
     private static func whole(_ value: CGFloat) -> CGFloat { value.rounded(.toNearestOrEven) }
