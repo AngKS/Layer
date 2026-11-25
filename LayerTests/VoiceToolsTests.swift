@@ -39,7 +39,7 @@ struct VoiceHandlesTests {
 struct CanvasPictureTests {
     @Test func thePictureListsScreensAndElements() throws {
         let (app, screen) = VoiceFixture.login()
-        let button = try #require(app.store.screen(screen)?.elements.first { $0.kind == .button })
+        let button = try #require(app.store.screenLeaves(screen).first { $0.kind == .button })
         app.selection = .element(.init(host: .screen(screen), element: button.id))
         let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         #expect(picture.hasScreens)
@@ -65,8 +65,8 @@ struct CanvasPictureTests {
             )
         }
         let stroke = PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: Date()))
-        app.store.addFloating(try #require(DesignElement.drawing([stroke])), scale: 1)
-        #expect(app.store.floating.count == 1)
+        app.store.addCanvasNode(try #require(LayerNode.drawing([stroke])), scale: 1)
+        #expect(app.store.tree.canvas.count == 1)
 
         let handles = VoiceHandles()
         let picture = CanvasPicture.capture(from: app, handles: handles)
@@ -81,7 +81,7 @@ struct CanvasPictureTests {
     /// With several things selected, "these" are all of them.
     @Test func everythingSelectedIsMarkedSelected() throws {
         let (app, screen) = VoiceFixture.login()
-        let elements = try #require(app.store.screen(screen)?.elements)
+        let elements = app.store.screenLeaves(screen)
         app.selection = .several([
             .element(.init(host: .screen(screen), element: elements[0].id)),
             .element(.init(host: .screen(screen), element: elements[2].id)),
@@ -92,9 +92,8 @@ struct CanvasPictureTests {
 
     @Test func elementsAreListedFromTheTopWhateverOrderTheyWereMadeIn() throws {
         let (app, screen) = VoiceFixture.login()
-        _ = app.store.setElements([
-            DesignElement(kind: .body, frame: CGRect(x: 20, y: 10, width: 353, height: 20), text: "Above it all", tint: Theme.accent),
-        ], on: screen)
+        app.store.add(.leaf(.body, frame: CGRect(x: 20, y: 10, width: 353, height: 20), text: "Above it all", tint: Theme.accent),
+                      to: .screen(screen))
         let text = CanvasPicture.capture(from: app, handles: VoiceHandles()).text(.full)
         let above = try #require(text.range(of: "Above it all"))
         let title = try #require(text.range(of: "Welcome back"))
@@ -104,13 +103,11 @@ struct CanvasPictureTests {
 
     @Test func theCompactPictureSummarisesOtherScreens() throws {
         let (app, login) = VoiceFixture.login()
-        let profile = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4400, y: 4000), scale: 0.6))
-        app.store.updateScreen(profile.id) { $0.name = "Profile" }
-        _ = app.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Edit profile", tint: Theme.accent),
-        ], on: profile.id)
-        let title = try #require(app.store.screen(login)?.elements.first)
+        app.store.addFreeScreen([
+            .leaf(.title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
+            .leaf(.button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Edit profile", tint: Theme.accent),
+        ], name: "Profile", origin: CGPoint(x: 4400, y: 4000), scale: 0.6)
+        let title = try #require(app.store.screenLeaves(login).first)
         app.selection = .element(.init(host: .screen(login), element: title.id))
 
         let picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
@@ -162,7 +159,7 @@ struct CanvasPictureTests {
     /// so that "like Profile" still means something.
     @Test func aChangeForOneScreenIsToldThatScreenAndTheOthersByName() throws {
         let (app, _, _) = VoiceFixture.loginAndProfile()
-        _ = app.store.addFloating(.stickyNote, from: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        app.store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
         var picture = CanvasPicture.capture(from: app, handles: VoiceHandles())
         #expect(picture.text(.full).contains("Loose on the canvas"))
 
@@ -212,13 +209,19 @@ struct CanvasPictureTests {
 struct VoiceToolsTests {
     private struct Bench {
         let app: AppModel
-        let screen: DesignScreen.ID
+        let screen: TreeScreen.ID
         let handles: VoiceHandles
         let box: VoiceToolbox
 
-        @MainActor func element(_ handle: String) -> DesignElement? {
+        /// The leaf a handle names, on one of the design's screens.
+        @MainActor func node(_ handle: String) -> LayerNode? {
             guard let id = handles.element(handle) else { return nil }
-            return app.store.screens.flatMap(\.elements).first { $0.id == id }
+            return app.store.tree.screens.flatMap(\.root.leaves).first { $0.id == id }
+        }
+
+        /// Its frame in its screen's points.
+        @MainActor func frame(_ handle: String) -> CGRect? {
+            node(handle).flatMap { app.store.ownFrame($0.id) }
         }
     }
 
@@ -233,9 +236,9 @@ struct VoiceToolsTests {
     @Test func stylingAppliesLookWords() throws {
         let bench = bench()
         let line = bench.box.styleElement(element: "E2", look: "text blue, bold")
-        let button = try #require(bench.element("E2"))
-        #expect(button.textColor == ColourWords.parse("blue"))
-        #expect(button.fontWeight == .bold)
+        let button = try #require(bench.node("E2"))
+        #expect(button.style.textColor == ColourWords.parse("blue"))
+        #expect(button.style.fontWeight == .bold)
         // The element it changed is the one selected, so "it" means that one next.
         #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), element: button.id)))
         #expect(!line.isEmpty)
@@ -249,23 +252,17 @@ struct VoiceToolsTests {
         let bench = bench()
         let button = try #require(bench.handles.element("E2"))
         let image = try #require(bench.handles.element("E3"))
-        var item = DesignStore.newElement(.group)
-        item.isHidden = true
-        let group = item
-        bench.app.store.apply { content in
-            content.add(group, to: bench.screen)
-            content.update(button) { $0.group = group.id }
-            content.update(image) { $0.group = group.id }
-        }
+        let group = try #require(bench.app.store.wrap([button, image], in: .group, layout: .free))
+        bench.app.store.update(group) { $0.isHidden = true }
 
         _ = bench.box.styleElement(element: "E2", look: "bold")
-        #expect(bench.app.store.element(button)?.fontWeight == .bold)
-        #expect(bench.app.store.element(button)?.isHidden == false)
+        #expect(bench.app.store.node(button)?.style.fontWeight == .bold)
+        #expect(bench.app.store.node(button)?.isHidden == false)
 
-        bench.app.store.apply { $0.update(group.id) { $0.isHidden = false; $0.isLocked = true } }
+        bench.app.store.update(group) { $0.isHidden = false; $0.isLocked = true }
         _ = bench.box.styleElement(element: "E3", look: "radius 12")
-        #expect(bench.app.store.element(image)?.cornerRadius == 12)
-        #expect(bench.app.store.element(image)?.isLocked == false)
+        #expect(bench.app.store.node(image)?.style.cornerRadius == 12)
+        #expect(bench.app.store.node(image)?.isLocked == false)
     }
 
     /// A model can write "nan" where a number goes. A frame with that in it can't be laid out.
@@ -281,11 +278,11 @@ struct VoiceToolsTests {
     @Test func resizingAcceptsAShareOfTheScreen() throws {
         let bench = bench()
         _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "50%", height: nil)
-        var button = try #require(bench.element("E2"))
-        #expect(button.frame == CGRect(x: 20, y: 420, width: 197, height: 50))
+        var button = try #require(bench.frame("E2"))
+        #expect(button == CGRect(x: 20, y: 420, width: 197, height: 50))
         _ = bench.box.moveElement(element: "E2", x: "0", y: "25%", width: "180", height: "44pt")
-        button = try #require(bench.element("E2"))
-        #expect(button.frame == CGRect(x: 0, y: 213, width: 180, height: 44))
+        button = try #require(bench.frame("E2"))
+        #expect(button == CGRect(x: 0, y: 213, width: 180, height: 44))
     }
 
     @Test func aSizeThatMakesNoSenseChangesNothing() throws {
@@ -301,18 +298,18 @@ struct VoiceToolsTests {
         _ = bench.box.alignElement(element: "E3", alignment: "centre")
         // The store keeps positions to whole points, as it does when aligning by hand:
         // a 200-point image on a 393-point screen sits at 97, half a point off true centre.
-        #expect(try #require(bench.element("E3")).frame.minX == 97)
+        #expect(try #require(bench.frame("E3")).minX == 97)
         _ = bench.box.alignElement(element: "E3", alignment: "Right")
-        #expect(try #require(bench.element("E3")).frame.maxX == 393)
+        #expect(try #require(bench.frame("E3")).maxX == 393)
         // "Middle" and "centrally" are how people say centred, and mean side to side
         // as "centre" does. Top to bottom has to be asked for.
         _ = bench.box.alignElement(element: "E3", alignment: "middle")
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 97, y: 500, width: 200, height: 200))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 97, y: 500, width: 200, height: 200))
         _ = bench.box.alignElement(element: "E3", alignment: "left")
         _ = bench.box.alignElement(element: "E3", alignment: "centrally")
-        #expect(try #require(bench.element("E3")).frame.minX == 97)
+        #expect(try #require(bench.frame("E3")).minX == 97)
         _ = bench.box.alignElement(element: "E3", alignment: "vertical centre")
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 97, y: 326, width: 200, height: 200))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 97, y: 326, width: 200, height: 200))
         let before = bench.app.store.content
         let line = bench.box.alignElement(element: "E3", alignment: "sideways")
         #expect(bench.app.store.content == before)
@@ -322,7 +319,7 @@ struct VoiceToolsTests {
     @Test func settingTextChangesTheWords() throws {
         let bench = bench()
         _ = bench.box.setText(element: "E2", text: "Board the ship")
-        #expect(try #require(bench.element("E2")).text == "Board the ship")
+        #expect(try #require(bench.node("E2")).content.text == "Board the ship")
     }
 
     /// Measured with the on-device model: asked to change an element's text colour, it
@@ -331,20 +328,20 @@ struct VoiceToolsTests {
     @Test func aColourGivenAsTheWordsColoursTheWords() throws {
         let bench = bench()
         _ = bench.box.setText(element: "E1", text: "blue")
-        var title = try #require(bench.element("E1"))
-        #expect(title.text == "Welcome back")
-        #expect(title.textColor == ColourWords.parse("blue"))
+        var title = try #require(bench.node("E1"))
+        #expect(title.content.text == "Welcome back")
+        #expect(title.style.textColor == ColourWords.parse("blue"))
         _ = bench.box.setText(element: "E1", text: "text white")
-        title = try #require(bench.element("E1"))
-        #expect(title.text == "Welcome back")
-        #expect(title.textColor == ColourWords.parse("white"))
+        title = try #require(bench.node("E1"))
+        #expect(title.content.text == "Welcome back")
+        #expect(title.style.textColor == ColourWords.parse("white"))
         #expect(bench.box.failures.isEmpty)
 
         // Written as a label would be, it is the label.
         _ = bench.box.setText(element: "E2", text: "Blue")
-        #expect(try #require(bench.element("E2")).text == "Blue")
+        #expect(try #require(bench.node("E2")).content.text == "Blue")
         _ = bench.box.setText(element: "E2", text: "blue skies ahead")
-        #expect(try #require(bench.element("E2")).text == "blue skies ahead")
+        #expect(try #require(bench.node("E2")).content.text == "blue skies ahead")
     }
 
     @Test func theTextColourHasAnArgumentOfItsOwn() {
@@ -357,11 +354,11 @@ struct VoiceToolsTests {
     @Test func addingAnElementPutsItBelowTheRest() throws {
         let bench = bench()
         let line = bench.box.addElement(screen: nil, kind: "text field", text: "Email", look: "radius 12")
-        let added = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        let added = try #require(bench.app.store.screenLeaves(bench.screen).last)
         #expect(added.kind == .textField)
-        #expect(added.text == "Email")
-        #expect(added.cornerRadius == 12)
-        #expect(added.frame.minY > 700)
+        #expect(added.content.text == "Email")
+        #expect(added.style.cornerRadius == 12)
+        #expect(try #require(bench.app.store.ownFrame(added.id)).minY > 700)
         // The model is told what to call it from now on.
         #expect(line.contains("E4"))
         #expect(bench.handles.element("E4") == added.id)
@@ -375,11 +372,11 @@ struct VoiceToolsTests {
     @Test func duplicatingAndDeleting() throws {
         let bench = bench()
         let line = bench.box.duplicateElement(element: "E2")
-        #expect(bench.app.store.screen(bench.screen)?.elements.count == 4)
+        #expect(bench.app.store.screenLeaves(bench.screen).count == 4)
         #expect(line.contains("E4"))
-        #expect(try #require(bench.element("E4")).text == "Sign in")
+        #expect(try #require(bench.node("E4")).content.text == "Sign in")
         _ = bench.box.deleteElement(element: "E4", named: "button")
-        #expect(bench.app.store.screen(bench.screen)?.elements.count == 3)
+        #expect(bench.app.store.screenLeaves(bench.screen).count == 3)
         // What is gone can't be named again.
         #expect(bench.box.deleteElement(element: "E4", named: "button") == "There is no E4.")
     }
@@ -387,9 +384,9 @@ struct VoiceToolsTests {
     @Test func renamingAndDeletingAScreen() {
         let bench = bench()
         _ = bench.box.renameScreen(screen: "S1", name: "Sign In")
-        #expect(bench.app.store.screen(bench.screen)?.name == "Sign In")
+        #expect(bench.app.store.treeScreen(bench.screen)?.name == "Sign In")
         _ = bench.box.deleteScreen(screen: "S1", named: "sign in screen")
-        #expect(bench.app.store.screens.isEmpty)
+        #expect(bench.app.store.tree.screens.isEmpty)
         #expect(bench.box.deleteScreen(screen: "S1", named: "sign in screen") == "There is no S1.")
     }
 
@@ -441,13 +438,13 @@ struct VoiceToolsTests {
 
         let line = bench.box.stackElements(elements: "E3, E1, E2", direction: "column")
 
-        #expect(try #require(bench.element("E1")).frame == CGRect(x: 20, y: 75, width: 353, height: 41))
-        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 128, width: 353, height: 50))
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 190, width: 200, height: 200))
+        #expect(try #require(bench.frame("E1")) == CGRect(x: 20, y: 75, width: 353, height: 41))
+        #expect(try #require(bench.frame("E2")) == CGRect(x: 20, y: 128, width: 353, height: 50))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 20, y: 190, width: 200, height: 200))
         #expect(line == "Stacked 3 elements in a column.")
         #expect(bench.box.failures.isEmpty)
         // All of them are selected afterwards, so that "them" stays them.
-        #expect(bench.app.selectedElements.count == 3)
+        #expect(bench.app.selectedThings.count == 3)
         // And it is one thing to undo.
         undo.undo()
         #expect(bench.app.store.content == before)
@@ -461,8 +458,8 @@ struct VoiceToolsTests {
         _ = bench.box.moveElement(element: "E1", x: nil, y: "300", width: nil, height: nil)
         _ = bench.box.moveElement(element: "E2", x: nil, y: "300", width: nil, height: nil)
         _ = bench.box.stackElements(elements: "E2 E1", direction: "column")
-        #expect(try #require(bench.element("E2")).frame.minY == 300)
-        #expect(try #require(bench.element("E1")).frame.minY == 362)
+        #expect(try #require(bench.frame("E2")).minY == 300)
+        #expect(try #require(bench.frame("E1")).minY == 362)
     }
 
     @Test func stackingInARowGoesAcrossWithTopsTogether() throws {
@@ -470,8 +467,8 @@ struct VoiceToolsTests {
         _ = bench.box.moveElement(element: "E2", x: nil, y: nil, width: "100", height: nil)
         _ = bench.box.moveElement(element: "E3", x: nil, y: nil, width: "100", height: "100")
         let line = bench.box.stackElements(elements: "E2, E3", direction: "row")
-        #expect(try #require(bench.element("E2")).frame == CGRect(x: 20, y: 420, width: 100, height: 50))
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 132, y: 420, width: 100, height: 100))
+        #expect(try #require(bench.frame("E2")) == CGRect(x: 20, y: 420, width: 100, height: 50))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 132, y: 420, width: 100, height: 100))
         #expect(line == "Stacked 2 elements in a row.")
     }
 
@@ -507,17 +504,17 @@ struct VoiceToolsTests {
     @Test func placingPutsOneElementByAnother() throws {
         let bench = bench()
         let line = bench.box.placeElement(element: "E3", relation: "below", target: "E1")
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 128, width: 200, height: 200))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 20, y: 128, width: 200, height: 200))
         #expect(line == "Put the image below the title “Welcome back”.")
 
         _ = bench.box.placeElement(element: "E3", relation: "above", target: "E2")
-        #expect(try #require(bench.element("E3")).frame == CGRect(x: 20, y: 208, width: 200, height: 200))
+        #expect(try #require(bench.frame("E3")) == CGRect(x: 20, y: 208, width: 200, height: 200))
         _ = bench.box.placeElement(element: "E3", relation: "right of", target: "E2")
-        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        #expect(try #require(bench.frame("E3")).origin == CGPoint(x: 385, y: 420))
         _ = bench.box.placeElement(element: "E3", relation: "beside", target: "E2")
-        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: 385, y: 420))
+        #expect(try #require(bench.frame("E3")).origin == CGPoint(x: 385, y: 420))
         _ = bench.box.placeElement(element: "E3", relation: "left of", target: "E2")
-        #expect(try #require(bench.element("E3")).frame.origin == CGPoint(x: -192, y: 420))
+        #expect(try #require(bench.frame("E3")).origin == CGPoint(x: -192, y: 420))
         #expect(bench.box.failures.isEmpty)
     }
 
@@ -550,10 +547,10 @@ struct VoiceToolsTests {
         let bench = bench()
         bench.box.spokenCommand = "Can you add an image below the title?"
         let line = bench.box.addElement(screen: "S1", kind: "image", text: nil, look: nil, relation: "below", target: "E1")
-        let added = try #require(bench.app.store.screen(bench.screen)?.elements.last)
+        let added = try #require(bench.app.store.screenLeaves(bench.screen).last)
         #expect(added.kind == .image)
-        #expect(added.frame.minX == 20)
-        #expect(added.frame.minY == 128)
+        #expect(bench.app.store.ownFrame(added.id)?.minX == 20)
+        #expect(bench.app.store.ownFrame(added.id)?.minY == 128)
         #expect(line.hasPrefix("Added an image as E4."))
         #expect(bench.box.lines.last == "Put the image below the title “Welcome back”.")
         #expect(bench.box.failures.isEmpty)
@@ -578,11 +575,11 @@ struct VoiceToolsTests {
         let line = bench.box.alignElement(element: "E1, E3", alignment: "centre")
         // Through the middle of the area they cover together, 20 to 373 across.
         // The store puts each on a whole point of its own, so within half a point.
-        #expect(abs(try #require(bench.element("E3")).frame.midX - 196.5) <= 1)
-        #expect(try #require(bench.element("E1")).frame.minX == 20)
+        #expect(abs(try #require(bench.frame("E3")).midX - 196.5) <= 1)
+        #expect(try #require(bench.frame("E1")).minX == 20)
         #expect(line == "Lined up 2 elements by their centres.")
         _ = bench.box.alignElement(element: "E2 E3", alignment: "top")
-        #expect(try #require(bench.element("E3")).frame.minY == 420)
+        #expect(try #require(bench.frame("E3")).minY == 420)
         #expect(bench.box.failures.isEmpty)
     }
 
@@ -595,13 +592,13 @@ struct VoiceToolsTests {
         let bench = bench()
         bench.box.spokenCommand = "Can you edit the image to be a section?"
         #expect(bench.box.deleteElement(element: "E3", named: "image") == "That would have deleted something you didn't ask to remove, so nothing was changed.")
-        #expect(bench.element("E3") != nil)
+        #expect(bench.node("E3") != nil)
         #expect(bench.box.deleteScreen(screen: "S1", named: "login screen").hasPrefix("That would have deleted something"))
-        #expect(bench.app.store.screens.count == 1)
+        #expect(bench.app.store.tree.screens.count == 1)
 
         bench.box.spokenCommand = "get rid of the image"
         _ = bench.box.deleteElement(element: "E3", named: "image")
-        #expect(bench.element("E3") == nil)
+        #expect(bench.node("E3") == nil)
     }
 
     @Test func whatAsksForSomethingToBeRemoved() {
@@ -659,15 +656,15 @@ struct VoiceToolsTests {
     /// understood, and to try "50%", the model made a sticky note 180 points wide.
     @Test func aShareOfTheScreenIsRefusedPlainlyForSomethingOnNoScreen() throws {
         let bench = bench()
-        let note = DesignElement(kind: .stickyNote, frame: CGRect(x: 0, y: 0, width: 200, height: 120), text: "A note", tint: Theme.accent)
-        bench.app.store.addFloating(note, scale: 1)
+        let note = LayerNode.leaf(.stickyNote, frame: CGRect(x: 0, y: 0, width: 200, height: 120), text: "A note", tint: Theme.accent)
+        bench.app.store.addCanvasNode(note, scale: 1)
         let handle = bench.handles.handle(forElement: note.id)
         let line = bench.box.moveElement(element: handle, x: nil, y: nil, width: "50%", height: nil)
         #expect(line == "That isn't on a screen, so it can't be a share of one. Give its size in points, such as 180.")
-        #expect(bench.app.store.floating.first?.element.frame.width == 200)
+        #expect(bench.app.store.ownFrame(note.id)?.width == 200)
         // In points it is resized as anything else is.
         _ = bench.box.moveElement(element: handle, x: nil, y: nil, width: "150", height: nil)
-        #expect(bench.app.store.floating.first?.element.frame.width == 150)
+        #expect(bench.app.store.ownFrame(note.id)?.width == 150)
     }
 
     /// A model asked "Which element should I change—E24, E25, or E26?" on an iPad.
@@ -686,7 +683,7 @@ struct VoiceToolsTests {
         _ = bench.box.show(target: "S1")
         #expect(bench.app.selection == .screen(bench.screen))
         _ = bench.box.show(target: "e3")
-        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)))
+        #expect(bench.app.selection == .element(.init(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)))
         #expect(bench.box.show(target: "all") == "Showing everything.")
         #expect(bench.box.show(target: "S9") == "There is no S9.")
         // Showing changes nothing in the design.
@@ -728,28 +725,28 @@ struct VoiceToolsTests {
 
         // Its kind, the words on it, another word for its kind, or "it" all fit.
         _ = bench.box.deleteElement(element: "E2", named: "the Sign In button")
-        #expect(bench.element("E2") == nil)
+        #expect(bench.node("E2") == nil)
         _ = bench.box.deleteElement(element: "E3", named: "picture")
-        #expect(bench.element("E3") == nil)
+        #expect(bench.node("E3") == nil)
         _ = bench.box.deleteElement(element: "E1", named: "it")
-        #expect(bench.element("E1") == nil)
+        #expect(bench.node("E1") == nil)
     }
 
     @Test func aModelThatGivesNoNameIsTakenAtItsWord() throws {
         let bench = bench()
         _ = bench.box.deleteElement(element: "E3", named: nil)
-        #expect(bench.element("E3") == nil)
+        #expect(bench.node("E3") == nil)
     }
 
     @Test func deletingAScreenNeedsANameThatFits() {
         let bench = bench()
         #expect(bench.box.deleteScreen(screen: "S1", named: "checkout screen") == "There is no checkout screen here. That screen is “Login”.")
-        #expect(bench.app.store.screens.count == 1)
+        #expect(bench.app.store.tree.screens.count == 1)
         // "This screen", "the first screen" and the like name it by where it is.
         #expect(VoiceNaming.fits("this screen", names: ["login"], words: "Login"))
         #expect(VoiceNaming.fits("the first page", names: ["login"], words: "Login"))
         _ = bench.box.deleteScreen(screen: "S1", named: "the login page")
-        #expect(bench.app.store.screens.isEmpty)
+        #expect(bench.app.store.tree.screens.isEmpty)
     }
 
     @Test func aNameFitsByKindByWordsOrByBeingNoNameAtAll() {
@@ -795,9 +792,9 @@ struct VoiceToolsTests {
     @Test func aHandleGivenAsTheNameIsNoNameAtAll() throws {
         let bench = bench()
         _ = bench.box.deleteElement(element: "E3", named: "E3")
-        #expect(bench.element("E3") == nil)
+        #expect(bench.node("E3") == nil)
         _ = bench.box.deleteScreen(screen: "S1", named: "S1")
-        #expect(bench.app.store.screens.isEmpty)
+        #expect(bench.app.store.tree.screens.isEmpty)
     }
 
     /// A field is a field whatever is typed in it: "password field" names the one that
@@ -805,12 +802,12 @@ struct VoiceToolsTests {
     @Test func aFieldIsNotNamedByWhatAnotherFieldIsFor() throws {
         let bench = bench()
         _ = bench.box.addElement(screen: "S1", kind: "text field", text: "Email", look: nil)
-        let field = try #require(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .textField })
+        let field = try #require(bench.app.store.screenLeaves(bench.screen).first { $0.kind == .textField })
         let handle = bench.handles.handle(forElement: field.id)
         #expect(bench.box.deleteElement(element: handle, named: "password field").hasPrefix("There is no password field here."))
-        #expect(bench.element(handle) != nil)
+        #expect(bench.node(handle) != nil)
         _ = bench.box.deleteElement(element: handle, named: "the email field")
-        #expect(bench.element(handle) == nil)
+        #expect(bench.node(handle) == nil)
     }
 
     // MARK: What can't be done
@@ -830,8 +827,8 @@ struct VoiceToolsTests {
 
     @Test func aLockedElementIsRefused() throws {
         let bench = bench()
-        let button = try #require(bench.element("E2"))
-        bench.app.store.update(.init(host: .screen(bench.screen), element: button.id)) { $0.isLocked = true }
+        let button = try #require(bench.node("E2"))
+        bench.app.store.update(button.id) { $0.isLocked = true }
         let before = bench.app.store.content
         for line in [
             bench.box.moveElement(element: "E2", x: nil, y: nil, width: "50%", height: nil),
@@ -851,49 +848,49 @@ struct VoiceToolsTests {
         let box = VoiceToolbox(model: app, handles: handles)
         #expect(box.setText(element: "E1", text: "Hello") == "There is no E1.")
         #expect(box.addElement(screen: nil, kind: "button", text: nil, look: nil) == "There is no screen to add to yet.")
-        #expect(app.store.content.screens.isEmpty)
+        #expect(app.store.tree.screens.isEmpty)
     }
 
     /// A change typed for one screen can touch nothing outside it: not another screen, not
     /// an element on one or loose on the canvas, and no new screen.
     @Test func aChangeForOneScreenTouchesNothingElse() async throws {
         let (app, login, profile) = VoiceFixture.loginAndProfile()
-        let note = app.store.addFloating(.stickyNote, from: CGRect(x: 3000, y: 3000, width: 160, height: 160))
+        let note = app.store.addNote(sketchedIn: CGRect(x: 3000, y: 3000, width: 160, height: 160))
         let handles = VoiceHandles()
         _ = CanvasPicture.capture(from: app, handles: handles)
         let box = VoiceToolbox(model: app, handles: handles)
         box.scope = login
-        func element(_ handle: String) throws -> DesignElement {
+        func element(_ handle: String) throws -> LayerNode {
             let id = try #require(handles.element(handle))
-            return try #require(app.store.screens.flatMap(\.elements).first { $0.id == id })
+            return try #require(app.store.tree.screens.flatMap(\.root.leaves).first { $0.id == id })
         }
         let scopeLine = "Only S1 “Login” can be changed here."
 
         _ = box.styleElement(element: "E2", look: "green")
-        #expect(try element("E2").tint == ColourWords.parse("green"))
+        #expect(try element("E2").resolvedTint == ColourWords.parse("green"))
         #expect(!box.lastFailed)
 
-        let profileTint = try element("E4").tint
+        let profileTint = try element("E4").resolvedTint
         #expect(box.styleElement(element: "E4", look: "red").contains("isn't on S1"))
-        #expect(try element("E4").tint == profileTint)
+        #expect(try element("E4").resolvedTint == profileTint)
         #expect(box.lastFailed)
         // Nor what is loose on the canvas, E5.
-        #expect(handles.element("E5") == note.element)
+        #expect(handles.element("E5") == note)
         #expect(box.setText(element: "E5", text: "Hello").contains("isn't on S1"))
-        #expect(app.store.floating.first?.element.text != "Hello")
+        #expect(app.store.node(note)?.content.text != "Hello")
 
         #expect(box.renameScreen(screen: "S2", name: "Settings") == scopeLine)
         #expect(box.deleteScreen(screen: "S2", named: nil) == scopeLine)
-        #expect(app.store.screen(profile)?.name == "Profile")
+        #expect(app.store.treeScreen(profile)?.name == "Profile")
 
         #expect(try await box.createScreen(name: nil, description: "a settings screen", device: nil) == scopeLine)
-        #expect(app.store.screens.count == 2)
+        #expect(app.store.tree.screens.count == 2)
 
         // Whatever is selected, a new element goes on the screen the change is for.
         app.selection = .screen(profile)
         _ = box.addElement(screen: nil, kind: "button", text: "Next", look: nil, relation: nil, target: nil)
-        #expect(app.store.screen(login)?.elements.contains { $0.text == "Next" } == true)
-        #expect(app.store.screen(profile)?.elements.contains { $0.text == "Next" } == false)
+        #expect(app.store.screenLeaves(login).contains { $0.content.text == "Next" } == true)
+        #expect(app.store.screenLeaves(profile).contains { $0.content.text == "Next" } == false)
         // And so does a screen tool given no screen.
         app.selection = .screen(profile)
         #expect(box.tidyScreen(screen: nil) == "Tidied the layout of S1.")
@@ -964,7 +961,7 @@ struct VoiceToolsTests {
         #expect(box.tidyScreen(screen: nil) == gone)
         #expect(box.changeScreenDevice(screen: nil, device: "iPad") == gone)
         #expect(app.store.content == before)
-        #expect(app.store.screen(profile)?.elements.count == 1)
+        #expect(app.store.screenLeaves(profile).count == 1)
     }
 
     // MARK: After close, and where new screens go
@@ -976,7 +973,7 @@ struct VoiceToolsTests {
         bench.app.close()
         let line = try await bench.box.createScreen(name: "Settings", description: "a settings screen")
         #expect(line == AppModel.closedProblem)
-        #expect(bench.app.generation == nil && bench.app.store.screens.count == 1)
+        #expect(bench.app.generation == nil && bench.app.store.tree.screens.count == 1)
     }
 
     /// The command's own anchor puts its screen where the pencil pointed, and only its own:
@@ -989,7 +986,7 @@ struct VoiceToolsTests {
         bench.box.newScreenAnchor = point
         let making = Task { try await bench.box.createScreen(name: "Settings", description: "a settings screen") }
         #expect(await eventually { bench.app.isGenerating })
-        #expect(bench.app.store.screens.last?.origin == point)
+        #expect(bench.app.store.tree.screens.last?.origin == point)
         feed.finish()
         _ = try await making.value
         bench.box.reset()
@@ -1001,23 +998,23 @@ struct VoiceToolsTests {
     @Test func rotateElementTurnsToAnAngleOrByAnAmount() throws {
         let bench = bench()
         let line = bench.box.rotateElement(element: "E2", angle: "30", by: nil)
-        #expect(try #require(bench.element("E2")).rotation == 30)
+        #expect(try #require(bench.node("E2")).rotation == 30)
         #expect(line == "Turned E2 to 30°.")
         _ = bench.box.rotateElement(element: "E2", angle: nil, by: "-45")
-        #expect(try #require(bench.element("E2")).rotation == 345)
+        #expect(try #require(bench.node("E2")).rotation == 345)
         // Said with a unit, and the angle wins when both are given.
         _ = bench.box.rotateElement(element: "E2", angle: "45 degrees", by: "10")
-        #expect(try #require(bench.element("E2")).rotation == 45)
+        #expect(try #require(bench.node("E2")).rotation == 45)
         _ = bench.box.rotateElement(element: "E2", angle: "90°", by: nil)
-        #expect(try #require(bench.element("E2")).rotation == 90)
+        #expect(try #require(bench.node("E2")).rotation == 90)
         _ = bench.box.rotateElement(element: "E2", angle: "0", by: nil)
-        #expect(try #require(bench.element("E2")).rotation == nil)
+        #expect(try #require(bench.node("E2")).rotation == nil)
         #expect(bench.box.failures.isEmpty)
     }
 
     @Test func rotateElementRefusesALockedElementAndNonsense() throws {
         let bench = bench()
-        bench.app.store.update(.init(host: .screen(bench.screen), element: try #require(bench.element("E2")).id)) { $0.isLocked = true }
+        bench.app.store.update(try #require(bench.node("E2")).id) { $0.isLocked = true }
         let before = bench.app.store.content
         #expect(bench.box.rotateElement(element: "E2", angle: "30", by: nil) == "E2 is locked.")
         #expect(bench.box.rotateElement(element: "E1", angle: nil, by: nil) == "Say an angle, such as 45, or how far to turn it, such as 15.")
@@ -1036,7 +1033,7 @@ struct VoiceToolsTests {
         _ = bench.box.rotateElement(element: "E2", angle: "30", by: nil)
         _ = bench.box.rotateElement(element: "E2", angle: nil, by: "15")
         bench.app.store.endHeldEdit()
-        #expect(try #require(bench.element("E2")).rotation == 45)
+        #expect(try #require(bench.node("E2")).rotation == 45)
         undo.undo()
         #expect(bench.app.store.content == before)
         #expect(!undo.canUndo)
@@ -1090,7 +1087,7 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.beginEdit()
@@ -1103,8 +1100,8 @@ struct VoiceToolsTests {
         #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
-        #expect(try #require(bench.element("E2")).tint == Theme.accent)
-        #expect(try #require(bench.element("E3")).frame.origin.x == 80)
+        #expect(try #require(bench.node("E2")).resolvedTint == Theme.accent)
+        #expect(try #require(bench.frame("E3")).origin.x == 80)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
@@ -1116,7 +1113,7 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
@@ -1127,8 +1124,8 @@ struct VoiceToolsTests {
         #expect(store.historyMark == mark)
         store.endEdit()
         undo.undo()
-        #expect(try #require(bench.element("E2")).tint == Theme.accent)
-        #expect(try #require(bench.element("E3")).frame.origin.x == 60)
+        #expect(try #require(bench.node("E2")).resolvedTint == Theme.accent)
+        #expect(try #require(bench.frame("E3")).origin.x == 60)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
@@ -1143,7 +1140,7 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         bench.app.adjustmentPause = .milliseconds(20)
         store.beginHeldEdit()
         for width in [180, 160, 140] {
@@ -1155,11 +1152,11 @@ struct VoiceToolsTests {
         #expect(!store.isEditing && !store.isHoldingEdit)
         store.update(image) { $0.frame.origin.y = 520 }
         undo.undo()
-        #expect(try #require(bench.element("E3")).frame.origin.y == 500)
-        #expect(try #require(bench.element("E3")).frame.size.width == 140)
+        #expect(try #require(bench.frame("E3")).origin.y == 500)
+        #expect(try #require(bench.frame("E3")).size.width == 140)
         undo.undo()
-        #expect(try #require(bench.element("E2")).tint == Theme.accent)
-        #expect(try #require(bench.element("E3")).frame.size.width == 140)
+        #expect(try #require(bench.node("E2")).resolvedTint == Theme.accent)
+        #expect(try #require(bench.frame("E3")).size.width == 140)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
@@ -1173,7 +1170,7 @@ struct VoiceToolsTests {
         let store = bench.app.store
         let undo = try #require(store.undoManager)
         let before = store.content
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         store.beginEdit()
         store.update(image) { $0.frame.origin.x = 40 }
@@ -1181,8 +1178,8 @@ struct VoiceToolsTests {
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         undo.undo()
-        #expect(try #require(bench.element("E2")).tint == Theme.accent)
-        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
+        #expect(try #require(bench.node("E2")).resolvedTint == Theme.accent)
+        #expect(try #require(bench.frame("E3")).origin.x == 40)
         undo.undo()
         #expect(store.content == before)
         #expect(!undo.canUndo)
@@ -1193,7 +1190,7 @@ struct VoiceToolsTests {
     @Test func undoForACorrectionNeverTakesBackAChangeByHand() throws {
         let bench = bench()
         let store = bench.app.store
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.beginHeldEdit()
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
@@ -1204,8 +1201,8 @@ struct VoiceToolsTests {
         store.endHeldEdit()
         #expect(said != "Undid the last change.")
         #expect(bench.box.lastFailed)
-        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
-        #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
+        #expect(try #require(bench.frame("E3")).origin.x == 40)
+        #expect(try #require(bench.node("E2")).resolvedTint == ColourWords.parse("green"))
     }
 
     /// A correction never redoes a change by hand either; "redo" said outright does.
@@ -1213,17 +1210,17 @@ struct VoiceToolsTests {
         let bench = bench()
         let store = bench.app.store
         let undo = try #require(store.undoManager)
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.update(image) { $0.frame.origin.x = 40 }
         undo.undo()
         store.beginHeldEdit()
         bench.box.spokenCommand = "No, that's wrong."
         #expect(bench.box.redo() != "Redid the last change.")
-        #expect(try #require(bench.element("E3")).frame.origin.x == 20)
+        #expect(try #require(bench.frame("E3")).origin.x == 20)
         bench.box.spokenCommand = "Redo."
         #expect(bench.box.redo() == "Redid the last change.")
         store.endHeldEdit()
-        #expect(try #require(bench.element("E3")).frame.origin.x == 40)
+        #expect(try #require(bench.frame("E3")).origin.x == 40)
     }
 
     /// "Undo" said outright is the Undo button: it takes back the last change, whoever
@@ -1231,13 +1228,13 @@ struct VoiceToolsTests {
     @Test func undoSaidOutrightTakesBackTheLastChangeWhoeverMadeIt() throws {
         let bench = bench()
         let store = bench.app.store
-        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.element("E3")).id)
+        let image = DesignStore.ElementRef(host: .screen(bench.screen), element: try #require(bench.node("E3")).id)
         store.update(image) { $0.frame.origin.x = 40 }
         store.beginHeldEdit()
         bench.box.spokenCommand = "Undo that."
         #expect(bench.box.undo() == "Undid the last change.")
         store.endHeldEdit()
-        #expect(try #require(bench.element("E3")).frame.origin.x == 20)
+        #expect(try #require(bench.frame("E3")).origin.x == 20)
     }
 
     @Test func undoInsideACommandUndoesTheLastCommand() throws {
@@ -1250,17 +1247,17 @@ struct VoiceToolsTests {
         // The next says "undo that, and make it green".
         bench.app.store.beginHeldEdit()
         #expect(bench.box.undo() == "Undid the last change.")
-        #expect(try #require(bench.element("E2")).text == "Sign in")
+        #expect(try #require(bench.node("E2")).content.text == "Sign in")
         _ = bench.box.styleElement(element: "E2", look: "green")
         bench.app.store.endHeldEdit()
-        #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
+        #expect(try #require(bench.node("E2")).resolvedTint == ColourWords.parse("green"))
         // Which leaves one step to undo: the green.
         undo.undo()
-        #expect(try #require(bench.element("E2")).tint == Theme.accent)
-        #expect(try #require(bench.element("E2")).text == "Sign in")
+        #expect(try #require(bench.node("E2")).resolvedTint == Theme.accent)
+        #expect(try #require(bench.node("E2")).content.text == "Sign in")
 
         #expect(bench.box.redo() == "Redid the last change.")
-        #expect(try #require(bench.element("E2")).tint == ColourWords.parse("green"))
+        #expect(try #require(bench.node("E2")).resolvedTint == ColourWords.parse("green"))
     }
 
     @Test func undoWithNothingToUndoSaysSo() {

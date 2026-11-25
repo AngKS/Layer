@@ -3,16 +3,8 @@
 # and takes a file's line out once its last hit has gone: the gate fails on a stale line.
 # The owners are the ledger's table (plan 6, Task 1).
 
-# Voice: Tasks 6-8.
-Layer/Debug/VoiceDemo.swift
-Layer/Voice/ScreenEditor.swift
-Layer/Voice/VoiceAgent.swift
-Layer/Voice/VoiceCall.swift
-Layer/Voice/VoiceToolbox.swift
-LayerTests/HostedToolCallingTests.swift
-LayerTests/PencilVoiceTests.swift
-LayerTests/VoiceAgentLiveTests.swift
-LayerTests/VoiceAgentTests.swift
-LayerTests/VoiceCallTests.swift
-LayerTests/VoiceScreenLayoutTests.swift
-LayerTests/VoiceToolsTests.swift
+# Voice: Tasks 6-8. Every voice file is on the tree from Task 7.
+
+# Task 11's, under (s): aCommandLowersNothing's live-counter proof, a `store.screens` read (the controller's ruling for
+# plan 6's new "lowers nothing" tests).
+LayerTests/VoiceOnTheTreeTests.swift

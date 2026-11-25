@@ -20,7 +20,7 @@ import Testing
 struct VoiceAgentLiveTests {
     let model = ProcessInfo.processInfo.environment["LAYER_LMSTUDIO"] ?? ""
 
-    private func design() -> (app: AppModel, screen: DesignScreen.ID, agent: VoiceAgent) {
+    private func design() -> (app: AppModel, screen: TreeScreen.ID, agent: VoiceAgent) {
         let (app, screen) = VoiceFixture.undoableLogin()
         app.setModelChoice(.hosted(.lmStudio, model: model))
         return (app, screen, VoiceAgent(model: app))
@@ -42,7 +42,7 @@ struct VoiceAgentLiveTests {
         let (app, screen, agent) = design()
         let outcome = await say("Make the sign in button green", to: agent)
         #expect(outcome.problem == nil)
-        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        #expect(app.store.screenLeaves(screen).first { $0.kind == .button }?.resolvedTint == ColourWords.parse("green"))
     }
 
     @Test func theCanvasGoesToTheFirstScreen() async throws {
@@ -57,38 +57,39 @@ struct VoiceAgentLiveTests {
     @Test func anImageIsHalvedAndCentred() async throws {
         let (app, screen, agent) = design()
         let outcome = await say("Make the image half width and align it centrally", to: agent)
-        let image = try #require(app.store.screen(screen)?.elements.first { $0.kind == .image })
-        print("VOICE-LIVE image frame \(image.frame)")
+        let image = try #require(app.store.screenLeaves(screen).first { $0.kind == .image })
+        let frame = try #require(app.store.ownFrame(image.id))
+        print("VOICE-LIVE image frame \(frame)")
         #expect(outcome.problem == nil)
-        #expect(image.frame.width == 197)
-        #expect(abs(image.frame.midX - 196.5) <= 1)
+        #expect(frame.width == 197)
+        #expect(abs(frame.midX - 196.5) <= 1)
     }
 
     @Test func wordsAreRewrittenInAStyle() async throws {
         let (app, screen, agent) = design()
         let outcome = await say("Change the title's text colour to blue and make its content sound like a pirate", to: agent)
-        let title = try #require(app.store.screen(screen)?.elements.first { $0.kind == .title })
-        print("VOICE-LIVE title now “\(title.text)”")
+        let title = try #require(app.store.screenLeaves(screen).first { $0.kind == .title })
+        print("VOICE-LIVE title now “\(title.content.text)”")
         #expect(outcome.problem == nil)
-        #expect(title.textColor == ColourWords.parse("blue"))
-        #expect(title.text != "Welcome back")
+        #expect(title.style.textColor == ColourWords.parse("blue"))
+        #expect(title.content.text != "Welcome back")
     }
 
     @Test func aCommandLeansOnTheOneBefore() async throws {
         let (app, screen, agent) = design()
         _ = await say("Make the sign in button say Continue", to: agent)
         let outcome = await say("Now make it half width", to: agent)
-        let button = try #require(app.store.screen(screen)?.elements.first { $0.kind == .button })
+        let button = try #require(app.store.screenLeaves(screen).first { $0.kind == .button })
         #expect(outcome.problem == nil)
-        #expect(button.text == "Continue")
-        #expect(button.frame.width == 197)
+        #expect(button.content.text == "Continue")
+        #expect(app.store.ownFrame(button.id)?.width == 197)
     }
 
     @Test func somethingThatIsNotThereIsSaidNotDone() async throws {
         let (app, _, agent) = design()
-        let before = app.store.content
+        let before = app.store.tree
         let outcome = await say("Make the slider wider", to: agent)
-        #expect(app.store.content.screens == before.screens)
+        #expect(app.store.tree.screens == before.screens)
         #expect(outcome.lines.isEmpty)
         // Said by the model, in words: a model that couldn't be reached leaves the
         // design alone too, and must not pass for one that declined.
@@ -100,12 +101,12 @@ struct VoiceAgentLiveTests {
         let (app, _, agent) = design()
         let outcome = await say("I want a profile page with user settings", to: agent)
         #expect(outcome.problem == nil)
-        #expect(app.store.screens.count == 2)
-        let made = try #require(app.store.screens.last)
-        print("VOICE-LIVE new screen “\(made.name)”: \(made.elements.map { "\($0.kind.rawValue) \($0.text)" })")
-        #expect(made.elements.count >= 3)
+        #expect(app.store.tree.screens.count == 2)
+        let made = try #require(app.store.tree.screens.last)
+        print("VOICE-LIVE new screen “\(made.name)”: \(made.root.leaves.map { "\($0.kind.rawValue) \($0.content.text)" })")
+        #expect(made.root.leaves.count >= 3)
         // The whole of it is one step to undo.
         app.store.undoManager?.undo()
-        #expect(app.store.screens.count == 1)
+        #expect(app.store.tree.screens.count == 1)
     }
 }

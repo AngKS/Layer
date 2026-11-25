@@ -8,23 +8,21 @@ import Testing
 enum VoiceFixture {
     /// A design with one iPhone screen named Login. From the top: a title, a "Sign in"
     /// button and an image, which a call knows as E1, E2 and E3 on S1.
-    static func login() -> (app: AppModel, screen: DesignScreen.ID) {
+    static func login() -> (app: AppModel, screen: TreeScreen.ID) {
         let app = AppModel(document: LayerDocument())
         // A line of its own: on the app's, a call started by a test running alongside
         // ended this design's.
         app.phoneLine = PhoneLine()
-        let screen = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4000, y: 4000), scale: 0.6))
-        app.store.updateScreen(screen.id) { $0.name = "Login" }
-        _ = app.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
-            DesignElement(kind: .image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
-        ], on: screen.id)
-        return (app, screen.id)
+        let screen = app.store.addFreeScreen([
+            .leaf(.title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
+            .leaf(.button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
+            .leaf(.image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
+        ], name: "Login", origin: CGPoint(x: 4000, y: 4000), scale: 0.6)
+        return (app, screen)
     }
 
     /// The login design with an undo history of its own, starting empty.
-    static func undoableLogin() -> (app: AppModel, screen: DesignScreen.ID) {
+    static func undoableLogin() -> (app: AppModel, screen: TreeScreen.ID) {
         let fixture = login()
         giveUndo(to: fixture.app)
         return fixture
@@ -33,15 +31,13 @@ enum VoiceFixture {
     /// The undoable login design with a second iPhone screen to its right, named Profile,
     /// holding one title. A call knows them as S1 Login (E1 title, E2 button, E3 image)
     /// and S2 Profile (E4 title). The undo history starts empty, Profile and all.
-    static func loginAndProfile() -> (app: AppModel, login: DesignScreen.ID, profile: DesignScreen.ID) {
+    static func loginAndProfile() -> (app: AppModel, login: TreeScreen.ID, profile: TreeScreen.ID) {
         let (app, screen) = Self.login()
-        let profile = app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
-        app.store.updateScreen(profile.id) { $0.name = "Profile" }
-        _ = app.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
-        ], on: profile.id)
+        let profile = app.store.addFreeScreen([
+            .leaf(.title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Your profile", tint: Theme.accent),
+        ], name: "Profile", origin: CGPoint(x: 4600, y: 4000), scale: 0.6)
         giveUndo(to: app)
-        return (app, screen, profile.id)
+        return (app, screen, profile)
     }
 
     private static func giveUndo(to app: AppModel) {
@@ -603,15 +599,15 @@ struct VoiceCallTests {
     private static let needsOwnModels = Comment(rawValue: "Foundation Models runs models of the app's own from iPadOS 27.2")
 
     /// The login design in a call whose model follows `script`.
-    private func call(_ script: [String: [ScriptedLanguageModel.Step]]) async -> (AppModel, DesignScreen.ID, FakeRoute) {
+    private func call(_ script: [String: [ScriptedLanguageModel.Step]]) async -> (AppModel, TreeScreen.ID, FakeRoute) {
         let (app, screen) = VoiceFixture.undoableLogin()
         let route = FakeRoute()
         await app.startVoiceCall(route: route, runner: VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: script)))
         return (app, screen, route)
     }
 
-    private func button(in app: AppModel, _ screen: DesignScreen.ID) -> DesignElement? {
-        app.store.screen(screen)?.elements.first { $0.kind == .button }
+    private func button(in app: AppModel, _ screen: TreeScreen.ID) -> LayerNode? {
+        app.store.screenLeaves(screen).first { $0.kind == .button }
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, needsOwnModels))
@@ -620,7 +616,7 @@ struct VoiceCallTests {
         route.send(.command("Make the button green"))
         #expect(await eventually { app.voice?.caption?.kind == .done })
         #expect(app.voice?.caption?.text == "Restyled the button “Sign in”.")
-        #expect(button(in: app, screen)?.tint == ColourWords.parse("green"))
+        #expect(button(in: app, screen)?.resolvedTint == ColourWords.parse("green"))
         app.endVoiceCall()
     }
 
@@ -670,7 +666,7 @@ struct VoiceCallTests {
         let before = app.store.content
         route.send(.command("two things"))
         route.send(.command("make it wider"))
-        #expect(await eventually { self.button(in: app, screen)?.text == "One" })
+        #expect(await eventually { self.button(in: app, screen)?.content.text == "One" })
         #expect(app.voice?.queuedCount == 1)
         route.send(.command("stop"))
         #expect(await eventually { app.voice?.phase == .listening })
@@ -678,8 +674,8 @@ struct VoiceCallTests {
         #expect(app.voice?.queuedCount == 0)
         try await Task.sleep(for: .milliseconds(150))
         // The command waiting never ran, and the one stopped went no further.
-        #expect(button(in: app, screen)?.text == "One")
-        #expect(button(in: app, screen)?.tint == Theme.accent)
+        #expect(button(in: app, screen)?.content.text == "One")
+        #expect(button(in: app, screen)?.resolvedTint == Theme.accent)
         // What it had done is one step.
         #expect(!app.store.isHoldingEdit)
         let undo = try #require(app.store.undoManager)
@@ -697,13 +693,13 @@ struct VoiceCallTests {
         ]])
         let before = app.store.content
         route.send(.command("two things"))
-        #expect(await eventually { self.button(in: app, screen)?.text == "One" })
+        #expect(await eventually { self.button(in: app, screen)?.content.text == "One" })
         app.endVoiceCall()
         #expect(app.voice == nil)
         #expect(route.isStopped)
         // The command lets go of the design as it is cancelled, a moment later.
         #expect(await eventually { !app.store.isHoldingEdit })
-        #expect(button(in: app, screen)?.tint == Theme.accent)
+        #expect(button(in: app, screen)?.resolvedTint == Theme.accent)
         let undo = try #require(app.store.undoManager)
         undo.undo()
         #expect(app.store.content == before)
@@ -1669,7 +1665,7 @@ struct PencilBarFlickTests {
 
 @Suite("The call pill's parts")
 struct CallPillPartsTests {
-    @Test func theTimerCountsMinutesAndSeconds() {
+    @Test @MainActor func theTimerCountsMinutesAndSeconds() {
         #expect(CallTimer.text(forSeconds: 0) == "0:00")
         #expect(CallTimer.text(forSeconds: 42) == "0:42")
         #expect(CallTimer.text(forSeconds: 75) == "1:15")

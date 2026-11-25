@@ -105,7 +105,7 @@ final class Recorder: VoiceActing {
         return note("styleElement", ["element": element, "look": look], saying: "Restyled \(element).")
     }
 
-    func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String {
+    func moveElement(element: String, x: String?, y: String?, width: String?, height: String?, takeOut: String?) -> String {
         change(element) {
             guard var frame = $0.frame else { return }
             if width != nil { frame.size.width /= 2 }
@@ -113,7 +113,7 @@ final class Recorder: VoiceActing {
             if y != nil { frame.origin.y = 60 }
             $0.frame = frame
         }
-        return note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height], saying: "Resized \(element).")
+        return note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height, "takeOut": takeOut], saying: "Resized \(element).")
     }
 
     func rotateElement(element: String, angle: String?, by: String?) -> String {

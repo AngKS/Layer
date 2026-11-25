@@ -5,6 +5,12 @@ import Foundation
 /// and the same code the Siri actions use, so a change made by voice is the change made by
 /// hand: undoable, and seen by everything that watches the design.
 ///
+/// A handle names any node of the tree, containers included (plan 6, call 7). Each tool
+/// finds it through the store's index and changes it through the tree's verbs, as the
+/// canvas and the panels do. A thing a row, column, grid or overlay places isn't moved by
+/// its own numbers: the model is told what places it, and how to reorder it or take it out
+/// (call 8).
+///
 /// Nothing here throws for a request that can't be met. A model that names something
 /// that isn't there is told so in a line, and can try again or say so.
 @MainActor
@@ -34,7 +40,7 @@ final class VoiceToolbox: VoiceActing {
     /// asked of one screen. Another screen, an element not on this one (loose ones too) and
     /// a new screen are refused, and a tool given no screen means this one, whatever is
     /// selected. Nil lets a command go anywhere.
-    var scope: DesignScreen.ID?
+    var scope: TreeScreen.ID?
 
     /// What a correction ("No, …") may do with the undo and redo tools in the command under
     /// way. A correction for one screen undoes only that screen's last change, which its
@@ -121,8 +127,8 @@ final class VoiceToolbox: VoiceActing {
                 }
                 return alignElement(element: element, alignment: edge)
             }
-            let moving: FoundElement
-            let other: FoundElement
+            let moving: Found
+            let other: Found
             switch (find(element: element), find(element: target)) {
             case (.failure(let refusal), _), (_, .failure(let refusal)): return failed(refusal.line)
             case (.success(let one), .success(let two)): (moving, other) = (one, two)
@@ -131,13 +137,14 @@ final class VoiceToolbox: VoiceActing {
                 return failed("Name two different elements. To add a new one next to another, give addElement where it goes.")
             }
             guard moving.ref.host == other.ref.host else { return failed("Those aren't on the same screen.") }
-            guard !moving.element.isLocked else { return failed("\(handles.handle(forElement: moving.element.id)) is locked.") }
+            guard !moving.placed.isLocked else { return failed("\(handle(of: moving)) is locked.") }
+            if let placer = placer(of: moving) { return failed(Self.placedLine(handle(of: moving), placer)) }
             let store = model.store
             guard let frame = store.canvasFrame(of: .element(moving.ref)), let by = store.canvasFrame(of: .element(other.ref)) else {
                 return failed("That couldn't be placed.")
             }
             // In the points of the screen they are on.
-            let gap = 12 * (store.resolve(moving.ref)?.placement.scale ?? 1)
+            let gap = 12 * moving.placed.placement.scale
             let origin = switch side {
             case .below: CGPoint(x: by.minX, y: by.maxY + gap)
             case .above: CGPoint(x: by.minX, y: by.minY - gap - frame.height)
@@ -146,7 +153,7 @@ final class VoiceToolbox: VoiceActing {
             }
             reveal(.element(moving.ref), in: model)
             store.position([.element(moving.ref): origin])
-            return done("Put \(Self.describe(moving.element)) \(side.rawValue) \(Self.describe(other.element)).")
+            return done("Put \(Self.describe(moving.node)) \(side.rawValue) \(Self.describe(other.node)).")
         }
     }
 
@@ -196,12 +203,13 @@ final class VoiceToolbox: VoiceActing {
             default: return failed("I can stack in a column or a row, not “\(direction)”.")
             }
             let named = Self.handleList(elements)
-            var found: [FoundElement] = []
+            var found: [Found] = []
             for handle in named {
                 switch find(element: handle) {
                 case .failure(let refusal): return failed(refusal.line)
                 case .success(let one):
-                    guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
+                    guard !one.placed.isLocked else { return failed("\(self.handle(of: one)) is locked.") }
+                    if let placer = placer(of: one) { return failed(Self.placedLine(self.handle(of: one), placer)) }
                     if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
                 }
             }
@@ -211,8 +219,7 @@ final class VoiceToolbox: VoiceActing {
             // Worked out on the canvas, where the store puts things, in the points of the
             // screen they are on: a gap of 12 of those is less on a screen drawn small.
             let store = model.store
-            let scale = store.resolve(found[0].ref)?.placement.scale ?? 1
-            let gap = 12 * scale
+            let gap = 12 * found[0].placed.placement.scale
             var placed: [(ref: DesignStore.ElementRef, frame: CGRect)] = found.compactMap { one in
                 store.canvasFrame(of: .element(one.ref)).map { (one.ref, $0) }
             }
@@ -279,13 +286,13 @@ final class VoiceToolbox: VoiceActing {
             // A model puts a handle in quotes as often as not. The quotes go with it.
             let isQuoted = before.last.map("“\"'‘".contains) == true && after.first.map("”\"'’".contains) == true
             var words: String?
-            if let id = handles.screen(handle), let screen = model.store.screen(id) {
+            if let id = handles.screen(handle), let screen = model.store.treeScreen(id) {
                 // "Screen S2" and “S2” already say it is a screen.
                 let isCalledAScreen = before.lowercased().hasSuffix("screen ") || (isQuoted && before.dropLast().lowercased().hasSuffix("screen "))
                 words = isCalledAScreen ? "“\(screen.name)”" : "the screen “\(screen.name)”"
             } else if case .success(let found) = locate(element: handle) {
                 // Off the screen a change is for, it is still said as what it is.
-                words = Self.describe(found.element)
+                words = Self.describe(found.node)
             }
             guard var words else {
                 said += before + handle
@@ -316,11 +323,13 @@ final class VoiceToolbox: VoiceActing {
         guard !model.isGenerating else { return failed("A screen is already being written.") }
         // A device word that isn't one is passed over: the screen is still wanted, and
         // the design's usual device is the likeliest one meant.
-        let usual = model.store.canvas.sketchDevice
+        let settings = model.store.tree.settings
+        let usual = settings.sketchDevice
         // The device the model named, or else the one the person did: on an iPad the
-        // model left it out, and "on the MacBook" got a phone screen.
-        let frame = device.flatMap { Self.device(named: $0, preferring: usual) }
-            ?? spokenCommand.flatMap { Self.device(named: $0, preferring: usual) }
+        // model left it out, and "on the MacBook" got a phone screen. A device of the
+        // design's own goes by its name.
+        let frame = device.flatMap { Self.device(named: $0, preferring: usual, custom: settings.customDevices) }
+            ?? spokenCommand.flatMap { Self.device(named: $0, preferring: usual, custom: settings.customDevices) }
         // What the voice model asked for, so that a session log shows it beside the screen made.
         VoiceLog.log.info("tool: createScreen \"\(description, privacy: .public)\" on \((frame ?? usual).id, privacy: .public) (said \(device ?? "nothing", privacy: .public))")
         // Inside a command the screen is part of the command's own undo step.
@@ -339,11 +348,12 @@ final class VoiceToolbox: VoiceActing {
         model.dismissGeneration()
         try Task.checkCancellation()
         if case .failed(let reason) = outcome { return failed(reason) }
-        guard let screen = model.store.screen(screenID) else {
+        guard let screen = model.store.treeScreen(screenID) else {
             // Taken away while it was being written, by undo or by hand.
             return failed(outcome == nil ? "The screen was taken away while it was being written." : "The model didn't describe any elements.")
         }
-        let count = screen.elements.count
+        // Told as a person would count what is on it: its leaves, not the rows and cards that hold them.
+        let count = screen.root.leaves.count
         // Said so: seeing the new screen in its canvas list, a model took it for another
         // one already there with the same name.
         return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements"). It is the \(handles.handle(forScreen: screenID)) now in the canvas list.")
@@ -357,7 +367,7 @@ final class VoiceToolbox: VoiceActing {
             switch find(screen: screen) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                model.store.updateScreen(found.id) { $0.name = name }
+                model.store.updateTreeScreen(found.id) { $0.name = name }
                 reveal(.screen(found.id), in: model)
                 return done("Renamed \(handles.handle(forScreen: found.id)) to “\(name)”.")
             }
@@ -404,34 +414,74 @@ final class VoiceToolbox: VoiceActing {
 
     /// Makes a screen another device's, as the device picker and Siri do (`changeDevice(of:to:)`):
     /// what is on it follows where it was put, so that it looks made for the new size rather
-    /// than a phone's layout in a tablet's corner.
+    /// than a phone's layout in a tablet's corner. A device of the design's own goes by its name.
     func changeScreenDevice(screen: String?, device: String) -> String {
         forCommand {
             guard let model else { return gone }
-            guard let frame = Self.device(named: device, preferring: model.store.canvas.sketchDevice) else {
-                return failed("I can make it an iPhone, iPad or Mac screen, not “\(device)”.")
+            let settings = model.store.tree.settings
+            guard let frame = Self.device(named: device, preferring: settings.sketchDevice, custom: settings.customDevices) else {
+                return failed(Self.noDevice(called: device, custom: settings.customDevices))
             }
             switch screenMeant(screen, in: model) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
+                let store = model.store
                 let handle = handles.handle(forScreen: found.id)
+                // A size a file held may be too large for a whole number: said as the device picker says it.
                 let named = "\(Self.article(for: frame.name)) \(frame.name) screen (\(frame.size.width.wholePoints) × \(frame.size.height.wholePoints))"
-                guard found.device.id != frame.id else { return done("\(handle) is already \(named).") }
-                model.store.changeDevice(of: found.id, to: frame)
+                guard store.device(of: found.id)?.id != frame.id else { return done("\(handle) is already \(named).") }
+                store.changeDevice(of: found.id, to: frame)
+                // The store refuses one of the design's own that a file held broken (`DeviceFrame.problems`): said so,
+                // not that it was made.
+                guard store.device(of: found.id)?.id == frame.id else {
+                    let problems = frame.problems
+                    return failed("Couldn't make \(handle) \(named). \(problems.isEmpty ? "That device can't be used." : problems.joined(separator: " "))")
+                }
                 reveal(.screen(found.id), in: model)
                 return done("Made \(handle) \(named).")
             }
         }
     }
 
+    /// Why no device was found for some words: the built-in families, and the design's own devices by name.
+    static func noDevice(called words: String, custom: [DeviceFrame]) -> String {
+        guard !custom.isEmpty else { return "I can make it an iPhone, iPad or Mac screen, not “\(words)”." }
+        return "I can make it an iPhone, iPad or Mac screen, or \(custom.map(\.name).joined(separator: ", ")), not “\(words)”."
+    }
+
     private static func article(for name: String) -> String {
         name.first.map { "aeiouAEIOU".contains($0) } == true ? "an" : "a"
     }
 
-    /// The device some words name: "iPad", "iPhone Pro Max", "a webpage", "laptop". A
-    /// word that names only a family, such as "phone", "tablet" or "Mac", is `usual` when
-    /// that is of the family, so a design made on an iPad mini goes on with iPad minis.
-    static func device(named words: String, preferring usual: DeviceFrame = .iPhone) -> DeviceFrame? {
+    /// A name that is exactly one of `custom`'s, then the built-ins as today, then a custom name the words contain.
+    ///
+    /// `custom` is the design's own devices. One is chosen by its exact name, ignoring case and the space round it
+    /// (`CanvasSettings.customDevice(named:)`), before anything else. Then the built-ins: "iPad", "iPhone Pro Max",
+    /// "a webpage", "laptop", where a word that names only a family, such as "phone", "tablet" or "Mac", is `usual`
+    /// when that is of the family, so a design made on an iPad mini goes on with iPad minis. A built-in wins over a
+    /// name the words only contain. Last, one of the design's own whose name the words hold, such as "the kiosk
+    /// screen" for "Kiosk": the longest such name, and of two as long, the one made first.
+    static func device(named words: String, preferring usual: DeviceFrame = .iPhone, custom: [DeviceFrame] = []) -> DeviceFrame? {
+        var settings = CanvasSettings()
+        settings.customDevices = custom
+        if let exact = settings.customDevice(named: words) { return exact }
+        if let builtIn = builtInDevice(named: words, preferring: usual) { return builtIn }
+        let said = Self.words(of: words)
+        let held = custom.filter { device in
+            let name = Self.words(of: device.name)
+            guard !name.isEmpty, name.count <= said.count else { return false }
+            return (0...(said.count - name.count)).contains { Array(said[$0..<($0 + name.count)]) == name }
+        }
+        return held.max { Self.words(of: $0.name).count < Self.words(of: $1.name).count }
+    }
+
+    /// The words of some text, in lower case, without what is between them.
+    private static func words(of text: String) -> [String] {
+        text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    }
+
+    /// The built-in device some words name: see `device(named:preferring:custom:)`.
+    private static func builtInDevice(named words: String, preferring usual: DeviceFrame) -> DeviceFrame? {
         let said = words.lowercased()
             .replacingOccurrences(of: "web page", with: "webpage").replacingOccurrences(of: "web site", with: "website")
             .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
@@ -467,7 +517,7 @@ final class VoiceToolbox: VoiceActing {
     /// the model is told the element's handle. With no handle, or words that aren't one,
     /// it is the screen pointed at: the one selected or holding the selection, else the
     /// one mostly in view, else the newest.
-    private func screenMeant(_ given: String?, in model: AppModel) -> Result<DesignScreen, Refusal> {
+    private func screenMeant(_ given: String?, in model: AppModel) -> Result<TreeScreen, Refusal> {
         if let given, let tidy = VoiceHandles.tidied(given) {
             if tidy.hasPrefix("E") {
                 switch find(element: tidy) {
@@ -481,21 +531,24 @@ final class VoiceToolbox: VoiceActing {
         }
         // A change for one screen is for that one, whatever is selected.
         if let scoped = scopedScreen(in: model) { return scoped }
-        if let selected = model.selectedScreen { return .success(selected) }
-        let holding = Set(model.selectedElements.compactMap { found -> DesignScreen.ID? in
-            if case .screen(let id) = found.ref.host { id } else { nil }
+        let store = model.store
+        if let id = model.selectedScreenID, let selected = store.treeScreen(id) { return .success(selected) }
+        let holding = Set(model.selectedThings.compactMap { thing -> TreeScreen.ID? in
+            guard case .element(let ref) = thing, case .screen(let id) = ref.host else { return nil }
+            return id
         })
-        if holding.count == 1, let id = holding.first, let screen = model.store.screen(id) { return .success(screen) }
+        if holding.count == 1, let id = holding.first, let screen = store.treeScreen(id) { return .success(screen) }
+        let tree = store.tree
         if model.canvasSize != .zero {
             let visible = model.viewport.visibleRect(in: model.canvasSize)
-            let inView = model.store.screens.map { screen -> (DesignScreen, CGFloat) in
-                let shown = screen.canvasFrame.intersection(visible)
-                let frame = screen.canvasFrame
+            let inView = tree.screens.map { screen -> (TreeScreen, CGFloat) in
+                let frame = screen.canvasFrame(on: tree.device(of: screen))
+                let shown = frame.intersection(visible)
                 return (screen, shown.isNull || frame.isEmpty ? 0 : shown.width * shown.height / (frame.width * frame.height))
             }.filter { $0.1 > 0.3 }.max { $0.1 < $1.1 }
             if let inView { return .success(inView.0) }
         }
-        guard let newest = model.store.screens.last else { return .failure(Refusal(line: "There is no screen yet.")) }
+        guard let newest = tree.screens.last else { return .failure(Refusal(line: "There is no screen yet.")) }
         return .success(newest)
     }
 
@@ -504,7 +557,7 @@ final class VoiceToolbox: VoiceActing {
     func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
         forCommand {
             guard let model else { return gone }
-            let host: DesignScreen
+            let host: TreeScreen
             if let screen, !screen.trimmingCharacters(in: .whitespaces).isEmpty {
                 switch find(screen: screen) {
                 case .failure(let refusal): return failed(refusal.line)
@@ -520,17 +573,33 @@ final class VoiceToolbox: VoiceActing {
                 return failed("I can't add “\(kind)”. The kinds are title, body, button, text field, image, symbol, divider, toggle, checkbox, radio, progress, avatar and text.")
             }
             let words = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            var element = DesignStore.newElement(kind, symbol: kind == .symbol ? (words.isEmpty ? "star" : words) : nil)
-            if kind.hasText, !words.isEmpty { element.text = words }
-            if let look { Self.apply(look: look, to: &element) }
-            element.frame = DesignActions.frameForNewElement(element, on: host)
-            let ref = model.store.setElements([element], on: host.id)[0]
-            reveal(.element(ref), in: model)
-            let handle = handles.handle(forElement: element.id)
-            let added = done("Added \(Self.describe(element, article: "a")) as \(handle).")
+            var node = LayerNode.standard(kind, symbol: kind == .symbol ? (words.isEmpty ? "star" : words) : nil)
+            if kind.hasText, !words.isEmpty { node.content.text = words }
+            if let look { Self.look(look)?.apply(to: &node) }
+            let store = model.store
+            let relation = relation.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+            let target = target.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+
+            // Beside a thing a row, column or grid on this screen places: it joins that one, next to it.
+            if let relation, let target, let side = Self.side(named: relation), case .success(let other) = find(element: target),
+               other.screen?.id == host.id, let placer = placer(of: other), let parent = store.parent(of: other.id),
+               let slot = store.index[other.id]?.siblingIndex {
+                guard store.add(node, to: parent, at: side == .below || side == .rightOf ? slot + 1 : slot) else {
+                    return failed("That couldn't be added.")
+                }
+                reveal(.element(DesignStore.ElementRef(host: .screen(host.id), element: node.id)), in: model)
+                let added = done("Added \(Self.describe(node, article: "a")) as \(handles.handle(forNode: node.id)).")
+                return added + " " + done("Put \(Self.describe(node)) \(side.rawValue) \(Self.describe(other.node)) in \(placer.handle).")
+            }
+
+            // Below what is on a free root; last in a root that lays things out, which places it.
+            if host.root.resolvedLayout == .free, let frame = store.newElementFrame(kind, on: host.id) { node.frame = frame }
+            guard store.add(node, to: .screen(host.id)) else { return failed("That couldn't be added.") }
+            reveal(.element(DesignStore.ElementRef(host: .screen(host.id), element: node.id)), in: model)
+            let handle = handles.handle(forNode: node.id)
+            let added = done("Added \(Self.describe(node, article: "a")) as \(handle).")
             // "Add an image below the title": put by the other one as it is added.
-            if let relation, !relation.trimmingCharacters(in: .whitespaces).isEmpty,
-               let target, !target.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let relation, let target {
                 return added + " " + placeElement(element: handle, relation: relation, target: target)
             }
             return added
@@ -548,50 +617,71 @@ final class VoiceToolbox: VoiceActing {
                 if let colour = Self.colourMeantAsWords(text) {
                     return styleElement(element: element, look: "text \(colour)")
                 }
-                guard found.element.kind.hasText else {
-                    return failed("The \(found.element.kind.layerName.lowercased()) has no words to change.")
+                // A card, row or other container shows the words of what it holds, not words of its own.
+                if found.node.isContainer {
+                    let what = found.node.kindName.lowercased()
+                    return failed("\(handle(of: found)) is \(Self.article(for: what)) \(what), which has no words of its own.")
+                }
+                guard found.node.kind.hasText else {
+                    return failed("The \(found.node.kind.layerName.lowercased()) has no words to change.")
                 }
                 reveal(.element(found.ref), in: model)
-                model.store.update(found.ref) { $0.text = text }
-                return done("Reworded the \(found.element.kind.layerName.lowercased()) to “\(text)”.")
+                model.store.update(found.id) { $0.content.text = text }
+                return done("Reworded the \(found.node.kind.layerName.lowercased()) to “\(text)”.")
             }
         }
     }
 
+    /// A look goes to the thing named, or, for a plain group (a free one, a row, a column, a grid or an overlay), to
+    /// each thing it holds, in one step: "make these blue" with a group selected recolours what is in it. A card takes
+    /// it itself (call 7).
     func styleElement(element: String, look: String) -> String {
         forCommand {
             guard let model else { return gone }
             switch find(element: element) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                // Tried on a copy first, to tell whether the look was understood.
-                var restyled = found.element
-                guard Self.apply(look: look, to: &restyled) else {
+                guard let words = Self.look(look) else {
                     return failed("I didn't understand the look “\(look)”. Try words such as blue, bold, 18pt, radius 12 or text white.")
                 }
                 reveal(.element(found.ref), in: model)
-                // Applied to the element as it is kept: the copy is as the views show it, locked
-                // or hidden as its groups are, and written back whole it made their lock or hide
-                // its own.
-                model.store.update(found.ref) { _ = Self.apply(look: look, to: &$0) }
-                return done("Restyled \(Self.describe(found.element)).")
+                let store = model.store
+                let restyled = found.node.kind == .group ? found.node.leaves.map(\.id) : [found.id]
+                store.asOneStep {
+                    for id in restyled { store.update(id) { words.apply(to: &$0) } }
+                }
+                return done("Restyled \(Self.describe(found.node)).")
             }
         }
     }
 
-    func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String {
+    /// In a free parent, a position or a size is where it goes or how big it is, in its host's points; a container
+    /// goes whole, and is resized as the Format panel resizes one. A thing a row, column, grid or overlay places is
+    /// only resized by its numbers, which fixes the axes they change: a position changes nothing, and the model is
+    /// told how to reorder it or take it out, which `takeOut` does through the drag rule (call 8). Under a screen's
+    /// root that lays things out, there is nowhere to take it out to (F15).
+    func moveElement(element: String, x: String?, y: String?, width: String?, height: String?, takeOut: String?) -> String {
         forCommand {
             guard let model else { return gone }
             switch find(element: element) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
+                let handle = handle(of: found)
+                guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
                 let given = [x, y, width, height].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
+                let isPositioned = given[0] != nil || given[1] != nil
+                let isTakingOut = Self.saysYes(takeOut)
+                let placer = placer(of: found)
+                if let placer {
+                    if !placer.canTakeOut, isPositioned || isTakingOut { return failed(Self.placedLine(handle, placer)) }
+                    if isTakingOut, !isPositioned { return failed("Say where \(handle) goes: x and y.") }
+                    if !isTakingOut, isPositioned { return failed(Self.placedLine(handle, placer)) }
+                }
                 guard given.contains(where: { $0 != nil }) else { return failed("Say where it should go or how big it should be.") }
                 // On a screen, shares are of the screen. A loose element has no screen to share.
-                let screenSize = found.screen?.size
+                let screenSize = found.screen.flatMap { model.store.device(of: $0.id)?.size }
                 // Loose elements are given in canvas points and kept in points of their own.
-                let scale: CGFloat = found.screen == nil ? (model.store.resolve(found.ref)?.placement.scale ?? 1) : 1
+                let scale: CGFloat = found.screen == nil ? found.placed.placement.scale : 1
                 var values: [CGFloat?] = []
                 for (index, written) in given.enumerated() {
                     guard let written else {
@@ -609,17 +699,70 @@ final class VoiceToolbox: VoiceActing {
                     }
                     values.append(value / scale)
                 }
-                reveal(.element(found.ref), in: model)
-                model.store.update(found.ref) { element in
-                    if let x = values[0] { element.frame.origin.x = x }
-                    if let y = values[1] { element.frame.origin.y = y }
-                    if let width = values[2] { element.frame.size.width = width }
-                    if let height = values[3] { element.frame.size.height = height }
-                }
+                // Its upright frame in its host's points, as the canvas and the picture have it.
+                var frame = found.placed.frame
+                if let x = values[0] { frame.origin.x = x }
+                if let y = values[1] { frame.origin.y = y }
+                if let width = values[2] { frame.size.width = width }
+                if let height = values[3] { frame.size.height = height }
                 let isResize = values[2] != nil || values[3] != nil
-                return done("\(isResize ? "Resized" : "Moved") \(Self.describe(found.element)).")
+                reveal(.element(found.ref), in: model)
+                let store = model.store
+                if let placer {
+                    guard isTakingOut else {
+                        store.move(found.id, toHostFrame: frame, size: true)
+                        return done("Resized \(Self.describe(found.node)).")
+                    }
+                    return self.takeOut(found, handle: handle, from: placer, to: frame)
+                }
+                if found.node.isContainer, isResize {
+                    store.resizeGroup(found.ref, to: Self.containerFrame(frame, from: found))
+                } else {
+                    store.place(found.id, at: frame)
+                }
+                return done("\(isResize ? "Resized" : "Moved") \(Self.describe(found.node)).")
             }
         }
+    }
+
+    /// Takes a laid-out thing out to `frame`, by the drag rule (`DesignStore.move(_:toHostFrame:)`): onto its host's top
+    /// there, or into the row, column or grid on its host that the frame's middle falls in.
+    private func takeOut(_ found: Found, handle: String, from placer: Placer, to frame: CGRect) -> String {
+        guard let store = model?.store else { return gone }
+        switch store.move(found.id, toHostFrame: frame) {
+        case .takenOut:
+            return done("Took \(handle) out of \(placer.handle).")
+        case .reordered:
+            let now = self.placer(of: found.id)
+            guard let now, now.handle != placer.handle else { return done("Moved \(handle) to another place in \(placer.handle).") }
+            return done("Moved \(handle) into the \(now.word) \(now.handle), which places it.")
+        case .resized, .placed:
+            return done("Resized \(Self.describe(found.node)).")
+        case .unchanged:
+            return noted("\(handle) is there already.")
+        case .refused:
+            var nowhere = placer
+            nowhere.canTakeOut = false
+            return failed(Self.placedLine(handle, nowhere))
+        }
+    }
+
+    /// A free container's new frame as the Format panel gives one (`AppModel.setGroupBox`): a width or a height scales
+    /// everything in it in proportion, by the width when both are given. A row, column, grid or overlay takes the frame
+    /// as it is, and is fixed on the axes it changes.
+    private static func containerFrame(_ frame: CGRect, from found: Found) -> CGRect {
+        let box = found.placed.frame
+        guard found.node.resolvedLayout == .free, box.width > 0, box.height > 0 else { return frame }
+        let size = frame.width != box.width
+            ? CGSize(width: frame.width, height: box.height * frame.width / box.width)
+            : CGSize(width: box.width * frame.height / box.height, height: frame.height)
+        return CGRect(origin: frame.origin, size: size)
+    }
+
+    /// Whether the words say yes: `yes`, `true` or `y`.
+    private static func saysYes(_ words: String?) -> Bool {
+        guard let words else { return false }
+        return ["yes", "true", "y"].contains(words.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)))
     }
 
     func rotateElement(element: String, angle: String?, by: String?) -> String {
@@ -628,8 +771,8 @@ final class VoiceToolbox: VoiceActing {
             switch find(element: element) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                let handle = handles.handle(forElement: found.element.id)
-                guard !found.element.isLocked else { return failed("\(handle) is locked.") }
+                let handle = handle(of: found)
+                guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
                 let words = [angle, by].map { $0?.trimmingCharacters(in: .whitespaces) }.map { $0?.isEmpty == true ? nil : $0 }
                 // The angle wins when both are given.
                 guard let written = words[0] ?? words[1] else {
@@ -638,9 +781,11 @@ final class VoiceToolbox: VoiceActing {
                 guard let degrees = Self.degrees(written) else {
                     return failed("I didn't understand the angle “\(written)”.")
                 }
-                let target = words[0] != nil ? degrees : found.element.resolvedRotation + degrees
+                // On the canvas, its containers' turns included. A laid-out child turns where it is placed, which
+                // is how it is seen, as in SwiftUI.
+                let target = words[0] != nil ? degrees : found.placed.degrees + degrees
                 reveal(.element(found.ref), in: model)
-                model.store.update(found.ref) { $0.setRotation(target) }
+                model.store.setCanvasAngles([found.id: target])
                 return done("Turned \(handle) to \(Int(Rotation.shown(target)))°.")
             }
         }
@@ -657,6 +802,8 @@ final class VoiceToolbox: VoiceActing {
         return value
     }
 
+    /// One thing lined up with its screen, as the popover's Align does: only in a free parent (spec §10). What a row,
+    /// column, grid or overlay places is lined up by that one's alignment, which the model is told to set.
     func alignElement(element: String, alignment: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -668,38 +815,54 @@ final class VoiceToolbox: VoiceActing {
                 guard let (edge, name) = Self.alignment(named: alignment) else {
                     return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
                 }
-                guard found.screen != nil else { return failed("\(handles.handle(forElement: found.element.id)) isn't on a screen to line up with.") }
-                guard !found.element.isLocked else { return failed("\(handles.handle(forElement: found.element.id)) is locked.") }
+                let handle = handle(of: found)
+                guard found.screen != nil else { return failed("\(handle) isn't on a screen to line up with.") }
+                guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
+                if let placer = placer(of: found) { return failed(Self.alignedLine(handle, placer)) }
                 reveal(.element(found.ref), in: model)
                 model.store.align(found.ref, edge)
-                return done("Aligned \(Self.describe(found.element)) to the \(name).")
+                return done("Aligned \(Self.describe(found.node)) to the \(name).")
             }
         }
     }
 
     /// Lines several elements up with one another: by an edge, or through the middle, of
-    /// the area they cover together.
+    /// the area they cover together. As the popover's Align does (`AppModel.lineUpSelection`): in one row, column,
+    /// grid or overlay, by that one's alignment; otherwise only what is in a free parent moves (spec §10), and what
+    /// is placed stays where it is, the rest lining up with it all the same.
     private func alignTogether(_ named: [String], alignment: String) -> String {
         guard let model else { return gone }
         guard let (edge, name) = Self.alignment(named: alignment) else {
             return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
         }
-        var found: [FoundElement] = []
+        var found: [Found] = []
         for handle in named {
             switch find(element: handle) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let one):
-                guard !one.element.isLocked else { return failed("\(handles.handle(forElement: one.element.id)) is locked.") }
+                guard !one.placed.isLocked else { return failed("\(self.handle(of: one)) is locked.") }
                 if !found.contains(where: { $0.ref == one.ref }) { found.append(one) }
             }
         }
         guard found.count > 1 else { return alignElement(element: named[0], alignment: alignment) }
         guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
         let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
-        reveal(.element(found[0].ref), in: model)
-        model.store.align(together, edge)
-        select(together, in: model)
+        let store = model.store
         let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
+        if let aligned = store.layoutAligned(together, edge) {
+            reveal(.element(found[0].ref), in: model)
+            store.update(aligned.parent) { $0.layout = aligned.layout }
+            select(together, in: model)
+            return done("Lined up \(found.count) elements by their \(by).")
+        }
+        // All in one that places them along this edge, or each placed by one: nothing of theirs can move.
+        if store.laidOutParent(of: together) != nil || !store.holdsSomethingInAFreeParent(together),
+           let placed = found.first(where: { $0.placed.isLaidOut }), let placer = placer(of: placed) {
+            return failed(Self.alignedLine(handle(of: placed), placer))
+        }
+        reveal(.element(found[0].ref), in: model)
+        store.alignInFreeParents(together, edge)
+        select(together, in: model)
         return done("Lined up \(found.count) elements by their \(by).")
     }
 
@@ -709,13 +872,14 @@ final class VoiceToolbox: VoiceActing {
             switch find(element: element) {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
-                guard let copy = model.store.duplicate(found.ref) else { return failed("That couldn't be duplicated.") }
-                reveal(.element(copy), in: model)
-                return done("Duplicated \(Self.describe(found.element)) as \(handles.handle(forElement: copy.element)).")
+                guard let copy = model.store.duplicate(node: found.id) else { return failed("That couldn't be duplicated.") }
+                reveal(.element(DesignStore.ElementRef(host: found.ref.host, element: copy)), in: model)
+                return done("Duplicated \(Self.describe(found.node)) as \(handles.handle(forNode: copy)).")
             }
         }
     }
 
+    /// A container goes with everything in it, and only by its own word: "card", "row", "group" or its name.
     func deleteElement(element: String, named: String?) -> String {
         forCommand {
             guard let model else { return gone }
@@ -723,15 +887,15 @@ final class VoiceToolbox: VoiceActing {
             case .failure(let refusal): return failed(refusal.line)
             case .success(let found):
                 if let refusal = refusesToDelete() { return refusal }
-                let handle = handles.handle(forElement: found.element.id)
+                let handle = handle(of: found)
                 // Only what the person named goes: see `VoiceNaming`. A handle given as the
                 // name is no name at all.
-                if let named, VoiceHandles.tidied(named) == nil, !Self.fits(named, found.element) {
-                    return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That is \(Self.describe(found.element)).")
+                if let named, VoiceHandles.tidied(named) == nil, !Self.fits(named, found.node) {
+                    return failed("There is no \(named.trimmingCharacters(in: .whitespaces)) here. That is \(Self.describe(found.node)).")
                 }
-                guard !found.element.isLocked else { return failed("\(handle) is locked.") }
-                model.store.delete(found.ref)
-                return done("Deleted \(Self.describe(found.element)).")
+                guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
+                model.store.delete(nodes: [found.id])
+                return done("Deleted \(Self.describe(found.node)).")
             }
         }
     }
@@ -763,7 +927,7 @@ final class VoiceToolbox: VoiceActing {
             // Asked for, the view moves even in a change for one screen; the screen stays
             // selected.
             DesignActions.reveal(.element(found.ref), in: model, selecting: scope == nil)
-            return done("Showing \(Self.describe(found.element)).")
+            return done("Showing \(Self.describe(found.node)).")
         case .failure(let refusal):
             return failed(refusal.line)
         }
@@ -868,11 +1032,81 @@ final class VoiceToolbox: VoiceActing {
         var line: String
     }
 
-    private struct FoundElement {
-        var ref: DesignStore.ElementRef
-        var element: DesignElement
-        /// The screen it is on; nil for a loose element.
-        var screen: DesignScreen?
+    /// A node a handle names, where it is now: a leaf or a container, on a screen or on the open canvas.
+    private struct Found {
+        /// Its frame in its host's points, its angle, its parent's layout, and its lock and hide with its containers'.
+        var placed: PlacedNode
+        /// The screen it is on; nil for one on the open canvas.
+        var screen: TreeScreen?
+
+        var id: UUID { placed.node.id }
+        var node: LayerNode { placed.node }
+        var ref: DesignStore.ElementRef { placed.ref }
+    }
+
+    /// What places a thing a row, column, grid or overlay lays out: that one's handle, or its screen's for a screen's
+    /// root, and the word its layout goes by.
+    private struct Placer {
+        var handle: String
+        /// `row`, `column`, `grid` or `overlay`.
+        var word: String
+        /// Whether it can be taken out onto its host's top: not from under a screen's root that lays things out, which
+        /// has no free top to take it to (F15).
+        var canTakeOut: Bool
+    }
+
+    private func handle(of found: Found) -> String {
+        handles.handle(forNode: found.id)
+    }
+
+    /// What places `found`, or nil when it is in a free parent: a free container, a free root or the open canvas.
+    private func placer(of found: Found) -> Placer? {
+        guard found.placed.isLaidOut else { return nil }
+        return placer(of: found.id)
+    }
+
+    /// What places a node: see `placer(of:)`. Nil for a node in a free parent, or one the design doesn't have.
+    private func placer(of id: UUID) -> Placer? {
+        guard let store = model?.store, let parent = store.parent(of: id) else { return nil }
+        let holder: UUID?
+        let placer: (handle: String, canTakeOut: Bool)
+        switch parent {
+        case .node(let container):
+            holder = container
+            placer = (handles.handle(forNode: container), true)
+        case .screen(let screen):
+            holder = store.treeScreen(screen)?.root.id
+            placer = (handles.handle(forScreen: screen), false)
+        case .canvas:
+            return nil
+        }
+        guard let layout = holder.flatMap(store.node)?.resolvedLayout, let word = Self.word(for: layout) else { return nil }
+        return Placer(handle: placer.handle, word: word, canTakeOut: placer.canTakeOut)
+    }
+
+    /// What a layout is called: `row`, `column`, `grid` or `overlay`; nil for free.
+    private static func word(for layout: LayerNode.Layout) -> String? {
+        switch layout {
+        case .free: nil
+        case .stack(let stack): stack.axis == .horizontal ? "row" : "column"
+        case .grid: "grid"
+        case .overlay: "overlay"
+        }
+    }
+
+    /// Why a thing that is placed by a row, column, grid or overlay wasn't moved, and what to do instead (call 8):
+    /// `E6 is in the row E5, which places it. To change its place in E5, call reorder. To take it out of E5, call
+    /// moveElement again with takeOut yes and where it goes.` Under a screen's root that lays things out, there is
+    /// nowhere to take it, so the last sentence isn't said (F15).
+    private static func placedLine(_ handle: String, _ placer: Placer) -> String {
+        let line = "\(handle) is in the \(placer.word) \(placer.handle), which places it. To change its place in \(placer.handle), call reorder."
+        guard placer.canTakeOut else { return line }
+        return line + " To take it out of \(placer.handle), call moveElement again with takeOut yes and where it goes."
+    }
+
+    /// Why a thing that is placed by a row, column, grid or overlay wasn't lined up, and what lines it up instead.
+    private static func alignedLine(_ handle: String, _ placer: Placer) -> String {
+        "\(handle) is in the \(placer.word) \(placer.handle), which places it. To line things up in \(placer.handle), call setLayout on \(placer.handle) with an alignment, such as \(placer.word) centred."
     }
 
     private var gone: String { failed("The design has closed.") }
@@ -897,9 +1131,9 @@ final class VoiceToolbox: VoiceActing {
     /// The screen a tool means when none is named in a change for one screen: that one,
     /// or a refusal once it has gone, so that nothing is done to another in its place.
     /// Nil when a command can go anywhere.
-    private func scopedScreen(in model: AppModel) -> Result<DesignScreen, Refusal>? {
+    private func scopedScreen(in model: AppModel) -> Result<TreeScreen, Refusal>? {
         guard let scope else { return nil }
-        guard let screen = model.store.screen(scope) else {
+        guard let screen = model.store.treeScreen(scope) else {
             return .failure(Refusal(line: Self.screenGone))
         }
         return .success(screen)
@@ -909,7 +1143,7 @@ final class VoiceToolbox: VoiceActing {
     private var scopeNamed: String? {
         guard let scope else { return nil }
         let handle = handles.handle(forScreen: scope)
-        guard let name = model?.store.screen(scope)?.name else { return handle }
+        guard let name = model?.store.treeScreen(scope)?.name else { return handle }
         return "\(handle) “\(name)”"
     }
 
@@ -918,57 +1152,52 @@ final class VoiceToolbox: VoiceActing {
         scopeNamed.map { Refusal(line: "Only \($0) can be changed here.") }
     }
 
-    private func find(screen handle: String) -> Result<DesignScreen, Refusal> {
+    private func find(screen handle: String) -> Result<TreeScreen, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as S1."))
         }
         guard tidy.hasPrefix("S") else { return .failure(Refusal(line: "There is no screen \(tidy).")) }
-        guard let id = handles.screen(tidy), let screen = model?.store.screen(id) else {
+        guard let id = handles.screen(tidy), let screen = model?.store.treeScreen(id) else {
             return .failure(Refusal(line: "There is no \(tidy)."))
         }
         if let scope, id != scope, let scoped = outsideTheScope { return .failure(scoped) }
         return .success(screen)
     }
 
-    /// An element a tool may change: one on the screen a change is for, when there is one.
-    private func find(element handle: String) -> Result<FoundElement, Refusal> {
+    /// A node a tool may change: one on the screen a change is for, when there is one.
+    private func find(element handle: String) -> Result<Found, Refusal> {
         let found = locate(element: handle)
         guard let scope, case .success(let one) = found, one.ref.host != .screen(scope), let screen = scopeNamed else {
             return found
         }
-        return .failure(Refusal(line: "\(handles.handle(forElement: one.element.id)) isn't on \(screen), the screen this change is for."))
+        return .failure(Refusal(line: "\(self.handle(of: one)) isn't on \(screen), the screen this change is for."))
     }
 
-    /// An element wherever it is, on any screen or loose on the canvas.
-    private func locate(element handle: String) -> Result<FoundElement, Refusal> {
+    /// A node wherever it is, a leaf or a container, on any screen or loose on the canvas, found through the store's
+    /// index.
+    private func locate(element handle: String) -> Result<Found, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as E2."))
         }
         guard tidy.hasPrefix("E") else { return .failure(Refusal(line: "There is no element \(tidy).")) }
-        guard let id = handles.element(tidy), let store = model?.store else {
+        // Looked up afresh each time: a node can have moved to another screen, or into another container.
+        guard let id = handles.node(tidy), let store = model?.store, let placed = store.placed(id) else {
             return .failure(Refusal(line: "There is no \(tidy)."))
         }
-        // Looked up afresh each time: an element can have moved to another screen.
-        for screen in store.screens {
-            if let element = screen.elements.first(where: { $0.id == id }) {
-                return .success(FoundElement(ref: .init(host: .screen(screen.id), element: id), element: element, screen: screen))
-            }
-        }
-        if let loose = store.floating.first(where: { $0.id == id }) {
-            return .success(FoundElement(ref: .init(host: .canvas, element: id), element: loose.element, screen: nil))
-        }
-        return .failure(Refusal(line: "There is no \(tidy)."))
+        let screen: TreeScreen? = if case .screen(let screenID) = placed.ref.host { store.treeScreen(screenID) } else { nil }
+        return .success(Found(placed: placed, screen: screen))
     }
 
     /// The screen a new element goes on when none is named: the one a change is for, the
     /// selected one, the one holding the selection, or the newest.
-    private func currentScreen(in model: AppModel) -> Result<DesignScreen, Refusal> {
+    private func currentScreen(in model: AppModel) -> Result<TreeScreen, Refusal> {
         if let scoped = scopedScreen(in: model) { return scoped }
-        if let screen = model.selectedScreen { return .success(screen) }
-        if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
+        let store = model.store
+        if let id = model.selectedScreenID, let screen = store.treeScreen(id) { return .success(screen) }
+        if let selected = model.selectedNode, case .screen(let id) = selected.ref.host, let screen = store.treeScreen(id) {
             return .success(screen)
         }
-        guard let newest = model.store.screens.last else { return .failure(Refusal(line: "There is no screen to add to yet.")) }
+        guard let newest = store.tree.screens.last else { return .failure(Refusal(line: "There is no screen to add to yet.")) }
         return .success(newest)
     }
 
@@ -998,9 +1227,20 @@ final class VoiceToolbox: VoiceActing {
 
     // MARK: Reading what was asked
 
-    /// "the button “Sign in”", or "a text field “Email”".
-    private static func describe(_ element: DesignElement, article: String = "the") -> String {
-        let what = DesignDescriber.describe(element)
+    /// "the button “Sign in”", "a text field “Email”", or for a container what it is, as the Layers panel calls it:
+    /// "the card", "the row".
+    private static func describe(_ node: LayerNode, article: String = "the") -> String {
+        let what: String
+        if node.isContainer {
+            what = node.kindName.lowercased()
+        } else if node.kind == .symbol, let symbol = node.content.symbol {
+            what = "\(symbol) symbol"
+        } else {
+            // As Siri describes a leaf (`DesignDescriber`).
+            let words = node.content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let kind = node.kind.layerName.lowercased()
+            what = words.isEmpty ? kind : "\(kind) “\(words)”"
+        }
         // "An image", not "a image".
         let isVowel = what.first.map { "aeiou".contains($0.lowercased()) } == true
         return "\(article == "a" && isVowel ? "an" : article) \(what)"
@@ -1033,25 +1273,26 @@ final class VoiceToolbox: VoiceActing {
         return ColourWords.named[words] != nil ? words : nil
     }
 
-    /// Whether what the person called something fits an element: by what its kind is
-    /// called, by the words on it, or by its own name.
-    private static func fits(_ named: String, _ element: DesignElement) -> Bool {
-        var kindNames = (LookWords.kindWords.first { $0.kind == element.kind }?.words ?? []) + [element.kind.layerName]
+    /// Whether what the person called something fits a node: by what its kind is
+    /// called, by the words on it, or by its own name. A container goes by what the Layers
+    /// panel calls it too, such as "row" or "card", and by its own name, never by the
+    /// words of what it holds: "delete the Wi-Fi" isn't the row.
+    private static func fits(_ named: String, _ node: LayerNode) -> Bool {
+        var kindNames = (LookWords.kindWords.first { $0.kind == node.kind }?.words ?? []) + [node.kind.layerName]
+        if node.isContainer { kindNames.append(node.kindName) }
         // "Email field" and the like say what a field is for, not what it is. That is for
         // the words on the field to bear out, or any field would answer to "password field".
-        if element.kind == .textField { kindNames.removeAll { ["search field", "email field", "password field"].contains($0) } }
+        if node.kind == .textField { kindNames.removeAll { ["search field", "email field", "password field"].contains($0) } }
         // Anything with words on it can be called "the text".
-        let loose = element.kind.hasText ? ["text", "words", "label", "copy"] : []
-        return VoiceNaming.fits(named, names: kindNames + loose, words: "\(element.text) \(element.name ?? "") \(element.symbol ?? "")")
+        let loose = node.kind.hasText ? ["text", "words", "label", "copy"] : []
+        return VoiceNaming.fits(named, names: kindNames + loose,
+                                words: "\(node.content.text) \(node.name ?? "") \(node.content.symbol ?? "")")
     }
 
-    /// Gives an element the look some words describe. False if none of them meant anything.
-    @discardableResult
-    private static func apply(look: String, to element: inout DesignElement) -> Bool {
+    /// The look some words describe; nil if none of them meant anything.
+    private static func look(_ look: String) -> Look? {
         let words = LookWords.look(from: look.components(separatedBy: ","))
-        guard words != Look() else { return false }
-        words.apply(to: &element)
-        return true
+        return words == Look() ? nil : words
     }
 
     /// A length as written: points (`180`, `44pt`) or a share of `extent` (`50%`).

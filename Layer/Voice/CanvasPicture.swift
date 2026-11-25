@@ -145,8 +145,16 @@ struct CanvasPicture: Sendable, Equatable {
 
     private static func words(for element: Element) -> String {
         let text = element.text.replacingOccurrences(of: "\n", with: " ")
-        guard !text.isEmpty else { return "\(element.handle), the \(element.kind)" }
-        return "\(element.handle), the \(element.kind) \"\(text.count > 48 ? text.prefix(45) + "…" : text)\""
+        guard !text.isEmpty else { return "\(element.handle), the \(noun(for: element))" }
+        return "\(element.handle), the \(noun(for: element)) \"\(text.count > 48 ? text.prefix(45) + "…" : text)\""
+    }
+
+    /// What a thing is called: its kind, or for a group what its layout makes it, as its line and the Layers panel call
+    /// it: `row`, `column`, `grid` or `overlay`, and `group` when it is free. A card is a card, whatever its layout.
+    private static func noun(for element: Element) -> String {
+        guard element.isContainer, element.kind == "group", let layout = element.layout,
+              let first = layout.split(whereSeparator: { $0 == " " || $0 == "," }).first else { return element.kind }
+        return String(first)
     }
 
     /// Each element's line at `indent`, and what a container holds under it, two spaces further in.

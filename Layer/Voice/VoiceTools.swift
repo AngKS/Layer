@@ -16,7 +16,7 @@ protocol VoiceActing: AnyObject, Sendable {
     @MainActor func placeElement(element: String, relation: String, target: String) -> String
     @MainActor func setText(element: String, text: String) -> String
     @MainActor func styleElement(element: String, look: String) -> String
-    @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String
+    @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?, takeOut: String?) -> String
     /// `angle` is where to turn it to; `by` is how far to turn it from where it is. Both in degrees, clockwise.
     @MainActor func rotateElement(element: String, angle: String?, by: String?) -> String
     @MainActor func alignElement(element: String, alignment: String) -> String
@@ -45,6 +45,11 @@ extension VoiceActing {
     /// Adds an element where new elements go: below the rest.
     @MainActor func addElement(screen: String?, kind: String, text: String?, look: String?) -> String {
         addElement(screen: screen, kind: kind, text: text, look: look, relation: nil, target: nil)
+    }
+
+    /// Moves or resizes a thing, taking nothing out of the row, column or grid it is in.
+    @MainActor func moveElement(element: String, x: String?, y: String?, width: String?, height: String?) -> String {
+        moveElement(element: element, x: x, y: y, width: width, height: height, takeOut: nil)
     }
 }
 
@@ -180,7 +185,7 @@ struct CreateScreenTool: Tool {
         var name: String?
         @Guide(description: "What the screen is for and what should be on it, in the person's own words.")
         var description: String
-        @Guide(description: "Only if the person names one: iPhone, iPad, Mac, or webpage for a web page or website.")
+        @Guide(description: "Only if the person names one: iPhone, iPad, Mac, or webpage for a web page or website, or one of this design's own devices by name.")
         var device: String?
     }
 
@@ -282,10 +287,13 @@ struct MoveElementTool: Tool {
         var width: String?
         @Guide(description: "Height, such as 44 or 10%.")
         var height: String?
+        @Guide(description: "Only to take it out of the row, column or grid it is in: yes. Give x and y for where it goes.")
+        var takeOut: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        await actor.moveElement(element: arguments.element, x: arguments.x, y: arguments.y, width: arguments.width, height: arguments.height)
+        await actor.moveElement(element: arguments.element, x: arguments.x, y: arguments.y, width: arguments.width, height: arguments.height,
+                                takeOut: arguments.takeOut)
     }
 }
 
@@ -460,7 +468,7 @@ struct ChangeScreenDeviceTool: Tool {
     struct Arguments {
         @Guide(description: "The screen's handle, such as S1. Leave out for this screen.")
         var screen: String?
-        @Guide(description: "iPhone, iPad, Mac or webpage.")
+        @Guide(description: "iPhone, iPad, Mac or webpage, or one of this design's own devices by name.")
         var device: String
     }
 

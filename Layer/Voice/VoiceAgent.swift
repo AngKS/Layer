@@ -118,12 +118,12 @@ final class VoiceAgent: VoiceCommandRunner {
     private var lastCommandStep: Int?
     /// The screen the last command was for, or else the one screen it changed, with
     /// `lastCommandStep`: a correction for one screen undoes only a change to that screen.
-    private var lastCommandScope: DesignScreen.ID?
+    private var lastCommandScope: TreeScreen.ID?
 
     /// The screen the command under way is for, when it can change nothing else: a change
     /// asked of one screen. Every look at the canvas while it runs says so. Nil for any
     /// other command, and between commands, a warm-up's look included.
-    private var scopedScreen: DesignScreen.ID?
+    private var scopedScreen: TreeScreen.ID?
 
     /// How many commands a session takes before the next starts a fresh one. The model is
     /// sent only the last two anyway (`VoiceProfile`), but the session keeps every word,
@@ -186,7 +186,7 @@ final class VoiceAgent: VoiceCommandRunner {
     func run(_ command: String, about target: VoiceTarget?) async -> VoiceOutcome {
         guard let model, !model.isClosed else { return VoiceOutcome(problem: AppModel.closedProblem) }
         // A change for a screen that has gone since it was asked has nothing it may change.
-        if case .screenEdit(let id) = target, model.store.screen(id) == nil {
+        if case .screenEdit(let id) = target, model.store.treeScreen(id) == nil {
             return VoiceOutcome(problem: VoiceToolbox.screenGone)
         }
         toolbox.reset()
