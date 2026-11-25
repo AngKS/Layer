@@ -97,7 +97,12 @@ private final class Bench {
     /// The open route hears some words, and the call shows them.
     func hear(_ words: String, on route: Int = 0) async -> Bool {
         routes[route].send(.hearing(words))
-        return await eventually { self.pencil.call?.caption?.kind == .hearing && self.pencil.call?.caption?.text == words }
+        return await eventually { self.shows(words) }
+    }
+
+    /// Whether the call shows `words` as heard.
+    func shows(_ words: String) -> Bool {
+        pencil.call?.caption?.kind == .hearing && pencil.call?.caption?.text == words
     }
 
     func end() {
@@ -109,15 +114,19 @@ private final class Bench {
 @Suite("Push-to-talk with Apple Pencil Pro", .serialized)
 @MainActor
 struct PencilVoiceTests {
-    @Test func aQuickSqueezeTogglesAndTheNextSends() async {
+    /// It waits on what the bubble and the call show, never on a clock: polled against 3 s, a stall of the main actor
+    /// that every suite shares ran the limit out before the call's few hops to listening could run (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func aQuickSqueezeTogglesAndTheNextSends() async {
         let bench = Bench()
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: .radians(0.1))
         #expect(bench.pencil.bubble == PencilVoice.Bubble(anchor: Bench.overButton, azimuth: .radians(0.1), state: .gettingReady))
         bench.now += .milliseconds(200)
         bench.pencil.squeezeEnded()
-        #expect(await eventually { bench.state == .listening })
+        #expect(await observed { bench.state == .listening })
         #expect(bench.routes.count == 1 && bench.routes[0].finishCount == 0)
-        #expect(await bench.hear("make it blue"))
+        bench.routes[0].send(.hearing("make it blue"))
+        #expect(await observed { bench.shows("make it blue") })
 
         // The second squeeze sends; letting go of it does nothing more.
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: .radians(0.1))
@@ -129,9 +138,10 @@ struct PencilVoiceTests {
 
         bench.pencil.call?.captionTimes = (.milliseconds(100), .milliseconds(100))
         bench.routes[0].send(.command("make it blue"))
-        #expect(await eventually { bench.runner.commands == ["make it blue"] })
-        #expect(await eventually { bench.state == .done })
-        #expect(await eventually { bench.pencil.bubble == nil })
+        // Done once the command has run: what it ran is read then.
+        #expect(await observed { bench.state == .done })
+        #expect(bench.runner.commands == ["make it blue"])
+        #expect(await observed { bench.pencil.bubble == nil })
         bench.end()
     }
 

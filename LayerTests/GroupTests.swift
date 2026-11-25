@@ -853,6 +853,26 @@ final class TapClock {
     }
 }
 
+/// The finger touches the canvas would see, on a test's clock: each lands now and lifts after the time given, as the ink
+/// canvas's finger detector records them (`AppModel.lastFingerTouch`).
+@MainActor
+final class FingerTouches {
+    private let clock: TapClock
+    private var last: (landed: ContinuousClock.Instant, lifted: ContinuousClock.Instant)?
+
+    init(_ model: AppModel, _ clock: TapClock) {
+        self.clock = clock
+        model.lastFingerTouch = { self.last }
+    }
+
+    /// A finger lands now and lifts `milliseconds` later, which the clock moves on to.
+    func press(for milliseconds: Int) {
+        let landed = clock.now
+        clock.wait(milliseconds)
+        last = (landed, clock.now)
+    }
+}
+
 extension OrderBoard {
     /// The middle of something, in the view: the board shows the canvas unscrolled and
     /// unzoomed, so it is the same point on the canvas.
@@ -919,6 +939,82 @@ struct SelectingGroupsTests {
         slowClock.wait(500)
         slow.model.pick(.element(slow.b))
         #expect(slow.model.selection == nil)
+    }
+
+    /// A double-tap is timed as UIKit times its own: from the first tap lifting, when it is handled, to the second
+    /// landing, which the canvas sees. A second that lands 340 ms after the first lifted makes one, though it is handled
+    /// 380 ms after: timed to its lifting, its own length counted against it, and it didn't. XCUITest's two quick presses
+    /// land 290–330 ms after the first lifts and are handled 350–370 ms after it (the sweep, lane 2).
+    @Test func aSecondTapIsTimedFromTheFirstLiftingToItsLanding() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let finger = FingerTouches(board.model, clock)
+        let g = board.group(board.b, board.d)
+        finger.press(for: 30)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g))
+        clock.wait(340)
+        finger.press(for: 33)
+        clock.wait(7)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(board.b), "landed 340 ms after the first lifted")
+
+        // Landing past the interval, they are two taps however quick the second is: it takes the group out again.
+        let slow = OrderBoard()
+        let slowClock = TapClock(slow.model)
+        let slowFinger = FingerTouches(slow.model, slowClock)
+        let h = slow.group(slow.b, slow.d)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == .element(h))
+        slowClock.wait(360)
+        slowFinger.press(for: 10)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == nil, "landed 360 ms after the first lifted")
+    }
+
+    /// A finger the canvas saw is the tap's own only while the tap is handled just after it lifted. Pencil-tapped, a
+    /// thing's group is picked; a finger then touches a control within 350 ms, leaving the selection as it is; five
+    /// seconds later the Pencil taps the thing again. That is a tap of its own, timed to its lifting, as a Pencil tap
+    /// always was: it takes the group out, and doesn't go in (sweep 2 review, I-1).
+    @Test func aFingerOnAControlDoesntMakeALaterPencilTapADoubleTap() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let finger = FingerTouches(board.model, clock)
+        let g = board.group(board.b, board.d)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g))
+        clock.wait(100)
+        finger.press(for: 50)
+        clock.wait(5000)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == nil, "a Pencil tap 5 s later takes the group out")
+    }
+
+    /// As in UIKit, a press held past the longest tap, 0.75 s, is no tap of a double-tap, however soon it landed: the
+    /// group is taken out, not gone into (sweep 2 review, M-3). Held 0.7 s, it is one.
+    @Test func aSecondPressHeldPastTheLongestTapIsntADoubleTap() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        let finger = FingerTouches(board.model, clock)
+        let g = board.group(board.b, board.d)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g))
+        clock.wait(100)
+        finger.press(for: 800)
+        clock.wait(5)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == nil, "held 800 ms")
+
+        let held = OrderBoard()
+        let heldClock = TapClock(held.model)
+        let heldFinger = FingerTouches(held.model, heldClock)
+        _ = held.group(held.b, held.d)
+        held.model.pick(.element(held.b))
+        heldClock.wait(100)
+        heldFinger.press(for: 700)
+        heldClock.wait(5)
+        held.model.pick(.element(held.b))
+        #expect(held.model.selection == .element(held.b), "held 700 ms")
     }
 
     @Test func aDoubleTapIsReadAgainstTheSelectionBeforeIt() {

@@ -537,16 +537,18 @@ struct OpeningDesignTests {
         return (window, browser, design)
     }
 
-    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+    /// A real dismiss, on a main thread every suite running alongside shares: the app's limit for it, 2 s and then 8 s
+    /// here, ran out across the thread's stalls now and then. The limit isn't what this test is about: `pick` is given
+    /// none, and the test's time limit stands in (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
         let (window, browser, design) = try browserShowingADesign(animated: false)
         defer { window.isHidden = true }
         #expect(browser.presentedViewController === design)
 
         var steps: [String] = []
         let url = URL(fileURLWithPath: "/designs/B.layer")
-        // A real dismiss, on a main thread every suite running alongside shares: the app's
-        // 2 s for it ran out now and then. The limit isn't what this test is about.
-        try await DocumentBrowser.pick(url, in: browser, limit: .seconds(8)) { presented in
+        try await DocumentBrowser.pick(url, in: browser, limit: nil) { presented in
             steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
         } picking: { picked in
             steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
@@ -609,18 +611,54 @@ struct OpeningDesignTests {
         #expect(steps.all == ["prepared", "dismissing", "dismissed"], "a design was picked after the open gave up: \(steps.all)")
     }
 
-    @Test func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
+    /// It waits on the presentation and the dismiss themselves, never on a clock: the app's limit for each, 4 s here,
+    /// ran out across a stall of the main thread that every suite shares before UIKit could finish the presentation,
+    /// and the open gave up (the sweep, lane 2). The limit isn't what this is about: `pick` is given none, and the
+    /// test's time limit stands in.
+    @Test(.timeLimit(.minutes(1)))
+    func aDesignStillComingUpIsPutAwayOnceItIsUp() async throws {
         let (window, browser, design) = try browserShowingADesign(animated: true)
         defer { window.isHidden = true }
         #expect(design.isBeingPresented)
         let url = URL(fileURLWithPath: "/designs/B.layer")
         let picking = Task {
-            // Within the ten seconds waited for below: the app's 2 s for a real
-            // presentation and dismiss, on a shared main thread, isn't what this is about.
-            try await DocumentBrowser.pick(url, in: browser, limit: .seconds(4)) { _ in } picking: { _ in }
+            try await DocumentBrowser.pick(url, in: browser, limit: nil) { _ in } picking: { _ in }
         }
-        guard case .success? = await outcome(of: picking, within: .seconds(10)) else {
+        // Cancelled at the time limit, the open is too, and ends.
+        let result = await withTaskCancellationHandler { await picking.result } onCancel: { picking.cancel() }
+        guard case .success = result else {
             Issue.record("a dismiss tried while the design was still coming up was never finished")
+            return
+        }
+        #expect(browser.presentedViewController == nil)
+    }
+
+    /// Holds the thread, as a long piece of work on it does: nothing else runs on it meanwhile.
+    private func holdTheMainThread(for seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
+    /// The app's own limit is counted in the main thread's turns, not by the clock: a stall of the thread longer than
+    /// the limit, while a design is still coming up, uses up one look, and the design is put away once it is up. Timed
+    /// by the clock, the wait woke from the stall before UIKit could finish the presentation, and the open gave up
+    /// (sweep 2 review, M-2).
+    @Test(.timeLimit(.minutes(1)))
+    func aStallLongerThanTheLimitDoesntGiveUpOnADesignComingUp() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: true)
+        defer { window.isHidden = true }
+        // The presentation under way, and the open waiting on it.
+        try await Task.sleep(for: .milliseconds(50))
+        try #require(design.isBeingPresented)
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let picking = Task {
+            try await DocumentBrowser.pick(url, in: browser, limit: .seconds(1)) { _ in } picking: { _ in }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        // The main thread held for longer than the limit, and than the presentation's animation.
+        holdTheMainThread(for: 1.5)
+        let result = await withTaskCancellationHandler { await picking.result } onCancel: { picking.cancel() }
+        guard case .success = result else {
+            Issue.record("a stall longer than the limit gave up on a design coming up: \(result)")
             return
         }
         #expect(browser.presentedViewController == nil)

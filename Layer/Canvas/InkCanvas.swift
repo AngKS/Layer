@@ -265,6 +265,7 @@ struct InkCanvas: UIViewRepresentable {
                 return restingFingers.fingers(in: container)
             }
             restingFingers.onAllLifted = { [weak self] in self?.model.fingersLifted() }
+            model.lastFingerTouch = { [weak self] in self?.restingFingers.lastTouch }
             twist.addTarget(self, action: #selector(twisted(_:)))
             twist.canTurn = { [weak self] in
                 guard let model = self?.model else { return false }
@@ -1262,11 +1263,14 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
         weak var touch: UITouch?
         var start: CGPoint
         var hasStrayed = false
+        var landed: ContinuousClock.Instant
     }
 
     private var down: [ObjectIdentifier: Finger] = [:]
     /// How far a finger can drift and still be resting. Further, it is dragging or scrolling.
     private let drift: CGFloat = 14
+    /// The finger that lifted last: when it landed and when it lifted. A tap's, while the tap is handled, just after.
+    private(set) var lastTouch: (landed: ContinuousClock.Instant, lifted: ContinuousClock.Instant)?
 
     init() {
         super.init(target: nil, action: nil)
@@ -1290,8 +1294,9 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        let now = ContinuousClock.now
         for touch in touches {
-            down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view))
+            down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view), landed: now)
         }
     }
 
@@ -1306,6 +1311,10 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        let now = ContinuousClock.now
+        for touch in touches {
+            if let finger = down[ObjectIdentifier(touch)] { lastTouch = (finger.landed, now) }
+        }
         lifted(touches)
     }
 

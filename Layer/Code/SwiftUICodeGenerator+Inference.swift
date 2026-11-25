@@ -22,34 +22,6 @@ extension SwiftUICodeGenerator {
         var rotation: Double?
     }
 
-    /// Where the inference reads a node from: a node's own space in the inferred container's.
-    /// While every node down to it is upright, origins are added, so whole numbers stay exact;
-    /// under a turned one the centre goes through the turns, as `TreeIndex` turns it.
-    struct Place {
-        var toContainer = CGAffineTransform.identity
-        var origin = CGPoint.zero
-        var degrees: Double = 0
-        var isUpright = true
-
-        /// A child of the node this is the place of: its frame and angle in the container's space, and its own place.
-        func placing(_ node: LayerNode) -> (frame: CGRect, rotation: Double?, place: Place) {
-            let own = node.rotation.flatMap { $0.isFinite ? $0 : nil } ?? 0
-            let size = node.frame.size
-            let frame: CGRect
-            if isUpright {
-                frame = CGRect(origin: CGPoint(x: origin.x + node.frame.origin.x, y: origin.y + node.frame.origin.y), size: size)
-            } else {
-                let centre = CGPoint(x: node.frame.origin.x + size.width / 2, y: node.frame.origin.y + size.height / 2)
-                    .applying(toContainer)
-                frame = CGRect(origin: CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2), size: size)
-            }
-            let degrees = self.degrees + own
-            let place = Place(toContainer: node.transformToParent.concatenating(toContainer), origin: frame.origin,
-                              degrees: degrees, isUpright: isUpright && Rotation.normalized(own) == 0)
-            return (frame, Rotation.kept(degrees), place)
-        }
-    }
-
     /// The box the inference fills: a screen, inside its safe areas, or a container's content box.
     struct InferenceBox {
         var size: CGSize
@@ -66,19 +38,22 @@ extension SwiftUICodeGenerator.ScreenWriter {
 
     /// What a free container places, in reading order: its written children at their frames and
     /// turns in its own space, a free group's members in its place (a free group is transparent).
+    /// Each is read from its own space in the container's as `TreeIndex` places it (`OwnSpace`): while
+    /// every node down to it is upright, origins are added, so whole numbers stay exact; under a turned
+    /// one the centre goes through the turns.
     func items(of container: LayerNode) -> [Generator.Item] {
         var found: [Generator.Item] = []
-        func gather(_ children: [LayerNode], at place: Generator.Place) {
+        func gather(_ children: [LayerNode], in space: TreeIndex.OwnSpace) {
             for child in children where isWritten(child) {
-                let placed = place.placing(child)
+                let placed = space.placing(child)
                 if child.kind == .group, child.resolvedLayout == .free {
-                    gather(child.children, at: placed.place)
+                    gather(child.children, in: placed.space)
                 } else {
-                    found.append(Generator.Item(node: child, frame: placed.frame, rotation: placed.rotation))
+                    found.append(Generator.Item(node: child, frame: placed.frame, rotation: Rotation.kept(placed.degrees)))
                 }
             }
         }
-        gather(container.children, at: Generator.Place())
+        gather(container.children, in: .host)
         // Top to bottom, as today's elements were sorted.
         return found.sorted { $0.frame.minY < $1.frame.minY }
     }

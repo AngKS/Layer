@@ -42,7 +42,7 @@ enum DesignLayoutWriter {
             "background": settings.resolvedBackground.hex,
             "showsGrid": settings.showsGrid,
             "gridStyle": settings.gridStyle.rawValue,
-            "gridSpacing": number(settings.gridSpacing),
+            "gridSpacing": tenthWithinReach(settings.gridSpacing),
             "snapsToGuides": settings.snapsToGuides,
             "snapsToGrid": settings.snapsToGrid,
             "showsMeasurements": settings.showsMeasurements,
@@ -59,13 +59,16 @@ enum DesignLayoutWriter {
     }
 
     private static func rect(_ rect: CGRect) -> [String: Double] {
-        ["x": number(rect.minX), "y": number(rect.minY), "width": number(rect.width), "height": number(rect.height)]
+        ["x": tenthWithinReach(rect.minX), "y": tenthWithinReach(rect.minY),
+         "width": tenthWithinReach(rect.width), "height": tenthWithinReach(rect.height)]
     }
 
-    /// Rounded to a tenth of a point, which is all a layout needs. A file can hold any number: what isn't one is written
-    /// as 0, and what is past any design's length as the farthest one written, as the canvas picture tells them, so that
-    /// nothing infinite reaches `JSONSerialization`, which ends the app rather than throwing.
-    fileprivate static func number(_ value: CGFloat) -> Double {
+    /// Rounded to a tenth of a point, which is all a layout needs, and within the farthest written. A file can hold any
+    /// number: what isn't one is written as 0, and what is past any design's length as the farthest one written, as the
+    /// canvas picture tells them, so that nothing infinite reaches `JSONSerialization`, which ends the app rather than
+    /// throwing. For frames, sizes and looks; a layout, padding or sizing is written as the file writes it
+    /// (`Writer.finiteOrNil(_:)`).
+    fileprivate static func tenthWithinReach(_ value: CGFloat) -> Double {
         guard value.isFinite else { return 0 }
         return (min(max(Double(value), -farthest), farthest) * 10).rounded() / 10
     }
@@ -91,16 +94,8 @@ private struct Writer {
         var containers: [[String: Any]] = []
     }
 
-    /// Both axes' sizing, as a node's `width` and `height` are saved.
-    private struct Sizes: Encodable {
-        var width: LayerNode.Sizing
-        var height: LayerNode.Sizing
-    }
-
     let design: String
     let index: TreeIndex
-    /// Writes a layout, padding or sizing as `design.json` does.
-    private let encoder = JSONEncoder()
 
     init(design: String, index: TreeIndex) {
         self.design = design
@@ -114,16 +109,16 @@ private struct Writer {
             "name": screen.name,
             "device": device.id,
             "deviceName": DeviceChoice.displayName(of: device),
-            "width": DesignLayoutWriter.number(device.size.width),
-            "height": DesignLayoutWriter.number(device.size.height),
-            "x": DesignLayoutWriter.number(screen.origin.x),
-            "y": DesignLayoutWriter.number(screen.origin.y),
-            "scale": DesignLayoutWriter.number(screen.scale * 100),
+            "width": DesignLayoutWriter.tenthWithinReach(device.size.width),
+            "height": DesignLayoutWriter.tenthWithinReach(device.size.height),
+            "x": DesignLayoutWriter.tenthWithinReach(screen.origin.x),
+            "y": DesignLayoutWriter.tenthWithinReach(screen.origin.y),
+            "scale": DesignLayoutWriter.tenthWithinReach(screen.scale * 100),
             "locked": screen.isLocked == true,
-            "safeAreaTop": DesignLayoutWriter.number(device.safeTop),
-            "safeAreaBottom": DesignLayoutWriter.number(device.safeBottom),
-            "layout": written(screen.root.layout ?? .free),
-            "padding": written(screen.root.padding),
+            "safeAreaTop": DesignLayoutWriter.tenthWithinReach(device.safeTop),
+            "safeAreaBottom": DesignLayoutWriter.tenthWithinReach(device.safeBottom),
+            "layout": Self.written(screen.root.layout ?? .free),
+            "padding": Self.written(screen.root.padding),
             "elements": contents.leaves,
             "containers": contents.containers,
         ]
@@ -160,11 +155,11 @@ private struct Writer {
             "id": id(node.id, on: host),
             "kind": node.kind.rawValue,
             "name": node.displayName,
-            "x": DesignLayoutWriter.number(frame.minX),
-            "y": DesignLayoutWriter.number(frame.minY),
-            "width": DesignLayoutWriter.number(frame.width),
-            "height": DesignLayoutWriter.number(frame.height),
-            "sizing": written(Sizes(width: node.width, height: node.height)),
+            "x": DesignLayoutWriter.tenthWithinReach(frame.minX),
+            "y": DesignLayoutWriter.tenthWithinReach(frame.minY),
+            "width": DesignLayoutWriter.tenthWithinReach(frame.width),
+            "height": DesignLayoutWriter.tenthWithinReach(frame.height),
+            "sizing": Self.written(width: node.width, height: node.height),
         ]
         if let parent { info["parent"] = id(parent, on: host) }
         if let turn = DesignLayoutWriter.turn(entry?.hostShape.degrees ?? node.rotation ?? 0) { info["rotation"] = turn }
@@ -176,8 +171,8 @@ private struct Writer {
     /// A group's or a card's entry: how it lays out what it holds, and what it holds, in order.
     private func container(_ node: LayerNode, in parent: UUID?, on host: Host) -> [String: Any] {
         var info = placed(node, in: parent, on: host)
-        info["layout"] = written(node.layout ?? .free)
-        info["padding"] = written(node.padding)
+        info["layout"] = Self.written(node.layout ?? .free)
+        info["padding"] = Self.written(node.padding)
         info["children"] = node.children.map { id($0.id, on: host) }
         return info
     }
@@ -192,14 +187,14 @@ private struct Writer {
         if let symbol = content.symbol { info["symbol"] = symbol }
         if node.kind == .shape { info["shape"] = (content.shape ?? .rectangle).rawValue }
         if content.imageID != nil { info["hasPicture"] = true }
-        if let fontSize = style.fontSize { info["fontSize"] = DesignLayoutWriter.number(fontSize) }
+        if let fontSize = style.fontSize { info["fontSize"] = DesignLayoutWriter.tenthWithinReach(fontSize) }
         if let weight = style.fontWeight { info["fontWeight"] = weight.rawValue }
         if let textColor = style.textColor { info["textColour"] = textColor.hex }
         if let alignment = style.textAlignment { info["textAlignment"] = alignment.rawValue }
-        if let radius = style.cornerRadius { info["cornerRadius"] = DesignLayoutWriter.number(radius) }
+        if let radius = style.cornerRadius { info["cornerRadius"] = DesignLayoutWriter.tenthWithinReach(radius) }
         if let opacity = style.opacity { info["opacity"] = opacity }
         if let width = style.borderWidth, width > 0 {
-            info["borderWidth"] = DesignLayoutWriter.number(width)
+            info["borderWidth"] = DesignLayoutWriter.tenthWithinReach(width)
             if let colour = style.borderColor { info["borderColour"] = colour.hex }
         }
         if style.hasShadow { info["shadow"] = true }
@@ -209,11 +204,70 @@ private struct Writer {
         return info
     }
 
-    /// `part` as `design.json` writes it.
-    private func written(_ part: some Encodable) -> Any {
-        guard let data = try? encoder.encode(part), let object = try? JSONSerialization.jsonObject(with: data) else {
-            return [String: Any]()
+    // MARK: Layout, padding and sizing
+
+    // Each written with the keys and values `design.json` gives it (`LayerNode+Coding.swift`), as its encoder writes
+    // them and JSON reads them back. A part holding a number that isn't finite, which the encoder refuses, is an empty
+    // object.
+
+    private static func written(_ layout: LayerNode.Layout) -> [String: Any] {
+        switch layout {
+        case .free:
+            return ["type": "free"]
+        case .stack(let stack):
+            guard let spacing = finiteOrNil(stack.spacing) else { return [:] }
+            return ["type": "stack", "axis": stack.axis.rawValue, "spacing": spacing, "alignment": stack.alignment.rawValue,
+                    "justify": stack.justify.rawValue]
+        case .grid(let grid):
+            guard let columnSpacing = finiteOrNil(grid.columnSpacing), let rowSpacing = finiteOrNil(grid.rowSpacing) else {
+                return [:]
+            }
+            return ["type": "grid", "columns": grid.columns, "columnSpacing": columnSpacing, "rowSpacing": rowSpacing,
+                    "horizontal": grid.alignment.horizontal.rawValue, "vertical": grid.alignment.vertical.rawValue]
+        case .overlay(let alignment):
+            return ["type": "overlay", "horizontal": alignment.horizontal.rawValue, "vertical": alignment.vertical.rawValue]
         }
-        return object
+    }
+
+    private static func written(_ padding: LayerNode.Padding) -> [String: Any] {
+        guard let top = finiteOrNil(padding.top), let leading = finiteOrNil(padding.leading),
+              let bottom = finiteOrNil(padding.bottom), let trailing = finiteOrNil(padding.trailing) else { return [:] }
+        return ["top": top, "leading": leading, "bottom": bottom, "trailing": trailing]
+    }
+
+    /// Both axes' sizing, as a node's `width` and `height` are saved: empty when either can't be written.
+    private static func written(width: LayerNode.Sizing, height: LayerNode.Sizing) -> [String: Any] {
+        guard let width = written(width), let height = written(height) else { return [:] }
+        return ["width": width, "height": height]
+    }
+
+    private static func written(_ sizing: LayerNode.Sizing) -> [String: Any]? {
+        var fields: [String: Any]
+        switch sizing.mode {
+        case .fit:
+            fields = ["mode": "fit"]
+        case .fill(let weight):
+            guard let weight = finiteOrNil(weight) else { return nil }
+            fields = ["mode": "fill", "weight": weight]
+        case .fixed:
+            fields = ["mode": "fixed"]
+        }
+        if let minimum = sizing.minimum {
+            guard let minimum = finiteOrNil(minimum) else { return nil }
+            fields["min"] = minimum
+        }
+        if let maximum = sizing.maximum {
+            guard let maximum = finiteOrNil(maximum) else { return nil }
+            fields["max"] = maximum
+        }
+        return fields
+    }
+
+    /// A number of a layout, padding or sizing as `design.json`'s encoder writes it and JSON reads it back: as it is,
+    /// where a negative zero is 0. Nil when it isn't finite, which the encoder refuses, so its part is written empty.
+    /// Not rounded or kept within reach, as frames are (`DesignLayoutWriter.tenthWithinReach(_:)`).
+    private static func finiteOrNil(_ value: CGFloat) -> Double? {
+        guard value.isFinite else { return nil }
+        return value == 0 ? 0 : Double(value)
     }
 }

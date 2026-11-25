@@ -370,7 +370,7 @@ private struct ImageAttaching: ViewModifier {
             hasFailed = true
             return
         }
-        withAnimation(.smooth(duration: 0.3)) { model.addImage(prepared) }
+        withAnimation(.smooth(duration: 0.3)) { _ = model.addImage(prepared) }
     }
 
     /// A file of A2UI, imported: one too large or that can't be read says so in the import's sheet.
@@ -385,7 +385,7 @@ private struct ImageAttaching: ViewModifier {
             hasFailed = true
             return
         }
-        withAnimation(.smooth(duration: 0.3)) { model.addImage(prepared) }
+        withAnimation(.smooth(duration: 0.3)) { _ = model.addImage(prepared) }
     }
 }
 

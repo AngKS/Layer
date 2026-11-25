@@ -41,27 +41,13 @@ extension DesignStore {
     /// trust it, and a root that wasn't laid out stays as it was given.
     ///
     /// A screen is left out, as `addScreen(_:)` refuses one, when its device is one of the design's own that can't be
-    /// used (`DeviceFrame.problems`), which a file can hold; when the design already has its id or one of its nodes'
-    /// (or a screen before it does); when it holds a drawing or a sticky note, or a node deeper than 32; or when it
-    /// would take the design past 5,000 nodes.
+    /// used (`DeviceFrame.problems`), which a file can hold, or for `accepts(newScreen:besides:)`'s refusals, a screen
+    /// before it in `screens` counting as the design's.
     @discardableResult
     func addLaidOutScreens(_ screens: [TreeScreen]) -> [TreeScreen.ID] {
-        let index = index
-        var screenIDs = Set(tree.screens.map(\.id))
-        var taken: Set<UUID> = []
-        var count = index.count
+        var taken = takenByScreens
         var added: [TreeScreen] = []
-        for screen in screens {
-            let ids = TreeEdit.ids(in: screen.root)
-            let fresh = Set(ids)
-            guard tree.device(of: screen).problems.isEmpty, !screenIDs.contains(screen.id), fresh.count == ids.count,
-                  fresh.allSatisfy({ index[$0] == nil }), taken.isDisjoint(with: fresh),
-                  TreeEdit.levels(below: screen.root) <= TreeRules.maximumDepth,
-                  !TreeEdit.holds(screen.root, where: { !$0.kind.belongsOnScreens }),
-                  count + ids.count <= TreeRules.maximumNodes else { continue }
-            screenIDs.insert(screen.id)
-            taken.formUnion(fresh)
-            count += ids.count
+        for screen in screens where tree.device(of: screen).problems.isEmpty && accepts(newScreen: screen, besides: &taken) {
             added.append(screen)
         }
         guard !added.isEmpty else { return [] }
@@ -73,5 +59,42 @@ extension DesignStore {
         for screen in made { GenerationWork.committed(on: screen.id) }
         #endif
         return made.map(\.id)
+    }
+
+    // MARK: New screens
+
+    /// What new screens must not repeat: the design's screens' ids, its nodes' ids and how many nodes it holds, and
+    /// what screens added with them in the same change have taken (`accepts(newScreen:besides:)`).
+    struct TakenByScreens {
+        fileprivate var screens: Set<TreeScreen.ID>
+        /// Ids taken by the screens accepted so far, besides the design's own, which its index holds.
+        fileprivate var nodes: Set<UUID> = []
+        /// The design's nodes and theirs.
+        fileprivate var count: Int
+    }
+
+    /// What the design's own screens and nodes take, before any new screen is accepted.
+    var takenByScreens: TakenByScreens {
+        TakenByScreens(screens: Set(tree.screens.map(\.id)), count: index.count)
+    }
+
+    /// Whether `screen` can be added as a new screen beside what is `taken`, as `addScreen(keepingItsDevice:)` and
+    /// `addLaidOutScreens(_:)` both add one; when it can, `taken` takes it in. Refused when the design, or a screen
+    /// accepted before it, has its id or one of its nodes', or it gives one id twice; when it holds a drawing or a
+    /// sticky note, or a node deeper than 32; or when the design would hold more than 5,000 nodes. Its device isn't
+    /// asked about: see `addScreen(_:)`.
+    func accepts(newScreen screen: TreeScreen, besides taken: inout TakenByScreens) -> Bool {
+        let index = index
+        let ids = TreeEdit.ids(in: screen.root)
+        let fresh = Set(ids)
+        guard !taken.screens.contains(screen.id), fresh.count == ids.count,
+              fresh.allSatisfy({ index[$0] == nil }), taken.nodes.isDisjoint(with: fresh),
+              TreeEdit.levels(below: screen.root) <= TreeRules.maximumDepth,
+              !TreeEdit.holds(screen.root, where: { !$0.kind.belongsOnScreens }),
+              taken.count + ids.count <= TreeRules.maximumNodes else { return false }
+        taken.screens.insert(screen.id)
+        taken.nodes.formUnion(fresh)
+        taken.count += ids.count
+        return true
     }
 }

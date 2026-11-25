@@ -26,7 +26,7 @@ APP="$H/Sources/ScreenBenchmarkHarness/App"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -p "$R"/Layer/Tree/*.swift "$R"/Layer/A2UI/*.swift "$STAGE/"
-cp -p "$R/Layer/Model/Design.swift" "$R/Layer/Model/ShapeKind.swift" "$STAGE/"
+cp -p "$R/Layer/Model/Design.swift" "$R/Layer/Model/ShapeKind.swift" "$R/Layer/Model/TurnedRect.swift" "$STAGE/"
 cp -p "$R/Layer/Components/ComponentSpec.swift" "$R/Layer/Components/Catalogue.swift" "$STAGE/"
 cp -p "$R/Layer/Document/JSONValue.swift" "$STAGE/"
 cp -p "$R/Layer/Sketch/PromptOverrides.swift" "$R/Layer/Sketch/ScreenPrompt.swift" \

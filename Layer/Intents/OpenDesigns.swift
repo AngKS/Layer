@@ -232,6 +232,34 @@ final class OneAtATime {
     }
 }
 
+/// The one answer a wait gets, from whichever way it ends first: the work saying it has finished, its limit, or its
+/// cancellation. The wait is told it once, whenever it starts waiting.
+final class OneAnswer: Sendable {
+    private let state = OSAllocatedUnfairLock<(answer: Bool?, waiting: CheckedContinuation<Bool, Never>?)>(initialState: (nil, nil))
+
+    var isGiven: Bool { state.withLock { $0.answer != nil } }
+
+    /// Waits with `continuation` for the answer: at once if it has been given.
+    func wait(with continuation: CheckedContinuation<Bool, Never>) {
+        let given = state.withLock { state -> Bool? in
+            if state.answer == nil { state.waiting = continuation }
+            return state.answer
+        }
+        if let given { continuation.resume(returning: given) }
+    }
+
+    /// Gives the answer, unless one has been given already.
+    func give(_ answer: Bool) {
+        let waiting = state.withLock { state -> CheckedContinuation<Bool, Never>? in
+            guard state.answer == nil else { return nil }
+            state.answer = answer
+            defer { state.waiting = nil }
+            return state.waiting
+        }
+        waiting?.resume(returning: answer)
+    }
+}
+
 /// Of several ways a wait can end, lets the first through and no other.
 final class FirstToFinish: Sendable {
     private let finished = OSAllocatedUnfairLock(initialState: false)
@@ -279,9 +307,11 @@ enum DocumentBrowser {
     /// over the browser is put away first, as tapping Back would: given to `prepare` while
     /// it is still shown, then dismissed, unless it went or began to go meanwhile. A design
     /// still coming up is waited for first, since UIKit can leave a dismiss asked for then
-    /// unanswered. Each wait lasts at most `limit`; past it, the design couldn't be opened.
+    /// unanswered. Each wait lasts at most `limit`, counted in the main thread's own turns
+    /// (`looks(in:)`); past it, the design couldn't be opened. Nil waits for as long as each
+    /// takes: a test's own time limit stands in. Given up on, the open stops at once.
     static func pick(
-        _ url: URL, in browser: UIViewController, limit: Duration = .seconds(2),
+        _ url: URL, in browser: UIViewController, limit: Duration? = .seconds(2),
         dismissing dismiss: (UIViewController, @escaping @Sendable () -> Void) -> Void = { controller, done in controller.dismiss(animated: false) { done() } },
         preparing prepare: (UIViewController) async -> Void, picking: (URL) -> Void
     ) async throws {
@@ -289,32 +319,53 @@ enum DocumentBrowser {
             await prepare(presented)
             // An open given up on meanwhile goes no further: the next may already be under way.
             try Task.checkCancellation()
-            let deadline = ContinuousClock.now + limit
-            while presented.isBeingPresented, ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(20))
+            var looksLeft = limit.map(looks(in:))
+            while presented.isBeingPresented, looksLeft.map({ $0 > 0 }) ?? true {
+                looksLeft? -= 1
+                try await Task.sleep(for: look)
             }
             if browser.presentedViewController === presented, !presented.isBeingDismissed {
-                guard !presented.isBeingPresented, await finishes(within: limit, { done in dismiss(presented, done) }) else {
-                    throw LayerIntentError.couldNotOpen
-                }
+                guard !presented.isBeingPresented else { throw LayerIntentError.couldNotOpen }
+                let isPutAway = await finishes(within: limit) { done in dismiss(presented, done) }
+                // Nor does one given up on while its design was being dismissed.
+                try Task.checkCancellation()
+                guard isPutAway else { throw LayerIntentError.couldNotOpen }
             }
         }
-        // Nor does one given up on while its design was being dismissed.
         try Task.checkCancellation()
         picking(url)
     }
 
-    /// Whether `start` says it has finished within `limit`.
-    private static func finishes(within limit: Duration, _ start: (@escaping @Sendable () -> Void) -> Void) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let first = FirstToFinish()
-            start {
-                if first.claim() { continuation.resume(returning: true) }
+    /// How long a wait sleeps between looks at what it waits for.
+    private static let look: Duration = .milliseconds(20)
+
+    /// How many looks a wait of `limit` has: on a free main thread, `limit`. Each look is a turn of the main thread,
+    /// so a stall of it uses up one look rather than its length. A limit timed by the clock ran out across a stall
+    /// longer than itself: the wait woke before UIKit could finish the presentation or the dismiss it waited for, and
+    /// gave up however soon that would have come (sweep 2 review, M-2).
+    private static func looks(in limit: Duration) -> Int {
+        max(1, Int((limit / look).rounded(.up)))
+    }
+
+    /// Whether `start` says it has finished within `limit`, counted in looks (`looks(in:)`); with no limit, once it
+    /// says so. False at once when the wait is cancelled.
+    private static func finishes(within limit: Duration?, _ start: (@escaping @Sendable () -> Void) -> Void) async -> Bool {
+        let answer = OneAnswer()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                answer.wait(with: continuation)
+                start { answer.give(true) }
+                guard let limit else { return }
+                Task {
+                    for _ in 0..<looks(in: limit) {
+                        try? await Task.sleep(for: look)
+                        if answer.isGiven { return }
+                    }
+                    answer.give(false)
+                }
             }
-            Task {
-                try? await Task.sleep(for: limit)
-                if first.claim() { continuation.resume(returning: false) }
-            }
+        } onCancel: {
+            answer.give(false)
         }
     }
 

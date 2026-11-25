@@ -1163,7 +1163,8 @@ struct VoiceToolsTests {
     /// A slider moved and let go while a command runs is a step of its own, and the
     /// command's step is closed when the command ends: a change made next is a step of its own.
     /// The slider goes through the format panel, as a slider does: a run of changes the
-    /// panel's pause ends.
+    /// panel's pause ends. The test waits on the pause itself, not on a clock: polled against 3 s, a stall of the main
+    /// actor that every suite shares ran the limit out before the pause's 20 ms task could run (the sweep, lane 2).
     @Test func aSliderMovedAndLetGoDuringACommandLeavesTheStepToTheCommand() async throws {
         let bench = bench()
         let store = bench.app.store
@@ -1175,7 +1176,8 @@ struct VoiceToolsTests {
         for width in [180, 160, 140] {
             bench.app.adjusting { store.update(image.node) { $0.frame.size.width = CGFloat(width) } }
         }
-        #expect(await eventually { !store.isEditing }, "the panel's pause ends the slider's step")
+        await bench.app.waitForAdjustmentPause()
+        #expect(!store.isEditing, "the panel's pause ends the slider's step")
         _ = bench.box.styleElement(element: "E2", look: "green")
         store.endHeldEdit()
         #expect(!store.isEditing && !store.isHoldingEdit)

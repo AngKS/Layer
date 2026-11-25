@@ -27,3 +27,44 @@ struct OutlineStream: Sendable {
         return root
     }
 }
+
+/// What a model writes a screen in.
+enum ScreenFormat: String, Sendable, CaseIterable {
+    /// The indented outline (`Outline`): what every model writes (`ScreenGenerator.format(for:)`).
+    case outline
+    /// A2UI 1.0 in Layer's catalogue, a message per line (`A2UIPrompt`).
+    case a2ui
+}
+
+/// A model's answer read as it is written, in the format the model was told to write: `ScreenGenerator` reads each
+/// answer through one, and so does the screen harness.
+enum ScreenReader {
+    case outline(OutlineStream)
+    case a2ui(A2UIStream)
+
+    init(_ format: ScreenFormat, tokens: DesignTokens) {
+        switch format {
+        case .outline: self = .outline(OutlineStream(tokens: tokens))
+        case .a2ui: self = .a2ui(A2UIStream(tokens: tokens))
+        }
+    }
+
+    /// The screen so far, when it has more leaves than the last one handed on.
+    mutating func take(_ text: String, isComplete: Bool) -> LayerNode? {
+        switch self {
+        case .outline(var outline):
+            defer { self = .outline(outline) }
+            return outline.take(text, isComplete: isComplete)
+        case .a2ui(var a2ui):
+            defer { self = .a2ui(a2ui) }
+            return a2ui.take(text, isComplete: isComplete)
+        }
+    }
+
+    /// Once the answer is complete, what couldn't be brought in, but for buttons' actions: Layer never runs
+    /// one, so that isn't something left out. The outline reads every line it can and passes over the rest.
+    var leftOut: [A2UIDiagnostic] {
+        guard case .a2ui(let a2ui) = self else { return [] }
+        return a2ui.diagnostics.filter { $0.reason != .actionNotRun }
+    }
+}

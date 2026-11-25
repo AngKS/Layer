@@ -262,14 +262,12 @@ enum SketchedNode {
     /// column, which is the cell's.
     private static func horizontalExtent(of held: CGRect, in parent: LayerNode) -> CGFloat {
         guard case .grid(let grid) = parent.resolvedLayout else { return held.width }
-        let columns = CGFloat(min(12, max(1, grid.columns)))
-        let content = parent.frame.width - parent.padding.leading - parent.padding.trailing
-        let column = (content - (columns - 1) * max(0, grid.columnSpacing)) / columns
+        let column = LayoutEngine.columnWidth(grid, parent.frame.width - parent.padding.leading - parent.padding.trailing)
         return column.isFinite && column > 0 ? column : held.width
     }
 
-    /// The least a card narrows a member to: the height of the smallest control (`TreeValidator`), across.
-    private static let narrowest: CGFloat = 44
+    /// The least a card narrows a member to: the height of the smallest control, across.
+    private static let narrowest = TreeValidator.smallestControlHeight
 
     /// `taken`, back to front, fitted across a card `extent` wide whose `padding` is the design's, which is cut across
     /// to what leaves each member at least `narrowest` wide (or its own width, when that is less), down to none.
@@ -344,11 +342,7 @@ enum SketchedNode {
         let staying = children.indices.filter { !taking.contains(children[$0].id) }
         func isDrawn(_ at: Int) -> Bool { !children[at].isHidden }
         /// Seen before the card: drawn, and not wholly under one drawn thing in front of it.
-        func wasSeen(_ at: Int) -> Bool {
-            isDrawn(at) && !children.indices.contains { over in
-                over > at && isDrawn(over) && shapes[over].contains(shapes[at])
-            }
-        }
+        var wasSeen = TreeEdit.Seen(shapes: shapes, drawn: children.map { !$0.isHidden })
 
         // 1. The ruled slot.
         let floor = staying.lastIndex { at in
@@ -363,7 +357,7 @@ enum SketchedNode {
                 || takenAt.contains { $0 > at && shapes[at].contains(shapes[$0]) && wasSeen($0) })
         } ?? -1)
         let highest = staying.firstIndex { box.contains(shapes[$0]) && wasSeen($0) } ?? staying.count
-        let slot = lowest <= highest ? min(max(ruled, lowest), highest) : ruled
+        let slot = TreeEdit.slot(ruled, movedInto: lowest, highest)
         return slot < staying.count ? children[staying[slot]].id : nil
     }
 

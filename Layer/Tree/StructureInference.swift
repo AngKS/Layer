@@ -172,11 +172,8 @@ enum StructureInference {
         // Only what meets the members can cover one or be covered by one: the rest are passed over at once.
         let span = members.reduce(CGRect.null) { $0.union(shape[$1]) }
         func isDrawn(_ at: Int) -> Bool { !before[at].isHidden }
-        /// Seen before it was built: drawn, and not wholly under one drawn thing in front of it. Asked only of what one
-        /// thing wholly covers, which is seldom: it looks at everything in front.
-        func wasSeen(_ at: Int) -> Bool {
-            isDrawn(at) && !before.indices.contains { over in over > at && isDrawn(over) && was[over].contains(was[at]) }
-        }
+        /// Seen before it was built: drawn, and not wholly under one drawn thing in front of it.
+        var wasSeen = TreeEdit.Seen(shapes: was, drawn: before.map { !$0.isHidden })
         let ruled = staying.count { $0 < front }
         let lowest = 1 + (staying.lastIndex { at in
             isDrawn(at) && meets(shape[at], span) && members.contains { shape[at].contains(shape[$0]) && wasSeen($0) }
@@ -185,7 +182,7 @@ enum StructureInference {
             meets(shape[at], span) && members.contains { member in isDrawn(member) && shape[member].contains(shape[at]) }
                 && wasSeen(at)
         } ?? staying.count
-        return lowest <= highest ? min(max(ruled, lowest), highest) : ruled
+        return TreeEdit.slot(ruled, movedInto: lowest, highest)
     }
 
     /// What rides on a member (plan 5's final review, A5): each child that stays, the pass may move, and lies at least

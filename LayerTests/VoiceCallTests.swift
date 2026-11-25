@@ -159,6 +159,21 @@ func until(within limit: Duration = .seconds(10), _ condition: () -> Bool) async
     }
 }
 
+/// Waits for `condition` as `until` does, looked at now and again each time something observable it reads changes, but
+/// with no limit of its own: for an event the test knows comes, however long the main actor that every suite running
+/// alongside shares takes to get to it. A limit that runs out across one of its stalls fails the wait however soon the
+/// event follows: the waiter's own wake-up is queued ahead of the work it waits for. The test's time limit
+/// (`.timeLimit`) is what a change that never comes runs into, which cancels the wait.
+@MainActor
+func observed(_ condition: () -> Bool) async -> Bool {
+    while !Task.isCancelled {
+        let (changes, change) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        if withObservationTracking(condition, onChange: { change.yield() }) { return true }
+        for await _ in changes { break }
+    }
+    return condition()
+}
+
 @Suite("A voice call", .serialized)
 @MainActor
 struct VoiceCallTests {

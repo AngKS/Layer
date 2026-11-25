@@ -1440,10 +1440,23 @@ final class AppModel {
     /// The time now, which tells a double-tap's second tap from a tap of its own. A test
     /// sets a clock of its own.
     @ObservationIgnored var now: () -> ContinuousClock.Instant = { .now }
-    /// How soon a second tap on the same thing makes a double-tap. It stands in for the
-    /// system double-tap interval the spec names: iPadOS gives no public value for it to
-    /// read (L4).
+    /// How soon after a tap lifts a second on the same thing must land to make a double-tap: the system's
+    /// double-tap interval the spec names, which iPadOS gives no public value for (L4). It is UIKit's own,
+    /// `UITapGestureRecognizer`'s maximum interval between successive taps, 0.35 s on iPadOS 27, and it is timed
+    /// as UIKit times it, from the one lifting to the other landing (`isSecondTap(on:)`).
     static let doubleTapInterval: Duration = .milliseconds(350)
+    /// The finger touch the canvas saw lift last: when it landed and when it lifted. A tap's own, while the tap is
+    /// handled just after it lifts (`liftToHandling`): its landing is what a double-tap's second tap is timed to.
+    /// Supplied by the ink canvas, which sees every finger. Nil where nothing is, as in a test.
+    @ObservationIgnored var lastFingerTouch: () -> (landed: ContinuousClock.Instant, lifted: ContinuousClock.Instant)? = { nil }
+    /// The longest after a finger lifts that its tap is handled, for the finger to be taken as the tap's own. A tap is
+    /// handled within a frame or two of its lifting (6–17 ms measured); a finger that lifted longer before is another
+    /// touch's, such as a control's tapped while the Pencil taps a thing, which a Pencil or pointer tap, whose touch the
+    /// canvas doesn't see, mustn't be timed to.
+    static let liftToHandling: Duration = .milliseconds(100)
+    /// The longest a press can be held and still be a tap of a double-tap: UIKit's own, `UITapGestureRecognizer`'s
+    /// maximum single tap duration, 0.75 s on iPadOS 27.
+    static let longestTap: Duration = .milliseconds(750)
     /// The last tap that picked a thing: what it was on (a thing in a group, or a group's
     /// gap, before `pickTarget`), when, and the selection before and after it. A second tap
     /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
@@ -1523,10 +1536,22 @@ final class AppModel {
     }
 
     /// Whether a tap on a thing is the second of a double-tap: the last tap was on the same
-    /// thing, not long before, and the selection is as it left it.
+    /// thing, the selection is as it left it, and this one landed soon after that one lifted.
+    /// A tap is handled as it lifts, so it is timed to where the canvas saw its finger land,
+    /// as UIKit times its own double tap: timed to its lifting, the second press's own length
+    /// counted against it, and two quick presses the system would take for a double-tap
+    /// weren't one. As in UIKit, a press held past the longest tap is no second tap.
+    ///
+    /// The finger is the tap's own only when it lifted just now (`liftToHandling`) and
+    /// landed after the last tap. A tap with no such finger, a Pencil's or a pointer's, which
+    /// the canvas doesn't see, is timed to now, as it lifts, as every tap was before.
     private func isSecondTap(on thing: CanvasSelection) -> Bool {
         guard let lastTap, lastTap.thing == thing, lastTap.after == selection else { return false }
-        return now() - lastTap.at < Self.doubleTapInterval
+        let time = now()
+        guard let finger = lastFingerTouch(), time - finger.lifted < Self.liftToHandling, finger.landed > lastTap.at else {
+            return time - lastTap.at < Self.doubleTapInterval
+        }
+        return finger.landed - lastTap.at < Self.doubleTapInterval && finger.lifted - finger.landed <= Self.longestTap
     }
 
     /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it
@@ -2429,6 +2454,12 @@ final class AppModel {
             if let adjustment { store.endEdit(adjustment) }
             adjustment = nil
         }
+    }
+
+    /// Returns once the format panel's pause has ended its run of changes, or at once when no run waits for it. A test
+    /// waits on the pause itself here, rather than on a clock.
+    func waitForAdjustmentPause() async {
+        await adjustmentEnd?.value
     }
 
     /// Opens the panel's own edit, unless it is open already.

@@ -1,13 +1,10 @@
 import CoreGraphics
 import Foundation
 
-// A stand-in for `TurnedRect` (Layer/Model/Rotation.swift), which the tree's records, index,
-// edits and layout use, and for the `Rotation.rotate` it turns its corners with. The real file
-// also turns rects for the canvas (`Viewport`), which needs much of the app's model. What is
-// here is copied from it unchanged, less `corner(_:)` and the `Viewport` extension; keep it in
-// step with Rotation.swift. `corner(_:)` takes an `ElementLayout.Corner`, so it is in
-// Tools/SketchBenchmarkHarness/TurnedRectCorner.swift, beside the one harness that compiles
-// ElementLayout.swift: every file here is copied into the screen harness, which doesn't.
+// A turned box, apart from `Rotation.swift` so that it builds on macOS: the tree's records, index, edits and layout
+// use it, and the benchmark harnesses compile this file as it is. `corner(_:)` is beside `ElementLayout.Corner`, and
+// the view's shape of one (`Viewport.viewShape(for:)`) is in `Rotation.swift`.
+
 extension Rotation {
     /// The point turned clockwise on screen about `centre`.
     static func rotate(_ point: CGPoint, about centre: CGPoint, by degrees: Double) -> CGPoint {
