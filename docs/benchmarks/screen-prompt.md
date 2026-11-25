@@ -315,7 +315,7 @@ model's reasoning (`answerStart`), and `run.sh rescore <log>` scores a run's A2U
   two with one id in one message are. A2UI from a file is read as before. On the 24 answers above, the reader alone makes
   13 valid (`rescore`).
 - A screen in A2UI is asked for at temperature 0.5 (`A2UIPrompt.temperature`), and LM Studio is now sent a temperature
-  when one is asked for. (Round 1, after one fixed run.)
+  when one is asked for; Magic Pen's requests still ask LM Studio for none (below). (Round 1, after one fixed run.)
 - The prompt asks for ids in words, each component's own, and counts only what shows, not the Columns and Rows that hold
   it. (Round 3.)
 - The prompt says a line closes only its own component. (Round 4.)
@@ -353,6 +353,10 @@ failures count; the times below are the final run's, which nothing else shared.
 | Output tokens per screen, p50 (all) | 3220 (81945) | 4512 (108750) | 4393 (104748) |
 | Reasoning tokens p50 | 3090 | 3937 | 3474 |
 
+"A2UI, before" is an `a2ui 3` run on its own, as the brief asked for the diagnosis; the final run is `both 3`, the two
+formats taking turns. So those two columns aren't like for like: the rule's comparison, of both formats in one run, is
+the one that counts.
+
 The outline was also 24 of 24 in rounds 2, 3 and 4, and the on-device outline 8 of 8 after each round and after the final
 run (first content p50 1071, 1066, 1106 and 1003 ms).
 
@@ -382,7 +386,21 @@ hosted default: outline — valid 20/24 vs 24/24; first content p50 51127 ms vs 
   that keeps reasoning under a schema, or a provider that does, is the lever left for syntax.
 
 **The machine.** The final run had the machine and LM Studio to itself: load 1.72 to 5.12, and no request in LM Studio's
-log but its own. Rounds 2 to 4 began at a load under 20 with MEASURING in place but were each disturbed for a few minutes:
-round 2 by another lane's `xcodebuild test` from 02:57:49 to 03:01:37 (load up to 175.83), round 3 by 77 of another lane's
-LM Studio requests from 03:46:10 to 03:57:14, and round 4 by 19 of them from 04:44:50 to 04:48:38 and a load of 21 to 28
-from 05:20:44 to 05:23:14. The before run shared its first 75 seconds with another lane's on-device run.
+log but its own. Rounds 2 to 4 began at a load under 20 with MEASURING in place but were each disturbed for a few
+minutes: round 2 by a load of 20 or more from 02:56:26 to 03:03:27 (up to 175.83) from another lane's two `xcodebuild
+test` runs (from 02:55:46, and from 02:57:49 to 03:01:37), round 3 by 77 of another lane's LM Studio requests from
+03:46:10 to 03:57:14, and round 4 by 19 of them from 04:44:50 to 04:48:38 and a load of 21 to 28 from 05:20:44 to
+05:23:14. The before run shared its first 75 seconds with another lane's on-device run.
+
+**Magic Pen on LM Studio, at temperature 0 and at its own (fix round 1).** Sending LM Studio the temperature asked for
+would also have changed Magic Pen: `HostedSketchInterpreter` asks for 0 in its two requests, and LM Studio had always
+been sent none. Its exact requests, captured from the app through the test provider (`decide` for three of the corpus's
+checkbox-or-image close calls, with its schema; `suggestTitle` for boards made of the settings, product and sign-in
+examples), were sent five times each at temperature 0 and with none, taking turns, from 07:36:18 to 07:37:45 (MEASURING
+held, load 16.41 at the start, nothing else in LM Studio's log). All 60 finished (`stop`), none near a limit. `decide`,
+under its schema, reasons not at all at either: 9 to 16 tokens, 0.1 to 0.5 s. `suggestTitle` reasons 211 to 410 tokens
+in 1.9 to 3.8 s at either, with no loop, and names each board sensibly (at 0, "Product Detail Page", "Notification
+Settings", "Sign In Screen", the same each time). But one `decide` got worse: the pill-shaped outline with an X that the
+corpus labels an image was read as a checkbox five times out of five at 0, against image four times out of five with no
+temperature; the other two were the same at both. So Magic Pen asks LM Studio for no temperature again, as before, and
+Anthropic still for 0 (`HostedSketchInterpreter.options`); only A2UI's request gets its temperature.
