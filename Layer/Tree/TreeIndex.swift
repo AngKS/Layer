@@ -31,6 +31,13 @@ struct TreeIndex: Equatable, Sendable {
     /// False when the design holds an id twice, which only a damaged design does: the first node of the id has the
     /// entry (see `walk`). Such an index is built again for every version, never brought up to date.
     private(set) var isClean = true
+    /// How many groups the structure pass made (`LayerNode.isAStructureThePassMade`) each host holds, every node of the
+    /// design counted, those of an id held twice included.
+    private var structures: [Host: Int] = [:]
+
+    /// The hosts that hold a group the structure pass made: where the store's decline check looks
+    /// (`DesignStore.takenOutOfStructures`).
+    var hostsWithStructures: Set<Host> { Set(structures.keys) }
 
     init(_ content: TreeContent) {
         var count = content.canvas.count + content.screens.count
@@ -91,6 +98,7 @@ struct TreeIndex: Equatable, Sendable {
         } else {
             isClean = false
         }
+        if node.isAStructureThePassMade { count(on: host, by: 1) }
         for (index, child) in node.children.enumerated() {
             walk(child, host: host, parent: node.id, siblingIndex: index, path: path + [index], in: pose.own)
         }
@@ -185,10 +193,10 @@ struct TreeIndex: Equatable, Sendable {
     }
 
     /// Whether what a node's own entry is worked out from is the same in `a` and `b`: its frame, angle, lock and hide,
-    /// and its scale on the canvas's top level.
+    /// its scale on the canvas's top level, and whether it is a structure the pass made.
     private static func isPosedAlike(_ a: LayerNode, _ b: LayerNode, onCanvasTop: Bool) -> Bool {
         a.frame == b.frame && a.rotation == b.rotation && a.isLocked == b.isLocked && a.isHidden == b.isHidden
-            && (!onCanvasTop || a.scale == b.scale)
+            && (!onCanvasTop || a.scale == b.scale) && a.isAStructureThePassMade == b.isAStructureThePassMade
     }
 
     /// Brings the entries of `now` and everything in it up to date from `was`, the node of the same id at the same
@@ -197,6 +205,7 @@ struct TreeIndex: Equatable, Sendable {
                                  changes: inout Changes) {
         let isPosedAlike = Self.isPosedAlike(was, now, onCanvasTop: host == .canvas && path.count == 1)
         if !moved, isPosedAlike, was.children.isShared(with: now.children) { return }
+        if was.isAStructureThePassMade != now.isAStructureThePassMade { count(on: host, by: now.isAStructureThePassMade ? 1 : -1) }
         let posed = moved || !isPosedAlike
         let pose = Self.pose(of: now, in: space, host: host)
         if posed {
@@ -229,14 +238,25 @@ struct TreeIndex: Equatable, Sendable {
         }
     }
 
-    /// Takes `node`'s entry, and those of everything in it, out of the index.
+    /// Takes `node`'s entry, and those of everything in it, out of the index. `host` is the one it was on.
     private mutating func forget(_ node: LayerNode, on host: Host) {
         entries[node.id] = nil
+        if node.isAStructureThePassMade { count(on: host, by: -1) }
         for child in node.children { forget(child, on: host) }
+    }
+
+    /// Adds `change` to the groups the structure pass made that `host` holds.
+    private mutating func count(on host: Host, by change: Int) {
+        let total = structures[host, default: 0] + change
+        structures[host] = total > 0 ? total : nil
     }
 }
 
 extension LayerNode {
+    /// A group the structure pass made: what the store's decline check looks in for members taken out
+    /// (`DesignStore.takenOutOfStructures`).
+    var isAStructureThePassMade: Bool { kind == .group && sketch?.decidedBy == .structure }
+
     /// Whether this is `other` as it was, everything in it unchanged: equal, with the very list of children `other`
     /// has, as a version of a design that changed elsewhere holds it. Quick where `==` would compare all it holds. A node
     /// equal to `other` but whose children were written again isn't, and is looked at as one that changed.

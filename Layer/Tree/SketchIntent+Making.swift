@@ -51,7 +51,8 @@ extension TreeContent {
         var follower = PlacementFollower(before: before)
         for index in screens.indices {
             let screen = screens[index]
-            guard earlier[screen.id] != screen.root else { continue }
+            // Unchanged, it is passed over at once; one equal but written again is followed, and nothing in it changes.
+            if let was = earlier[screen.id], screen.root.isUnchanged(from: was) { continue }
             follower.device = device(of: screen)
             follower.host = .screen(screen.id)
             let now = PlacementFollower.Pose(node: screen.root, toHost: .identity)
@@ -114,6 +115,8 @@ private struct PlacementFollower {
         var held: [UUID: Int]?
         var rewritten: LayerNode?
         for index in node.children.indices {
+            // A leaf with no intent has none to follow, wherever the change put it, and holds nothing that has.
+            if node.children[index].sketch == nil, node.children[index].children.isEmpty { continue }
             var child = node.children[index]
             var then: Pose?
             if let was {

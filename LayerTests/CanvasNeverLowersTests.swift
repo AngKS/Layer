@@ -307,16 +307,22 @@ extension HostedWindowSuites {
                 let owner = CanvasDrags.Owner()
                 let (written, built, drawn) = (ListWork.elementsWritten, targets(), nodeViews())
                 var checks: [Double] = [], checksAsThePass: [Double] = []
+                var checksAsTheStore: [Double] = [], checksAsTheStoreAsThePass: [Double] = []
                 for frame in 1...60 {
                     let before = model.store.tree
                     drags.moveOnTarget(ref, by: CGSize(width: step.width * CGFloat(frame), height: 0), startingAt: start, owner: owner, model: model)
                     let after = model.store.tree
                     // The decline check (plan 5, Task 9) runs once on each change a frame makes: timed here on the
-                    // frame's own trees, as they are and with the row and the group made the pass's.
+                    // frame's own trees, as they are and with the row and the group made the pass's; and as the store
+                    // runs it (sweep 1, item 6), told the hosts that hold a structure the pass made.
                     if after != before {
+                        let passMade = (Self.madeByThePass([row.id, group.id], in: before), Self.madeByThePass([row.id, group.id], in: after))
                         checks.append(Self.timeDeclineCheck(from: before, to: after))
-                        checksAsThePass.append(Self.timeDeclineCheck(from: Self.madeByThePass([row.id, group.id], in: before),
-                                                                     to: Self.madeByThePass([row.id, group.id], in: after)))
+                        checksAsThePass.append(Self.timeDeclineCheck(from: passMade.0, to: passMade.1))
+                        checksAsTheStore.append(Self.timeDeclineCheck(from: before, to: after,
+                                                                      structures: TreeIndex(before).hostsWithStructures))
+                        checksAsTheStoreAsThePass.append(Self.timeDeclineCheck(from: passMade.0, to: passMade.1,
+                                                                               structures: TreeIndex(passMade.0).hostsWithStructures))
                     }
                     host.view.layoutIfNeeded()
                     try await Task.sleep(for: .milliseconds(4))
@@ -327,14 +333,16 @@ extension HostedWindowSuites {
                 try await settle(.milliseconds(300))
                 print("BENCH drag \(what) frames=60 writes=\(counts.0) targets=\(counts.1) nodeViews=\(counts.2)")
                 print("BENCH drag \(what) declineCheck changes=\(checks.count) \(Self.microseconds(checks)) asThePass \(Self.microseconds(checksAsThePass))")
+                print("BENCH drag \(what) declineCheckAsTheStore changes=\(checksAsTheStore.count) \(Self.microseconds(checksAsTheStore)) asThePass \(Self.microseconds(checksAsTheStoreAsThePass))")
             }
         }
 
         /// How long the store's decline check takes over one change, in µs: `takenOutOfStructures`, which
-        /// `DesignStore.change` runs after every forward change.
-        private static func timeDeclineCheck(from before: TreeContent, to after: TreeContent) -> Double {
+        /// `DesignStore.change` runs after every forward change, told `structures` as the store tells it.
+        private static func timeDeclineCheck(from before: TreeContent, to after: TreeContent,
+                                             structures: Set<TreeIndex.Host>? = nil) -> Double {
             let start = ContinuousClock.now
-            _ = DesignStore.takenOutOfStructures(from: before, to: after)
+            _ = DesignStore.takenOutOfStructures(from: before, to: after, structures: structures)
             let elapsed = ContinuousClock.now - start
             return Double(elapsed.components.seconds) * 1e6 + Double(elapsed.components.attoseconds) / 1e12
         }

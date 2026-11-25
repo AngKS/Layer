@@ -381,6 +381,51 @@ private func observation(of sketch: CGRect) throws -> SketchObservation {
         #expect(fields.allSatisfy { isDeclined($0.id, in: model) })
     }
 
+    /// The decline check told which hosts hold a structure the pass made, as the store tells it from its index (sweep
+    /// item 6), finds what it finds when it looks everywhere: a member taken out of the row to its screen, to another
+    /// screen or to the canvas, and nothing for a change on a screen or the canvas that holds no such row.
+    @Test func theDeclineCheckToldWhereStructuresAreFindsWhatItFindsLookingEverywhere() throws {
+        var row = LayerNode(kind: .group)
+        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 8))
+        row.frame = CGRect(x: 20, y: 100, width: 10, height: 10)
+        (row.width, row.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        row.sketch = LayerNode.SketchIntent(sketched: row.frame, on: DeviceFrame.iPhone.size, margin: DeviceFrame.iPhone.margin,
+                                            confidence: 1, decidedBy: .structure)
+        row.children = [text(0, 0), text(0, 0), text(0, 0)]
+        var withRow = TreeScreen(name: "A", origin: .zero, scale: 1, deviceID: nil)
+        withRow.root.children = [row, text(20, 300)]
+        var plain = TreeScreen(name: "B", origin: CGPoint(x: 600, y: 0), scale: 1, deviceID: nil)
+        plain.root.children = [text(20, 100), text(20, 200)]
+        var group = LayerNode(kind: .group)
+        group.frame = CGRect(x: 0, y: 1200, width: 100, height: 100)
+        group.scale = 1
+        group.children = [text(0, 0), text(0, 40)]
+        var before = TreeContent()
+        before.screens = [withRow, plain]
+        before.canvas = [group]
+        TreeRules.apply(to: &before, after: nil)
+        let structures = TreeIndex(before).hostsWithStructures
+        #expect(structures == [.screen(withRow.id)])
+
+        let member = before.screens[0].root.children[0].children[1]
+        let changes: [(String, (inout TreeContent) -> Void, Bool)] = [
+            ("a member taken out to its screen", { $0.screens[0].root.children[0].children.remove(at: 1); $0.screens[0].root.children.append(member) }, true),
+            ("a member taken to another screen", { $0.screens[0].root.children[0].children.remove(at: 1); $0.screens[1].root.children.append(member) }, true),
+            ("a member taken to the canvas", { $0.screens[0].root.children[0].children.remove(at: 1); $0.canvas.append(member) }, true),
+            ("a text moved on the plain screen", { $0.screens[1].root.children[0].frame.origin.x += 10 }, false),
+            ("a text moved in the canvas group", { $0.canvas[0].children[0].frame.origin.x += 10 }, false),
+            ("a member moved in its row", { $0.screens[0].root.children[0].children[1].content.text = "Moved" }, false),
+        ]
+        for (what, change, declines) in changes {
+            var after = before
+            change(&after)
+            let everywhere = DesignStore.takenOutOfStructures(from: before, to: after)
+            #expect(DesignStore.takenOutOfStructures(from: before, to: after, structures: structures) == everywhere, "after \(what)")
+            #expect(everywhere == (declines ? [member.id] : []), "after \(what)")
+        }
+        #expect(DesignStore.takenOutOfStructures(from: before, to: before, structures: []).isEmpty)
+    }
+
     @Test func undoingABuiltRowDeclinesNothing() throws {
         let (model, screen, undo) = makeModel()
         let a = text(20, 100), b = text(132, 100)

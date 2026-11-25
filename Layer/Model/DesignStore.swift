@@ -767,8 +767,11 @@ final class DesignStore {
         // The change and the tree's rules after it, in one access to the content, so that the
         // whole design is compared once (C6).
         let isUndoingOrRedoing = undoManager.map { $0.isUndoing || $0.isRedoing } ?? false
+        // The hosts of the design before that hold a structure the pass made, from the index when it is for that design.
+        let structures = keptIndex.flatMap { $0.version == count ? $0.index.hostsWithStructures : nil }
         Self.applying(body, to: &content, previous: before, followingTheRules: followsTheRules, laidOutAhead: ahead,
-                      followingPlacements: !keepsPlacementIntents, decliningWhatLeftAStructure: !isUndoingOrRedoing)
+                      followingPlacements: !keepsPlacementIntents, decliningWhatLeftAStructure: !isUndoingOrRedoing,
+                      structures: structures)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -819,10 +822,12 @@ final class DesignStore {
     /// Layers panel, several things dragged, Siri and voice. Not for a container that is gone, so that a structure grown
     /// into another or ungrouped declines nothing this way (`ungroup` declines on its own). The marks are part of the
     /// change, and so of its step (plan 5's final review, A9): undoing the move takes them away, and redo puts them
-    /// back. Not after an undo or a redo, which never come through here anyway.
+    /// back. Not after an undo or a redo, which never come through here anyway. `structures` are the hosts of `previous`
+    /// that hold a container the pass made, when the index knows them: the check looks nowhere else.
     private static func applying(_ body: (inout TreeContent) -> Void, to content: inout TreeContent, previous: TreeContent,
                                  followingTheRules: Bool, laidOutAhead: [TreeScreen.ID: LayerNode] = [:],
-                                 followingPlacements: Bool, decliningWhatLeftAStructure: Bool) {
+                                 followingPlacements: Bool, decliningWhatLeftAStructure: Bool,
+                                 structures: Set<TreeIndex.Host>?) {
         body(&content)
         // What the change itself wrote, before the rules lay anything out: only that is the person's placing. Held as a
         // value, it is copied only where the rules then change the tree.
@@ -831,7 +836,7 @@ final class DesignStore {
                         kept: followingTheRules ? previous : nil)
         if let written { content.followPlacements(since: previous, written: written) }
         if decliningWhatLeftAStructure {
-            let leaving = takenOutOfStructures(from: previous, to: content)
+            let leaving = takenOutOfStructures(from: previous, to: content, structures: structures)
             if !leaving.isEmpty { content = declining(Set(leaving), in: content) }
         }
     }

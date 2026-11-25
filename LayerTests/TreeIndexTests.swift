@@ -232,8 +232,9 @@ extension TreeIndexTests {
 
     /// The store keeps its index across changes and brings it up to date where the design changed: after every change
     /// of a run that moves, turns, locks, hides, retypes, restyles, adds, deletes, reparents, reorders, wraps, unwraps,
-    /// rescales, duplicates, adds and takes away a screen, undoes, redoes and puts back a whole design, the index it
-    /// gives is the one a fresh build of the design gives.
+    /// marks a structure the pass's, rescales, duplicates, adds and takes away a screen, undoes, redoes and puts back a
+    /// whole design, the index it gives is the one a fresh build of the design gives, the hosts holding a structure the
+    /// pass made among it.
     @MainActor
     @Test func theStoresKeptIndexIsAFreshBuildAfterEveryChange() throws {
         let (content, ids) = Self.mixedDesign()
@@ -278,6 +279,9 @@ extension TreeIndexTests {
         check("a wrap")
         #expect(!store.unwrap(wrapper).isEmpty)
         check("an unwrap")
+        store.update(ids.row) { $0.sketch = LayerNode.SketchIntent(sketched: $0.frame, on: nil, margin: 0, confidence: 1, decidedBy: .structure) }
+        check("a row the structure pass's")
+        #expect(store.index.hostsWithStructures == [.screen(ids.free)])
         store.update(ids.group) { $0.scale = 0.75 }
         check("a canvas node's scale")
         store.update(ids.turned) { $0.rotation = 0 }
@@ -290,6 +294,7 @@ extension TreeIndexTests {
         check("a screen added")
         store.deleteScreen(ids.free)
         check("a screen taken away")
+        #expect(store.index.hostsWithStructures.isEmpty)
         undo.undo()
         check("an undo")
         undo.undo()
@@ -298,7 +303,7 @@ extension TreeIndexTests {
         check("a redo")
         store.restore(content)
         check("a whole design put back")
-        #expect(checked == 24)
+        #expect(checked == 25)
     }
 
     /// Brought up to date in place where only frames, angles, locks and hides change; and refused, to be built again,

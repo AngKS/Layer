@@ -94,26 +94,32 @@ extension DesignStore {
     /// The nodes a change took out of a container the pass made into another parent, that container still being there
     /// (call 11, F4). One the change deleted, or whose container went (grown into another, undone, ungrouped), isn't
     /// among them. Only the hosts the change touched are looked into.
-    static func takenOutOfStructures(from before: TreeContent, to after: TreeContent) -> [UUID] {
+    ///
+    /// `structures`, when known, are the hosts of `before` that hold a container the pass made (the index's
+    /// `hostsWithStructures`): no member can have left one anywhere else, so the rest of `before` isn't looked into, and
+    /// with none at all nothing is (plan 5's Task 9 carry: the check ran on every drag frame and stroke).
+    static func takenOutOfStructures(from before: TreeContent, to after: TreeContent,
+                                     structures: Set<TreeIndex.Host>? = nil) -> [UUID] {
+        if structures?.isEmpty == true { return [] }
         var was: [LayerNode] = [], now: [LayerNode] = []
         let screensAfter = Dictionary(after.screens.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })
         let screensBefore = Set(before.screens.map(\.id))
         for screen in before.screens {
             let root = screensAfter[screen.id]
             guard root != screen.root else { continue }
-            was.append(screen.root)
+            if structures?.contains(.screen(screen.id)) != false { was.append(screen.root) }
             if let root { now.append(root) }
         }
         now += after.screens.filter { !screensBefore.contains($0.id) }.map(\.root)
         if before.canvas != after.canvas {
-            was += before.canvas
+            if structures?.contains(.canvas) != false { was += before.canvas }
             now += after.canvas
         }
 
         // Each member of a container the pass made, by the container it was in.
         var held: [UUID: UUID] = [:]
         func holdings(_ node: LayerNode) {
-            if node.kind == .group, node.sketch?.decidedBy == .structure {
+            if node.isAStructureThePassMade {
                 for child in node.children where held[child.id] == nil { held[child.id] = node.id }
             }
             node.children.forEach(holdings)
