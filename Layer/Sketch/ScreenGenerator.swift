@@ -29,7 +29,7 @@ enum ScreenGenerator {
     /// (`google/gemma-4-26b-a4b`, 24 screens of each) the outline was 24 of 24 valid and A2UI 13 of 24, and A2UI's
     /// first content came 33% later (docs/benchmarks/screen-prompt.md). Until then it was A2UI (My call 17). The rule
     /// still chose the outline after A2UI's reliability work (2026-11-26): A2UI 20 of 24 against 24 of 24, its first
-    /// content 27% later.
+    /// content 26% later.
     static let hostedFormat = Format.outline
 
     /// The outline for the on-device model, and for a hosted model this system can't run (which falls back to it);
