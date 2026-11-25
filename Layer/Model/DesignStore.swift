@@ -76,11 +76,11 @@ final class DesignStore {
 
     init(content: TreeContent = TreeContent()) {
         self.content = content
-        followsTheRules = Self.followsTheRules(content)
+        followsTheRules = Self.rulesLeaveAsItIs(content)
     }
 
-    /// Whether the rules, applied in full, leave `content` as it is.
-    private static func followsTheRules(_ content: TreeContent) -> Bool {
+    /// Whether the rules, applied in full, leave `content` as it is: whether it follows them already.
+    private static func rulesLeaveAsItIs(_ content: TreeContent) -> Bool {
         var applied = content
         TreeRules.apply(to: &applied, after: nil)
         return applied == content
