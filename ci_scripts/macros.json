@@ -1,0 +1,7 @@
+[
+  {
+    "fingerprint" : "c0a9375ea9cd3fd47d875c98ed7f027ea61c03cb",
+    "packageIdentity" : "swift-json-schema",
+    "targetName" : "JSONSchemaMacro"
+  }
+]
