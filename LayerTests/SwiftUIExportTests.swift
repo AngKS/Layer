@@ -452,6 +452,70 @@ struct SwiftUIExportTests {
         #expect(row < padding && padding < frame && frame < background)
     }
 
+    /// The canvas places a free container's children from its frame's corner, padding or not, and a sketched card holds
+    /// what it takes where it is on the screen, so close round it. Its code pads each side only as far in as what it holds
+    /// is from that side, and spaces its rows no wider than they are, so that what it holds sits on its background where
+    /// the canvas draws it (plan 5's final review, B2). Here an outline 6 pt round `CardReadingTests`' title and body, 10 pt
+    /// apart.
+    @Test func aFreeCardDrawnCloseRoundItsContentsHoldsThemWhereTheyAre() throws {
+        let title = Self.leaf(.title, "Title", frame: CGRect(x: 96, y: 120, width: 200, height: 40))
+        let body = Self.leaf(.body, "Body", frame: CGRect(x: 20, y: 170, width: 353, height: 40))
+        var content = Self.design([(.free, [title, body])])
+        let made = try #require(SketchedNode.make(.card, sketch: CGRect(x: 14, y: 114, width: 365, height: 100), in: content,
+                                                  index: TreeIndex(content), confidence: 0.95, decidedBy: .rules))
+        content.screens[0].root = SketchedNode.inserting(made, into: content.screens[0].root)
+        TreeRules.apply(to: &content, after: nil)
+        let card = try #require(content.screens[0].root.children.first)
+        #expect(card.kind == .card && card.padding == LayerNode.Padding(all: 16))
+        #expect(card.frame == CGRect(x: 14, y: 114, width: 365, height: 100))
+        // On the canvas the title is 6 pt down, and the body 6 pt in from each side and 4 pt up from the bottom.
+        #expect(card.children.map(\.frame) == [CGRect(x: 82, y: 6, width: 200, height: 40), CGRect(x: 6, y: 56, width: 353, height: 40)])
+
+        let code = Self.code(content)
+        let opening = "VStack(alignment: .leading, spacing: 10) {"
+        #expect(Self.inside(startingWith: opening, in: code).filter { $0.hasPrefix("Text(") } == ["Text(\"Title\")", "Text(\"Body\")"])
+        #expect(Array(Self.modifiers(startingWith: opening, in: code).prefix(6)) == [
+            ".padding(.top, 6)", ".padding(.leading, 6)", ".padding(.bottom, 4)", ".padding(.trailing, 6)",
+            ".frame(width: 365, height: 100, alignment: .topLeading)",
+            ".background(.background.secondary, in: .rect(cornerRadius: DesignTokens.cardRadius))",
+        ])
+        // So the body starts 6 + 40 + 10 = 56 pt down, as on the canvas, and ends 4 pt inside the background.
+        #expect(!Self.block(startingWith: "Text(\"Body\")", in: code).contains { $0.hasPrefix(".padding(.top") })
+    }
+
+    /// A row, column or overlay that fits its width in a free container, holding something that fills across: the
+    /// engine offers it no width there, so what fills takes its own and the container hugs it, where SwiftUI would let
+    /// `.frame(maxWidth: .infinity)` stretch it over the room offered. So it is held to its width, as a grid that fits is
+    /// (plan 5 Task 11's third concern). Holding nothing that fills, it needs no frame.
+    @Test func aStackThatFitsAFreeContainerKeepsItsWidthWhenWhatItHoldsFills() throws {
+        func go() -> LayerNode { Self.leaf(.button, "Go", frame: CGRect(x: 0, y: 0, width: 80, height: 44)) }
+        var column = Self.container(.group, Self.stack(.vertical, spacing: 12), [Self.leaf(.textField), go()], width: .fit)
+        column.frame.origin = CGPoint(x: 40, y: 200)
+        var row = Self.container(.group, Self.stack(.horizontal, spacing: 8, alignment: .center), [Self.leaf(.body, "Beside"), go()],
+                                 width: .fit)
+        row.frame.origin = CGPoint(x: 40, y: 340)
+        var overlay = Self.container(.group, .overlay(LayerNode.Alignment(horizontal: .start, vertical: .start)),
+                                     [Self.leaf(.image, frame: CGRect(x: 0, y: 0, width: 100, height: 60)), Self.leaf(.body, "Over")],
+                                     width: .fit)
+        overlay.frame.origin = CGPoint(x: 40, y: 440)
+        var fitting = Self.container(.group, Self.stack(.vertical, spacing: 24), [Self.text("One"), Self.text("Two")], width: .fit)
+        fitting.frame.origin = CGPoint(x: 40, y: 560)
+        let content = Self.design(.free, [column, row, overlay, fitting])
+        let laidOut = content.screens[0].root.children
+        let widths = try [column, row, overlay].map { node in try #require(laidOut.first { $0.id == node.id }).frame.width }
+        #expect(widths.allSatisfy { $0 > 0 && $0 < 353 }, "\(widths)")
+
+        let code = Self.code(content)
+        #expect(Self.modifiers(startingWith: "VStack(alignment: .leading, spacing: DesignTokens.rhythm[1])", in: code)
+            .contains(".frame(width: \(Self.number(widths[0])), alignment: .leading)"))
+        #expect(Self.modifiers(startingWith: "HStack(alignment: .center, spacing: DesignTokens.rhythm[0])", in: code)
+            .contains(".frame(width: \(Self.number(widths[1])), alignment: .leading)"))
+        #expect(Self.modifiers(startingWith: "ZStack(alignment: .topLeading)", in: code)
+            .contains(".frame(width: \(Self.number(widths[2])), alignment: .leading)"))
+        #expect(!Self.modifiers(startingWith: "VStack(alignment: .leading, spacing: DesignTokens.rhythm[3])", in: code)
+            .contains { $0.hasPrefix(".frame(width:") })
+    }
+
     @Test func aFreeGroupInAColumnIsInferredInsideItsBox() throws {
         let group = Self.free(at: CGRect(x: 0, y: 0, width: 353, height: 100), [
             Self.text("Left", frame: CGRect(x: 0, y: 0, width: 150, height: 24)),
