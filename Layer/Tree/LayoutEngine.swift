@@ -560,7 +560,7 @@ enum LayoutEngine {
               a.scale == b.scale, a.content.text == b.content.text, a.style.fontSize == b.style.fontSize,
               a.style.fontWeight == b.style.fontWeight, a.unreadChildren == b.unreadChildren,
               a.children.count == b.children.count else { return false }
-        return a.children == b.children || zip(a.children, b.children).allSatisfy { laysOutAlike($0, $1) }
+        return a.children.isShared(with: b.children) || zip(a.children, b.children).allSatisfy { laysOutAlike($0, $1) }
     }
 
     /// The containers among `previous`'s children, by id, so each can be found as it was last laid

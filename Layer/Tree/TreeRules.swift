@@ -55,18 +55,18 @@ enum TreeRules {
 
     // MARK: - What is as it was
 
-    /// For each of `content`'s screens, in order, whether `kept` has it with the same root on the same device: then it
-    /// follows the structure already.
+    /// For each of `content`'s screens, in order, whether `kept` has it with its root unchanged
+    /// (`LayerNode.isUnchanged(from:)`), on the same device: then it follows the structure already.
     private static func unchangedScreens(in content: TreeContent, since kept: TreeContent) -> [Bool] {
         let earlier = Dictionary(kept.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return content.screens.map { screen in
             guard let before = earlier[screen.id] else { return false }
-            return before.root == screen.root && kept.device(of: before) == content.device(of: screen)
+            return screen.root.isUnchanged(from: before.root) && kept.device(of: before) == content.device(of: screen)
         }
     }
 
-    /// The canvas's top-level nodes of a version that follows the rules: a node the same as its own there follows the
-    /// structure already. Looked up by id only once a node isn't where it was.
+    /// The canvas's top-level nodes of a version that follows the rules: a node unchanged from its own there follows
+    /// the structure already. Looked up by id only once a node isn't where it was.
     private final class KeptNodes {
         let nodes: [LayerNode]
         private lazy var byID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -75,11 +75,11 @@ enum TreeRules {
             self.nodes = nodes
         }
 
-        /// Whether `nodes[index]`, among `list`, is as it is here.
+        /// Whether `list[index]` is as it is here, unchanged (`LayerNode.isUnchanged(from:)`).
         func holds(_ list: [LayerNode], at index: Int) -> Bool {
             let node = list[index]
-            if nodes.indices.contains(index), nodes[index].id == node.id { return nodes[index] == node }
-            return byID[node.id] == node
+            if nodes.indices.contains(index), nodes[index].id == node.id { return node.isUnchanged(from: nodes[index]) }
+            return byID[node.id].map(node.isUnchanged(from:)) ?? false
         }
     }
 
@@ -169,7 +169,7 @@ enum TreeRules {
         }
         // Looked for first, so that a canvas with nothing to move isn't copied to look inside it.
         let canvas = content.canvas
-        let looked = canvasKept.map { kept in canvas == kept.nodes ? [] : canvas.indices.filter { !kept.holds(canvas, at: $0) } }
+        let looked = canvasKept.map { kept in canvas.isShared(with: kept.nodes) ? [] : canvas.indices.filter { !kept.holds(canvas, at: $0) } }
         for index in looked ?? Array(canvas.indices) where holds(content.canvas[index], where: isDrawing) {
             let top = content.canvas[index]
             // In the space the top-level node sits in, so at its scale.
@@ -218,7 +218,7 @@ enum TreeRules {
     private static func tidy(_ nodes: inout [LayerNode], besides kept: KeptNodes? = nil) -> [Int] {
         let list = nodes
         if let kept {
-            guard list != kept.nodes, list.indices.contains(where: { !kept.holds(list, at: $0) && needsTidying(list[$0]) })
+            guard !list.isShared(with: kept.nodes), list.indices.contains(where: { !kept.holds(list, at: $0) && needsTidying(list[$0]) })
             else { return [] }
         }
         guard nodes.contains(where: needsTidying) else { return [] }

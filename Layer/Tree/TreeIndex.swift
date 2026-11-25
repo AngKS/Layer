@@ -133,44 +133,34 @@ struct TreeIndex: Equatable, Sendable {
     // MARK: - Brought up to date
 
     /// Brings this index, worked out for `old`, up to `new`, as `TreeIndex(new)` would have it, looking only where the
-    /// two differ: a node whose frame, angle, scale, lock or hide changed has its entry worked out again, with
-    /// everything inside it; a list of children that gained, lost or reordered something has what it held taken out
-    /// and what it holds now put in; a screen added or taken away, its nodes. Everything else is left as it is, with
-    /// its place in the tree. False, and the index is left part done, for an index of a damaged design, a screen id
-    /// held twice, or a change that gives a node's id to another: build it again then.
+    /// two differ. A list of children, or of the canvas's nodes, shared by both is passed over whole. In one that isn't,
+    /// a node at the same place with the same id is followed: its entry is worked out again, with everything inside it,
+    /// when its frame, angle, scale, lock or hide changed, or what holds it moved; what is inside it is looked at the
+    /// same way. A node at a new place, and one gone from its place, are put in and taken out with everything in them;
+    /// so are a screen added and one taken away. Everything else is left as it is. False, and the index is left part
+    /// done, for an index of a damaged design, a screen id held twice, or a change that gives a node's id to another:
+    /// build it again then.
     mutating func refresh(from old: TreeContent, to new: TreeContent) -> Bool {
         guard isClean else { return false }
         var changes = Changes()
-        if old.screens != new.screens {
+        if !old.screens.isShared(with: new.screens) {
             let roots = Dictionary(old.screens.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })
             let now = Set(new.screens.map(\.id))
             guard roots.count == old.screens.count, now.count == new.screens.count else { return false }
-            for screen in old.screens where !now.contains(screen.id) { changes.taken.append(screen.root) }
+            for screen in old.screens where !now.contains(screen.id) { changes.taken.append((screen.root, .screen(screen.id))) }
             for screen in new.screens {
                 let host = Host.screen(screen.id)
                 if let root = roots[screen.id], root.id == screen.root.id {
                     follow(root, to: screen.root, host: host, path: [], in: .top, moved: false, changes: &changes)
                 } else {
-                    if let root = roots[screen.id] { changes.taken.append(root) }
+                    if let root = roots[screen.id] { changes.taken.append((root, host)) }
                     changes.put.append(Put(node: screen.root, host: host, parent: nil, siblingIndex: 0, path: [], space: .top))
                 }
             }
         }
-        if old.canvas != new.canvas {
-            if old.canvas.count == new.canvas.count, zip(old.canvas, new.canvas).allSatisfy({ $0.id == $1.id }) {
-                for index in new.canvas.indices {
-                    follow(old.canvas[index], to: new.canvas[index], host: .canvas, path: [index], in: .top, moved: false,
-                           changes: &changes)
-                }
-            } else {
-                changes.taken += old.canvas
-                for (index, node) in new.canvas.enumerated() {
-                    changes.put.append(Put(node: node, host: .canvas, parent: nil, siblingIndex: index, path: [index], space: .top))
-                }
-            }
-        }
-        // Everything taken out first, so that a node moved from one list to another is put in where it is now.
-        for node in changes.taken { forget(node) }
+        follow(old.canvas, to: new.canvas, of: nil, host: .canvas, path: [], in: .top, moved: false, changes: &changes)
+        // Everything taken out first, so that a node moved from one place to another is put in where it is now.
+        for (node, host) in changes.taken { forget(node, on: host) }
         for put in changes.put {
             walk(put.node, host: put.host, parent: put.parent, siblingIndex: put.siblingIndex, path: put.path, in: put.space)
         }
@@ -178,9 +168,9 @@ struct TreeIndex: Equatable, Sendable {
         return isClean
     }
 
-    /// Lists of children whose nodes go, and nodes put in, found while bringing an index up to date.
+    /// Nodes taken out, with the host each was on, and nodes put in, found while bringing an index up to date.
     private struct Changes {
-        var taken: [LayerNode] = []
+        var taken: [(node: LayerNode, host: Host)] = []
         var put: [Put] = []
     }
 
@@ -194,13 +184,20 @@ struct TreeIndex: Equatable, Sendable {
         var space: Space
     }
 
+    /// Whether what a node's own entry is worked out from is the same in `a` and `b`: its frame, angle, lock and hide,
+    /// and its scale on the canvas's top level.
+    private static func isPosedAlike(_ a: LayerNode, _ b: LayerNode, onCanvasTop: Bool) -> Bool {
+        a.frame == b.frame && a.rotation == b.rotation && a.isLocked == b.isLocked && a.isHidden == b.isHidden
+            && (!onCanvasTop || a.scale == b.scale)
+    }
+
     /// Brings the entries of `now` and everything in it up to date from `was`, the node of the same id at the same
     /// place. `space` is what its parent places it in now; `moved`, whether that differs from what it was placed in.
     private mutating func follow(_ was: LayerNode, to now: LayerNode, host: Host, path: [Int], in space: Space, moved: Bool,
                                  changes: inout Changes) {
-        if !moved, was == now { return }
-        let posed = moved || was.frame != now.frame || was.rotation != now.rotation || was.isLocked != now.isLocked
-            || was.isHidden != now.isHidden || (host == .canvas && path.count == 1 && was.scale != now.scale)
+        let isPosedAlike = Self.isPosedAlike(was, now, onCanvasTop: host == .canvas && path.count == 1)
+        if !moved, isPosedAlike, was.children.isShared(with: now.children) { return }
+        let posed = moved || !isPosedAlike
         let pose = Self.pose(of: now, in: space, host: host)
         if posed {
             entries[now.id]?.toHost = pose.toHost
@@ -208,22 +205,51 @@ struct TreeIndex: Equatable, Sendable {
             entries[now.id]?.isLockedWithAncestors = pose.own.isLocked
             entries[now.id]?.isHiddenWithAncestors = pose.own.isHidden
         }
-        let before = was.children, after = now.children
-        guard before.count == after.count, zip(before, after).allSatisfy({ $0.id == $1.id }) else {
-            changes.taken += before
-            for (index, child) in after.enumerated() {
-                changes.put.append(Put(node: child, host: host, parent: now.id, siblingIndex: index, path: path + [index], space: pose.own))
-            }
-            return
+        follow(was.children, to: now.children, of: now.id, host: host, path: path, in: pose.own, moved: posed, changes: &changes)
+    }
+
+    /// The same for a list of children of the node `parent` at `path`, or of the canvas's top level (`parent` nil, `path`
+    /// []), each placed in `space`: one at the same place with the same id is followed, and the rest taken out and put in.
+    private mutating func follow(_ before: [LayerNode], to after: [LayerNode], of parent: UUID?, host: Host, path: [Int],
+                                 in space: Space, moved: Bool, changes: inout Changes) {
+        if !moved, before.isShared(with: after) { return }
+        let onCanvasTop = host == .canvas && path.isEmpty
+        for index in before.indices where !(after.indices.contains(index) && after[index].id == before[index].id) {
+            changes.taken.append((before[index], host))
         }
-        for index in after.indices where posed || before[index] != after[index] {
-            follow(before[index], to: after[index], host: host, path: path + [index], in: pose.own, moved: posed, changes: &changes)
+        for index in after.indices {
+            guard before.indices.contains(index), before[index].id == after[index].id else {
+                changes.put.append(Put(node: after[index], host: host, parent: parent, siblingIndex: index, path: path + [index],
+                                       space: space))
+                continue
+            }
+            if !moved, Self.isPosedAlike(before[index], after[index], onCanvasTop: onCanvasTop),
+               before[index].children.isShared(with: after[index].children) { continue }
+            follow(before[index], to: after[index], host: host, path: path + [index], in: space, moved: moved, changes: &changes)
         }
     }
 
     /// Takes `node`'s entry, and those of everything in it, out of the index.
-    private mutating func forget(_ node: LayerNode) {
+    private mutating func forget(_ node: LayerNode, on host: Host) {
         entries[node.id] = nil
-        for child in node.children { forget(child) }
+        for child in node.children { forget(child, on: host) }
+    }
+}
+
+extension LayerNode {
+    /// Whether this is `other` as it was, everything in it unchanged: equal, with the very list of children `other`
+    /// has, as a version of a design that changed elsewhere holds it. Quick where `==` would compare all it holds. A node
+    /// equal to `other` but whose children were written again isn't, and is looked at as one that changed.
+    func isUnchanged(from other: LayerNode) -> Bool {
+        children.isShared(with: other.children) && self == other
+    }
+}
+
+extension Array {
+    /// Whether this and `other` are one list: shared between two versions of a design, as a list nothing was written
+    /// to is, so that nothing in it changed either.
+    func isShared(with other: [Element]) -> Bool {
+        count == other.count
+            && withUnsafeBufferPointer { mine in other.withUnsafeBufferPointer { theirs in mine.baseAddress == theirs.baseAddress } }
     }
 }
