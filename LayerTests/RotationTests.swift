@@ -1799,10 +1799,10 @@ struct TwistOnTheInkCanvasTests {
     /// Fingers on a sheet or a popover lying over the selection are on that, not on the
     /// selection: they don't turn what is hidden under it, as the Pencil there doesn't let
     /// go of it. In a narrow window, the panels are sheets over the canvas.
-    @Test func fingersOnASheetOverTheSelectionArentOnIt() {
+    @Test func fingersOnASheetOverTheSelectionArentOnIt() async throws {
         let board = TurnBoard()
         let coordinator = InkCanvas.Coordinator(model: board.model)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1210, height: 834))
         let canvasRoot = UIView(frame: window.bounds)
         let container = UIView(frame: canvasRoot.bounds)
         canvasRoot.addSubview(container)

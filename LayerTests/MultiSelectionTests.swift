@@ -902,8 +902,8 @@ struct CanvasDragTests {
 @Suite("The Pencil on controls over the canvas")
 @MainActor
 struct PencilOnChromeTests {
-    @Test func aTouchInASheetOrPopoverIsNotOnTheCanvas() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+    @Test func aTouchInASheetOrPopoverIsNotOnTheCanvas() async throws {
+        let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
         let canvasRoot = UIView(frame: window.bounds)
         let container = UIView(frame: canvasRoot.bounds)
         let overlay = UIView(frame: CGRect(x: 10, y: 10, width: 50, height: 50))

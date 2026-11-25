@@ -240,13 +240,18 @@ final class AudioEngineHardware: MicrophoneHardware, @unchecked Sendable {
         { @Sendable buffer, _ in hearing(AudioChunk(buffer: buffer, time: .now)) }
     }
 
+    /// What an interruption notification says when the interruption began: `AVAudioSession.InterruptionType.began`.
+    /// iOS 27 deprecates that type with the notification, for `didBecomeInactiveNotification`; the notification is
+    /// kept, as it is what has been tried on a device, and the type isn't named.
+    private static let interruptionBegan: UInt = 1
+
     /// A phone call, Siri, or the microphone changing under the engine (headphones going
     /// on or off) stops the sound.
     private func watch(_ engine: AVAudioEngine, lost: @escaping @Sendable () -> Void) {
         let center = NotificationCenter.default
         watching = [
             center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { note in
-                let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+                let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == Self.interruptionBegan
                 guard began else { return }
                 VoiceLog.log.info("microphone: interrupted")
                 lost()
