@@ -64,6 +64,9 @@ private struct AlignSubject {
     let name: String
     let id: UUID
     let expect: @MainActor (DesignStore, ElementLayout.Alignment, TreeContent, String) -> Void
+    /// Whether its laid-out parent has no use for an alignment, which every surface refuses, Siri with
+    /// `alignmentNotTaken`.
+    var isNotTaken: @MainActor (ElementLayout.Alignment) -> Bool = { _ in false }
 
     nonisolated private static let across: [ElementLayout.Alignment: LayerNode.Edge3] = [.left: .start, .centerX: .center, .right: .end]
     nonisolated private static let down: [ElementLayout.Alignment: LayerNode.Edge3] = [.top: .start, .centerY: .center, .bottom: .end]
@@ -72,14 +75,14 @@ private struct AlignSubject {
     /// nothing: the child stays where it is in it.
     static func laidOut(_ name: String, _ id: UUID, in parent: UUID,
                         _ aligned: @escaping @MainActor (ElementLayout.Alignment) -> LayerNode.Layout?) -> AlignSubject {
-        AlignSubject(name: name, id: id) { store, alignment, before, what in
+        AlignSubject(name: name, id: id, expect: { store, alignment, before, what in
             guard let layout = aligned(alignment) else {
                 #expect(store.tree == before, "\(what): nothing changes")
                 return
             }
             #expect(store.node(parent)?.resolvedLayout == layout, "\(what)")
             #expect(store.node(parent)?.children.contains { $0.id == id } == true, "\(what): it stays in its parent")
-        }
+        }, isNotTaken: { aligned($0) == nil })
     }
 
     /// A row's child: top, middle and bottom are the row's; left, centre and right are along it.
@@ -104,7 +107,7 @@ private struct AlignSubject {
     /// A thing in a free parent on an iPhone screen, 393 × 852: lined up with that edge or middle of the screen, by the
     /// box round its shape, its corner on a whole point.
     static func onItsScreen(_ name: String, _ id: UUID) -> AlignSubject {
-        AlignSubject(name: name, id: id) { store, alignment, _, what in
+        AlignSubject(name: name, id: id, expect: { store, alignment, _, what in
             guard let seen = store.index[id]?.hostShape.bounds else {
                 Issue.record("\(what): it has gone")
                 return
@@ -118,14 +121,14 @@ private struct AlignSubject {
             case .bottom: abs(seen.maxY - 852) <= 0.5
             }
             #expect(lined, "\(what): \(seen)")
-        }
+        })
     }
 
     /// A thing on the open canvas in no laid-out parent: there is no screen to line it up with, and nothing changes.
     static func offScreen(_ name: String, _ id: UUID) -> AlignSubject {
-        AlignSubject(name: name, id: id) { store, _, before, what in
+        AlignSubject(name: name, id: id, expect: { store, _, before, what in
             #expect(store.tree == before, "\(what): nothing changes")
-        }
+        })
     }
 }
 
@@ -292,9 +295,19 @@ private struct AlignSurfaces {
         error.map { String(localized: $0.localizedStringResource) }
     }
 
-    /// On each app that changed: one undo puts `before` back, and there is nothing more to undo.
+    /// Whether Siri threw `alignmentNotTaken`.
+    func isAlignmentNotTaken(_ error: LayerIntentError?) -> Bool {
+        if case .alignmentNotTaken? = error { true } else { false }
+    }
+
+    /// On each app that changed, one undo puts `before` back and leaves nothing more to undo. On each that didn't, a
+    /// refusal or an alignment the parent already has, there is no step at all.
     func expectOneStepEach(back before: TreeContent, _ what: String) {
-        for (name, app) in [("panel", panel), ("voice", voice), ("Siri", siri)] where app.store.tree != before {
+        for (name, app) in [("panel", panel), ("voice", voice), ("Siri", siri)] {
+            guard app.store.tree != before else {
+                #expect(!app.undo.canUndo, "\(what): \(name) made a step that changed nothing")
+                continue
+            }
             app.undo.undo()
             #expect(app.store.tree == before, "\(what): \(name)'s undo")
             #expect(!app.undo.canUndo, "\(what): \(name)'s one step")
@@ -629,7 +642,8 @@ struct GroupAsTests {
         #expect(!linedUp.isSelectionLaidOut)
         #expect(linedUp.canLineUpSelection(.left))
 
-        aligned.alignSelection(.left)
+        // Today's Align among several things, which moves every one of them.
+        aligned.store.align(selection, .left)
         linedUp.lineUpSelection(.left)
 
         #expect(linedUp.store.node(b.id)?.frame.minX == 20)
@@ -752,6 +766,13 @@ struct GroupAsTests {
             #expect(surfaces.siri.store.tree == after, "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
             #expect(surfaces.box.lastFailed == !isOn, "\(what): voice said “\(line)”")
             #expect((error == nil) == isOn, "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
+            // What each says: voice that it aligned, what it did; Siri, for a parent with no use for the alignment,
+            // which ones that parent takes.
+            if isOn { #expect(line.hasPrefix("Aligned "), "\(what): voice said “\(line)”") }
+            if subject.isNotTaken(alignment) {
+                #expect(!isOn, "\(what)")
+                #expect(surfaces.isAlignmentNotTaken(error), "\(what): Siri said \(surfaces.said(error) ?? "nothing")")
+            }
             subject.expect(surfaces.panel.store, alignment, before, what)
             surfaces.expectOneStepEach(back: before, what)
         }

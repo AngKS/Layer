@@ -559,6 +559,7 @@ struct AlignElementIntent: AppIntent, UndoableIntent {
         case .nothing(.notTaken(let parent, let takes)):
             throw LayerIntentError.alignmentNotTaken(container: containerName(parent, of: ref, in: store), takes: takes)
         case .nothing(.allPlaced):
+            // Defensive: only several things can each be placed by a parent of their own, and Siri aligns one.
             throw LayerIntentError.laidOut
         case .nothing(.gone), .nothing(.screen):
             throw LayerIntentError.elementNotFound

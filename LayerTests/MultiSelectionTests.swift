@@ -538,7 +538,7 @@ struct SeveralThingsOnTheCanvasTests {
         board.model.setSelectionLocked(false)
         #expect(!board.model.isSelectionLocked)
 
-        board.model.alignSelection(.left)
+        board.store.align(selection, .left)
         #expect(board.canvasFrame(board.note).minX == board.canvasFrame(board.title).minX)
 
         board.model.duplicateSelection()

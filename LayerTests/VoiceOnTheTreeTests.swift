@@ -128,6 +128,38 @@ struct VoiceOnTheTreeTests {
         #expect(!bench.login.undo.canUndo)
     }
 
+    /// `placeElement` towards an edge of the screen is an align ("an edge is what was meant"), so a row's child follows
+    /// the one rule there too (Ruling 6, 2026-11-26): the row's alignment, as one step, or, along the row, a refusal
+    /// naming what the row takes. So does a placement by another thing that the person didn't ask for, which the
+    /// on-device model makes of "move it down"; asked for one, it is a place, which the row gives.
+    @Test func placingARowChildAtAnEdgeAlignsTheRow() throws {
+        let bench = bench()
+        let before = bench.store.tree
+        #expect(bench.box.placeElement(element: "E6", relation: "above", target: "S1") == "Aligned E5's contents to the top.")
+        #expect(bench.store.node(bench.login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .start)))
+        #expect(bench.store.parent(of: bench.login.label) == .node(bench.login.row))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+
+        #expect(bench.box.placeElement(element: "E6", relation: "left of", target: "S1")
+            == "E6 is in the row E5, which aligns what it holds only to the top, vertical centre or bottom.")
+        #expect(bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+
+        // "Move the Wi-Fi label down" names no other thing to go by: E1 as the target is taken as the bottom edge.
+        bench.box.spokenCommand = "Move the Wi-Fi label down"
+        #expect(bench.box.placeElement(element: "E6", relation: "below", target: "E1") == "Aligned E5's contents to the bottom.")
+        #expect(bench.store.node(bench.login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .end)))
+        bench.login.undo.undo()
+        #expect(bench.store.tree == before)
+        #expect(!bench.login.undo.canUndo)
+
+        bench.box.spokenCommand = "Put the Wi-Fi label below the title"
+        #expect(bench.box.placeElement(element: "E6", relation: "below", target: "E1") == Self.rowChildLine)
+        #expect(bench.store.tree == before)
+    }
+
     @Test func stackingOrPlacingALaidOutChildSaysToReorder() {
         let bench = bench()
         let before = bench.store.tree
