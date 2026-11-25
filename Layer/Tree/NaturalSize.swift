@@ -30,6 +30,19 @@ enum NaturalSize {
         }
     }
 
+    /// Whether `node`'s text is measured at another size with `a` than with `b`: a title, body or text with no size of
+    /// its own, when the two give its kind different sizes (`fontSize(of:tokens:)`). Only their text sizes lay
+    /// anything out.
+    static func isMeasuredDifferently(_ node: LayerNode, with a: DesignTokens, and b: DesignTokens) -> Bool {
+        guard node.style.fontSize == nil else { return false }
+        switch node.kind {
+        case .title: return a.textSizes.title != b.textSizes.title
+        case .body: return a.textSizes.body != b.textSizes.body
+        case .text: return a.textSizes.text != b.textSizes.text
+        default: return false
+        }
+    }
+
     static func fontWeight(of node: LayerNode) -> FontWeightChoice {
         node.style.fontWeight ?? node.kind.spec.fontWeight
     }

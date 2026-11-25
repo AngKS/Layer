@@ -556,5 +556,31 @@ import Testing
         #expect(store.node(toggle)?.style.hasShadow == true)
         #expect(zip(containers.map(LayoutEngine.timesLaidOut), before).map(-) == containers.map { _ in 0 })
     }
+
+    /// A design token a scrub changes lays out only what it measures (sweep item 5): a card's radius or the rhythm lays
+    /// nothing out, and the title's size only the screen that holds a title, from scratch as before. Counted for each
+    /// container.
+    @MainActor
+    @Test func aTokenChangedLaysOutOnlyWhatItMeasures() throws {
+        let titled = Self.screen(origin: CGPoint(x: 600, y: 0), layout: Self.column, [
+            Self.generated(.title, "Welcome"),
+            Self.laidOut(Self.row, [Self.node(.shape, CGRect(x: 0, y: 0, width: 40, height: 40)),
+                                    Self.node(.shape, CGRect(x: 0, y: 0, width: 40, height: 40))]),
+        ])
+        let store = DesignStore(content: Self.applied(Self.design(screens: [Self.listScreen(rows: 2), titled])))
+        let list = Self.containers(in: store.tree.screens[0].root), withTitle = Self.containers(in: store.tree.screens[1].root)
+        #expect((list.count, withTitle.count) == (3, 2))
+        var before = (list + withTitle).map(LayoutEngine.timesLaidOut)
+        func laid() -> [Int] { zip((list + withTitle).map(LayoutEngine.timesLaidOut), before).map(-) }
+
+        store.updateCanvas { $0.tokens.card.radius = 4 }
+        store.updateCanvas { $0.tokens.rhythm = [4, 8, 16] }
+        #expect(laid() == [0, 0, 0, 0, 0])
+
+        before = (list + withTitle).map(LayoutEngine.timesLaidOut)
+        store.updateCanvas { $0.tokens.textSizes.title = 34 }
+        #expect(laid() == [0, 0, 0, 1, 1])
+        #expect(Self.applied(store.tree) == store.tree, "laid out as laying it all out again would")
+    }
     #endif
 }

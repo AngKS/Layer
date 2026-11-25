@@ -83,28 +83,39 @@ enum TreeRules {
         }
     }
 
-    /// A version of the design that follows the rules, laid out in full, with the tokens of the one being laid out: a
-    /// screen or canvas container laid out alike there (`LayoutEngine.laysOutAlike`) needs no layout.
+    /// A version of the design that follows the rules, laid out in full: a screen or canvas container laid out alike
+    /// there (`LayoutEngine.laysOutAlike`), holding no text that `tokens` measure at another size than its tokens did,
+    /// needs no layout.
     private final class LaidOut {
         let content: TreeContent
+        /// The tokens the design is laid out with now.
+        let tokens: DesignTokens
         /// Made when first looked in.
         private lazy var screens = Dictionary(content.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         private lazy var canvas = Dictionary(content.canvas.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
-        init(_ content: TreeContent) {
+        init(_ content: TreeContent, laidOutWith tokens: DesignTokens) {
             self.content = content
+            self.tokens = tokens
         }
 
         /// Whether `screen`, of `design`, is laid out alike on the same device here.
         func laysOutAlike(_ screen: TreeScreen, in design: TreeContent) -> Bool {
             guard let own = screens[screen.id], content.device(of: own) == design.device(of: screen) else { return false }
-            return LayoutEngine.laysOutAlike(screen.root, own.root)
+            return LayoutEngine.laysOutAlike(screen.root, own.root) && isMeasuredAlike(screen.root)
         }
 
         /// Whether a container on the canvas's top level is laid out alike here.
         func laysOutAlike(_ node: LayerNode) -> Bool {
             guard let own = canvas[node.id] else { return false }
-            return LayoutEngine.laysOutAlike(node, own)
+            return LayoutEngine.laysOutAlike(node, own) && isMeasuredAlike(node)
+        }
+
+        /// Whether all `node` holds is measured as it was: no text in it is measured at a size the tokens changed.
+        private func isMeasuredAlike(_ node: LayerNode) -> Bool {
+            let earlier = content.settings.tokens
+            return earlier.textSizes == tokens.textSizes
+                || !TreeEdit.holds(node) { NaturalSize.isMeasuredDifferently($0, with: earlier, and: tokens) }
         }
     }
 
@@ -322,16 +333,18 @@ enum TreeRules {
     /// `previous`'s, nothing was laid out with them: every screen and every such container is laid
     /// out, with no `previous` (F25).
     ///
-    /// With `kept` (see `apply`), laid out in full with the same tokens, a screen or a canvas container the engine lays
-    /// out alike there (`LayoutEngine.laysOutAlike`), its look changed and nothing it is laid out by, is laid out
-    /// already: what the engine would give it is what it has.
+    /// With `kept` (see `apply`), laid out in full, a screen or a canvas container the engine lays out alike there
+    /// (`LayoutEngine.laysOutAlike`), its look changed and nothing it is laid out by, is laid out already: what the
+    /// engine would give it is what it has. So is one that holds no text measured at a size the tokens changed, when
+    /// they did (`NaturalSize.isMeasuredDifferently`): a scrub of a token lays out only what is measured by it, and of
+    /// one nothing is measured by (a card's radius, the rhythm), nothing.
     private static func layOut(_ content: inout TreeContent, after previous: TreeContent?, kept: TreeContent?,
                                measure: TextMeasure) -> [LayoutDiagnostic] {
         var diagnostics: [LayoutDiagnostic] = []
         let tokens = content.settings.tokens
         let earlier = previous.flatMap { $0.settings.tokens == tokens ? $0 : nil }
         let screens = Dictionary((earlier?.screens ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let laidOut = kept.flatMap { $0.settings.tokens == tokens ? LaidOut($0) : nil }
+        let laidOut = kept.map { LaidOut($0, laidOutWith: tokens) }
         for index in content.screens.indices {
             let screen = content.screens[index], before = screens[screen.id]
             if let before, let earlier, earlier.device(of: before) == content.device(of: screen),
