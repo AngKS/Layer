@@ -536,4 +536,25 @@ import Testing
         check("a redo")
         #expect(checked == 12)
     }
+
+    #if DEBUG
+    /// A look changed through the store, a fill, a radius or a shadow, lays nothing out: the screen it is on, laid out
+    /// alike, has the frames the engine would give it (sweep item 4). Counted for each container, since suites that
+    /// run alongside lay out containers of their own.
+    @MainActor
+    @Test func aLookChangedThroughTheStoreLaysNothingOut() throws {
+        let store = DesignStore(content: Self.applied(Self.design(screens: [Self.listScreen(rows: 3), Self.listScreen(rows: 3)])))
+        let containers = store.tree.screens.flatMap { Self.containers(in: $0.root) }
+        #expect(containers.count == 8)
+        let toggle = store.tree.screens[0].root.children[1].children[2].id
+        let before = containers.map(LayoutEngine.timesLaidOut)
+
+        store.update(toggle) { $0.style.tint = RGBColor(hex: 0xFF3B30) }
+        store.update(toggle) { $0.style.cornerRadius = 6 }
+        store.update(toggle) { $0.style.hasShadow = true }
+
+        #expect(store.node(toggle)?.style.hasShadow == true)
+        #expect(zip(containers.map(LayoutEngine.timesLaidOut), before).map(-) == containers.map { _ in 0 })
+    }
+    #endif
 }

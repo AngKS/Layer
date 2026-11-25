@@ -550,6 +550,19 @@ enum LayoutEngine {
         return placed == previous
     }
 
+    /// Whether the engine lays `a` and `b` out alike: they differ, if at all, only in what it never reads, a look (a fill,
+    /// a corner radius, a shadow, a text's colour), a name, a lock or a sketch's intent, and not in an id, a kind, a
+    /// frame, an angle, a layout, a padding, a sizing, a hide, words or their font, at any depth. Laid out with the same
+    /// tokens, each gives the other's frames, so a node laid out as it is needs no layout when it becomes the other.
+    static func laysOutAlike(_ a: LayerNode, _ b: LayerNode) -> Bool {
+        guard a.id == b.id, a.kind == b.kind, a.frame == b.frame, a.rotation == b.rotation, a.layout == b.layout,
+              a.padding == b.padding, a.width == b.width, a.height == b.height, a.isHidden == b.isHidden,
+              a.scale == b.scale, a.content.text == b.content.text, a.style.fontSize == b.style.fontSize,
+              a.style.fontWeight == b.style.fontWeight, a.unreadChildren == b.unreadChildren,
+              a.children.count == b.children.count else { return false }
+        return a.children == b.children || zip(a.children, b.children).allSatisfy { laysOutAlike($0, $1) }
+    }
+
     /// The containers among `previous`'s children, by id, so each can be found as it was last laid
     /// out. A hidden one wasn't: what is inside a hidden child is left as it is, so it may have
     /// changed since it was last laid out without being laid out again. Shown again, it is laid

@@ -50,7 +50,7 @@ enum TreeRules {
         let count = content.canvas.count
         let removed = tidy(&content.canvas, besides: canvasKept)
         keepUnreadPlaces(&content.unreadCanvas, among: count, removing: removed)
-        return layOut(&content, after: previous, measure: measure)
+        return layOut(&content, after: previous, kept: kept, measure: measure)
     }
 
     // MARK: - What is as it was
@@ -80,6 +80,31 @@ enum TreeRules {
             let node = list[index]
             if nodes.indices.contains(index), nodes[index].id == node.id { return nodes[index] == node }
             return byID[node.id] == node
+        }
+    }
+
+    /// A version of the design that follows the rules, laid out in full, with the tokens of the one being laid out: a
+    /// screen or canvas container laid out alike there (`LayoutEngine.laysOutAlike`) needs no layout.
+    private final class LaidOut {
+        let content: TreeContent
+        /// Made when first looked in.
+        private lazy var screens = Dictionary(content.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        private lazy var canvas = Dictionary(content.canvas.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        init(_ content: TreeContent) {
+            self.content = content
+        }
+
+        /// Whether `screen`, of `design`, is laid out alike on the same device here.
+        func laysOutAlike(_ screen: TreeScreen, in design: TreeContent) -> Bool {
+            guard let own = screens[screen.id], content.device(of: own) == design.device(of: screen) else { return false }
+            return LayoutEngine.laysOutAlike(screen.root, own.root)
+        }
+
+        /// Whether a container on the canvas's top level is laid out alike here.
+        func laysOutAlike(_ node: LayerNode) -> Bool {
+            guard let own = canvas[node.id] else { return false }
+            return LayoutEngine.laysOutAlike(node, own)
         }
     }
 
@@ -296,16 +321,22 @@ enum TreeRules {
     /// and the engine leaves alone what is the same inside the rest. When the tokens aren't
     /// `previous`'s, nothing was laid out with them: every screen and every such container is laid
     /// out, with no `previous` (F25).
-    private static func layOut(_ content: inout TreeContent, after previous: TreeContent?,
+    ///
+    /// With `kept` (see `apply`), laid out in full with the same tokens, a screen or a canvas container the engine lays
+    /// out alike there (`LayoutEngine.laysOutAlike`), its look changed and nothing it is laid out by, is laid out
+    /// already: what the engine would give it is what it has.
+    private static func layOut(_ content: inout TreeContent, after previous: TreeContent?, kept: TreeContent?,
                                measure: TextMeasure) -> [LayoutDiagnostic] {
         var diagnostics: [LayoutDiagnostic] = []
         let tokens = content.settings.tokens
         let earlier = previous.flatMap { $0.settings.tokens == tokens ? $0 : nil }
         let screens = Dictionary((earlier?.screens ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let laidOut = kept.flatMap { $0.settings.tokens == tokens ? LaidOut($0) : nil }
         for index in content.screens.indices {
             let screen = content.screens[index], before = screens[screen.id]
             if let before, let earlier, earlier.device(of: before) == content.device(of: screen),
                before.root == screen.root { continue }
+            if let laidOut, laidOut.laysOutAlike(screen, in: content) { continue }
             LayoutEngine.layOut(&content.screens[index].root, previous: before?.root, measure: measure, tokens: tokens,
                                 diagnostics: &diagnostics)
         }
@@ -313,6 +344,7 @@ enum TreeRules {
         for index in content.canvas.indices where content.canvas[index].isContainer {
             let before = canvas[content.canvas[index].id]
             if before == content.canvas[index] { continue }
+            if let laidOut, laidOut.laysOutAlike(content.canvas[index]) { continue }
             fitOnCanvas(&content.canvas[index], measure: measure, tokens: tokens)
             LayoutEngine.layOut(&content.canvas[index], previous: before, measure: measure, tokens: tokens,
                                 diagnostics: &diagnostics)
