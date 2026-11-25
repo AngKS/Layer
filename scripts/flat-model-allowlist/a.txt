@@ -32,6 +32,7 @@ Tools/SketchBenchmarkHarness/Stubs.swift         # the flat content's stub
 # a read of store.screens, or a write through updateScreen, that shows a lowering counter is live (F18, F26), or a test
 # of the flat model itself. Some are lane B's files by call 2.
 LayerTests/CanvasNeverLowersTests.swift          # (u), (s)
+LayerTests/SketchConversionBudgetTests.swift     # (u): plan 5 Task 12, DesignContent(tree: t) at the fixture
 LayerTests/CanvasOnTheTreeTests.swift            # (u), (s)
 LayerTests/GroupAsTests.swift                    # (u), (s)
 LayerTests/TreeTargetsTests.swift                # (u), (s)
