@@ -5,9 +5,12 @@
 # macOS. Those three files need nothing else from the app but `Rotation.shown`, which
 # Tools/Shared/RotationStub.swift copies.
 #
-# Usage: Tools/VoiceBenchmarkHarness/run.sh [baseline|sampled|required|examples|canvasfirst|quoted|commandfirst]
+# Usage: Tools/VoiceBenchmarkHarness/run.sh check   (builds, and puts a call's tools and canvas picture together, with no model)
+#        Tools/VoiceBenchmarkHarness/run.sh [baseline|sampled|required|examples|canvasfirst|quoted|commandfirst]
 #        Tools/VoiceBenchmarkHarness/run.sh newtools [runs] [baseline|sampled]   (the 2026-11-18 tools, each case several times)
+#        Tools/VoiceBenchmarkHarness/run.sh structure [runs] [baseline|sampled]   (plan 6's structure tools over a nested screen, each case several times)
 #        Tools/VoiceBenchmarkHarness/run.sh latency [runs] [instructions,plain,quoted,quotedkeep,commandfirst]   (commands in a row)
+#        Add --all-tools to any of these to hand the model every tool, as a hosted model has them, not the on-device list.
 # Results and what they led to: docs/benchmarks/voice-on-device.md
 set -eu
 cd "$(dirname "$0")/../.."

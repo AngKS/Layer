@@ -27,7 +27,7 @@ private final class SlowWarmingRunner: VoiceCommandRunner {
 @MainActor
 private final class Bench {
     let app: AppModel
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
     let runner = FakeRunner()
     var routes: [FakeRoute] = []
     var now = ContinuousClock.now
@@ -69,7 +69,7 @@ private final class Bench {
     }
 
     func element(_ index: Int) -> CanvasSelection {
-        let id = app.store.screen(screen)!.elements[index].id
+        let id = app.store.screenLeaves(screen)[index].id
         return .element(.init(host: .screen(screen), element: id))
     }
 
@@ -226,10 +226,10 @@ struct PencilVoiceTests {
     @Test func aSqueezeOverADrawingTargetsWhatIsBeneath() async {
         let bench = Bench()
         // Ink over the button. Locked, it is picked by its frame.
-        var ink = DesignStore.newElement(.drawing)
+        var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = bench.app.store.addFloating(ink, scale: 1)
+        let drawing = DesignStore.ElementRef(host: .canvas, element: bench.app.store.addCanvasNode(ink, scale: 1))
         #expect(bench.app.hoverTarget(at: Bench.overButton) == .element(drawing))
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         #expect(bench.app.selection == bench.button)
@@ -250,7 +250,8 @@ struct PencilVoiceTests {
     }
 
     /// F6: a squeeze over a member of a selected group keeps the group, as one over part of
-    /// several things keeps them all; and what voice is told is selected is what is in it.
+    /// several things keeps them all; and what voice is told is selected is the group itself,
+    /// with what is in it under it (plan 6, call 7).
     @Test func aSqueezeOnAMemberOfASelectedGroupKeepsTheGroup() async throws {
         let bench = Bench()
         // Taken first: grouping can change where they are in the list.
@@ -264,8 +265,9 @@ struct PencilVoiceTests {
 
         let picture = CanvasPicture.capture(from: bench.app, handles: VoiceHandles())
         let selected = picture.screens.flatMap(\.elements).filter(\.isSelected)
-        #expect(Set(selected.map(\.kind)) == ["title", "button"])
-        #expect(selected.count == 2)
+        #expect(selected.map(\.kind) == ["group"])
+        #expect(Set(selected.flatMap(\.children).map(\.kind)) == ["title", "button"])
+        #expect(!selected.flatMap(\.children).map(\.isSelected).contains(true))
         bench.end()
     }
 
@@ -286,7 +288,7 @@ struct PencilVoiceTests {
         let device = bench.app.store.canvas.sketchDevice
         #expect(DesignActions.placementForNewScreen(device, in: bench.app, near: anchor).origin == anchor)
         bench.app.generateScreen(from: "a settings screen", near: anchor)
-        let made = try #require(bench.app.store.screens.last)
+        let made = try #require(bench.app.store.tree.screens.last)
         #expect(made.origin == anchor)
         bench.app.stopGenerating()
         await bench.app.waitForGeneration()
@@ -297,12 +299,13 @@ struct PencilVoiceTests {
 
     @Test func aNewScreenAtAPointMovesRightPastAScreenThere() throws {
         let (app, screen) = VoiceFixture.login()
-        let login = try #require(app.store.screen(screen))
+        let login = try #require(app.store.treeScreen(screen))
+        let frame = login.canvasFrame(on: app.store.tree.device(of: login))
         let placement = DesignActions.placementForNewScreen(.iPhone, in: app, near: CGPoint(x: 3900, y: 4100))
-        #expect(placement.origin == CGPoint(x: (login.canvasFrame.maxX + 60).rounded(), y: 4100))
+        #expect(placement.origin == CGPoint(x: (frame.maxX + 60).rounded(), y: 4100))
         // With no point, as before: to the right of the rightmost screen, level with it.
         let usual = DesignActions.placementForNewScreen(.iPhone, in: app)
-        #expect(usual.origin == CGPoint(x: (login.canvasFrame.maxX + 60).rounded(), y: login.origin.y))
+        #expect(usual.origin == CGPoint(x: (frame.maxX + 60).rounded(), y: login.origin.y))
     }
 
     @Test func aToggleLeftSilentCloses() async {
@@ -502,7 +505,7 @@ struct PencilVoiceTests {
         pencil?.hovered()
         #expect(await eventually { pencil?.call?.phase == .listening })
         try? await Task.sleep(for: .milliseconds(50))
-        weak var call = pencil?.call
+        weak let call = pencil?.call
         pencil = nil
         #expect(await eventually { call == nil })
     }
@@ -1027,10 +1030,10 @@ struct PencilVoiceTests {
     /// on it is about the whole selection, not what lies beneath it (final fix 13).
     @Test func aSqueezeOnADrawingInTheSelectionKeepsTheWholeSelection() async {
         let bench = Bench()
-        var ink = DesignStore.newElement(.drawing)
+        var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = bench.app.store.addFloating(ink, scale: 1)
+        let drawing = DesignStore.ElementRef(host: .canvas, element: bench.app.store.addCanvasNode(ink, scale: 1))
         let both = CanvasSelection([.element(drawing), bench.title])
         bench.app.selection = both
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
@@ -2156,10 +2159,8 @@ struct SqueezeRouterTests {
 @MainActor
 struct ScreenEditorTests {
     /// A second screen, Profile, to the right of Login.
-    private func addProfile(to bench: Bench) -> DesignScreen.ID {
-        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
-        bench.app.store.updateScreen(profile.id) { $0.name = "Profile" }
-        return profile.id
+    private func addProfile(to bench: Bench) -> TreeScreen.ID {
+        bench.app.store.addFreeScreen([], name: "Profile", origin: CGPoint(x: 4600, y: 4000), scale: 0.6)
     }
 
     @Test func aChangeShowsItsStepThenItsReplyThenClears() async throws {

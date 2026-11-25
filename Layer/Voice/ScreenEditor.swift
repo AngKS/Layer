@@ -75,13 +75,13 @@ final class ScreenEditor {
     @ObservationIgnored private weak var model: AppModel?
     /// Screens whose change is being sent: waiting on the call to get ready, or behind a
     /// command spoken a moment earlier whose words are still settling. It has no number yet.
-    private var sending: Set<DesignScreen.ID> = []
+    private var sending: Set<TreeScreen.ID> = []
     /// Each screen's last change sent.
-    private var sent: [DesignScreen.ID: Sent] = [:]
+    private var sent: [TreeScreen.ID: Sent] = [:]
     /// Words typed in each screen's field and not sent. Kept here, not by the field, which
     /// goes whenever its screen stops being selected or the bar hides: they are there when
     /// it comes back. Only a screen with something typed, or on its way, has one.
-    private var drafts: [DesignScreen.ID: Draft] = [:]
+    private var drafts: [TreeScreen.ID: Draft] = [:]
 
     init(model: AppModel) {
         self.model = model
@@ -90,12 +90,12 @@ final class ScreenEditor {
     // MARK: Drafts
 
     /// What is typed in `screen`'s field.
-    func draft(for screen: DesignScreen.ID) -> Draft {
+    func draft(for screen: TreeScreen.ID) -> Draft {
         drafts[screen] ?? Draft()
     }
 
     /// The person typed in `screen`'s field: it now holds `text`.
-    func setDraft(_ text: String, for screen: DesignScreen.ID) {
+    func setDraft(_ text: String, for screen: TreeScreen.ID) {
         guard draft(for: screen).text != text else { return }
         changeDraft(for: screen) { $0.text = text }
     }
@@ -104,7 +104,7 @@ final class ScreenEditor {
     /// taken at once, clearing the field, and come back if they couldn't be sent, unless
     /// something has been typed since. Returns the send, whose value says whether the
     /// change went; nil, with the field cleared, when only blanks were typed.
-    func sendDraft(for screen: DesignScreen.ID) -> Task<Bool, Never>? {
+    func sendDraft(for screen: TreeScreen.ID) -> Task<Bool, Never>? {
         var taken: String?
         changeDraft(for: screen) { taken = $0.takeForSending() }
         guard let words = taken else { return nil }
@@ -115,7 +115,7 @@ final class ScreenEditor {
         }
     }
 
-    private func changeDraft(for screen: DesignScreen.ID, _ change: (inout Draft) -> Void) {
+    private func changeDraft(for screen: TreeScreen.ID, _ change: (inout Draft) -> Void) {
         var draft = draft(for: screen)
         change(&draft)
         drafts[screen] = draft.isEmpty ? nil : draft
@@ -131,9 +131,9 @@ final class ScreenEditor {
     /// Once begun, a send isn't cancelled with the task it was asked from, as when the
     /// field goes away: it would stop waiting for a command spoken a moment earlier, and go
     /// ahead of it.
-    func send(_ text: String, to screen: DesignScreen.ID) async -> Bool {
+    func send(_ text: String, to screen: TreeScreen.ID) async -> Bool {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !words.isEmpty, let model, !model.isClosed, model.store.screen(screen) != nil,
+        guard !words.isEmpty, let model, !model.isClosed, model.store.treeScreen(screen) != nil,
               !isBusy(for: screen), whyUnavailable() == nil else { return false }
         sending.insert(screen)
         sent[screen] = nil
@@ -153,7 +153,7 @@ final class ScreenEditor {
     /// How the change to `screen` is getting on: on its way, with no step yet, while it is
     /// being sent; then its own lines on the call it was sent on. Over with nothing sent,
     /// once the call it was sent on has ended, or once its reply has shown.
-    func progress(for screen: DesignScreen.ID) -> VoiceCall.Progress {
+    func progress(for screen: TreeScreen.ID) -> VoiceCall.Progress {
         if sending.contains(screen) { return .working(nil) }
         guard let change = sent[screen], let call = change.call, call.phase != .ended,
               call === model?.pencilVoice.call else { return .over }
@@ -161,14 +161,14 @@ final class ScreenEditor {
     }
 
     /// Whether a change to `screen` is on its way, which keeps another from being sent.
-    func isBusy(for screen: DesignScreen.ID) -> Bool {
+    func isBusy(for screen: TreeScreen.ID) -> Bool {
         if case .working = progress(for: screen) { return true }
         return false
     }
 
     /// What the field for `screen` shows in place of the words typed, or nil when there is
     /// nothing to show and it shows its words or its placeholder.
-    func line(for screen: DesignScreen.ID) -> Line? {
+    func line(for screen: TreeScreen.ID) -> Line? {
         switch progress(for: screen) {
         case .working(let step): .working(step ?? Self.noStepYet)
         case .done(let text), .said(let text): .reply(text)

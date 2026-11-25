@@ -306,7 +306,7 @@ final class PencilVoice {
     /// listens for a change to that screen until it lets go. It isn't a squeeze, so neither
     /// Squeeze to Talk, the system's squeeze setting, Draw nor where it is has a say. One
     /// listen at a time: while one is open, a squeeze's or another hold's, it is ignored.
-    func holdBegan(about screen: DesignScreen.ID, at anchor: CGPoint) {
+    func holdBegan(about screen: TreeScreen.ID, at anchor: CGPoint) {
         if case .listening = mode { return }
         guard let model else { return }
         // A phone call in another window has the microphone, and its commands are about that
@@ -637,34 +637,49 @@ final class PencilVoice {
         model.isOverChrome(viewPoint)
     }
 
-    /// What the pen is over. Drawings are looked through, since voice can't change one.
-    /// Part of what is selected means all of it, a drawing in it included: the drawing is
-    /// looked at before it is looked through. What is selected has parts when it is several
-    /// things, or a group, whose members are what the pen finds (F6).
+    /// What the pen is over: what a tap there finds, a container in a gap between what it
+    /// holds (a card's padding among them) as much as a thing, as voice sees containers
+    /// (call 7). Drawings are looked through, since voice can't change one. Part of what is
+    /// selected means all of it, a drawing in it included: the drawing is looked at before it
+    /// is looked through. What is selected has parts when it is several things, or a
+    /// container, whose nodes at any depth are what the pen finds (F6).
     private func target(at viewPoint: CGPoint, in model: AppModel) -> VoiceTarget {
-        let whole = model.selection.flatMap { $0.isSeveral || model.selectedElement?.element.kind == .group ? $0 : nil }
-        let leaves = whole == nil ? [] : Set(model.selectedLeaves.map(\.ref.element))
-        if let whole, let top = model.hoverTarget(at: viewPoint), Self.isPart(top, of: whole, leaves: leaves) {
+        let whole = model.selection.flatMap { $0.isSeveral || model.selectedNode?.node.isContainer == true ? $0 : nil }
+        let top = model.hoverTarget(at: viewPoint)
+        if let whole, let top, Self.isPart(top, of: whole, in: model.store) {
             return .thing(whole)
         }
-        guard let hit = model.hoverTarget(at: viewPoint, skippingDrawings: true) else {
+        // Ink lies over everything else. Beneath it the pen finds a thing or a screen, as a
+        // finger reaching through it would, though not a container by its gaps.
+        let hit = Self.isDrawing(top, in: model.store) ? model.hoverTarget(at: viewPoint, skippingDrawings: true) : top
+        guard let hit else {
             return .canvas(model.viewport.canvasPoint(for: viewPoint))
         }
-        if let whole, Self.isPart(hit, of: whole, leaves: leaves) {
+        if let whole, Self.isPart(hit, of: whole, in: model.store) {
             return .thing(whole)
         }
         return .thing(hit)
     }
 
+    private static func isDrawing(_ thing: CanvasSelection?, in store: DesignStore) -> Bool {
+        guard case .element(let ref)? = thing else { return false }
+        return store.node(ref.element)?.kind == .drawing
+    }
+
     /// Whether what the pen is over is part of what is selected: one of the things selected,
-    /// one of `leaves`, what is in the groups selected, or something on a screen selected.
-    private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection, leaves: Set<DesignElement.ID>) -> Bool {
+    /// something in a container selected, at any depth, or something on a screen selected.
+    private static func isPart(_ hit: CanvasSelection, of selection: CanvasSelection, in store: DesignStore) -> Bool {
         if selection.contains(hit) { return true }
         guard case .element(let ref) = hit else { return false }
-        if leaves.contains(ref.element) { return true }
-        // An element on a screen that is selected is part of it too.
-        if case .screen(let id) = ref.host, selection.contains(.screen(id)) { return true }
-        return false
+        let holders = Set(store.index.ancestors(of: ref.element))
+        return selection.things.contains { thing in
+            switch thing {
+            case .element(let selected): holders.contains(selected.element)
+            // A thing on a screen that is selected is part of it too.
+            case .screen(let id): ref.host == .screen(id)
+            case .several: false
+            }
+        }
     }
 
     private func select(_ target: VoiceTarget, in model: AppModel) {

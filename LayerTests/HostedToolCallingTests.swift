@@ -269,13 +269,13 @@ extension HostedModelTests {
 
         #expect(outcome.problem == nil)
         #expect(outcome.lines == ["Restyled the button “Sign in”."])
-        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        #expect(app.store.screenLeaves(screen).first { $0.kind == .button }?.resolvedTint == ColourWords.parse("green"))
         // The model was sent the rules, the whole canvas and every tool, as Anthropic takes them.
         let first = try body(ofRequest: 0)
         let system = try #require(first["system"] as? String)
         #expect(system.contains(VoiceRules.full))
         #expect(system.contains(#"E2 button "Sign in" x20 y420 w353 h50"#))
-        #expect((first["tools"] as? [[String: Any]])?.count == 21)
+        #expect((first["tools"] as? [[String: Any]])?.count == 25)
         #expect(first["model"] as? String == "claude-test")
         // Its second look at the canvas is after the change.
         let second = try #require(try body(ofRequest: 1)["system"] as? String)
@@ -324,9 +324,9 @@ extension HostedModelTests {
 
         let line = try await box.createScreen(name: "the Welcome screen", description: "a simple login screen")
 
-        #expect(app.store.screens.count == 2)
-        let made = try #require(app.store.screens.last)
-        #expect(made.elements.map(\.kind) == [.title, .button])
+        #expect(app.store.tree.screens.count == 2)
+        let made = try #require(app.store.tree.screens.last)
+        #expect(made.root.leaves.map(\.kind) == [.title, .button])
         // Named as the model named it, without the words that say it is a screen.
         #expect(made.name == "Welcome")
         // The model is told what to call the new screen, and how much is on it.
@@ -354,12 +354,12 @@ extension HostedModelTests {
 
         _ = try await box.createScreen(name: "Admin Dashboard", description: "an admin dashboard", device: nil)
 
-        #expect(app.store.screens.last?.device.id == "macbook-air")
+        #expect(app.store.tree.screens.last.map(app.store.tree.device(of:))?.id == "macbook-air")
         // Shown, but not selected.
         #expect(app.selection == nil)
 
         _ = try await box.createScreen(name: "Settings", description: "settings", device: "iPad")
-        #expect(app.store.screens.last?.device.id == "ipad")
+        #expect(app.store.tree.screens.last.map(app.store.tree.device(of:))?.id == "ipad")
     }
 
     /// gpt-6-luna turns tools down while it reasons, and says to send reasoning_effort
@@ -381,7 +381,7 @@ extension HostedModelTests {
         let outcome = await VoiceAgent(model: app).run("make the sign in button green")
 
         #expect(outcome.problem == nil)
-        #expect(app.store.screen(screen)?.elements.first { $0.kind == .button }?.tint == ColourWords.parse("green"))
+        #expect(app.store.screenLeaves(screen).first { $0.kind == .button }?.resolvedTint == ColourWords.parse("green"))
         let bodies = try StubProvider.requests.map { try #require(JSONSerialization.jsonObject(with: $0.body) as? [String: Any]) }
         #expect(bodies.count == 3)
         #expect(bodies[0]["reasoning_effort"] == nil)
@@ -405,24 +405,24 @@ extension HostedModelTests {
         let handles = VoiceHandles()
         _ = CanvasPicture.capture(from: app, handles: handles)
         let box = VoiceToolbox(model: app, handles: handles)
-        let image = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screen(screen)?.elements.last).id)
+        let image = DesignStore.ElementRef(host: .screen(screen), element: try #require(app.store.screenLeaves(screen).last).id)
 
         app.store.beginHeldEdit()                  // the spoken command starts
         app.store.beginEdit()                      // a finger starts to drag the image
-        app.store.update(image) { $0.frame.origin.x = 40 }
+        app.store.update(image.element) { $0.frame.origin.x = 40 }
         let mark = app.store.historyMark           // the drag's step, from its first change
         _ = try await box.createScreen(name: nil, description: "a simple login screen")
         app.store.endHeldEdit()                    // the command is over; the finger is still down
-        app.store.update(image) { $0.frame.origin.x = 60 }
-        app.store.update(image) { $0.frame.origin.x = 80 }
+        app.store.update(image.element) { $0.frame.origin.x = 60 }
+        app.store.update(image.element) { $0.frame.origin.x = 80 }
 
-        #expect(app.store.screens.count == 2)
+        #expect(app.store.tree.screens.count == 2)
         // The command's screen is one step; no streamed element or move was a step of its own.
         #expect(app.store.historyMark == mark + 1)
         app.store.endEdit()                        // the finger lifts
         undo.undo()
-        #expect(app.store.screens.count == 1)
-        #expect(app.store.resolve(image)?.element.frame.origin.x == 80)
+        #expect(app.store.tree.screens.count == 1)
+        #expect(app.store.ownFrame(image.element)?.origin.x == 80)
         undo.undo()
         #expect(app.store.content == before)
         #expect(!undo.canUndo)

@@ -8,7 +8,7 @@ import Testing
 struct VoiceScreenLayoutTests {
     private struct Bench {
         var app: AppModel
-        var screen: DesignScreen.ID
+        var screen: TreeScreen.ID
         var handles: VoiceHandles
         var box: VoiceToolbox
     }
@@ -73,12 +73,12 @@ struct VoiceScreenLayoutTests {
     /// Pointed at an element, "this screen" is the screen it is on, with or without its handle.
     @Test func thisScreenIsTheOnePointedAt() throws {
         let bench = bench()
-        _ = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 9000, y: 9000), scale: 0.6))
-        let button = try #require(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .button })
+        bench.app.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 9000, y: 9000), scale: 0.6)
+        let button = try #require(bench.app.store.screenLeaves(bench.screen).first { $0.kind == .button })
         bench.app.selection = .element(.init(host: .screen(bench.screen), element: button.id))
         #expect(bench.box.tidyScreen(screen: nil) == "Tidied the layout of S1.")
         #expect(bench.box.changeScreenDevice(screen: "E2", device: "iPad").hasPrefix("Made S1 an iPad screen"))
-        #expect(bench.app.store.screen(bench.screen)?.deviceID == "ipad")
+        #expect(bench.app.store.treeScreen(bench.screen)?.deviceID == "ipad")
         #expect(bench.box.tidyScreen(screen: "E99") == "There is no E99.")
     }
 
@@ -86,34 +86,37 @@ struct VoiceScreenLayoutTests {
     /// they scale with the screen's width, and the image keeps its leading inset.
     @Test func changingTheDeviceReflowsTheScreen() throws {
         let bench = bench()
-        let before = try #require(bench.app.store.screen(bench.screen)).elements.map(\.frame)
+        let store = bench.app.store
+        func frames() -> [CGRect] { store.screenLeaves(bench.screen).compactMap { store.ownFrame($0.id) } }
+        let before = frames()
         let line = bench.box.changeScreenDevice(screen: "S1", device: "iPad")
         #expect(line == "Made S1 an iPad screen (820 × 1180).")
-        let screen = try #require(bench.app.store.screen(bench.screen))
+        let screen = try #require(store.treeScreen(bench.screen))
         #expect(screen.deviceID == "ipad")
-        #expect(screen.elements.map(\.kind) == [.title, .button, .image])
-        #expect(screen.elements.map(\.frame) == [CGRect(x: 42, y: 75, width: 737, height: 41),
-                                                 CGRect(x: 42, y: 420, width: 737, height: 50),
-                                                 CGRect(x: 20, y: 500, width: 200, height: 200)])
+        #expect(store.screenLeaves(bench.screen).map(\.kind) == [.title, .button, .image])
+        #expect(frames() == [CGRect(x: 42, y: 75, width: 737, height: 41),
+                             CGRect(x: 42, y: 420, width: 737, height: 50),
+                             CGRect(x: 20, y: 500, width: 200, height: 200)])
         // Back to an iPhone is no device at all, as the Siri action keeps it, and everything is where it was.
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPhone").hasPrefix("Made S1 an iPhone screen"))
-        #expect(bench.app.store.screen(bench.screen)?.deviceID == nil)
-        #expect(bench.app.store.screen(bench.screen)?.elements.map(\.frame) == before)
+        #expect(store.treeScreen(bench.screen)?.deviceID == nil)
+        #expect(frames() == before)
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "watch").hasPrefix("I can make it"))
     }
 
     /// A button stood on end keeps its angle and its size on an iPad, and stays on the screen.
     @Test func aTurnedElementKeepsItsAngleAndSizeOnANewDevice() throws {
         let bench = bench()
-        let button = try #require(bench.app.store.screen(bench.screen)?.elements.first { $0.kind == .button })
-        let ref = DesignStore.ElementRef(host: .screen(bench.screen), element: button.id)
-        bench.app.store.update(ref) { $0.setRotation(90) }
+        let store = bench.app.store
+        let button = try #require(store.screenLeaves(bench.screen).first { $0.kind == .button })
+        let size = try #require(store.ownFrame(button.id)).size
+        store.setCanvasAngles([button.id: 90])
         #expect(bench.box.changeScreenDevice(screen: "S1", device: "iPad").hasPrefix("Made S1 an iPad screen"))
-        let screen = try #require(bench.app.store.screen(bench.screen))
-        let after = try #require(screen.elements.first { $0.id == button.id })
-        #expect(after.rotation == 90)
-        #expect(after.frame.size == button.frame.size)
-        #expect(CGRect(origin: .zero, size: screen.size).contains(after.shapeBounds))
+        let after = try #require(store.index.ownPose(of: button.id, in: store.tree))
+        #expect(after.degrees == 90)
+        #expect(after.frame.size == size)
+        let device = try #require(store.device(of: bench.screen))
+        #expect(CGRect(origin: .zero, size: device.size).contains(TurnedRect(rect: after.frame, degrees: after.degrees).bounds))
     }
 
     @Test func aNewScreenIsOnTheDeviceAskedFor() async throws {
@@ -123,7 +126,7 @@ struct VoiceScreenLayoutTests {
             bench.app.screenStream = { _ in stream }
             let making = Task { try await bench.box.createScreen(name: "Shop", description: "an Apple product page", device: said) }
             #expect(await eventually { bench.app.isGenerating })
-            let made = try #require(bench.app.store.screens.last)
+            let made = try #require(bench.app.store.tree.screens.last)
             #expect(made.id != bench.screen)
             #expect(made.deviceID == expected)
             feed.finish()

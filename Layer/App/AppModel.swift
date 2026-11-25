@@ -867,10 +867,11 @@ final class AppModel {
     @ObservationIgnored var openDesigns: @MainActor () -> [AppModel] = { OpenDesigns.shared.all }
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
-    /// the names of the screens and what their elements say.
+    /// the names of the screens and what their leaves say, read from the tree.
     var voiceVocabulary: [String] {
         var seen: Set<String> = []
-        let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
+        let tree = store.tree
+        let words = tree.screens.flatMap { [$0.name] + $0.root.leaves.map(\.content.text) } + tree.canvasLeaves.map(\.content.text)
         return words
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0.count <= 60 && seen.insert($0).inserted }
