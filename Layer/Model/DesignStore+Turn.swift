@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 /// Turning and resizing on the tree: what the knob, the twist, the Rotation field and a handle write. Each reads the
-/// store's index and a walk down one node's path, as the canvas's other writes do (`DesignStore+Canvas.swift`), and
-/// none lowers the projection. Each write is one change.
+/// store's index and a walk down one node's path, as the canvas's other writes do (`DesignStore+Canvas.swift`). Each
+/// write is one change.
 extension DesignStore {
     // MARK: Turning
 

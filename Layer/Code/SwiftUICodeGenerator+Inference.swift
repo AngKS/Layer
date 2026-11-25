@@ -22,10 +22,9 @@ extension SwiftUICodeGenerator {
         var rotation: Double?
     }
 
-    /// Where the inference reads a node from: a node's own space in the inferred container's,
-    /// as the projection worked out a leaf's place on its screen. While every node down to it
-    /// is upright, origins are added, so whole numbers stay exact; under a turned one the
-    /// centre goes through the turns, as `TreeIndex` turns it.
+    /// Where the inference reads a node from: a node's own space in the inferred container's.
+    /// While every node down to it is upright, origins are added, so whole numbers stay exact;
+    /// under a turned one the centre goes through the turns, as `TreeIndex` turns it.
     struct Place {
         var toContainer = CGAffineTransform.identity
         var origin = CGPoint.zero

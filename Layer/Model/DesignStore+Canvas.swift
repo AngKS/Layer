@@ -3,7 +3,7 @@ import Foundation
 
 /// A node where the canvas finds it: what it is, where it is in its host's own points, how those
 /// points sit on the canvas, and what holds it. Built from the store's index and one walk down the
-/// node's path, never from the projection.
+/// node's path.
 struct PlacedNode: Equatable {
     var ref: NodeRef
     var node: LayerNode
@@ -34,8 +34,8 @@ struct PlacedNode: Equatable {
 }
 
 /// The canvas's reads and writes on the tree, beside plan 2's verbs (`DesignStore+Tree.swift`). Each read
-/// comes from the store's index, worked out once per version, and a walk down one node's path; none lowers
-/// the projection. Each write is one change, made as the store's verbs make theirs.
+/// comes from the store's index, worked out once per version, and a walk down one node's path. Each write
+/// is one change, made as the store's verbs make theirs.
 extension DesignStore {
     // MARK: Reading
 

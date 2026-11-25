@@ -272,8 +272,6 @@ struct ElementEntity: AppEntity {
     /// A leaf on `host`, called `hostName`, locked or hidden as `isLocked` and `isHidden` say: with the containers
     /// above it, as the design's index has it.
     init(design: String, host: TreeIndex.Host, hostName: String, node: LayerNode, isLocked: Bool, isHidden: Bool) {
-        // Until plan 6's Task 11 renames the ref, the index's host and a ref's are two enums of one shape, converted
-        // here alone (F29).
         id = EntityKey.element(design: design, host: host, element: node.id)
         kind = ElementKindChoice(node.kind)
         text = node.content.text

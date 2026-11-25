@@ -248,7 +248,8 @@ struct FormatPanelLayoutTests {
         #expect(!undo.canUndo)
     }
 
-    /// A card lowers as a group, so Ungroup acts on it as on a group: the button is on for both, and off when locked.
+    /// A card is a container as a group is, so Ungroup acts on it as on a group: the button is on for both, and off when
+    /// locked.
     @Test func ungroupIsOnWhereItWouldAct() throws {
         let card = container(.card, frame: CGRect(x: 20, y: 100, width: 100, height: 60), [text(0, 0), text(0, 30)])
         var locked = container(.group, frame: CGRect(x: 20, y: 300, width: 100, height: 60), [text(0, 0), text(0, 30)])

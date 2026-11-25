@@ -159,10 +159,10 @@ extension AppModel {
         for (made, screen) in zip(laidOut, screens) where added.contains(screen.id) {
             unfixed.merge(made.unfixed) { $0 + $1 }
         }
-        for (surface, screen) in zip(imported.screens, screens) where !added.contains(screen.id) {
+        for (surface, (made, screen)) in zip(imported.screens, zip(laidOut, screens)) where !added.contains(screen.id) {
             diagnostics.append(A2UIDiagnostic(
                 reason: .invalidComponent,
-                message: "Surface \(surface.surfaceID) isn't imported: \(Self.whyRefused(screen.root))."))
+                message: "Surface \(surface.surfaceID) isn't imported: \(Self.whyRefused(screen.root, on: made.device))."))
         }
         if let shown = CanvasSelection(added.map(CanvasSelection.screen)) {
             DesignActions.reveal(shown, in: self, selecting: false)
@@ -179,11 +179,14 @@ extension AppModel {
     }
 
     /// Each imported screen's root laid out as the rules would lay it out on its screen: on the surface's own device
-    /// when it names one this design has (Layer's own export), else on the design's new-screen device (F3).
+    /// when it names one this design has (Layer's own export), else on the design's new-screen device (F3). A device of
+    /// the design's own that can't be used (`DeviceFrame.problems`), which a file can hold, lays nothing out: the store
+    /// refuses a screen on it, and the report says why (`whyRefused(_:on:)`).
     nonisolated private static func laidOut(_ screens: [A2UIImport.Screen], settings: CanvasSettings) -> [LaidOutImport] {
         screens.map { screen in
             let named = screen.deviceID.map(settings.device(named:))
             let device = named.flatMap { $0.id == screen.deviceID ? $0 : nil } ?? settings.sketchDevice
+            guard device.problems.isEmpty else { return LaidOutImport(device: device, root: screen.root, unfixed: [:]) }
             let made = TreeRules.laidOutReporting(screen.root, deviceID: device == .iPhone ? nil : device.id,
                                                   settings: settings, previous: nil)
             return LaidOutImport(device: device, root: made.root,
@@ -191,9 +194,12 @@ extension AppModel {
         }
     }
 
-    /// Why the design refused a screen's root, as `addLaidOutScreens` refuses one: it holds what a screen can't, or
-    /// there is no room for it.
-    private static func whyRefused(_ root: LayerNode) -> String {
+    /// Why the design refused a screen's root on `device`, as `addLaidOutScreens` refuses one: its device can't be used,
+    /// it holds what a screen can't, or there is no room for it.
+    private static func whyRefused(_ root: LayerNode, on device: DeviceFrame) -> String {
+        if !device.problems.isEmpty {
+            return "its screen is for the device “\(device.name)”, which can't be used"
+        }
         if TreeEdit.levels(below: root) > TreeRules.maximumDepth {
             return "its screen is nested more than \(TreeRules.maximumDepth) deep, which a screen can't hold"
         }

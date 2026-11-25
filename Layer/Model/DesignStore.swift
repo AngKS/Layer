@@ -198,15 +198,15 @@ final class DesignStore {
 
     /// A copy of a screen and everything on it, to its right, as one change. What is on it is
     /// copied as it is, its root's layout, rows and cards included, each thing new and keeping
-    /// its own lock and hide. The copy is unlocked and named for the original. Nil when the
+    /// its own lock and hide. The copy is unlocked and named for the original, and keeps its
+    /// device, even one a file held that can't be used: no new device is chosen. Nil when the
     /// screen is gone, or the copy would take the design past 5,000 things.
     @discardableResult
     func duplicateScreen(_ id: TreeScreen.ID) -> TreeScreen? {
         duplicateTreeScreen(id).flatMap { treeScreen($0) }
     }
 
-    /// `duplicateScreen(_:)` read from the tree, giving the copy's identifier: what the popover's Duplicate does, so
-    /// that a tap lowers nothing.
+    /// `duplicateScreen(_:)`, giving the copy's identifier: what the popover's Duplicate and Siri's Duplicate Screen do.
     @discardableResult
     func duplicateTreeScreen(_ id: TreeScreen.ID) -> TreeScreen.ID? {
         let tree = tree
@@ -220,7 +220,7 @@ final class DesignStore {
         copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
         copy.origin.x = frame.maxX + 60
-        return addScreen(copy)
+        return addScreen(keepingItsDevice: copy)
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
@@ -267,9 +267,8 @@ final class DesignStore {
 
     /// Lines an element on a screen up with an edge or the middle of that screen. A container
     /// lines up as one block: its box is lined up, and everything in it moves as far. Read from the
-    /// tree and written to it, so that an Align tap lowers nothing: a container by `position`, and
-    /// anything else through its parent (`place`), which in a row, column, grid or overlay takes it
-    /// out as a new place does (My call 20).
+    /// tree and written to it: a container by `position`, and anything else through its parent
+    /// (`place`), which in a row, column, grid or overlay takes it out as a new place does (My call 20).
     func align(_ ref: NodeRef, _ alignment: ElementLayout.Alignment) {
         guard case .screen(let id) = ref.host, let screen = treeScreen(id), let placed = placed(ref) else { return }
         // A turned thing lines up by the box round its shape; its frame moves with it.

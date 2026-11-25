@@ -279,6 +279,14 @@ private struct CanvasEvents: ViewModifier {
         } message: {
             Text(model.undoNotice ?? "")
         }
+        .alert("Couldn't Add the Screen", isPresented: Binding(
+            get: { model.screenNotice != nil },
+            set: { if !$0 { model.screenNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.screenNotice ?? "")
+        }
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
             set: { if !$0 { model.keptVersionsNotice = nil } }

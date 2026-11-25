@@ -98,8 +98,8 @@ extension DesignStore {
     /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
     /// on each axis whose size changed, and the engine lays out what is in it.
     func resizeGroup(_ ref: NodeRef, to frame: CGRect, from start: GroupPose? = nil) {
-        // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds the store's
-        // index and never lowers the design to its list (clause (m)).
+        // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds no more than the
+        // store's index.
         guard let group = placed(ref), group.node.isContainer, !group.isLocked,
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
@@ -265,12 +265,5 @@ extension DesignStore {
             }
         }
         setOwnLocks(false, nodes: nodes, screens: screens)
-    }
-}
-
-extension NodeRef.Host {
-    /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
-    var parent: TreeScreen.ID? {
-        if case .screen(let id) = self { id } else { nil }
     }
 }

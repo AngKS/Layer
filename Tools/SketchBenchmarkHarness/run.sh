@@ -2,8 +2,8 @@
 # Builds and runs the macOS sketch benchmark harness. Apple Intelligence calls fail in the
 # iPadOS Simulator (see memory note `layer-apple-intelligence-findings`), so the
 # model-dependent parts of the benchmark run here instead, compiling the real
-# `Layer/Sketch` files for macOS with stubs for the two UIKit/PencilKit-only types they
-# transitively need.
+# `Layer/Sketch` files for macOS with stubs (Stubs.swift, Tools/Shared/) for the UIKit-only
+# types they transitively need.
 #
 # Usage: Tools/SketchBenchmarkHarness/run.sh <generate|run|check|structure|healthcheck> [args...]
 set -eu

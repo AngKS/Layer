@@ -70,7 +70,7 @@ struct LayersPanel: View {
 /// (rows, columns and grids in layout order), then those on the open canvas, drawings in a section of their
 /// own. Only this reads the design, the selection and the hover, which change on every frame of a drag and
 /// every move of the pencil: each row is given what it shows, never a node, whose frame changes on every
-/// frame, and is built again only when that changes. Read from the tree and its index, never the projection.
+/// frame, and is built again only when that changes. Read from the tree and its index.
 private struct LayersList: View {
     @Environment(AppModel.self) private var model
     /// The containers left open, for this session. One with something selected in it is open

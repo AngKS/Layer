@@ -59,7 +59,7 @@ struct SelectionActions: View {
     private var bar: some View {
         @Bindable var model = model
         let isLocked = model.isSelectionLocked
-        // Read from the tree, so that the bar lowers nothing when the design changes.
+        // Read from the tree and its index, as the canvas reads it.
         let selected = model.selectedNode
         return ToolbarPill {
             if isLocked {
@@ -240,7 +240,7 @@ struct SelectionActions: View {
     }
 
     /// Why a shape is off, when it is because what is selected is on more than one screen, or on a screen and the open
-    /// canvas; nothing otherwise. Read from the selection's own refs, so that the bar lowers nothing.
+    /// canvas; nothing otherwise. Read from the selection's own refs.
     private var groupHint: String {
         let hosts = Set(model.selectedThings.compactMap { thing -> NodeRef.Host? in
             if case .element(let ref) = thing { ref.host } else { nil }

@@ -263,6 +263,33 @@ struct ScreenGenerationLifecycleTests {
         .screen(Outline.parse(text, isComplete: true))
     }
 
+    /// Generate on a New Screens device that a file held broken (`DeviceFrame.problems`) makes no screen, and says why,
+    /// naming the device. The last generation's outcome goes in its own time, as the refusal leaves it alone (plan 6,
+    /// Task 11 fix round, M2).
+    @Test func aGenerationRefusedOnADeviceThatCantBeUsedSaysSoAndLeavesTheLastOutcome() async throws {
+        let (app, _, feed) = bench()
+        app.generationOutcomePause = .seconds(1)
+        let first = try #require(app.generateScreen(from: "a settings screen"))
+        feed.yield(Self.written("title: Settings\n"))
+        feed.finish()
+        // Given time to finish under load: the refusal below needs no generation under way.
+        try #require(await eventually(within: .seconds(15)) { !app.isGenerating })
+        #expect(app.generation?.screenID == first)
+
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        app.store.updateCanvas {
+            $0.customDevices.append(sliver)
+            $0.sketchDeviceID = sliver.id
+        }
+        let screens = app.store.tree.screens
+        #expect(app.generateScreen(from: "a profile screen") == nil)
+        #expect(app.store.tree.screens == screens)
+        let said = try #require(app.screenNotice)
+        #expect(said.hasPrefix("The device “Sliver” can't be used."), "\(said)")
+        // The finished one's outcome still goes when its time is up: the refusal didn't keep it.
+        #expect(await eventually(within: .seconds(10)) { app.generation == nil })
+    }
+
     /// Undo pressed while a screen is written takes it away. The generation still
     /// finishes: it used to stay "writing" for good, with every later one refused and its
     /// own undo step never closed (B-I1).

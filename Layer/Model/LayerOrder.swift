@@ -146,7 +146,7 @@ extension DesignStore {
         case bottom
     }
 
-    /// Read from the tree and its index: a drop in the Layers panel lowers nothing.
+    /// A drop in the Layers panel, read from the tree and its index.
     private func moveLayer(_ id: UUID, to list: NodeParent, landing: Landing) -> Bool {
         guard let thing = placed(id), thing.node.kind != .drawing, !thing.isLocked,
               let from = parent(of: id), let host = index[id]?.host, host == self.host(of: list),

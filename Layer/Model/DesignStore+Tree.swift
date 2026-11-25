@@ -84,16 +84,25 @@ extension DesignStore {
         return true
     }
 
-    /// Adds a screen, with everything on it, after the others, and returns its id. Nil, and nothing is
-    /// added, when the design already has the screen's id or one of its nodes', when its device is one of
-    /// the design's own that can't be used (`DeviceFrame.problems`), which a file can hold, or for
-    /// `add`'s other refusals: a drawing or sticky note on it, a node deeper than 32, or more than 5,000
-    /// nodes. A refused screen's id may name another screen the design has, so it is never handed back.
+    /// Adds a new screen, with everything on it, after the others, and returns its id. Nil, and nothing is
+    /// added, when its device is one of the design's own that can't be used (`DeviceFrame.problems`), which a
+    /// file can hold: a new screen is a fresh choice of device. Nil too for `addScreen(keepingItsDevice:)`'s
+    /// refusals.
     @discardableResult
     func addScreen(_ screen: TreeScreen) -> TreeScreen.ID? {
+        guard tree.device(of: screen).problems.isEmpty else { return nil }
+        return addScreen(keepingItsDevice: screen)
+    }
+
+    /// Adds a screen whose device is no new choice, such as a copy of one the design has (`duplicateTreeScreen`), and
+    /// returns its id: its device isn't checked, as the screen it was copied from already has it. Nil, and nothing is
+    /// added, when the design already has the screen's id or one of its nodes', or for `add`'s other refusals: a
+    /// drawing or sticky note on it, a node deeper than 32, or more than 5,000 nodes. A refused screen's id may name
+    /// another screen the design has, so it is never handed back.
+    @discardableResult
+    func addScreen(keepingItsDevice screen: TreeScreen) -> TreeScreen.ID? {
         let top = Holder(host: .screen(screen.id), path: [], node: screen.root, depth: 0, toHost: .identity, degrees: 0)
-        guard !tree.screens.contains(where: { $0.id == screen.id }), tree.device(of: screen).problems.isEmpty,
-              accepts([screen.root], in: top) else { return nil }
+        guard !tree.screens.contains(where: { $0.id == screen.id }), accepts([screen.root], in: top) else { return nil }
         changeTree(writing: 0) { $0.screens.append(screen) }
         return screen.id
     }

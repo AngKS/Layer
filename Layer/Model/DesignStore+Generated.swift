@@ -40,9 +40,10 @@ extension DesignStore {
     /// Each root must be as `TreeRules.laidOut` gave it for the screen's device and this design's settings: the rules
     /// trust it, and a root that wasn't laid out stays as it was given.
     ///
-    /// A screen is left out, as `addScreen(_:)` refuses one, when the design already has its id or one of its nodes'
-    /// (or a screen before it does), when it holds a drawing or a sticky note, a node deeper than 32, or would take
-    /// the design past 5,000 nodes.
+    /// A screen is left out, as `addScreen(_:)` refuses one, when its device is one of the design's own that can't be
+    /// used (`DeviceFrame.problems`), which a file can hold; when the design already has its id or one of its nodes'
+    /// (or a screen before it does); when it holds a drawing or a sticky note, or a node deeper than 32; or when it
+    /// would take the design past 5,000 nodes.
     @discardableResult
     func addLaidOutScreens(_ screens: [TreeScreen]) -> [TreeScreen.ID] {
         let index = index
@@ -53,7 +54,7 @@ extension DesignStore {
         for screen in screens {
             let ids = TreeEdit.ids(in: screen.root)
             let fresh = Set(ids)
-            guard !screenIDs.contains(screen.id), fresh.count == ids.count,
+            guard tree.device(of: screen).problems.isEmpty, !screenIDs.contains(screen.id), fresh.count == ids.count,
                   fresh.allSatisfy({ index[$0] == nil }), taken.isDisjoint(with: fresh),
                   TreeEdit.levels(below: screen.root) <= TreeRules.maximumDepth,
                   !TreeEdit.holds(screen.root, where: { !$0.kind.belongsOnScreens }),

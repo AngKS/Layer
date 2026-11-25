@@ -178,7 +178,9 @@ extension BuildScreenIntent {
     /// again over it as it is then, and the rules lay that out (call 1).
     ///
     /// Siri sees leaves only. A build the design has no room for (more than 5,000 things, or nested deeper than 32)
-    /// changes nothing and throws `designTooLarge`.
+    /// changes nothing and throws `designTooLarge`. A new screen on a device of the design's own that can't be used
+    /// (`DeviceFrame.problems`), such as a New Screens device a file held broken, throws `deviceNotFound` before
+    /// anything is read or laid out, as the store would refuse it.
     @MainActor
     static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
                       undoManager: UndoManager?) async throws -> TreeScreen.ID {
@@ -194,6 +196,7 @@ extension BuildScreenIntent {
     @MainActor
     private static func buildScreen(_ layout: String, name: String?, device: DeviceFrame, in model: AppModel,
                                     undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        guard device.problems.isEmpty else { throw LayerIntentError.deviceNotFound(device.name) }
         let deviceID: String? = device == .iPhone ? nil : device.id
         var made: Made
         repeat {
@@ -430,7 +433,7 @@ struct DuplicateScreenIntent: AppIntent, UndoableIntent {
     /// (`DesignStore.duplicateTreeScreen`). Returns the copy's id.
     ///
     /// Throws `screenNotFound` for a screen that has gone, and `designTooLarge` when the design can't hold the copy:
-    /// past 5,000 things, the store makes none.
+    /// past 5,000 things, the store makes none. The copy keeps the screen's device, whatever it is.
     @MainActor
     static func duplicate(_ screen: TreeScreen.ID, in model: AppModel, undoManager: UndoManager?) throws -> TreeScreen.ID {
         guard model.store.treeScreen(screen) != nil else { throw LayerIntentError.screenNotFound }

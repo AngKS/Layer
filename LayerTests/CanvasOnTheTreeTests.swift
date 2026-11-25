@@ -85,7 +85,7 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat) -> Bool 
 }
 
 /// The canvas's reads and writes on the tree (plan 4, Task 1): a node's own pose and placement from the
-/// index, a frame placed through its parent's inverse, and the selection read without lowering the design.
+/// index, a frame placed through its parent's inverse, and the selection read from the tree alone.
 @Suite("The canvas on the tree")
 @MainActor
 struct CanvasOnTheTreeTests {

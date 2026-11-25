@@ -993,6 +993,32 @@ struct VoiceToolsTests {
         #expect(bench.box.newScreenAnchor == nil)
     }
 
+    /// A screen the design has no room for isn't started, and voice says so: the last generation's screen, still shown,
+    /// is never said to be the one made (plan 6, Task 11 fix round, M2).
+    @Test func aRefusedScreenIsNeverTheLastOneMade() async throws {
+        let bench = bench()
+        let store = bench.app.store
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        bench.app.screenStream = { _ in stream }
+        let last = try #require(bench.app.generateScreen(from: "a settings screen"))
+        feed.yield(.screen(Outline.parse("title: Settings\n", isComplete: true)))
+        feed.finish()
+        // Given time to finish under load: the refusal below needs no generation under way.
+        try #require(await eventually(within: .seconds(15)) { !bench.app.isGenerating })
+        #expect(bench.app.generation?.screenID == last)
+        // A screen of texts that brings the design to 5,000 nodes, its root among them.
+        let room = TreeRules.maximumNodes - store.index.count - 1
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 4_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes)
+        let screens = store.tree.screens
+
+        let line = try await bench.box.createScreen(name: "Profile", description: "a profile screen")
+        #expect(line == "The screen couldn't be started.")
+        #expect(bench.box.lastFailed)
+        #expect(store.tree.screens == screens)
+    }
+
     // MARK: Turning
 
     @Test func rotateElementTurnsToAnAngleOrByAnAmount() throws {

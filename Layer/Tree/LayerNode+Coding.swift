@@ -1,10 +1,11 @@
 import CoreGraphics
 import Foundation
 
-// How a node is saved. It reads every key but `id` and `kind` as optional, so a node written before a field existed still opens; keeps the keys it
-// doesn't know, its own and those inside its parts (its style, layout, padding, sizing,
-// accessibility, sketch and source); and reads its children one at a time, so one this
-// version can't read doesn't stop the rest from opening. Optionals are left out when nil.
+// How a node is saved. It reads every key but `id` and `kind` as optional, so a node written
+// before a field existed still opens; keeps the keys it doesn't know, its own and those inside
+// its parts (its style, layout, padding, sizing, accessibility, sketch and source); and reads its
+// children one at a time, so one this version can't read doesn't stop the rest from opening.
+// Optionals are left out when nil.
 // A node's content is written among its own keys, apart from `ink`, which is saved apart.
 
 extension LayerNode: KeepsUnknownKeys {

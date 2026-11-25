@@ -341,11 +341,14 @@ final class VoiceToolbox: VoiceActing {
         guard chosen.problems.isEmpty else { return failed(Self.cantMake(Self.screenNamed(chosen), on: chosen)) }
         // What the voice model asked for, so that a session log shows it beside the screen made.
         VoiceLog.log.info("tool: createScreen \"\(description, privacy: .public)\" on \((frame ?? usual).id, privacy: .public) (said \(device ?? "nothing", privacy: .public))")
-        // Inside a command the screen is part of the command's own undo step.
-        model.store.actingForCommand {
+        // Inside a command the screen is part of the command's own undo step. The screen is the one this call made: a
+        // refused one leaves the last generation's in place, which is never said to be made.
+        let started = model.store.actingForCommand {
             model.generateScreen(from: description, named: Self.screenName(name), near: newScreenAnchor, device: frame)
         }
-        guard let screenID = model.generation?.screenID else { return failed("The screen couldn't be started.") }
+        guard let screenID = started, model.generation?.screenID == screenID else {
+            return failed("The screen couldn't be started.")
+        }
         // Stopping the command stops the model; what it has written so far stays.
         await withTaskCancellationHandler {
             await model.waitForGeneration()

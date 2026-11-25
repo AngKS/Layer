@@ -24,7 +24,7 @@ struct SelectionLayer: View {
         let store = model.store
         let viewport = model.viewport
         let tree = store.tree
-        // Read from the tree: the canvas never lowers the design to its list (F12, F13).
+        // Read from the tree and its index alone (F12, F13).
         let selectedTreeScreen = model.selectedScreenID.flatMap(store.treeScreen)
         let selected = model.selectedNode
         ZStack(alignment: .topLeading) {

@@ -586,6 +586,50 @@ struct SiriWritesTheTreeTests {
         #expect(gone.map { if case .screenNotFound = $0 { true } else { false } } == true)
     }
 
+    /// A screen on one of the design's own devices that a file held broken (`problems`) is still copied by Duplicate
+    /// Screen, keeping its device, in one step: a copy chooses no new device. Siri never says the design is full when it
+    /// isn't (plan 6, Task 11 fix round, I1).
+    @Test func aScreenOnADeviceThatCantBeUsedIsStillDuplicated() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model, store = model.store
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        #expect(!sliver.problems.isEmpty)
+        // As a file holds them: the store makes no new screen on the device.
+        let thin = TreeScreen(name: "Thin", origin: CGPoint(x: 2_000, y: 0), scale: 1, deviceID: sliver.id)
+        store.changeTree(writing: 0) {
+            $0.settings.customDevices.append(sliver)
+            $0.screens.append(thin)
+        }
+        login.undo.removeAllActions()
+
+        let copy = try DuplicateScreenIntent.duplicate(thin.id, in: model, undoManager: nil)
+        #expect(store.treeScreen(copy)?.name == "Thin Copy")
+        #expect(store.device(of: copy) == sliver)
+        login.undo.undo()
+        #expect(store.treeScreen(copy) == nil)
+        #expect(!login.undo.canUndo, "one step")
+    }
+
+    /// Build Screen asked for a new screen on a device that can't be used (`problems`), such as a New Screens device a
+    /// file held broken, throws `deviceNotFound` with its name before anything is read or written, never
+    /// `designTooLarge` (Task 11 fix round, I2).
+    @Test func aBuildOnADeviceThatCantBeUsedIsRefusedByName() async throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model, store = model.store
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        store.changeTree(writing: 0) { $0.settings.customDevices.append(sliver) }
+        login.undo.removeAllActions()
+        let before = store.tree
+
+        let built = await #expect(throws: LayerIntentError.self) {
+            _ = try await BuildScreenIntent.build("title: Lobby", on: nil, name: "Lobby", device: sliver, in: model,
+                                                  undoManager: nil)
+        }
+        #expect(isDeviceNotFound(built, named: "Sliver"))
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
+    }
+
     /// M5: Move to Screen onto the open canvas at X and Y, in canvas points, puts the thing's corner there, drawn as large
     /// as it was, in one step. `MovingTests` moves one off a screen where it is, and refuses a sticky note a screen.
     @Test func movingOntoTheOpenCanvasPutsItsCornerWhereAsked() throws {

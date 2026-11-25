@@ -518,6 +518,8 @@ final class AppModel {
     private(set) var generation: ScreenGeneration?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationDismissal: Task<Void, Never>?
+    /// How long a finished generation's outcome is shown before it goes.
+    @ObservationIgnored var generationOutcomePause: Duration = .seconds(4)
 
     var isGenerating: Bool { generation?.phase == .writing }
 
@@ -538,11 +540,16 @@ final class AppModel {
     /// The screen is an undo step of its own (`DesignStore.Edit`), or, asked for by a spoken
     /// command, part of the command's: either way, what the person does while it is
     /// written is a step of its own, which the screen's never takes in or closes (G4).
-    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, device: DeviceFrame? = nil) {
+    ///
+    /// Returns the new screen's id. Nil, and nothing changes, when there is nothing to write
+    /// or the store refuses the screen: on a device that can't be used, or with no room for
+    /// it. A refusal asked for by hand says why (`screenNotice`); a spoken command says it
+    /// itself. The last generation's outcome stays up until its own time.
+    @discardableResult
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil,
+                        device: DeviceFrame? = nil) -> TreeScreen.ID? {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
-        generationTask?.cancel()
-        generationDismissal?.cancel()
+        guard !prompt.isEmpty, !isGenerating, !isClosed else { return nil }
 
         let device = device ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
@@ -563,12 +570,18 @@ final class AppModel {
                                        scale: placement.scale, deviceID: device == .iPhone ? nil : device.id,
                                        root: Outline.parse("", isComplete: true, tokens: tokens)))
         }
-        // A design with no room for another screen refuses it: there is nothing to write on, so
-        // the model isn't asked, and the step ends with nothing in it.
+        // A design with no room for another screen, or a device that can't be used, refuses it:
+        // there is nothing to write on, so the model isn't asked, and the step ends with nothing
+        // in it.
         guard let screenID = added else {
-            if ownsEdit { store.endEdit(edit) }
-            return
+            if ownsEdit {
+                store.endEdit(edit)
+                screenNotice = Self.whyNoScreen(on: device)
+            }
+            return nil
         }
+        generationTask?.cancel()
+        generationDismissal?.cancel()
         // Shown, not selected: a new screen comes in without selection handles round it.
         DesignActions.reveal(.screen(screenID), in: self, selecting: false)
         generation = ScreenGeneration(screenID: screenID, description: prompt)
@@ -614,6 +627,7 @@ final class AppModel {
                 self?.finishGeneration(error: error is CancellationError ? nil : error, edit: edit, ownsEdit: ownsEdit)
             }
         }
+        return screenID
     }
 
     /// Stops the model; what it has written so far stays.
@@ -688,7 +702,7 @@ final class AppModel {
         // Success says so briefly; a failure stays until it is dismissed.
         if finished.phase == .finished {
             generationDismissal = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: self?.generationOutcomePause ?? .zero)
                 guard !Task.isCancelled else { return }
                 withAnimation(.smooth(duration: 0.3)) { self?.dismissGeneration() }
             }
@@ -931,6 +945,18 @@ final class AppModel {
     @ObservationIgnored var takenActions: [TakenAction] = []
     /// Said when Siri's undo of an action found nothing left to take back.
     var undoNotice: String?
+
+    /// Said when a screen asked for by hand, generated or dropped from the library, can't be added: see
+    /// `whyNoScreen(on:)`.
+    var screenNotice: String?
+
+    /// Why the store refused a new screen of `device`: the device can't be used (`DeviceFrame.problems`), as a file can
+    /// hold one of the design's own, or else the design holds as much as Layer keeps.
+    static func whyNoScreen(on device: DeviceFrame) -> String {
+        let problems = device.problems
+        guard problems.isEmpty else { return "The device “\(device.name)” can't be used. \(problems.joined(separator: " "))" }
+        return "The design already holds as much as Layer keeps: \(TreeRules.maximumNodes.formatted()) things, nested at most \(TreeRules.maximumDepth) deep."
+    }
 
     /// Takes out of Siri's history the actions everything of which has been changed since,
     /// so that Siri isn't left to undo one, do nothing, and say it did. Done as the app
@@ -2477,7 +2503,10 @@ final class AppModel {
             store.addScreen(TreeScreen(name: name, origin: placement.origin, scale: placement.scale,
                                        deviceID: device == .iPhone ? nil : device.id, root: root))
         }
-        guard added != nil else { return }
+        guard added != nil else {
+            screenNotice = Self.whyNoScreen(on: device)
+            return
+        }
         tool = .select
         selection = nil
         suggestTitleIfNeeded()
@@ -2518,7 +2547,10 @@ final class AppModel {
         let placement = framePlacement(device, centeredAt: point)
         let screen = TreeScreen(name: "Screen \(store.tree.screens.count + 1)", origin: placement.origin,
                                 scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
-        guard store.addScreen(screen) != nil else { return nil }
+        guard store.addScreen(screen) != nil else {
+            screenNotice = Self.whyNoScreen(on: device)
+            return nil
+        }
         tool = .select
         // A new frame comes in unselected.
         selection = nil

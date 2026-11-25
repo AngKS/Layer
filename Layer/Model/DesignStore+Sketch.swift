@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// The sketch path on the tree (spec §5): a reading becomes a node where its sketch lands, in one change, and a reading
-/// is told what is already on its screen from the tree, never from the projection.
+/// is told what is already on its screen from the tree.
 extension DesignStore {
     /// One change: the reading's node where it lands (§5). Nil off every screen. `adjust` finishes it in the same change.
     ///

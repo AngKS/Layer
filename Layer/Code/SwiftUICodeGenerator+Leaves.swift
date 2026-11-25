@@ -1,9 +1,10 @@
 import CoreGraphics
 import Foundation
 
-// Each leaf's view: today's native views and styling, read from a `LayerNode`. Its frame is split off the view (F15): today's reading-order inference and Exact
-// positions write the frame they always wrote, and a child of a row, column, grid or overlay
-// writes the frame its sizing asks for instead.
+// Each leaf's view: today's native views and styling, read from a `LayerNode`. Its frame is split
+// off the view (F15): today's reading-order inference and Exact positions write the frame they
+// always wrote, and a child of a row, column, grid or overlay writes the frame its sizing asks
+// for instead.
 
 extension SwiftUICodeGenerator {
     /// A leaf as its code reads it: the node, the frame it is written at, and its turn, in the

@@ -5,9 +5,9 @@ import Foundation
 // Format panel. A screen's own points are its device's; on the open canvas they are the top-level
 // node's own, which its scale draws on the canvas (`placement(of:in:)`).
 //
-// A pose is worked out along the node's path, as the projection posed elements: under upright
-// containers their origins are added, so whole numbers stay exactly whole whatever the canvas's
-// scale; once one is turned, the node's centre is carried through their transforms.
+// A pose is worked out along the node's path: under upright containers their origins are added, so
+// whole numbers stay exactly whole whatever the canvas's scale; once one is turned, the node's
+// centre is carried through their transforms.
 
 extension TreeIndex {
     /// Where a node's own space sits in its host's own points: what its children are placed by, and

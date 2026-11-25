@@ -653,4 +653,69 @@ struct TreeVerbTests {
         let made = try #require(store.addScreen(kiosk, at: Placement(origin: .zero, scale: 1)))
         #expect(store.device(of: made.id) == kiosk)
     }
+
+    /// One of the design's own devices that a file held broken (`DeviceFrame.problems`), 1 point across with no room
+    /// inside, and a screen on it, written as a file holds them: the store refuses neither when they are read.
+    private func designWithAScreenOnASliver() -> (model: AppModel, sliver: DeviceFrame, screen: TreeScreen.ID) {
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        let model = AppModel(document: LayerDocument())
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        let screen = TreeScreen(name: "Thin", origin: .zero, scale: 1, deviceID: sliver.id)
+        model.store.changeTree(writing: 0) {
+            $0.settings.customDevices.append(sliver)
+            $0.screens.append(screen)
+        }
+        return (model, sliver, screen.id)
+    }
+
+    /// A copy keeps its original's device, even one that can't be used: duplicating chooses no new device, so the
+    /// store's refusal of one for a new screen doesn't take Duplicate away (plan 6, Task 11 fix round, I1). The popover's
+    /// Duplicate copies it as the store's does.
+    @Test func aScreenOnADeviceThatCantBeUsedIsStillCopied() throws {
+        let (model, sliver, screen) = designWithAScreenOnASliver()
+        let store = model.store
+        #expect(!sliver.problems.isEmpty)
+
+        let copy = try #require(store.duplicateScreen(screen))
+        #expect(copy.name == "Thin Copy")
+        #expect(store.device(of: copy.id) == sliver)
+
+        model.selection = .screen(screen)
+        model.duplicateSelection()
+        #expect(store.tree.screens.count == 3)
+        #expect(store.tree.screens.allSatisfy { $0.deviceID == sliver.id })
+    }
+
+    /// Screens laid out off the main actor, as the A2UI import and Siri's Build Screen add them, are refused on a device
+    /// that can't be used, as `addScreen(_:)` refuses one; another of the same call is still added (Task 11 fix round,
+    /// I2).
+    @Test func aLaidOutScreenOnADeviceThatCantBeUsedIsLeftOut() throws {
+        let (model, sliver, _) = designWithAScreenOnASliver()
+        let store = model.store
+        let thin = TreeScreen(name: "Thin Too", origin: CGPoint(x: 100, y: 0), scale: 1, deviceID: sliver.id)
+        let phone = TreeScreen(name: "Phone", origin: CGPoint(x: 400, y: 0), scale: 1, deviceID: nil)
+
+        #expect(store.addLaidOutScreens([thin, phone]) == [phone.id])
+        #expect(store.treeScreen(thin.id) == nil)
+        #expect(store.tree.screens.count == 2)
+    }
+
+    /// A frame or a template dropped from the library that the store refuses says why, naming the device (Task 11 fix
+    /// round, M2).
+    @Test func aRefusedLibraryDropSaysWhy() throws {
+        let (model, sliver, _) = designWithAScreenOnASliver()
+        let before = model.store.tree
+
+        #expect(model.addFrame(sliver) == nil)
+        let said = try #require(model.screenNotice)
+        #expect(said.hasPrefix("The device “Sliver” can't be used."), "\(said)")
+        model.screenNotice = nil
+
+        model.store.updateCanvas { $0.sketchDeviceID = sliver.id }
+        let named = model.store.tree
+        model.addTemplate("Product")
+        #expect(model.store.tree == named)
+        #expect(model.screenNotice?.hasPrefix("The device “Sliver” can't be used.") == true)
+        #expect(before.screens == named.screens)
+    }
 }

@@ -242,6 +242,27 @@ import Testing
         #expect(!said.contains("can't hold") && !said.contains("what a screen can't"), "\(said)")
     }
 
+    /// A surface laid out on the design's New Screens device, one of its own that a file held broken (`problems`), isn't
+    /// imported: the report names the device, not the design's size (plan 6, Task 11 fix round, I2).
+    @Test func aScreenOnADeviceThatCantBeUsedIsSaidWithItsDevice() async throws {
+        let (model, undo) = makeModel()
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        model.store.changeTree(writing: 0) {
+            $0.settings.customDevices.append(sliver)
+            $0.settings.sketchDeviceID = sliver.id
+        }
+        undo.removeAllActions()
+
+        let report = await model.importA2UI(try fixture("a2ui-scaffold-simple-login-form"))
+
+        #expect(report.screens.isEmpty)
+        #expect(model.store.tree.screens.isEmpty)
+        #expect(!undo.canUndo)
+        let said = report.groups.flatMap(\.diagnostics).map(\.message).first { $0.contains("isn't imported") } ?? ""
+        #expect(said.contains("its screen is for the device “Sliver”, which can't be used"), "\(said)")
+        #expect(!said.contains("more than"), "\(said)")
+    }
+
     @Test func idsAreWrittenAsIDs() {
         #expect(A2UIImportReport.title(for: .duplicateID) == "IDs used twice")
     }

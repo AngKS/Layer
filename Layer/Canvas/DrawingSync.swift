@@ -62,10 +62,9 @@ struct DrawingSync {
     private var marks: [LayerNode.ID: [Mark]] = [:]
 
     /// The canvas's unlocked, visible drawing nodes, back to front: those that can be drawn on. Read from
-    /// the open canvas's own nodes, where the design keeps every drawing, rather than from the whole
-    /// design lowered to its list, which this runs on every change, each frame of a drag among them.
-    /// `TreeRules` keeps every drawing there, in no container, so each one's own lock and hide are how
-    /// the views show it.
+    /// the open canvas's own nodes alone, where the design keeps every drawing, rather than from the whole
+    /// design, as this runs on every change, each frame of a drag among them. `TreeRules` keeps every
+    /// drawing there, in no container, so each one's own lock and hide are how the views show it.
     static func onCanvas(_ content: TreeContent) -> [LayerNode] {
         content.canvas.filter { $0.kind == .drawing && !$0.isLocked && !$0.isHidden }
     }

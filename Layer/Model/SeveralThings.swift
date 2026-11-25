@@ -122,8 +122,8 @@ extension DesignStore {
     /// Elements and screens land on whole points of their own, so that those that started
     /// on whole points keep their places relative to each other; a drawing, whose ink lies
     /// where it was drawn, goes exactly where it is put. Whatever is locked or gone stays.
-    /// All of it is one change, read from the index and written on the tree: nothing lowers
-    /// the projection, on any frame of a drag.
+    /// All of it is one change, read from the index and written on the tree, on any frame of a
+    /// drag.
     ///
     /// A container placed freely moves by its own frame, in one write, and everything in it
     /// rides along, those locked on their own included: it is one thing. Anything else goes
@@ -141,8 +141,8 @@ extension DesignStore {
         for (thing, origin) in origins where alone.contains(thing) {
             switch thing {
             case .element(let ref):
-                // Read from the tree, as every frame of a drag reads it, so that a frame builds the store's
-                // index and never lowers the design to its list (clause (m)).
+                // Read from the tree, as every frame of a drag reads it, so that a frame builds no more than the
+                // store's index.
                 guard let placed = placed(ref), !placed.isLocked else { continue }
                 let box = placed.canvasShape.bounds
                 let target = placed.placement.localPoint(for: origin), current = placed.placement.localPoint(for: box.origin)

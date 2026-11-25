@@ -24,7 +24,7 @@ struct LayerLine: Equatable, Identifiable, Sendable {
     var isLayoutOrder: Bool
 }
 
-/// What the Layers panel lists, read from the tree and the store's index: no projection is made for it.
+/// What the Layers panel lists, read from the tree and the store's index.
 enum LayerRows {
     /// A host's rows: its top-level things (a screen's root's children), each open container's children under
     /// it. Free and overlay lists topmost first; rows, columns and grids in layout order. Drawings are left out.
