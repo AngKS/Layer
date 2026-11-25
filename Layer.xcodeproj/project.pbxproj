@@ -291,6 +291,7 @@
 		89DBB6B5B8AF32D6B72A2EEA /* OneModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B6FA203F56476F598AE653E /* OneModelTests.swift */; };
 		8B47EEF601851602790856A1 /* TreeTargetsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1B86044F0017D6556814D3 /* TreeTargetsTests.swift */; };
 		8B4C2F17F41E8E0B32FB83EC /* checkbox_image_image_3.json in Resources */ = {isa = PBXBuildFile; fileRef = 4FC604495DD92C4B520D5402 /* checkbox_image_image_3.json */; };
+		8C3F46A019C6ACA25066F48D /* TurnedRect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F0792CC237F3A273F901F06 /* TurnedRect.swift */; };
 		8C8EA3739AA081F61BFB53E1 /* DesignStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF800BC07BBBF3367FD33C86 /* DesignStore.swift */; };
 		8D165F3F6A73A9B674381936 /* stickyNote_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = CB5F432B3077A1B64F7D28D2 /* stickyNote_clean_1.json */; };
 		8DFE33CE35F93C1F0F6C4480 /* checkbox_radio_checkbox_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 4F10FCF364611FA5B3EA24AC /* checkbox_radio_checkbox_2.json */; };
@@ -741,6 +742,7 @@
 		4E7D979078F7E76B34146D9F /* CallPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPill.swift; sourceTree = "<group>"; };
 		4ED1415691EB8753973D446A /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4EE11D2CFD41B2D0BEBC1429 /* VoiceToolbox+Elements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceToolbox+Elements.swift"; sourceTree = "<group>"; };
+		4F0792CC237F3A273F901F06 /* TurnedRect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnedRect.swift; sourceTree = "<group>"; };
 		4F10FCF364611FA5B3EA24AC /* checkbox_radio_checkbox_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_radio_checkbox_2.json; sourceTree = "<group>"; };
 		4FC604495DD92C4B520D5402 /* checkbox_image_image_3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_image_image_3.json; sourceTree = "<group>"; };
 		4FEFFB503BCF7CE59521786E /* DesignFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignFile.swift; sourceTree = "<group>"; };
@@ -1326,6 +1328,7 @@
 				33FD717EF8A57773E689FBE1 /* ShapeKind.swift */,
 				46E911A7B1F12EA42626BB26 /* SystemSymbol.swift */,
 				4ED1415691EB8753973D446A /* Theme.swift */,
+				4F0792CC237F3A273F901F06 /* TurnedRect.swift */,
 				DFF91C2500602D5D27B28C62 /* TurnSession.swift */,
 				AF5567634AE631FEFA9FF16B /* Viewport.swift */,
 			);
@@ -2576,6 +2579,7 @@
 				0E5484DAB9B9990F4DC87FBD /* TreeTargets.swift in Sources */,
 				3ADC0D166D0C3D994178A970 /* TreeValidator.swift in Sources */,
 				75518C3509FEA53C1413CD34 /* TurnSession.swift in Sources */,
+				8C3F46A019C6ACA25066F48D /* TurnedRect.swift in Sources */,
 				D51300E560074574A7E315E5 /* TwistGestureRecognizer.swift in Sources */,
 				C6824DD4F7AFD514CF3336A1 /* UnfixedIssue.swift in Sources */,
 				1343CF62B73F3E882FF3999E /* Viewport.swift in Sources */,

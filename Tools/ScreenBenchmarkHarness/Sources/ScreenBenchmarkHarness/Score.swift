@@ -1,12 +1,7 @@
 import Foundation
 
-/// What a model is told to write a screen in, and read back with.
-enum Format: String {
-    /// The indented outline, read by `OutlineStream` and `Outline`.
-    case outline
-    /// A2UI 1.0, a message per line, read by `A2UIStream`.
-    case a2ui
-}
+/// What a model is told to write a screen in, and read back with: the app's own (`ScreenFormat`).
+typealias Format = ScreenFormat
 
 /// One screen's scores, from the model's whole answer.
 struct ScreenScore {

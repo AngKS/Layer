@@ -41,7 +41,7 @@ import Foundation
         var a2ui = Summary(label: "check a2ui")
         var handedOn = true
         for (format, text) in [(Format.outline, Briefs.cannedOutline), (.a2ui, Briefs.cannedA2UI)] {
-            var reader = Reader(format)
+            var reader = ScreenReader(format, tokens: .standard)
             var shown = 0
             var written = ""
             for line in text.components(separatedBy: "\n") {
@@ -159,7 +159,7 @@ import Foundation
     ) async {
         let clock = ContinuousClock()
         let start = clock.now
-        var reader = Reader(format)
+        var reader = ScreenReader(format, tokens: .standard)
         var text = ""
         var firstContent: Duration?
         var completion = Duration.zero
@@ -182,30 +182,5 @@ import Foundation
         let timing = "firstContent=\(firstContent.map { "\(Int(($0 / .milliseconds(1)).rounded()))" } ?? "-")ms completion=\(Int((completion / .milliseconds(1)).rounded()))ms"
         print("=== \(summary.label) · \(brief)\n\(text)\n\(score.line) \(timing)\n")
         summary.scores.append(score)
-    }
-}
-
-/// The app's stream reader for a format, as `ScreenGenerator` reads an answer.
-private enum Reader {
-    case outline(OutlineStream)
-    case a2ui(A2UIStream)
-
-    init(_ format: Format) {
-        switch format {
-        case .outline: self = .outline(OutlineStream(tokens: .standard))
-        case .a2ui: self = .a2ui(A2UIStream(tokens: .standard))
-        }
-    }
-
-    /// The screen so far, when it has more leaves than the last one handed on.
-    mutating func take(_ text: String, isComplete: Bool) -> LayerNode? {
-        switch self {
-        case .outline(var outline):
-            defer { self = .outline(outline) }
-            return outline.take(text, isComplete: isComplete)
-        case .a2ui(var a2ui):
-            defer { self = .a2ui(a2ui) }
-            return a2ui.take(text, isComplete: isComplete)
-        }
     }
 }

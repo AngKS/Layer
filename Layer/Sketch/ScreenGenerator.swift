@@ -22,13 +22,8 @@ enum ScreenGenerator {
         }
     }
 
-    /// What a model writes a screen in.
-    enum Format: String, Sendable, CaseIterable {
-        /// The indented outline (`Outline`): what every model writes (`format(for:)`).
-        case outline
-        /// A2UI 1.0 in Layer's catalogue, a message per line (`A2UIPrompt`).
-        case a2ui
-    }
+    /// What a model writes a screen in (`ScreenFormat`).
+    typealias Format = ScreenFormat
 
     /// What hosted models write: the outline, by My call 8's rule on plan 6's measure. On LM Studio
     /// (`google/gemma-4-26b-a4b`, 24 screens of each) the outline was 24 of 24 valid and A2UI 13 of 24, and A2UI's
@@ -107,7 +102,7 @@ enum ScreenGenerator {
                     let room = Self.room(for: request.choice)
                     let session = makeSession(for: request.choice, instructions: instructions(for: request.description, room: room, format: format))
                     let prompt = ScreenPrompt.request(request.description, board: request.board, room: room)
-                    var reader = Reader(format, tokens: request.tokens)
+                    var reader = ScreenReader(format, tokens: request.tokens)
                     var text = ""
                     var hasHandedOn = false
                     var hasStarted = false
@@ -143,37 +138,6 @@ enum ScreenGenerator {
             return LanguageModelSession(model: HostedLanguageModel(provider: provider, model: model), instructions: instructions)
         }
         return LanguageModelSession(instructions: instructions)
-    }
-
-    /// The answer read in the format the model was told to write.
-    private enum Reader {
-        case outline(OutlineStream)
-        case a2ui(A2UIStream)
-
-        init(_ format: Format, tokens: DesignTokens) {
-            switch format {
-            case .outline: self = .outline(OutlineStream(tokens: tokens))
-            case .a2ui: self = .a2ui(A2UIStream(tokens: tokens))
-            }
-        }
-
-        mutating func take(_ text: String, isComplete: Bool) -> LayerNode? {
-            switch self {
-            case .outline(var outline):
-                defer { self = .outline(outline) }
-                return outline.take(text, isComplete: isComplete)
-            case .a2ui(var a2ui):
-                defer { self = .a2ui(a2ui) }
-                return a2ui.take(text, isComplete: isComplete)
-            }
-        }
-
-        /// Once the answer is complete, what couldn't be brought in, but for buttons' actions: Layer never runs
-        /// one, so that isn't something left out. The outline reads every line it can and passes over the rest.
-        var leftOut: [A2UIDiagnostic] {
-            guard case .a2ui(let a2ui) = self else { return [] }
-            return a2ui.diagnostics.filter { $0.reason != .actionNotRun }
-        }
     }
 }
 

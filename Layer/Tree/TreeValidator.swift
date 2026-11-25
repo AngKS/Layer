@@ -18,7 +18,7 @@ enum TreeValidator {
     }
 
     /// The least a button or text field is tall, and the smallest and largest text, in points.
-    private static let smallestControlHeight: CGFloat = 44
+    static let smallestControlHeight: CGFloat = 44
     private static let smallestText: CGFloat = 11
     private static let largestText: CGFloat = 1_000
     private static let columnRange = 1...12

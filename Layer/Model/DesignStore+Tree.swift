@@ -101,8 +101,8 @@ extension DesignStore {
     /// another screen the design has, so it is never handed back.
     @discardableResult
     func addScreen(keepingItsDevice screen: TreeScreen) -> TreeScreen.ID? {
-        let top = Holder(host: .screen(screen.id), path: [], node: screen.root, depth: 0, toHost: .identity, degrees: 0)
-        guard !tree.screens.contains(where: { $0.id == screen.id }), accepts([screen.root], in: top) else { return nil }
+        var taken = takenByScreens
+        guard accepts(newScreen: screen, besides: &taken) else { return nil }
         changeTree(writing: 0) { $0.screens.append(screen) }
         return screen.id
     }

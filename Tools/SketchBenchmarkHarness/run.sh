@@ -38,9 +38,8 @@ swiftc \
     "$REPO_ROOT/Layer/Sketch/SketchEngine.swift" \
     "$REPO_ROOT/Layer/Sketch/AppleIntelligenceInterpreter.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Stubs.swift" \
+    "$REPO_ROOT/Layer/Model/TurnedRect.swift" \
     "$REPO_ROOT/Tools/Shared/RotationStub.swift" \
-    "$REPO_ROOT/Tools/Shared/TurnedRectStub.swift" \
-    "$REPO_ROOT/Tools/SketchBenchmarkHarness/TurnedRectCorner.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Generate.swift" \
     "$REPO_ROOT/Tools/SketchBenchmarkHarness/Harness.swift" \
     -o "$BIN"

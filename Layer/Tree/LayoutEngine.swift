@@ -564,7 +564,7 @@ enum LayoutEngine {
 
     private static func columnCount(_ grid: LayerNode.Grid) -> Int { min(12, max(1, grid.columns)) }
 
-    private static func columnWidth(_ grid: LayerNode.Grid, _ width: CGFloat) -> CGFloat {
+    static func columnWidth(_ grid: LayerNode.Grid, _ width: CGFloat) -> CGFloat {
         let columns = CGFloat(columnCount(grid))
         return max(0, (width - (columns - 1) * gap(grid.columnSpacing)) / columns)
     }

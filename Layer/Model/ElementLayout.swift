@@ -472,3 +472,16 @@ struct SpacingGuides: Equatable, Sendable {
         )
     }
 }
+
+extension TurnedRect {
+    /// Where one of its corners is, turned: here, beside `ElementLayout.Corner`, so that `TurnedRect.swift` builds on
+    /// macOS without it.
+    func corner(_ corner: ElementLayout.Corner) -> CGPoint {
+        switch corner {
+        case .topLeft: corners[0]
+        case .topRight: corners[1]
+        case .bottomRight: corners[2]
+        case .bottomLeft: corners[3]
+        }
+    }
+}
