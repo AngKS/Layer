@@ -33,6 +33,7 @@
 		110ED8EDA6F2843BE55134AE /* button_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = E34A52AA48FF8955F9DFDA8C /* button_noisy_2.json */; };
 		111AC6E5B316F724F903F660 /* title_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 584EE4E584DAA4F206C8059F /* title_clean_2.json */; };
 		11206FBCE035C3499128B1A5 /* StructureGridTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB824C266471EE47CF6DE90 /* StructureGridTests.swift */; };
+		117986DF465822E9445715D1 /* TreeEdit+Seen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7638B77ABEE6618E9C824E15 /* TreeEdit+Seen.swift */; };
 		127795BCC3400C0852451553 /* body_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 0A0B6B7A0ED0DDEA89AEDE71 /* body_jittered_1a.json */; };
 		13370F979F8FCA06F3C26114 /* CodeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259CFD576E49663BF3908228 /* CodeTokens.swift */; };
 		1343CF62B73F3E882FF3999E /* Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF5567634AE631FEFA9FF16B /* Viewport.swift */; };
@@ -826,6 +827,7 @@
 		73904A9517CA25EB858FAB2E /* SketchBenchmarkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchBenchmarkTests.swift; sourceTree = "<group>"; };
 		75038A2AE7C9F3344E801F1B /* AssetLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetLibraryTests.swift; sourceTree = "<group>"; };
 		75F8FE73B6F1600F4471A90F /* ShareA2UIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareA2UIUITests.swift; sourceTree = "<group>"; };
+		7638B77ABEE6618E9C824E15 /* TreeEdit+Seen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TreeEdit+Seen.swift"; sourceTree = "<group>"; };
 		764B7346C716553C4EA3B0D7 /* button_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = button_clean_1.json; sourceTree = "<group>"; };
 		7690513B1180CEAFB853B117 /* DesignStore+Tree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignStore+Tree.swift"; sourceTree = "<group>"; };
 		76965ECC52982C4D8C3B4362 /* unknown_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = unknown_noisy_1.json; sourceTree = "<group>"; };
@@ -1196,6 +1198,7 @@
 				2BA685CACDB1AFCD6558A1E2 /* TreeDrop.swift */,
 				E5BF55699027887CD6FACA46 /* TreeEdit.swift */,
 				E17363CBFD7E2D6409CF7C84 /* TreeEdit+Group.swift */,
+				7638B77ABEE6618E9C824E15 /* TreeEdit+Seen.swift */,
 				C9FED85CEF222B5069C05595 /* TreeIndex.swift */,
 				0194C707D16DDCB21673DEC2 /* TreeIndex+Pose.swift */,
 				665316E28E82F4A8C66AAB93 /* TreeReconciler.swift */,
@@ -2568,6 +2571,7 @@
 				B95F506B095D6B969A4B65E0 /* TreeContent.swift in Sources */,
 				DF19E8611108717502DCDFF6 /* TreeDrop.swift in Sources */,
 				77966872A2088AA15E535239 /* TreeEdit+Group.swift in Sources */,
+				117986DF465822E9445715D1 /* TreeEdit+Seen.swift in Sources */,
 				1C4DAC6ADC8BA9FE13165F64 /* TreeEdit.swift in Sources */,
 				AC0BFD796FDE44E48160CB79 /* TreeIndex+Pose.swift in Sources */,
 				920B8C83A832C06EAB8020CA /* TreeIndex.swift in Sources */,

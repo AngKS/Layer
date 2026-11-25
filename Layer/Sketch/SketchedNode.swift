@@ -342,11 +342,7 @@ enum SketchedNode {
         let staying = children.indices.filter { !taking.contains(children[$0].id) }
         func isDrawn(_ at: Int) -> Bool { !children[at].isHidden }
         /// Seen before the card: drawn, and not wholly under one drawn thing in front of it.
-        func wasSeen(_ at: Int) -> Bool {
-            isDrawn(at) && !children.indices.contains { over in
-                over > at && isDrawn(over) && shapes[over].contains(shapes[at])
-            }
-        }
+        var wasSeen = TreeEdit.Seen(shapes: shapes, drawn: children.map { !$0.isHidden })
 
         // 1. The ruled slot.
         let floor = staying.lastIndex { at in
@@ -361,7 +357,7 @@ enum SketchedNode {
                 || takenAt.contains { $0 > at && shapes[at].contains(shapes[$0]) && wasSeen($0) })
         } ?? -1)
         let highest = staying.firstIndex { box.contains(shapes[$0]) && wasSeen($0) } ?? staying.count
-        let slot = lowest <= highest ? min(max(ruled, lowest), highest) : ruled
+        let slot = TreeEdit.slot(ruled, movedInto: lowest, highest)
         return slot < staying.count ? children[staying[slot]].id : nil
     }
 
