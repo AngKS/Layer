@@ -358,8 +358,10 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(try root(of: screen, in: store).children.map(\.id).suffix(2) == [empty, across])
     }
 
-    /// Call 6, as plan 5's final review ruled it (B1): an outline round two fields of a column the pass built makes a
-    /// card holding both, in the column where they were. Nothing in the column moves, the fields after it included.
+    /// Call 6, as plan 5's final review ruled it (B1 and its follow-up): an outline round two fields of a column the pass
+    /// built makes a card holding both, in the column where they were. The card is the person's own, so it has the
+    /// design's card padding round them: the fields before it don't move, and the field after it moves down by exactly
+    /// the padding it adds.
     @Test func aCardRoundTwoFieldsOfABuiltColumnTakesThemWhereTheyAre() async throws {
         let (model, undo) = makeModel()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
@@ -386,12 +388,17 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(card.kind == .card)
         #expect(after.children.map(\.id) == [fields[0].id, card.id, fields[3].id])
         #expect(card.children.map(\.id) == [fields[1].id, fields[2].id])
-        #expect(fields.map { model.store.placed($0.id)?.frame } == before)
-        // It holds them as the column did, and hugs them, so that it is as long as they were.
+        // It holds them as the column did, padded as a card is, and fits them.
+        let padding = DesignTokens.standard.card.padding
         #expect(card.layout == column.layout)
-        #expect(card.padding == LayerNode.Padding())
+        #expect(card.padding == LayerNode.Padding(all: padding))
         #expect(card.width.mode == .fit && card.height.mode == .fit)
-        #expect(card.frame == CGRect(x: 0, y: 60, width: 353, height: 104))
+        #expect(card.frame == CGRect(x: 0, y: 60, width: 353 + 2 * padding, height: 104 + 2 * padding))
+        let now = fields.map { model.store.placed($0.id)?.frame }
+        #expect(now[0] == before[0])
+        #expect(now[1] == before[1]?.offsetBy(dx: padding, dy: padding))
+        #expect(now[2] == before[2]?.offsetBy(dx: padding, dy: padding))
+        #expect(now[3] == before[3]?.offsetBy(dx: 0, dy: 2 * padding))
         #expect(card.style.tint == nil)
         #expect(card.sketch?.originalBounds == drawn)
 
@@ -400,7 +407,8 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(fields.map { model.store.placed($0.id)?.frame } == before)
     }
 
-    /// In a row, the card is a row of what it takes, at their slot (B1).
+    /// In a row, the card is a row of what it takes, at their slot, padded: the button after it moves along by exactly
+    /// the padding it adds (B1 and its follow-up).
     @Test func aCardRoundMembersOfARowHoldsThemAsTheRowDid() throws {
         let (store, screen, undo) = makeStore()
         var row = rowOfTwoButtons()
@@ -417,17 +425,21 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(store.node(row.id)?.children.map(\.id) == [card, buttons[2]])
         let made = try #require(store.node(card))
         #expect(made.children.map(\.id) == [buttons[0], buttons[1]])
+        let padding = DesignTokens.standard.card.padding
         #expect(made.layout == row.layout)
-        #expect(made.padding == LayerNode.Padding())
-        #expect(made.frame == CGRect(x: 0, y: 0, width: 212, height: 44))
-        #expect(buttons.map { store.placed($0)?.frame } == before)
+        #expect(made.padding == LayerNode.Padding(all: padding))
+        #expect(made.frame == CGRect(x: 0, y: 0, width: 212 + 2 * padding, height: 44 + 2 * padding))
+        let now = buttons.map { store.placed($0)?.frame }
+        #expect(now[0] == before[0]?.offsetBy(dx: padding, dy: padding))
+        #expect(now[1] == before[1]?.offsetBy(dx: padding, dy: padding))
+        #expect(now[2] == before[2]?.offsetBy(dx: 2 * padding, dy: 0))
 
         undo.undo()
         #expect(store.node(row.id)?.children.map(\.id) == buttons)
     }
 
-    /// A card round one cell of a grid takes it in its cell. Round two, it would move each cell after them back a cell,
-    /// so it lands round the grid instead and goes behind it, and nothing moves (B1).
+    /// A card round one cell of a grid takes it in its cell, padded. Round two, it would move each cell after them back a
+    /// cell, so it lands round the grid instead and goes behind it, and nothing moves (B1 and its follow-up).
     @Test func aCardTakesOneCellOfAGridAndLiesBehindTwo() throws {
         let (store, screen, _) = makeStore()
         var grid = LayerNode(kind: .group)
@@ -446,16 +458,24 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         let one = try #require(store.addSketched(.card, from: CGRect(x: 196, y: 294, width: 172, height: 132),
                                                  confidence: 0.95, decidedBy: .rules))
         #expect(store.node(grid.id)?.children.map(\.id) == [cells[0], one, cells[2], cells[3]])
-        #expect(store.node(one)?.children.map(\.id) == [cells[1]])
-        #expect(cells.map { store.placed($0)?.frame } == before)
+        let padding = DesignTokens.standard.card.padding
+        let held = try #require(store.node(one))
+        #expect(held.children.map(\.id) == [cells[1]])
+        #expect(held.padding == LayerNode.Padding(all: padding))
+        #expect(held.frame.size == CGSize(width: 160 + 2 * padding, height: 120 + 2 * padding))
+        #expect(store.placed(cells[0])?.frame == before[0])
+        let card = try #require(store.placed(one)?.frame)
+        #expect(store.placed(cells[1])?.frame == CGRect(x: card.minX + padding, y: card.minY + padding, width: 160, height: 120))
 
         // Round the first row: the first cell, and the card holding the second.
-        let two = try #require(store.addSketched(.card, from: CGRect(x: 20, y: 290, width: 352, height: 140),
+        let firstRow = try #require(store.placed(cells[0])?.frame).union(card)
+        let laidOut = cells.map { store.placed($0)?.frame }
+        let two = try #require(store.addSketched(.card, from: firstRow.insetBy(dx: -10, dy: -10),
                                                  confidence: 0.95, decidedBy: .rules))
         #expect(try root(of: screen, in: store).children.map(\.id) == [two, grid.id])
         #expect(store.node(two)?.children.isEmpty == true)
         #expect(store.node(grid.id)?.children.map(\.id) == [cells[0], one, cells[2], cells[3]])
-        #expect(cells.map { store.placed($0)?.frame } == before)
+        #expect(cells.map { store.placed($0)?.frame } == laidOut)
     }
 
     /// What a card takes in a column is one unbroken run: round two fields with a locked one between them, it lands

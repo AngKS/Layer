@@ -79,10 +79,10 @@ struct SketchLanding: Equatable, Sendable {
     }
 
     /// What a card drawn round `rect` (the container's space) takes from a row, column, grid or overlay (call 6): what it
-    /// encloses (`enclosed(by:in:)`), in order, when that can become one thing in its place with nothing else there moving.
-    /// That is an unbroken run of a row, column or overlay, which hidden things, taking no room, don't break; or one cell
-    /// of a grid, since the cells after two taken would each move back a cell. Empty when it encloses nothing there; nil
-    /// when what it encloses can't be one thing in place.
+    /// encloses (`enclosed(by:in:)`), in order, when that can become one thing in its place, so that only the card's
+    /// padding moves what else is there. That is an unbroken run of a row, column or overlay, which hidden things, taking
+    /// no room, don't break; or one cell of a grid, since the cells after two taken would each move back a cell. Empty
+    /// when it encloses nothing there; nil when what it encloses can't be one thing in place.
     static func takenInPlace(by rect: CGRect, in container: LayerNode) -> [UUID]? {
         let taken = Set(enclosed(by: rect, in: container))
         guard !taken.isEmpty else { return [] }

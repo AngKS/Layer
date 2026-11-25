@@ -20,10 +20,10 @@ import Foundation
 ///     else in front. That slot then moves as little as needed so that nothing seen is wholly hidden by one thing,
 ///     where some slot can do that. Hidden things count for none of this.
 ///   - In a row, column, grid or overlay, round what it can take there in place (`SketchLanding.takenInPlace`), it takes
-///     that: their slot, and them, held as that container held them, with no padding and hugging them, so that nothing
-///     there moves (plan 5's final review, B1). Round nothing there, it takes nothing, and keeps the drawn box: as tall
-///     as drawn, and as wide as drawn, or as wide as what holds it when it was drawn across the screen
-///     (`PlacementIntent.proportional`).
+///     that: their slot, and them, held as that container held them, padded by the design's card padding and fitting
+///     them, so that only the padding moves what is after it (plan 5's final review, B1 and its follow-up). Round nothing
+///     there, it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as wide as what holds
+///     it when it was drawn across the screen (`PlacementIntent.proportional`).
 enum SketchedNode {
     struct Made: Equatable, Sendable {
         var node: LayerNode
@@ -195,9 +195,10 @@ enum SketchedNode {
 
     /// `card`, drawn round `drawn` in a row, column, grid or overlay (call 6, as ruled in plan 5's final review, B1).
     /// Round what it can take there in place (`SketchLanding.takenInPlace`), all within depth 32 once inside it (F9), it
-    /// holds that as the container held it, with no padding, and fits it, filling an axis where something it takes fills
-    /// that axis. So it is as long as they were, the spacing between them included, and in their slot nothing there
-    /// moves. Else it takes nothing, as drawn.
+    /// holds that as the container held it and fits it, filling an axis where something it takes fills that axis. It
+    /// keeps the card's padding: the person drew a card, so it looks like one. So it is as long as they were, the spacing
+    /// between them included, and its padding more, and in their slot only that padding moves what is after it. Else it
+    /// takes nothing, as drawn.
     private static func inPlace(_ card: LayerNode, drawn: CGRect, in parent: LayerNode,
                                 at depth: Int) -> (LayerNode, takes: [UUID]) {
         guard let takes = SketchLanding.takenInPlace(by: drawn, in: parent), !takes.isEmpty else { return (card, []) }
@@ -206,7 +207,6 @@ enum SketchedNode {
         guard taken.allSatisfy({ fitsInACard($0, at: depth) }) else { return (card, []) }
 
         var node = card
-        node.padding = LayerNode.Padding()
         var axis: LayerNode.Axis?
         switch parent.resolvedLayout {
         case .stack(let stack):
@@ -231,7 +231,10 @@ enum SketchedNode {
         }
         node.width = sizing(\.width, along: axis == .horizontal)
         node.height = sizing(\.height, along: axis == .vertical)
-        node.frame = taken.dropFirst().reduce(taken[0].frame) { $0.union($1.frame) }
+        let held = taken.dropFirst().reduce(taken[0].frame) { $0.union($1.frame) }
+        let padding = node.padding
+        node.frame = CGRect(x: held.minX, y: held.minY, width: held.width + padding.leading + padding.trailing,
+                            height: held.height + padding.top + padding.bottom)
         return (node, takes)
     }
 
