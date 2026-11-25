@@ -215,7 +215,9 @@ struct StoreChangeBenchmarkTests {
         let owner = CanvasDrags.Owner()
         let frames = 60
         var times: [Double] = []
+        var frameTrees: [(before: TreeContent, after: TreeContent)] = []
         for frame in 1...frames {
+            let before = store.tree
             let begun = ContinuousClock.now
             drags.moveNode(ref, by: CGSize(width: CGFloat(frame) * model.zoomScale, height: 0), startingAt: start, owner: owner,
                            model: model) { placed in
@@ -223,10 +225,44 @@ struct StoreChangeBenchmarkTests {
             }
             _ = store.index
             times.append(Self.milliseconds(ContinuousClock.now - begun))
+            frameTrees.append((before, store.tree))
         }
         drags.dropElement(ref, findsNewHome: false, owner: owner, model: model)
         let drag = Self.percentiles(times)
         print(String(format: "BENCH large drag p50=%.3f p95=%.3f", drag.p50, drag.p95))
+
+        // Two of a drag frame's extras, each timed on every frame's own trees: the store's comparison of the design with
+        // the one before (`content != oldValue`), and the placement-intent follower (`followPlacements`), on the design
+        // as it is and with every leaf on screen 5 a sketch's, so that it has intents to follow.
+        func sketched(_ tree: TreeContent) -> TreeContent {
+            var tree = tree
+            for index in tree.screens[4].root.children.indices {
+                let frame = tree.screens[4].root.children[index].frame
+                tree.screens[4].root.children[index].sketch = LayerNode.SketchIntent(
+                    sketched: frame, on: DeviceFrame.iPhone.size, margin: DeviceFrame.iPhone.margin, confidence: 1, decidedBy: .rules)
+            }
+            return tree
+        }
+        var compares: [Double] = [], follows: [Double] = [], sketchedFollows: [Double] = []
+        for (before, after) in frameTrees {
+            var begun = ContinuousClock.now
+            let differs = after != before
+            compares.append(Self.milliseconds(ContinuousClock.now - begun) * 1000)
+            #expect(differs)
+            var followed = after
+            begun = ContinuousClock.now
+            followed.followPlacements(since: before, written: after)
+            follows.append(Self.milliseconds(ContinuousClock.now - begun) * 1000)
+            let (was, now) = (sketched(before), sketched(after))
+            var followedSketches = now
+            begun = ContinuousClock.now
+            followedSketches.followPlacements(since: was, written: now)
+            sketchedFollows.append(Self.milliseconds(ContinuousClock.now - begun) * 1000)
+        }
+        for (name, values) in [("compare", compares), ("follow", follows), ("followSketched", sketchedFollows)] {
+            let result = Self.percentiles(values)
+            print(String(format: "BENCH large %@ p50=%.1fus p95=%.1fus", name, result.p50, result.p95))
+        }
 
         // Where a large container dragged over a screen would go if let go (`TreeDrop.target`, a drag frame's look for its
         // line): a card of 200 texts on the canvas, the finger over screen 6's rows, on the design with the card added.
