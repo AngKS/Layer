@@ -42,7 +42,7 @@ enum DesignLayoutWriter {
             "background": settings.resolvedBackground.hex,
             "showsGrid": settings.showsGrid,
             "gridStyle": settings.gridStyle.rawValue,
-            "gridSpacing": number(settings.gridSpacing),
+            "gridSpacing": tenthWithinReach(settings.gridSpacing),
             "snapsToGuides": settings.snapsToGuides,
             "snapsToGrid": settings.snapsToGrid,
             "showsMeasurements": settings.showsMeasurements,
@@ -59,13 +59,16 @@ enum DesignLayoutWriter {
     }
 
     private static func rect(_ rect: CGRect) -> [String: Double] {
-        ["x": number(rect.minX), "y": number(rect.minY), "width": number(rect.width), "height": number(rect.height)]
+        ["x": tenthWithinReach(rect.minX), "y": tenthWithinReach(rect.minY),
+         "width": tenthWithinReach(rect.width), "height": tenthWithinReach(rect.height)]
     }
 
-    /// Rounded to a tenth of a point, which is all a layout needs. A file can hold any number: what isn't one is written
-    /// as 0, and what is past any design's length as the farthest one written, as the canvas picture tells them, so that
-    /// nothing infinite reaches `JSONSerialization`, which ends the app rather than throwing.
-    fileprivate static func number(_ value: CGFloat) -> Double {
+    /// Rounded to a tenth of a point, which is all a layout needs, and within the farthest written. A file can hold any
+    /// number: what isn't one is written as 0, and what is past any design's length as the farthest one written, as the
+    /// canvas picture tells them, so that nothing infinite reaches `JSONSerialization`, which ends the app rather than
+    /// throwing. For frames, sizes and looks; a layout, padding or sizing is written as the file writes it
+    /// (`Writer.finiteOrNil(_:)`).
+    fileprivate static func tenthWithinReach(_ value: CGFloat) -> Double {
         guard value.isFinite else { return 0 }
         return (min(max(Double(value), -farthest), farthest) * 10).rounded() / 10
     }
@@ -106,14 +109,14 @@ private struct Writer {
             "name": screen.name,
             "device": device.id,
             "deviceName": DeviceChoice.displayName(of: device),
-            "width": DesignLayoutWriter.number(device.size.width),
-            "height": DesignLayoutWriter.number(device.size.height),
-            "x": DesignLayoutWriter.number(screen.origin.x),
-            "y": DesignLayoutWriter.number(screen.origin.y),
-            "scale": DesignLayoutWriter.number(screen.scale * 100),
+            "width": DesignLayoutWriter.tenthWithinReach(device.size.width),
+            "height": DesignLayoutWriter.tenthWithinReach(device.size.height),
+            "x": DesignLayoutWriter.tenthWithinReach(screen.origin.x),
+            "y": DesignLayoutWriter.tenthWithinReach(screen.origin.y),
+            "scale": DesignLayoutWriter.tenthWithinReach(screen.scale * 100),
             "locked": screen.isLocked == true,
-            "safeAreaTop": DesignLayoutWriter.number(device.safeTop),
-            "safeAreaBottom": DesignLayoutWriter.number(device.safeBottom),
+            "safeAreaTop": DesignLayoutWriter.tenthWithinReach(device.safeTop),
+            "safeAreaBottom": DesignLayoutWriter.tenthWithinReach(device.safeBottom),
             "layout": Self.written(screen.root.layout ?? .free),
             "padding": Self.written(screen.root.padding),
             "elements": contents.leaves,
@@ -152,10 +155,10 @@ private struct Writer {
             "id": id(node.id, on: host),
             "kind": node.kind.rawValue,
             "name": node.displayName,
-            "x": DesignLayoutWriter.number(frame.minX),
-            "y": DesignLayoutWriter.number(frame.minY),
-            "width": DesignLayoutWriter.number(frame.width),
-            "height": DesignLayoutWriter.number(frame.height),
+            "x": DesignLayoutWriter.tenthWithinReach(frame.minX),
+            "y": DesignLayoutWriter.tenthWithinReach(frame.minY),
+            "width": DesignLayoutWriter.tenthWithinReach(frame.width),
+            "height": DesignLayoutWriter.tenthWithinReach(frame.height),
             "sizing": Self.written(width: node.width, height: node.height),
         ]
         if let parent { info["parent"] = id(parent, on: host) }
@@ -184,14 +187,14 @@ private struct Writer {
         if let symbol = content.symbol { info["symbol"] = symbol }
         if node.kind == .shape { info["shape"] = (content.shape ?? .rectangle).rawValue }
         if content.imageID != nil { info["hasPicture"] = true }
-        if let fontSize = style.fontSize { info["fontSize"] = DesignLayoutWriter.number(fontSize) }
+        if let fontSize = style.fontSize { info["fontSize"] = DesignLayoutWriter.tenthWithinReach(fontSize) }
         if let weight = style.fontWeight { info["fontWeight"] = weight.rawValue }
         if let textColor = style.textColor { info["textColour"] = textColor.hex }
         if let alignment = style.textAlignment { info["textAlignment"] = alignment.rawValue }
-        if let radius = style.cornerRadius { info["cornerRadius"] = DesignLayoutWriter.number(radius) }
+        if let radius = style.cornerRadius { info["cornerRadius"] = DesignLayoutWriter.tenthWithinReach(radius) }
         if let opacity = style.opacity { info["opacity"] = opacity }
         if let width = style.borderWidth, width > 0 {
-            info["borderWidth"] = DesignLayoutWriter.number(width)
+            info["borderWidth"] = DesignLayoutWriter.tenthWithinReach(width)
             if let colour = style.borderColor { info["borderColour"] = colour.hex }
         }
         if style.hasShadow { info["shadow"] = true }
@@ -212,11 +215,13 @@ private struct Writer {
         case .free:
             return ["type": "free"]
         case .stack(let stack):
-            guard let spacing = number(stack.spacing) else { return [:] }
+            guard let spacing = finiteOrNil(stack.spacing) else { return [:] }
             return ["type": "stack", "axis": stack.axis.rawValue, "spacing": spacing, "alignment": stack.alignment.rawValue,
                     "justify": stack.justify.rawValue]
         case .grid(let grid):
-            guard let columnSpacing = number(grid.columnSpacing), let rowSpacing = number(grid.rowSpacing) else { return [:] }
+            guard let columnSpacing = finiteOrNil(grid.columnSpacing), let rowSpacing = finiteOrNil(grid.rowSpacing) else {
+                return [:]
+            }
             return ["type": "grid", "columns": grid.columns, "columnSpacing": columnSpacing, "rowSpacing": rowSpacing,
                     "horizontal": grid.alignment.horizontal.rawValue, "vertical": grid.alignment.vertical.rawValue]
         case .overlay(let alignment):
@@ -225,8 +230,8 @@ private struct Writer {
     }
 
     private static func written(_ padding: LayerNode.Padding) -> [String: Any] {
-        guard let top = number(padding.top), let leading = number(padding.leading), let bottom = number(padding.bottom),
-              let trailing = number(padding.trailing) else { return [:] }
+        guard let top = finiteOrNil(padding.top), let leading = finiteOrNil(padding.leading),
+              let bottom = finiteOrNil(padding.bottom), let trailing = finiteOrNil(padding.trailing) else { return [:] }
         return ["top": top, "leading": leading, "bottom": bottom, "trailing": trailing]
     }
 
@@ -242,25 +247,26 @@ private struct Writer {
         case .fit:
             fields = ["mode": "fit"]
         case .fill(let weight):
-            guard let weight = number(weight) else { return nil }
+            guard let weight = finiteOrNil(weight) else { return nil }
             fields = ["mode": "fill", "weight": weight]
         case .fixed:
             fields = ["mode": "fixed"]
         }
         if let minimum = sizing.minimum {
-            guard let minimum = number(minimum) else { return nil }
+            guard let minimum = finiteOrNil(minimum) else { return nil }
             fields["min"] = minimum
         }
         if let maximum = sizing.maximum {
-            guard let maximum = number(maximum) else { return nil }
+            guard let maximum = finiteOrNil(maximum) else { return nil }
             fields["max"] = maximum
         }
         return fields
     }
 
-    /// A number as the encoder writes it and JSON reads it back, where a negative zero is zero. Nil when it isn't
-    /// finite, which the encoder refuses.
-    private static func number(_ value: CGFloat) -> Double? {
+    /// A number of a layout, padding or sizing as `design.json`'s encoder writes it and JSON reads it back: as it is,
+    /// where a negative zero is 0. Nil when it isn't finite, which the encoder refuses, so its part is written empty.
+    /// Not rounded or kept within reach, as frames are (`DesignLayoutWriter.tenthWithinReach(_:)`).
+    private static func finiteOrNil(_ value: CGFloat) -> Double? {
         guard value.isFinite else { return nil }
         return value == 0 ? 0 : Double(value)
     }

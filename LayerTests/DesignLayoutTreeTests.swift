@@ -15,6 +15,10 @@ import Testing
 // the fixture's name for it, with `Goldens/DesignLayout-containers.json`. To record it again, run this suite with the
 // environment variable TEST_RUNNER_LAYER_RECORD_LAYOUT set to a folder on this Mac, then copy the file written there
 // into `Goldens/`.
+//
+// `theEdgesAreWrittenByteForByteAsBefore` compares a design of edge numbers with `Goldens/DesignLayout-edges.json`,
+// recorded with the writer before the sweep (2381de4), which encoded and parsed back each layout, padding and sizing. It
+// is never recorded again: it is what that writer wrote.
 
 private final class DesignLayoutTreeBundleMarker {}
 
@@ -276,6 +280,58 @@ struct DesignLayoutTreeTests {
         #expect(!json.contains(" : -0,") && !json.contains(" : -0\n"), "a negative zero is written as 0")
         #expect(try sorted(try entry(card.id, in: written["containers"])["padding"]) == "{}")
         #expect(try sorted(leafEntry["sizing"]) == "{}")
+    }
+
+    /// A design of edge numbers, ids fixed: frames at the farthest a number is written (±1e12) and past it (1e15, 1e308,
+    /// clamped), a font size of 1e20 (clamped), and layouts, paddings and sizings with a negative zero, thirds, 1e20,
+    /// 1e308, the smallest denormal, NaN and ∞.
+    private func edges() -> TreeContent {
+        func id(_ n: Int) -> UUID { UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", n))! }
+        var leaf = LayerNode.leaf(.text, frame: CGRect(x: -1e12, y: 1e12, width: 1e15, height: 1e308), text: "Far")
+        leaf.id = id(3)
+        leaf.width = LayerNode.Sizing(.fill(weight: .nan))
+        leaf.style.fontSize = 1e20
+        leaf.style.cornerRadius = 1.0 / 3
+        var grid = LayerNode(kind: .group)
+        grid.id = id(2)
+        grid.layout = .grid(LayerNode.Grid(columns: 3, columnSpacing: 1e20, rowSpacing: 0.1,
+                                           alignment: LayerNode.Alignment(horizontal: .start, vertical: .end)))
+        grid.padding = LayerNode.Padding(top: -0.0, leading: 1.0 / 3, bottom: 12.000000000000002, trailing: 1e12)
+        grid.width = LayerNode.Sizing(.fill(weight: 1.0 / 3), minimum: -0.0, maximum: 1e308)
+        grid.height = LayerNode.Sizing(.fit, minimum: 4.9e-324)
+        grid.frame = CGRect(x: 1e12, y: -1e12, width: 300, height: 200)
+        grid.children = [leaf]
+        var card = LayerNode(kind: .card)
+        card.id = id(4)
+        card.layout = .overlay(LayerNode.Alignment(horizontal: .end, vertical: .start))
+        card.padding = LayerNode.Padding(top: .nan, leading: 16, bottom: 16, trailing: 16)
+        card.height = LayerNode.Sizing(.fit, maximum: .infinity)
+        card.frame = CGRect(x: 0, y: 220, width: 300, height: 100)
+        var screen = TreeScreen(name: "Edges", origin: CGPoint(x: 1e15, y: -0.0), scale: 1, deviceID: nil)
+        screen.id = id(1)
+        screen.root.id = id(5)
+        screen.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: -0.0, alignment: .fill, justify: .spaceBetween))
+        screen.root.padding = LayerNode.Padding(top: 1e20, leading: 16, bottom: 0.1, trailing: 16)
+        screen.root.children = [grid, card]
+        var loose = LayerNode.leaf(.text, frame: CGRect(x: -5e12, y: 0, width: 100, height: 24), text: "Loose")
+        loose.id = id(6)
+        var content = TreeContent()
+        content.settings.gridSpacing = 1e20
+        content.screens = [screen]
+        content.canvas = [loose]
+        return content
+    }
+
+    /// The edge numbers are written byte for byte as the writer before the sweep wrote them (M-4 of the sweep's review).
+    @Test func theEdgesAreWrittenByteForByteAsBefore() throws {
+        let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Edges", content: edges(), modified: nil))
+        if let folder = ProcessInfo.processInfo.environment["LAYER_RECORD_LAYOUT"] {
+            try json.write(to: URL(fileURLWithPath: folder).appendingPathComponent("DesignLayout-edges.json"), atomically: true,
+                           encoding: .utf8)
+            return
+        }
+        let golden = try #require(bundle.url(forResource: "DesignLayout-edges", withExtension: "json"))
+        #expect(json == (try String(contentsOf: golden, encoding: .utf8)))
     }
 
     @Test func theContainersGoldenHolds() throws {

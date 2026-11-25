@@ -1,0 +1,154 @@
+{
+  "canvas" : {
+    "background" : "#F4F3EC",
+    "codeIncludesPreview" : true,
+    "codeLayout" : "stack",
+    "codeUsesNavigationTitle" : false,
+    "gridSpacing" : 1000000000000,
+    "gridStyle" : "dots",
+    "newScreenDevice" : "iphone",
+    "newScreenDeviceName" : "Phone",
+    "showsFrameNames" : true,
+    "showsGrid" : true,
+    "showsMeasurements" : true,
+    "snapsToGrid" : false,
+    "snapsToGuides" : true
+  },
+  "canvasContainers" : [
+
+  ],
+  "canvasElements" : [
+    {
+      "colour" : "#CD6C57",
+      "height" : 24,
+      "id" : "design|canvas|00000000-0000-0000-0000-000000000006",
+      "kind" : "text",
+      "name" : "Text",
+      "sizing" : {
+        "height" : {
+          "mode" : "fixed"
+        },
+        "width" : {
+          "mode" : "fixed"
+        }
+      },
+      "text" : "Loose",
+      "width" : 100,
+      "x" : -1000000000000,
+      "y" : 0
+    }
+  ],
+  "design" : "Edges",
+  "id" : "design",
+  "screens" : [
+    {
+      "containers" : [
+        {
+          "children" : [
+            "design|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000003"
+          ],
+          "height" : 200,
+          "id" : "design|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002",
+          "kind" : "group",
+          "layout" : {
+            "columns" : 3,
+            "columnSpacing" : 1e+20,
+            "horizontal" : "start",
+            "rowSpacing" : 0.10000000000000001,
+            "type" : "grid",
+            "vertical" : "end"
+          },
+          "name" : "Grid",
+          "padding" : {
+            "bottom" : 12.000000000000002,
+            "leading" : 0.33333333333333331,
+            "top" : 0,
+            "trailing" : 1000000000000
+          },
+          "sizing" : {
+            "height" : {
+              "min" : 4.9406564584124654e-324,
+              "mode" : "fit"
+            },
+            "width" : {
+              "max" : 1e+308,
+              "min" : 0,
+              "mode" : "fill",
+              "weight" : 0.33333333333333331
+            }
+          },
+          "width" : 300,
+          "x" : 1000000000000,
+          "y" : -1000000000000
+        },
+        {
+          "children" : [
+
+          ],
+          "height" : 100,
+          "id" : "design|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000004",
+          "kind" : "card",
+          "layout" : {
+            "horizontal" : "end",
+            "type" : "overlay",
+            "vertical" : "start"
+          },
+          "name" : "Card",
+          "padding" : {
+
+          },
+          "sizing" : {
+
+          },
+          "width" : 300,
+          "x" : 0,
+          "y" : 220
+        }
+      ],
+      "device" : "iphone",
+      "deviceName" : "Phone",
+      "elements" : [
+        {
+          "colour" : "#CD6C57",
+          "cornerRadius" : 0.29999999999999999,
+          "fontSize" : 1000000000000,
+          "height" : 1000000000000,
+          "id" : "design|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000003",
+          "kind" : "text",
+          "name" : "Text",
+          "parent" : "design|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002",
+          "sizing" : {
+
+          },
+          "text" : "Far",
+          "width" : 1000000000000,
+          "x" : 0,
+          "y" : 0
+        }
+      ],
+      "height" : 852,
+      "id" : "design|00000000-0000-0000-0000-000000000001",
+      "layout" : {
+        "alignment" : "fill",
+        "axis" : "vertical",
+        "justify" : "spaceBetween",
+        "spacing" : 0,
+        "type" : "stack"
+      },
+      "locked" : false,
+      "name" : "Edges",
+      "padding" : {
+        "bottom" : 0.10000000000000001,
+        "leading" : 16,
+        "top" : 1e+20,
+        "trailing" : 16
+      },
+      "safeAreaBottom" : 34,
+      "safeAreaTop" : 59,
+      "scale" : 100,
+      "width" : 393,
+      "x" : 1000000000000,
+      "y" : -0
+    }
+  ]
+}

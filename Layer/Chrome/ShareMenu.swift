@@ -22,8 +22,10 @@ struct ShareMenu: View {
                 }
                 // Written when picked, through the share sheet that says when it closes, so that its folder goes then.
                 Button {
-                    if let url = try? shared.a2ui.write() {
-                        picture = SharedPicture(urls: [url]) { ShareFolder.remove(holding: url, prefix: SharedA2UI.folderPrefix) }
+                    do {
+                        picture = try SharedPicture.a2ui(shared.a2ui)
+                    } catch {
+                        problem = SharedA2UI.problem
                     }
                 } label: {
                     Label("A2UI JSON", systemImage: "curlybraces")
@@ -31,11 +33,7 @@ struct ShareMenu: View {
             }
             if tree.screens.count > 1 {
                 Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
-                    if let urls = CodeFiles.write(model.store.tree) {
-                        picture = SharedPicture(urls: urls) {
-                            for url in urls { ShareFolder.remove(holding: url, prefix: CodeFiles.folderPrefix) }
-                        }
-                    }
+                    if let files = SharedPicture.codeFiles(for: model.store.tree) { picture = files }
                 }
             }
             ForEach(ShareItem.offered(for: model), id: \.self) { item in
@@ -142,6 +140,9 @@ struct SharedA2UI: Sendable {
     /// The start of the name of each folder a screen's A2UI is written in to share.
     static let folderPrefix = "A2UI-"
 
+    /// Said when the file couldn't be written to share, as the design file's copy says it.
+    static let problem = "Layer couldn't write the screen's A2UI to share."
+
     /// Writes the file, named `fileName`, in a folder of its own in `temporary`, which goes when the share sheet closes
     /// (`ShareFolder.remove(holding:prefix:)`). A file that can't be written leaves nothing behind.
     func write(in temporary: URL = FileManager.default.temporaryDirectory) throws -> URL {
@@ -241,11 +242,27 @@ enum ShareItem: Hashable {
 }
 
 /// Files on their way to the share sheet.
-private struct SharedPicture: Identifiable {
+struct SharedPicture: Identifiable {
     let urls: [URL]
     let id = UUID()
     /// Done once the share sheet has closed.
     var whenClosed: (@Sendable () -> Void)?
+
+    /// A screen's A2UI, written in a folder of its own in `temporary`, which goes once the share sheet has closed.
+    /// Throws, leaving nothing behind, when it can't be written.
+    static func a2ui(_ shared: SharedA2UI, in temporary: URL = FileManager.default.temporaryDirectory) throws -> SharedPicture {
+        let url = try shared.write(in: temporary)
+        return SharedPicture(urls: [url]) { ShareFolder.remove(holding: url, prefix: SharedA2UI.folderPrefix) }
+    }
+
+    /// The SwiftUI files for every screen, written in a folder of their own in `temporary`, which goes once the share
+    /// sheet has closed. Nil, leaving nothing behind, when they can't be written.
+    static func codeFiles(for design: TreeContent, in temporary: URL = FileManager.default.temporaryDirectory) -> SharedPicture? {
+        guard let urls = CodeFiles.write(design, in: temporary) else { return nil }
+        return SharedPicture(urls: urls) {
+            if let file = urls.first { ShareFolder.remove(holding: file, prefix: CodeFiles.folderPrefix) }
+        }
+    }
 }
 
 /// The generated SwiftUI for every screen, written out as files to share: `DesignTokens.swift`
@@ -272,14 +289,18 @@ enum CodeFiles {
 }
 
 /// The system share sheet.
-private struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: UIViewControllerRepresentable {
     let items: [Any]
     var whenClosed: (@Sendable () -> Void)?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
+        Self.controller(sharing: items, whenClosed: whenClosed)
+    }
+
+    /// The share sheet for `items`, which calls `whenClosed` when it closes, whether something was shared or not.
+    static func controller(sharing items: [Any], whenClosed: (@Sendable () -> Void)?) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        // Told when the sheet closes, whether something was shared or not.
-        controller.completionWithItemsHandler = { [whenClosed] _, _, _, _ in whenClosed?() }
+        controller.completionWithItemsHandler = { _, _, _, _ in whenClosed?() }
         return controller
     }
 

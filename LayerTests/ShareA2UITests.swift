@@ -67,15 +67,26 @@ import Testing
         ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
     }
 
+    /// The share sheet as the Share menu makes it, closed: it calls what was given for when it closes, as the system
+    /// calls it when the person shares or cancels. Its items aren't what is looked at: given files outside a window,
+    /// the sheet logs that it can't ask how to share them.
+    @MainActor private static func closeTheShareSheet(for picture: SharedPicture) {
+        let sheet = ActivityView.controller(sharing: [], whenClosed: picture.whenClosed)
+        sheet.completionWithItemsHandler?(nil, false, nil, nil)
+    }
+
     /// A screen's A2UI is written to share in a folder of its own, which goes, file and all, when the share sheet closes:
-    /// each share used to leave an `A2UI-<UUID>` folder behind (the sweep, lane 2).
-    @Test func theA2UIWrittenToShareGoesWithItsFolderWhenTheSheetCloses() throws {
+    /// each share used to leave an `A2UI-<UUID>` folder behind (the sweep, lane 2). Through the share sheet's own
+    /// completion handler (the sweep's review, M-5).
+    @Test @MainActor func theA2UIWrittenToShareGoesWithItsFolderWhenTheSheetCloses() throws {
         let temporary = try Self.temporaryFolder()
         defer { try? FileManager.default.removeItem(at: temporary) }
         let shared = SharedA2UI(screen: try Self.profileScreen(named: "Profile", deviceID: nil), typeName: "Profile")
 
-        let url = try shared.write(in: temporary)
+        let picture = try SharedPicture.a2ui(shared, in: temporary)
 
+        let url = try #require(picture.urls.first)
+        #expect(picture.urls.count == 1)
         #expect(url.lastPathComponent == "Profile.a2ui.json")
         // The screen's A2UI: the same JSON, whose objects' keys come in no fixed order.
         let written = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? NSArray
@@ -84,12 +95,28 @@ import Testing
         let folder = url.deletingLastPathComponent()
         #expect(folder.lastPathComponent.hasPrefix(SharedA2UI.folderPrefix))
         #expect(Self.contents(of: temporary) == [folder.lastPathComponent])
-        ShareFolder.remove(holding: url, prefix: SharedA2UI.folderPrefix)
+        Self.closeTheShareSheet(for: picture)
         #expect(Self.contents(of: temporary).isEmpty)
     }
 
+    /// An A2UI file that can't be written to share throws, leaving nothing behind: the Share menu then says so
+    /// (`SharedA2UI.problem`), as the design file's copy does.
+    @Test func anA2UIFileThatCantBeWrittenThrowsAndLeavesNothing() throws {
+        let temporary = try Self.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        // A file where the folder for it would go.
+        let notAFolder = temporary.appendingPathComponent("taken")
+        try Data().write(to: notAFolder)
+        let shared = SharedA2UI(screen: try Self.profileScreen(named: "Profile", deviceID: nil), typeName: "Profile")
+
+        #expect(throws: (any Error).self) { try SharedPicture.a2ui(shared, in: notAFolder) }
+
+        #expect(Self.contents(of: temporary) == ["taken"])
+        #expect(SharedA2UI.problem == "Layer couldn't write the screen's A2UI to share.")
+    }
+
     /// The SwiftUI files for every screen go the same way: their folder, once the sheet has closed.
-    @Test func theSwiftUIFilesWrittenToShareGoWithTheirFolderWhenTheSheetCloses() throws {
+    @Test @MainActor func theSwiftUIFilesWrittenToShareGoWithTheirFolderWhenTheSheetCloses() throws {
         let temporary = try Self.temporaryFolder()
         defer { try? FileManager.default.removeItem(at: temporary) }
         var second = try Self.profileScreen(named: "Settings", deviceID: nil)
@@ -97,12 +124,13 @@ import Testing
         var tree = TreeContent()
         tree.screens = [try Self.profileScreen(named: "Profile", deviceID: nil), second]
 
-        let urls = try #require(CodeFiles.write(tree, in: temporary))
+        let picture = try #require(SharedPicture.codeFiles(for: tree, in: temporary))
 
+        let urls = picture.urls
         #expect(Set(urls.map(\.lastPathComponent)).isSuperset(of: ["Profile.swift", "Settings.swift"]))
         let folders = Set(urls.map { $0.deletingLastPathComponent().lastPathComponent })
         #expect(folders.count == 1 && folders.first?.hasPrefix(CodeFiles.folderPrefix) == true)
-        for url in urls { ShareFolder.remove(holding: url, prefix: CodeFiles.folderPrefix) }
+        Self.closeTheShareSheet(for: picture)
         #expect(Self.contents(of: temporary).isEmpty)
     }
 

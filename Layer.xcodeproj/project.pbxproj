@@ -198,6 +198,7 @@
 		5FA333FEC2373B678D258E54 /* checkbox_clean_2.json in Resources */ = {isa = PBXBuildFile; fileRef = A1F607A2FEAA917E489775D1 /* checkbox_clean_2.json */; };
 		623CB87025AB9F7C3E93C5A6 /* StructureInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18789C9F4BC13625FB7BA14C /* StructureInference.swift */; };
 		625DC8226DFB7C061FEE8D4D /* SketchIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710DE5C1A2D22213DD36940A /* SketchIntentTests.swift */; };
+		630DAFDE3B189B7BAD0F4E30 /* DesignLayout-edges.json in Resources */ = {isa = PBXBuildFile; fileRef = 3641A7D7C877F886CC29BFDF /* DesignLayout-edges.json */; };
 		636AA329E840EA64A4024F33 /* a2ui-product-card.json in Resources */ = {isa = PBXBuildFile; fileRef = B2E96090EEB9AA5901356EF4 /* a2ui-product-card.json */; };
 		63A4D622D4AE02350DC2165C /* textField_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 5DE5FCC0F5D3D55662EF392C /* textField_jittered_1a.json */; };
 		6420A960C34CED645FEE7463 /* textField_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = C334E30CC73DE394A35C845F /* textField_jittered_1b.json */; };
@@ -685,6 +686,7 @@
 		34E39AD644E05A6C80F23A92 /* toggle_progress_toggle_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = toggle_progress_toggle_1.json; sourceTree = "<group>"; };
 		3533B8DD43987039B3AEF207 /* GenerationThroughTheReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationThroughTheReconcilerTests.swift; sourceTree = "<group>"; };
 		3548E5C4845A5E5853EB03AD /* screen_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = screen_noisy_1.json; sourceTree = "<group>"; };
+		3641A7D7C877F886CC29BFDF /* DesignLayout-edges.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "DesignLayout-edges.json"; sourceTree = "<group>"; };
 		36AF626C495519A17886AA99 /* MagicPen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MagicPen.swift; sourceTree = "<group>"; };
 		36C4E8182BBDEFD6DC9EE1A3 /* SketchBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchBenchmark.swift; sourceTree = "<group>"; };
 		37B53B86609548F6683ECF34 /* SettingsButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsButton.swift; sourceTree = "<group>"; };
@@ -1600,6 +1602,7 @@
 			children = (
 				D2D0F87EC6767B4EAD18470F /* ComponentKinds.txt */,
 				C8C5FE6AF59FA625C932D4CC /* DesignLayout-containers.json */,
+				3641A7D7C877F886CC29BFDF /* DesignLayout-edges.json */,
 				18F46EB732272C18B3E860D1 /* DesignLayout-sketch.json */,
 				C42A42D62BC4CEC95DE940D5 /* SketchReadings.txt */,
 				78A73461DAC47451C41D4C30 /* Code */,
@@ -2044,6 +2047,7 @@
 			files = (
 				35BB7EB90390F01051DB1512 /* ComponentKinds.txt in Resources */,
 				B753FF388E0ADEBAE3D7CA28 /* DesignLayout-containers.json in Resources */,
+				630DAFDE3B189B7BAD0F4E30 /* DesignLayout-edges.json in Resources */,
 				AA0A5ABDA8BD85F910F22DFF /* DesignLayout-sketch.json in Resources */,
 				BC98943847038E53AD6C7195 /* DesignTokens-standard.swift.txt in Resources */,
 				23C1CA190C3BB2D137ECA2B4 /* NOTICE.md in Resources */,
