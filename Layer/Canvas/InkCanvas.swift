@@ -146,7 +146,8 @@ struct InkCanvas: UIViewRepresentable {
         let tap = UITapGestureRecognizer()
         /// The palette's lasso: a loop drawn with it selects what it goes round, elements
         /// and screens as well as ink. PencilKit's own lasso knows only strokes, so with
-        /// the lasso in hand the document canvas stops drawing and this takes the loop.
+        /// the lasso in hand the document canvas stops drawing, its own recognisers wait for
+        /// this one to fail, and this takes the loop.
         let lasso = LassoGestureRecognizer()
         /// A finger that rests on the canvas and then drags pulls out a box, which
         /// selects what it holds, as in Freeform.
@@ -910,10 +911,16 @@ struct InkCanvas: UIViewRepresentable {
             }
         }
 
-        /// The canvases scroll only once it is plain that the lasso isn't being drawn: a
-        /// second finger, a pinch or a two-finger scroll, makes it give way.
+        /// Everything on or inside the canvases waits for the lasso to fail: the scroll
+        /// views' pan and pinch, so a second finger, a pinch or a two-finger scroll makes
+        /// it give way, and PencilKit's own drawing and selection recognisers, so its lasso
+        /// can't take a loop first when touch moves arrive bunched and leave a lasso round
+        /// nothing holding on to the selection. The lasso is off unless it is in hand, and
+        /// then only a finger or the Pencil as set at `refresh()` reaches it, so drawing,
+        /// the eraser and a finger's pan are not held up.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-            gestureRecognizer === lasso && canvases.contains { other === $0.panGestureRecognizer || other === $0.pinchGestureRecognizer }
+            guard gestureRecognizer === lasso, let view = other.view else { return false }
+            return canvases.contains { view.isDescendant(of: $0) }
         }
 
         /// Whether a view the Pencil touched is in a presentation of its own over the canvas,
