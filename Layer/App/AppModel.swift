@@ -1874,8 +1874,9 @@ final class AppModel {
         return selected.node.isContainer && !selected.isLocked
     }
 
-    /// Lines up what is selected: one element with its screen, several things with each other. Reached through
-    /// `lineUpSelection(_:)`, which leaves what a row, column, grid or overlay places to it.
+    /// Lines up what is selected, whatever holds it: one element with its screen, several things with each other. The
+    /// align buttons go through `lineUpSelection(_:)` instead, which leaves what a row, column, grid or overlay places to
+    /// that parent's alignment (`DesignStore.aligning`).
     func alignSelection(_ alignment: ElementLayout.Alignment) {
         guard let selection, !isSelectionLocked else { return }
         switch selection {

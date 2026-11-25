@@ -149,8 +149,10 @@ extension VoiceToolbox {
         }
     }
 
-    /// One thing lined up with its screen, as the popover's Align does: only in a free parent (spec §10). What a row,
-    /// column, grid or overlay places is lined up by that one's alignment, which the model is told to set.
+    /// One thing lined up as the popover's and the Format panel's Align line it up, by the store's one decision
+    /// (`DesignStore.aligning`): in a row, column, grid or overlay, a screen's laid-out root among them, by that parent's
+    /// alignment when it has a use for the one asked; in a free parent, with its screen (spec §10). An alignment the
+    /// parent has no use for is refused, naming the parent and the alignments it takes.
     func alignElement(element: String, alignment: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -162,19 +164,22 @@ extension VoiceToolbox {
                 guard let (edge, name) = Self.alignment(named: alignment) else {
                     return failed("I can align to the left, centre, right, top, middle or bottom, not “\(alignment)”.")
                 }
-                let handle = handle(of: found)
-                guard found.screen != nil else { return failed("\(handle) isn't on a screen to line up with.") }
-                guard !found.placed.isLocked else { return failed("\(handle) is locked.") }
-                if let placer = placer(of: found) { return failed(alignedLine(handle, placer)) }
-                reveal(.element(found.ref), in: model)
-                model.store.align(found.ref, edge)
+                let thing = CanvasSelection.element(found.ref)
+                let store = model.store
+                let decided = store.aligning(thing, edge)
+                if case .nothing(let why) = decided { return failed(alignRefusal(why, of: [found])) }
+                reveal(thing, in: model)
+                store.lineUp(thing, edge)
+                if case .setsLayout = decided, let placer = placer(of: found) {
+                    return done("Aligned \(placer.handle)'s contents to the \(name).")
+                }
                 return done("Aligned \(Self.describe(found.node)) to the \(name).")
             }
         }
     }
 
-    /// Lines several elements up with one another: by an edge, or through the middle, of
-    /// the area they cover together, through the popover's Align (`DesignStore.lineUp`): in one row, column, grid or
+    /// Lines several elements up with one another: by an edge, or through the middle, of the area they cover together,
+    /// by the store's one decision, as the popover's Align does (`DesignStore.lineUp`): in one row, column, grid or
     /// overlay, by that one's alignment; otherwise only what is in a free parent moves (spec §10), and what is placed
     /// stays where it is, the rest lining up with it all the same.
     private func alignTogether(_ named: [String], alignment: String) -> String {
@@ -195,29 +200,66 @@ extension VoiceToolbox {
         guard Set(found.map(\.ref.host)).count == 1 else { return failed("Those aren't all on one screen.") }
         let together = CanvasSelection.several(Set(found.map { .element($0.ref) }))
         let store = model.store
-        let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
-        // All in one that places them along this edge, or each placed by one: nothing of theirs can move.
-        if store.layoutAligned(together, edge) == nil,
-           store.laidOutParent(of: together) != nil || !store.holdsSomethingInAFreeParent(together),
-           let placed = found.first(where: { $0.placed.isLaidOut }), let placer = placer(of: placed) {
-            return failed(alignedLine(handle(of: placed), placer))
-        }
+        let decided = store.aligning(together, edge)
+        if case .nothing(let why) = decided { return failed(alignRefusal(why, of: found)) }
         reveal(.element(found[0].ref), in: model)
         store.lineUp(together, edge)
         select(together, in: model)
+        if case .setsLayout = decided, let placer = placer(of: found[0]) {
+            return done("Aligned \(placer.handle)'s contents to the \(name).")
+        }
+        let by = name.hasSuffix("centre") ? "\(name)s" : "\(name) edges"
         return done("Lined up \(found.count) elements by their \(by).")
     }
 
+    /// Why Align changes nothing for `found`, as the model is told it. A laid-out parent with no use for the alignment is
+    /// named with the alignments it does take; things each placed by a parent of their own are told what lines them up
+    /// (`alignedLine`).
+    private func alignRefusal(_ why: DesignStore.AlignRefusal, of found: [Found]) -> String {
+        let named = Self.listed(found.map(handle(of:)))
+        switch why {
+        case .locked:
+            return "\(named) \(found.count > 1 ? "are" : "is") locked."
+        case .offScreen:
+            return "\(named) isn't on a screen to line up with."
+        case .notTaken(_, let takes):
+            guard let placer = placer(of: found[0]) else { break }
+            let words = takes.map(Self.name(of:))
+            let listed = words.count > 1 ? words.dropLast().joined(separator: ", ") + " or " + (words.last ?? "") : words.joined()
+            return "\(named) \(found.count > 1 ? "are" : "is") in the \(placer.word) \(placer.handle), which aligns what it holds only to the \(listed)."
+        case .allPlaced:
+            guard let placed = found.first(where: { $0.placed.isLaidOut }), let placer = placer(of: placed) else { break }
+            return alignedLine(handle(of: placed), placer)
+        case .gone, .screen:
+            break
+        }
+        return "\(named) couldn't be aligned."
+    }
+
+    /// The alignment a word asks for, with the name a reply gives it (`name(of:)`).
     private static func alignment(named word: String) -> (ElementLayout.Alignment, String)? {
-        switch word.lowercased().trimmingCharacters(in: .whitespaces) {
-        case "left", "leading": (.left, "left")
+        let alignment: ElementLayout.Alignment? = switch word.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "left", "leading": .left
         // "Middle" is how people say centred, so it is side to side like "centre".
-        case "centre", "center", "centred", "centered", "centrally", "middle", "horizontal centre", "horizontal center": (.centerX, "centre")
-        case "right", "trailing": (.right, "right")
-        case "top": (.top, "top")
-        case "vertical centre", "vertical center", "vertical middle", "vertically", "centre vertically", "center vertically": (.centerY, "vertical centre")
-        case "bottom": (.bottom, "bottom")
+        case "centre", "center", "centred", "centered", "centrally", "middle", "horizontal centre", "horizontal center": .centerX
+        case "right", "trailing": .right
+        case "top": .top
+        case "vertical centre", "vertical center", "vertical middle", "vertically", "centre vertically", "center vertically": .centerY
+        case "bottom": .bottom
         default: nil
+        }
+        return alignment.map { ($0, name(of: $0)) }
+    }
+
+    /// What a reply calls an alignment, in the words `alignment(named:)` reads back as it.
+    private static func name(of alignment: ElementLayout.Alignment) -> String {
+        switch alignment {
+        case .left: "left"
+        case .centerX: "centre"
+        case .right: "right"
+        case .top: "top"
+        case .centerY: "vertical centre"
+        case .bottom: "bottom"
         }
     }
 }

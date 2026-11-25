@@ -64,19 +64,81 @@ extension DesignStore {
         place(id, at: container.frame.offsetBy(dx: (corner.x - at.x) / scale, dy: (corner.y - at.y) / scale))
     }
 
-    // MARK: Lining up among several things
+    // MARK: Align, decided once
 
-    /// Align among several things, and of one a row, column, grid or overlay places: when everything shares a laid-out
-    /// parent that has the alignment, that parent takes it (`layoutAligned`), as one change; otherwise what sits in a free
-    /// parent moves (`alignInFreeParents`). The popover's and the Format panel's Align (`AppModel.lineUpSelection`) and
-    /// voice's (`VoiceToolbox.alignTogether`) both come this way (plan 6, Task 7 review M2).
-    func lineUp(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) {
-        if let aligned = layoutAligned(selection, alignment) {
-            update(aligned.parent) { $0.layout = aligned.layout }
-        } else {
-            alignInFreeParents(selection, alignment)
+    /// What Align does with what is selected: one decision, which the popover's and the Format panel's Align
+    /// (`AppModel.lineUpSelection`), voice's `alignElement` for one thing or several, and Siri's Align Element all make
+    /// here, so that they can't drift apart (spec §10).
+    enum Aligning: Equatable {
+        /// What is selected is placed by one row, column, grid or overlay, a screen's laid-out root among them, which has a
+        /// use for the alignment: that parent takes it, and lines up what it holds (a column: left, centre or right; a
+        /// row: top, middle or bottom; a grid or an overlay: any of them).
+        case setsLayout(parent: UUID, layout: LayerNode.Layout)
+        /// One thing in a free parent on a screen: lined up with an edge or the middle of its screen.
+        case withItsScreen(NodeRef)
+        /// Several things not all in one laid-out parent: what sits in a free parent lines up with the rest, and what a
+        /// row, column, grid or overlay places stays where it is.
+        case withEachOther
+        /// Nothing changes, for this reason.
+        case nothing(AlignRefusal)
+    }
+
+    /// Why Align would change nothing.
+    enum AlignRefusal: Equatable {
+        /// Nothing is selected that is still there.
+        case gone
+        /// What is selected is locked, by itself or by a container above it; of several, every one.
+        case locked
+        /// A screen is selected: Align lines up what is on screens, not the screens themselves.
+        case screen
+        /// One thing in a free parent on the open canvas: there is no screen to line it up with.
+        case offScreen
+        /// The row or column that places what is selected lines what it holds up only across itself, and this
+        /// alignment is along it (Align Top in a column). `takes` are the alignments it has a use for.
+        case notTaken(parent: UUID, takes: [ElementLayout.Alignment])
+        /// Several things, each placed by a row, column, grid or overlay but not all by the same one: none of them can
+        /// move on its own.
+        case allPlaced
+    }
+
+    /// What Align with `alignment` does with `selection`: see `Aligning`. Read from the tree; changes nothing.
+    func aligning(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) -> Aligning {
+        guard !things(in: selection).isEmpty else { return .nothing(.gone) }
+        guard !isLocked(selection) else { return .nothing(.locked) }
+        if case .screen = selection { return .nothing(.screen) }
+        if let parent = laidOutParent(of: selection), let layout = node(parent)?.resolvedLayout {
+            guard let aligned = Self.layout(layout, aligned: alignment) else {
+                let takes = ElementLayout.Alignment.allCases.filter { Self.layout(layout, aligned: $0) != nil }
+                return .nothing(.notTaken(parent: parent, takes: takes))
+            }
+            return .setsLayout(parent: parent, layout: aligned)
+        }
+        guard holdsSomethingInAFreeParent(selection) else { return .nothing(.allPlaced) }
+        switch selection {
+        case .element(let ref):
+            guard case .screen = ref.host else { return .nothing(.offScreen) }
+            return .withItsScreen(ref)
+        case .several, .screen:
+            return .withEachOther
         }
     }
+
+    /// Does what `aligning(_:_:)` decides, as one change, and returns the decision: the parent's alignment set, one thing
+    /// lined up with its screen (`align(_:_:)`), several lined up with one another moving only what sits in a free parent
+    /// (`alignInFreeParents`), or nothing.
+    @discardableResult
+    func lineUp(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) -> Aligning {
+        let decided = aligning(selection, alignment)
+        switch decided {
+        case .setsLayout(let parent, let layout): update(parent) { $0.layout = layout }
+        case .withItsScreen(let ref): align(ref, alignment)
+        case .withEachOther: alignInFreeParents(selection, alignment)
+        case .nothing: break
+        }
+        return decided
+    }
+
+    // MARK: Lining up among several things
 
     /// Today's Align among several things (`align(_:_:)`), moving only what sits in a free parent (spec §10): what a row,
     /// column, grid or overlay places stays where it is, and the others line up with it all the same, as they do with a
@@ -103,15 +165,6 @@ extension DesignStore {
     }
 
     // MARK: Lining up in a laid-out parent
-
-    /// When everything selected shares one laid-out parent: the layout that parent takes from an align button
-    /// (a column: left, centres, right → start, centre, end; a row: top, middles, bottom; a grid or overlay: both).
-    /// Nil when it doesn't apply, or the parent is free.
-    func layoutAligned(_ selection: CanvasSelection, _ alignment: ElementLayout.Alignment) -> (parent: UUID, layout: LayerNode.Layout)? {
-        guard let parent = laidOutParent(of: selection), let layout = node(parent)?.resolvedLayout,
-              let aligned = Self.layout(layout, aligned: alignment) else { return nil }
-        return (parent, aligned)
-    }
 
     /// The row, column, grid or overlay that holds everything selected, a screen's laid-out root included: what places
     /// it, so that Align edits its alignment and Distribute has nothing to space. Nil when what is selected doesn't

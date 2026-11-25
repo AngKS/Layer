@@ -22,28 +22,22 @@ extension AppModel {
         return GroupShape.allCases.filter { store.canGroup(selection, as: $0) }
     }
 
-    /// In one laid-out parent: its alignment, as one step. Otherwise today's `alignSelection`, moving only what sits in a
-    /// free parent (spec §10): what a row, column, grid or overlay places stays where it is, and the rest line up with
-    /// it all the same.
+    /// Align, as the store decides it for every surface (`DesignStore.aligning`): in one laid-out parent, its alignment,
+    /// as one step; one thing in a free parent, with its screen; several, moving only what sits in a free parent
+    /// (spec §10), so that what a row, column, grid or overlay places stays where it is and the rest line up with it.
     ///
     /// In a laid-out parent an alignment it has no use for, such as Align Top in a column, changes nothing: the parent
     /// places what it holds, so nothing is moved on its own either.
     func lineUpSelection(_ alignment: ElementLayout.Alignment) {
-        guard let selection, canLineUpSelection(alignment) else { return }
-        if selection.isSeveral || store.layoutAligned(selection, alignment) != nil {
-            store.lineUp(selection, alignment)
-        } else {
-            alignSelection(alignment)
-        }
+        guard let selection else { return }
+        store.lineUp(selection, alignment)
     }
 
-    /// Whether `lineUpSelection` would line anything up: something that isn't locked or a screen is selected. In a
-    /// laid-out parent the alignment is one it has, and otherwise something selected is in a free parent.
+    /// Whether `lineUpSelection` would line anything up: whether the store's decision is anything but "nothing".
     func canLineUpSelection(_ alignment: ElementLayout.Alignment) -> Bool {
-        guard let selection, !isSelectionLocked else { return false }
-        if case .screen = selection { return false }
-        guard store.laidOutParent(of: selection) != nil else { return store.holdsSomethingInAFreeParent(selection) }
-        return store.layoutAligned(selection, alignment) != nil
+        guard let selection else { return false }
+        if case .nothing = store.aligning(selection, alignment) { return false }
+        return true
     }
 
     /// Today's Distribute (`DesignStore.distribute`), moving only what sits in a free parent (spec §10): what a row,

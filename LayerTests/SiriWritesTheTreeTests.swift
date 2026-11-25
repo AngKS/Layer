@@ -5,9 +5,10 @@ import UIKit
 @testable import Layer
 
 // Siri writes the tree (plan 6, Task 5): Add and Move take the numbers Get Design Layout gives, in host points through
-// the index; a laid-out child is moved by the drag rule on its own screen; Align and Arrange say why they leave what a
-// row, column or grid places; every write is one step with the system's undo; and a device is chosen by name, the
-// design's own included. Through the static helpers, as `DesignActionTests` calls them.
+// the index; a laid-out child is moved by the drag rule on its own screen; Arrange says why it leaves what a row, column
+// or grid orders, and Align lines a laid-out child up by its parent's alignment, as the Format panel does (2026-11-26);
+// every write is one step with the system's undo; and a device is chosen by name, the design's own included. Through
+// the static helpers, as `DesignActionTests` calls them.
 
 @Suite("Siri writes the tree")
 @MainActor
@@ -247,25 +248,36 @@ struct SiriWritesTheTreeTests {
 
     // MARK: - Align and Arrange
 
-    /// F14 and My call 15: Align leaves anything a laid-out parent places, an overlay's included; Arrange leaves what a
-    /// row, column or grid orders, and arranges in an overlay.
-    @Test func alignAndArrangeRefuseALaidOutChild() throws {
+    /// F14 and My call 15: Arrange leaves what a row, column or grid orders, and arranges in an overlay. Align lines up a
+    /// child a laid-out parent places by that parent's alignment, as the Format panel's Align does (2026-11-26): a row's
+    /// child by the row's, as one step, "Align"; an overlay's by the overlay's. An alignment along the row changes nothing,
+    /// and says which the row takes.
+    @Test func arrangeRefusesALaidOutChildAndAlignSetsItsParentsAlignment() throws {
         let login = TreeFixture.loginWithACardAndARow()
         let store = login.model.store
         let label = try ref(login.label, in: login)
         let before = store.tree
 
-        let aligned = #expect(throws: LayerIntentError.self) {
-            try AlignElementIntent.align(label, in: login.model, .left, undoManager: nil)
-        }
-        #expect(isLaidOut(aligned))
-        #expect(said(aligned) == Self.laidOutLine)
         let arranged = #expect(throws: LayerIntentError.self) {
             try ArrangeElementIntent.arrange(label, in: login.model, .forward, undoManager: nil)
         }
         #expect(isLaidOut(arranged))
         #expect(said(arranged) == Self.laidOutLine)
+        let along = #expect(throws: LayerIntentError.self) {
+            try AlignElementIntent.align(label, in: login.model, .left, undoManager: nil)
+        }
+        #expect(!isLaidOut(along))
+        #expect(said(along) == Self.rowTakesLine)
         #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
+
+        try AlignElementIntent.align(label, in: login.model, .bottom, undoManager: nil)
+        #expect(store.node(login.row)?.layout == .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .end)))
+        #expect(store.parent(of: login.label) == .node(login.row))
+        #expect(login.undo.undoActionName == "Align")
+        login.undo.undo()
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
 
         let back = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 100, height: 24), text: "Back")
         let front = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 60, height: 24), text: "Front")
@@ -276,17 +288,17 @@ struct SiriWritesTheTreeTests {
 
         try ArrangeElementIntent.arrange(backRef, in: login.model, .forward, undoManager: nil)
         #expect(store.node(overlay.id)?.children.map(\.id) == [front.id, back.id])
-        let inOverlay = store.tree
-        let alignedInOverlay = #expect(throws: LayerIntentError.self) {
-            try AlignElementIntent.align(backRef, in: login.model, .left, undoManager: nil)
-        }
-        #expect(isLaidOut(alignedInOverlay))
-        #expect(store.tree == inOverlay)
+        try AlignElementIntent.align(backRef, in: login.model, .left, undoManager: nil)
+        #expect(store.node(overlay.id)?.layout == .overlay(LayerNode.Alignment(horizontal: .start, vertical: .center)))
+        #expect(store.node(overlay.id)?.children.map(\.id) == [front.id, back.id])
     }
+
+    /// What Siri says when a row has no use for an alignment.
+    private static let rowTakesLine =
+        "That element is in a row, which aligns what it holds only to the top edge, vertical middle or bottom edge. Nothing was changed."
 
     /// Siri's Align lines up what sits in a free parent with its screen, as the popover's Align does: a leaf on the free
     /// root, one in a free card, and one in a turned card by the box round its turned shape, each its own step, "Align".
-    /// A column screen's child, which its root places, is refused and nothing changes (plan 6 final review C, I1).
     @Test func aligningThingsInFreeParentsLinesThemUpWithTheScreen() throws {
         let login = TreeFixture.loginWithACardAndARow()
         let store = login.model.store
@@ -305,17 +317,34 @@ struct SiriWritesTheTreeTests {
         let bottom = try seen(login.body).maxY
         #expect(abs(bottom - 852) <= 0.5, "\(bottom)")
         #expect(store.parent(of: login.body) == .node(login.card))
+    }
 
+    /// A column screen's child, which its root places, is lined up by the column's alignment (2026-11-26; it was refused
+    /// before, plan 6 final review C, I1): across the column as one step, "Align", and along it not at all, which Siri
+    /// says, naming the screen's column.
+    @Test func aligningAColumnScreensChildSetsTheColumnsAlignment() throws {
         let t1 = text("One"), t2 = text("Two")
-        let (model, _, screen) = columnScreen([t1, t2])
+        let (model, undo, screen) = columnScreen([t1, t2])
         let child = try #require(model.store.ref(of: t2.id))
+        let root = try #require(model.store.treeScreen(screen)?.root.id)
         let before = model.store.tree
-        let refused = #expect(throws: LayerIntentError.self) {
-            try AlignElementIntent.align(child, in: model, .left, undoManager: nil)
+
+        let along = #expect(throws: LayerIntentError.self) {
+            try AlignElementIntent.align(child, in: model, .top, undoManager: nil)
         }
-        #expect(isLaidOut(refused))
+        #expect(!isLaidOut(along))
+        #expect(said(along)
+            == "That element is in its screen's column, which aligns what it holds only to the left edge, horizontal centre or right edge. Nothing was changed.")
         #expect(model.store.tree == before)
+        #expect(!undo.canUndo)
+
+        try AlignElementIntent.align(child, in: model, .centerX, undoManager: nil)
+        #expect(model.store.node(root)?.layout == .stack(LayerNode.Stack(axis: .vertical, spacing: 24, alignment: .center)))
         #expect(model.store.treeScreen(screen)?.root.children.map(\.id) == [t1.id, t2.id])
+        #expect(undo.undoActionName == "Align")
+        undo.undo()
+        #expect(model.store.tree == before)
+        #expect(!undo.canUndo)
     }
 
     @Test func arrangingInAFreeCardStillWorks() throws {
