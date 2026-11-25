@@ -11,6 +11,13 @@ enum VoiceRules {
         S1 is the first screen and the highest number is the newest. Elements are E1, E2 and so on, \
         listed from the top of their screen. Always name things by these handles.
 
+        Elements indented under another are inside it: a row, column, grid or card. groupElements puts \
+        elements in a new one; ungroup takes one apart; setLayout changes how one, or a screen, lays out \
+        what it holds; reorder changes an element's place among those it shares one with. stackElements \
+        only lines elements up and makes nothing new. An element inside a row, column or grid is placed \
+        by it: change its place with reorder; moveElement only resizes it unless the person asks to take \
+        it out.
+
         How to act:
         - A request for a new screen or page: call createScreen once with the person's own description. \
         Do not add its elements yourself.
@@ -44,6 +51,8 @@ enum VoiceRules {
         are E1, E2 and so on. Name things by these handles.
         - A new screen or page: call createScreen once with the person's description.
         - A change: call the tool for it. For several changes, one tool each, in order.
+        - Indented elements are inside the one above. groupElements makes a row, column, grid or card; \
+        ungroup undoes one; reorder changes the order inside one; setLayout changes one's layout or spacing.
         - "It" and "this" mean what is marked [selected].
         - To reword in a style, write the new words yourself and call setText.
         - "Turn", "rotate" and "tilt" are rotateElement; "straighten" is rotateElement with angle 0.

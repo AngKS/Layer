@@ -85,6 +85,7 @@
 		30A4509406BEC55E82B5D648 /* image_textField_image_2.json in Resources */ = {isa = PBXBuildFile; fileRef = 3D1C5936B35D8839D1615A26 /* image_textField_image_2.json */; };
 		30B92392D4241D853DFC9E1B /* progress_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 3B82CC6BDCAA612F90D4838C /* progress_jittered_1b.json */; };
 		30F29B4662538AE96ACD05FF /* CanvasDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B60D59B43806202E8FBB607 /* CanvasDrop.swift */; };
+		3127341B5487FA009A7E374A /* VoiceToolbox+Structure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A7EFA142D6F247E1CB88318 /* VoiceToolbox+Structure.swift */; };
 		31B81AF7B11953438E382C6B /* ScreenGenerationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 800E83124DC63477FF49470B /* ScreenGenerationTests.swift */; };
 		31B9FE12BEA7E9C3A1B42323 /* divider_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 2FB07F1ED5A60A893C3B0105 /* divider_clean_1.json */; };
 		31BB5C80C82A732634B92749 /* DesignStore+Structure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D0662CA505F127155100648 /* DesignStore+Structure.swift */; };
@@ -302,6 +303,7 @@
 		95262B1B72E6E2FB4100208B /* DesignStore+NewElement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9EE5D6438233990ED19B2F /* DesignStore+NewElement.swift */; };
 		9562FC7E12CE0D747B4C79D7 /* divider_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = C729E511A28042897902A214 /* divider_jittered_1b.json */; };
 		96D33B28B75FF2060CB34E99 /* SketchToNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D965F8A060CF60574CBFCC /* SketchToNodeTests.swift */; };
+		9710F17CC565F6A74FD28BA2 /* NewVoiceToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224B8E710AD2C0F38C8C96B2 /* NewVoiceToolsTests.swift */; };
 		97595AFD3E8A20F508184D60 /* structure-grid_noisy_2.json in Resources */ = {isa = PBXBuildFile; fileRef = E12314A3B46AA48D65BA8D4C /* structure-grid_noisy_2.json */; };
 		97A18DA4377B4957B2AD91E0 /* stickyNote_jittered_1b.json in Resources */ = {isa = PBXBuildFile; fileRef = 25AB0AA8BC013810EEFF269C /* stickyNote_jittered_1b.json */; };
 		97E531FFF54608A8F07C1E1D /* toggle_clean_1.json in Resources */ = {isa = PBXBuildFile; fileRef = 94C51370C1EF3A2B51195487 /* toggle_clean_1.json */; };
@@ -631,6 +633,7 @@
 		21367BB9CEF150145DCDC8DF /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		21564DCF25E04B456CC7C6E5 /* FlatStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlatStoreTests.swift; sourceTree = "<group>"; };
 		21E425BB63DD6A2017EA6A99 /* ElementLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLayout.swift; sourceTree = "<group>"; };
+		224B8E710AD2C0F38C8C96B2 /* NewVoiceToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewVoiceToolsTests.swift; sourceTree = "<group>"; };
 		2257980B2B7A148361B67DE1 /* CanvasSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelection.swift; sourceTree = "<group>"; };
 		22F1F08BFE52169F00D5622C /* TreePlaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreePlaceTests.swift; sourceTree = "<group>"; };
 		2378BF1C976284C911BAF263 /* SuggestionPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionPill.swift; sourceTree = "<group>"; };
@@ -819,6 +822,7 @@
 		7784A30DCE9727F387312A96 /* ConcurrentEditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrentEditTests.swift; sourceTree = "<group>"; };
 		7942B5562158100754E89A7B /* scratchOut_noisy_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = scratchOut_noisy_2.json; sourceTree = "<group>"; };
 		79B8A40EF02A85E637D35B6F /* avatar_clean_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_clean_1.json; sourceTree = "<group>"; };
+		7A7EFA142D6F247E1CB88318 /* VoiceToolbox+Structure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceToolbox+Structure.swift"; sourceTree = "<group>"; };
 		7ABFEA276705A10EA9154E0C /* avatar_noisy_1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = avatar_noisy_1.json; sourceTree = "<group>"; };
 		7C6A13CD630171868587E394 /* VoiceTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTools.swift; sourceTree = "<group>"; };
 		7D51E1DB38FE734150884F9C /* checkbox_jittered_2a.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_jittered_2a.json; sourceTree = "<group>"; };
@@ -1231,6 +1235,7 @@
 				7F2BF93CE41926C0591EE8B7 /* VoiceRoute.swift */,
 				8C283B28595251A583DB87B0 /* VoiceRules.swift */,
 				5342BB161C044BA5BAE9A8C8 /* VoiceToolbox.swift */,
+				7A7EFA142D6F247E1CB88318 /* VoiceToolbox+Structure.swift */,
 				7C6A13CD630171868587E394 /* VoiceTools.swift */,
 			);
 			path = Voice;
@@ -1456,6 +1461,7 @@
 				D9ED7B47C8483BC6FCA1A030 /* LookWordsEverywhereTests.swift */,
 				3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */,
 				5658ED18F621DDD8EE9E4445 /* MultiSelectionTests.swift */,
+				224B8E710AD2C0F38C8C96B2 /* NewVoiceToolsTests.swift */,
 				A4AA816C80BCEB5DFA71CA1C /* NodeViewTests.swift */,
 				CED676BA058F4BBFBFC7ED02 /* OutlinePromptTests.swift */,
 				8BDE7F449A84CACB19D513E2 /* OutlineTests.swift */,
@@ -2303,6 +2309,7 @@
 				3D6A834F650AF5ED279F3590 /* LookWordsEverywhereTests.swift in Sources */,
 				E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */,
 				9001D60CBB831784637DCDA1 /* MultiSelectionTests.swift in Sources */,
+				9710F17CC565F6A74FD28BA2 /* NewVoiceToolsTests.swift in Sources */,
 				3A417FA16C3DF8E3C4BC4EFC /* NodeViewTests.swift in Sources */,
 				6F701EE0D0E6648794D617A0 /* OutlinePromptTests.swift in Sources */,
 				68A051131105B9524DBA52BE /* OutlineTests.swift in Sources */,
@@ -2561,6 +2568,7 @@
 				A0FDE499089200912E1E3E18 /* VoiceProfile.swift in Sources */,
 				1513DD1E51F249D8D73DD482 /* VoiceRoute.swift in Sources */,
 				C6970FCA4ED3171193B1F7D6 /* VoiceRules.swift in Sources */,
+				3127341B5487FA009A7E374A /* VoiceToolbox+Structure.swift in Sources */,
 				9D435F457CD9DD7DAC4BDCF7 /* VoiceToolbox.swift in Sources */,
 				5C0F89DA7FFC1CD890E521BD /* VoiceTools.swift in Sources */,
 				C2687FAAE956A236F8AA116B /* ZoomStops.swift in Sources */,

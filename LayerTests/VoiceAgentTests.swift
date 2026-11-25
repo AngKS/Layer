@@ -341,7 +341,7 @@ struct VoiceAgentTests {
         #expect(told.instructions.contains(VoiceRules.full))
         #expect(told.instructions.contains(#"S1 "Login" 393x852"#))
         #expect(told.instructions.contains(#"E2 button "Sign in""#))
-        #expect(told.tools.count == 21)
+        #expect(told.tools.count == 25)
         #expect(Set(told.tools).isSuperset(of: ["createScreen", "styleElement", "moveElement", "rotateElement", "tidyScreen", "changeScreenDevice", "show", "undo", "endCall"]))
     }
 
@@ -354,7 +354,7 @@ struct VoiceAgentTests {
         let agent = VoiceAgent(model: app, testModel: ScriptedLanguageModel(script: [:], closing: "Done.", recorder: recorder), canEndCall: false)
         _ = await agent.run("hello")
         let told = try #require(recorder.requests.first)
-        #expect(told.tools.count == 20)
+        #expect(told.tools.count == 24)
         #expect(!told.tools.contains("endCall"))
         #expect(told.tools.contains("undo"))
         // The pencil's own agent is made that way.

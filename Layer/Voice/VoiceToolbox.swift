@@ -15,8 +15,8 @@ import Foundation
 /// that isn't there is told so in a line, and can try again or say so.
 @MainActor
 final class VoiceToolbox: VoiceActing {
-    private weak var model: AppModel?
-    private let handles: VoiceHandles
+    private(set) weak var model: AppModel?
+    let handles: VoiceHandles
 
     /// What each step of the command under way did, in order.
     private(set) var lines: [String] = []
@@ -60,7 +60,7 @@ final class VoiceToolbox: VoiceActing {
 
     /// Makes what a tool changes the spoken command's under way: one step with the rest of
     /// the command, and never one with what the person does meanwhile (V1).
-    private func forCommand<T>(_ body: () -> T) -> T {
+    func forCommand<T>(_ body: () -> T) -> T {
         guard let store = model?.store else { return body() }
         return store.actingForCommand(body)
     }
@@ -185,7 +185,7 @@ final class VoiceToolbox: VoiceActing {
 
     /// The handles in a list such as "E3, E4" or "E2 E1". A handle written loosely, "E 2",
     /// is one.
-    private static func handleList(_ written: String) -> [String] {
+    static func handleList(_ written: String) -> [String] {
         written.components(separatedBy: CharacterSet(charactersIn: ",;&")).flatMap { part -> [String] in
             let part = part.replacingOccurrences(of: " and ", with: " ")
             let words = part.split(separator: " ").map(String.init)
@@ -462,7 +462,7 @@ final class VoiceToolbox: VoiceActing {
         return "I can make it an iPhone, iPad or Mac screen, or \(custom.map(\.name).joined(separator: ", ")), not “\(words)”."
     }
 
-    private static func article(for name: String) -> String {
+    static func article(for name: String) -> String {
         name.first.map { "aeiouAEIOU".contains($0) } == true ? "an" : "a"
     }
 
@@ -1081,12 +1081,12 @@ final class VoiceToolbox: VoiceActing {
 
     // MARK: Finding what was named
 
-    private struct Refusal: Error {
+    struct Refusal: Error {
         var line: String
     }
 
     /// A node a handle names, where it is now: a leaf or a container, on a screen or on the open canvas.
-    private struct Found {
+    struct Found {
         /// Its frame in its host's points, its angle, its parent's layout, and its lock and hide with its containers'.
         var placed: PlacedNode
         /// The screen it is on; nil for one on the open canvas.
@@ -1108,7 +1108,7 @@ final class VoiceToolbox: VoiceActing {
         var canTakeOut: Bool
     }
 
-    private func handle(of found: Found) -> String {
+    func handle(of found: Found) -> String {
         handles.handle(forNode: found.id)
     }
 
@@ -1162,18 +1162,18 @@ final class VoiceToolbox: VoiceActing {
         "\(handle) is in the \(placer.word) \(placer.handle), which places it. To line things up in \(placer.handle), call setLayout on \(placer.handle) with an alignment, such as \(placer.word) centred."
     }
 
-    private var gone: String { failed("The design has closed.") }
+    var gone: String { failed("The design has closed.") }
 
     /// Selects what a tool changed and brings it into view, so that "it" means that one
     /// next. A change for one screen leaves both alone: the screen stays selected, with
     /// the field the change was typed in, and the view stays where the person put it.
-    private func reveal(_ target: CanvasSelection, in model: AppModel) {
+    func reveal(_ target: CanvasSelection, in model: AppModel) {
         guard scope == nil else { return }
         DesignActions.reveal(target, in: model)
     }
 
     /// Selects several things a tool changed together; not in a change for one screen.
-    private func select(_ together: CanvasSelection, in model: AppModel) {
+    func select(_ together: CanvasSelection, in model: AppModel) {
         guard scope == nil else { return }
         model.selection = together
     }
@@ -1205,7 +1205,7 @@ final class VoiceToolbox: VoiceActing {
         scopeNamed.map { Refusal(line: "Only \($0) can be changed here.") }
     }
 
-    private func find(screen handle: String) -> Result<TreeScreen, Refusal> {
+    func find(screen handle: String) -> Result<TreeScreen, Refusal> {
         guard let tidy = VoiceHandles.tidied(handle) else {
             return .failure(Refusal(line: "“\(handle)” isn't a handle. Use one from the list, such as S1."))
         }
@@ -1218,7 +1218,7 @@ final class VoiceToolbox: VoiceActing {
     }
 
     /// A node a tool may change: one on the screen a change is for, when there is one.
-    private func find(element handle: String) -> Result<Found, Refusal> {
+    func find(element handle: String) -> Result<Found, Refusal> {
         let found = locate(element: handle)
         guard let scope, case .success(let one) = found, one.ref.host != .screen(scope), let screen = scopeNamed else {
             return found
@@ -1256,7 +1256,7 @@ final class VoiceToolbox: VoiceActing {
 
     // MARK: Results
 
-    private func done(_ line: String) -> String {
+    func done(_ line: String) -> String {
         VoiceLog.log.info("tool: done. \(line, privacy: .private)")
         // The model is told the handle of what was made, to go on with. The pill isn't.
         lines.append(line.replacing(#/ It is the [ES]\d+ now in the canvas list\./#, with: "").replacing(#/ as [ES]\d+/#, with: ""))
@@ -1266,12 +1266,12 @@ final class VoiceToolbox: VoiceActing {
 
     /// A line for the model about something that needn't be done: neither done, nor a
     /// failure that would be the person's to hear.
-    private func noted(_ line: String) -> String {
+    func noted(_ line: String) -> String {
         VoiceLog.log.info("tool: noted. \(line, privacy: .private)")
         return line
     }
 
-    private func failed(_ line: String) -> String {
+    func failed(_ line: String) -> String {
         VoiceLog.log.info("tool: couldn't. \(line, privacy: .private)")
         failures.append(line)
         lastFailed = true

@@ -172,6 +172,24 @@ final class Recorder: VoiceActing {
         note("placeElement", ["element": element, "relation": relation, "target": target], saying: "Put \(element) \(relation) \(target).")
     }
 
+    func groupElements(elements: String, as shape: String) -> String {
+        made += 1
+        return note("groupElements", ["elements": elements, "as": shape], saying: "Put \(elements) in a \(shape), E\(made).")
+    }
+
+    func setLayout(target: String, layout: String?, spacing: String?) -> String {
+        let said = [layout, spacing.map { "spacing \($0)" }].compactMap { $0 }.joined(separator: ", ")
+        return note("setLayout", ["target": target, "layout": layout, "spacing": spacing], saying: "\(target) is now \(said).")
+    }
+
+    func ungroup(element: String) -> String {
+        note("ungroup", ["element": element], saying: "Took what \(element) held out of it.")
+    }
+
+    func reorder(element: String, position: String, target: String) -> String {
+        note("reorder", ["element": element, "position": position, "target": target], saying: "Moved \(element) \(position) \(target).")
+    }
+
     func pan(direction: String) -> String {
         note("pan", ["direction": direction], saying: "Moved the view \(direction).")
     }
@@ -212,6 +230,10 @@ enum Canvas: String {
     case twoPointed
     /// One iPad-sized screen, pointed at as a whole.
     case iPadPointed
+    /// One screen holding containers, as the app tells them since plan 6: a card, a row and a column (`structure`).
+    case nested
+    /// The same, with its two text fields selected.
+    case fieldsSelected
 
     private static let login = CanvasPicture.Screen(
         handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), visibleShare: 1,
@@ -222,10 +244,39 @@ enum Canvas: String {
         ]
     )
 
+    /// E2 a free card, E5 a row and E10 a column, each holding two things, with two fields between them.
+    private static let account = CanvasPicture.Screen(
+        handle: "S1", name: "Account", size: CGSize(width: 393, height: 852), visibleShare: 1,
+        elements: [
+            .init(handle: "E1", kind: "title", text: "Account", frame: CGRect(x: 20, y: 60, width: 353, height: 41)),
+            .init(handle: "E2", kind: "card", text: "", frame: CGRect(x: 20, y: 121, width: 353, height: 128), isContainer: true, children: [
+                .init(handle: "E3", kind: "text", text: "About me", frame: CGRect(x: 36, y: 137, width: 200, height: 24)),
+                .init(handle: "E4", kind: "body", text: "Designing better experiences.", frame: CGRect(x: 36, y: 169, width: 321, height: 64)),
+            ]),
+            .init(handle: "E5", kind: "group", text: "", frame: CGRect(x: 20, y: 269, width: 143, height: 31), layout: "row, spacing 12, centred", isContainer: true, children: [
+                .init(handle: "E6", kind: "text", text: "Wi-Fi", frame: CGRect(x: 20, y: 272, width: 80, height: 24)),
+                .init(handle: "E7", kind: "toggle", text: "", frame: CGRect(x: 112, y: 269, width: 51, height: 31), look: ["colour green", "on"]),
+            ]),
+            .init(handle: "E8", kind: "text field", text: "Email", frame: CGRect(x: 20, y: 320, width: 353, height: 44)),
+            .init(handle: "E9", kind: "text field", text: "Password", frame: CGRect(x: 20, y: 380, width: 353, height: 44)),
+            .init(handle: "E10", kind: "group", text: "", frame: CGRect(x: 20, y: 460, width: 353, height: 82), layout: "column, spacing 12", isContainer: true, children: [
+                .init(handle: "E11", kind: "button", text: "Sign in", frame: CGRect(x: 20, y: 460, width: 353, height: 50), look: ["colour accent"]),
+                .init(handle: "E12", kind: "text", text: "Forgot password?", frame: CGRect(x: 20, y: 522, width: 150, height: 20)),
+            ]),
+        ]
+    )
+
     var picture: CanvasPicture {
         switch self {
         case .empty:
             return .empty
+        case .nested:
+            return CanvasPicture(screens: [Self.account])
+        case .fieldsSelected:
+            var account = Self.account
+            account.elements[3].isSelected = true
+            account.elements[4].isSelected = true
+            return CanvasPicture(screens: [account])
         case .one:
             return CanvasPicture(screens: [Self.login])
         case .three:
@@ -450,6 +501,41 @@ let newToolCases: [Case] = {
     return list
 }()
 
+/// Whether a position says before: "before", "above" or "left of", as the app reads it (`VoiceToolbox.isBefore`).
+private func saysBefore(_ position: String?) -> Bool {
+    let said = Set((position ?? "").lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+    return !said.isDisjoint(with: ["before", "above", "left"]) && said.isDisjoint(with: ["after", "below", "under", "right"])
+}
+
+/// The structure tools added in plan 6 (`groupElements`, `setLayout`, `ungroup`, `reorder`), over a screen holding a
+/// card, a row and a column, with two controls: taking one thing out of a row, which is `moveElement`'s, and resizing a
+/// button in a column. Run with `structure`, each several times. See "Structure tools (plan 6)" in the benchmark notes.
+let structureCases: [Case] = [
+    Case(canvas: .fieldsSelected, command: "Put these in a column", tools: ["groupElements"],
+         isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("column") }),
+    Case(canvas: .fieldsSelected, command: "Make these a row", tools: ["groupElements"],
+         isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("row") }),
+    Case(canvas: .nested, command: "Make the card a grid of two", tools: ["setLayout"],
+         isRight: { arguments in
+             let layout = (arguments["layout"] ?? "").lowercased()
+             return arguments["target"] == "E2" && layout.contains("grid") && (layout.contains("2") || layout.contains("two"))
+         }),
+    // More than the row's 12.
+    Case(canvas: .nested, command: "Space the row out more", tools: ["setLayout"],
+         isRight: { arguments in
+             let spacing = Double((arguments["spacing"] ?? "").filter { $0.isNumber || $0 == "." }) ?? 0
+             let keepsTheRow = arguments["layout"].map { $0.lowercased().contains("row") } ?? true
+             return arguments["target"] == "E5" && spacing > 12 && keepsTheRow
+         }),
+    Case(canvas: .nested, command: "Ungroup the row", tools: ["ungroup"], isRight: has("element", "E5")),
+    Case(canvas: .nested, command: "Move the toggle before the label", tools: ["reorder"],
+         isRight: { $0["element"] == "E7" && $0["target"] == "E6" && saysBefore($0["position"]) }),
+    // Controls: one thing out of a row is moveElement's take-out, and a button in a column is resized as any is.
+    Case(canvas: .nested, command: "Take the toggle out of the row", tools: ["moveElement"],
+         isRight: { $0["element"] == "E7" && ["yes", "true", "y"].contains(($0["takeOut"] ?? "").lowercased()) }),
+    Case(canvas: .nested, command: "Make the button half width", tools: ["moveElement"], isRight: both(has("element", "E11"), has("width", "50"))),
+]
+
 /// The on-device branch of the app's `VoiceProfile`, with optional changes to try.
 struct BenchProfile: LanguageModelSession.DynamicProfile {
     let picture: CanvasPicture
@@ -504,7 +590,7 @@ struct BenchProfile: LanguageModelSession.DynamicProfile {
                 Instructions("The canvas now:\n\(picture.text(.compact))")
             }
             if picture.hasScreens {
-                VoiceTools.all(actor, canEndCall: canEndCall)
+                VoiceTools.compact(actor, canEndCall: canEndCall)
             } else {
                 VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall)
             }
@@ -676,7 +762,7 @@ struct CallProfile: LanguageModelSession.DynamicProfile {
                 BenchBrief()
             }
             if picture.hasScreens {
-                VoiceTools.all(actor)
+                VoiceTools.compact(actor)
             } else {
                 VoiceTools.forEmptyCanvas(actor)
             }
@@ -880,9 +966,14 @@ struct Main {
             }
             return
         }
-        if CommandLine.arguments.dropFirst().first == "newtools" {
-            await newTools(runs: CommandLine.arguments.dropFirst(2).first.flatMap(Int.init) ?? 5,
-                           variant: CommandLine.arguments.dropFirst(3).first.flatMap(BenchProfile.Variant.init(rawValue:)) ?? .baseline)
+        if let mode = CommandLine.arguments.dropFirst().first, mode == "newtools" || mode == "structure" {
+            let runs = CommandLine.arguments.dropFirst(2).first.flatMap(Int.init) ?? 5
+            let variant = CommandLine.arguments.dropFirst(3).first.flatMap(BenchProfile.Variant.init(rawValue:)) ?? .baseline
+            if mode == "newtools" {
+                await newTools(runs: runs, variant: variant)
+            } else {
+                await structure(runs: runs, variant: variant)
+            }
             return
         }
         print("variant: \(variant.rawValue)")
@@ -891,7 +982,7 @@ struct Main {
         for canvas in [Canvas.empty, .one, .three] {
             let picture = canvas.picture
             let recorder = Recorder(picture: picture)
-            let tools = picture.hasScreens ? VoiceTools.all(recorder) : VoiceTools.forEmptyCanvas(recorder)
+            let tools = picture.hasScreens ? VoiceTools.compact(recorder) : VoiceTools.forEmptyCanvas(recorder)
             let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact))) ?? -1
             let brief = (try? await model.tokenCount(for: Instructions("The canvas now:\n\(picture.text(.compact))"))) ?? -1
             let toolTokens = (try? await model.tokenCount(for: tools)) ?? -1
@@ -943,17 +1034,22 @@ func check() {
         print("harness FAILED: a row's line and what it holds aren't told as the app tells them")
         exit(1)
     }
-    print("harness ok: \(tools.count) tools")
+    guard Canvas.fieldsSelected.picture.text(.compact).contains("\n  E10 column, spacing 12 x20 y460 w353 h82:\n    E11 button \"Sign in\""),
+          Canvas.fieldsSelected.picture.selectionInWords == "E8, the text field \"Email\" on S1; E9, the text field \"Password\" on S1" else {
+        print("harness FAILED: the structure cases' canvas isn't told as the app tells it")
+        exit(1)
+    }
+    print("harness ok: \(tools.count) tools, \(structureCases.count) structure cases")
 }
 
 /// The prompt's size before a word is spoken, for each canvas, as `main` prints it.
 @MainActor
-func printPromptSize(canEndCall: Bool) async {
+func printPromptSize(canEndCall: Bool, canvases: [Canvas] = [.empty, .one, .three]) async {
     let model = SystemLanguageModel.default
-    for canvas in [Canvas.empty, .one, .three] {
+    for canvas in canvases {
         let picture = canvas.picture
         let recorder = Recorder(picture: picture)
-        let tools = picture.hasScreens ? VoiceTools.all(recorder, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(recorder, canEndCall: canEndCall)
+        let tools = picture.hasScreens ? VoiceTools.compact(recorder, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(recorder, canEndCall: canEndCall)
         let rules = (try? await model.tokenCount(for: Instructions(VoiceRules.compact))) ?? -1
         let brief = (try? await model.tokenCount(for: Instructions("The canvas now:\n\(picture.text(.compact))"))) ?? -1
         let toolTokens = (try? await model.tokenCount(for: tools)) ?? -1
@@ -965,12 +1061,29 @@ func printPromptSize(canEndCall: Bool) async {
 @MainActor
 func newTools(runs: Int, variant: BenchProfile.Variant) async {
     print("newtools: \(runs) runs, variant \(variant.rawValue)")
+    print("context size: \(SystemLanguageModel.default.contextSize) tokens")
     await printPromptSize(canEndCall: true)
     await printPromptSize(canEndCall: false)
-    var tallies: [(Case, right: Int, rightTool: Int, picks: [String: Int])] = newToolCases.map { ($0, 0, 0, [:]) }
+    await repeated(newToolCases, runs: runs, variant: variant)
+}
+
+/// Each of `structureCases` run `runs` times, as `newtools` runs its own, with the profile's size for the nested canvas.
+@MainActor
+func structure(runs: Int, variant: BenchProfile.Variant) async {
+    print("structure: \(runs) runs, variant \(variant.rawValue)")
+    print("context size: \(SystemLanguageModel.default.contextSize) tokens")
+    await printPromptSize(canEndCall: true, canvases: [.one, .nested])
+    await printPromptSize(canEndCall: false, canvases: [.one, .nested])
+    await repeated(structureCases, runs: runs, variant: variant)
+}
+
+/// `cases`, each run `runs` times; one line a run, then each case's rates.
+@MainActor
+func repeated(_ cases: [Case], runs: Int, variant: BenchProfile.Variant) async {
+    var tallies: [(Case, right: Int, rightTool: Int, picks: [String: Int])] = cases.map { ($0, 0, 0, [:]) }
     for pass in 1...runs {
-        for index in newToolCases.indices {
-            let testCase = newToolCases[index]
+        for index in cases.indices {
+            let testCase = cases[index]
             let outcome = await run(testCase, variant: variant)
             if outcome.right { tallies[index].right += 1 }
             if outcome.rightTool { tallies[index].rightTool += 1 }

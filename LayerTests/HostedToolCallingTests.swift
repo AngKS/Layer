@@ -275,7 +275,7 @@ extension HostedModelTests {
         let system = try #require(first["system"] as? String)
         #expect(system.contains(VoiceRules.full))
         #expect(system.contains(#"E2 button "Sign in" x20 y420 w353 h50"#))
-        #expect((first["tools"] as? [[String: Any]])?.count == 21)
+        #expect((first["tools"] as? [[String: Any]])?.count == 25)
         #expect(first["model"] as? String == "claude-test")
         // Its second look at the canvas is after the change.
         let second = try #require(try body(ofRequest: 1)["system"] as? String)

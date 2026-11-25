@@ -97,6 +97,39 @@ struct VoiceAgentLiveTests {
         #expect(!outcome.said.isEmpty)
     }
 
+    /// The tree fixture (a card, a row of "Wi-Fi" and a toggle) with two texts below the row, "Terms" and "Privacy", on
+    /// the model of the run (plan 6, Task 8).
+    private func designWithARow() -> (login: TreeFixture.Login, x: UUID, y: UUID, agent: VoiceAgent) {
+        let (login, x, y) = TreeFixture.loginWithTwoTexts()
+        login.model.setModelChoice(.hosted(.lmStudio, model: model))
+        return (login, x, y, VoiceAgent(model: login.model))
+    }
+
+    @Test func liveGroupsTwoTextsAsARow() async throws {
+        let (login, x, y, agent) = designWithARow()
+        let store = login.model.store
+        let outcome = await say("Put the two texts at the bottom in a row", to: agent)
+        #expect(outcome.problem == nil)
+        guard case .node(let id)? = store.parent(of: x), let row = store.node(id) else {
+            Issue.record("The texts aren't in a container")
+            return
+        }
+        print("VOICE-LIVE made \(row.kindName): \(String(describing: row.layout))")
+        #expect(row.children.map(\.id) == [x, y])
+        guard case .stack(let stack)? = row.layout else {
+            Issue.record("The container isn't a row")
+            return
+        }
+        #expect(stack.axis == .horizontal)
+    }
+
+    @Test func liveReordersInARow() async throws {
+        let (login, _, _, agent) = designWithARow()
+        let outcome = await say("Move the toggle before the label", to: agent)
+        #expect(outcome.problem == nil)
+        #expect(login.model.store.node(login.row)?.children.map(\.id) == [login.toggle, login.label])
+    }
+
     @Test func aNewScreenIsWrittenFromADescription() async throws {
         let (app, _, agent) = design()
         let outcome = await say("I want a profile page with user settings", to: agent)

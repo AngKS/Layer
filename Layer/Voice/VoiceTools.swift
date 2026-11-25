@@ -28,6 +28,13 @@ protocol VoiceActing: AnyObject, Sendable {
     /// `screen` nil, or an element's handle, is the screen pointed at.
     @MainActor func tidyScreen(screen: String?) -> String
     @MainActor func changeScreenDevice(screen: String?, device: String) -> String
+    /// `elements`: handles, comma separated (two or more; one for a card). `shape`: group, row, column, grid or card.
+    @MainActor func groupElements(elements: String, as shape: String) -> String
+    /// `target`: a container's E handle or a screen's S handle. Nil `layout` keeps the kind; nil `spacing` keeps it.
+    @MainActor func setLayout(target: String, layout: String?, spacing: String?) -> String
+    @MainActor func ungroup(element: String) -> String
+    /// `position`: before or after; above and left of read as before, below and right of as after.
+    @MainActor func reorder(element: String, position: String, target: String) -> String
     @MainActor func show(target: String) -> String
     @MainActor func pan(direction: String) -> String
     @MainActor func zoom(to level: String) -> String
@@ -130,11 +137,19 @@ enum VoiceTools {
             CreateScreenTool(actor: actor), AddElementTool(actor: actor), SetTextTool(actor: actor),
             StyleElementTool(actor: actor), MoveElementTool(actor: actor), RotateElementTool(actor: actor), AlignElementTool(actor: actor),
             StackElementsTool(actor: actor), PlaceElementTool(actor: actor), DuplicateElementTool(actor: actor), DeleteElementTool(actor: actor),
+            GroupElementsTool(actor: actor), SetLayoutTool(actor: actor), UngroupTool(actor: actor), ReorderTool(actor: actor),
             RenameScreenTool(actor: actor), DeleteScreenTool(actor: actor), TidyScreenTool(actor: actor), ChangeScreenDeviceTool(actor: actor),
             ShowTool(actor: actor), PanTool(actor: actor), ZoomTool(actor: actor),
             UndoTool(actor: actor), RedoTool(actor: actor),
         ]
         return canEndCall ? tools + [EndCallTool(actor: actor)] : tools
+    }
+
+    /// What the on-device model is handed with a screen to edit: every tool but `setLayout` and `reorder`. Measured with
+    /// all of them, its profile with one screen was 3,578 tokens of its 8,192, over the 3,400 allowed it (plan 6, Task 8:
+    /// "Structure tools (plan 6)" in docs/benchmarks/voice-on-device.md).
+    static func compact(_ actor: any VoiceActing, canEndCall: Bool = true) -> [any Tool] {
+        all(actor, canEndCall: canEndCall).filter { !($0 is SetLayoutTool) && !($0 is ReorderTool) }
     }
 
     /// With no screens there is nothing to edit, so a model is spared the tools that edit.
@@ -163,6 +178,10 @@ enum VoiceTools {
         case "renameScreen": "Renaming…"
         case "tidyScreen": "Tidying…"
         case "changeScreenDevice": "Changing the device…"
+        case "groupElements": "Grouping…"
+        case "setLayout": "Changing the layout…"
+        case "ungroup": "Ungrouping…"
+        case "reorder": "Reordering…"
         case "show": "Showing…"
         case "pan": "Moving the view…"
         case "zoom": "Zooming…"
@@ -474,6 +493,80 @@ struct ChangeScreenDeviceTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         await actor.changeScreenDevice(screen: arguments.screen, device: arguments.device)
+    }
+}
+
+struct GroupElementsTool: Tool {
+    let actor: any VoiceActing
+    let name = "groupElements"
+    let description = "Puts elements in a new group, row, column, grid or card."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The handles, comma separated, such as E3, E4. They must be in the same place.")
+        var elements: String
+        @Guide(description: "group, row, column, grid or card.")
+        var `as`: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.groupElements(elements: arguments.elements, as: arguments.as)
+    }
+}
+
+struct SetLayoutTool: Tool {
+    let actor: any VoiceActing
+    let name = "setLayout"
+    let description = "Changes how a row, column, grid, card, group or screen lays out what it holds."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "A row, column, grid, card or group, such as E5, or a screen, such as S1.")
+        var target: String
+        @Guide(description: "free, row, column, grid of 2 (any number), or overlay; may add left, centred, right, top, bottom or stretched. Leave out to keep it.")
+        var layout: String?
+        @Guide(description: "The gap between the things in it, in points, such as 16. Leave out to keep it.")
+        var spacing: String?
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.setLayout(target: arguments.target, layout: arguments.layout, spacing: arguments.spacing)
+    }
+}
+
+struct UngroupTool: Tool {
+    let actor: any VoiceActing
+    let name = "ungroup"
+    let description = "Takes a row, column, grid, card or group apart, leaving what it held in place."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The row, column, grid, card or group to take apart, such as E5.")
+        var element: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.ungroup(element: arguments.element)
+    }
+}
+
+struct ReorderTool: Tool {
+    let actor: any VoiceActing
+    let name = "reorder"
+    let description = "Moves an element before or after another in the row, column, grid or group they share."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The element to move, such as E7.")
+        var element: String
+        @Guide(description: "before or after.")
+        var position: String
+        @Guide(description: "The element it goes before or after, such as E6.")
+        var target: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        await actor.reorder(element: arguments.element, position: arguments.position, target: arguments.target)
     }
 }
 
