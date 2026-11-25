@@ -13,8 +13,8 @@ enum A2UIPrompt {
     static let surfaceID = "screen"
 
     /// The temperature a screen in A2UI is asked for at (`ScreenGenerator`), where a provider takes one
-    /// (`HostedModelClient`): lower than a model's own, often 1, so a slip inside a line's JSON is less likely. Every
-    /// line in a hundred and fifty was good at it on 2026-11-26 (docs/benchmarks/screen-prompt.md).
+    /// (`HostedModelClient`): lower than a model's own, often 1, so a slip inside a line's JSON is less likely
+    /// (2026-11-26, docs/benchmarks/screen-prompt.md).
     static let temperature = 0.5
 
     static func instructions(for description: String) -> String {
