@@ -18,10 +18,10 @@ new: 228x40 tint #CD6C57 text "Title"
 font: 28 bold | text colour: #000000, bordered #000000 | radius: 0 | alignment: center
 hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
 loose, drawn large: 228x40 | drawn small: 228x40
-in a blueprint: 228x40 | in a row: 170x40 | at 40pt: 228x56
-laid out: 82,75 229x40 alignment -
+in an outline: 58x34 | in a row: 58x34 | at 40pt: 81x48
+laid out: 20,79 58x34 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## body
 name: Body | symbol: text.alignleft | placeholder: A short description goes here, a line or two that says what this is.
@@ -43,10 +43,10 @@ new: 297x44 tint #CD6C57 text "A short description goes here, a line or two that
 font: 15 regular | text colour: #55544F, bordered #55544F | radius: 0 | alignment: center
 hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
 loose, drawn large: 297x44 | drawn small: 297x44
-in a blueprint: 353x44 | in a row: 170x44 | at 40pt: 353x56
-laid out: 20,75 353x44 alignment -
+in an outline: 325x36 | in a row: 168x54 | at 40pt: 323x191
+laid out: 20,79 353x36 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## image
 name: Image | symbol: photo | placeholder: 
@@ -68,10 +68,10 @@ new: 333x120 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 16 | alignment: leading
 hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 333x120 | drawn small: 333x120
-in a blueprint: 353x200 | in a row: 170x120 | at 40pt: 353x200
-laid out: 20,75 353x200 alignment -
+in an outline: 353x200 | in a row: 170x200 | at 40pt: 353x200
+laid out: 20,79 353x200 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## button
 name: Button | symbol: capsule.fill | placeholder: Continue
@@ -93,10 +93,10 @@ new: 353x50 tint #CD6C57 text "Continue"
 font: 17 semibold | text colour: #FFFFFF, bordered #CD6C57 | radius: 20 | alignment: center
 hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 353x50 | drawn small: 353x50
-in a blueprint: 353x50 | in a row: 170x50 | at 40pt: 353x56
-laid out: 20,75 353x50 alignment -
+in an outline: 112x50 | in a row: 112x50 | at 40pt: 112x50
+laid out: 20,79 353x50 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: buttonStyle, colour, height, kind, name, text, width, x, y
+layout data: buttonStyle, colour, height, kind, name, sizing, text, width, x, y
 
 ## textField
 name: Text Field | symbol: character.cursor.ibeam | placeholder: Placeholder
@@ -118,10 +118,10 @@ new: 333x48 tint #CD6C57 text "Placeholder"
 font: 16 regular | text colour: #9A9892, bordered #9A9892 | radius: 12 | alignment: leading
 hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: true
 loose, drawn large: 333x48 | drawn small: 333x48
-in a blueprint: 353x48 | in a row: 170x48 | at 40pt: 353x56
-laid out: 20,75 353x48 alignment -
+in an outline: 353x48 | in a row: 170x48 | at 40pt: 353x48
+laid out: 20,79 353x48 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## divider
 name: Divider | symbol: minus | placeholder: 
@@ -143,10 +143,10 @@ new: 333x1 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
 hasFill: false | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 333x1 | drawn small: 333x1
-in a blueprint: 353x1 | in a row: 170x1 | at 40pt: 353x1
-laid out: 20,75 353x1 alignment -
+in an outline: 353x1 | in a row: 170x1 | at 40pt: 353x1
+laid out: 20,79 353x1 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## symbol
 name: Symbol | symbol: star | placeholder: 
@@ -168,10 +168,10 @@ new: 44x44 tint #2B2A27 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
 hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 44x44 | drawn small: 44x44
-in a blueprint: 44x44 | in a row: 44x44 | at 40pt: 44x44
-laid out: 174,75 45x44 alignment -
+in an outline: 44x44 | in a row: 44x44 | at 40pt: 44x44
+laid out: 20,79 44x44 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## text
 name: Text | symbol: character.textbox | placeholder: Text
@@ -193,10 +193,10 @@ new: 200x24 tint #CD6C57 text "Text"
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
 hasFill: false | hasCornerRadius: false | hasBorder: true | hasOnState: false | hasTextAlignment: true
 loose, drawn large: 455x24 | drawn small: 80x24
-in a blueprint: 200x24 | in a row: 170x24 | at 40pt: 200x56
-laid out: 96,75 201x24 alignment -
+in an outline: 32x21 | in a row: 32x21 | at 40pt: 71x48
+laid out: 20,79 32x21 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## stickyNote
 name: Sticky Note | symbol: note.text | placeholder: Note
@@ -218,10 +218,10 @@ new: 150x150 tint #FCE38A text "Note"
 font: 15 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 6 | alignment: center
 hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: true
 loose, drawn large: 320x320 | drawn small: 100x100
-in a blueprint: 150x150 | in a row: 170x150 | at 40pt: 150x150
-laid out: 121,75 151x150 alignment -
+in an outline: 150x150 | in a row: 150x150 | at 40pt: 150x150
+laid out: not kept on a screen
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## toggle
 name: Toggle | symbol: switch.2 | placeholder: 
@@ -243,10 +243,10 @@ new: 51x31 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
 hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
 loose, drawn large: 51x31 | drawn small: 51x31
-in a blueprint: 51x31 | in a row: 51x31 | at 40pt: 51x31
-laid out: 171,75 51x31 alignment -
+in an outline: 51x31 | in a row: 51x31 | at 40pt: 51x31
+laid out: 20,79 51x31 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on false value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## avatar
 name: Avatar | symbol: person.crop.circle | placeholder: 
@@ -268,10 +268,10 @@ new: 40x40 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
 hasFill: false | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 40x40 | drawn small: 40x40
-in a blueprint: 40x40 | in a row: 40x40 | at 40pt: 40x40
-laid out: 176,75 41x40 alignment -
+in an outline: 48x48 | in a row: 48x48 | at 40pt: 48x48
+laid out: 20,79 48x48 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## checkbox
 name: Checkbox | symbol: checkmark.square | placeholder: 
@@ -293,10 +293,10 @@ new: 24x24 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 10 | alignment: leading
 hasFill: true | hasCornerRadius: true | hasBorder: false | hasOnState: true | hasTextAlignment: false
 loose, drawn large: 24x24 | drawn small: 24x24
-in a blueprint: 24x24 | in a row: 24x24 | at 40pt: 24x24
-laid out: 184,75 25x24 alignment -
+in an outline: 24x24 | in a row: 24x24 | at 40pt: 24x24
+laid out: 20,79 24x24 alignment -
 marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## radio
 name: Radio Button | symbol: largecircle.fill.circle | placeholder: 
@@ -318,10 +318,10 @@ new: 24x24 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
 hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
 loose, drawn large: 24x24 | drawn small: 24x24
-in a blueprint: 24x24 | in a row: 24x24 | at 40pt: 24x24
-laid out: 184,75 25x24 alignment -
+in an outline: 24x24 | in a row: 24x24 | at 40pt: 24x24
+laid out: 20,79 24x24 alignment -
 marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## progress
 name: Progress Bar | symbol: progress.indicator | placeholder: 
@@ -343,10 +343,10 @@ new: 333x6 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 20 | alignment: leading
 hasFill: true | hasCornerRadius: true | hasBorder: true | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 333x6 | drawn small: 333x6
-in a blueprint: 353x6 | in a row: 170x6 | at 40pt: 353x6
-laid out: 20,75 353x6 alignment -
+in an outline: 353x6 | in a row: 170x6 | at 40pt: 353x6
+laid out: 20,79 353x6 alignment -
 marks: empty on true value - | dot on the right on true value 0.9 | shaded to 0.42 on true value 0.4
-layout data: colour, height, kind, name, progress, width, x, y
+layout data: colour, height, kind, name, progress, sizing, width, x, y
 
 ## shape
 name: Shape | symbol: square.on.circle | placeholder: 
@@ -368,10 +368,10 @@ new: 100x100 tint #CD6C57 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 16 | alignment: leading
 hasFill: true | hasCornerRadius: false | hasBorder: false | hasOnState: true | hasTextAlignment: false
 loose, drawn large: 100x100 | drawn small: 100x100
-in a blueprint: 100x100 | in a row: 100x100 | at 40pt: 100x100
-laid out: 146,75 101x100 alignment -
+in an outline: not written
+laid out: not written
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, shape, width, x, y
+layout data: colour, height, kind, name, on, shape, sizing, width, x, y
 
 ## drawing
 name: Drawing | symbol: scribble | placeholder: 
@@ -393,10 +393,10 @@ new: 120x120 tint #2B2A27 text ""
 font: 17 regular | text colour: #2B2A27, bordered #2B2A27 | radius: 0 | alignment: leading
 hasFill: false | hasCornerRadius: false | hasBorder: false | hasOnState: false | hasTextAlignment: false
 loose, drawn large: 120x120 | drawn small: 120x120
-in a blueprint: 120x120 | in a row: 170x120 | at 40pt: 120x120
-laid out: 136,75 121x120 alignment -
+in an outline: not written
+laid out: not written
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 asked for on a screen: title, bodyText, image, button, textField, divider, toggle, avatar, checkbox, radioButton, progressBar
 asked for on the open canvas: text, stickyNote, phoneScreen

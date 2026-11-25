@@ -13,20 +13,27 @@ struct ShareMenu: View {
 
     var body: some View {
         Menu {
-            // The code of the selected screen, or of the first one.
-            if let screen = model.selectedScreen ?? model.store.screens.first {
-                ShareLink(
-                    item: SharedSwiftUICode(screen: screen, among: model.store.screens, settings: model.store.canvas.code),
-                    preview: SharePreview(SwiftUICodeGenerator.fileName(for: screen, among: model.store.screens))
-                ) {
+            // The code and the A2UI of the selected screen, or of the first one.
+            let tree = model.store.tree
+            if let screen = sharedScreen(in: tree) {
+                let shared = SharedScreen(screen, in: tree)
+                ShareLink(item: shared.code, preview: SharePreview(shared.codeFileName)) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
-            }
-            if model.store.screens.count > 1 {
-                Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
-                    if let urls = CodeFiles.write(model.store.screens, settings: model.store.canvas.code) {
-                        picture = SharedPicture(urls: urls)
+                // Written when picked, through the share sheet that says when it closes, so that its folder goes then.
+                Button {
+                    do {
+                        picture = try SharedPicture.a2ui(shared.a2ui)
+                    } catch {
+                        problem = SharedA2UI.problem
                     }
+                } label: {
+                    Label("A2UI JSON", systemImage: "curlybraces")
+                }
+            }
+            if tree.screens.count > 1 {
+                Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
+                    if let files = SharedPicture.codeFiles(for: model.store.tree) { picture = files }
                 }
             }
             ForEach(ShareItem.offered(for: model), id: \.self) { item in
@@ -48,6 +55,12 @@ struct ShareMenu: View {
         }
     }
 
+    /// The screen whose code is shared: the selected one, or the first.
+    private func sharedScreen(in tree: TreeContent) -> TreeScreen? {
+        if case .screen(let id) = model.selection, let screen = tree.screens.first(where: { $0.id == id }) { return screen }
+        return tree.screens.first
+    }
+
     /// Makes what `item` shares from the design as it is now, and hands it to the share sheet.
     private func share(_ item: ShareItem) {
         Task {
@@ -66,28 +79,100 @@ struct ShareMenu: View {
     }
 }
 
+/// What the Share menu offers of one screen: its SwiftUI code and its A2UI, both named from one context's view names,
+/// made once each time the menu is.
+struct SharedScreen {
+    let code: SharedSwiftUICode
+    /// "<TypeName>.swift".
+    let codeFileName: String
+    let a2ui: SharedA2UI
+
+    init(_ screen: TreeScreen, in tree: TreeContent) {
+        let context = SwiftUICodeGenerator.Context(tree)
+        code = SharedSwiftUICode(screen: screen, context: context, settings: tree.settings.code)
+        codeFileName = SwiftUICodeGenerator.fileName(for: screen, in: context)
+        a2ui = SharedA2UI(screen: screen, typeName: context.typeName(of: screen))
+    }
+}
+
 /// A screen's SwiftUI code, written when it is shared and not before: the menu is made again
 /// on every change to the design, a frame of a drag among them, and the code is as long as
-/// the screen is full. It shares what `SwiftUICodeGenerator.code(for:among:settings:)` gives
+/// the screen is full. It shares what `SwiftUICodeGenerator.code(for:in:settings:)` gives
 /// for the design as it was when the menu was made, as text.
 struct SharedSwiftUICode: Transferable, Sendable {
-    let screen: DesignScreen
-    let screens: [DesignScreen]
+    let screen: TreeScreen
+    let context: SwiftUICodeGenerator.Context
     let settings: CodeSettings
 
-    init(screen: DesignScreen, among screens: [DesignScreen], settings: CodeSettings) {
+    init(screen: TreeScreen, context: SwiftUICodeGenerator.Context, settings: CodeSettings) {
         self.screen = screen
-        self.screens = screens
+        self.context = context
         self.settings = settings
     }
 
     /// The code itself.
     var source: String {
-        SwiftUICodeGenerator.code(for: screen, among: screens, settings: settings)
+        SwiftUICodeGenerator.code(for: screen, in: context, settings: settings)
     }
 
     static var transferRepresentation: some TransferRepresentation {
         ProxyRepresentation(exporting: \.source)
+    }
+}
+
+/// A screen's A2UI, written when it is shared and not before, like `SharedSwiftUICode`: the menu is
+/// made again on every change to the design, and the file is as long as the screen is full.
+struct SharedA2UI: Sendable {
+    let screen: TreeScreen
+    let typeName: String
+
+    init(screen: TreeScreen, typeName: String) {
+        self.screen = screen
+        self.typeName = typeName
+    }
+
+    /// The file's contents: the screen's messages as one JSON array.
+    var data: Data { A2UIExporter.document(for: screen, surfaceID: typeName) }
+
+    /// "<TypeName>.a2ui.json".
+    var fileName: String { typeName + ".a2ui.json" }
+
+    /// The start of the name of each folder a screen's A2UI is written in to share.
+    static let folderPrefix = "A2UI-"
+
+    /// Said when the file couldn't be written to share, as the design file's copy says it.
+    static let problem = "Layer couldn't write the screen's A2UI to share."
+
+    /// Writes the file, named `fileName`, in a folder of its own in `temporary`, which goes when the share sheet closes
+    /// (`ShareFolder.remove(holding:prefix:)`). A file that can't be written leaves nothing behind.
+    func write(in temporary: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        let folder = try ShareFolder.make(Self.folderPrefix, in: temporary)
+        do {
+            let url = folder.appendingPathComponent(fileName)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+}
+
+/// A folder of its own for files made to share, in the system's temporary folder, taken away once the share sheet has
+/// closed: each share used to leave one behind.
+enum ShareFolder {
+    /// A new folder in `temporary` whose name starts with `prefix`, such as `A2UI-`.
+    static func make(_ prefix: String, in temporary: URL) throws -> URL {
+        let folder = temporary.appendingPathComponent(prefix + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    /// Takes away the folder `file` was written in, when its name starts with `prefix`: nothing else is touched.
+    static func remove(holding file: URL, prefix: String) {
+        let folder = file.deletingLastPathComponent()
+        guard folder.lastPathComponent.hasPrefix(prefix) else { return }
+        try? FileManager.default.removeItem(at: folder)
     }
 }
 
@@ -157,39 +242,65 @@ enum ShareItem: Hashable {
 }
 
 /// Files on their way to the share sheet.
-private struct SharedPicture: Identifiable {
+struct SharedPicture: Identifiable {
     let urls: [URL]
     let id = UUID()
     /// Done once the share sheet has closed.
     var whenClosed: (@Sendable () -> Void)?
+
+    /// A screen's A2UI, written in a folder of its own in `temporary`, which goes once the share sheet has closed.
+    /// Throws, leaving nothing behind, when it can't be written.
+    static func a2ui(_ shared: SharedA2UI, in temporary: URL = FileManager.default.temporaryDirectory) throws -> SharedPicture {
+        let url = try shared.write(in: temporary)
+        return SharedPicture(urls: [url]) { ShareFolder.remove(holding: url, prefix: SharedA2UI.folderPrefix) }
+    }
+
+    /// The SwiftUI files for every screen, written in a folder of their own in `temporary`, which goes once the share
+    /// sheet has closed. Nil, leaving nothing behind, when they can't be written.
+    static func codeFiles(for design: TreeContent, in temporary: URL = FileManager.default.temporaryDirectory) -> SharedPicture? {
+        guard let urls = CodeFiles.write(design, in: temporary) else { return nil }
+        return SharedPicture(urls: urls) {
+            if let file = urls.first { ShareFolder.remove(holding: file, prefix: CodeFiles.folderPrefix) }
+        }
+    }
 }
 
-/// The generated SwiftUI for every screen, written out as files to share.
+/// The generated SwiftUI for every screen, written out as files to share: `DesignTokens.swift`
+/// too when the views use the design's tokens.
 enum CodeFiles {
-    static func write(_ screens: [DesignScreen], settings: CodeSettings) -> [URL]? {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftUI-\(UUID().uuidString)")
+    /// The start of the name of each folder the files are written in to share.
+    static let folderPrefix = "SwiftUI-"
+
+    /// The files, in a folder of their own in `temporary`, which goes when the share sheet closes
+    /// (`ShareFolder.remove(holding:prefix:)`). Nil, leaving nothing behind, when they can't be written.
+    static func write(_ design: TreeContent, in temporary: URL = FileManager.default.temporaryDirectory) -> [URL]? {
+        guard let folder = try? ShareFolder.make(folderPrefix, in: temporary) else { return nil }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            return try SwiftUICodeGenerator.files(for: screens, settings: settings).map { file in
+            return try SwiftUICodeGenerator.files(for: design, settings: design.settings.code).map { file in
                 let url = folder.appendingPathComponent(file.name)
                 try Data(file.source.utf8).write(to: url, options: .atomic)
                 return url
             }
         } catch {
+            try? FileManager.default.removeItem(at: folder)
             return nil
         }
     }
 }
 
 /// The system share sheet.
-private struct ActivityView: UIViewControllerRepresentable {
+struct ActivityView: UIViewControllerRepresentable {
     let items: [Any]
     var whenClosed: (@Sendable () -> Void)?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
+        Self.controller(sharing: items, whenClosed: whenClosed)
+    }
+
+    /// The share sheet for `items`, which calls `whenClosed` when it closes, whether something was shared or not.
+    static func controller(sharing items: [Any], whenClosed: (@Sendable () -> Void)?) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        // Told when the sheet closes, whether something was shared or not.
-        controller.completionWithItemsHandler = { [whenClosed] _, _, _, _ in whenClosed?() }
+        controller.completionWithItemsHandler = { _, _, _, _ in whenClosed?() }
         return controller
     }
 
@@ -252,7 +363,7 @@ enum BoardSnapshot {
     }
 
     private static func parts(of model: AppModel, longestSide: CGFloat, aspect: ClosedRange<CGFloat>?) -> Parts? {
-        let drawing = model.store.content.visibleInk
+        let drawing = model.store.tree.visibleInk
         let ink = drawing.strokes.isEmpty ? nil : drawing.bounds
         let design = model.store.contentBounds
         guard var area = (design.map { ink?.union($0) ?? $0 } ?? ink)?.insetBy(dx: -40, dy: -40).integral else { return nil }
@@ -262,15 +373,20 @@ enum BoardSnapshot {
             area = area.insetBy(dx: (area.width - width) / 2, dy: (area.height - height) / 2).integral
         }
 
+        // Drawn from the tree through the canvas's own views.
+        let tree = model.store.tree
+        let tokens = tree.settings.tokens
         let board = ZStack(alignment: .topLeading) {
-            ForEach(model.store.screens) { screen in
-                PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
+            ForEach(tree.screens) { screen in
+                ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: tree.settings.showsFrameNames)
+                    .equatable()
                     .offset(x: screen.origin.x, y: screen.origin.y)
             }
-            ForEach(model.store.floating) { floating in
-                FloatingElementView(floating: floating)
-                    // Floating drawings last, as the canvas draws them.
-                    .zIndex(floating.element.kind == .drawing ? 1 : 0)
+            ForEach(tree.canvas) { node in
+                CanvasNodeView(node: node, tokens: tokens)
+                    .equatable()
+                    // Drawings last, as the canvas draws them.
+                    .zIndex(node.kind == .drawing ? 1 : 0)
             }
         }
         .offset(x: -area.minX, y: -area.minY)

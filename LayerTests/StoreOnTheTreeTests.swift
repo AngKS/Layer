@@ -1,0 +1,128 @@
+import CoreGraphics
+import Foundation
+import Testing
+@testable import Layer
+
+@MainActor
+private func makeStore(_ content: TreeContent = TreeContent()) -> (store: DesignStore, undo: UndoManager) {
+    let undo = UndoManager()
+    undo.groupsByEvent = false
+    let store = DesignStore(content: content)
+    store.undoManager = undo
+    return (store, undo)
+}
+
+private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_001) -> Bool {
+    abs(a.minX - b.minX) < tolerance && abs(a.minY - b.minY) < tolerance && abs(a.width - b.width) < tolerance
+        && abs(a.height - b.height) < tolerance
+}
+
+private func buttonNode(_ frame: CGRect = CGRect(x: 20, y: 100, width: 200, height: 50)) -> LayerNode {
+    .leaf(.button, frame: frame, text: "Go", tint: Theme.accent)
+}
+
+/// The store keeps the design as a tree: its rules run inside every change, undo and redo (plan 2, Task 7).
+@Suite("The store on the tree")
+@MainActor
+struct StoreOnTheTreeTests {
+    @Test func theStoreHoldsTheTree() throws {
+        let (store, _) = makeStore()
+        let screen = try #require(store.addScreen(from: CGRect(x: 0, y: 0, width: 393, height: 852)))
+        let frame = screen.canvasFrame(on: store.tree.device(of: screen))
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
+        store.place(LayerNode.standard(.button), centredAt: centre)
+
+        let root = try #require(store.tree.screens.first?.root)
+        #expect(root.children.map(\.kind) == [.button])
+    }
+
+    /// A group and the one member pointed at it, made in one change: the rules at its end
+    /// dissolve the group, so the member is on the screen's root, and the change is one step.
+    @Test func aGroupOfOneMadeInAChangeIsGoneByItsEnd() throws {
+        let (store, undo) = makeStore()
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
+        undo.removeAllActions()
+        let member = buttonNode()
+        let item = LayerNode.container(children: [member])
+
+        store.apply { content in
+            guard let index = content.screens.firstIndex(where: { $0.id == screen.id }) else { return }
+            content.screens[index].root.children.append(item)
+        }
+
+        let root = try #require(store.tree.screens.first?.root)
+        #expect(root.children.map(\.id) == [member.id])
+        #expect(root.children.first?.frame == member.frame)
+        #expect(store.node(item.id) == nil)
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(store.tree.screens.first?.root.children.isEmpty == true)
+        #expect(!undo.canUndo)
+    }
+
+    #if DEBUG
+    /// A leaf moved on one free screen lays out that screen's root once, and the other screen's not at all (F8).
+    @Test func aLeafEditLaysOutOnlyItsScreen() throws {
+        let (store, _) = makeStore()
+        let a = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
+        let b = try #require(store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 0), scale: 1)))
+        let onA = store.add([buttonNode()], onScreen: a.id)
+        _ = store.add([buttonNode()], onScreen: b.id)
+        let roots = store.tree.screens.map(\.root.id)
+        let before = roots.map(LayoutEngine.timesLaidOut)
+
+        store.update(onA[0].node) { $0.frame.origin.x += 10 }
+
+        let laid = zip(roots.map(LayoutEngine.timesLaidOut), before).map(-)
+        #expect(laid == [1, 0])
+    }
+    #endif
+
+    /// A free group turned 30, moved 10 points right with `position`, comes back through undo as the
+    /// tree was before and goes again through redo as the tree was after, and its leaves stay where they
+    /// are in it (F24).
+    @Test func undoAndRedoGoThroughTheTree() throws {
+        var big = LayerNode(kind: .shape)
+        big.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        var small = LayerNode(kind: .text)
+        small.content.text = "Hello"
+        small.frame = CGRect(x: 50, y: 25, width: 100, height: 50)
+        var group = LayerNode(kind: .group)
+        group.width = LayerNode.Sizing(.fit)
+        group.height = LayerNode.Sizing(.fit)
+        group.rotation = 30
+        group.frame = CGRect(x: 100, y: 100, width: 200, height: 100)
+        group.children = [big, small]
+        var root = LayerNode(kind: .group)
+        root.children = [group]
+        var tree = TreeContent()
+        tree.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: root)]
+        TreeRules.apply(to: &tree, after: nil)
+        let (store, undo) = makeStore(tree)
+        let before = store.content
+        let ref = NodeRef(host: .screen(tree.screens[0].id), node: group.id)
+
+        func node(_ id: UUID, in tree: TreeContent) throws -> LayerNode {
+            try #require(TreeIndex(tree).node(id, in: tree))
+        }
+        let groupBefore = try node(group.id, in: before).frame
+        let box = try #require(store.canvasFrame(of: .element(ref)))
+
+        store.position([CanvasSelection.element(ref): CGPoint(x: box.minX + 10, y: box.minY)])
+
+        let after = store.content
+        #expect(close(try node(group.id, in: after).frame, groupBefore.offsetBy(dx: 10, dy: 0)))
+        #expect(try node(group.id, in: after).rotation == 30)
+        #expect(try node(group.id, in: after).children.map(\.id) == [big.id, small.id])
+        #expect(close(try node(big.id, in: after).frame, try node(big.id, in: before).frame))
+        #expect(close(try node(small.id, in: after).frame, try node(small.id, in: before).frame))
+
+        undo.undo()
+        #expect(store.content == before)
+        #expect(close(try node(group.id, in: store.content).frame, groupBefore))
+
+        undo.redo()
+        #expect(store.content == after)
+        #expect(close(try node(group.id, in: store.content).frame, try node(group.id, in: after).frame))
+    }
+}

@@ -14,7 +14,7 @@ import SwiftUI
 struct ScreenEditField: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
 
     @State private var isTyping = false
     @FocusState private var isFocused: Bool

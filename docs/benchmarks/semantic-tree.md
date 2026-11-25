@@ -1,0 +1,691 @@
+# Semantic tree: performance baseline and budgets
+
+Spec §13. The "Before" column was measured on main 8d00fc7 (2026-11-23, Xcode 27.2, iOS 27.2 simulator
+"Layer iPad Pro 11 (st2-lane-c)", UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47). The "After" columns
+are filled when plans 2, 3, 4, 5 and 6 end, and after the performance sweep, with the same simulator and the same commands; plan 3's generation figures come
+from `Tools/ScreenBenchmarkHarness` on macOS, where the on-device model runs.
+
+| What | How | Budget | Before (main 8d00fc7) | After plan 2 | After plan 3 | After plan 4 | After plan 5 | After plan 6 | After the sweep |
+|---|---|---|---|---|---|---|---|---|---|
+| Reading after the pen rests (rules path, no model) | `SketchBenchmark` timings over the 156 fixtures, plus the conversion including the structure pass | p95 under 100 ms | not measured in this baseline (it needs the tree) | not measured: plan 5 puts the reading on the tree | not measured: plan 5 puts the reading on the tree | not measured: plan 5 puts the reading on the tree | the rules' reading p50 0.0019 ms, p95 0.0147 ms over the 156 fixtures (`SketchBenchmarkTests.printsTheFullBenchmarkReport`). The conversion (the reading, the landing and the structure pass, as one step) over the 116 fixtures the rules read as a thing on a screen, on a free iPhone screen of 100 sketched things, in two cases. **Light**, the things in 25 rows the person made, so the pass has little to take (`SketchConversionBudgetTests.aReadingLandsWithinBudget`): p50 1.567 ms, p95 2.214 ms, 45 times under the budget; the pass alone p50 0.005 ms, p95 0.165 ms (medians of three runs, quiet). **Heavy**, the 100 things straight on the free root, so the pass's neighbourhood is the whole root (`aReadingWhosePassTakesInTheWholeScreenLandsWithinBudget`): p50 6.272 ms, p95 8.055 ms, 12 times under the budget; the pass alone p50 5.371 ms, p95 6.044 ms (medians of three runs at 1-minute loads of 199 to 1015, with plan 6's lanes building; the light case gave p95 2.433 ms in the same runs). The corpus: rules 87.8% (137/156), with Apple Intelligence on this Mac 89.1% (139/156); the 32 structure fixtures all as expected. See "How plan 5's numbers were measured" | the conversion (the reading, the landing and the structure pass, as one step) over the 116 fixtures the rules read as a thing on a screen, medians of three runs (`SketchConversionBudgetTests`). **Light**: p50 1.719 ms, p95 2.305 ms, 43 times under the budget; the pass alone p50 0.005 ms, p95 0.182 ms. **Heavy**, the whole root the pass's neighbourhood: p50 6.511 ms, p95 7.137 ms, 14 times under the budget; the pass alone p50 5.332 ms, p95 5.785 ms. The slowest single reading was 47.7 to 55.8 ms in every run, light and heavy alike. `BENCH sketch accuracy`: the rules 87.8% (137/156) in each run, the structure fixtures 32 of 32 as expected (`run.sh structure`). **Met.** See "How plan 6's numbers were measured" | the conversion at 5174831, medians of three runs (`SketchConversionBudgetTests`). **Light**: p50 1.664 ms, p95 2.410 ms; the pass alone p50 0.005 ms, p95 0.182 ms. **Heavy**: p50 6.404 ms, p95 7.098 ms; the pass alone p50 5.363 ms, p95 5.776 ms. The slowest single reading was 47.5 to 56.7 ms. The sweep's own baseline, three runs at eede551 in the same hour: light 1.735 / 2.287, heavy 6.476 / 7.088, so unchanged within the runs' spread. `BENCH sketch accuracy`: 87.8% (137/156) in each run. **Met.** See "How the sweep's numbers were measured" |
+| Layout of one edit on a 100-node screen: the store | `StoreChangeBenchmarkTests`, 50 runs each, `ContinuousClock`: each change alone, and (since the fix wave) with the next read of the screens after it, a `+read` line | p95 under 16 ms in the simulator; checked on the iPad | move p50 0.174 ms, p95 0.183 ms; resize p50 0.175 ms, p95 0.186 ms; text p50 0.175 ms, p95 0.185 ms; add (and delete) p50 0.333 ms, p95 0.353 ms. The change alone: no read was timed | move p50 0.433 ms, p95 0.457 ms; resize p50 0.429 ms, p95 0.464 ms; text p50 0.430 ms, p95 0.450 ms; add (and delete) p50 0.544 ms, p95 0.571 ms (median of three runs). The change alone. About 2.5 times main, and within budget (see below). The next read adds about 0.17 ms (fix wave, below) | move p50 0.280 ms, p95 0.299 ms; resize p50 0.287 ms, p95 0.307 ms; text p50 0.275 ms, p95 0.317 ms; add (and delete) p50 0.559 ms, p95 0.609 ms (median of three runs, the change alone). With the next read: move p95 0.477 ms, resize 0.483 ms, text 0.512 ms, add 0.791 ms. As plan 2's fix wave left it (see "How plan 3's numbers were measured") | move p50 0.289 ms, p95 0.307 ms; resize p50 0.287 ms, p95 0.298 ms; text p50 0.284 ms, p95 0.294 ms; add (and delete) p50 0.582 ms, p95 0.603 ms (median of three runs, the change alone). With the next read: move p95 0.489 ms, resize 0.479 ms, text 0.470 ms, add 0.783 ms. Within 5% of plan 3's: plan 4 changed no edit's path (see "How plan 4's numbers were measured") | move p50 0.335 ms, p95 0.356 ms; resize p50 0.338 ms, p95 0.353 ms; text p50 0.330 ms, p95 0.339 ms; add (and delete) p50 0.637 ms, p95 0.662 ms (median of three runs, the change alone). With the next read: move p95 0.533 ms, resize 0.530 ms, text 0.517 ms, add 0.839 ms. 0.046 to 0.055 ms over plan 4's: every change now runs the decline check (see "How plan 5's numbers were measured") | on the tree, as Task 2 ported it (`store.update(id)` and `store.add` then `delete(nodes:)`; the projection is gone): move p50 0.549 ms, p95 0.580 ms; resize p50 0.544 ms, p95 0.575 ms; text p50 0.536 ms, p95 0.555 ms; add (and delete) p50 0.880 ms, p95 0.932 ms (median of three runs, the change alone). Main 8d00fc7 again, plan 2's own file, in the same simulator and hour: move p50 0.172 ms, p95 0.178 ms; resize 0.172 / 0.200; text 0.169 / 0.173; add 0.325 / 0.361. 2.7 to 3.2 times main at p50 (add the least, move the most), 2.6 to 3.3 times at p95, and 17 times under the budget. Not comparable with plan 5's column, which timed the old file's write through the projection. The next read is the tree row's `+read` (below). **Met** | move p50 0.392 ms, p95 0.411 ms; resize p50 0.394 ms, p95 0.442 ms; text p50 0.388 ms, p95 0.410 ms; add (and delete) p50 0.567 ms, p95 0.638 ms (median of three runs at 5174831, the change alone, taking turns with three of the sweep's baseline at eede551: move 0.537 / 0.571, resize 0.537 / 0.562, text 0.533 / 0.561, add 0.878 / 0.955). 27% under the baseline at p50 for move, resize and text, 35% for add: a timed change no longer builds the index again before it changes anything (item 2), and the placement follower no longer looks at every leaf (item 6). 1.7 to 2.3 times Task 12's main at p50, where plan 6 was 2.7 to 3.2. **Met** |
+| Layout of one edit on a 100-node screen: the rules | plan 1's `TreeRulesTests.oneEditOnAHundredNodeScreenIsQuick` (at 130a4f1, from plan 1's ledger) | p95 under 16 ms | p50 0.957 ms, p95 1.292 ms | p50 0.646 ms, p95 0.820 ms (median of three runs, on this branch) | p50 0.633 ms, p95 0.719 ms (median of three runs) | p50 0.661 ms, p95 0.738 ms (median of three runs) | p50 0.747 ms, p95 1.082 ms (median of three runs). Plan 5 changed no rule: see "How plan 5's numbers were measured" | p50 0.641 ms, p95 0.754 ms (median of three runs). **Met** | p50 0.636 ms, p95 0.697 ms (median of three runs; the baseline in the same hour 0.644 / 0.715). Unchanged: the row times `TreeRules.apply(to:after:)` with no version known to follow the rules, as the store's rules ran before the sweep. **Met** |
+| A drag frame | `CanvasDragWorkTests.aDragFrameWritesOnlyWhatItMoves` | today's numbers or better | a 60-frame drag of a group of three writes 240 elements (60 x 4: three lines and the group's box); a drag of one line writes 60 | a group of three writes 60 (the group alone, its lines riding in it); one line writes 60. A leaf dragged 60 frames on a free screen lays out its screen's root 60 times and the screen's other four containers 0 times (`StoreChangeBudgetTests.aLeafDragLaysOutOnlyItsDirtyPath`). A 60-frame drag of several lines, a twist and a group's handle each build the store's index at most once (`CanvasDragWorkTests.aGesturesFramesBuildTheIndexOnlyWhenAContainerMoves`) | unchanged: a group of three writes 60 and one line 60 (`CanvasDragWorkTests.aDragFrameWritesOnlyWhatItMoves` asserts both exactly); a leaf dragged 60 frames lays out its screen's root at most 60 times and the other four containers 0 times (`StoreChangeBudgetTests.aLeafDragLaysOutOnlyItsDirtyPath`); a gesture's frames build the index at most once. All pass at 35a3716 | per frame, with the canvas up and both panels open (`DragFrameBenchmarkTests`, 60 frames, the same in each of three runs): a line writes 1 node, builds 1 target and 2 node views (its own and its screen root's); a free group of three writes 1, builds 1 target and 2 node views (the group's and the root's; its lines ride in it); a row's child, lifted, writes 0, builds 0 targets and 1 node view in all 60 frames. The canvas lowers the projection on none of these frames, nor on a screen's (`CanvasNeverLowersTests`). `aDragFrameWritesOnlyWhatItMoves`, `CanvasTargetsWorkTests`, `oneEditRebuildsOnlyTheViewsOnItsPath` and `draggingARowChildWritesNothingUntilTheDrop` pass in the quiet run at 2cef960 | per frame, as plan 4's, the same in each of three runs (`DragFrameBenchmarkTests`): a line writes 1 node, builds 1 target and 2 node views; a free group of three writes 1, builds 1 target and 2 node views; a row's child, lifted, writes 0, builds 0 targets and 1 node view in all 60 frames. The decline check plan 5 runs after every change, timed on each frame's change: a line p50 21.2 µs, p95 24.2 µs; the group p50 18.2 µs, p95 19.2 µs; with the board's row and group made the pass's, so that it walks what they hold, a line 54.5 and 63.6 µs, the group 50.5 and 53.1 µs (medians of three runs): under 0.4% of a 16 ms frame. The lifted row child changes nothing until it is dropped, so no check runs | per frame, as plans 4 and 5, the same in each of three runs (`DragFrameBenchmarkTests`): a line writes 1 node, builds 1 target and 2 node views; a free group of three writes 1, builds 1 target and 2 node views; a row's child, lifted, writes 0, builds 0 targets and 1 node view in all 60 frames. Plan 2's counters (`CanvasDragWorkTests` and the four other counter suites, 40 tests passing in each run): a line dragged 60 frames writes 60, a group 60, a row's child 0 with 0 new versions; 20 edits of one text rebuild the 60 views on its path and none of the lines beside it. The decline check per frame: a line p50 19.9 µs, p95 24.0 µs; the group p50 17.8 µs, p95 19.8 µs; made the pass's, a line 49.9 and 56.9 µs, the group 49.0 and 56.0 µs (medians of three runs). **Met** | per frame, as plan 6's, the same in every run (`DragFrameBenchmarkTests`): a line writes 1 node, builds 1 target and 2 node views; a free group of three writes 1, builds 1 target and 2 node views; a row's child, lifted, writes 0, builds 0 targets and 1 node view. Plan 2's counters, in the script's run: a line 60, a group 60, a row's child 0 writes with 0 versions; 20 edits rebuild 60 views on the path and none beside it. The decline check as the store now runs it, told which hosts hold a structure the pass made (item 6): p50 0.1 µs, p95 0.2 µs for the line and the group, where the full check is 22.7 / 27.9 and 19.1 / 24.8 µs; with the row and the group made the pass's, 48.2 / 54.6 µs and 46.0 / 57.0 µs (medians of three runs). On the large design, a frame of a leaf dragged on a free screen, read after: p50 0.588 ms, p95 0.598 ms, against the baseline's 2.113 / 2.275 (see the large design's rows). **Met** |
+| Streaming generation | ids of unaffected nodes are stable across updates; one commit per update; layout off the main actor | 100% stable | not measured in this baseline | not measured: plan 3 streams generation through the tree | 100% stable: every id outlives the updates after it, one commit per update, and no layout on the main actor (`GenerationThroughTheReconcilerTests`: `everyIDOutlivesTheUpdatesAfterIt`, `eachUpdateIsOneCommitLaidOutOffTheMainActor`), passing again in plan 3's quiet runs at 35a3716 | not measured again: plan 4 changed no generation path; `GenerationThroughTheReconcilerTests` pass at 2cef960 | not measured again: plan 5 changed no generation path; `GenerationThroughTheReconcilerTests` pass in the full suite | 100% stable: `GenerationThroughTheReconcilerTests` (8 tests, among them `everyIDOutlivesTheUpdatesAfterIt` and `eachUpdateIsOneCommitLaidOutOffTheMainActor`) pass in each of the three runs at 5a7f030, at the loads recorded below. **Met** | 100% stable: `GenerationThroughTheReconcilerTests` (8 tests) pass in the script's run at 5174831 and in the full unit suite. **Met** |
+| Generation tokens and time to first content | `ScreenBenchmarkHarness` on macOS | recorded, and the hosted default chosen from them | not measured in this baseline | not measured: plan 3 builds the harness on the tree | On-device, the outline at plan 3's final wording (round 4, `run.sh outline 3`, 24 screens, quiet): first content p50 1049 ms, p95 1127 ms; completion p50 1891 ms, p95 2461 ms. Round 5, the same wording read with every number in a generated outline's looks passed over (Task 13, one run, quiet): first content p50 1041 ms, p95 1211 ms; completion p50 1930 ms, p95 2713 ms. Round 2's wording, before review's fixes, over 72 screens: first content p50 1041 ms, p95 1225 ms; completion p50 1936 ms, p95 2598 ms. The on-device model reports no tokens. LM Studio's runs are smoke only (`screen-prompt.md`) | not measured: plan 4 changed no prompt or generation path | not measured: plan 5 changed no prompt or generation path (`SketchHintTests` pass unchanged) | On-device, the outline at plan 3's final wording, unchanged since (`run.sh outline 3`, 24 screens, at loads of 7.0 to 7.8): 24 valid; first content p50 1148 ms, p95 1290 ms; completion p50 2090 ms, p95 3038 ms. The on-device model reports no tokens. Hosted, LM Studio `google/gemma-4-26b-a4b`, 24 screens of each format, taking turns (`run.sh hosted google/gemma-4-26b-a4b both 3`): **the outline** (the full prompt) 24 valid; first content p50 43459 ms, p95 91399 ms; completion p50 45375 ms, p95 94918 ms; output tokens p50 3197 a screen (80057 in all). **A2UI** 13 valid; first content p50 57976 ms, p95 132540 ms; completion p50 67019 ms, p95 143921 ms; output tokens p50 3641 (109932). `hosted default: outline`: A2UI had fewer valid screens, and its first content came 33% later. **Recorded, and the hosted default is now the outline**: see "The hosted format (plan 6)" | not measured: the sweep changed no prompt or generation path |
+| One change through the store on a 100-node screen, on the tree | `StoreChangeBudgetTests.aStoreChangeOnAHundredNodeScreenIsWithinBudget` (always on), 50 runs each. On a column of 25 rows: a body resized, a text edited, a text added to a row. On the same rows on a free root: row 12 moved whole (since the fix wave; see below). Each change alone, and with the next read of the screens, which lowers the tree again; the budget holds the change with the read | p95 under 16 ms | not measurable on main (it needs the tree) | resize p50 0.874 ms, p95 0.966 ms; text p50 0.912 ms, p95 1.012 ms; add p50 0.791 ms, p95 0.881 ms (median of three runs, the change alone). The move measured then, p50 0.161 ms, p95 0.196 ms, timed nothing: see "The budget's move" below | move (a row on a free root) p50 0.619 ms, p95 0.662 ms; resize p50 0.597 ms, p95 0.698 ms; text p50 0.717 ms, p95 0.765 ms; add p50 0.799 ms, p95 0.919 ms (median of three runs, the change alone). With the next read, which the budget holds: move p95 0.925 ms, resize 0.958 ms, text 1.033 ms, add 1.178 ms, 13 times under the budget | move (a row on a free root) p50 0.638 ms, p95 0.716 ms; resize p50 0.625 ms, p95 0.660 ms; text p50 0.754 ms, p95 0.798 ms; add p50 0.843 ms, p95 0.895 ms (median of three runs, the change alone). With the next read: move p95 0.971 ms, resize 0.880 ms, text 1.014 ms, add 1.120 ms, 14 times under the budget | move (a row on a free root) p50 0.738 ms, p95 1.070 ms; resize p50 0.670 ms, p95 0.714 ms; text p50 0.797 ms, p95 0.840 ms; add p50 0.909 ms, p95 0.959 ms (median of three runs, the change alone). With the next read: move p95 1.389 ms, resize 0.946 ms, text 1.062 ms, add 1.197 ms, 11 times under the budget | move (a row on a free root) p50 0.667 ms, p95 0.763 ms; resize p50 0.649 ms, p95 0.738 ms; text p50 0.781 ms, p95 0.862 ms; add p50 0.980 ms, p95 1.060 ms (median of three runs, the change alone). With the next read, which since Task 9 is a read of the store's index, as the canvas draws from it: move p95 0.936 ms, resize 0.877 ms, text 0.998 ms, add 1.212 ms, 13 times under the budget. **Met** | move (a row on a free root) p50 0.639 ms, p95 0.676 ms; resize p50 0.624 ms, p95 0.687 ms; text p50 0.751 ms, p95 0.789 ms; add p50 0.892 ms, p95 0.987 ms (median of three runs at 5174831, the change alone). With the next read: move p95 0.713 ms, resize 0.750 ms, text 0.912 ms, add 1.131 ms, 14 times under the budget. The baseline, taking turns with it: move 0.680 / 0.723, resize 0.671 / 0.738, text 0.805 / 0.900, add 0.999 / 1.099, and with the read move p95 0.886, resize 0.889, text 1.040, add 1.238. The read is 18 to 20% cheaper at p50: the index is brought up to date, not built again (item 2). **Met** |
+| Canvas workout | `CanvasBenchmarkUITests.testCanvasWorkout`, Release, 5 iterations a run, median of 3 runs | no worse than baseline by more than 5% | CPU time 4.479 s; peak physical memory 84.65 MB; clock 30.233 s (see below) | CPU time 4.777 s; peak physical memory 84.79 MB; clock 30.437 s. CPU time is 6.7% over the Before column, and 0.4% over main measured again in the same hour on the same simulator (4.757 s): see below | CPU time 4.866 s; peak physical memory 84.59 MB; clock 30.504 s (median of three runs). 0.5% over main measured again in the same hour, interleaved with it (4.842 s), retiring the same instructions (25.56 G against 25.50 G); 8.6% over the Before column, where main is now 8.1% over it: see below | CPU time 4.778 s; peak physical memory 75.81 MB; clock 30.435 s (median of three runs). 0.4% under main measured again in the same hour, interleaved with it (4.798 s), retiring 1.1% more instructions (25.64 G against 25.37 G); peak memory equal to main's, both about 9 MB under plan 3's hour: see below | not measured: plan 5's measurements are the sketch path's; plan 6 measures the workout against main in the same hour | CPU time 4.843 s; peak physical memory 75.90 MB; clock 30.473 s (median of three runs; relative standard deviations 6.2 to 7.5%, 0.5 to 0.7% and 6.4 to 6.6%). Against main 8d00fc7 measured again in the same simulator and hour, straight after it (4.816 s, 75.56 MB, 30.493 s): CPU time +0.6%, memory +0.4%, clock −0.1%, instructions retired +0.8% (25.63 G against 25.43 G). Against the Before column: CPU time +8.1%, memory −10.3%, clock +0.8%, and main itself is 7.5% over it in CPU time. **Met against main in the same hour; over Before by 8.1%**, as main is over it by 7.5%: see below | CPU time 4.838 s; peak physical memory 75.76 MB; clock 30.431 s (median of three runs at 5174831; relative standard deviations 7.2 to 7.7%, 0.5 to 0.6% and 6.7 to 6.8%). The sweep's baseline at eede551, measured the same way 85 minutes earlier: 4.688 s, 75.95 MB, 30.821 s. CPU time +3.2%, memory −0.3%, clock −1.3%, inside one run's spread. Against the Before column: CPU time +8.0%, as plan 6's +8.1%. **Met against the sweep's baseline; over Before by 8.0%, as plan 6**: see "Canvas workout after the sweep" |
+| One change on a large design | `StoreChangeBenchmarkTests.aStoreChangeOnALargeDesign` (the sweep's item 1): 10 iPhone screens of 100 nodes (5 free roots of 100 leaves, 5 columns of 20 rows) and 45 loose things on the canvas, 1,055 nodes in all; screen 5's move, screen 6's resize, text and add, and a toggle's tint; 50 runs each, the change alone and with the next read of the index (`+read`) | p95 under 16 ms, as the store's | not measurable on main (it needs the tree) | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | at plan 6's code (eede551, which adds only the row), median of three runs, p50 / p95 ms, alone then `+read`: move 0.976 / 1.014, 2.067 / 2.162; resize 1.093 / 1.211, 2.177 / 2.348; text 1.611 / 1.907, 2.712 / 2.986; add 2.180 / 2.245, 3.259 / 3.414; a look 1.027 / 1.071, 2.112 / 2.176. A change cost twice the 100-node screen's, and its read four times: both walked the whole design | move 0.438 / 0.495, 0.553 / 0.620; resize 0.659 / 0.760, 0.723 / 0.879; text 1.134 / 1.450, 1.266 / 1.583; add 0.759 / 0.801, 0.891 / 0.930; a look 0.257 / 0.262, 0.317 / 0.322 (median of three runs, taking turns with the baseline). The slowest p95 with its read is 1.583 ms, 10 times under the budget. A change now costs about what the screen it touches costs. **Met** |
+| A design token scrubbed, on the large design | the same test: one step of the card's radius, which lays nothing out, and of the title's size, which 5 of the 10 screens use; 50 runs each | p95 under 16 ms, as the store's | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | at eede551: the radius 5.051 / 5.224 ms, with the read 6.132 / 6.356; the title's size 5.176 / 5.308, with the read 6.284 / 6.418. Every screen was laid out from scratch on every step | the radius 0.144 / 0.147 ms, with the read 0.166 / 0.169; the title's size 3.525 / 3.615, with the read 4.531 / 4.675: only the screens holding a title are laid out (item 5). **Met** |
+| A drag frame, on the large design | the same test: a leaf on screen 5 (free) dragged 60 frames by the canvas's own drag, snapping off, the index read after each frame; and, on each frame's own trees, the store's comparison of the design with the one before and the placement-intent follower, as the design is and with every leaf on the screen a sketch's | p95 under 16 ms | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | at eede551: p50 2.113 ms, p95 2.275 ms. The comparison and the follower weren't timed; the follower as it was before the sweep's item 6, at 5174831, took p50 149.0 µs, p95 150.5 µs (152.2 / 154.7 µs sketched) | p50 0.588 ms, p95 0.598 ms, a quarter of the baseline's. The comparison p50 24.1 µs, p95 24.3 µs; the follower 40.8 / 41.2 µs, 140.1 / 141.0 µs sketched. **Met** |
+| Where a dragged container would go | the same test: `TreeDrop.target` for a card of 200 texts on the canvas, the finger over screen 6's column, 50 runs | none of its own (a drag frame's) | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured at eede551: the row came just before item 7, at 0989483, p50 0.178 ms, p95 0.182 ms | p50 0.129 ms, p95 0.133 ms: the dragged subtree walked once a frame, not three times (item 7) |
+| Siri's element query, on the large design | `StoreChangeBenchmarkTests.siriElementsOnALargeDesign`: `ElementQuery.entities(for:)` for 10 identifiers spread over the design, open in its window, 20 runs | none | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured at eede551: the row came just before item 8, at 2358da9, p50 78.742 ms, p95 83.996 ms | p50 6.983 ms, p95 7.335 ms: a snapshot's elements worked out once for all the identifiers asked, from the open design's index (item 8) |
+| Opening a design | `StoreChangeBenchmarkTests.openingALargeDesign` (the sweep's review, minor 4): the file's read (`DesignFile(wrapper:)`, which decodes the design and lays it out in full) and the store's check, since the sweep, that it follows the rules (`DesignStore.init`), 10 runs each after one untimed, on the large design and on 4,994 nodes | none | not measured | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | no check at open; the read was not timed | at the merged head 0fbf74d, p50 / p95 ms: the large design's read 17.009 / 17.579 and check 4.257 / 4.463; 4,994 nodes' read 80.279 / 80.946 and check 20.121 / 20.544. The check adds about a quarter to opening, once |
+
+## Budgets after the sweep
+
+Measured at 5174831 on 2026-11-25 in "Layer iPad Pro 11 (st2-lane-c)", with the loads recorded (see "How the sweep's
+numbers were measured"). Each unit figure is the median of three runs, taken in turns with three of the sweep's
+baseline at eede551 (plan 6's code with the large design's row added).
+
+| Row | Budget | After the sweep | Met or missed |
+|---|---|---|---|
+| Reading after the pen rests | p95 under 100 ms | the conversion p95 2.410 ms (light) and 7.098 ms (heavy); the rules 87.8% of the corpus | **Met** |
+| Layout of one edit: the store | p95 under 16 ms | slowest p95 0.638 ms (add and delete), from 0.955 ms | **Met** |
+| Layout of one edit: the rules | p95 under 16 ms | p95 0.697 ms | **Met** |
+| One change through the store, on the tree | p95 under 16 ms | slowest p95 1.131 ms (add, with the next read), from 1.238 ms | **Met** |
+| One change on the large design (new) | p95 under 16 ms | slowest p95 1.583 ms (a text edited, with the next read), from 3.414 ms (an add) | **Met** |
+| A token step on the large design (new) | p95 under 16 ms | slowest p95 4.675 ms (the title's size, with the read), from 6.418 ms | **Met** |
+| A drag frame | plan 2's numbers or better: a line drag writes 60, a group drag 60 | 60 and 60; per frame 1 write, 1 target and 2 node views, and a row's lifted child 0 writes. On the large design p95 0.598 ms, from 2.275 ms | **Met** |
+| Streaming generation | 100% stable | `GenerationThroughTheReconcilerTests` pass | **Met** |
+| Canvas workout | no worse than baseline by more than 5% | CPU time 3.2% over the sweep's baseline, inside one run's spread; 8.0% over the Before column, as plan 6 was | **Met against the sweep's baseline; over Before by 8.0%, as plan 6** |
+
+No budget is missed, and every row the sweep aimed at is cheaper. A change to the large design now costs about what the
+screen it touches costs: a leaf's move there takes 0.438 ms, against 0.392 ms for the same move on the 100-node screen
+alone, where before the sweep it took 0.976 ms against 0.537 ms.
+
+## Budgets after plan 6
+
+Measured at 5a7f030 on 2026-11-25 in "Layer iPad Pro 11 (st2-lane-c)", with the loads recorded (see "How plan 6's
+numbers were measured"). Each figure is the median of three runs.
+
+| Row | Budget | After plan 6 | Met or missed |
+|---|---|---|---|
+| Reading after the pen rests | p95 under 100 ms | the conversion p95 2.305 ms (light) and 7.137 ms (heavy); the rules 87.8% of the corpus | **Met** |
+| Layout of one edit: the store | p95 under 16 ms | slowest p95 0.932 ms (add and delete) | **Met** |
+| Layout of one edit: the rules | p95 under 16 ms | p95 0.754 ms | **Met** |
+| One change through the store, on the tree | p95 under 16 ms | slowest p95 1.212 ms (add, with the next read) | **Met** |
+| A drag frame | plan 2's numbers or better: a line drag writes 60, a group drag 60 | 60 and 60; per frame 1 write, 1 target and 2 node views, and a row's lifted child 0 writes | **Met** |
+| Streaming generation | 100% stable | `GenerationThroughTheReconcilerTests` pass in all three runs | **Met** |
+| Generation tokens and time to first content | recorded, and the hosted default chosen | recorded; the hosted default is now the outline | **Met** |
+| Canvas workout | no worse than baseline by more than 5% | CPU time 0.6% over main measured again in the same hour; 8.1% over the Before column, which main is 7.5% over | **Met against main in the same hour; over Before by 8.1%** |
+
+No budget is missed. One row is over 5% against the Before column alone: the workout's CPU time, 8.1% over. Main,
+measured again in the same simulator and hour, is 7.5% over the same column, for the same instructions, because the
+cores ran slower: about 2.8 GHz against 3.47 GHz on 2026-11-23. Plan 2 found the Before column no longer valid for CPU
+time and asked plan 6 to compare with main in the same hour. Against main, the branch is 0.6% over. Plan 2 also asked
+for the two to be interleaved; the script runs the branch's three runs, then main's, so they weren't.
+
+**The hosted format.** My call 8's rule, run on LM Studio, chose the outline. A2UI had fewer valid screens (13 of 24
+against 24 of 24), and its first content came 33% later. `ScreenGenerator.hostedFormat` is now `.outline`. See "The
+hosted format (plan 6)" below and `screen-prompt.md`.
+
+## How to measure
+
+`scripts/measure-semantic-tree.sh [--quick] [--simulator <name>] [--main <worktree>]` runs every row above and prints only
+the load before each timed run, each `BENCH` line, the workout's CPU Time, Peak (physical memory) and Clock Monotonic
+Time as medians of 3 runs (each the average of 5 iterations, with its relative standard deviation), and
+`measure ok: <n> lines`. Its conditions are the ones below: "Layer iPad Pro 11 (st2-lane-c)"
+(19CD922B-1564-4FEF-A86A-4AF37B114B47) unless `--simulator` says otherwise; nothing timed while the 1-minute load is 20 or
+more or another `xcodebuild` runs (the script waits up to 15 minutes, then refuses); the unit benchmarks in Debug, each
+group in its own invocation; the workout in Release, built in a temporary worktree of HEAD with `LayerTests` out of the
+`Layer` scheme and `TestPlans/Layer.xctestplan`, with the app uninstalled first; committed files never changed
+(`git status --porcelain` is the same before and after). `--quick` leaves out the workout and the load check, and shows
+that every row runs; it is never what is recorded. `--main` also runs plan 2 Task 1's own `StoreChangeBenchmarkTests`
+and the workout on that worktree's HEAD, in a temporary copy, under the same conditions. The hosted default's measure is
+`Tools/ScreenBenchmarkHarness/run.sh hosted <model> both`, which ends with the `hosted default:` line.
+
+## How the baseline was measured
+
+- Machine quiet before each measurement: the 1-minute load average was 14 before the first unit run
+  (the other two unit runs were at about 50, which is why the result is shown not to depend on it, below),
+  and 14.92, 9.07 and 8.03 before the three workout runs; it stayed between 7 and 20 during them. No other `xcodebuild` ran during the workout runs.
+- The same simulator for every measurement. Before the workout runs the app was uninstalled; the
+  simulator was not erased.
+- The unit benchmark is the single-threaded work of a few hundred microseconds. Three runs, at
+  1-minute loads of about 14, 50 and 49, gave the same numbers to within 3% (p50 and p95 above are the
+  first run; the other two: move p50 0.172 and 0.175, p95 0.183 and 0.184; add p50 0.333 and 0.337, p95
+  0.353 and 0.357), so it does not move with the machine's load.
+- The workout needs Release, and Release cannot compile `LayerTests` (it uses debug-only symbols).
+  So on the baseline worktree only, `LayerTests` was taken out of the `Layer` scheme's build entries and
+  out of `TestPlans/Layer.xctestplan`. Do the same for the "after" runs, and not in the committed files.
+- Commands (replace the simulator with the one above, and the DerivedData with a throwaway folder):
+
+```
+# once, with LayerTests taken out of the scheme and the Layer test plan:
+TEST_RUNNER_LAYER_BENCHMARK=1 xcodebuild build-for-testing -project Layer.xcodeproj -scheme Layer \
+  -testPlan Layer -configuration Release \
+  -destination "platform=iOS Simulator,id=19CD922B-1564-4FEF-A86A-4AF37B114B47" \
+  -derivedDataPath "$HOME/Library/Developer/Xcode/DerivedData/Layer-<name>-release" -skipPackagePluginValidation
+xcrun simctl uninstall 19CD922B-1564-4FEF-A86A-4AF37B114B47 kahshin.Layer
+TEST_RUNNER_LAYER_BENCHMARK=1 xcodebuild test-without-building ...same arguments... \
+  -only-testing:LayerUITests/CanvasBenchmarkUITests/testCanvasWorkout
+
+# the store benchmark (Debug, unit tests):
+TEST_RUNNER_LAYER_BENCHMARK=1 xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan CI \
+  -destination "platform=iOS Simulator,id=19CD922B-1564-4FEF-A86A-4AF37B114B47" \
+  -derivedDataPath "$HOME/Library/Developer/Xcode/DerivedData/Layer-<name>" -skipPackagePluginValidation \
+  -only-testing:LayerTests/StoreChangeBenchmarkTests
+```
+
+## Canvas workout, three runs (each: average of 5 iterations, relative standard deviation in brackets)
+
+| Run | CPU time s | Peak physical MB | Clock s | CPU instructions G | CPU cycles G |
+|---|---|---|---|---|---|
+| 1 | 4.496 (8.7%) | 84.75 (0.56%) | 30.098 (6.7%) | 25.45 (4.9%) | 15.49 (8.1%) |
+| 2 | 4.467 (7.4%) | 84.62 (0.59%) | 30.233 (6.8%) | 25.53 (3.8%) | 15.52 (8.1%) |
+| 3 | 4.479 (8.0%) | 84.65 (0.59%) | 30.291 (7.1%) | 25.55 (3.9%) | 15.66 (8.5%) |
+| Median | 4.479 | 84.65 | 30.233 | 25.53 | 15.52 |
+
+Run to run, CPU time varies by under 1% and peak memory by under 0.2%, so a 5% budget is well outside
+the noise. Within a run the iterations vary by 4 to 9%.
+
+The store benchmark's operations: `update(ref) { $0.frame.origin.x += 1 }`, `{ $0.frame.size.width += 1 }`,
+`{ $0.text += "a" }`, and one text added with `setElements([text], on:)` then deleted,
+on an iPhone screen of 25 rows of 4 elements (a text, a body, a toggle, a divider).
+
+## How plan 2's numbers were measured
+
+On feature/semantic-tree 9939ada (2026-11-24, Xcode 27.2, the same simulator, UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47),
+with the commands above. The host is an Apple M4 Max (12 performance and 4 efficiency cores).
+
+- Machine quiet: measuring began only after two checks a minute apart found a 1-minute load at most 20 and no other
+  `xcodebuild` running (another lane's UI suite ran until 03:12, so the wait was 36 minutes). The load was then sampled
+  every 20 seconds through every run. Runs during which it rose above 20 were discarded and run again: the branch's run 3
+  (load up to 25.5) and main's run 1 (up to 35.9). No other `xcodebuild` ran during any run.
+- The unit benchmarks ran in Debug, three times each, at 1-minute loads of 7 to 17. The store benchmark's runs agree
+  within 4% at p50 and 10% at p95; the rules' and the tree's, which are a fraction of a millisecond, within 13% at p50
+  and 28% at p95. `StoreChangeBenchmarkTests` runs alone; `TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick()` and
+  `StoreChangeBudgetTests` run together after it.
+  - Store, move p50 0.429 / 0.433 / 0.434 ms, p95 0.447 / 0.465 / 0.457; resize p50 0.429 / 0.427 / 0.444,
+    p95 0.441 / 0.483 / 0.464; text p50 0.430 / 0.430 / 0.432, p95 0.448 / 0.450 / 0.490; add p50 0.540 / 0.544 / 0.549,
+    p95 0.557 / 0.571 / 0.602.
+  - Rules p50 0.693 / 0.646 / 0.634 ms, p95 0.892 / 0.820 / 0.707.
+  - On the tree: move p50 0.161 / 0.162 / 0.143 ms, p95 0.201 / 0.196 / 0.157; resize p50 0.863 / 0.874 / 0.883,
+    p95 1.011 / 0.966 / 0.949; text p50 0.907 / 0.912 / 0.924, p95 0.993 / 1.012 / 1.012; add p50 0.791 / 0.796 / 0.787,
+    p95 0.891 / 0.881 / 0.870.
+- A change through the store costs about 2.5 times what it did on main (0.43 ms against 0.17 ms for a move). Each change
+  on the branch writes through the projection, runs the tree's rules and compares the tree. The next read lowers the
+  tree again once; that read wasn't in these numbers, and is timed since the fix wave (below). It is still about 35
+  times under the 16 ms budget.
+- The rules row's Before figure is plan 1's, taken at 130a4f1 in another session. The workout below shows the cores'
+  clock moving between sessions (about 3.47 GHz on 2026-11-23, 2.86 GHz here), so the change from 0.957 to 0.646 ms
+  can't be credited to the code.
+- Nested fit rows (plan 1's final review: their measuring grows polynomially with depth) caused no regression seen
+  here. Nothing measured nests fit rows more than one deep: rows in a column, and a row in a card.
+
+## Canvas workout after plan 2, and main again in the same hour
+
+The branch built in Release from a temporary worktree (DerivedData `Layer-semantic-tree-release`), and main 8d00fc7
+the same way (`Layer-st2-main-control-release`), each with `LayerTests` taken out of the scheme and the Layer test
+plan there only. The app was uninstalled before every run.
+
+| Run | CPU time s | Peak physical MB | Clock s | CPU instructions G | CPU cycles G |
+|---|---|---|---|---|---|
+| Branch 1 | 4.850 (6.8%) | 84.79 (0.64%) | 30.493 (6.7%) | 25.68 (3.8%) | 13.78 (6.9%) |
+| Branch 2 | 4.777 (8.4%) | 84.73 (0.64%) | 30.436 (6.9%) | 25.51 (3.4%) | 13.79 (4.3%) |
+| Branch 4 | 4.773 (6.9%) | 85.04 (0.54%) | 30.437 (6.6%) | 25.53 (3.7%) | 13.61 (6.1%) |
+| **Branch median** | **4.777** | **84.79** | **30.437** | **25.53** | **13.78** |
+| Main 2 | 4.742 (6.9%) | 84.33 (0.42%) | 30.437 (6.7%) | 25.51 (3.6%) | 13.85 (6.4%) |
+| Main 3 | 4.775 (7.1%) | 84.80 (0.58%) | 30.460 (6.7%) | 25.59 (3.5%) | 13.58 (5.2%) |
+| Main 4 | 4.757 (7.0%) | 83.94 (0.51%) | 30.526 (6.7%) | 25.56 (3.6%) | 13.56 (5.9%) |
+| **Main median, again** | **4.757** | **84.33** | **30.460** | **25.56** | **13.58** |
+| Discarded: branch 3, main 1 | 4.677, 4.769 | 85.27, 84.58 | 30.518, 30.462 | 25.58, 25.60 | 14.28, 13.68 |
+
+The Before column is therefore no longer a valid comparator for CPU time. For the "After plan 6" column, measure main
+again in the same hour, interleave the two (branch, main, branch, main) and record the order, and compare instructions
+retired first.
+
+Against the Before column the branch's CPU time is 6.7% higher, over the 5% budget. Against main measured again in
+the same hour it is 0.4% higher, within it. Main itself now takes 6.2% more CPU time than it did on 2026-11-23 for
+the same instructions (25.56 G against 25.53 G) in 12.5% fewer cycles: the cores ran at about 2.86 GHz on average
+against 3.47 GHz then. So the difference from the Before column is the machine, not the code: the branch retires the
+same instructions as main (25.53 G against 25.56 G), and its peak memory and clock are within 1% of main's.
+
+## The budget's move, and the next read (plan 2's fix wave)
+
+Plan 2's final review found that the always-on budget's "move" timed nothing. It moved row 12's text, which sits in a
+row under a column root; a position written to a column root's child is laid back by it (My call 20), so the write drops
+the origin before anything is written. The tree came out equal, nothing was laid out, and nothing was laid back: its
+0.161 ms is the cost of a change that changes nothing. The env-gated `StoreChangeBenchmarkTests` was never affected: its
+screen's root is free, and its move writes.
+
+The budget now moves row 12 whole on the same 25 rows on a free root, a point to the right each run, and checks that the
+row moved 50 points and what it holds rode in it. Both benchmarks also time the next read of the screens after each
+change, which lowers the tree again: a `+read` BENCH line beside each change's own. The budget holds the change with the
+read under 16 ms.
+
+Measured on feature/semantic-tree in the fix wave (2026-11-24, Xcode 27.2, Debug), three runs each, median shown. These
+ran in the "Layer iPad Pro 11 (semantic-tree)" simulator, not st2-lane-c's, at 1-minute loads of 40 to 170 with other
+lanes building: the machine wasn't quiet (F14), so they show what the read adds and that the budget holds, and are not
+comparable with the columns above. Plan 6's After column measures both, quiet, in st2-lane-c's simulator.
+
+| Benchmark | Change | Alone p50 / p95 ms | With the next read p50 / p95 ms |
+|---|---|---|---|
+| Store (`StoreChangeBenchmarkTests`) | move | 0.272 / 0.287 | 0.449 / 0.468 |
+| | resize | 0.276 / 0.290 | 0.451 / 0.471 |
+| | text | 0.267 / 0.288 | 0.437 / 0.473 |
+| | add (and delete) | 0.560 / 0.576 | 0.733 / 0.752 |
+| Tree (`StoreChangeBudgetTests`) | move (a row on a free root) | 0.590 / 0.626 | 0.814 / 0.856 |
+| | resize | 0.627 / 0.664 | 0.852 / 0.893 |
+| | text | 0.753 / 0.807 | 0.976 / 1.036 |
+| | add | 0.849 / 0.903 | 1.079 / 1.150 |
+
+The next read adds about 0.17 ms to a change in the store benchmark, and about 0.22 ms in the tree's, where a screen holds
+25 rows as well as 100 things. Every change with its read is still over 13 times under the 16 ms budget.
+
+## How plan 3's numbers were measured
+
+On st3/lane-a 35a3716, ScreenBlueprint removed (2026-11-24, Xcode 27.2), in the same simulator, "Layer iPad Pro 11
+(st2-lane-c)", UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47, with the commands above. Lane A was the only lane running; no
+other `xcodebuild` ran during any measurement, and the 1-minute load was sampled every 20 seconds through each run.
+
+- The unit benchmarks ran in Debug from lane A's worktree and DerivedData, three times each: `StoreChangeBenchmarkTests`
+  alone, then `TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick()`, `StoreChangeBudgetTests` and
+  `GenerationThroughTheReconcilerTests` together (every test passed). The first set started each run once the load was
+  at most 20, which was right after the run before, at 15.5 to 19.8. The set was run again from loads under 10 (5.1 to
+  8.9); those are the column's figures. The two sets' p50s agree within 5%; the busier set's p95 tails were longer,
+  most in the tree's move (0.838 ms against 0.662).
+  - Store, the change alone, p50 / p95 ms per run: move 0.287 / 0.280 / 0.279, 0.299 / 0.301 / 0.297; resize 0.290 /
+    0.287 / 0.285, 0.295 / 0.307 / 0.312; text 0.280 / 0.275 / 0.271, 0.300 / 0.324 / 0.317; add 0.570 / 0.550 / 0.559,
+    0.600 / 0.657 / 0.609.
+  - Store with the next read, medians: move 0.454 / 0.477, resize 0.465 / 0.483, text 0.440 / 0.512, add 0.730 / 0.791.
+  - Rules p50 0.633 / 0.638 / 0.632 ms, p95 0.715 / 0.736 / 0.719.
+  - On the tree, the change alone, p50 / p95 ms per run: move 0.619 / 0.632 / 0.608, 0.682 / 0.662 / 0.659; resize
+    0.598 / 0.597 / 0.587, 0.698 / 0.726 / 0.679; text 0.717 / 0.724 / 0.709, 0.765 / 0.817 / 0.742; add 0.799 / 0.803 /
+    0.797, 0.919 / 0.878 / 1.004.
+  - On the tree with the next read, medians: move 0.863 / 0.925, resize 0.823 / 0.958, text 0.940 / 1.033, add 1.028 /
+    1.178.
+- Plan 3 changed no edit's path: a change through the store costs what it did after plan 2's fix wave (move 0.280 ms
+  against 0.272 ms then, measured busy), well under the "After plan 2" column's 0.433 ms, which was before the fix
+  wave. The tree's figures are within 10% of the fix wave's.
+
+## Canvas workout after plan 3, and main again in the same hour
+
+The branch at 35a3716 and main at 8d00fc7, each built in Release from a temporary worktree (DerivedData
+`Layer-t13-branch-release` and `Layer-t13-main-release`) with `LayerTests` taken out of the scheme and the Layer test plan
+there only, and run interleaved from 10:38 to 11:06: branch 1, main 1, branch 2, main 2, branch 3, main 3, branch 4. The
+app was uninstalled before every run, and each run started once the 1-minute load was at most 10 (the first pair, at most 20).
+Branch 1 was discarded: its load reached 22.4 as it began. Every kept run stayed between 5.3 and 9.7.
+
+| Run | CPU time s | Peak physical MB | Clock s | CPU instructions G | CPU cycles G |
+|---|---|---|---|---|---|
+| Branch 2 | 4.893 (7.3%) | 84.35 (0.57%) | 30.512 (6.6%) | 25.37 (3.5%) | 13.30 (5.7%) |
+| Branch 3 | 4.859 (7.1%) | 84.82 (0.67%) | 30.492 (6.6%) | 25.56 (3.8%) | 13.31 (5.9%) |
+| Branch 4 | 4.866 (8.2%) | 84.59 (0.59%) | 30.504 (6.6%) | 25.63 (4.1%) | 13.34 (6.3%) |
+| **Branch median** | **4.866** | **84.59** | **30.504** | **25.56** | **13.31** |
+| Main 1 | 4.859 (7.1%) | 84.78 (0.52%) | 30.536 (6.7%) | 25.50 (3.8%) | 13.31 (6.0%) |
+| Main 2 | 4.842 (7.0%) | 85.02 (0.56%) | 30.507 (6.7%) | 25.54 (3.9%) | 13.25 (6.1%) |
+| Main 3 | 4.839 (7.0%) | 84.62 (0.61%) | 30.470 (6.6%) | 25.45 (3.8%) | 13.18 (6.2%) |
+| **Main median, again** | **4.842** | **84.78** | **30.507** | **25.50** | **13.25** |
+| Discarded: branch 1 | 4.832 | 84.09 | 30.350 | 25.56 | 13.51 |
+
+Against main in the same hour the branch takes 0.5% more CPU time, retires 0.2% more instructions in 0.5% more cycles,
+and its peak memory and clock are within 0.2%: within the 5% budget. Against the Before column it is 8.6% over in CPU
+time, and main is 8.1% over it now; against plan 2's column the branch is 1.9% over and main 1.8% over plan 2's own
+measure of it again. As in plan 2, the difference from the earlier columns is the machine, not the code.
+
+## How plan 4's numbers were measured
+
+On feature/semantic-tree 2cef960 (2026-11-25, Xcode 27.2), in the same simulator, "Layer iPad Pro 11 (st2-lane-c)",
+UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47, with the commands above, from 02:08 to 02:59.
+
+- Machine quiet: before every run a script checked with `pgrep` that no other `xcodebuild` was running and waited until
+  the 1-minute load was at most 10; the load and the number of `xcodebuild` processes were sampled every 20 seconds
+  through every run. No other `xcodebuild` ran during any kept run. Each run's own `xcodebuild` (the build check, the
+  install and launch, and for the workout the screen recording) raised the 1-minute load in its first minute: the unit
+  runs to between 16 and 47, the workout runs to between 29 and 82, after which it fell back to 6 to 10. The store
+  benchmark's first run is discarded: another lane's `xcodebuild` started during it (load 92.9); it was run again as
+  run 4. Its figures agreed with the kept runs to within 3%.
+- The unit benchmarks ran in Debug from lane A's worktree and DerivedData, three times each: `StoreChangeBenchmarkTests`
+  alone; `TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick()` with `StoreChangeBudgetTests`; and
+  `DragFrameBenchmarkTests` alone (new in plan 4, gated as the store benchmark is). Every test passed in every run.
+  - Store, the change alone, p50 / p95 ms per run (2, 3, 4): move 0.289 / 0.282 / 0.297, 0.304 / 0.314 / 0.307; resize
+    0.287 / 0.286 / 0.296, 0.296 / 0.298 / 0.302; text 0.284 / 0.284 / 0.291, 0.288 / 0.294 / 0.301; add 0.582 / 0.576 /
+    0.588, 0.596 / 0.618 / 0.603.
+  - Store with the next read, medians: move 0.463 / 0.489, resize 0.459 / 0.479, text 0.457 / 0.470, add 0.755 / 0.783.
+  - Rules p50 0.646 / 0.712 / 0.661 ms, p95 0.716 / 0.973 / 0.738.
+  - On the tree, the change alone, p50 / p95 ms per run: move 0.612 / 0.638 / 0.648, 0.662 / 0.918 / 0.716; resize
+    0.609 / 0.632 / 0.625, 0.640 / 0.660 / 0.693; text 0.739 / 0.762 / 0.754, 0.773 / 0.798 / 0.798; add 0.802 / 0.843 /
+    0.854, 0.860 / 0.895 / 0.934.
+  - On the tree with the next read, medians: move 0.872 / 0.971, resize 0.841 / 0.880, text 0.972 / 1.014, add 1.064 /
+    1.120.
+  - A drag frame, with `CanvasScreen` shown and the Layers and Format panels open, the targets and node views summed
+    over the board's own ids and the writes read from the process-wide `ListWork.elementsWritten`, which only this
+    benchmark adds to as it runs alone, the same in all three runs: `BENCH drag line frames=60 writes=60 targets=60 nodeViews=120`, `BENCH drag
+    group frames=60 writes=60 targets=60 nodeViews=120`, `BENCH drag rowChild frames=60 writes=0 targets=0 nodeViews=1`.
+  - The counter tests, run once after them (`HostedWindowSuites/NodeViewWorkTests/oneEditRebuildsOnlyTheViewsOnItsPath()`,
+    `CanvasDragWorkTests`, `HostedWindowSuites/CanvasTargetsWorkTests`,
+    `LayoutDragTests/draggingARowChildWritesNothingUntilTheDrop()`): `Test run with 13 tests in 5 suites passed`.
+- Plan 4 moved the canvas and the panels onto the tree and changed no edit's path: a change through the store costs
+  what it did after plan 3 (move 0.289 ms against 0.280 ms), and the tree's figures are within 6% of plan 3's at p50.
+  The slowest change with its read is 14 times under 16 ms.
+
+## Canvas workout after plan 4, and main again in the same hour
+
+The branch at 2cef960 and main at 8d00fc7, each built in Release from a temporary worktree (DerivedData
+`Layer-semantic-tree-release` and `Layer-t12-main-release`) with `LayerTests` taken out of the scheme and the Layer test
+plan there only, and run interleaved from 02:34 to 02:58: branch 1, main 1, branch 2, main 2, branch 3, main 3. The app
+was uninstalled before every run, and each run started once no other `xcodebuild` ran and the 1-minute load was at most
+10. Each run's own launch raised the load in its first minute (to 43, 43, 82, 51, 30 and 47 in that order), and it fell
+back to 6 to 9 for the rest of the run.
+
+| Run | CPU time s | Peak physical MB | Clock s | CPU instructions G | CPU cycles G |
+|---|---|---|---|---|---|
+| Branch 1 | 4.800 (7.2%) | 76.03 (0.75%) | 30.455 (6.7%) | 25.66 (3.6%) | 13.65 (6.7%) |
+| Branch 2 | 4.739 (6.1%) | 75.81 (0.66%) | 30.392 (6.4%) | 25.43 (3.8%) | 13.59 (6.6%) |
+| Branch 3 | 4.778 (7.2%) | 75.56 (0.53%) | 30.435 (6.7%) | 25.64 (4.0%) | 13.60 (6.6%) |
+| **Branch median** | **4.778** | **75.81** | **30.435** | **25.64** | **13.60** |
+| Main 1 | 4.777 (8.1%) | 75.33 (0.56%) | 30.460 (6.8%) | 25.36 (4.0%) | 13.46 (5.6%) |
+| Main 2 | 4.824 (7.8%) | 75.87 (0.62%) | 30.400 (6.7%) | 25.37 (4.2%) | 13.42 (7.2%) |
+| Main 3 | 4.798 (7.3%) | 75.81 (0.65%) | 30.332 (6.6%) | 25.40 (4.1%) | 13.69 (8.1%) |
+| **Main median, again** | **4.798** | **75.81** | **30.400** | **25.37** | **13.46** |
+
+Against main in the same hour the branch takes 0.4% less CPU time, retires 1.1% more instructions in 1.0% more cycles,
+and its peak memory is the same and its clock 0.1% longer: within the 5% budget. Without branch run 2, whose launch
+raised the load most, the branch's CPU time is 4.789 s, 0.2% under main's. Against plan 3's column (4.866 s) the branch
+is 1.8% under, and main 0.9% under its own measure in plan 3's hour (4.842 s); against the Before column (4.479 s) the
+branch is 6.7% over and main 7.1% over. Peak memory is about 9 MB lower than in plan 3's hour for main and the branch
+alike (75.8 MB against 84.6 MB and 84.8 MB), so it is the simulator or the machine, not the code.
+
+## How plan 5's numbers were measured
+
+The app as it is at feature/semantic-tree f36ab30, with Task 12's tests (2026-11-25, Xcode 27.2), in the same simulator,
+"Layer iPad Pro 11 (st2-lane-c)", UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47, from 06:23 to 07:15. Task 12 changed no app
+code but comments.
+
+- Machine quiet: the other lanes were asked to pause new builds for the window. The tests were built once before it
+  (`build-for-testing`, lane A's DerivedData), and each run was a `test-without-building` with
+  `TEST_RUNNER_LAYER_BENCHMARK=1`. Before every run a script checked with `pgrep` that no other `xcodebuild` was running
+  and waited until the 1-minute load was at most 10; the load and the number of `xcodebuild` processes were sampled every
+  20 seconds through the window. No other `xcodebuild` ran during any run: another lane's build ran from 06:28 to 06:35,
+  between two runs, and the next run waited for the load to fall back under 10. Each run's own `xcodebuild` raised the load
+  in its first minute, to between 23 and 73.
+- Three rounds of `SketchConversionBudgetTests/aReadingLandsWithinBudget()`, `SketchBenchmarkTests/printsTheFullBenchmarkReport()`,
+  `TidyTests/tidyingSixHundredThingsIsQuick()` and `DragFrameBenchmarkTests`, each alone; then the macOS tidy timing
+  (below, under the structure pass); then three rounds of `StoreChangeBenchmarkTests` alone and
+  `TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick()` with `StoreChangeBudgetTests`. Every test passed in every run, and
+  each budget test at its first attempt.
+  - The conversion (the reading, the landing and the pass), p50 / p95 ms per run: 1.567 / 1.568 / 1.538, 2.244 / 2.131 /
+    2.214. The pass alone: p50 0.005 in each, p95 0.162 / 0.165 / 0.165.
+  - The rules' reading over the 156 fixtures, p50 / p95 ms per run: 0.0018 / 0.0019 / 0.0019, 0.0147 / 0.0142 / 0.0147.
+    87.8% in each.
+  - Store, the change alone, p50 / p95 ms per run: move 0.335 / 0.327 / 0.347, 0.357 / 0.333 / 0.356; resize 0.338 /
+    0.332 / 0.347, 0.353 / 0.341 / 0.354; text 0.326 / 0.330 / 0.342, 0.335 / 0.339 / 0.345; add 0.631 / 0.637 / 0.649,
+    0.646 / 0.668 / 0.662.
+  - Store with the next read, medians: move 0.510 / 0.533, resize 0.510 / 0.530, text 0.501 / 0.517, add 0.811 / 0.839.
+  - Rules p50 0.747 / 0.764 / 0.731 ms, p95 1.082 / 1.261 / 1.011.
+  - On the tree, the change alone, p50 / p95 ms per run: move 0.735 / 0.754 / 0.738, 1.050 / 1.070 / 1.077; resize
+    0.667 / 0.672 / 0.670, 0.714 / 0.694 / 0.720; text 0.797 / 0.839 / 0.777, 0.828 / 0.928 / 0.840; add 0.897 / 0.909 /
+    0.928, 0.945 / 0.959 / 1.024.
+  - On the tree with the next read, medians: move 0.986 / 1.389, resize 0.889 / 0.946, text 1.020 / 1.062, add 1.135 /
+    1.197.
+  - A drag frame: the counts were plan 4's in all three runs. The decline check, p50 / p95 µs per run: line 21.2 / 21.4 /
+    21.2, 24.2 / 26.0 / 23.9; group 18.2 / 17.5 / 18.2, 20.8 / 19.2 / 19.0; made the pass's, line 54.5 / 55.7 / 54.2,
+    60.0 / 63.9 / 63.6, and group 50.9 / 49.5 / 50.5, 53.1 / 53.7 / 51.8.
+  - Voice's tidy of 600 things (`DesignStore.tidy`, the pass and building what it is sure of, Debug): 169.7 / 167.4 /
+    166.8 ms, 51 structures each time.
+- What the conversion times (`SketchConversionBudgetTests`): what the app's conversion does once the pen has rested,
+  without its deliberate pauses (the 900 ms rest and the 750 ms re-trace). That is the sketch observed from its strokes,
+  the request made with what the tree says is on the screen, the rules' reading (with its close-call check and its
+  score), and then, as one step, `addSketched` and `structurePass(over:)`. PencilKit's handwriting recogniser isn't in it;
+  `printsTheFullBenchmarkReport` times it apart. Each reading is undone, untimed, so every one lands on the same screen.
+  The 116 readings are the 124 fixtures placed on a screen, less the 8 scratch-outs.
+- The light case's screen is 25 rows, each a text, a body, a toggle and a divider, each of the 100 remembering its sketch.
+  The rows have no sketch: they are the person's, which the pass never takes. So a sketch whose centre is on a row lands
+  in it, and no pass runs, since a row isn't free; one below or beside them lands on the root, where the pass finds
+  nothing it may take but the new thing. That is why the pass is mostly its fixed cost there (p50 5 µs). The rows have
+  to be the person's for `thePassLooksOnlyAtTheReceivingContainer`'s bound to hold: the pass's neighbourhood grows from
+  the new thing through every arrangeable thing within 48 pt of one already in it, and rows the pass had made, 30 pt
+  apart, would bring in all 25.
+- The heavy case (Task 12's fix round) is the pass's worst case on a busy screen: the same 100 things straight on the free
+  root, where each row put them, fixed at that size. Each is within 48 pt of the next, so the pass looks at the whole
+  root: in every run the median neighbourhood was over 90 things, which the test requires. It measures again up to three
+  times while its p95 is over 100 ms, as the light case does. With the pass slowed on purpose by 120 ms whenever it looked
+  at more than 50 things, it failed all three times (p95 135.4, 135.2 and 135.1 ms) while the light case still passed.
+  Its numbers above were measured in "Layer iPad Pro 11 (st2-lane-c)" at the app as it is at f36ab30 with the fix
+  round's tests, from 07:26 to 07:29 on 2026-11-25, while three to five other `xcodebuild` processes ran: a budget
+  check, not a comparison with an earlier column. Its slowest reading was 53 to 54 ms in each run; the light case's
+  slowest was 49 to 50 ms in the same runs, so that one reading's cost isn't the pass's.
+- Plan 5 changed no rule: `TreeRules`, `LayoutEngine`, `TreeIndex` and `LayerNode` are as plan 4 left them. In a
+  change's path it added one thing: after every forward change the store runs the decline check (Task 9). The store's
+  changes cost 0.046 to 0.055 ms more at p50 than in plan 4's column, and the tree's 0.043 to 0.100 ms more. The drag
+  benchmark times the check at about 20 µs on its screen of 45 things, and the check walks every node of a changed
+  screen, so on these screens of 100 things it is most of the rise. The rules' benchmark, which runs no store code, is
+  13% over plan 4's at p50 (0.747 ms against 0.661 ms), so the machine is part of it too. Every change with its read is
+  still at least 11 times under 16 ms.
+
+## Structure pass (plan 5, Task 8)
+
+The 32 `LayerTests/Fixtures/structure-*.json` fixtures are drawn in the sketch corpus's style (`SketchSamples` strokes,
+seeded jitter of 1.5 for jittered and 4.5 for noisy, regenerated byte for byte by `run.sh generate`, which leaves the 156
+sketch fixtures as they were). Each is things already on an iPhone screen and one batch of sketches. Every sketch is read
+by `RuleInterpreter`, placed with `SketchedNode` on a free root, and then `StructureInference.infer` runs over the batch
+(over a new card's inside, for a card). The sketch corpus's loader skips `structure-`.
+
+| Group | Fixtures | What each should become |
+|---|---|---|
+| Rows | 8: toggle beside a label, two half-width images, three avatars; 3 clean, 3 jittered, 2 noisy (toggle, images) | a row, applied |
+| Columns | 6: three wide boxes as text fields, four stacked-line bodies; 2 clean, 2 jittered, 2 noisy | a column, applied |
+| Grids | 6: 2 × 2 and 2 × 3 half-width images; 2 clean, 2 jittered, 2 noisy | a grid, applied |
+| Cards | 4: an outline round two texts (clean, jittered), round three (clean, noisy) | a card; its inside none for two, a column applied for three |
+| Near misses | 8: a title 120 pt above a button, two images 40 apart, heights 2.5 times apart (an image and an avatar), a locked divider between texts, an L of three images, a column edge 6 pt off, an outline round a title and a body with a third text half under its edge (a card of the two, the text left out), a lone text | none (the card's inside none) |
+
+A clean or jittered fixture must be its structure with its decision; a near miss must give none; a noisy fixture may be
+its structure or none, never another (`isAsExpected`). The fixtures went in first and `StructureFixtureTests` was red
+before any of them was generated.
+
+Controls are tests in `StructureFixtureTests`: each near miss with only its one cause changed back must group (the image's
+height 150 to 70 beside the avatar, the divider unlocked, the column's edge 6 pt off made 0, the gap 40 made 20), so that
+none is for the reason it names. The half-over outline reads as a card that takes the title and the body and leaves the
+text; with the text wholly inside it takes all three.
+
+Two things the layout does to a sketch shaped the fixtures: `ElementLayout.sketched` places a sketched title or body after
+a neighbour on its left at the gutter, and lines a box's leading edge up with a neighbour's within 8 pt. So "two texts 40
+apart" is two images, and the column edge 6 pt off is an existing thing 6 pt off the one it would line up with.
+
+**Tuning.** None: every fixture came out as it should the first time the fixtures were fixed. `StructureConventions.reach`
+and `SketchConventions`' card scores are as before, and `CardReadingTests` is untouched.
+
+Result, macOS harness and the simulator both: `structure: 32 fixtures, 32 as expected, near misses grouped 0`. Found
+structures: 8 rows, 5 columns, 6 grids and 5 cards (2 with a column applied inside, and the half-over outline's, a near
+miss whose decision is none), none 8 (the other 7 near misses, and the noisy column fixture whose third field read as a
+button).
+
+**The pass's time** over one batch, which is the whole of `StructureInference.infer` for it, measured once the machine was
+quiet (no other `xcodebuild` and no other lane running; the 1-minute load was 3.5 when the runs began, at 3:07 and 3:10 on
+2026-11-25, at the commit this section was written with):
+
+| Where | p50 | p95 |
+|---|---|---|
+| macOS harness, `run.sh structure` (Release, `-O`), three runs | 0.021 to 0.028 ms | 0.089 to 0.114 ms |
+| "Layer iPad Pro 11 (st2-lane-c)", `StructureFixtureTests.printsTheStructureReport` (Debug), one run | 0.128 ms | 0.442 ms |
+
+Both are far under the 100 ms budget: a batch's neighbourhood is a handful of nodes.
+
+**Voice's tidy over a large screen** (`mode: .tidy`, every arrangeable child new, so the neighbourhood is the whole
+container), timed once with a throwaway harness run (Release, `-O`, the same quiet machine, medians of five runs): the nodes
+are texts and images 120 × 80 on a 140 × 100 grid, each off its place by up to 3 pt.
+
+| Children | Decisions | Time |
+|---|---|---|
+| 9 | 4 | 0.2 ms |
+| 30 | 7 | 0.7 ms |
+| 100 | 11 | 58 ms |
+| 200 | 23 | 274 ms |
+| 600 | 46 | 32.6 s |
+
+The cost grows much faster than the number of children: from 200 to 600 children it grows 3 times and the time 120 times. A
+tidy of a hundred things is quick; one of several hundred in a single container is not. This is the grid search's growth
+(Task 3 and Task 6), recorded here for Task 10, which runs tidy; it is not changed in Task 8.
+
+**Since Task 10**, which bounded it, measured again in Task 12 on the quiet machine (see "How plan 5's numbers were
+measured"), with a throwaway harness built as `run.sh` builds the sketch harness (Release, `-O`), medians of five runs. The
+nodes are the first n of `TidyTests.tidyingSixHundredThingsIsQuick`'s lattice: rows of 24 down the 140 × 100 grid, texts
+and images in turn, each off its place by −3 to 3 pt. At 600 that is Task 8's case (as `TidyTests` records it); Task 8 didn't
+record how it laid out the smaller counts, so below 600 the decisions aren't comparable with its table.
+
+| Children | Decisions | Time (runs) |
+|---|---|---|
+| 9 | 1 | 0.15 ms (2.08, 0.18, 0.15, 0.14, 0.10) |
+| 30 | 2 | 0.94 ms (0.94, 1.09, 0.96, 0.90, 0.88) |
+| 100 | 8 | 3.6 ms (4.43, 3.87, 3.57, 3.35, 3.22) |
+| 200 | 18 | 6.1 ms (6.96, 6.46, 6.08, 5.75, 5.47) |
+| 600 | 51 | 14.5 ms (16.80, 15.50, 14.48, 14.44, 14.50) |
+
+From 200 to 600 children the time now grows 2.4 times, and 600 take 14.5 ms where they took 32.6 s. Task 10 searches grids
+one band of at most 64 things at a time (`StructureConventions.gridSearchedTogether`), so the 600-thing lattice makes more,
+smaller grids than one search over all of it did (51 decisions where Task 8 counted 46). In the simulator, unoptimised, the whole of voice's tidy of those 600
+things (`DesignStore.tidy`: the pass and building the 51 structures it is sure of) takes 166.8 to 169.7 ms over three runs,
+under `tidyingSixHundredThingsIsQuick`'s 300 ms.
+
+The bands cut the sketch pass's grid search too, not only tidy's (plan 5's final review, M3 of half A, Task 10 m1): they
+apply to any neighbourhood of more than 64 leaves and cards, and a batch on a busy screen has one (the always-on heavy
+reading budget's median neighbourhood is over 90). A band that is half full ends at the first clear horizontal line, which
+can be the line between two rows of a grid, so a grid drawn cell by cell on such a screen can be read as rows rather than
+one grid.
+
+## How plan 6's numbers were measured
+
+The app as it is at st6/early 5a7f030, the branch after Task 11 (2026-11-25, Xcode 27.2), in the same simulator,
+"Layer iPad Pro 11 (st2-lane-c)", UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47, from 14:40 to 15:17, with
+`scripts/measure-semantic-tree.sh --simulator "Layer iPad Pro 11 (st2-lane-c)" --main /Users/angks/projects/personal/Layer`
+(main is checked out there at 8d00fc7, the Before column's commit). It printed `measure ok: 32 lines` and left
+`git status --porcelain` as it found it.
+
+- Loads recorded: the other agents were asked to pause new builds for the window, and it began once three checks 30
+  seconds apart found no `xcodebuild` running and a 1-minute load under 20 (another agent's UI suite had ended at 14:37).
+  The load and the number of `xcodebuild` processes were sampled every 20 seconds until 16:12, the end of the hosted
+  run: no `xcodebuild` but the script's own ran at any time. The script checks both again before each timed run. The
+  1-minute load before each: the store benchmark 6.42, the budgets and the rules 17.59, the drag frame benchmark 19.96,
+  the counters 16.93, the sketch reading 19.27, generation 18.17; the workout's runs 15.96, 5.31 and 5.20; main's store
+  benchmark 7.90; main's workout runs 7.37, 3.79 and 4.92. Each run's own `xcodebuild` raised the load in its first
+  minute. During the workout runs it stayed between 3.6 and 6.5, but for the branch's first run, which began at 16.0,
+  rose to 17.1 and fell to 5.3.
+- The unit groups ran three times: once in the script, then twice more from 15:14 to 15:16 with the script's own
+  commands (`test-without-building`, the CI plan, Debug, `TEST_RUNNER_LAYER_BENCHMARK=1`, the same simulator and
+  DerivedData), each group after the same check, at loads of 9.5 to 10.9. Every test passed in every run, and each budget
+  test at its first attempt.
+  - Store, the change alone, p50 / p95 ms per run: move 0.562 / 0.549 / 0.535, 0.587 / 0.580 / 0.547; resize 0.544 /
+    0.544 / 0.539, 0.577 / 0.575 / 0.570; text 0.536 / 0.539 / 0.522, 0.547 / 0.555 / 0.566; add 0.880 / 0.881 / 0.859,
+    0.899 / 0.932 / 0.935.
+  - Main's store benchmark, plan 2 Task 1's own file in a copy of main, once: move 0.172 / 0.178, resize 0.172 / 0.200,
+    text 0.169 / 0.173, add 0.325 / 0.361. Within 3% of the Before column's at p50, so this single-threaded benchmark
+    doesn't show the slower clock the workout does (below).
+  - Rules p50 0.675 / 0.641 / 0.631 ms, p95 0.754 / 0.882 / 0.750.
+  - On the tree, the change alone, p50 / p95 ms per run: move 0.709 / 0.667 / 0.667, 0.763 / 0.831 / 0.698; resize
+    0.677 / 0.640 / 0.649, 0.724 / 0.738 / 0.741; text 0.799 / 0.779 / 0.781, 0.873 / 0.862 / 0.842; add 0.990 / 0.980 /
+    0.968, 1.004 / 1.060 / 1.075.
+  - On the tree with the next read, medians: move 0.827 / 0.936, resize 0.786 / 0.877, text 0.920 / 0.998, add 1.121 /
+    1.212.
+  - The conversion, light, p50 / p95 ms per run: 1.719 / 1.626 / 1.747, 2.305 / 2.155 / 2.334; the pass alone p50 0.005 /
+    0.004 / 0.005, p95 0.184 / 0.166 / 0.182. Heavy: 6.551 / 6.511 / 6.446, 7.146 / 7.137 / 7.056; the pass alone 5.331 /
+    5.341 / 5.332, 5.856 / 5.785 / 5.687. The slowest reading: light 48.5 / 47.7 / 49.8, heavy 54.6 / 54.0 / 55.8.
+  - The rules' reading over the 156 fixtures: 87.8% in each run (candidate recall 89.1%, top 3 89.1%, escalation 11.5%).
+  - A drag frame: the counts were plan 4's in all three runs. The decline check, p50 / p95 µs per run: line 21.5 / 19.9 /
+    19.5, 22.5 / 25.2 / 24.0; group 18.1 / 17.8 / 17.5, 18.9 / 22.5 / 19.8; made the pass's, line 54.4 / 47.2 / 49.9,
+    56.9 / 55.8 / 60.9, and group 49.4 / 48.1 / 49.0, 51.3 / 56.2 / 56.0.
+  - The counters, the same in each run: `BENCH drag line frames=60 writes=60`, `BENCH drag group frames=60 writes=60`,
+    `BENCH drag row child frames=60 writes=0 versions=0`, `BENCH node views edits=20 path=60 lines=0`.
+  - `GenerationThroughTheReconcilerTests`: 8 tests passed in each run.
+- What changed since plan 5's column:
+  - **The store row times another path.** Plan 5's column timed the old file, a write through the projection with
+    `update(ref)` (at f36ab30). Since Task 2 the file times the store's tree verbs: `update(id)`, and `add` then
+    `delete(nodes:)`, and Task 11 deleted the projection. `update(id)` first finds the node in the store's index, which is
+    built again after every change, so each timed move, resize and text edit likely builds it once: on the tree row's
+    screen a build costs 0.14 to 0.16 ms (its `+read` lines less its changes alone). The rest is the change itself, as on
+    the tree row: the rules, the placement follower (Task P5C), the decline check (plan 5) and the step's record. The
+    store row is 2.7 to 3.2 times main's at p50, where plan 2 found 2.5 times, and still 17 times under 16 ms. The
+    sweep can confirm the index's share by timing it alone.
+  - **The tree row's next read is the index**, since Task 9 (`StoreChangeBudgetTests` reads `store.index`, which the
+    canvas draws from, where it read `store.screens`, the lowering). So its `+read` is cheaper than plan 5's: move p95
+    0.936 ms against 1.389 ms.
+  - The tree's changes alone, at p50 against plan 5's: move 10% under (0.667 ms against 0.738 ms), resize and text
+    within 3%, add 8% over (0.980 ms against 0.909 ms). Move's p95 has lost plan 5's long tail (0.763 ms against
+    1.070 ms).
+  - The light conversion is 10% over plan 5's at p50 (1.719 ms against 1.567 ms) and 4% at p95; its pass alone is
+    unchanged at p50. The heavy case, measured busy in plan 5, is now measured at the loads recorded above: p95
+    7.137 ms against 8.055 ms.
+  - The rules' benchmark, which runs no store code, is 14% under plan 5's at p50 (0.641 ms against 0.747 ms). The
+    machine moves by that much between windows, so changes of 10% either way in these rows aren't credited to the code
+    here.
+
+## Canvas workout after plan 6, and main again in the same hour
+
+The branch at 5a7f030 and main at 8d00fc7, each built in Release by the script in a temporary worktree of its HEAD, with
+`LayerTests` taken out of the scheme and the Layer test plan there only, each in a throwaway DerivedData. The app was
+uninstalled before each one's three runs. They ran one after the other, not interleaved, as the script runs them: branch
+1, 2, 3 from 14:51 to 15:02, then main 1, 2, 3 from 15:03 to 15:14.
+
+| Run | CPU time s | Peak physical MB | Clock s | CPU instructions G | CPU cycles G |
+|---|---|---|---|---|---|
+| Branch 1 | 4.864 (7.5%) | 85.26 (0.50%) | 30.510 (6.6%) | 25.71 (3.9%) | 13.56 (6.0%) |
+| Branch 2 | 4.827 (6.2%) | 75.90 (0.67%) | 30.448 (6.4%) | 25.63 (3.7%) | 13.77 (7.5%) |
+| Branch 3 | 4.843 (7.2%) | 75.75 (0.52%) | 30.473 (6.6%) | 25.55 (4.4%) | 13.50 (6.6%) |
+| **Branch median** | **4.843** | **75.90** | **30.473** | **25.63** | **13.56** |
+| Main 1 | 4.805 (7.7%) | 84.76 (0.60%) | 30.502 (6.8%) | 25.38 (4.2%) | 13.40 (6.2%) |
+| Main 2 | 4.816 (6.5%) | 75.10 (0.57%) | 30.446 (6.6%) | 25.51 (3.6%) | 13.49 (6.1%) |
+| Main 3 | 4.854 (7.3%) | 75.56 (0.78%) | 30.493 (6.7%) | 25.43 (3.7%) | 13.40 (6.3%) |
+| **Main median, again** | **4.816** | **75.56** | **30.493** | **25.43** | **13.40** |
+
+Against main in the same hour the branch takes 0.6% more CPU time, retires 0.8% more instructions in 1.2% more cycles,
+and its peak memory is 0.4% higher and its clock 0.1% shorter: within the 5% budget. Against plan 4's column (4.778 s) the
+branch is 1.4% over, and main 0.4% over its own measure in plan 4's hour (4.798 s).
+
+Against the Before column the branch is 8.1% over in CPU time and main 7.5% over, for the same instructions as then
+(25.63 G and 25.43 G against 25.53 G) in 13% fewer cycles: the cores ran at about 2.8 GHz on average (13.56 G cycles in
+4.843 s), against 3.47 GHz on 2026-11-23. As in plans 2 to 4, the difference from the Before column is the machine, not
+the code. In each, the first run after the app was installed peaked about 9.5 MB higher than the other two, main's and
+the branch's alike, so peak memory's median is the lower level.
+
+## The hosted format (plan 6)
+
+The rule (My call 8, `HostedFormatRule` in the harness, held to its four cases by `run.sh check`): hosted models write A2UI
+unless A2UI has fewer valid screens than the outline, or its first-content median is more than 25% above the outline's.
+
+`Tools/ScreenBenchmarkHarness/run.sh hosted google/gemma-4-26b-a4b both 3`, from 15:18 to 16:12 on 2026-11-25, at 5a7f030:
+the 8 briefs, each written three times in each format, the two formats taking turns on each brief (A2UI first on the odd
+ones), with the full prompts sent as the app sends them, through `HostedModelClient`. The figures:
+
+| Per 24 screens | The outline (full prompt) | A2UI |
+|---|---|---|
+| Valid | **24** | **13** |
+| First content p50 / p95 ms | **43459** / 91399 | **57976** / 132540 |
+| Completion p50 / p95 ms | 45375 / 94918 | 67019 / 143921 |
+| Output tokens per screen, p50 (all) | 3197 (80057) | 3641 (109932) |
+
+It ended: `hosted default: outline — valid 13/24 vs 24/24; first content p50 57976 ms vs 43459 ms (+33%)`. Both of the
+rule's conditions hold, so the default flips: `ScreenGenerator.hostedFormat` is `.outline`, and a hosted model is told the
+full outline prompt. The on-device model was told the outline already. A2UI is still read when a caller asks for it
+(`ScreenGenerator.stream(_:format:)`), and Layer still imports, pastes and shares A2UI.
+
+The machine during the run: no `xcodebuild` ran, and the 1-minute load stayed between 2.7 and 11.2, except from 15:49 to
+15:52, when something outside the project raised it to 44.7. That touched one or two screens' times. The valid count
+alone flips the default, so the decision doesn't rest on them. LM Studio had the model listed but not loaded, so one short
+request loaded it at 15:18, before the run: no screen's time includes the load. The rest of the figures, and why the A2UI
+screens weren't valid, are in `screen-prompt.md`, "Hosted formats (plan 6)".
+
+## How the sweep's numbers were measured
+
+The performance sweep's lane 1 (2026-11-25, Xcode 27.2), on sweep/one from 2381de4, the end of plan 6, in
+"Layer iPad Pro 11 (st2-lane-c)", UDID 19CD922B-1564-4FEF-A86A-4AF37B114B47. Lane 2 worked in its own worktree at the
+same time and paused new builds whenever `task-12-READY-TO-MEASURE` was there; the file was there only while something
+was timed.
+
+- **The large design (item 1).** `StoreChangeBenchmarkTests` gained `aStoreChangeOnALargeDesign` and
+  `siriElementsOnALargeDesign`, which print the `BENCH large …` lines, and `scripts/measure-semantic-tree.sh` requires
+  them. Its tests now run one at a time (`.serialized`), so that one waiting on Siri's query doesn't time another.
+- **The script, before and after.** `scripts/measure-semantic-tree.sh --simulator "Layer iPad Pro 11 (st2-lane-c)"` ran at
+  eede551 from 18:00 to 18:37 (`measure ok: 43 lines`) and at 5174831 from 19:45 to 20:00 (`measure ok: 51 lines`), each
+  leaving `git status --porcelain` as it found it. Loads before each timed run: at eede551 the store benchmark 17.89, the
+  budgets and the rules 18.09, the drag frame 19.18, the counters 18.60, the sketch reading 17.31, generation 16.92, the
+  workout's runs 17.95, 9.26 and 10.56; at 5174831 5.37, 5.58, 5.54, 6.02, 5.65, 5.57, and 14.72, 5.61 and 7.51. (A
+  remote-desktop session and the system's media analysis kept the load near 20 through the first.)
+- **Each item, before and after.** The build products of every commit were cloned (`cp -c`) and timed with the script's
+  own `test-without-building`, `TEST_RUNNER_LAYER_BENCHMARK=1`, the CI plan, Debug, from the clone's `.xctestrun`, after
+  the same check as the script's (no other `xcodebuild`, and a 1-minute load under 20). The item table below comes from
+  three rounds after the sweep's review, from 20:49 to 22:06. Each round timed the store benchmark of every commit in
+  order, the budgets of eede551, 5174831 and the merged head, and the drag frame benchmark of ff30355 and 3a09d8d: 54
+  runs, at 1-minute loads of 16.22 to 19.98 before them. Each run's load is recorded in `sweep-1-report.md`'s "Hardening
+  round", in plan 6's ledger, with the full tables. The first rounds, from 19:21 to 19:34, gave the same figures within
+  their spread. Their highest load before a run was 19.95, under the limit, which this paragraph once rounded to 20.0;
+  their per-run loads weren't kept, so the table isn't theirs.
+- **The column above.** Its figures and its baselines are another set: three rounds of eede551 and 5174831 taking turns,
+  from 20:02 to 20:04. The load before each run, the store benchmark then the budgets: eede551 10.16 and 9.66, 9.11 and
+  8.17, 8.46 and 8.51; 5174831 9.85 and 9.38, 8.08 and 8.07, 8.31 and 7.96. The sketch reading's figures are the medians
+  of the script's run and two more of each, from 20:01 to 20:02, at loads of 17.31 (the script's), 19.12 and 16.78 for
+  eede551, and 5.65 (the script's), 17.98 and 16.72 for 5174831. The merged head 0fbf74d, with lane 2 and the review's
+  tests, times within 2% of 5174831 on every store, tree and large-design row in the rounds above.
+- **Opening a design (the review's minor 4).** Since the sweep, the store checks once, as a design opens, that it follows
+  the rules: `DesignStore.init` applies them in full to a copy and compares, after the file's read has laid the design
+  out. `StoreChangeBenchmarkTests.openingALargeDesign` times both, at the merged head in the rounds above (loads 17.41 to
+  18.06), each 10 runs after one untimed. On the large design (1,055 nodes) the read takes p50 17.009 ms, p95 17.579 ms,
+  and the check 4.257 / 4.463 ms. On 4,994 nodes, near the 5,000 cap, the read takes 80.279 / 80.946 ms and the check
+  20.121 / 20.544 ms. So the check adds about a quarter to opening (Debug, in the simulator), on the main actor, once.
+- **What each item changed, at p50, before and after it** (the large design's rows unless named; the full tables are in
+  the report):
+
+  | Item | Commit | What it changed | The row that shows it |
+  |---|---|---|---|
+  | 2. The index kept across changes | 2e1d3f3, ff30355 | the store brings its index up to date where the design changed (`TreeIndex.refresh`), not built again | move with its read 2.140 → 1.143 ms; add with its read 3.380 → 1.423 ms |
+  | 3. The structure passes only where something changed | 01afc8d | the rules know the store's last version follows them (`TreeRules.apply`'s `kept`), and look only at the screens and canvas nodes that changed | move 0.963 → 0.608 ms; the drag frame 1.195 → 0.831 ms |
+  | 4. A look lays nothing out | 3cf02e8 | a screen or canvas container the engine lays out alike (`LayoutEngine.laysOutAlike`) keeps its frames | a look 0.656 → 0.350 ms |
+  | 5. A token lays out only what it measures | 7e5ebca | only what holds text measured at a changed size is laid out (`NaturalSize.isMeasuredDifferently`) | the card's radius 4.698 → 0.172 ms; the title's size 4.763 → 4.126 ms |
+  | 2 to 4, cheaper | ff30355 | lists of children kept in place, and nodes compared by their shared list of children, not all they hold | the 100-node store's add 1.161 → 0.932 ms (item 2 had made it 1.128 from 0.901) |
+  | 6. The per-change extras | 3a09d8d | the decline check looks only where the pass made a structure; the follower passes over leaves with no intent | the 100-node store's move 0.567 → 0.394 ms; the drag frame 0.810 → 0.610 ms; the follower 152.6 → 40.9 µs |
+  | 7. TreeDrop walks once | 2358da9 | the dragged subtree walked once a frame | where a 200-text card would go 0.190 → 0.128 ms |
+  | 8. Siri's element query | 9d59b1e | a snapshot's elements worked out once a query, from the open design's index | 10 identifiers 82.477 → 7.531 ms |
+
+- **The deep comparison (item 6).** The store still compares the design with the one before after every change, to
+  find a change that changed nothing. Lists nothing was written to are shared, and `==` passes over a shared list at once,
+  so it costs what the changed screen's lists cost, not the design: 24.1 µs at p50 on the large design's drag frame. The
+  sweep's own new checks compare by the shared list instead (`LayerNode.isUnchanged(from:)`).
+- Every test passed in every run, each budget test at its first attempt. The drag counters were plan 6's in every run.
+
+## Canvas workout after the sweep
+
+| Run | CPU time s | Peak physical MB | Clock s |
+|---|---|---|---|
+| Baseline eede551, 1 | 4.745 (6.3%) | 84.70 (0.45%) | 30.879 (6.7%) |
+| Baseline eede551, 2 | 4.688 (6.6%) | 75.59 (0.60%) | 30.821 (6.3%) |
+| Baseline eede551, 3 | 4.632 (8.0%) | 75.95 (0.74%) | 30.577 (7.2%) |
+| **Baseline median** | **4.688** | **75.95** | **30.821** |
+| After the sweep 5174831, 1 | 4.614 (7.3%) | 84.50 (0.53%) | 30.335 (6.8%) |
+| After the sweep 5174831, 2 | 4.838 (7.7%) | 75.44 (0.49%) | 30.431 (6.7%) |
+| After the sweep 5174831, 3 | 4.844 (7.2%) | 75.76 (0.62%) | 30.512 (6.7%) |
+| **After the sweep median** | **4.838** | **75.76** | **30.431** |
+
+The workout's CPU time is 3.2% over the sweep's baseline at the median, though its first run is the lowest of the six;
+one run's own spread is 6 to 8%. Its peak memory is 0.3% under, and its clock 1.3% under. As in every earlier column, the
+first run after the app was installed peaked about 9 MB higher than the other two. The two were measured 85 minutes
+apart, not interleaved, at the loads above.

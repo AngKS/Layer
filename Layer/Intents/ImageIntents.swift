@@ -55,7 +55,7 @@ struct GenerateImageIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard AppModel.canUseImagePlayground else { throw LayerIntentError.imagePlaygroundUnavailable }
         if let element {
-            let (model, ref, found) = try await DesignActions.element(element)
+            let (model, ref, found) = try await DesignActions.node(element)
             guard found.kind == .image else { throw LayerIntentError.notAnImage }
             DesignActions.reveal(.element(ref), in: model)
             model.remakeImageWithPlayground(ref, prompt: prompt, style: style?.style)
@@ -65,7 +65,7 @@ struct GenerateImageIntent: AppIntent {
             model.makeImageWithPlayground(prompt: prompt, style: style?.style, onScreen: target.id)
         } else {
             let model = try await DesignActions.model(for: nil as String?)
-            if let selected = model.selectedElement, selected.element.kind == .image {
+            if let selected = DesignActions.selectedLeaf(in: model), selected.node.kind == .image {
                 model.remakeImageWithPlayground(selected.ref, prompt: prompt, style: style?.style)
             } else {
                 model.makeImageWithPlayground(prompt: prompt, style: style?.style)
@@ -128,7 +128,7 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
         let model: AppModel
         let request: ImagePlaygroundRequest
         if let element {
-            let (found, ref, existing) = try await DesignActions.element(element)
+            let (found, ref, existing) = try await DesignActions.node(element)
             guard existing.kind == .image else { throw LayerIntentError.notAnImage }
             model = found
             request = ImagePlaygroundRequest(target: .replace(ref))
@@ -140,23 +140,39 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
             model = found
             request = ImagePlaygroundRequest(target: .newImage(onScreen: target.id))
         }
-        let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> DesignStore.ElementRef? in
+        let ref = try Self.add(prepared, for: request, in: model, x: x, y: y, width: width, height: height, undoManager: undoManager)
+        guard let entity = DesignActions.entity(for: ref, in: model) else { throw LayerIntentError.elementNotFound }
+        return .result(value: entity, dialog: "Added the picture to \(entity.screenName).")
+    }
+
+    /// What `perform` does once it knows where the picture goes, as one step, "Add Picture": a new image element where
+    /// `request` asks, at X, Y, Width and Height when given, in its host's points as Move Element takes them, or the new
+    /// picture of the image `request` replaces, which keeps its place and size. Returns where it is. Throws
+    /// `designTooLarge`, with nothing changed, when the design has no room for a new image, on a screen or on the open
+    /// canvas, and `elementNotFound` when it, or the image it replaces, has gone.
+    @MainActor
+    static func add(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest, in model: AppModel, x: Double?, y: Double?,
+                    width: Double?, height: Double?, undoManager: UndoManager?) throws -> NodeRef {
+        let isNew = if case .newImage = request.target { true } else { false }
+        let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> NodeRef? in
             guard let ref = model.placeGeneratedImage(prepared, for: request) else { return nil }
-            if element == nil, x != nil || y != nil || width != nil || height != nil {
-                model.store.update(ref) { image in
-                    let aspect = image.frame.height / max(image.frame.width, 1)
-                    if let width {
-                        image.frame.size.width = CGFloat(width)
-                        if height == nil { image.frame.size.height = (CGFloat(width) * aspect).rounded() }
-                    }
-                    if let height { image.frame.size.height = CGFloat(height) }
-                    if let x { image.frame.origin.x = CGFloat(x) }
-                    if let y { image.frame.origin.y = CGFloat(y) }
+            if isNew, x != nil || y != nil || width != nil || height != nil, let placed = model.store.placed(ref) {
+                // In its host's points, as Move Element takes them: a screen root that lays it out keeps its place.
+                var frame = placed.frame
+                let aspect = frame.height / max(frame.width, 1)
+                if let width {
+                    frame.size.width = CGFloat(width)
+                    if height == nil { frame.size.height = (CGFloat(width) * aspect).rounded() }
                 }
+                if let height { frame.size.height = CGFloat(height) }
+                if let x { frame.origin.x = CGFloat(x) }
+                if let y { frame.origin.y = CGFloat(y) }
+                model.store.place(ref.node, at: frame)
             }
             return ref
         }
-        guard let ref, let entity = DesignActions.entity(for: ref, in: model) else { throw LayerIntentError.elementNotFound }
-        return .result(value: entity, dialog: "Added the picture to \(entity.screenName).")
+        // The screen a new image goes on was found just now, so a new one refused is one the design had no room for.
+        guard let ref else { throw isNew ? LayerIntentError.designTooLarge : LayerIntentError.elementNotFound }
+        return ref
     }
 }

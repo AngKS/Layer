@@ -26,7 +26,7 @@ final class LayerDocument: ReferenceFileDocument {
     init(model: ModelChoice = ModelPreferences.defaultChoice) {
         // A new design starts with the app's default model, and keeps it from then on.
         var new = DesignFile()
-        new.content.canvas.model = model
+        new.content.settings.model = model
         state = OSAllocatedUnfairLock(initialState: State(file: new))
         isNew = true
     }

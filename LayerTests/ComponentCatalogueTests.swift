@@ -21,6 +21,11 @@ private func s(_ size: CGSize) -> String { "\(n(size.width))x\(n(size.height))" 
 private func r(_ rect: CGRect) -> String { "\(n(rect.minX)),\(n(rect.minY)) \(s(rect.size))" }
 private func c(_ colour: RGBColor) -> String { colour.hex }
 
+/// The leaves under a node, in order.
+private func leaves(of node: LayerNode) -> [LayerNode] {
+    node.isContainer ? node.children.flatMap(leaves(of:)) : [node]
+}
+
 /// Sketches of several shapes and places, to bring out each kind's layout rules.
 private let sketches: [(name: String, rect: CGRect)] = [
     ("wide", CGRect(x: 20, y: 700, width: 340, height: 50)),
@@ -44,9 +49,9 @@ private func describe(_ kind: ElementKind) throws -> [String] {
     var lines = ["## \(kind.rawValue)"]
     lines.append("name: \(kind.layerName) | symbol: \(kind.symbol) | placeholder: \(kind.placeholder)")
     lines.append("hasText: \(kind.hasText) | belongsOnScreens: \(kind.belongsOnScreens) | prompt: \(SketchPrompt.name(for: .element(kind)))")
-    let words = ScreenBlueprint.kindWords.first { $0.kind == kind }?.words ?? []
+    let words = LookWords.kindWords.first { $0.kind == kind }?.words ?? []
     lines.append("written as: \(words.joined(separator: ", "))")
-    lines.append("found by each of its written names: \(words.allSatisfy { ScreenBlueprint.kind(named: $0) == kind })")
+    lines.append("found by each of its written names: \(words.allSatisfy { LookWords.kind(named: $0) == kind })")
 
     // Size and placement.
     lines.append("size: \(s(ElementLayout.size(for: kind, sketch: .zero)))"
@@ -68,49 +73,60 @@ private func describe(_ kind: ElementKind) throws -> [String] {
         + " | keeping shape: \(r(ElementLayout.resizedKeepingShape(box, from: .bottomRight, by: CGSize(width: 20, height: 5), kind: kind)))"
         + " | keeping shape from top left: \(r(ElementLayout.resizedKeepingShape(box, from: .topLeft, by: CGSize(width: -20, height: -5), kind: kind)))")
 
-    // A new one, and its usual look.
-    let new = DesignStore.newElement(kind)
-    lines.append("new: \(s(new.frame.size)) tint \(c(new.tint)) text \"\(new.text)\"")
+    // A new one, and its usual look, with the standard tokens.
+    let new = LayerNode.standard(kind)
+    lines.append("new: \(s(new.frame.size)) tint \(c(new.resolvedTint)) text \"\(new.content.text)\"")
     var element = new
     element.frame = CGRect(x: 0, y: 0, width: 120, height: 40)
     var outlined = element
-    outlined.buttonLook = .bordered
-    lines.append("font: \(n(element.resolvedFontSize)) \(element.resolvedFontWeight.rawValue)"
+    outlined.content.buttonLook = .bordered
+    lines.append("font: \(n(element.resolvedFontSize(tokens: .standard))) \(element.resolvedFontWeight.rawValue)"
         + " | text colour: \(c(element.resolvedTextColor)), bordered \(c(outlined.resolvedTextColor))"
-        + " | radius: \(n(element.resolvedCornerRadius)) | alignment: \(element.resolvedTextAlignment.rawValue)")
+        + " | radius: \(n(element.resolvedCornerRadius(tokens: .standard))) | alignment: \(element.resolvedTextAlignment.rawValue)")
     lines.append("hasFill: \(element.hasFill) | hasCornerRadius: \(element.hasCornerRadius) | hasBorder: \(element.hasBorder)"
-        + " | hasOnState: \(element.hasOnState) | hasTextAlignment: \(element.hasTextAlignment)")
+        + " | hasOnState: \(kind.spec.traits.contains(.onState)) | hasTextAlignment: \(kind.spec.traits.contains(.textAlignment))")
 
     // On the open canvas, drawn large and drawn small.
-    let store = DesignStore(content: DesignContent())
-    let large = store.resolve(store.addFloating(kind, from: CGRect(x: 0, y: 0, width: 300, height: 200)))
-    let small = store.resolve(store.addFloating(kind, from: CGRect(x: 0, y: 0, width: 30, height: 20)))
-    lines.append("loose, drawn large: \(s(large?.element.frame.size ?? .zero)) | drawn small: \(s(small?.element.frame.size ?? .zero))")
+    let store = DesignStore()
+    let large = store.placeLoose(kind, sketchedAs: CGRect(x: 0, y: 0, width: 300, height: 200)).flatMap { store.node($0.node) }
+    let small = store.placeLoose(kind, sketchedAs: CGRect(x: 0, y: 0, width: 30, height: 20)).flatMap { store.node($0.node) }
+    lines.append("loose, drawn large: \(s(large?.frame.size ?? .zero)) | drawn small: \(s(small?.frame.size ?? .zero))")
 
-    // In a written or generated screen.
-    let item = ScreenBlueprint.Item(kind: kind, text: "")
-    var sized = item
-    sized.fontSize = 40
-    lines.append("in a blueprint: \(s(ScreenBlueprint.size(of: item, available: 353, on: .iPhone)))"
-        + " | in a row: \(s(ScreenBlueprint.size(of: item, available: 170, on: .iPhone, inRow: true)))"
-        + " | at 40pt: \(s(ScreenBlueprint.size(of: sized, available: 353, on: .iPhone)))")
-    let laid = try #require(ScreenBlueprint(sections: [.init(items: [item])]).layout(on: .iPhone).first)
-    lines.append("laid out: \(r(laid.frame)) alignment \(laid.textAlignment?.rawValue ?? "-")")
+    // In a written or generated screen: the leaf the one-line outline of its first written name makes, its natural
+    // size offered a phone's column and a row's share, and where the rules lay it out on a phone.
+    if let name = words.first {
+        let screen = Outline.parse(name, isComplete: true)
+        let leaf = try #require(leaves(of: screen).first)
+        var sized = leaf
+        sized.style.fontSize = 40
+        lines.append("in an outline: \(s(NaturalSize.of(leaf, width: 353, measure: .shared)))"
+            + " | in a row: \(s(NaturalSize.of(leaf, width: 170, measure: .shared)))"
+            + " | at 40pt: \(s(NaturalSize.of(sized, width: 353, measure: .shared)))")
+        let laid = TreeRules.laidOut(screen, deviceID: DeviceFrame.iPhone.id, settings: CanvasSettings(), previous: nil)
+        if let placed = placedLeaves(of: laid).first(where: { $0.node.id == leaf.id }) {
+            lines.append("laid out: \(r(placed.frame)) alignment \(placed.node.style.textAlignment?.rawValue ?? "-")")
+        } else {
+            lines.append("laid out: not kept on a screen")
+        }
+    } else {
+        lines.append("in an outline: not written")
+        lines.append("laid out: not written")
+    }
 
     // What the marks inside a sketch say.
     func marked(_ inner: SketchObservation.InnerMark, at bounds: CGRect?) -> String {
-        var element = DesignStore.newElement(kind)
+        var element = LayerNode.standard(kind)
         element.adoptMarks(of: SketchObservation(
             bounds: CGRect(x: 0, y: 0, width: 60, height: 30), form: .enclosure(roundness: 0.5, inner: inner), strokeCount: 2, innerBounds: bounds
         ))
-        return "on \(element.isOn) value \(element.value.map { n(CGFloat($0)) } ?? "-")"
+        return "on \(element.content.isOn) value \(element.content.value.map { n(CGFloat($0)) } ?? "-")"
     }
     lines.append("marks: empty \(marked(.none, at: nil)) | dot on the right \(marked(.dot, at: CGRect(x: 0.6, y: 0.2, width: 0.3, height: 0.6)))"
         + " | shaded to 0.42 \(marked(.other, at: CGRect(x: 0, y: 0, width: 0.42, height: 1)))")
 
     // What a design's layout, written out as data, says of it.
-    var content = DesignContent()
-    content.screens = [DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [new])]
+    var content = TreeContent()
+    content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: .container(children: [.standard(kind)]))]
     let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Design", content: content, modified: nil))
     let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     let screens = try #require(root["screens"] as? [[String: Any]])
@@ -124,7 +140,7 @@ private func describeEveryKind() throws -> String {
     var lines: [String] = []
     // A group item has no members of its own here, so the design's views leave it out and
     // it has no layout data to describe. Its entry is checked on its own.
-    for kind in ElementKind.allCases where kind != .group {
+    for kind in ElementKind.allCases where kind != .group && kind != .card {
         lines += try describe(kind)
         lines.append("")
     }
@@ -161,9 +177,10 @@ struct ComponentCatalogueTests {
     }
 
     @Test func theKindsOfferedToShortcutsAreTheKindsThereAre() {
-        // Every kind that can be placed: a group is made by grouping, not offered as a kind.
-        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.allCases.filter { $0 != .group }.map(\.rawValue)))
-        for kind in ElementKind.allCases where kind != .group {
+        // Every kind that can be placed: a group is made by grouping, and a card by the tree's own
+        // code, so neither is offered as a kind.
+        #expect(Set(ElementKindChoice.allCases.map(\.rawValue)) == Set(ElementKind.allCases.filter { $0 != .group && $0 != .card }.map(\.rawValue)))
+        for kind in ElementKind.allCases where kind != .group && kind != .card {
             #expect(ElementKindChoice(kind).element == kind)
             #expect(ElementKindChoice.caseDisplayRepresentations[ElementKindChoice(kind)] != nil)
         }
@@ -172,10 +189,10 @@ struct ComponentCatalogueTests {
     /// F9: a group is made by grouping. No word names it, nothing written or sketched
     /// becomes one, and it shows no words of its own.
     @Test func aGroupIsAKindNothingIsSketchedAsOrWrittenAs() {
-        #expect(ScreenBlueprint.kindWords.first { $0.kind == .group }?.words == [])
-        #expect(ScreenBlueprint.kind(named: "group") != .group)
-        #expect(ScreenBlueprint.kind(named: "Group") != .group)
-        #expect(!ScreenPrompt.kindNames.contains { ScreenBlueprint.kind(named: $0) == .group })
+        #expect(LookWords.kindWords.first { $0.kind == .group }?.words == [])
+        #expect(LookWords.kind(named: "group") != .group)
+        #expect(LookWords.kind(named: "Group") != .group)
+        #expect(!ScreenPrompt.kindNames.contains { LookWords.kind(named: $0) == .group })
         #expect(!ScreenPrompt.kindNames.contains("group"))
         let observation = SketchObservation(bounds: CGRect(x: 0, y: 0, width: 10, height: 10), form: .scribble, strokeCount: 1)
         let onScreen = SketchRequest(observation: observation, placement: .onScreen(local: CGRect(x: 0, y: 0, width: 10, height: 10), existing: []), strokes: [], prompt: "")

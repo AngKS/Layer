@@ -6,26 +6,13 @@ import Observation
 /// document's undo manager, which is also what tells the system that the document needs
 /// saving.
 ///
-/// The design keeps its elements in one list (`DesignContent.elements`). `screens` and
-/// `floating` are views of that list, worked out once per change.
+/// The design is kept as a tree (`TreeContent`), and the tree's rules (`TreeRules`) run inside
+/// every change, undo and redo.
 @MainActor @Observable
 final class DesignStore {
-    /// Points at one element: where it lives, and which one it is there.
-    struct ElementRef: Hashable, Sendable {
-        enum Host: Hashable, Sendable {
-            case screen(DesignScreen.ID)
-            /// The open canvas, outside every screen.
-            case canvas
-        }
-
-        var host: Host
-        var element: DesignElement.ID
-    }
-
-    private(set) var content: DesignContent {
+    private(set) var content: TreeContent {
         didSet {
             guard content != oldValue else { return }
-            views = nil
             targets = nil
             changeCount += 1
             // A change made through `change(_:)` is told once it has been recorded: see there.
@@ -35,10 +22,15 @@ final class DesignStore {
 
     /// True while `change(_:)` makes a change, before it is recorded.
     @ObservationIgnored private var isChanging = false
+    /// True while the app moves things by their placement intents: see `keepingPlacementIntents(_:)`.
+    @ObservationIgnored private var keepsPlacementIntents = false
 
     /// Counts the changes made to the content, by anyone, so that a step can tell whether
     /// the change before its own was its own too.
     @ObservationIgnored private var changeCount = 0
+
+    /// Screens' roots laid out off the main actor, for the next change alone: see `withLaidOutAhead`.
+    @ObservationIgnored private var laidOutAhead: [TreeScreen.ID: LayerNode] = [:]
 
     /// Moves on with every change to the content, and is read so that whatever draws from
     /// something kept for one version is drawn again when the content changes. For keeping
@@ -56,237 +48,152 @@ final class DesignStore {
     }
     static let undoLevels = 50
     /// Called with the new content after every change, including undo and redo.
-    @ObservationIgnored var onChange: ((DesignContent) -> Void)?
+    @ObservationIgnored var onChange: ((TreeContent) -> Void)?
     /// Moves on whenever the history does: a step made, undone, redone or taken out. A
     /// spoken correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
 
-    /// The views of the list, and where each element is in it, for the content as it is now.
-    private struct Views {
-        var screens: [DesignScreen]
-        var floating: [FloatingElement]
-        var index: [DesignElement.ID: Int]
+    /// Where every node is (`TreeIndex`), as last worked out, with the content it was worked out for and that content's
+    /// version (`changeCount`). Read for a later version, it is brought up to date where the content changed since
+    /// (`TreeIndex.refresh(from:to:)`), rather than built again over the whole design.
+    private struct KeptIndex {
+        var index: TreeIndex
+        var content: TreeContent
+        var version: Int
     }
-    @ObservationIgnored private var views: Views?
+    @ObservationIgnored private var keptIndex: KeptIndex?
 
-    init(content: DesignContent = DesignContent()) {
+    #if DEBUG
+    /// How many times this store has built its index, or brought it up to date: at most once for each version of the
+    /// content that was read. For the tests that hold a gesture's frames to building it only when they need it.
+    @ObservationIgnored private(set) var timesIndexed = 0
+    #endif
+
+    /// Whether the content follows every one of the tree's rules, laid out in full, as a design read from a file does
+    /// (`DesignFile`): then a change's rules look only at what it changed (`TreeRules.apply(to:after:kept:)`). Worked
+    /// out as the store is made, and kept by every change after, each of which runs the rules.
+    @ObservationIgnored private let followsTheRules: Bool
+
+    init(content: TreeContent = TreeContent()) {
         self.content = content
+        followsTheRules = Self.rulesLeaveAsItIs(content)
     }
 
-    private var current: Views {
-        // Read first, so that whatever draws from a view is redrawn when the content changes.
+    /// Whether the rules, applied in full, leave `content` as it is: whether it follows them already.
+    private static func rulesLeaveAsItIs(_ content: TreeContent) -> Bool {
+        var applied = content
+        TreeRules.apply(to: &applied, after: nil)
+        return applied == content
+    }
+
+    /// The design's tree. Read through `content`, so that whatever reads it is redrawn when it changes.
+    var tree: TreeContent { content }
+
+    /// Where every node of the tree is, worked out once per version of the content, when it is
+    /// first asked for: see `TreeIndex`. The one worked out for an earlier version is brought up to
+    /// date where the content changed since, so a change pays for what it touched.
+    var index: TreeIndex {
+        // Read first, so that whatever reads it is redrawn when the content changes.
         let content = content
-        if let views { return views }
-        let made = Views(
-            screens: content.screens, floating: content.floating,
-            index: Dictionary(content.elements.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        )
-        views = made
-        return made
+        if let keptIndex, keptIndex.version == changeCount { return keptIndex.index }
+        let index: TreeIndex
+        if var kept = keptIndex {
+            // Let go of first, so that the index is brought up to date in place rather than copied.
+            keptIndex = nil
+            index = kept.index.refresh(from: kept.content, to: content) ? kept.index : TreeIndex(content)
+        } else {
+            index = TreeIndex(content)
+        }
+        #if DEBUG
+        timesIndexed += 1
+        #endif
+        keptIndex = KeptIndex(index: index, content: content, version: changeCount)
+        return index
     }
 
-    /// What can be touched on each host, for the groups that had been gone into when it was
-    /// worked out (see `targetElements(entered:)`), for the content as it is now. Hover asks
-    /// for it on every move of the pen.
-    @ObservationIgnored private var targets: (entered: Set<DesignElement.ID>, found: [ElementRef.Host: [DesignElement]])?
+    /// What can be touched on each host, for the containers that had been gone into when it was
+    /// worked out (see `treeTargets(entered:)`), for the content as it is now. Hover asks for it
+    /// on every move of the pen.
+    @ObservationIgnored private var targets: (entered: Set<UUID>, found: TreeTargets)?
 
-    /// What `make` works out about what can be touched while the groups in `entered` have been
-    /// gone into: kept until the content changes, or other groups are gone into.
-    func keptTargets(entered: Set<DesignElement.ID>, _ make: () -> [ElementRef.Host: [DesignElement]]) -> [ElementRef.Host: [DesignElement]] {
+    /// What can be touched on each screen and the open canvas while the containers in `entered` have been
+    /// gone into: see `TreeTargets`. Kept until the content changes, or other containers are gone into:
+    /// hover asks on every move of the pen. `CanvasWork.targetPasses` counts each build.
+    func treeTargets(entered: Set<UUID>) -> TreeTargets {
         // Read first, so that whatever draws from it is redrawn when the content changes.
         _ = content
         if let targets, targets.entered == entered { return targets.found }
-        let found = make()
+        #if DEBUG
+        CanvasWork.targetPasses += 1
+        #endif
+        let found = TreeTargets(tree, index: index, entered: entered)
         targets = (entered, found)
         return found
     }
 
-    /// Where an element is in the design's own list.
-    func indexInList(of id: DesignElement.ID) -> Int? {
-        current.index[id]
-    }
-
-    /// Each screen with what is on it.
-    var screens: [DesignScreen] { current.screens }
-    /// The elements on the open canvas.
-    var floating: [FloatingElement] { current.floating }
     var title: String? { content.title }
-    var canvas: CanvasSettings { content.canvas }
+    var canvas: CanvasSettings { content.settings }
 
     // MARK: Looking things up
 
-    func screen(_ id: DesignScreen.ID) -> DesignScreen? {
-        screens.first { $0.id == id }
-    }
-
-    /// The topmost screen covering a point on the canvas.
-    func screen(at point: CGPoint) -> DesignScreen? {
-        screens.last { $0.canvasFrame.contains(point) }
-    }
-
-    /// The screen a sketch was drawn on, judged by where the sketch's centre falls.
-    func screen(under sketch: CGRect) -> DesignScreen? {
-        screen(at: CGPoint(x: sketch.midX, y: sketch.midY))
-    }
-
-    /// An element, wherever it is.
-    func element(_ id: DesignElement.ID) -> DesignElement? {
-        current.index[id].map { content.elements[$0] }
-    }
-
-    /// An element together with the placement that turns its frame into canvas points.
-    /// Nil when the element is gone, or no longer where `ref` says it is.
-    func resolve(_ ref: ElementRef) -> (element: DesignElement, placement: Placement)? {
-        guard let element = element(ref.element) else { return nil }
-        switch ref.host {
-        case .screen(let id):
-            guard element.parent == id, let screen = screen(id) else { return nil }
-            return (element, screen.placement)
-        case .canvas:
-            guard element.parent == nil else { return nil }
-            return (element, Placement(origin: .zero, scale: element.scale ?? 1))
-        }
-    }
-
-    /// The area everything in the design covers, or nil for an empty design. A turned loose
-    /// element covers the box round its turned shape.
+    /// The area everything in the design covers, or nil for an empty design: each screen with its name, and the
+    /// shape of every node on the open canvas as the index has it. A turned one covers the box round its turned shape.
     var contentBounds: CGRect? {
-        let rects = screens.map { $0.canvasFrame.union($0.labelFrame) } + floating.map { $0.placement.canvasRect(for: $0.element.shapeBounds) }
+        let tree = tree, index = index
+        var rects = tree.screens.map { screen in
+            let device = tree.device(of: screen)
+            return screen.canvasFrame(on: device).union(screen.labelFrame(on: device))
+        }
+        func cover(_ node: LayerNode) {
+            if let shape = index.canvasShape(of: node.id, in: tree) { rects.append(shape.bounds) }
+            node.children.forEach(cover)
+        }
+        tree.canvas.forEach(cover)
         return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
     }
 
-    /// The scale loose elements are drawn at: that of the newest screen, so they match it.
-    var looseScale: CGFloat { screens.last?.scale ?? 0.66 }
+    /// The scale loose things are drawn at: that of the newest screen, so they match it.
+    var looseScale: CGFloat { tree.screens.last?.scale ?? 0.66 }
 
     // MARK: Changes made in one step
 
-    /// Adds the screen a sketch stands for: an iPhone, as large as it was drawn.
+    /// Adds the screen a sketch stands for: of the design's device for new screens (`sketchDevice`), as large as it was
+    /// drawn. Nil, and nothing is added, as `addScreen(_:at:)` refuses.
     @discardableResult
-    func addScreen(from sketch: CGRect) -> DesignScreen {
+    func addScreen(from sketch: CGRect) -> TreeScreen? {
         let device = canvas.sketchDevice
         return addScreen(device, at: ElementLayout.screenPlacement(for: sketch, device: device))
     }
 
+    /// Adds an empty screen of `device` where `placement` puts it, on a free root, as one step. Named by how many screens
+    /// the tree holds. Its root takes the screen's identifier. Nil, and nothing is added, for a device that can't be used
+    /// (`DeviceFrame.problems`), such as one of the design's own a file held broken, and as `addScreen(_:)` refuses.
     @discardableResult
-    func addScreen(_ device: DeviceFrame, at placement: Placement) -> DesignScreen {
-        let screen = DesignScreen(
-            name: "Screen \(screens.count + 1)", origin: placement.origin, scale: placement.scale,
-            deviceID: device == .iPhone ? nil : device.id
-        )
-        change { $0.addScreen(screen) }
-        return screen
+    func addScreen(_ device: DeviceFrame, at placement: Placement) -> TreeScreen? {
+        guard device.problems.isEmpty else { return nil }
+        var screen = TreeScreen(name: "Screen \(tree.screens.count + 1)", origin: placement.origin, scale: placement.scale,
+                                deviceID: device == .iPhone ? nil : device.id)
+        screen.root.id = screen.id
+        return addScreen(screen).flatMap(treeScreen)
     }
 
-    /// Adds an element where it was sketched. Returns nil if the screen no longer exists.
-    /// `adjust` finishes the element before it is added, in the same undoable step.
-    @discardableResult
-    func addElement(_ kind: ElementKind, from sketch: CGRect, to screenID: DesignScreen.ID, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
-        guard let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements)
-        adjust(&element)
-        return add(element, to: screenID)
+    /// Deletes several elements as one undo step. A container goes with everything in it, at
+    /// any depth, whatever their own locks: a group is one thing. What held it keeps the rest
+    /// of what it holds, laid out again if it lays them out. The sketch reading log is told
+    /// once, of everything that went (`delete(nodes:)`).
+    func delete(_ refs: [NodeRef]) {
+        delete(nodes: Set(refs.map(\.node)))
     }
 
-    /// The element a sketch drawn on a screen stands for, laid out among `others` there.
-    private static func sketchedElement(_ kind: ElementKind, from sketch: CGRect, on screen: DesignScreen, among others: [DesignElement]) -> DesignElement {
-        let existing = others.filter { !$0.isHidden }
-        let laid = ElementLayout.sketched(kind, sketch: screen.localRect(for: sketch), on: screen.device, among: existing.map(\.frame))
-        var element = DesignElement(kind: kind, frame: laid.frame, text: kind.placeholder, tint: Theme.accent)
-        element.textAlignment = laid.alignment
-        // A screen's first button is its main action; any more are outlined beside or below it.
-        if kind == .button, existing.contains(where: { $0.kind == .button && $0.resolvedButtonLook == .filled }) {
-            element.buttonLook = .bordered
-            element.text = "Cancel"
-        }
-        return element
-    }
-
-    /// Makes an element on a screen another kind of thing, as when its sketch was read as
-    /// the wrong one. It is laid out afresh from where it was sketched, as if it had been
-    /// read that way to begin with, and stays the same element: its place among the
-    /// others, its name, and any words written for it are kept. `adjust` finishes it in
-    /// the same undoable step. Returns the element as it now is, or nil when it is gone
-    /// or isn't on a screen.
-    @discardableResult
-    func changeKind(of ref: ElementRef, to kind: ElementKind, sketchedAt sketch: CGRect, adjust: (inout DesignElement) -> Void = { _ in }) -> DesignElement? {
-        guard case .screen(let screenID) = ref.host, let old = resolve(ref)?.element, let screen = screen(screenID) else { return nil }
-        var element = Self.sketchedElement(kind, from: sketch, on: screen, among: screen.elements.filter { $0.id != old.id })
-        element.name = old.name
-        element.isLocked = old.isLocked
-        if kind.hasText, old.kind.hasText, old.text != old.kind.placeholder { element.text = old.text }
-        adjust(&element)
-        // Everything about it but what it is and where it lives is replaced.
-        let replacement = element
-        change { content in
-            content.update(old.id) { $0 = replacement }
-        }
-        return self.element(old.id)
-    }
-
-    /// Adds an element sketched on the open canvas, where and about as large as it was drawn.
-    @discardableResult
-    func addFloating(_ kind: ElementKind, from sketch: CGRect) -> ElementRef {
-        var element = Self.newElement(kind)
-        let scale = looseScale
-        let drawn = CGSize(width: sketch.width / scale, height: sketch.height / scale)
-        element.frame.size = kind.spec.looseSize.size(from: element.frame.size, drawn: drawn)
-        return place(element, centeredAt: CGPoint(x: sketch.midX, y: sketch.midY))
-    }
-
-    /// Deletes several elements as one undo step. A group goes with everything in it, at any
-    /// depth, whatever their own locks: a group is one thing.
-    func delete(_ refs: [ElementRef]) {
-        let ids = withWhatIsInThem(Set(refs.map(\.element)))
-        change { $0.remove(ids) }
-        // Stage 0 instrumentation: a no-op unless one of these was a Magic Pen reading
-        // deleted soon after it was made. See SketchReadingLog.
-        tellTheReadingLogOfDeleted(ids)
-    }
-
-    /// Puts a ready-made element on the canvas, centred on a point: onto the screen
-    /// there, if it is the kind of thing that goes on screens, and onto the open canvas
-    /// otherwise. Only the size of `element.frame` is used.
-    @discardableResult
-    func place(_ element: DesignElement, centeredAt point: CGPoint) -> ElementRef {
-        var element = element
-        let size = element.frame.size
-
-        func centered(in placement: Placement) -> CGPoint {
-            let center = placement.localPoint(for: point)
-            return CGPoint(x: (center.x - size.width / 2).rounded(), y: (center.y - size.height / 2).rounded())
-        }
-
-        if element.kind.belongsOnScreens, let screen = screens.last(where: { $0.canvasFrame.contains(point) }) {
-            element.frame.origin = centered(in: screen.placement)
-            add(element, to: screen.id)
-            return ElementRef(host: .screen(screen.id), element: element.id)
-        }
-        let scale = looseScale
-        element.frame.origin = centered(in: Placement(origin: .zero, scale: scale))
-        add(element, to: nil, scale: scale)
-        return ElementRef(host: .canvas, element: element.id)
-    }
-
-    /// A new element of a kind, at its starting size and look, ready to be placed.
-    nonisolated static func newElement(_ kind: ElementKind, symbol: String? = nil) -> DesignElement {
-        DesignElement(
-            kind: kind,
-            frame: CGRect(origin: .zero, size: ElementLayout.size(for: kind, sketch: .zero)),
-            text: kind.placeholder, tint: kind.spec.tint, symbol: symbol
-        )
-    }
-
-    /// Deletes an element, or a group with everything in it, as one undo step.
-    func delete(_ ref: ElementRef) {
-        guard resolve(ref) != nil else { return }
-        let ids = withWhatIsInThem([ref.element])
-        change { $0.remove(ids) }
-        // See the matching note on delete(_ refs:).
-        tellTheReadingLogOfDeleted(ids)
+    /// Deletes an element, or a container with everything in it, as one undo step: see
+    /// `delete(_ refs:)`.
+    func delete(_ ref: NodeRef) {
+        guard placed(ref) != nil else { return }
+        delete(nodes: [ref.node])
     }
 
     /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
-    private func tellTheReadingLogOfDeleted(_ ids: Set<DesignElement.ID>) {
+    func tellTheReadingLogOfDeleted(_ ids: Set<UUID>) {
         // One task for them all: a group of 200 is not 200 hops to the log's actor.
         guard !ids.isEmpty else { return }
         #if DEBUG
@@ -295,87 +202,47 @@ final class DesignStore {
         Task { await SketchReadingLog.shared.noteDeleted(ids) }
     }
 
-    /// Some elements, and everything in any group among them, at any depth.
-    private func withWhatIsInThem(_ ids: Set<DesignElement.ID>) -> Set<DesignElement.ID> {
-        var all = ids
-        for id in ids where groupItem(id) != nil { all.formUnion(content.contents(of: id).map(\.id)) }
-        return all
-    }
-
-    /// A copy of an element beside the original, a little down and to the right, as one
-    /// change. It goes on top of what is on its host; or, when the original is in a group,
-    /// just in front of it, in the same group: on top, it would pull the whole group to the
-    /// front with it, as the group is gathered where its frontmost member is.
+    /// A copy of an element beside the original, 16 of its points down and to the right,
+    /// whatever the turn of what holds it, as one change (`duplicate(node:)`). It goes on top
+    /// of what is on its host; or, inside a container, just in front of the original there:
+    /// next to it in a row or a column, and in a group without pulling the group to the front.
     ///
-    /// A group is copied whole, with everything in it, in the same change: copied over
-    /// several, the copies would be put right in between and come apart (see
-    /// `DesignContent.keepGroupsSound()`). Each copy is new, and each thing copied points at
-    /// the copy of its group. The copies keep their order, and everything in the group moves
-    /// as far across the canvas as the group does, 16 of its points: on the open canvas a
-    /// member drawn at another scale moves as many of its own as that takes. The copy itself
-    /// is unlocked, as a copy is; what is in it keeps its own lock and hide.
+    /// A container is copied whole, with everything in it, as what it is: a row stays a row
+    /// and a card a card. Each copy is new. The copy itself is unlocked, as a copy is; what is
+    /// in it keeps its own lock and hide, and a drawing's copy has strokes of its own. Nil
+    /// when it is gone, or the copy would take the design past 5,000 things.
     @discardableResult
-    func duplicate(_ ref: ElementRef) -> ElementRef? {
-        guard let (element, placement) = resolve(ref) else { return nil }
-        let originals = element.kind == .group ? content.contents(of: element.id) + [element] : [element]
-        var ids: [DesignElement.ID: DesignElement.ID] = [:]
-        for original in originals { ids[original.id] = UUID() }
-        let shift = 16 * placement.scale
-        let copies = originals.map { original in
-            // A drawing's copy is made of strokes of its own.
-            var copy = original.withStrokesOfItsOwn()
-            copy.id = ids[original.id] ?? UUID()
-            let own: CGFloat
-            if original.id == element.id {
-                copy.isLocked = false
-                own = placement.scale
-            } else {
-                copy.group = original.group.flatMap { ids[$0] }
-                own = self.placement(of: original)?.scale ?? placement.scale
-            }
-            copy.frame = original.frame.offsetBy(dx: shift / own, dy: shift / own)
-            return copy
-        }
-        let parent = element.parent
-        apply { content in
-            for copy in copies { content.add(copy, to: parent, scale: copy.scale) }
-            guard element.group != nil else { return }
-            // Just in front of the original: in front of its item, for a group, which is in
-            // front of everything in it.
-            let copied = Set(copies.map(\.id))
-            var order = content.children(of: parent).map(\.id).filter { !copied.contains($0) }
-            guard let place = order.firstIndex(of: element.id) else { return }
-            order.insert(contentsOf: copies.map(\.id), at: place + 1)
-            content.reorder(parent, to: order)
-        }
-        guard let copy = ids[element.id] else { return nil }
-        return ElementRef(host: ref.host, element: copy)
+    func duplicate(_ ref: NodeRef) -> NodeRef? {
+        guard placed(ref) != nil, let copy = duplicate(node: ref.node) else { return nil }
+        return NodeRef(host: ref.host, node: copy)
     }
 
-    /// A copy of a screen and everything on it, to its right, as one change. Its groups are
-    /// copied too, with the rest: each copy is new and points at the copy of its group, and
-    /// everything keeps its own lock and hide, as the list holds them.
+    /// A copy of a screen and everything on it, to its right, as one change. What is on it is
+    /// copied as it is, its root's layout, rows and cards included, each thing new and keeping
+    /// its own lock and hide. The copy is unlocked and named for the original, and keeps its
+    /// device, even one a file held that can't be used: no new device is chosen. Nil when the
+    /// screen is gone, or the copy would take the design past 5,000 things.
+    // Kept for tests: the app copies a screen with `duplicateTreeScreen(_:)`.
     @discardableResult
-    func duplicateScreen(_ id: DesignScreen.ID) -> DesignScreen? {
-        guard let screen = screen(id) else { return nil }
-        var copy = screen
+    func duplicateScreen(_ id: TreeScreen.ID) -> TreeScreen? {
+        duplicateTreeScreen(id).flatMap { treeScreen($0) }
+    }
+
+    /// `duplicateScreen(_:)`, giving the copy's identifier: what the popover's Duplicate and Siri's Duplicate Screen do.
+    @discardableResult
+    func duplicateTreeScreen(_ id: TreeScreen.ID) -> TreeScreen.ID? {
+        let tree = tree
+        guard let original = tree.screens.first(where: { $0.id == id }) else { return nil }
+        let frame = original.canvasFrame(on: tree.device(of: original))
+        var copy = original
         copy.id = UUID()
-        copy.name = Self.copyName(for: screen.name, among: screens.map(\.name))
+        copy.root = TreeEdit.copyWithNewIDs(original.root)
+        // A screen's root takes the screen's identifier, as an empty one added does (`addScreen(_:at:)`).
+        copy.root.id = copy.id
+        copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
-        copy.origin.x = screen.canvasFrame.maxX + 60
-        let originals = content.children(of: id)
-        var ids: [DesignElement.ID: DesignElement.ID] = [:]
-        for original in originals { ids[original.id] = UUID() }
-        copy.elements = originals.map { original in
-            var element = original
-            element.id = ids[original.id] ?? UUID()
-            element.parent = copy.id
-            element.group = original.group.flatMap { ids[$0] }
-            return element
-        }
-        let made = copy
-        change { $0.addScreen(made) }
-        return self.screen(made.id) ?? made
+        copy.origin.x = frame.maxX + 60
+        return addScreen(keepingItsDevice: copy)
     }
 
     /// "Screen 1" becomes "Screen 1 Copy", then "Screen 1 Copy 2" and so on.
@@ -409,41 +276,37 @@ final class DesignStore {
         }
     }
 
-    /// Moves an element up or down among its siblings: see `arrange(_ selection:_:)`, and
-    /// `SiblingLists` for what its siblings are. Siri's Change Element Order comes this way.
-    func arrange(_ ref: ElementRef, _ arrangement: Arrangement) {
+    /// Moves an element up or down among its siblings, the children of its parent: see
+    /// `arrange(_ selection:_:)`. Siri's Change Element Order comes this way.
+    func arrange(_ ref: NodeRef, _ arrangement: Arrangement) {
         arrange(.element(ref), arrangement)
     }
 
     /// Whether an element can go further up, or further down, among its neighbours.
-    func canArrange(_ ref: ElementRef, _ arrangement: Arrangement) -> Bool {
+    func canArrange(_ ref: NodeRef, _ arrangement: Arrangement) -> Bool {
         canArrange(.element(ref), arrangement)
     }
 
-    /// Lines an element on a screen up with an edge or the middle of that screen. A group
-    /// lines up as one block: its box is lined up, and everything in it moves as far.
-    func align(_ ref: ElementRef, _ alignment: ElementLayout.Alignment) {
-        guard case .screen(let id) = ref.host, let screen = screen(id) else { return }
-        if let item = resolve(ref)?.element, item.kind == .group {
-            guard let box = canvasShape(of: .element(ref))?.bounds else { return }
-            let shape = item.shapeBounds
-            let aligned = ElementLayout.aligned(shape, alignment, in: screen.size)
-            // `position` takes canvas points.
-            let scale = screen.placement.scale
-            position([.element(ref): CGPoint(x: box.minX + (aligned.minX - shape.minX) * scale, y: box.minY + (aligned.minY - shape.minY) * scale)])
-            return
+    /// Lines an element on a screen up with an edge or the middle of that screen. A container
+    /// lines up as one block: its box is lined up, and everything in it moves as far. Read from the
+    /// tree and written to it: a container by `position`, and anything else through its parent
+    /// (`place`), which in a row, column, grid or overlay takes it out as a new place does (My call 20).
+    func align(_ ref: NodeRef, _ alignment: ElementLayout.Alignment) {
+        guard case .screen(let id) = ref.host, let screen = treeScreen(id), let placed = placed(ref) else { return }
+        // A turned thing lines up by the box round its shape; its frame moves with it.
+        let shape = TurnedRect(rect: placed.frame, degrees: placed.degrees).bounds
+        let aligned = ElementLayout.aligned(shape, alignment, in: tree.device(of: screen).size)
+        let distance = CGSize(width: aligned.minX - shape.minX, height: aligned.minY - shape.minY)
+        guard placed.node.isContainer else {
+            return place(ref.node, at: placed.frame.offsetBy(dx: distance.width, dy: distance.height))
         }
-        // A turned element lines up by the box round its shape; its frame moves with it.
-        update(ref) {
-            let box = $0.shapeBounds
-            let aligned = ElementLayout.aligned(box, alignment, in: screen.size)
-            $0.frame.origin.x += aligned.minX - box.minX
-            $0.frame.origin.y += aligned.minY - box.minY
-        }
+        // `position` takes canvas points.
+        let box = placed.canvasShape.bounds, scale = screen.placement.scale
+        position([.element(ref): CGPoint(x: box.minX + distance.width * scale, y: box.minY + distance.height * scale)])
     }
 
-    func deleteScreen(_ id: DesignScreen.ID) {
-        change { $0.removeScreen(id) }
+    func deleteScreen(_ id: TreeScreen.ID) {
+        change { $0.screens.removeAll { $0.id == id } }
     }
 
     /// Names the board. A name the app suggests itself isn't something to undo.
@@ -477,115 +340,73 @@ final class DesignStore {
     }
 
     func updateCanvas(_ body: (inout CanvasSettings) -> Void) {
-        change { body(&$0.canvas) }
+        change { body(&$0.settings) }
     }
 
     /// Puts the whole design back as it was, as one undo step. Siri's own undo of an action
     /// it took uses this.
-    func restore(_ previous: DesignContent) {
+    func restore(_ previous: TreeContent) {
         change { $0 = previous }
     }
 
-    /// Adds ready-made elements to a screen as one change, replacing what is there when
-    /// `replacing` is set. Returns where they now live.
+    /// Gives a thing to whatever it now lies on: the screen under its middle, or the open canvas
+    /// when there is none. It goes to that host's top level, on top, in one change (`move(_:to:at:)`):
+    /// its middle stays where it is on the canvas and its size in its own points, its corner on
+    /// whole points. A container goes whole, and what is in it keeps its own frames, so that on a
+    /// screen drawn at another scale it arrives scaled about its middle. Sticky notes and drawings
+    /// stay on the canvas, and so does a container holding one, which the move refuses. Read from
+    /// the tree. Returns where the thing now lives.
     @discardableResult
-    func setElements(_ elements: [DesignElement], on screenID: DesignScreen.ID, replacing: Bool) -> [ElementRef] {
-        guard screen(screenID) != nil else { return [] }
-        change { content in
-            if replacing {
-                content.setChildren(of: screenID, to: elements)
-            } else {
-                for element in elements { content.add(element, to: screenID) }
-            }
-        }
-        return elements.map { ElementRef(host: .screen(screenID), element: $0.id) }
-    }
-
-    /// Writes a screen being generated as its latest version says, over what was written
-    /// from the last (`written`, by place in the version). Each element written before
-    /// stays the same element and takes its new form, unless it has been changed or taken
-    /// away since: it is then the person's, left as they left it and written no more
-    /// (nil). Elements new to this version are added, and ones it no longer has go.
-    /// Whatever else is on the screen, put there by hand meanwhile, is left alone: each
-    /// line used to replace everything on the screen (G5, M1). Returns what is now written.
-    func writeGenerated(_ elements: [DesignElement], on screenID: DesignScreen.ID, over written: [DesignElement?]) -> [DesignElement?] {
-        guard screen(screenID) != nil else { return written }
-        var now: [DesignElement?] = []
-        change { content in
-            for (index, var element) in elements.enumerated() {
-                guard index < written.count else {
-                    now.append(content.add(element, to: screenID))
-                    continue
-                }
-                guard let last = written[index], content.element(last.id) == last else {
-                    now.append(nil)
-                    continue
-                }
-                element.id = last.id
-                content.update(last.id) { $0 = element }
-                now.append(content.element(last.id))
-            }
-            for case let last? in written.dropFirst(elements.count) where content.element(last.id) == last {
-                content.remove([last.id])
-            }
-        }
-        return now
-    }
-
-    /// Gives an element to whatever it now lies on: the screen under its centre, or the
-    /// open canvas when there is none. It keeps its size in points and its position on
-    /// the canvas. A group lands whole, everything in it with it: see `rehostGroup(_:)`.
-    /// Returns where the element now lives.
-    @discardableResult
-    func rehost(_ ref: ElementRef) -> ElementRef {
-        guard let (element, placement) = resolve(ref) else { return ref }
-        if element.kind == .group { return rehostGroup(ref) }
-        let frame = placement.canvasRect(for: element.frame)
-        let target = element.kind.belongsOnScreens ? screen(at: CGPoint(x: frame.midX, y: frame.midY)) : nil
-        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host else { return ref }
-        return move(ref, toScreen: target?.id, origin: nil) ?? ref
-    }
-
-    /// Puts a ready-made element on the open canvas exactly where its frame says, in points
-    /// of its own drawn `scale` canvas points each.
-    @discardableResult
-    func addFloating(_ element: DesignElement, scale: CGFloat) -> ElementRef {
-        add(element, to: nil, scale: scale)
-        return ElementRef(host: .canvas, element: element.id)
+    func rehost(_ ref: NodeRef) -> NodeRef {
+        guard let placed = placed(ref) else { return ref }
+        let middle = placed.canvasShape.centre
+        let goesOnScreens = placed.node.isContainer || placed.node.kind.belongsOnScreens
+        let target = goesOnScreens ? treeScreen(at: middle) : nil
+        let host: NodeRef.Host = target.map { .screen($0.id) } ?? .canvas
+        guard host != ref.host, move(ref.node, to: target.map { .screen($0.id) } ?? .canvas) else { return ref }
+        return self.ref(of: ref.node) ?? ref
     }
 
     /// Moves an element onto a screen, or onto the open canvas when `screenID` is nil.
     /// `origin` is where its top-left corner goes, in its new host's points; when nil it
-    /// keeps its place on the canvas. It keeps its size in points. Returns where it now
-    /// lives, or nil when the element or screen is gone or the element can't go on screens.
+    /// keeps its place on the canvas, its corner on whole points. It keeps its size in its own
+    /// points, and a container goes whole, everything in it with it (`move(_:to:at:)`). Returns
+    /// where it now lives, or nil when the element or screen is gone or the element can't go on
+    /// screens. One step to undo.
+    // Kept for tests: no app path calls it (Siri's Move Element to Screen takes things out with `takeOut`).
     @discardableResult
-    func move(_ ref: ElementRef, toScreen screenID: DesignScreen.ID?, origin: CGPoint?) -> ElementRef? {
-        guard let (element, placement) = resolve(ref) else { return nil }
-        var target: DesignScreen?
+    func move(_ ref: NodeRef, toScreen screenID: TreeScreen.ID?, origin: CGPoint?) -> NodeRef? {
+        guard let placed = placed(ref) else { return nil }
         if let screenID {
-            guard let found = screen(screenID), element.kind.belongsOnScreens else { return nil }
-            target = found
+            guard treeScreen(screenID) != nil, placed.node.isContainer || placed.node.kind.belongsOnScreens else { return nil }
         }
-        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-        let newPlacement = target?.placement ?? Placement(origin: .zero, scale: placement.scale)
+        let host: NodeRef.Host = screenID.map { .screen($0) } ?? .canvas
 
-        var frame = element.frame
-        if let origin {
-            frame.origin = origin
-        } else {
-            let onCanvas = placement.canvasRect(for: element.frame)
-            let center = newPlacement.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
-            frame.origin = CGPoint(x: (center.x - element.frame.width / 2).rounded(), y: (center.y - element.frame.height / 2).rounded())
-        }
-
-        if host == ref.host {
-            update(ref) { $0.frame = frame }
+        guard host != ref.host else {
+            var frame = placed.frame
+            if let origin {
+                frame.origin = origin
+            } else {
+                let onCanvas = placed.placement.canvasRect(for: placed.frame)
+                let center = placed.placement.localPoint(for: CGPoint(x: onCanvas.midX, y: onCanvas.midY))
+                frame.origin = CGPoint(x: (center.x - placed.frame.width / 2).rounded(), y: (center.y - placed.frame.height / 2).rounded())
+            }
+            let distance = CGSize(width: frame.minX - placed.frame.minX, height: frame.minY - placed.frame.minY)
+            if placed.node.isContainer, let moved = self.origin(of: ref.node, movedBy: distance) {
+                // A container moves by its own frame, and what is in it rides along.
+                update(ref.node) { $0.frame.origin = moved }
+            } else {
+                place(ref.node, at: frame)
+            }
             return ref
         }
-        change { $0.move(element.id, to: target?.id, scale: newPlacement.scale, frame: frame) }
-        return ElementRef(host: host, element: element.id)
+        // It lands at the top level of its new host, on top, where its own frame is in the host's points.
+        var moved = false
+        asOneStep {
+            moved = move(ref.node, to: screenID.map { .screen($0) } ?? .canvas)
+            if moved, let origin { update(ref.node) { $0.frame.origin = origin } }
+        }
+        return moved ? NodeRef(host: host, node: ref.node) : nil
     }
 
     // MARK: Changes made gradually
@@ -827,7 +648,7 @@ final class DesignStore {
     /// elements on it before and after. Nil when it changed nothing, or anything else: the
     /// board, another screen, or an element on the open canvas, or moved on or off it; or
     /// when it made that screen or took it away.
-    func onlyScreen(changedBy edit: Edit) -> DesignScreen.ID? {
+    func onlyScreen(changedBy edit: Edit) -> TreeScreen.ID? {
         edit.step?.onlyScreen
     }
 
@@ -886,22 +707,12 @@ final class DesignStore {
         try act(for: heldEdit, body)
     }
 
-    func update(_ ref: ElementRef, _ body: (inout DesignElement) -> Void) {
-        guard resolve(ref) != nil else { return }
-        change { $0.update(ref.element, body) }
-    }
-
-    func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
-        guard screen(id) != nil else { return }
-        change { $0.updateScreen(id, body) }
-    }
-
     // MARK: Changes worked out elsewhere
 
     /// Applies a change to the design as one undo step. The ink canvas's changes to
     /// drawings come this way: a stroke drawn or rubbed out there is a change to a
     /// drawing here, undone like any other.
-    func apply(_ body: (inout DesignContent) -> Void) {
+    func apply(_ body: (inout TreeContent) -> Void) {
         change(body)
     }
 
@@ -928,15 +739,15 @@ final class DesignStore {
         return try act(for: edit, body)
     }
 
-    // MARK: Undo
-
-    /// Adds an element to the list as its own change. Returns it as it is kept.
-    @discardableResult
-    private func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
-        var kept = element
-        change { kept = $0.add(element, to: parent, scale: scale) }
-        return kept
+    /// Runs `body`, whose next change commits roots laid out off the main actor: `roots`, by screen. For that change
+    /// alone, the rules lay out nothing on a screen whose root is then the one given for it (plan 3, call 6).
+    func withLaidOutAhead<T>(_ roots: [TreeScreen.ID: LayerNode], _ body: () throws -> T) rethrows -> T {
+        laidOutAhead = roots
+        defer { laidOutAhead = [:] }
+        return try body()
     }
+
+    // MARK: Undo
 
     /// Applies a change. Made for an edit (`act(for:)`), it joins that edit's step; one
     /// that doesn't say whose it is joins the edit by hand begun last; on its own it is its
@@ -946,13 +757,21 @@ final class DesignStore {
     /// an undo pressed meanwhile (the toolbar's, while a spoken command or a generation
     /// holds its step open) took back the step before, lost the edit's changes so far, and
     /// was itself undone when the edit closed.
-    private func change(_ body: (inout DesignContent) -> Void) {
+    private func change(_ body: (inout TreeContent) -> Void) {
         let before = content
         let count = changeCount
+        // A hint for this change alone.
+        let ahead = laidOutAhead
+        laidOutAhead = [:]
         isChanging = true
-        // The change and the groups put right after it, in one access to the content, so that
-        // the whole design is compared once (C6). A design without groups costs one scan.
-        Self.applying(body, to: &content)
+        // The change and the tree's rules after it, in one access to the content, so that the
+        // whole design is compared once (C6).
+        let isUndoingOrRedoing = undoManager.map { $0.isUndoing || $0.isRedoing } ?? false
+        // The hosts of the design before that hold a structure the pass made, from the index when it is for that design.
+        let structures = keptIndex.flatMap { $0.version == count ? $0.index.hostsWithStructures : nil }
+        Self.applying(body, to: &content, previous: before, followingTheRules: followsTheRules, laidOutAhead: ahead,
+                      followingPlacements: !keepsPlacementIntents, decliningWhatLeftAStructure: !isUndoingOrRedoing,
+                      structures: structures)
         isChanging = false
         // Whether it changed anything, as the content's own comparison found.
         guard changeCount != count else { return }
@@ -974,12 +793,79 @@ final class DesignStore {
         onChange?(content)
     }
 
-    /// Makes a change, then puts right whatever it left unsound about the design's groups:
-    /// see `DesignContent.keepGroupsSound()`. Anything that builds or moves a group whole
-    /// therefore does it in one change.
-    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent) {
+    /// Writes the structure pass's declines (`declining(_:in:)`) outside every step, as a suggested title is written
+    /// (`setTitle(undoable: false)`): undo never takes one back, and no Undo lights for one. False when none changed.
+    /// Only "Keep them as drawn" declines so (call 11): a decline a change makes is part of its step (`applying`).
+    @discardableResult
+    func markDeclinedOutsideTheHistory(_ ids: [UUID]) -> Bool {
+        let marked = Self.declining(Set(ids), in: content)
+        guard marked != content else { return false }
+        content = marked
+        return true
+    }
+
+    /// Makes a change, then runs the tree's rules, laying out what changed since `previous`. With `followingTheRules`,
+    /// `previous` follows every rule already (`followsTheRules`), so the rules look only at what the change touched
+    /// (`TreeRules.apply(to:after:kept:)`).
+    ///
+    /// A screen whose root was laid out ahead, and is that root now, is laid out already: the rules are told it was
+    /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
+    ///
+    /// With `followingPlacements`, each sketched thing the change put somewhere new in a free container on a screen has
+    /// its placement intent read again from where it is (`TreeContent.followPlacements(since:written:)`), in the same
+    /// change and so the same step: undoing the move puts the intent back with it. Where the change itself put it, before
+    /// the rules ran, is what counts, so that the engine resizing a node, as a row grows while its text is typed, rewrites
+    /// nothing (plan 6's Task P5C).
+    ///
+    /// With `decliningWhatLeftAStructure` (plan 5's call 11, F4), a node the change took out of a container the
+    /// structure pass made, into another parent, is declined, whichever verb moved it: the canvas's drops and lifts, the
+    /// Layers panel, several things dragged, Siri and voice. Not for a container that is gone, so that a structure grown
+    /// into another or ungrouped declines nothing this way (`ungroup` declines on its own). The marks are part of the
+    /// change, and so of its step (plan 5's final review, A9): undoing the move takes them away, and redo puts them
+    /// back. Not after an undo or a redo, which never come through here anyway. `structures` are the hosts of `previous`
+    /// that hold a container the pass made, when the index knows them: the check looks nowhere else.
+    private static func applying(_ body: (inout TreeContent) -> Void, to content: inout TreeContent, previous: TreeContent,
+                                 followingTheRules: Bool, laidOutAhead: [TreeScreen.ID: LayerNode] = [:],
+                                 followingPlacements: Bool, decliningWhatLeftAStructure: Bool,
+                                 structures: Set<TreeIndex.Host>?) {
         body(&content)
-        if content.hasGroups { content.keepGroupsSound() }
+        // What the change itself wrote, before the rules lay anything out: only that is the person's placing. Held as a
+        // value, it is copied only where the rules then change the tree.
+        let written = followingPlacements ? content : nil
+        TreeRules.apply(to: &content, after: holding(laidOutAhead, in: previous, as: content),
+                        kept: followingTheRules ? previous : nil)
+        if let written { content.followPlacements(since: previous, written: written) }
+        if decliningWhatLeftAStructure {
+            let leaving = takenOutOfStructures(from: previous, to: content, structures: structures)
+            if !leaving.isEmpty { content = declining(Set(leaving), in: content) }
+        }
+    }
+
+    /// Makes `body`'s changes keeping every placement intent as it is (plan 5's final review, A4): a device change moves
+    /// things by them, and voice's tidy carries what rides on what it lays out. Only a move or a resize the person makes
+    /// rewrites one.
+    func keepingPlacementIntents<T>(_ body: () throws -> T) rethrows -> T {
+        let outer = keepsPlacementIntents
+        keepsPlacementIntents = true
+        defer { keepsPlacementIntents = outer }
+        return try body()
+    }
+
+    /// `previous` with each screen of `laidOut` holding its root there, when `content` has that screen with that root:
+    /// in its place, or added for a new screen.
+    private static func holding(_ laidOut: [TreeScreen.ID: LayerNode], in previous: TreeContent,
+                                as content: TreeContent) -> TreeContent {
+        guard !laidOut.isEmpty else { return previous }
+        var previous = previous
+        for screen in content.screens {
+            guard let root = laidOut[screen.id], screen.root == root else { continue }
+            if let index = previous.screens.firstIndex(where: { $0.id == screen.id }) {
+                previous.screens[index].root = root
+            } else {
+                previous.screens.append(screen)
+            }
+        }
+        return previous
     }
 
     /// What each step in the history is registered with, rather than the store itself, so
@@ -988,8 +874,8 @@ final class DesignStore {
     /// else aren't the step's, and undoing it leaves them as they are.
     @MainActor fileprivate final class HistoryStep {
         struct Run {
-            var before: DesignContent
-            var after: DesignContent
+            var before: TreeContent
+            var after: TreeContent
         }
 
         private(set) var runs: [Run] = []
@@ -1011,7 +897,7 @@ final class DesignStore {
         /// touched nothing the run did, which the run then takes in at both ends: two edits
         /// taking turns frame by frame, a drag and a turn, kept two designs for each frame
         /// (review M-1).
-        func record(from before: DesignContent, to after: DesignContent, change: Int) {
+        func record(from before: TreeContent, to after: TreeContent, change: Int) {
             defer { lastChange = change }
             guard let last = runs.last else {
                 runs.append(Run(before: before, after: after))
@@ -1019,7 +905,7 @@ final class DesignStore {
             }
             if lastChange == change - 1 {
                 runs[runs.count - 1].after = after
-            } else if !Touched(from: last.after, to: before).meets(Touched(from: last.before, to: last.after)) {
+            } else if !TreeChange(from: last.after, to: before).meets(TreeChange(from: last.before, to: last.after)) {
                 runs[runs.count - 1] = Run(before: last.before.reverting(last.after, to: before), after: after)
             } else {
                 runs.append(Run(before: before, after: after))
@@ -1036,7 +922,7 @@ final class DesignStore {
         }
 
         /// The design with the step's changes taken back.
-        func undone(from content: DesignContent) -> DesignContent {
+        func undone(from content: TreeContent) -> TreeContent {
             runs.reversed().reduce(content) { $0.reverting($1.after, to: $1.before) }
         }
 
@@ -1052,27 +938,24 @@ final class DesignStore {
         }
 
         /// What its changes touched.
-        var touched: Touched {
-            runs.reduce(into: Touched()) { $0.formUnion(Touched(from: $1.before, to: $1.after)) }
+        var touched: TreeChange {
+            runs.reduce(into: TreeChange()) { $0.formUnion(TreeChange(from: $1.before, to: $1.after)) }
         }
 
         /// The one screen all its changes were to or on: see `DesignStore.onlyScreen(changedBy:)`.
-        var onlyScreen: DesignScreen.ID? {
-            var screens: Set<DesignScreen.ID> = []
+        var onlyScreen: TreeScreen.ID? {
+            var screens: Set<TreeScreen.ID> = []
             for run in runs {
-                let touched = Touched(from: run.before, to: run.after)
+                let touched = TreeChange(from: run.before, to: run.after)
                 guard !touched.board else { return nil }
                 screens.formUnion(touched.screens)
-                // Where each element it changed was, and is: a screen, or the open canvas.
-                func hosts(in content: DesignContent) -> [DesignElement.ID: DesignScreen.ID?] {
-                    Dictionary(content.elements.map { ($0.id, $0.parent) }, uniquingKeysWith: { first, _ in first })
-                }
-                let was = hosts(in: run.before), now = hosts(in: run.after)
-                for id in touched.elements {
+                // Where each node it changed was, and is: a screen, or the open canvas.
+                let was = TreeChange.hosts(in: run.before), now = TreeChange.hosts(in: run.after)
+                for id in touched.nodes {
                     for host in [was[id], now[id]] {
                         // Not there on that side: added, or taken away.
                         guard let host else { continue }
-                        guard let screen = host else { return nil }
+                        guard case .screen(let screen) = host else { return nil }
                         screens.insert(screen)
                     }
                 }
@@ -1080,50 +963,10 @@ final class DesignStore {
             // A screen the step made or took away isn't one a correction for it may undo:
             // that would take the screen away, or bring it back, again.
             guard screens.count == 1, let screen = screens.first,
-                  runs.first?.before.screenFrames.contains(where: { $0.id == screen }) == true,
-                  runs.last?.after.screenFrames.contains(where: { $0.id == screen }) == true
+                  runs.first?.before.screens.contains(where: { $0.id == screen }) == true,
+                  runs.last?.after.screens.contains(where: { $0.id == screen }) == true
             else { return nil }
             return screen
-        }
-    }
-
-    /// What a change touched: the elements it added, took away or altered, the screens it
-    /// added, took away or altered, and the screens it put an element on or took one off,
-    /// and whether it changed the board's name, its canvas, or what wasn't understood.
-    fileprivate struct Touched {
-        var elements: Set<DesignElement.ID> = []
-        var screens: Set<DesignScreen.ID> = []
-        var board = false
-
-        init() {}
-
-        init(from before: DesignContent, to after: DesignContent) {
-            board = before.boardDiffers(from: after)
-            let was = Dictionary(before.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let now = Dictionary(after.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            for id in Set(was.keys).union(now.keys) where was[id] != now[id] {
-                elements.insert(id)
-                // Added, taken away or moved to another host: the host is touched too.
-                if was[id]?.parent != now[id]?.parent || was[id] == nil || now[id] == nil {
-                    if let parent = was[id]?.parent { screens.insert(parent) }
-                    if let parent = now[id]?.parent { screens.insert(parent) }
-                }
-            }
-            let screensBefore = Dictionary(before.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let screensAfter = Dictionary(after.screenFrames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            for id in Set(screensBefore.keys).union(screensAfter.keys) where screensBefore[id] != screensAfter[id] {
-                screens.insert(id)
-            }
-        }
-
-        mutating func formUnion(_ other: Touched) {
-            elements.formUnion(other.elements)
-            screens.formUnion(other.screens)
-            board = board || other.board
-        }
-
-        func meets(_ other: Touched) -> Bool {
-            (board && other.board) || !elements.isDisjoint(with: other.elements) || !screens.isDisjoint(with: other.screens)
         }
     }
 
@@ -1246,14 +1089,13 @@ final class DesignStore {
     private func takeBack(_ step: HistoryStep) {
         forget(step)
         let current = content
+        // A node whose parent the step took away, a screen or a group, may have been put
+        // there by another edit since: it lands on the open canvas where it was, rather than
+        // on nothing, drawn nowhere and saved so (review C-1).
         var result = step.undone(from: current)
-        // A screen the step took away may have had something put on it by another edit
-        // since: it goes onto the open canvas where it was, rather than on no screen, drawn
-        // nowhere and saved so (review C-1).
-        result.rehostElementsOnMissingScreens(from: current)
-        // Taken back among changes made since, a step can leave a group unsound: put right
-        // here, so that the reverse step holds it too.
-        if result.hasGroups { result.keepGroupsSound() }
+        // Taken back among changes made since, a step can leave the tree as its rules wouldn't:
+        // put right here, so that the reverse step holds it too.
+        TreeRules.apply(to: &result, after: current, kept: followsTheRules ? current : nil)
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand

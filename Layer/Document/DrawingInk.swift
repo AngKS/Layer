@@ -11,23 +11,13 @@ extension PKStroke {
     }
 }
 
-extension DesignElement {
-    /// A drawing made of these strokes, given where they lie on the canvas. Its frame is
-    /// the area they cover. Nil when there are no strokes.
-    static func drawing(_ strokes: [PKStroke], id: UUID = UUID()) -> DesignElement? {
-        guard let area = InkGeometry.bounds(of: strokes) else { return nil }
-        var element = DesignStore.newElement(.drawing)
-        element.id = id
-        element.frame = area
-        element.ink = InkGeometry.data(for: strokes, measuredFrom: area.origin)
-        return element
-    }
-
-    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched
-    /// to it if the frame has been resized since they were drawn, and then turned about
-    /// the frame's middle by the drawing's angle.
-    var canvasStrokes: [PKStroke] {
-        guard kind == .drawing, let ink, let drawing = DecodedInk.drawing(id, ink: ink), !drawing.strokes.isEmpty else { return [] }
+/// Where a drawing's strokes lie, and how its frame is worked out from them: shared by the design's
+/// drawings, as elements and as nodes.
+enum DrawingInk {
+    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched to it if the frame
+    /// has been resized since they were drawn, and then turned about the frame's middle by `rotation`.
+    static func canvasStrokes(id: UUID, ink: Data?, frame: CGRect, rotation: Double) -> [PKStroke] {
+        guard let ink, let drawing = DecodedInk.drawing(id, ink: ink), !drawing.strokes.isEmpty else { return [] }
         let natural = drawing.bounds
         func stretch(_ now: CGFloat, _ then: CGFloat) -> CGFloat {
             // Ink that covers no width or height, a straight line for instance, has nothing to stretch.
@@ -36,7 +26,7 @@ extension DesignElement {
         let place = CGAffineTransform(translationX: -natural.minX, y: -natural.minY)
             .concatenating(CGAffineTransform(scaleX: stretch(frame.width, natural.width), y: stretch(frame.height, natural.height)))
             .concatenating(CGAffineTransform(translationX: frame.minX, y: frame.minY))
-            .concatenating(turn(resolvedRotation, about: CGPoint(x: frame.midX, y: frame.midY)))
+            .concatenating(turn(rotation, about: CGPoint(x: frame.midX, y: frame.midY)))
         return drawing.strokes.map { stroke in
             var placed = stroke
             placed.transform = stroke.transform.concatenating(place)
@@ -44,11 +34,17 @@ extension DesignElement {
         }
     }
 
-    /// Strokes as they lie on the canvas, already turned by `degrees` about `centre`, made
-    /// into a drawing that keeps that angle and looks exactly the same. The ink is
-    /// kept upright, and the frame is moved so that turning about its own middle puts
-    /// the strokes where they are. Nil when there are no strokes.
-    static func drawing(_ strokes: [PKStroke], id: UUID, keepingTurn degrees: Double, about centre: CGPoint) -> DesignElement? {
+    /// The frame and ink of a drawing made of these strokes, given where they lie on the canvas. Nil when
+    /// there are no strokes.
+    static func parts(of strokes: [PKStroke]) -> (frame: CGRect, ink: Data)? {
+        guard let area = InkGeometry.bounds(of: strokes) else { return nil }
+        return (area, InkGeometry.data(for: strokes, measuredFrom: area.origin))
+    }
+
+    /// The same for strokes already turned by `degrees` about `centre`: the ink is kept upright, and the
+    /// frame is moved so that turning about its own middle puts the strokes where they are. `degrees` is
+    /// the angle the drawing keeps.
+    static func parts(of strokes: [PKStroke], keepingTurn degrees: Double, about centre: CGPoint) -> (frame: CGRect, ink: Data)? {
         let back = turn(-degrees, about: centre)
         let unturned = strokes.map { stroke -> PKStroke in
             var upright = stroke
@@ -60,18 +56,42 @@ extension DesignElement {
         let turned = Rotation.rotate(middle, about: centre, by: degrees)
         // Turning about the new frame's middle must equal turning about the old one.
         let shift = CGPoint(x: turned.x - middle.x, y: turned.y - middle.y)
-        var element = DesignStore.newElement(.drawing)
-        element.id = id
-        element.frame = area.offsetBy(dx: shift.x, dy: shift.y)
-        element.ink = InkGeometry.data(for: unturned, measuredFrom: area.origin)
-        element.setRotation(degrees)
-        return element
+        return (area.offsetBy(dx: shift.x, dy: shift.y), InkGeometry.data(for: unturned, measuredFrom: area.origin))
+    }
+}
+
+extension LayerNode {
+    /// A drawing node made of these strokes, given where they lie on the canvas. Its frame is the area
+    /// they cover. Nil when there are no strokes.
+    static func drawing(_ strokes: [PKStroke], id: UUID = UUID()) -> LayerNode? {
+        guard let parts = DrawingInk.parts(of: strokes) else { return nil }
+        var node = LayerNode(kind: .drawing)
+        node.id = id
+        node.frame = parts.frame
+        node.content.ink = parts.ink
+        return node
     }
 
-    /// How many strokes a drawing is made of.
-    var strokeCount: Int {
-        guard kind == .drawing, let ink, let drawing = DecodedInk.drawing(id, ink: ink) else { return 0 }
-        return drawing.strokes.count
+    /// Strokes as they lie on the canvas, already turned by `degrees` about `centre`, made into a drawing
+    /// node that keeps that angle and looks exactly the same.
+    static func drawing(_ strokes: [PKStroke], id: UUID, keepingTurn degrees: Double, about centre: CGPoint) -> LayerNode? {
+        guard let parts = DrawingInk.parts(of: strokes, keepingTurn: degrees, about: centre) else { return nil }
+        var node = LayerNode(kind: .drawing)
+        node.id = id
+        node.frame = parts.frame
+        node.content.ink = parts.ink
+        node.rotation = Rotation.kept(degrees)
+        return node
+    }
+
+    /// How far it is turned, 0 when upright.
+    var resolvedRotation: Double { rotation ?? 0 }
+
+    /// A drawing's strokes where they now lie on the canvas: at its frame, stretched to it if the frame has been resized
+    /// since they were drawn, and then turned about the frame's middle by the drawing's angle.
+    var canvasStrokes: [PKStroke] {
+        guard kind == .drawing else { return [] }
+        return DrawingInk.canvasStrokes(id: id, ink: content.ink, frame: frame, rotation: resolvedRotation)
     }
 
     /// A drawing's strokes as points on the canvas, for reading it as a sketch.
@@ -84,28 +104,14 @@ extension DesignElement {
         }
     }
 
-    /// The same drawing with strokes of its own: each stroke is made again with a new
-    /// key. A copy needs this, or its strokes would be taken for the original's once
-    /// both are on the ink canvas.
-    func withStrokesOfItsOwn() -> DesignElement {
-        guard kind == .drawing, let ink, let drawing = try? PKDrawing(data: ink) else { return self }
-        let strokes = drawing.strokes.map { stroke in
-            PKStroke(
-                ink: stroke.ink,
-                path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: InkGeometry.newStrokeDate()),
-                transform: stroke.transform, mask: stroke.mask
-            )
-        }
+    /// The same drawing with strokes of its own: each stroke is made again with a new key. A
+    /// copy needs this, or its strokes would be taken for the original's once both are on the
+    /// ink canvas. Anything else is returned as it is.
+    func withStrokesOfItsOwn() -> LayerNode {
+        guard kind == .drawing, let ink = content.ink, let own = InkGeometry.strokesOfTheirOwn(ink) else { return self }
         var copy = self
-        copy.ink = PKDrawing(strokes: strokes).dataRepresentation()
+        copy.content.ink = own
         return copy
-    }
-
-    /// Whether a touch anywhere in the element's frame picks it. A drawing on the ink
-    /// canvas is picked by its strokes instead, which leaves the space round and inside
-    /// them free. Locked, it is off that canvas, and its frame is all there is to touch.
-    var isPickedByItsFrame: Bool {
-        kind != .drawing || isLocked
     }
 }
 
@@ -166,6 +172,19 @@ enum InkGeometry {
         }
     }
 
+    /// Ink with each stroke made again with a new key, or nil when it isn't a drawing's ink.
+    static func strokesOfTheirOwn(_ ink: Data) -> Data? {
+        guard let drawing = try? PKDrawing(data: ink) else { return nil }
+        let strokes = drawing.strokes.map { stroke in
+            PKStroke(
+                ink: stroke.ink,
+                path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: newStrokeDate()),
+                transform: stroke.transform, mask: stroke.mask
+            )
+        }
+        return PKDrawing(strokes: strokes).dataRepresentation()
+    }
+
     /// The area strokes cover, their thickness included. Nil for no strokes.
     static func bounds(of strokes: [PKStroke]) -> CGRect? {
         let rects = strokes.map(\.renderBounds)
@@ -196,18 +215,23 @@ enum InkGeometry {
     }
 }
 
-extension DesignContent {
-    /// The ink of the design's drawings where it lies on the canvas, as one PencilKit
-    /// drawing: for pictures of the board. Hidden drawings are left out.
+extension TreeContent {
+    /// The ink of the design's drawings where it lies on the canvas, as one PencilKit drawing: for pictures of the
+    /// board. Hidden drawings are left out. Read from the open canvas's own nodes, where `TreeRules` keeps every
+    /// drawing, in no container, so each one's own hide is how it shows.
     var visibleInk: PKDrawing {
-        PKDrawing(strokes: elements.filter { $0.kind == .drawing && !$0.isHidden }.flatMap(\.canvasStrokes))
+        PKDrawing(strokes: canvas.filter { $0.kind == .drawing && !$0.isHidden }.flatMap(\.canvasStrokes))
     }
+}
 
-    /// Takes in ink that was kept as one drawing for the whole board, as it was until
-    /// file version 3: strokes that touch become one drawing each, on the open canvas.
+extension TreeContent {
+    /// Takes in ink for the whole board as one drawing: strokes that touch become one
+    /// drawing each, on top of the open canvas, at scale 1.
     mutating func adopt(_ ink: PKDrawing) {
         for strokes in InkGeometry.groups(ink.strokes) {
-            if let drawing = DesignElement.drawing(strokes) { add(drawing, to: nil, scale: 1) }
+            guard var drawing = LayerNode.drawing(strokes) else { continue }
+            drawing.scale = 1
+            canvas.append(drawing)
         }
     }
 }

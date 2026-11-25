@@ -146,7 +146,8 @@ struct InkCanvas: UIViewRepresentable {
         let tap = UITapGestureRecognizer()
         /// The palette's lasso: a loop drawn with it selects what it goes round, elements
         /// and screens as well as ink. PencilKit's own lasso knows only strokes, so with
-        /// the lasso in hand the document canvas stops drawing and this takes the loop.
+        /// the lasso in hand the document canvas stops drawing, its own recognisers wait for
+        /// this one to fail, and this takes the loop.
         let lasso = LassoGestureRecognizer()
         /// A finger that rests on the canvas and then drags pulls out a box, which
         /// selects what it holds, as in Freeform.
@@ -264,6 +265,7 @@ struct InkCanvas: UIViewRepresentable {
                 return restingFingers.fingers(in: container)
             }
             restingFingers.onAllLifted = { [weak self] in self?.model.fingersLifted() }
+            model.lastFingerTouch = { [weak self] in self?.restingFingers.lastTouch }
             twist.addTarget(self, action: #selector(twisted(_:)))
             twist.canTurn = { [weak self] in
                 guard let model = self?.model else { return false }
@@ -784,7 +786,7 @@ struct InkCanvas: UIViewRepresentable {
             followInkNotYetFollowed()
             // The canvas's strokes are read only if a drawing has changed: see `DrawingSync`.
             let canvas = documentCanvas
-            guard let strokes = drawings.strokes(showing: model.store.content, reading: {
+            guard let strokes = drawings.strokes(showing: model.store.tree, reading: {
                 let current = canvas.drawing.strokes
                 #if DEBUG
                 CanvasWork.strokesRead += current.count
@@ -804,7 +806,7 @@ struct InkCanvas: UIViewRepresentable {
             // While the design is being put back by undo or redo it is the one to follow.
             if !evenWhileTheHistoryMoves, let history = documentCanvas.documentUndoManager, history.isUndoing || history.isRedoing { return }
             let reach = InkGeometry.reach / max(model.viewport.scale, 0.01)
-            let changes = drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.content, reach: reach)
+            let changes = drawings.changes(for: documentCanvas.drawing.strokes, in: model.store.tree, reach: reach)
             // Part of the tool's use under way, if it is, and of nothing else under way.
             model.store.act(for: toolEdit) { model.inkChanged(changes) }
             // PencilKit's own record of the change is not the one that is kept.
@@ -910,10 +912,16 @@ struct InkCanvas: UIViewRepresentable {
             }
         }
 
-        /// The canvases scroll only once it is plain that the lasso isn't being drawn: a
-        /// second finger, a pinch or a two-finger scroll, makes it give way.
+        /// Everything on or inside the canvases waits for the lasso to fail: the scroll
+        /// views' pan and pinch, so a second finger, a pinch or a two-finger scroll makes
+        /// it give way, and PencilKit's own drawing and selection recognisers, so its lasso
+        /// can't take a loop first when touch moves arrive bunched and leave a lasso round
+        /// nothing holding on to the selection. The lasso is off unless it is in hand, and
+        /// then only a finger or the Pencil as set at `refresh()` reaches it, so drawing,
+        /// the eraser and a finger's pan are not held up.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-            gestureRecognizer === lasso && canvases.contains { other === $0.panGestureRecognizer || other === $0.pinchGestureRecognizer }
+            guard gestureRecognizer === lasso, let view = other.view else { return false }
+            return canvases.contains { view.isDescendant(of: $0) }
         }
 
         /// Whether a view the Pencil touched is in a presentation of its own over the canvas,
@@ -935,7 +943,7 @@ struct InkCanvas: UIViewRepresentable {
 
         /// The drawing with ink under a canvas point, among those on the document
         /// canvas. Nil if there is no ink at the point.
-        func drawing(at point: CGPoint, tolerance: CGFloat) -> DesignElement.ID? {
+        func drawing(at point: CGPoint, tolerance: CGFloat) -> LayerNode.ID? {
             let areas = inkAreas ?? documentCanvas.drawing.strokes.map { ($0, $0.renderBounds) }
             inkAreas = areas
             let hit = areas.last { stroke, area in
@@ -949,7 +957,7 @@ struct InkCanvas: UIViewRepresentable {
         }
 
         /// The drawing that strokes with these keys ended up in, when they share one.
-        func drawing(owning keys: Set<Double>) -> DesignElement.ID? {
+        func drawing(owning keys: Set<Double>) -> LayerNode.ID? {
             let owners = Set(keys.compactMap { drawings.drawing(owning: $0) })
             return owners.count == 1 ? owners.first : nil
         }
@@ -1255,11 +1263,14 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
         weak var touch: UITouch?
         var start: CGPoint
         var hasStrayed = false
+        var landed: ContinuousClock.Instant
     }
 
     private var down: [ObjectIdentifier: Finger] = [:]
     /// How far a finger can drift and still be resting. Further, it is dragging or scrolling.
     private let drift: CGFloat = 14
+    /// The finger that lifted last: when it landed and when it lifted. A tap's, while the tap is handled, just after.
+    private(set) var lastTouch: (landed: ContinuousClock.Instant, lifted: ContinuousClock.Instant)?
 
     init() {
         super.init(target: nil, action: nil)
@@ -1283,8 +1294,9 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        let now = ContinuousClock.now
         for touch in touches {
-            down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view))
+            down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view), landed: now)
         }
     }
 
@@ -1299,6 +1311,10 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        let now = ContinuousClock.now
+        for touch in touches {
+            if let finger = down[ObjectIdentifier(touch)] { lastTouch = (finger.landed, now) }
+        }
         lifted(touches)
     }
 

@@ -4,7 +4,6 @@
 // Layer/Intents/ once a preview SDK is installed, and fix what the compiler says.
 
 import AppIntents
-import CoreGraphics
 
 /// One element of a screen Siri describes, filled straight from what the person said.
 @available(iOS 27, *)
@@ -27,29 +26,35 @@ struct ElementSpec: TransientAppEntity {
     @Property(title: "Colour", description: "Fill colour as a name (blue) or a hex code (#0A84FF). The kind's usual colour if unsaid.")
     var colour: String?
 
-    @Property(title: "Font Size", description: "Text size in points, 11 to 64. The kind's usual size if unsaid.")
-    var fontSize: Double?
-
     @Property(title: "Weight", description: "Regular, medium, semibold or bold.")
     var weight: FontWeightOption?
 
-    @Property(title: "Corner Radius", description: "Corner radius in points, 0 to 40.")
-    var cornerRadius: Double?
+    // No size, radius or spacing: a model fills this spec, and no model picks a number (spec §14). The design's
+    // tokens give them.
 
     var displayRepresentation: DisplayRepresentation { "\(text)" }
     init() {}
 
-    var item: ScreenBlueprint.Item {
-        ScreenBlueprint.Item(
-            kind: kind.element,
-            text: text.isEmpty ? kind.element.placeholder : text,
-            symbol: kind == .symbol ? (symbol ?? "star") : nil,
-            width: fillsWidth.map { $0 ? .fill : .fit },
-            colour: colour.flatMap(ColourWords.parse),
-            fontSize: fontSize.map { CGFloat($0) },
-            weight: weight?.choice,
-            cornerRadius: cornerRadius.map { CGFloat($0) }
-        )
+    /// This element as one line of the outline `BuildScreenIntent` reads: `kind: words [look]`.
+    var line: String {
+        let name = kind.element.spec.writtenNames.first ?? "text"
+        let words = kind == .symbol ? (symbol ?? "star") : text
+        var look: [String] = []
+        if let fillsWidth { look.append(fillsWidth ? "fill" : "fit") }
+        if let colour, ColourWords.parse(colour) != nil { look.append(colour) }
+        if let weight { look.append(weight.choice.rawValue) }
+        let written = "\(name): \(Self.written(words))"
+        return look.isEmpty ? written : "\(written) [\(look.joined(separator: ", "))]"
+    }
+
+    /// Words as the outline reads them: on one line, with no `;` or `|`, which it reads as a new line and a row's
+    /// split, and no square brackets, which hold a look.
+    private static func written(_ words: String) -> String {
+        words.components(separatedBy: .newlines).joined(separator: " ")
+            .replacingOccurrences(of: ";", with: ",")
+            .replacingOccurrences(of: "|", with: "/")
+            .replacingOccurrences(of: "[", with: "(")
+            .replacingOccurrences(of: "]", with: ")")
     }
 }
 
@@ -62,9 +67,6 @@ struct SectionSpec: TransientAppEntity {
     @Property(title: "Side by Side", description: "True to put the elements in one row, false to stack them top to bottom.")
     var isRow: Bool
 
-    @Property(title: "Spacing", description: "Gap between elements in points, 0 to 48. 12 if unsaid.")
-    var spacing: Double?
-
     @Property(title: "Elements", description: "The section's elements in reading order.")
     var elements: [ElementSpec]
 
@@ -73,7 +75,7 @@ struct SectionSpec: TransientAppEntity {
 }
 
 /// A whole screen, written by Siri from a description such as “a login screen with
-/// email, password and a Sign in button”. Laid out by the same code as `BuildScreenIntent`.
+/// email, password and a Sign in button”. Built by the same code as `BuildScreenIntent`, from its outline.
 @available(iOS 27, *)
 @AppEntity(.generable)
 struct ScreenSpec: TransientAppEntity {
@@ -91,14 +93,12 @@ struct ScreenSpec: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { "\(name)" }
     init() {}
 
-    var blueprint: ScreenBlueprint {
-        ScreenBlueprint(sections: sections.map { section in
-            ScreenBlueprint.Section(
-                axis: section.isRow ? .horizontal : .vertical,
-                spacing: section.spacing.map { CGFloat($0) } ?? 12,
-                items: section.elements.map(\.item)
-            )
-        })
+    /// The screen as the outline `BuildScreenIntent` reads: each section its lines, or one row, a blank line apart.
+    var outline: String {
+        sections.map { section in
+            let lines = section.elements.map(\.line)
+            return section.isRow ? "row: " + lines.joined(separator: " | ") : lines.joined(separator: "\n")
+        }.joined(separator: "\n\n")
     }
 }
 
@@ -124,14 +124,13 @@ struct BuildScreenFromSpecIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> {
         let model = try await DesignActions.model(for: design)
         let device = (spec.device ?? .iPhone).frame
-        let built = DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () -> DesignScreen in
-            let screen = model.store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: model))
-            model.store.updateScreen(screen.id) { $0.name = spec.name }
-            model.store.setElements(spec.blueprint.layout(on: device), on: screen.id, replacing: true)
-            return model.store.screen(screen.id) ?? screen
+        // Read as Build Screen reads a generated outline, laid out off the main actor, as one step.
+        let id = try await BuildScreenIntent.build(spec.outline, on: nil, name: spec.name, device: device, in: model,
+                                                   undoManager: undoManager)
+        DesignActions.reveal(.screen(id), in: model)
+        guard let built = model.store.screen(id), let entity = DesignActions.entity(for: built, in: model) else {
+            throw LayerIntentError.screenNotFound
         }
-        DesignActions.reveal(.screen(built.id), in: model)
-        guard let entity = DesignActions.entity(for: built, in: model) else { throw LayerIntentError.screenNotFound }
         return .result(value: entity)
     }
 }

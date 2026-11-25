@@ -1,0 +1,92 @@
+{
+  "canvas" : {
+    "background" : "#F4F3EC",
+    "codeIncludesPreview" : true,
+    "codeLayout" : "stack",
+    "codeUsesNavigationTitle" : false,
+    "gridSpacing" : 24,
+    "gridStyle" : "dots",
+    "newScreenDevice" : "iphone",
+    "showsFrameNames" : true,
+    "showsGrid" : true,
+    "showsMeasurements" : true,
+    "snapsToGrid" : false,
+    "snapsToGuides" : true
+  },
+  "canvasElements" : [
+    {
+      "colour" : "#FCE38A",
+      "height" : 105.59999999999999,
+      "id" : "local:Sketch.layer|canvas|2A62407E-9AC3-4B74-899F-DF712BBD1967",
+      "kind" : "stickyNote",
+      "name" : "Sticky Note",
+      "text" : "Rethink the header",
+      "width" : 105.59999999999999,
+      "x" : 330,
+      "y" : 66
+    }
+  ],
+  "design" : "Sketch",
+  "id" : "local:Sketch.layer",
+  "screens" : [
+    {
+      "device" : "iphone",
+      "elements" : [
+        {
+          "colour" : "#CD6C57",
+          "height" : 40,
+          "id" : "local:Sketch.layer|17F16029-6852-4B2C-98D1-E9142005BAD0|B5648995-EC42-4071-BED5-1DFA8C562669",
+          "kind" : "title",
+          "name" : "Title",
+          "text" : "Welcome",
+          "width" : 228,
+          "x" : 20,
+          "y" : 80
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 120,
+          "id" : "local:Sketch.layer|17F16029-6852-4B2C-98D1-E9142005BAD0|9999C517-02BF-4F7B-AC76-0D4E2B83C7AF",
+          "kind" : "image",
+          "name" : "Image",
+          "width" : 160,
+          "x" : 200,
+          "y" : 140
+        },
+        {
+          "buttonStyle" : "filled",
+          "colour" : "#CD6C57",
+          "height" : 50,
+          "id" : "local:Sketch.layer|17F16029-6852-4B2C-98D1-E9142005BAD0|F7DE73D8-071F-47E4-BAA0-33F39486AFC4",
+          "kind" : "button",
+          "name" : "Button",
+          "text" : "Continue",
+          "width" : 160,
+          "x" : 20,
+          "y" : 700
+        },
+        {
+          "colour" : "#CD6C57",
+          "height" : 31,
+          "id" : "local:Sketch.layer|17F16029-6852-4B2C-98D1-E9142005BAD0|32FA097D-B49B-493D-911D-69445BC6EC18",
+          "kind" : "toggle",
+          "name" : "Toggle",
+          "on" : true,
+          "width" : 51,
+          "x" : 310,
+          "y" : 300
+        }
+      ],
+      "height" : 852,
+      "id" : "local:Sketch.layer|17F16029-6852-4B2C-98D1-E9142005BAD0",
+      "locked" : false,
+      "name" : "Sketch",
+      "safeAreaBottom" : 34,
+      "safeAreaTop" : 59,
+      "scale" : 100,
+      "width" : 393,
+      "x" : 0,
+      "y" : 0
+    }
+  ]
+}

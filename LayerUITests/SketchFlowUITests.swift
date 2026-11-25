@@ -428,7 +428,7 @@ final class SketchFlowUITests: XCTestCase {
 
     func testImagesComeFromImagePlaygroundPhotosOrFiles() {
         openNewDesign()
-        control("Add Image").tap()
+        control("Add Image or A2UI").tap()
         XCTAssertTrue(app.buttons["Photos"].waitForExistence(timeout: 5), "the paperclip should offer Photos")
         XCTAssertTrue(app.buttons["Files"].exists, "the paperclip should offer Files")
         // Image Playground is offered only where Apple Intelligence can run it, which the
@@ -901,7 +901,7 @@ final class SketchFlowUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(window.width, window.height)
         let controls = [
-            "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image",
+            "Designs", "Board title", "Layers", "Draw", "Text", "Sticky note", "Library", "Add Image or A2UI",
             "Share", "Zoom", "Magic Pen",
         ]
         for label in controls {
@@ -1239,8 +1239,11 @@ final class SketchFlowUITests: XCTestCase {
         control("Layers").tap()
 
         // A double-tap goes in to the note under it. Nothing is selected first, so the first
-        // tap picks the group and the second goes one level in. (XCUITest's doubleTap() reaches
-        // the canvas as a single tap on an unselected group, so two quick presses stand in.)
+        // tap picks the group and the second goes one level in. Two quick presses stand in:
+        // XCUITest's doubleTap() lands its second touch the moment its first lifts, which
+        // SwiftUI's tap doesn't take for a second tap, so it reaches the canvas as one tap on
+        // an unselected group. The presses land 290–330 ms after the first lifts, within the
+        // 350 ms that UIKit, and the app, time a double-tap by (`AppModel.isSecondTap`).
         clearSelection()
         point(centre).press(forDuration: 0.02)
         point(centre).press(forDuration: 0.02)
@@ -1252,6 +1255,72 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Group'", timeout: 5))
         control("Ungroup").tap()
         XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "Ungroup should leave the two notes selected")
+    }
+
+    /// The Group button offers what is selected can be grouped as (plan 4, Task 6). One thing can only be held by a
+    /// card: a tap opens the menu, and Card wraps it. Beside a locked note, which Group leaves out, only Card is
+    /// offered too, and a tap again opens the menu rather than doing nothing.
+    func testTheGroupMenuPutsOneThingInACard() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        // A note, moved aside and locked.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        for _ in 0..<3 where !control("Unlock").exists {
+            control("Lock").tap()
+            _ = control("Unlock").waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(control("Unlock").exists, "the note should lock")
+
+        // Another, alone: a card is all it can be, so a tap on Group opens the menu, and Card wraps it.
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+
+        // The icons the bar had before it offered a card keep their order and their place: centred over the note, as
+        // the bar was, on the knob below its middle. Group comes after all of them.
+        XCTAssertTrue(control("Group").waitForExistence(timeout: 5), "one thing should be offered Group")
+        usleep(600_000)
+        let known = ["Edit text", "Format selection", "Duplicate", "Lock", "Arrange", "Delete selection"]
+            .map(control).filter(\.exists).map(\.frame)
+        XCTAssertGreaterThanOrEqual(known.count, 5, "the bar should have the icons it had")
+        XCTAssertTrue(zip(known, known.dropFirst()).allSatisfy { $0.maxX <= $1.minX }, "the icons should keep their order")
+        if let first = known.first, let last = known.last {
+            XCTAssertGreaterThanOrEqual(control("Group").frame.minX, last.maxX, "Group should come after every icon that was there")
+            XCTAssertEqual((first.minX + last.maxX) / 2, control("Rotate").frame.midX, accuracy: 1.5,
+                           "the icons that were there should stay centred over the note, where they were")
+        }
+        openGroupMenu()
+        XCTAssertFalse(app.buttons["Row"].isEnabled, "one thing can't be a row")
+        app.buttons["Card"].tap()
+        XCTAssertTrue(control("Ungroup").waitForExistence(timeout: 5), "Card should wrap the note and select the card")
+
+        // The card and the locked note: Group leaves the locked one out, so a tap opens the menu with Card in it.
+        clearSelection()
+        point(other).tap()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        openGroupMenu()
+        XCTAssertFalse(app.buttons["Row"].isEnabled, "with the locked note left out there is one thing to group")
+        XCTAssertTrue(app.buttons["Card"].isEnabled)
+    }
+
+    /// Taps Group until its menu shows Card: a note's popover, for typing, may take the first tap.
+    private func openGroupMenu() {
+        for _ in 0..<3 where !app.buttons["Card"].exists {
+            control("Group").tap()
+            _ = app.buttons["Card"].waitForExistence(timeout: 6)
+        }
+        XCTAssertTrue(app.buttons["Card"].exists, "a tap on Group should open its menu")
     }
 
     /// Send to Back from the Arrange menu puts the thing behind the one it overlapped, and the
@@ -1289,6 +1358,223 @@ final class SketchFlowUITests: XCTestCase {
         XCTAssertTrue(waitForLayers { self.layerRow("Sticky Note", index: 1)?.isSelected == true }, "the note, sent to the back, should be listed below the other")
         XCTAssertTrue(layerRow("Sticky Note", index: 0)?.isSelected == false)
         attach("arrange-after")
+    }
+
+    // MARK: Layout
+
+    /// A size typed in the device picker's Custom Size… sheet becomes a device of the design's own, and the selected
+    /// screen takes it at once: the selection says the screen is that size.
+    func testACustomSizeBecomesTheScreensDevice() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        let label = app.staticTexts["Screen 1"]
+        XCTAssertTrue(label.waitForExistence(timeout: 10))
+        control("Draw").tap()
+        point(CGPoint(x: label.frame.minX + 100, y: label.frame.maxY + 250)).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Screen 1 · 393'", timeout: 5), "tapping a frame should select it")
+
+        showFormatPanel(with: "Device")
+        panelControl("Device")?.tap()
+        let customSize = app.buttons["Custom Size…"]
+        XCTAssertTrue(customSize.waitForExistence(timeout: 5), "the device picker should offer a custom size")
+        customSize.tap()
+        XCTAssertTrue(app.navigationBars["New Device"].waitForExistence(timeout: 5), "Custom Size… should open the device sheet")
+        setNumber("Width", to: "300")
+        setNumber("Height", to: "500")
+        app.navigationBars["New Device"].buttons["Save"].tap()
+
+        XCTAssertTrue(waitForDisappearance(of: app.navigationBars["New Device"]), "Save should close the sheet")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == 'Screen 1 · 300 × 500'", timeout: 5), "the screen should take the new size")
+    }
+
+    /// Held, the popover's Group button offers Row, Column, Grid and Card: Row wraps the two notes in a row, which is
+    /// selected and listed in Layers by what it is (plan 4, Task 6, run here once Tasks 2 and 3 are in: F6).
+    func testGroupAsRowFromThePopoverMenu() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let other = CGPoint(x: centre.x, y: centre.y + 200)
+
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        stroke(centre, other)
+        control("Sticky note").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '150 × 150'", timeout: 5))
+        clearSelection()
+
+        point(centre).tap()
+        point(other).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        control("Group").press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["Row"].waitForExistence(timeout: 5), "a hold on Group should offer Row")
+        app.buttons["Row"].tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Row'", timeout: 5), "Row should select the new row, not \(String(describing: selectionElement.value))")
+        control("Layers").tap()
+        XCTAssertNotNil(layerRow("Row"), "the Layers panel should list the row")
+    }
+
+    /// The first milestone (spec, Verification), with the card and the grid made by Group as, since sketching them is
+    /// plan 5's: two texts held as a card and two as a grid, each listed in Layers by what it is, and the screen's code
+    /// laying the grid out with `Grid` and giving the card its background.
+    func testTheFirstMilestoneACardAndAGridSeenInLayersAndExported() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let places = [onScreen((120, 200)), onScreen((120, 240)), onScreen((110, 400)), onScreen((290, 400))]
+        for place in places { addText(movedTo: place) }
+        attach("milestone-four-texts")
+
+        // The first two held in a card. The second is tapped right of its middle: the first's turning knob, which shows
+        // once it is selected, hangs below its middle, over the second's.
+        clearSelection()
+        tapEach(places[0], onScreen((190, 240)))
+        groupAs("Card")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Card'", timeout: 5), "Card should select the new card, not \(String(describing: selectionElement.value))")
+
+        // The other two in a grid.
+        clearSelection()
+        tapEach(places[2], places[3])
+        groupAs("Grid")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Grid'", timeout: 5), "Grid should select the new grid, not \(String(describing: selectionElement.value))")
+        attach("milestone-card-and-grid")
+
+        // Layers lists each by what it is, and the code lays the grid out and gives the card its background.
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Card") != nil }, "the Layers panel should list the card")
+        XCTAssertNotNil(layerRow("Grid"), "the Layers panel should list the grid")
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.staticTexts.matching(labelContaining("Grid(")).firstMatch.waitForExistence(timeout: 5), "the code should lay the grid out with Grid")
+        XCTAssertTrue(app.staticTexts.matching(labelContaining(".background(.background.secondary")).firstMatch.exists, "the code should give the card its background")
+        attach("milestone-code")
+    }
+
+    /// The first milestone from a sketch (plan 5, Task 11): two zigzags, a box drawn round them, and four boxes with
+    /// crosses become a card holding a title and a body and a two-column grid of images at once. Layers lists the card
+    /// and the grid, and the screen's code lays the grid out with `Grid` and gives the card its background.
+    func testASketchedCardAndGridExportAGridAndACard() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10), "the box should become a screen")
+
+        // Each zigzag read on its own, as `FirstMilestoneTests` draws them. Here the handwriting reader runs, and may
+        // read a word in a zigzag drawn in straight strokes, so a text is looked for where it was drawn, whatever it says.
+        zigzag(140, 120, 110, 30, humps: 3)
+        convert()
+        XCTAssertTrue(textIsRead(over: CGRect(x: 140, y: 120, width: 110, height: 30)), "the first zigzag should become a text")
+        zigzag(30, 170, 330, 34, humps: 4)
+        convert()
+        XCTAssertTrue(textIsRead(over: CGRect(x: 30, y: 170, width: 330, height: 34)), "the second zigzag should become a text")
+        attach("sketched-milestone-two-texts")
+
+        // A box round them is a card holding them.
+        box(CGRect(origin: onScreen((10, 100)), size: CGSize(width: 373 * screenScale, height: 130 * screenScale)))
+        convert()
+        attach("sketched-milestone-card")
+
+        // Four boxes with crosses, read together, are a grid of images. The rows are further apart than the unit test's:
+        // this screen is drawn at two thirds of its size, where its 20 points apart are 13 on the canvas, close enough
+        // for the Magic Pen to take the boxes above and below as one sketch (it joins strokes within 14).
+        for (x, y) in [(40, 300), (213, 300), (40, 452), (213, 452)] as [(CGFloat, CGFloat)] {
+            crossedBox(x, y, 140, 120)
+        }
+        convert()
+        attach("sketched-milestone-card-and-grid")
+
+        // Layers lists the card and the grid, and the code lays the grid out and gives the card its background.
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Card") != nil }, "the Layers panel should list the card")
+        XCTAssertNotNil(layerRow("Grid"), "the Layers panel should list the grid")
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.staticTexts.matching(labelContaining("Grid(")).firstMatch.waitForExistence(timeout: 5), "the code should lay the grid out with Grid")
+        XCTAssertTrue(app.staticTexts.matching(labelContaining(".background(.background.secondary")).firstMatch.exists, "the code should give the card its background")
+        attach("sketched-milestone-code")
+    }
+
+    /// A thing in a column dragged over the lower half of the thing after it is lifted, and lands after it: the column's
+    /// order, which Layers lists first at the top, changes (plan 4, call 3).
+    func testDraggingAThingInAColumnReordersIt() {
+        openNewDesign()
+        box(sketch)
+        convert()
+        XCTAssertTrue(app.staticTexts["Screen 1"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        let text = onScreen((200, 200)), heart = onScreen((200, 300))
+
+        addText(movedTo: text)
+        control("Library").tap()
+        let search = app.textFields["Search the library"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("heart fill")
+        let symbol = app.buttons["heart.fill"]
+        XCTAssertTrue(symbol.waitForExistence(timeout: 5))
+        symbol.tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '44 × 44'", timeout: 5))
+        stroke(centre, heart)
+
+        // The two in a column: the text keeps its top-left, and the symbol, centred under it, follows a step below.
+        clearSelection()
+        point(text).tap()
+        point(heart).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5))
+        groupAs("Column")
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH 'Column'", timeout: 5), "Column should select the new column, not \(String(describing: selectionElement.value))")
+        attach("column-made")
+
+        // Gone into with two quick presses on the text, and the text dragged onto the symbol's lower half. The symbol is
+        // a 44-point square 24 to 32 points under the text's 24-point height: its lower half is 270 to 290 down.
+        clearSelection()
+        point(text).press(forDuration: 0.02)
+        point(text).press(forDuration: 0.02)
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "two quick presses should select the text in the column, not \(String(describing: selectionElement.value))")
+        stroke(text, onScreen((200, 280)))
+        attach("column-reordered")
+
+        control("Layers").tap()
+        XCTAssertTrue(waitForLayers { self.layerRow("Symbol") != nil && self.layerRow("Text") != nil }, "the column's rows should be listed")
+        guard let symbolRow = layerRow("Symbol"), let textRow = layerRow("Text") else { return }
+        XCTAssertLessThan(symbolRow.frame.minY, textRow.frame.minY, "the text, dropped after the symbol, should be listed below it")
+    }
+
+    /// Adds a text, which lands selected in the middle of the view, and drags it so that its middle is at `place`.
+    private func addText(movedTo place: CGPoint) {
+        let window = app.windows.firstMatch.frame
+        let centre = CGPoint(x: window.midX, y: window.midY)
+        control("Text").tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a new text should be selected")
+        // Its popover, for typing, is put away, and the text picked again.
+        clearSelection()
+        point(centre).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a tap should pick the new text")
+        stroke(centre, place)
+    }
+
+    /// Taps one text, then another, each added to the selection.
+    private func tapEach(_ first: CGPoint, _ second: CGPoint) {
+        point(first).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value == '200 × 24'", timeout: 5), "a tap should pick the text")
+        point(second).tap()
+        XCTAssertTrue(wait(for: selectionElement, toHave: "value BEGINSWITH '2 items'", timeout: 5), "a tap on each text should add it, not \(String(describing: selectionElement.value))")
+    }
+
+    /// Holds the popover's Group button and picks `shape` from the menu it opens.
+    private func groupAs(_ shape: String) {
+        control("Group").press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons[shape].waitForExistence(timeout: 5), "a hold on Group should offer \(shape)")
+        app.buttons[shape].tap()
     }
 
     /// Taps on empty canvas until nothing is selected. The first may only put away a popover.
@@ -1539,6 +1825,41 @@ final class SketchFlowUITests: XCTestCase {
     private func zigzag() {
         let points: [(CGFloat, CGFloat)] = [(150, 132), (170, 104), (190, 132), (210, 104), (230, 132)]
         for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
+    }
+
+    /// A zigzag across a box given in the phone screen's own coordinates, where `wave x y width height humps` would go:
+    /// from the middle of its left edge to its top and bottom `humps` times each, then to the middle of its right edge,
+    /// one stroke for each straight part.
+    private func zigzag(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, humps: Int) {
+        let peaks = (0..<(2 * humps)).map { index -> (CGFloat, CGFloat) in
+            (x + width * CGFloat(2 * index + 1) / CGFloat(4 * humps), index.isMultiple(of: 2) ? y : y + height)
+        }
+        let points = [(x, y + height / 2)] + peaks + [(x + width, y + height / 2)]
+        for (start, end) in zip(points, points.dropFirst()) { stroke(onScreen(start), onScreen(end)) }
+    }
+
+    /// Whether words are shown over an area given in the phone screen's own coordinates, give or take a few points,
+    /// within `timeout`: what a zigzag drawn there was read as, whatever it says.
+    private func textIsRead(over local: CGRect, timeout: TimeInterval = 10) -> Bool {
+        let corner = onScreen((local.minX - 10, local.minY - 10))
+        let area = CGRect(origin: corner, size: CGSize(width: (local.width + 20) * screenScale, height: (local.height + 20) * screenScale))
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let found = app.staticTexts.allElementsBoundByIndex.contains { text in
+                text.exists && area.contains(CGPoint(x: text.frame.midX, y: text.frame.midY))
+            }
+            if found { return true }
+            usleep(500_000)
+        } while Date() < deadline
+        return false
+    }
+
+    /// A box with a cross through it, given in the phone screen's own coordinates, as `box …; cross …` draws it.
+    private func crossedBox(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
+        box(CGRect(origin: onScreen((x, y)), size: CGSize(width: width * screenScale, height: height * screenScale)))
+        let (dx, dy) = (width * 0.14, height * 0.14)
+        stroke(onScreen((x + dx, y + dy)), onScreen((x + width - dx, y + height - dy)))
+        stroke(onScreen((x + width - dx, y + dy)), onScreen((x + dx, y + height - dy)))
     }
 
     /// Reads the sketch on the canvas. The tests draw with conversion after a pause off;

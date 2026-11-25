@@ -3,502 +3,136 @@ import Foundation
 
 /// Groups: several things on one screen, or on the open canvas, kept together as one.
 ///
-/// A group is an element of the kind `.group` in the design's one list, on the host its
-/// members are on. Each member says which group it belongs to with its `group`, and groups
-/// nest by a group item belonging to another. The item carries the group's name, lock,
-/// hide and angle; its frame is the box round its members.
-///
-/// What draws, exports, describes and hit-tests elements reads the design's views
-/// (`screens`, `floating`), which leave group items out and give each member the lock and
-/// hide of the groups above it. What shows the tree, the Layers panel and the canvas
-/// targets, reads the list itself (`children(of:)`): group items included, with each
-/// thing's own flags.
-extension DesignContent {
-    /// Whether any element is a group item or says it belongs to a group: a member left
-    /// pointing at a group that has gone still needs `keepGroupsSound()`. One scan of the
-    /// list, so that a design without groups costs no more than that.
-    var hasGroups: Bool {
-        elements.contains { $0.kind == .group || $0.group != nil }
-    }
-
-    /// The things that belong to a group directly, back to front.
-    func members(of group: DesignElement.ID) -> [DesignElement] {
-        elements.filter { $0.group == group }
-    }
-
-    /// The things in a group at any depth that aren't groups themselves, back to front.
-    func leaves(of group: DesignElement.ID) -> [DesignElement] {
-        #if DEBUG
-        GroupWork.leafWalked()
-        #endif
-        return contents(of: group).filter { $0.kind != .group }
-    }
-
-    /// Everything in a group at any depth, the groups inside it included, back to front.
-    func contents(of group: DesignElement.ID) -> [DesignElement] {
-        var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
-        for element in elements {
-            if let parentGroup = element.group { inside[parentGroup, default: []].append(element.id) }
-        }
-        var found: Set<DesignElement.ID> = []
-        var waiting = inside[group] ?? []
-        while let next = waiting.popLast() {
-            guard next != group, found.insert(next).inserted else { continue }
-            waiting += inside[next] ?? []
-        }
-        return found.isEmpty ? [] : elements.filter { found.contains($0.id) }
-    }
-
-    /// The groups an element is in, the nearest first.
-    func ancestors(of id: DesignElement.ID) -> [DesignElement.ID] {
-        guard let element = element(id) else { return [] }
-        return Self.groups(above: element, find: element(_:)).map(\.id)
-    }
-
-    /// Whether an element is locked: by itself, or by a group above it.
-    func isLockedWithItsGroups(_ id: DesignElement.ID) -> Bool {
-        guard let element = element(id) else { return false }
-        return element.isLocked || Self.groups(above: element, find: element(_:)).contains(where: \.isLocked)
-    }
-
-    /// Whether an element is hidden: by itself, or by a group above it.
-    func isHiddenWithItsGroups(_ id: DesignElement.ID) -> Bool {
-        guard let element = element(id) else { return false }
-        return element.isHidden || Self.groups(above: element, find: element(_:)).contains(where: \.isHidden)
-    }
-
-    /// The groups above an element, the nearest first, looked up with `find`. The chain
-    /// ends at a group that isn't there or isn't a group item, and at one met before, so
-    /// that a design whose groups loop, which only a damaged file has, can't hang it.
-    static func groups(above element: DesignElement, find: (DesignElement.ID) -> DesignElement?) -> [DesignElement] {
-        var found: [DesignElement] = []
-        var seen: Set<DesignElement.ID> = [element.id]
-        var next = element.group
-        while let id = next, seen.insert(id).inserted, let group = find(id), group.kind == .group {
-            found.append(group)
-            next = group.group
-        }
-        return found
-    }
-
-    // MARK: The views
-
-    /// The group items, by identifier: where the views look up the groups above a member.
-    /// Empty for a design without groups.
-    var groupItemsByID: [DesignElement.ID: DesignElement] {
-        var items: [DesignElement.ID: DesignElement] = [:]
-        for element in elements where element.kind == .group && items[element.id] == nil {
-            items[element.id] = element
-        }
-        return items
-    }
-
-    /// An element as the views show it: locked when it or a group above it is, and hidden
-    /// likewise, so that what reads the views, unaware of groups, leaves it alone or out.
-    static func shown(_ element: DesignElement, groups: [DesignElement.ID: DesignElement]) -> DesignElement {
-        guard element.group != nil, !groups.isEmpty, !(element.isLocked && element.isHidden) else { return element }
-        var shown = element
-        for group in Self.groups(above: element, find: { groups[$0] }) {
-            shown.isLocked = shown.isLocked || group.isLocked
-            shown.isHidden = shown.isHidden || group.isHidden
-        }
-        return shown
-    }
-
-    /// An element given to a view's setter, as it is to be kept. A lock or hide that is as
-    /// the view showed it (`shown`) keeps the element's own flag, so that writing a view
-    /// back as it was read changes nothing; one that differs is written.
-    static func written(_ given: DesignElement, over stored: DesignElement?, groups: [DesignElement.ID: DesignElement]) -> DesignElement {
-        guard let stored, !groups.isEmpty else { return given }
-        let shown = shown(stored, groups: groups)
-        var written = given
-        if given.isLocked == shown.isLocked { written.isLocked = stored.isLocked }
-        if given.isHidden == shown.isHidden { written.isHidden = stored.isHidden }
-        return written
-    }
-
-    // MARK: Keeping groups sound
-
-    /// Puts right whatever a change has left unsound about the design's groups, writing only
-    /// what differs. It runs at the end of every change to the design, after undo and redo,
-    /// and when a design is read, so anything that builds or moves a group does all of it in
-    /// one change: split over several, this would run in between and undo the half-built
-    /// group. In turn:
-    ///
-    /// 1. A member is ungrouped when its group isn't there, isn't a group item, is on another
-    ///    host, or has it inside itself; and a drawing is never in a group.
-    /// 2. A group with no members goes.
-    /// 3. A group of one dissolves: its member takes its place in the group above, and its
-    ///    lock and hide, so that a hidden group's member doesn't reappear.
-    /// 4. Each group's members are gathered into one run, in their order, ending where the
-    ///    frontmost of them was, with the group item just in front. Nothing else moves, and
-    ///    each drawing keeps its slot, as when things are arranged.
-    /// 5. Each group's box is fitted round its members' shapes, at the group's own angle,
-    ///    innermost groups first.
-    mutating func keepGroupsSound() {
-        ungroupStrays()
-        dissolveHollowGroups()
-        gatherMembers()
-        fitGroupBoxes()
-    }
-
-    /// Rule 1. Only group items are looked up: a member whose group isn't one of them, there
-    /// or not, is a stray either way.
-    private mutating func ungroupStrays() {
-        var groups = groupItemsByID
-        for element in elements where element.group != nil {
-            // A group item ungrouped earlier in this pass is taken as it now is.
-            let member = element.kind == .group ? groups[element.id] ?? element : element
-            guard let groupID = member.group, Self.isStray(member, in: groupID, groups: groups) else { continue }
-            update(member.id) { $0.group = nil }
-            if member.kind == .group { groups[member.id]?.group = nil }
-        }
-    }
-
-    private static func isStray(_ member: DesignElement, in groupID: DesignElement.ID, groups: [DesignElement.ID: DesignElement]) -> Bool {
-        guard member.kind != .drawing, let group = groups[groupID], group.parent == member.parent else { return true }
-        // Inside itself: its chain of groups comes back to it. A loop above it that doesn't
-        // pass through it is broken when the groups in it are seen to.
-        var seen: Set<DesignElement.ID> = []
-        var next: DesignElement.ID? = groupID
-        while let id = next {
-            if id == member.id { return true }
-            guard seen.insert(id).inserted else { return false }
-            next = groups[id]?.group
-        }
-        return false
-    }
-
-    /// Rules 2 and 3, one group at a time: one going can leave the group above it hollow.
-    private mutating func dissolveHollowGroups() {
-        while true {
-            var counts: [DesignElement.ID: Int] = [:]
-            var lastMember: [DesignElement.ID: DesignElement.ID] = [:]
-            for element in elements {
-                guard let group = element.group else { continue }
-                counts[group, default: 0] += 1
-                lastMember[group] = element.id
-            }
-            guard let hollow = elements.first(where: { $0.kind == .group && counts[$0.id, default: 0] < 2 }) else { return }
-            if counts[hollow.id] == 1, let member = lastMember[hollow.id] {
-                update(member) {
-                    $0.group = hollow.group
-                    $0.isLocked = $0.isLocked || hollow.isLocked
-                    $0.isHidden = $0.isHidden || hollow.isHidden
-                }
-            }
-            remove([hollow.id])
-        }
-    }
-
-    /// Rule 4, host by host: written through `reorder` with the host's whole order, and only
-    /// where it changes.
-    private mutating func gatherMembers() {
-        var hosts: [DesignScreen.ID?] = []
-        for element in elements where element.kind == .group && !hosts.contains(element.parent) {
-            hosts.append(element.parent)
-        }
-        for parent in hosts {
-            let things = children(of: parent).filter { $0.kind != .drawing }
-            let order = Self.gathered(things)
-            guard order != things.map(\.id) else { continue }
-            reorder(parent, to: rawOrder(on: parent, withDrawingsKept: order))
-        }
-    }
-
-    /// Things that share a host, back to front, drawings left out, with each group's members
-    /// gathered into one run, in their order, and the group item just in front of them. A
-    /// run takes the place of the frontmost thing in it; everything else keeps its order.
-    private static func gathered(_ things: [DesignElement]) -> [DesignElement.ID] {
-        var place: [DesignElement.ID: Int] = [:]
-        for (index, thing) in things.enumerated() where place[thing.id] == nil { place[thing.id] = index }
-        var inside: [DesignElement.ID: [DesignElement.ID]] = [:]
-        var outermost: [DesignElement.ID] = []
-        for thing in things {
-            if let group = thing.group, place[group] != nil {
-                inside[group, default: []].append(thing.id)
-            } else {
-                outermost.append(thing.id)
-            }
-        }
-        // Where each thing's run goes: where its frontmost leaf is.
-        var anchors: [DesignElement.ID: Int] = [:]
-        var visiting: Set<DesignElement.ID> = []
-        func anchor(_ id: DesignElement.ID) -> Int {
-            if let known = anchors[id] { return known }
-            let own = place[id] ?? 0
-            guard let members = inside[id], visiting.insert(id).inserted else { return own }
-            let found = members.map(anchor).max() ?? own
-            anchors[id] = found
-            return found
-        }
-        var written: Set<DesignElement.ID> = []
-        func run(_ id: DesignElement.ID) -> [DesignElement.ID] {
-            guard written.insert(id).inserted else { return [] }
-            guard let members = inside[id] else { return [id] }
-            return members.sorted { anchor($0) < anchor($1) }.flatMap(run) + [id]
-        }
-        return outermost.sorted { anchor($0) < anchor($1) }.flatMap(run)
-    }
-
-    /// Rule 5. Each box is worked out in canvas terms and kept in the item's own points: its
-    /// screen's, or on the open canvas its own scale's. Members on the open canvas can each
-    /// have a scale of their own (L5), so a member drawn at another scale than the item is
-    /// carried into the item's points through canvas points. One drawn at the same scale,
-    /// as everything on a screen is, is taken as it is: the box round shapes moved and scaled
-    /// alike is the same box moved and scaled, and the round trip through canvas points
-    /// picked up rounding that changed whenever a screen moved, rewriting its groups. The
-    /// group's angle is kept.
-    private mutating func fitGroupBoxes() {
-        var screenPlacements: [DesignScreen.ID: Placement] = [:]
-        for screen in screenFrames where screenPlacements[screen.id] == nil { screenPlacements[screen.id] = screen.placement }
-        func placement(of element: DesignElement) -> Placement? {
-            guard let parent = element.parent else { return Placement(origin: .zero, scale: element.scale ?? 1) }
-            return screenPlacements[parent]
-        }
-        var inside: [DesignElement.ID: [DesignElement]] = [:]
-        var items: [DesignElement] = []
-        for element in elements {
-            if element.kind == .group { items.append(element) }
-            if let group = element.group { inside[group, default: []].append(element) }
-        }
-        // Each group's box in its own points, innermost first.
-        var boxes: [DesignElement.ID: TurnedRect] = [:]
-        var visiting: Set<DesignElement.ID> = []
-        func box(of group: DesignElement) -> TurnedRect? {
-            if let known = boxes[group.id] { return known }
-            guard visiting.insert(group.id).inserted, let own = placement(of: group), own.scale > 0 else { return nil }
-            let shapes = (inside[group.id] ?? []).compactMap { member -> TurnedRect? in
-                guard let theirs = placement(of: member) else { return nil }
-                let shape: TurnedRect? = member.kind == .group ? box(of: member) : TurnedRect(rect: member.frame, degrees: member.resolvedRotation)
-                guard let shape else { return nil }
-                return theirs == own ? shape : TurnedRect(rect: own.localRect(for: theirs.canvasRect(for: shape.rect)), degrees: shape.degrees)
-            }
-            let found = TurnedRect.enclosing(shapes, at: group.resolvedRotation)
-            boxes[group.id] = found
-            return found
-        }
-        for item in items {
-            guard let frame = box(of: item)?.rect, frame != item.frame else { continue }
-            update(item.id) { $0.frame = frame }
-        }
-    }
-}
-
+/// A group is a container in the design's tree, holding its members as its children, and nesting
+/// in another as one of its children. It carries the group's name, lock, hide and angle; a free
+/// group's frame is the box round what it holds. What draws, exports, describes, hit-tests and
+/// lists things reads the tree (`TreeIndex`, `TreeTargets`), any container standing for what it
+/// holds until it is gone into.
 extension DesignStore {
-    /// What is on a screen, or on the open canvas, back to front, as the design's own list
-    /// holds it: group items included, and each thing with its own lock and hide.
-    func children(on host: ElementRef.Host) -> [DesignElement] {
-        content.children(of: host.parent)
+    // MARK: Selecting with containers
+
+    /// The containers that hold something, at any depth, the nearest first: a card, row, column, grid or
+    /// overlay as much as a group. A screen's root isn't one: it is the screen. Read from the index.
+    func groups(holding ref: NodeRef) -> [NodeRef] {
+        let memo = index
+        return memo.ancestors(of: ref.node).compactMap { id in
+            guard let entry = memo[id], !entry.path.isEmpty else { return nil }
+            return NodeRef(host: ref.host, node: id)
+        }
     }
 
-    /// The group items on a screen, or on the open canvas, back to front.
-    func groupItems(on host: ElementRef.Host) -> [DesignElement] {
-        children(on: host).filter { $0.kind == .group }
+    /// What a tap on `leaf` picks while the containers in `entered` have been gone into (something
+    /// in each is selected): the outermost of it and the containers above it that hasn't been,
+    /// which is `leaf` itself once all of them have. A container stands for a tap in the gap
+    /// between what it holds.
+    func pickTarget(for leaf: NodeRef, entered: Set<UUID>) -> NodeRef {
+        groups(holding: leaf).last { !entered.contains($0.node) } ?? leaf
     }
 
-    /// A group item, or nil when there is none by that identifier.
-    func groupItem(_ id: DesignElement.ID) -> DesignElement? {
-        element(id).flatMap { $0.kind == .group ? $0 : nil }
-    }
-
-    /// Whether an element is locked: by itself, or by a group above it. Looked up in the
-    /// store's index rather than the list.
-    func isLockedWithItsGroups(_ element: DesignElement) -> Bool {
-        element.isLocked || element.group != nil && DesignContent.groups(above: element, find: self.element(_:)).contains(where: \.isLocked)
-    }
-
-    // MARK: Selecting with groups
-
-    /// The groups above an element on its host, the nearest first, looked up in the store's
-    /// index rather than the list.
-    private func groups(above element: DesignElement) -> [DesignElement] {
-        Array(DesignContent.groups(above: element, find: self.element(_:)).prefix { $0.parent == element.parent })
-    }
-
-    /// The groups that hold something, at any depth, the nearest first.
-    func groups(holding ref: ElementRef) -> [ElementRef] {
-        guard let element = element(ref.element) else { return [] }
-        return groups(above: element).map { ElementRef(host: ref.host, element: $0.id) }
-    }
-
-    /// What a tap on `leaf` picks while the groups in `entered` have been gone into (something
-    /// in each is selected): the outermost of it and the groups above it that hasn't been,
-    /// which is `leaf` itself once all of them have. A group item stands for a tap in the gap
-    /// between its members.
-    func pickTarget(for leaf: ElementRef, entered: Set<DesignElement.ID>) -> ElementRef {
-        groups(holding: leaf).last { !entered.contains($0.element) } ?? leaf
-    }
-
-    /// One level in from `outer` towards `leaf`: the group just inside `outer` on the way to
+    /// One level in from `outer` towards `leaf`: the container just inside `outer` on the way to
     /// `leaf`, or `leaf` itself. `leaf` when `outer` is `leaf`, or doesn't hold it.
-    func nextLevel(in outer: ElementRef, towards leaf: ElementRef) -> ElementRef {
+    func nextLevel(in outer: NodeRef, towards leaf: NodeRef) -> NodeRef {
         let path = [leaf] + groups(holding: leaf)
         guard let index = path.firstIndex(of: outer), index > 0 else { return leaf }
         return path[index - 1]
     }
 
-    /// The topmost thing in a group, at any depth, that isn't a group itself and is shown,
-    /// whose turned frame holds a point on the canvas: what a tap on the group's target there
-    /// is on. Nil in a gap between its members.
-    ///
-    /// Only the group's own block is looked at. Kept sound, a group's members, and theirs,
-    /// are one run just behind its item among the things on its host, drawings apart, so the
-    /// block is read from the item back, front to back, to the first thing on the host that
-    /// isn't in the group.
-    func leaf(at point: CGPoint, in group: DesignElement.ID) -> ElementRef? {
-        guard let item = groupItem(group), let end = indexInList(of: group) else { return nil }
-        let host: ElementRef.Host = item.parent.map { .screen($0) } ?? .canvas
-        let onScreen = item.parent.flatMap { screen($0)?.placement }
-        let elements = content.elements
-        for element in elements[..<end].reversed() where element.parent == item.parent && element.kind != .drawing {
-            let above = groups(above: element)
-            guard above.contains(where: { $0.id == group }) else { break }
-            guard element.kind != .group, !element.isHidden, !above.contains(where: \.isHidden),
-                  let placement = onScreen ?? (element.parent == nil ? Placement(origin: .zero, scale: element.scale ?? 1) : nil),
-                  TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point)
-            else { continue }
-            return ElementRef(host: host, element: element.id)
-        }
-        return nil
-    }
-
-    /// What can be touched on a screen, or on the open canvas, back to front as it is drawn,
-    /// while the groups in `entered` have been gone into:
-    /// - each thing that isn't in a group, or is only in groups gone into;
-    /// - each group that hasn't been gone into but whose groups above it have, in its block's
-    ///   place, standing for its members, which have none of their own.
-    ///
-    /// What is hidden, by itself or with a group above it, has none. Nor has a drawing that
-    /// isn't locked: its ink is picked, not its frame.
-    ///
-    /// On the open canvas a locked drawing comes after the other floating things, as the canvas
-    /// draws it above them (C3, L10): hit order is draw order. This is the one place that
-    /// order lives, and what is built from the targets, and hover, follow it.
-    func targets(on host: ElementRef.Host, entered: Set<DesignElement.ID>) -> [ElementRef] {
-        let showing = groupsWithSomethingShowing()
-        var found = children(on: host).filter { isTarget($0, entered: entered, showing: showing) }
-        if host == .canvas { found = Self.drawnOrder(found) }
-        return found.map { ElementRef(host: host, element: $0.id) }
-    }
-
-    /// Floating things as the canvas draws them, back to front: a drawing, which can only be
-    /// touched while it is locked, above everything else on the open canvas.
-    private static func drawnOrder(_ things: [DesignElement]) -> [DesignElement] {
-        guard things.contains(where: { $0.kind == .drawing }) else { return things }
-        return things.filter { $0.kind != .drawing } + things.filter { $0.kind == .drawing }
-    }
-
-    /// `targets(on:entered:)` for every screen and the open canvas at once, as the elements
-    /// themselves, each with its own lock and hide: one pass over the list, where a pass for
-    /// each host went over all of it once a screen. Kept until the content changes, or other
-    /// groups are gone into: hover asks on every move of the pen.
-    func targetElements(entered: Set<DesignElement.ID>) -> [ElementRef.Host: [DesignElement]] {
-        keptTargets(entered: entered) {
-            #if DEBUG
-            CanvasWork.targetPasses += 1
-            #endif
-            var found: [ElementRef.Host: [DesignElement]] = [:]
-            let showing = groupsWithSomethingShowing()
-            for element in content.elements where isTarget(element, entered: entered, showing: showing) {
-                found[element.parent.map { .screen($0) } ?? .canvas, default: []].append(element)
-            }
-            if let floating = found[.canvas] { found[.canvas] = Self.drawnOrder(floating) }
-            return found
-        }
-    }
-
-    /// The groups that have something showing in them, at any depth: a member that isn't a
-    /// group, hidden neither by itself nor by a group above it. One pass over the list, the
-    /// groups above each member that shows marked as it goes, where asking each group for its
-    /// leaves went over the list for every group.
-    private func groupsWithSomethingShowing() -> Set<DesignElement.ID> {
-        // A design without groups costs one scan, and no dictionary.
-        guard content.elements.contains(where: { $0.kind == .group }) else { return [] }
-        var byID: [DesignElement.ID: DesignElement] = [:]
-        for element in content.elements where byID[element.id] == nil { byID[element.id] = element }
-        var showing: Set<DesignElement.ID> = []
-        for leaf in content.elements where leaf.kind != .group && leaf.group != nil && !leaf.isHidden {
-            guard !DesignContent.groups(above: leaf, find: { byID[$0] }).contains(where: \.isHidden) else { continue }
-            // Up the chain of groups it says it is in; what is above one already marked is too.
-            var seen: Set<DesignElement.ID> = [leaf.id]
-            var next = leaf.group
-            while let id = next, seen.insert(id).inserted, showing.insert(id).inserted {
-                next = byID[id]?.group
-            }
-        }
-        return showing
-    }
-
-    private func isTarget(_ element: DesignElement, entered: Set<DesignElement.ID>, showing: Set<DesignElement.ID>) -> Bool {
-        guard !element.isHidden, element.isPickedByItsFrame else { return false }
-        // A group with nothing showing in it has nothing to touch.
-        if element.kind == .group, !showing.contains(element.id) { return false }
-        if element.group != nil {
-            guard groups(above: element).allSatisfy({ entered.contains($0.id) && !$0.isHidden }) else { return false }
-        }
-        // A group gone into is stood for by what is in it.
-        return element.kind != .group || !entered.contains(element.id)
-    }
-
     // MARK: Moving, landing and resizing a group
 
-    /// What turns an element's frame into canvas points, where it is: its screen's placement,
-    /// or on the open canvas its own scale. Nil when its screen is gone.
-    func placement(of element: DesignElement) -> Placement? {
-        guard let parent = element.parent else { return Placement(origin: .zero, scale: element.scale ?? 1) }
-        return screen(parent)?.placement
-    }
-
-    /// A group as a handle drag on it began: what each frame of the drag resizes it from, so
+    /// A container as a handle drag on it began: what each frame of the drag resizes it from, so
     /// that the frames don't compound and drift.
     struct GroupPose: Equatable, Sendable {
-        /// Its box: the group item's frame, in its own points.
+        /// Its box: its upright frame in its host's own points, centred on its turned shape's centre.
         var box: CGRect
-        /// The frame of each thing in it, at any depth, that isn't a group.
-        var leaves: [DesignElement.ID: CGRect]
-        /// Those of them whose kind keeps its height when it is resized, a divider: only their
-        /// width is scaled.
-        var keepingHeight: Set<DesignElement.ID>
-        /// The least the group can be scaled by: any less, and something in it would be smaller
-        /// than its kind can be. Never more than 1: one that already is stops it shrinking.
+        /// It and everything in it, as the drag began: what each frame scales.
+        var node: LayerNode
+        /// The least it can be scaled by: any less, and something in it would be smaller than its
+        /// kind can be. Never more than 1: one that already is stops it shrinking.
         var smallestScale: CGFloat
+        /// Whether it is a row, column, grid or overlay itself, its own one leaf: resized by its
+        /// frame, with what is in it laid out by the engine.
+        var isLaidOut = false
+        /// Where what holds it sat: its own frame is put back as it was only while that is so. A group sized to fit
+        /// moves its box, and every frame in it, as what it holds grows past its edges.
+        var parentSpace: TreeIndex.OwnSpace = .host
     }
 
-    /// A group as it is now: see `GroupPose`. Nil when `ref` isn't a group.
-    func groupPose(of ref: ElementRef) -> GroupPose? {
-        guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        var pose = GroupPose(box: item.frame, leaves: [:], keepingHeight: [], smallestScale: 0)
-        for element in content.contents(of: item.id) where element.kind != .group {
-            pose.leaves[element.id] = element.frame
-            let spec = element.kind.spec
-            if spec.hasFixedHeight { pose.keepingHeight.insert(element.id) }
-            var smallest = element.frame.width > 0 ? spec.minimumSize.width / element.frame.width : 1
-            if !spec.hasFixedHeight, element.frame.height > 0 { smallest = max(smallest, spec.minimumSize.height / element.frame.height) }
+    /// A container as it is now, read from the tree: see `GroupPose`. Nil when `ref` isn't a container
+    /// where the ref says. A row, column, grid or overlay in it counts as one leaf, and one resized
+    /// itself is its own one leaf: what is in it is laid out by the engine, never scaled.
+    func groupPose(of ref: NodeRef) -> GroupPose? {
+        guard let placed = placed(ref), placed.node.isContainer,
+              let parentSpace = index.posed(ref.node, in: tree)?.parentSpace else { return nil }
+        let isLaidOut = placed.node.resolvedLayout != .free
+        var pose = GroupPose(box: placed.frame, node: placed.node, smallestScale: 0, isLaidOut: isLaidOut, parentSpace: parentSpace)
+        func consider(_ leaf: LayerNode) {
+            let spec = leaf.kind.spec
+            var smallest = leaf.frame.width > 0 ? spec.minimumSize.width / leaf.frame.width : 1
+            if !spec.hasFixedHeight, leaf.frame.height > 0 { smallest = max(smallest, spec.minimumSize.height / leaf.frame.height) }
             pose.smallestScale = max(pose.smallestScale, min(smallest, 1))
         }
+        func visit(_ node: LayerNode) {
+            for child in node.children {
+                if child.isContainer, child.resolvedLayout == .free { visit(child) } else { consider(child) }
+            }
+        }
+        if isLaidOut { consider(placed.node) } else { visit(placed.node) }
         return pose
     }
 
     /// The most a group can be scaled to, by a frame asked for in one go.
     static let largestGroupScale: CGFloat = 100
 
-    /// Resizes a group to `frame`, in its own points, as one change: from `start`, the group as
-    /// a handle drag on it began, or from where it is now. With s the new box's width over the
-    /// start's, the middle of each thing in it, at any depth, goes where it was in the start box,
-    /// read along the box's own axes, in the new one; and each one's frame is s times as large,
+    /// A container's X, Y, W and H, in its host's points as the Format panel shows them: the box's X and Y, and its
+    /// width and height, in its own axes when it is turned. The panel's fields (`AppModel.setGroupBox`, in its own edit)
+    /// and voice's `moveElement` (in its command's step) both come this way.
+    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the change is in the host's
+    ///   points, and `position` takes canvas points.
+    /// - W or H scales everything in it in proportion, both sides by the side given, from its top-left: a container is
+    ///   scaled by the ratio of its widths, so a width as it is with a new height changes nothing, and an H given alone
+    ///   scales by the heights (L8). A row, column, grid or overlay is scaled the same way, and fixed on both axes that
+    ///   change (`resizeGroup`).
+    ///
+    /// Nothing happens to a container that is locked, by itself or by one above it. Read from the tree.
+    func setBox(of ref: NodeRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+        if x != nil || y != nil, let item = placed(ref), item.node.isContainer {
+            let box = item.canvasShape.bounds
+            let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
+            let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
+            position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
+        }
+        if width != nil || height != nil, let item = placed(ref), item.node.isContainer,
+           item.frame.width > 0, item.frame.height > 0 {
+            // The side given exactly; given both, the width, as the ratio is the widths'.
+            let box = item.frame
+            let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
+                ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
+            resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
+        }
+    }
+
+    /// Resizes a container to `frame`, in its host's own points, as one change on the tree: from
+    /// `start`, the container as a handle drag on it began, or from where it is now. With s the new
+    /// box's width over the start's, the middle of each thing in it goes where it was in the start
+    /// box, read along the box's own axes, in the new one; and each one's frame is s times as large,
     /// apart from the height of a kind that keeps its height, a divider. Their angles, and their
     /// text's size, stay as they are, so that a turned member is never sheared. A frame in
-    /// proportion with the box, as the handles and the fields give, scales everything alike; the
-    /// box is then fitted round them again (`keepGroupsSound()`). Made smaller than something in
-    /// it can be, it is scaled only as far as that can go, about the same point. Nothing happens
-    /// to a group that is locked, by itself or by a group above it.
-    func resizeGroup(_ ref: ElementRef, to frame: CGRect, from start: GroupPose? = nil) {
-        guard let (item, placement) = resolve(ref), item.kind == .group, !isLocked(.element(ref)),
+    /// proportion with the box, as the handles and the fields give, scales everything alike; a
+    /// container that fits what it holds is then fitted round it again by the tree's rules. Made
+    /// smaller than something in it can be, it is scaled only as far as that can go, about the same
+    /// point. Nothing happens to a container that is locked, by itself or by one above it.
+    ///
+    /// A row, column, grid or overlay in it is one leaf, scaled as one and fixed at its new size,
+    /// and what is in it is laid out again. One resized itself takes `frame` as it is: it is fixed
+    /// on each axis whose size changed, and the engine lays out what is in it.
+    func resizeGroup(_ ref: NodeRef, to frame: CGRect, from start: GroupPose? = nil) {
+        // Read from the tree, as every frame of a handle's drag reads it, so that a frame builds no more than the
+        // store's index.
+        guard let group = placed(ref), group.node.isContainer, !group.isLocked,
               let pose = start ?? groupPose(of: ref), pose.box.width > 0, pose.box.height > 0, frame.width > 0, frame.height > 0
         else { return }
         // A typed number can be anything Double reads, infinity included: finite, and at most a
-        // hundred times the box it began as, or its members go non-finite and the design can't be saved.
+        // hundred times the box it began as, or what is in it goes non-finite and the design can't be saved.
         guard frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite else { return }
         var frame = frame
         frame.size.width = min(frame.width, pose.box.width * Self.largestGroupScale)
@@ -514,248 +148,150 @@ extension DesignStore {
             let centre = CGPoint(x: fixed.x + (from.x - fixed.x) * scale, y: fixed.y + (from.y - fixed.y) * scale)
             frame = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
         }
-        var frames: [DesignElement.ID: CGRect] = [:]
-        if frame == pose.box {
-            // Back where it began: exactly as it was, with no arithmetic to round.
-            frames = pose.leaves
+        guard let entry = index[ref.node], let posed = index.posed(ref.node, in: tree) else { return }
+        // Read from the pose, not the design: each frame of a handle's drag scales what was there as it began.
+        var resized = posed.node
+        // Back where it began, in a parent where it was, exactly as it was, with no arithmetic to round.
+        resized.frame = frame == pose.box && posed.parentSpace == pose.parentSpace ? pose.node.frame : posed.parentSpace.local(of: frame)
+        if pose.isLaidOut {
+            (resized.width, resized.height) = (pose.node.width, pose.node.height)
+            Self.fix(&resized, from: pose.node.frame.size, to: frame.size)
         } else {
-            let degrees = item.resolvedRotation
             let across = CGSize(width: frame.width / pose.box.width, height: frame.height / pose.box.height)
-            /// Where a point in the start box goes in the new one, both in the points of `own`.
-            func moved(_ point: CGPoint, in own: Placement) -> CGPoint {
-                let from = own == placement ? pose.box : own.localRect(for: placement.canvasRect(for: pose.box))
-                let to = own == placement ? frame : own.localRect(for: placement.canvasRect(for: frame))
-                let upright = Rotation.normalized(degrees) == 0
-                let along = upright ? point : Rotation.rotate(point, about: CGPoint(x: from.midX, y: from.midY), by: -degrees)
-                let placed = CGPoint(x: to.minX + (along.x - from.minX) * across.width, y: to.minY + (along.y - from.minY) * across.height)
-                return upright ? placed : Rotation.rotate(placed, about: CGPoint(x: to.midX, y: to.midY), by: degrees)
-            }
-            for (id, start) in pose.leaves {
-                guard let leaf = element(id), let own = self.placement(of: leaf) else { continue }
-                let centre = moved(CGPoint(x: start.midX, y: start.midY), in: own)
-                let size = CGSize(width: start.width * scale, height: pose.keepingHeight.contains(id) ? start.height : start.height * scale)
-                frames[id] = CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2, width: size.width, height: size.height)
-            }
+            resized = Self.scaling(resized, from: pose.node, across: across, by: scale)
         }
-        apply { content in
-            for (id, frame) in frames { content.update(id) { $0.frame = frame } }
+        guard resized != posed.node else { return }
+        let written = resized
+        changeTree(writing: 1) { tree in
+            tree.changeNode(on: entry.host, at: entry.path) { $0 = written }
         }
     }
 
-    /// Gives a group to whatever the middle of its box now lies on, as after a drag: the
-    /// screen there, or the open canvas when there is none. Everything in it, at any depth,
-    /// goes there in one change, back to front, so that it lands whole and stacked as it was,
-    /// on top of what is there; built over several, the groups would be put right in between
-    /// and come apart. It lands as one element does, keeping its middle where it is on the
-    /// canvas and its size in points: each thing in it keeps its size in its own points, and
-    /// its distance from the box's middle in them, so that on a screen drawn at another scale
-    /// the group arrives whole, scaled about its middle, rather than with its members spaced
-    /// as they were on the canvas, overlapping or apart. A group holding something that
-    /// doesn't go on screens, a sticky note, stays where it is instead of landing on a screen.
-    /// Returns where the group now lives.
-    @discardableResult
-    func rehostGroup(_ ref: ElementRef) -> ElementRef {
-        guard let (item, placement) = resolve(ref), item.kind == .group else { return ref }
-        // Worked out as a turn under way works it out (`TurnSession.rehosted`), to the last bit.
-        let middle = placement.canvasPoint(for: CGPoint(x: item.frame.midX, y: item.frame.midY))
-        let target = screen(at: middle)
-        let host: ElementRef.Host = target.map { .screen($0.id) } ?? .canvas
-        guard host != ref.host else { return ref }
-        let inside = content.contents(of: item.id)
-        if target != nil, inside.contains(where: { $0.kind != .group && !$0.kind.belongsOnScreens }) { return ref }
-        let moving = Set(inside.map(\.id) + [item.id])
-        var moves: [(id: DesignElement.ID, scale: CGFloat, frame: CGRect)] = []
-        for element in content.elements where moving.contains(element.id) {
-            guard let own = self.placement(of: element) else { return ref }
-            // Off a screen it keeps the scale it was drawn at, so it doesn't change size.
-            let landing = target?.placement ?? Placement(origin: .zero, scale: own.scale)
-            let onCanvas = own.canvasPoint(for: CGPoint(x: element.frame.midX, y: element.frame.midY))
-            let centre = landing.localPoint(for: Self.landedMiddle(of: onCanvas, about: middle, from: own, to: landing))
-            var origin = CGPoint(x: centre.x - element.frame.width / 2, y: centre.y - element.frame.height / 2)
-            // A group's box is fitted round its members once they have landed.
-            if element.kind != .group, element.kind != .drawing { origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
-            moves.append((element.id, landing.scale, CGRect(origin: origin, size: element.frame.size)))
+    /// `node` with what it holds scaled from `start`, as it was when a resize began: matched by id, each
+    /// child's middle at its own across `across` from the box's top-left, where its own space starts,
+    /// and its frame `scale` times as large, a divider's height kept. A free container in it is scaled
+    /// the same way through, its own space as much larger as it is; a row, column, grid or overlay is
+    /// fixed at its new size on each axis that changed, for the engine to lay out what it holds.
+    private static func scaling(_ node: LayerNode, from start: LayerNode, across: CGSize, by scale: CGFloat) -> LayerNode {
+        var node = node
+        let was = Dictionary(start.children.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for index in node.children.indices {
+            guard let before = was[node.children[index].id] else { continue }
+            var child = node.children[index]
+            let keepsHeight = !before.isContainer && before.kind.spec.hasFixedHeight
+            let size = CGSize(width: before.frame.width * scale, height: keepsHeight ? before.frame.height : before.frame.height * scale)
+            child.frame = CGRect(x: before.frame.minX * across.width + (before.frame.width * across.width - size.width) / 2,
+                                 y: before.frame.minY * across.height + (before.frame.height * across.height - size.height) / 2,
+                                 width: size.width, height: size.height)
+            if before.isContainer, before.resolvedLayout == .free {
+                child = scaling(child, from: before, across: CGSize(width: scale, height: scale), by: scale)
+            } else if before.isContainer {
+                (child.width, child.height) = (before.width, before.height)
+                fix(&child, from: before.frame.size, to: size)
+            }
+            node.children[index] = child
         }
-        apply { content in
-            for move in moves { content.move(move.id, to: target?.id, scale: move.scale, frame: move.frame) }
-        }
-        let landed = ElementRef(host: host, element: item.id)
-        return resolve(landed) != nil ? landed : ref
+        return node
     }
 
-    /// Where the middle of something in a group lands on the canvas, given at `point`, as the
-    /// group lands with its box's middle at `middle`: as far from it in the points of
-    /// `landing`, the placement it lands in, as it was in those of `own`, where it was.
-    nonisolated static func landedMiddle(of point: CGPoint, about middle: CGPoint, from own: Placement, to landing: Placement) -> CGPoint {
-        guard own.scale > 0, landing.scale != own.scale else { return point }
-        let ratio = landing.scale / own.scale
-        return CGPoint(x: middle.x + (point.x - middle.x) * ratio, y: middle.y + (point.y - middle.y) * ratio)
+    /// `.fixed` on each axis whose size changed.
+    private static func fix(_ node: inout LayerNode, from old: CGSize, to new: CGSize) {
+        if new.width != old.width { node.width.mode = .fixed }
+        if new.height != old.height { node.height.mode = .fixed }
     }
 
     // MARK: Group and Ungroup
 
     /// Whether Group would make a group of what is selected: see `group(_:)`.
     func canGroup(_ selection: CanvasSelection) -> Bool {
-        groupable(selection) != nil
+        canGroup(selection, as: .group)
     }
 
     /// Puts what is selected in a new group, as one step, and returns the group. Locked
     /// things and drawings are left out of it; the rest are to be two or more, on one screen
-    /// or all on the open canvas, and in one group (or none) without being all of that group,
+    /// or all on the open canvas, and in one container (or none) without being all of it,
     /// with no screen among what is selected. Nil, and nothing changes, when they aren't.
     ///
-    /// The group is made in the group its members are in, and is built whole in one change:
-    /// an item added on its own, with no members, would be taken away at the end of that
-    /// change (see `DesignContent.keepGroupsSound()`), which also gathers the members, from
-    /// wherever they were, just behind the item, where the frontmost of them was, and fits
-    /// the item's box round them. On the open canvas the item is drawn at its frontmost
-    /// member's scale; members drawn at others are boxed in canvas points (L5). It is named
-    /// as its kind until it is renamed.
+    /// The group is a free one, wrapped round them in the container they are in, in the slot
+    /// of the frontmost of them, which a row or a column then lays out as one thing (`wrap`).
+    /// It fits round them on both axes, so nothing moves. On the open canvas it is drawn at its
+    /// frontmost member's scale; members drawn at others are boxed in canvas points (L5). It
+    /// is named as its kind until it is renamed. Group as a group (`group(_:as:)`), which also refuses a wrap past the
+    /// store's depth and node limits (F15).
     @discardableResult
-    func group(_ selection: CanvasSelection) -> ElementRef? {
-        guard let members = groupable(selection), let front = members.last else { return nil }
-        var item = Self.newElement(.group)
-        item.group = front.element.group
-        let made = item
-        apply { content in
-            content.add(made, to: front.element.parent, scale: front.element.scale)
-            for member in members { content.update(member.element.id) { $0.group = made.id } }
-        }
-        let ref = ElementRef(host: front.ref.host, element: made.id)
-        return resolve(ref) != nil ? ref : nil
+    func group(_ selection: CanvasSelection) -> NodeRef? {
+        group(selection, as: .group)
     }
 
-    /// The things Group puts in a group, back to front, or nil when it can't: see `group(_:)`.
-    private func groupable(_ selection: CanvasSelection) -> [(ref: ElementRef, element: DesignElement)]? {
-        var members: [(ref: ElementRef, element: DesignElement)] = []
+    /// Today's Group rules, on node ids (F4): the unlocked things selected, with no drawings or screens, sharing one
+    /// parent, at least `minimum` of them, back to front. All of a free group is refused when
+    /// `refusingAllOfAFreeGroup`. Nil when they can't be grouped.
+    ///
+    /// A thing locked by itself or a container above it, a drawing, and a thing that is gone or no longer where the
+    /// selection says are left out; a screen among them refuses them all. One parent is one container, one screen's
+    /// root, or the canvas's top level. Every child of a free group, grouped, would make that group again under a new
+    /// id: left with one child, the old group would dissolve into the new, and its name and angle with it. A locked
+    /// child, left out, keeps the rest from being all of it. A row, column, grid or card doesn't dissolve, so all of
+    /// what one holds can be wrapped.
+    func groupable(_ selection: CanvasSelection, minimum: Int, refusingAllOfAFreeGroup: Bool) -> [UUID]? {
+        var members: [UUID] = []
         for thing in things(in: selection) {
             guard case .element(let ref) = thing else { return nil }
-            guard let element = resolve(ref)?.element, element.kind != .drawing, !isLocked(thing) else { continue }
-            members.append((ref, element))
+            guard let placed = placed(ref), placed.node.kind != .drawing, !placed.isLocked else { continue }
+            members.append(ref.node)
         }
-        guard members.count > 1, let first = members.first,
-              members.allSatisfy({ $0.ref.host == first.ref.host && $0.element.group == first.element.group })
-        else { return nil }
-        // Every member of the group they are in would make that group again under a new id:
-        // left with one member, the old group would dissolve into the new, and its name and
-        // angle with it. A locked member, left out, keeps the rest from being all of it.
-        if let shared = first.element.group, content.members(of: shared).count == members.count { return nil }
+        guard members.count >= max(minimum, 1), let first = members.first, let shared = parent(of: first),
+              members.allSatisfy({ parent(of: $0) == shared }) else { return nil }
+        if refusingAllOfAFreeGroup, case .node(let id) = shared, let group = node(id), group.kind == .group,
+           group.resolvedLayout == .free, group.children.count == members.count {
+            return nil
+        }
         return members
     }
 
     /// Takes a group apart, as one step, and returns its members as a selection. They go to
-    /// the group the group was in (or to none), where they are in the order, and take on its
-    /// lock and hide, so that a hidden group's members don't reappear. Not its members'
-    /// groups: those stay whole. Nil, and nothing changes, when `ref` isn't a group.
+    /// the container the group was in (or to none), in the group's slot, so that a row they
+    /// join lays them out there (`unwrap`). Each stays where it is on screen, its turn and the
+    /// group's added up, and takes on the group's lock and hide, so that a hidden group's
+    /// members don't reappear. Not its members' groups: those stay whole. Nil, and nothing
+    /// changes, when `ref` isn't a container where it says, or holds something this build couldn't read. A card, row,
+    /// column, grid or overlay is taken apart as a group is. Read from the tree.
+    ///
+    /// Taking apart a row, column or grid the structure pass made declines what it held, so
+    /// that the pass never puts it back (plan 5, call 11). The marks are part of the step
+    /// (plan 5's final review, A9): undoing it puts the container back with nothing declined.
     @discardableResult
-    func ungroup(_ ref: ElementRef) -> CanvasSelection? {
-        guard let item = resolve(ref)?.element, item.kind == .group else { return nil }
-        let members = content.members(of: item.id)
-        apply { content in
-            for member in members {
-                content.update(member.id) {
-                    $0.group = item.group
-                    $0.isLocked = $0.isLocked || item.isLocked
-                    $0.isHidden = $0.isHidden || item.isHidden
-                }
-            }
-            content.remove([item.id])
+    func ungroup(_ ref: NodeRef) -> CanvasSelection? {
+        guard let item = placed(ref), item.node.isContainer else { return nil }
+        let wasThePasses = item.node.sketch?.decidedBy == .structure
+        var members: [UUID] = []
+        asOneStep {
+            members = unwrap(ref.node)
+            if wasThePasses { apply { $0 = Self.declining(Set(members), in: $0) } }
         }
-        return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0.id)) })
+        return CanvasSelection(members.map { .element(NodeRef(host: ref.host, node: $0)) })
     }
 
-    /// Unlocks what is selected and, so that it is unlocked, every locked group above it, as
-    /// one step. A thing locked only by its group would otherwise stay locked (conflict D).
+    /// Unlocks what is selected and, so that it is unlocked, every locked container above it, as
+    /// one step: a thing locked only by its container would otherwise stay locked (Ruling D). Each
+    /// one's own flag is written; the containers are found through the index.
     func unlock(_ selection: CanvasSelection) {
-        let present = things(in: selection)
-        var groups: [DesignElement.ID] = []
-        for case .element(let ref) in present {
-            guard let element = resolve(ref)?.element else { continue }
-            groups += DesignContent.groups(above: element, find: self.element(_:)).filter(\.isLocked).map(\.id)
-        }
-        apply { content in
-            for thing in present {
-                switch thing {
-                case .element(let ref):
-                    content.update(ref.element) { $0.isLocked = false }
-                case .screen(let id):
-                    content.updateScreen(id) { $0.isLocked = nil }
-                case .several:
-                    continue
+        let memo = index, tree = tree
+        var nodes: [UUID] = []
+        var screens: [TreeScreen.ID] = []
+        for thing in things(in: selection) {
+            switch thing {
+            case .element(let ref):
+                nodes.append(ref.node)
+                nodes += memo.ancestors(of: ref.node).filter { id in
+                    memo[id].map { !$0.path.isEmpty } == true && memo.node(id, in: tree)?.isLocked == true
                 }
-            }
-            for id in groups { content.update(id) { $0.isLocked = false } }
-        }
-    }
-}
-
-extension DesignStore.ElementRef.Host {
-    /// The screen it is, or nil for the open canvas: what an element there has as its `parent`.
-    var parent: DesignScreen.ID? {
-        if case .screen(let id) = self { id } else { nil }
-    }
-}
-
-// MARK: The Layers tree
-
-/// One row of the Layers panel's tree: a thing and what is in it, with the lock and hide it
-/// has through the groups above it. Never given to a row itself: a frame changes on every
-/// frame of a drag.
-struct LayerNode: Identifiable {
-    var element: DesignElement
-    var ref: DesignStore.ElementRef
-    /// What is in it, topmost first: empty for anything but a group.
-    var children: [LayerNode]
-    /// Hidden by its own flag or a group above it.
-    var isHiddenWithItsGroups: Bool
-    /// Locked by its own flag or a group above it.
-    var isLockedWithItsGroups = false
-
-    var id: DesignElement.ID { element.id }
-}
-
-extension DesignStore {
-    /// What is on a screen, or on the open canvas, as the Layers panel shows it: the things at
-    /// the top level, topmost first, each group's members under it, topmost first, and no
-    /// drawings (see `drawings`). Built from `SiblingLists`, which holds the rule for which
-    /// list a thing is in. Each node has its own flags for the toggles, and the effective
-    /// ones, worked down from the top once, not looked up for each row.
-    func layerTree(on host: ElementRef.Host) -> [LayerNode] {
-        let things = children(on: host)
-        let lists = SiblingLists(things).lists
-        let byID = Dictionary(things.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var seen: Set<DesignElement.ID> = []
-        func nodes(in list: DesignElement.ID?, hidden: Bool, locked: Bool) -> [LayerNode] {
-            (lists[list] ?? []).reversed().compactMap { id in
-                guard let element = byID[id], seen.insert(id).inserted else { return nil }
-                let isHidden = hidden || element.isHidden
-                let isLocked = locked || element.isLocked
-                return LayerNode(
-                    element: element, ref: ElementRef(host: host, element: id),
-                    children: element.kind == .group ? nodes(in: id, hidden: isHidden, locked: isLocked) : [],
-                    isHiddenWithItsGroups: isHidden, isLockedWithItsGroups: isLocked
-                )
+            case .screen(let id):
+                screens.append(id)
+            case .several:
+                continue
             }
         }
-        return nodes(in: nil, hidden: false, locked: false)
-    }
-
-    /// The drawings on the open canvas, topmost first: listed in a section of their own.
-    var drawings: [ElementRef] {
-        children(on: .canvas).filter { $0.kind == .drawing }.reversed().map { ElementRef(host: .canvas, element: $0.id) }
+        setOwnLocks(false, nodes: nodes, screens: screens)
     }
 }
-
-#if DEBUG
-/// How much of the design the groups' own questions walk: for the tests that hold working out
-/// what can be touched to a pass over the list. Counted on the main thread alone, where the
-/// store works it out. The count only grows: a test measures the difference it makes.
-enum GroupWork {
-    nonisolated(unsafe) private(set) static var leafWalks = 0
-
-    static func leafWalked() {
-        guard Thread.isMainThread else { return }
-        leafWalks += 1
-    }
-}
-#endif

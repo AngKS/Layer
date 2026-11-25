@@ -128,7 +128,9 @@ struct GetDesignLayoutIntent: AppIntent {
         """
         Returns a Layer design as JSON with every position and size: each screen's device, canvas position and \
         scale, and its elements' frames in the screen's own points, text and look; loose elements in canvas \
-        points; the canvas settings; and how much ink is drawn. Use it to see exactly where things are before \
+        points; the canvas settings; and how much ink is drawn. Each element also gives its sizing, its rotation \
+        and its parent, the container it is in. Each screen gives its layout and lists its containers, groups and \
+        cards, with their layout, sizing, rotation and children. Use it to see exactly where things are before \
         moving, styling or drawing.
         """,
         categoryName: "Designs"
@@ -198,23 +200,25 @@ struct GenerateSwiftUICodeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let source: (screen: DesignScreen, content: DesignContent)
+        let source: (screen: TreeScreen.ID, name: String, design: TreeContent)
         if let screen, let id = screen.screenID, let snapshot = await DesignActions.snapshot(design: screen.designID),
            let found = snapshot.content.screens.first(where: { $0.id == id }) {
-            source = (found, snapshot.content)
+            source = (found.id, found.name, snapshot.content)
         } else if screen == nil {
             let current = try await DesignActions.screenOrCurrent(nil)
-            source = (current.screen, current.model.store.content)
+            source = (current.screen.id, current.screen.name, current.model.store.tree)
         } else {
             throw LayerIntentError.screenNotFound
         }
-        let code = Self.code(for: source.screen, in: source.content)
-        return .result(value: code, dialog: "Here's the SwiftUI for \(source.screen.name).")
+        guard let code = Self.code(for: source.screen, in: source.design) else { throw LayerIntentError.screenNotFound }
+        return .result(value: code, dialog: "Here's the SwiftUI for \(source.name).")
     }
 
-    /// The code for one screen of a design, its view named as the shared files and the code
-    /// panel name it: two screens called "Home" are `Home` and `Home2` (review M-8).
-    static func code(for screen: DesignScreen, in content: DesignContent) -> String {
-        SwiftUICodeGenerator.code(for: screen, among: content.screens, settings: content.canvas.code)
+    /// The code for one screen of a design, as Share and the code panel write it: its view named
+    /// as the shared files name it, so two screens called "Home" are `Home` and `Home2` (review
+    /// M-8), and the design's tokens after it when it uses them. Nil when the design has no such screen.
+    static func code(for screenID: TreeScreen.ID, in content: TreeContent) -> String? {
+        guard let screen = content.screens.first(where: { $0.id == screenID }) else { return nil }
+        return SwiftUICodeGenerator.code(for: screen, in: SwiftUICodeGenerator.Context(content), settings: content.settings.code)
     }
 }

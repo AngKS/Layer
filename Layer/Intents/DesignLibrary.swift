@@ -8,8 +8,8 @@ struct DesignSummary: Sendable {
     let title: String
     let modified: Date?
     /// Empty when the file couldn't be read, or, in the list of every design, when iCloud
-    /// hasn't downloaded it to this iPad.
-    let content: DesignContent
+    /// hasn't downloaded it to this iPad. A design this version refuses to open has no summary.
+    let content: TreeContent
     /// False for a design listed by its name alone, which iCloud hasn't downloaded: its
     /// content wasn't read, rather than empty.
     var isRead = true
@@ -82,15 +82,24 @@ enum DesignLibrary {
         return String(path.dropFirst(base.count))
     }
 
-    /// Reads one design, coordinating with iCloud and any app writing it. Reads the disk.
-    nonisolated static func read(_ url: URL) -> DesignSummary {
+    /// Reads one design, coordinating with iCloud and any app writing it. Nil for a design
+    /// this version can't open, one saved by an earlier or a newer version or one whose
+    /// design file can't be read at all: it is skipped, rather than listed as empty, and
+    /// Spotlight lets it go. Reads the disk.
+    nonisolated static func read(_ url: URL) -> DesignSummary? {
         let name = url.deletingPathExtension().lastPathComponent
         let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        var content = DesignContent()
+        var content = TreeContent()
+        var refused = false
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: .withoutChanges, error: &error) { readable in
-            if let read = try? DesignFile.content(at: readable) { content = read }
+            do {
+                content = try DesignFile.content(at: readable)
+            } catch is DesignFile.ReadError {
+                refused = true
+            } catch {}
         }
+        guard !refused else { return nil }
         return DesignSummary(id: id(for: url), url: url, title: content.title ?? name, modified: modified, content: content)
     }
 
@@ -107,8 +116,9 @@ enum DesignLibrary {
     /// this iPad is listed by its file's name alone: a coordinated read would download it,
     /// its pictures and ink included, and wait for that, and the list is made at every
     /// launch and for many of Siri's questions. A design unchanged since it was last read
-    /// isn't read again. Reads the disk.
-    nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary {
+    /// isn't read again. Nil for a design this version refuses to open, as `read` has it.
+    /// Reads the disk.
+    nonisolated static func listed(_ url: URL, isDownloaded: (URL) -> Bool = isDownloaded) -> DesignSummary? {
         guard isDownloaded(url) else { return byName(url, modified: modified(of: url)) }
         let stamp = Stamp(of: url)
         if let stamp, let kept = listedSummaries.withLock({ $0[url] }), kept.stamp == stamp { return kept.summary }
@@ -131,11 +141,12 @@ enum DesignLibrary {
         }
     }
 
-    private static let listedSummaries = OSAllocatedUnfairLock<[URL: (stamp: Stamp, summary: DesignSummary)]>(initialState: [:])
+    /// What each design read for the list was found to be, a refused one included.
+    private static let listedSummaries = OSAllocatedUnfairLock<[URL: (stamp: Stamp, summary: DesignSummary?)]>(initialState: [:])
 
     /// A design listed by its name alone, without reading it.
     private nonisolated static func byName(_ url: URL, modified: Date?) -> DesignSummary {
-        DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent(), isRead: false)
+        DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: TreeContent(), isRead: false)
     }
 
     private nonisolated static func modified(of url: URL) -> Date? {
@@ -173,12 +184,13 @@ enum DesignLibrary {
 
     /// Every design in `folders`, newest first, each as `listed` has it. A design iCloud
     /// keeps here only as a hidden placeholder is listed by its name, like one it keeps
-    /// under its own name with no contents. Hidden folders, iCloud's trash among them,
-    /// aren't looked in. Reads the disk.
+    /// under its own name with no contents. A design this version refuses to open is left
+    /// out. Hidden folders, iCloud's trash among them, aren't looked in. Reads the disk.
     nonisolated static func list(in folders: [URL], isDownloaded: (URL) -> Bool = isDownloaded) -> Listing {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
         var looked: [URL] = []
         var found: [String: DesignSummary] = [:]
+        var refused: Set<String> = []
         var present: Set<URL> = []
         for folder in folders {
             var isFolder: ObjCBool = false
@@ -189,12 +201,15 @@ enum DesignLibrary {
             for case let url as URL in items {
                 if !url.lastPathComponent.hasPrefix(".") {
                     guard url.pathExtension == "layer" else { continue }
-                    found[url.standardizedFileURL.path] = listed(url, isDownloaded: isDownloaded)
+                    let key = url.standardizedFileURL.path
+                    found[key] = listed(url, isDownloaded: isDownloaded)
+                    if found[key] == nil { refused.insert(key) }
                     present.insert(url)
                 } else if let design = design(heldBy: url) {
-                    // The design itself wins over a placeholder for it, should both be there.
+                    // The design itself wins over a placeholder for it, should both be there,
+                    // even when it is refused.
                     let key = design.standardizedFileURL.path
-                    if found[key] == nil { found[key] = byName(design, modified: modified(of: url)) }
+                    if found[key] == nil, !refused.contains(key) { found[key] = byName(design, modified: modified(of: url)) }
                 } else if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     items.skipDescendants()
                 }
@@ -227,7 +242,7 @@ enum DesignLibrary {
         }.value
     }
 
-    /// One design, read off the main thread. Nil when there is no such file.
+    /// One design, read off the main thread. Nil when there is no such file, or it is refused.
     static func summary(for id: String) async -> DesignSummary? {
         guard let url = url(for: id) else { return nil }
         return await Task.detached(priority: .userInitiated) { () -> DesignSummary? in

@@ -18,7 +18,7 @@ To run it again:
 
 ```sh
 TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b xcodebuild test \
-  -project Layer.xcodeproj -scheme Layer -testPlan CI \
+  -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI \
   -destination "platform=iOS Simulator,id=<simulator>" \
   -only-testing:LayerTests/VoiceAgentLiveTests
 ```

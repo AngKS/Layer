@@ -301,13 +301,13 @@ The line numbers are hints; search by name.
 ```bash
 SIM=$(xcrun simctl list devices | grep -F "Layer iPad Pro 11 (groups)" | grep -oE '[0-9A-F-]{36}')
 # Unit tests: one suite (a Swift Testing struct name), or a hosted one as HostedWindowSuites/<Suite>
-xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan CI \
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI \
   -destination "platform=iOS Simulator,id=$SIM" -only-testing:LayerTests/<Suite> 2>&1 | tail -30
 # All unit tests
-xcodebuild test -project Layer.xcodeproj -scheme Layer -testPlan CI -destination "platform=iOS Simulator,id=$SIM" 2>&1 | tail -30
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI -destination "platform=iOS Simulator,id=$SIM" 2>&1 | tail -30
 # UI tests: from a clean install, without the CI plan (it holds unit tests only)
 xcrun simctl uninstall "$SIM" kahshin.Layer
-xcodebuild test -project Layer.xcodeproj -scheme Layer -destination "platform=iOS Simulator,id=$SIM" \
+xcodebuild test -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -destination "platform=iOS Simulator,id=$SIM" \
   -only-testing:LayerUITests/SketchFlowUITests/<testName> 2>&1 | tail -30
 ```
 

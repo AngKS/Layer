@@ -6,6 +6,8 @@ struct CanvasScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.undoManager) private var undoManager
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// What the last A2UI dropped or pasted here made, and left out, until its sheet is put away (F19).
+    @State private var importReport: A2UIImportReport?
 
     var body: some View {
         let accent = Theme.accent.color
@@ -17,17 +19,26 @@ struct CanvasScreen: View {
                 LiveCanvasGrid()
 
                 OnCanvas {
-                    ForEach(model.store.screens) { screen in
-                        PhoneScreenView(screen: screen, showsName: model.store.canvas.showsFrameNames)
+                    // Drawn from the tree, each screen and canvas node compared by value: an edit draws
+                    // again only the views on its path.
+                    let tree = model.store.tree
+                    let tokens = tree.settings.tokens
+                    let showsNames = tree.settings.showsFrameNames
+                    let raised = model.screensBeingDraggedFrom
+                    ForEach(tree.screens) { screen in
+                        ScreenView(screen: screen, device: tree.device(of: screen), tokens: tokens, showsName: showsNames)
+                            .equatable()
                             .offset(x: screen.origin.x, y: screen.origin.y)
                             // An element dragged off its screen stays above the others until dropped.
-                            .zIndex(screensBeingDraggedFrom.contains(screen.id) ? 1 : 0)
+                            .zIndex(raised.contains(screen.id) ? 1 : 0)
                             .transition(.blurReplace)
                     }
-                    ForEach(model.store.floating) { floating in
-                        FloatingElementView(floating: floating)
-                            // A locked drawing is above the other things, as it is touched.
-                            .zIndex(floating.element.kind == .drawing ? 3 : 2)
+                    ForEach(tree.canvas) { node in
+                        CanvasNodeView(node: node, tokens: tokens)
+                            .equatable()
+                            // A locked drawing is above the other things, as it is touched. An unlocked one
+                            // draws nothing here: PencilKit draws it.
+                            .zIndex(node.kind == .drawing ? 3 : 2)
                             .transition(.blurReplace)
                     }
                 }
@@ -83,20 +94,8 @@ struct CanvasScreen: View {
         // ticks for a ruler. On a layer of their own behind the canvas, so that the handler
         // can be left out without the canvas itself being made anew each time.
         .background { WindowSqueeze() }
-        // Things dragged out of the library land where they are dropped: on a screen when
-        // dropped over one, on the open canvas otherwise.
-        .dropDestination(for: String.self) { ids, location in
-            let assets = ids.compactMap(AssetLibrary.asset(id:))
-            guard !assets.isEmpty else { return false }
-            withAnimation(.smooth(duration: 0.3)) {
-                for (index, asset) in assets.enumerated() {
-                    // Several at once fan out a little, rather than piling up.
-                    let offset = CGFloat(index) * 24
-                    model.addAsset(asset, at: CGPoint(x: location.x + offset, y: location.y + offset))
-                }
-            }
-            return true
-        }
+        // Things dragged out of the library, and A2UI dropped or pasted.
+        .modifier(CanvasDrops(model: model, report: $importReport))
         .ignoresSafeArea()
         // A screen being generated says how it is getting on, clear of the screen itself.
         // During a call the pill says it instead.
@@ -197,13 +196,50 @@ struct CanvasScreen: View {
             set: { model[keyPath: isOpen] = $0 }
         )
     }
+}
 
-    /// The screens that hold elements being dragged, one or several of them.
-    private var screensBeingDraggedFrom: Set<DesignScreen.ID> {
-        guard model.isAdjusting, let selection = model.selection else { return [] }
-        return Set(selection.things.compactMap { thing in
-            if case .element(let ref) = thing, case .screen(let id) = ref.host { id } else { nil }
-        })
+/// What the canvas takes. Things dragged out of the library land where they are dropped: on a screen when dropped over
+/// one, on the open canvas otherwise. A2UI dropped as text or a `.json` file becomes new screens from where it was
+/// dropped, and A2UI pasted with ⌘V becomes new screens where new screens go (call 17). What an import couldn't bring
+/// in as it was written is shown afterwards.
+///
+/// On iPadOS 27.2 a hardware keyboard's ⌘V doesn't reach `pasteDestination` here, with the pencil palette up or not,
+/// though ⌘Z does reach the app: plan 4, which rebuilds the canvas, takes that up. The add menu's Paste works.
+private struct CanvasDrops: ViewModifier {
+    let model: AppModel
+    @Binding var report: A2UIImportReport?
+
+    func body(content: Content) -> some View {
+        content
+            .dropDestination(for: CanvasDrop.DroppedText.self) { items, location in
+                switch CanvasDrop.payload(ofDropped: items) {
+                case .assets(let ids):
+                    withAnimation(.smooth(duration: 0.3)) {
+                        for (index, asset) in ids.compactMap(AssetLibrary.asset(id:)).enumerated() {
+                            // Several at once fan out a little, rather than piling up.
+                            let offset = CGFloat(index) * 24
+                            model.addAsset(asset, at: CGPoint(x: location.x + offset, y: location.y + offset))
+                        }
+                    }
+                    return true
+                case .a2ui(let data):
+                    let point = model.viewport.canvasPoint(for: location)
+                    Task { report = await model.importA2UI(data, near: point) }
+                    return true
+                case .tooLarge:
+                    report = A2UIImportReport(screens: [], diagnostics: [A2UIImporter.tooLarge])
+                    return true
+                case nil:
+                    return false
+                }
+            }
+            .pasteDestination(for: String.self) { strings in
+                guard case .a2ui(let data)? = CanvasDrop.payload(of: strings) else { return }
+                Task { report = await model.importA2UI(data) }
+            } validator: { strings in
+                strings.filter(A2UIImporter.looksLikeA2UI)
+            }
+            .a2uiImportSheet($report)
     }
 }
 
@@ -242,6 +278,22 @@ private struct CanvasEvents: ViewModifier {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.undoNotice ?? "")
+        }
+        .alert("Couldn't Add the Screen", isPresented: Binding(
+            get: { model.screenNotice != nil },
+            set: { if !$0 { model.screenNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.screenNotice ?? "")
+        }
+        .alert("Couldn't Add It", isPresented: Binding(
+            get: { model.addNotice != nil },
+            set: { if !$0 { model.addNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.addNotice ?? "")
         }
         .alert("Another Version Was Kept", isPresented: Binding(
             get: { model.keptVersionsNotice != nil },
@@ -292,7 +344,7 @@ private struct PanelSheet<Content: View>: View {
 
 /// Tells the model where a view is in its window's points, for a view that may sit in a
 /// presentation of its own, such as a sheet, where SwiftUI's global space is the sheet's.
-private struct WindowFrameReporter: UIViewRepresentable {
+struct WindowFrameReporter: UIViewRepresentable {
     let name: String
     let model: AppModel
 
@@ -401,7 +453,7 @@ private struct SheetSqueeze: View {
 /// is set. While off, the action is not there at all: an action that is there, even one that
 /// ignores the squeeze, stops PencilKit's palette coming up at the tip in Draw (seen on the
 /// iPad), and the system's own squeeze action elsewhere.
-private struct Squeezable: ViewModifier {
+struct Squeezable: ViewModifier {
     let router: SqueezeRouter
     let isOn: Bool
     /// Where the view is in the window, which its points are counted from.

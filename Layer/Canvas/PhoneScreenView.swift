@@ -1,151 +1,55 @@
 import SwiftUI
 
-/// A device screen and its elements, laid out in the screen's logical points and then
-/// scaled to its size on the canvas.
-struct PhoneScreenView: View {
-    @Environment(\.isCanvasZooming) private var isZooming
-    let screen: DesignScreen
-    var showsName = true
-
-    var body: some View {
-        let device = screen.device
-        let size = device.size
-        ZStack(alignment: .topLeading) {
-            // One soft shadow and a hairline edge. Shadows are redrawn on every frame of a
-            // zoom, and a wide one is the costliest thing on the canvas.
-            RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
-                .fill(.white)
-                // Left out mid-zoom: a shadow is redrawn for every frame the scale changes.
-                .shadow(color: .black.opacity(isZooming ? 0 : 0.08), radius: isZooming ? 0 : 16, y: isZooming ? 0 : 8)
-                .overlay {
-                    RoundedRectangle(cornerRadius: device.cornerRadius, style: .continuous)
-                        .strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
-                }
-
-            if device.family == .desktop {
-                menuBar(for: device)
-            } else {
-                statusBar(for: device)
-            }
-
-            ForEach(screen.elements.filter { !$0.isHidden }) { element in
-                ElementView(element: element)
-                    .frame(width: element.frame.width, height: element.frame.height)
-                    .rotationEffect(.degrees(element.resolvedRotation))
-                    .offset(x: element.frame.minX, y: element.frame.minY)
-                    .transition(.blurReplace)
-            }
-
-            if device.hasHomeIndicator {
-                let width: CGFloat = size.width > 600 ? 260 : 134
-                Capsule()
-                    .fill(Theme.homeIndicator)
-                    .frame(width: width, height: 5)
-                    .offset(x: (size.width - width) / 2, y: size.height - 13)
-            }
-
-            if showsName {
-                Text(screen.name)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.label)
-                    .fixedSize()
-                    .offset(x: 4, y: -30)
-            }
-        }
-        .frame(width: size.width, height: size.height, alignment: .topLeading)
-        .scaleEffect(screen.scale, anchor: .topLeading)
-        .frame(width: size.width * screen.scale, height: size.height * screen.scale, alignment: .topLeading)
-    }
-
-    /// A Mac's menu bar: the Apple menu and an app's menus on the left, status on the right.
-    private func menuBar(for device: DeviceFrame) -> some View {
-        HStack(spacing: 20) {
-            Image(systemName: "apple.logo")
-                .font(.system(size: 15, weight: .medium))
-            Text("App").font(.system(size: 13, weight: .bold))
-            ForEach(["File", "Edit", "View", "Window", "Help"], id: \.self) { menu in
-                Text(menu).font(.system(size: 13))
-            }
-            Spacer()
-            HStack(spacing: 14) {
-                Image(systemName: "wifi")
-                Image(systemName: "battery.100")
-                Text("Mon 9:41")
-            }
-            .font(.system(size: 13, weight: .medium))
-        }
-        .foregroundStyle(Theme.statusGlyph)
-        .padding(.horizontal, 18)
-        .frame(width: device.size.width, height: device.safeTop)
-        .background(.black.opacity(0.03))
-    }
-
-    /// The time and status icons, around a Dynamic Island on devices that have one.
-    private func statusBar(for device: DeviceFrame) -> some View {
-        ZStack {
-            if device.hasIsland {
-                Capsule()
-                    .fill(Theme.island)
-                    .frame(width: 112, height: 33)
-            }
-            HStack {
-                Text("9:41")
-                    .font(.system(size: device.hasIsland ? 16 : 13, weight: .semibold))
-                Spacer()
-                HStack(spacing: 6) {
-                    Image(systemName: "cellularbars")
-                    Image(systemName: "wifi")
-                    Image(systemName: "battery.100")
-                }
-                .font(.system(size: device.hasIsland ? 14 : 12, weight: .semibold))
-            }
-            .foregroundStyle(Theme.statusGlyph)
-            .padding(.horizontal, device.hasIsland ? 48 : 20)
-        }
-        .frame(width: device.size.width, height: device.hasIsland ? 33 : 18)
-        .offset(y: device.hasIsland ? 15 : 3)
-    }
-}
-
-/// An element on the open canvas, drawn at the scale it would have on a screen.
-struct FloatingElementView: View {
-    let floating: FloatingElement
-
-    var body: some View {
-        let frame = floating.element.frame
-        if !floating.element.isHidden { placed(frame) }
-    }
-
-    private func placed(_ frame: CGRect) -> some View {
-        ElementView(element: floating.element)
-            .frame(width: frame.width, height: frame.height)
-            .scaleEffect(floating.scale, anchor: .topLeading)
-            .frame(width: frame.width * floating.scale, height: frame.height * floating.scale, alignment: .topLeading)
-            .rotationEffect(.degrees(floating.element.resolvedRotation))
-            .offset(x: floating.canvasFrame.minX, y: floating.canvasFrame.minY)
-    }
-}
-
-/// One element, drawn to fill whatever frame it is given.
+/// One node's own look, drawn to fill whatever frame it is given: a leaf, or a card's fill. What a container holds
+/// is drawn by `NodeView`.
 struct ElementView: View {
-    let element: DesignElement
+    let node: LayerNode
+    /// Its parent lays it out: text is drawn whole and top-aligned, never shrunk (My call 18).
+    let isLaidOut: Bool
+    /// For a card with no fill or radius of its own, and text with no size of its own.
+    let tokens: DesignTokens
     @Environment(ImageLibrary.self) private var images
 
+    init(node: LayerNode, isLaidOut: Bool = false, tokens: DesignTokens = .standard) {
+        self.node = node
+        self.isLaidOut = isLaidOut
+        self.tokens = tokens
+    }
+
+    struct TextFit: Equatable {
+        var lineLimit: Int?
+        var shrinks: Bool
+        var vertical: VerticalAlignment
+    }
+
+    /// Laid out: no line limit, no shrinking, top-aligned. Otherwise today's per-kind values.
+    static func textFit(for kind: ElementKind, isLaidOut: Bool) -> TextFit {
+        if isLaidOut { return TextFit(lineLimit: nil, shrinks: false, vertical: .top) }
+        switch kind {
+        case .title: return TextFit(lineLimit: 1, shrinks: true, vertical: .center)
+        case .text: return TextFit(lineLimit: nil, shrinks: false, vertical: .top)
+        default: return TextFit(lineLimit: nil, shrinks: false, vertical: .center)
+        }
+    }
+
+    /// How its text is fitted to its frame: `textFit(for:isLaidOut:)` for its kind.
+    var textFit: TextFit { Self.textFit(for: node.kind, isLaidOut: isLaidOut) }
+
     var body: some View {
-        let radius = element.resolvedCornerRadius
+        let radius = node.resolvedCornerRadius(tokens: tokens)
         content
             .overlay {
-                if element.hasBorder, element.resolvedBorderWidth > 0 {
-                    RoundedRectangle(cornerRadius: element.hasCornerRadius ? radius : 0, style: .continuous)
-                        .strokeBorder(element.resolvedBorderColor.color, lineWidth: element.resolvedBorderWidth)
+                if node.hasBorder, node.resolvedBorderWidth > 0 {
+                    RoundedRectangle(cornerRadius: node.hasCornerRadius ? radius : 0, style: .continuous)
+                        .strokeBorder(node.resolvedBorderColor.color, lineWidth: node.resolvedBorderWidth)
                 }
             }
-            .modifier(ElementShadow(isOn: element.hasShadow))
-            .opacity(element.resolvedOpacity)
+            .modifier(ElementShadow(isOn: node.style.hasShadow))
+            .opacity(node.resolvedOpacity)
     }
 
     private var alignment: Alignment {
-        switch element.resolvedTextAlignment {
+        switch node.resolvedTextAlignment {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
@@ -153,7 +57,7 @@ struct ElementView: View {
     }
 
     private var textAlignment: TextAlignment {
-        switch element.resolvedTextAlignment {
+        switch node.resolvedTextAlignment {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
@@ -162,26 +66,20 @@ struct ElementView: View {
 
     @ViewBuilder
     private var content: some View {
-        let radius = element.resolvedCornerRadius
-        switch element.kind {
-        case .title:
+        let radius = node.resolvedCornerRadius(tokens: tokens)
+        let tint = node.resolvedTint.color
+        let frame = node.frame
+        switch node.kind {
+        case .title, .body, .text:
+            let fit = textFit
             label
-                .lineLimit(1)
-                .minimumScaleFactor(0.4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-
-        case .body:
-            label
+                .lineLimit(fit.lineLimit)
+                .minimumScaleFactor(fit.shrinks ? 0.4 : 1)
                 .multilineTextAlignment(textAlignment)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-
-        case .text:
-            label
-                .multilineTextAlignment(textAlignment)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: .top))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment.horizontal, vertical: fit.vertical))
 
         case .image, .avatar:
-            if let picture = images.image(element.imageID) {
+            if let picture = images.image(node.content.imageID) {
                 Color.clear
                     .overlay { Image(uiImage: picture).resizable().scaledToFill() }
                     .clipShape(.rect(cornerRadius: radius, style: .continuous))
@@ -189,8 +87,8 @@ struct ElementView: View {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(LinearGradient(colors: [Theme.imageTop, Theme.imageBottom], startPoint: .top, endPoint: .bottom))
                     .overlay {
-                        Image(systemName: element.kind == .avatar ? "person.fill" : "photo")
-                            .font(.system(size: min(element.frame.width, element.frame.height) * (element.kind == .avatar ? 0.45 : 0.26), weight: .medium))
+                        Image(systemName: node.kind == .avatar ? "person.fill" : "photo")
+                            .font(.system(size: min(frame.width, frame.height) * (node.kind == .avatar ? 0.45 : 0.26), weight: .medium))
                             .foregroundStyle(.white)
                     }
             }
@@ -198,9 +96,9 @@ struct ElementView: View {
         case .button:
             let shape = RoundedRectangle(cornerRadius: radius)
             Group {
-                switch element.resolvedButtonLook {
-                case .filled: shape.fill(element.tint.color)
-                case .bordered: shape.strokeBorder(element.tint.color, lineWidth: 1.5)
+                switch node.resolvedButtonLook {
+                case .filled: shape.fill(tint)
+                case .bordered: shape.strokeBorder(tint, lineWidth: 1.5)
                 case .plain: Color.clear
                 }
             }
@@ -225,17 +123,17 @@ struct ElementView: View {
                 .fill(Theme.dividerLine)
 
         case .symbol:
-            Image(systemName: SystemSymbol.resolve(element.symbol ?? "questionmark.square.dashed"))
+            Image(systemName: SystemSymbol.resolve(node.content.symbol ?? "questionmark.square.dashed"))
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(element.tint.color)
+                .foregroundStyle(tint)
 
         case .shape:
-            ShapeElementView(kind: element.shape ?? .rectangle, color: element.tint.color, isFilled: element.isOn, cornerRadius: radius)
+            ShapeElementView(kind: node.content.shape ?? .rectangle, color: tint, isFilled: node.content.isOn, cornerRadius: radius)
 
         case .stickyNote:
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(element.tint.color)
+                .fill(tint)
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
                 .overlay(alignment: alignment) {
                     label
@@ -244,12 +142,12 @@ struct ElementView: View {
                 }
 
         case .checkbox:
-            let side = min(element.frame.width, element.frame.height)
+            let side = min(frame.width, frame.height)
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(element.isOn ? element.tint.color : .clear)
-                .strokeBorder(element.isOn ? element.tint.color : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
+                .fill(node.content.isOn ? tint : .clear)
+                .strokeBorder(node.content.isOn ? tint : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
                 .overlay {
-                    if element.isOn {
+                    if node.content.isOn {
                         Image(systemName: "checkmark")
                             .font(.system(size: side * 0.55, weight: .bold))
                             .foregroundStyle(.white)
@@ -257,13 +155,13 @@ struct ElementView: View {
                 }
 
         case .radio:
-            let side = min(element.frame.width, element.frame.height)
+            let side = min(frame.width, frame.height)
             Circle()
-                .strokeBorder(element.isOn ? element.tint.color : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
+                .strokeBorder(node.content.isOn ? tint : Theme.controlOutline, lineWidth: max(1.5, side * 0.08))
                 .overlay {
-                    if element.isOn {
+                    if node.content.isOn {
                         Circle()
-                            .fill(element.tint.color)
+                            .fill(tint)
                             .padding(side * 0.25)
                     }
                 }
@@ -274,8 +172,8 @@ struct ElementView: View {
                 .overlay(alignment: .leading) {
                     GeometryReader { proxy in
                         Capsule()
-                            .fill(element.tint.color)
-                            .frame(width: proxy.size.width * CGFloat(element.resolvedValue))
+                            .fill(tint)
+                            .frame(width: proxy.size.width * CGFloat(node.resolvedValue))
                     }
                 }
                 .clipShape(.capsule)
@@ -283,30 +181,33 @@ struct ElementView: View {
         case .drawing:
             // A drawing that can be drawn on is on the ink canvas, where PencilKit draws
             // it. Locked, it is off that canvas, out of the eraser's reach, and drawn here.
-            if element.isLocked { InkPicture(ink: element.ink) }
+            if node.isLocked { InkPicture(ink: node.content.ink) }
+
+        case .card:
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(node.resolvedFill(tokens: tokens).color)
 
         case .group:
-            // A group draws nothing of its own: its members are drawn. A screen's elements
-            // leave group items out, so one never reaches here.
+            // A group draws nothing of its own: `NodeView` draws what it holds.
             EmptyView()
 
         case .toggle:
             // Drawn rather than a live `Toggle`, so that it scales with its frame.
             Capsule()
-                .fill(element.isOn ? element.tint.color : Theme.dividerLine)
-                .overlay(alignment: element.isOn ? .trailing : .leading) {
+                .fill(node.content.isOn ? tint : Theme.dividerLine)
+                .overlay(alignment: node.content.isOn ? .trailing : .leading) {
                     Circle()
                         .fill(.white)
                         .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                        .padding(element.frame.height * 0.07)
+                        .padding(frame.height * 0.07)
                 }
         }
     }
 
     private var label: some View {
-        Text(element.text)
-            .font(.system(size: element.resolvedFontSize, weight: element.resolvedFontWeight.fontWeight))
-            .foregroundStyle(element.resolvedTextColor.color)
+        Text(node.content.text)
+            .font(.system(size: node.resolvedFontSize(tokens: tokens), weight: node.resolvedFontWeight.fontWeight))
+            .foregroundStyle(node.resolvedTextColor.color)
     }
 }
 

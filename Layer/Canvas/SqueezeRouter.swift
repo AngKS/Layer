@@ -2,11 +2,12 @@ import Observation
 import SwiftUI
 
 /// Decides who has each of Apple Pencil Pro's squeezes in a window: a ruler (a Format
-/// field's or the zoom's), push-to-talk, or nobody. SwiftUI calls every visible view's
-/// squeeze action, in no fixed order, so two handlers could both act on one squeeze: the
-/// one that kept a ruler's value, and push-to-talk starting to listen. The window has one
-/// handler at a time (`CanvasScreen`'s `WindowSqueeze`, or a panel's sheet's while a panel is
-/// a sheet), and it asks this.
+/// field's, a form's or the zoom's), push-to-talk, or nobody. SwiftUI calls every visible
+/// view's squeeze action, in no fixed order, so two handlers could both act on one squeeze:
+/// the one that kept a ruler's value, and push-to-talk starting to listen. The window has one
+/// handler at a time (`CanvasScreen`'s `WindowSqueeze`; a panel's sheet's while a panel is a
+/// sheet; a form's while a form with number fields of its own is up over the canvas, the
+/// board menu or a device's sheet), and it asks this.
 @Observable
 @MainActor
 final class SqueezeRouter {
@@ -26,6 +27,15 @@ final class SqueezeRouter {
 
     /// When the squeeze under way last said it was still on.
     @ObservationIgnored private var lastActive: ContinuousClock.Instant?
+
+    /// How many forms with number fields of their own are up over the canvas, each in a
+    /// presentation of its own: the board menu's tokens, a device's sheet or form
+    /// (`FormSqueeze`). While one is, it has the squeezes, as a panel's sheet does. Observed.
+    private(set) var formsUp = 0
+
+    /// The name a form's frame is reported under in `AppModel.chromeFrames`, in window points:
+    /// where a form field's hover is a field's.
+    nonisolated static let formChrome = "form"
 
     /// Read afresh at each call, never kept: its scrubber and its pencil are the ones the
     /// window shows now (a test puts its own pencil in).
@@ -49,15 +59,29 @@ final class SqueezeRouter {
         )
     }
 
-    /// Whether the window's handler is the one: not while a panel is a sheet, which has a
-    /// handler of its own. Exactly one is there at a time.
-    var windowHandlerIsOn: Bool { hearsSqueezes && model?.panelIsASheet == false }
+    /// Whether the window's handler is the one: not while a panel is a sheet, or a form is up,
+    /// each of which has a handler of its own. Exactly one is there at a time.
+    var windowHandlerIsOn: Bool { hearsSqueezes && model?.panelIsASheet == false && formsUp == 0 }
 
-    /// Whether a panel's sheet's handler is the one.
-    var sheetHandlerIsOn: Bool { hearsSqueezes && model?.panelIsASheet == true }
+    /// Whether a panel's sheet's handler is the one: not while a form is up over it.
+    var sheetHandlerIsOn: Bool { hearsSqueezes && model?.panelIsASheet == true && formsUp == 0 }
+
+    /// Whether a form's handler is the one.
+    var formHandlerIsOn: Bool { hearsSqueezes && formsUp > 0 }
 
     /// Where a panel's sheet is in the window, which its handler's points are counted from.
     var sheetOrigin: CGPoint { model?.chromeFrames[AppModel.panelSheetChrome]?.origin ?? .zero }
+
+    /// Where the form that is up is in the window, which its handler's points are counted from.
+    var formOrigin: CGPoint { model?.chromeFrames[Self.formChrome]?.origin ?? .zero }
+
+    /// A form with number fields came up over the canvas: its handler takes the squeezes from
+    /// the window's, or a panel sheet's, until it goes (`formWent()`).
+    func formCameUp() { formsUp += 1 }
+
+    /// A form went: once none is up, the window's handler, or a panel sheet's, has the squeezes
+    /// again.
+    func formWent() { formsUp = max(0, formsUp - 1) }
 
     /// A point in a handler's own view, put in the window's points.
     nonisolated static func windowPoint(_ point: CGPoint?, offsetBy origin: CGPoint) -> CGPoint? {
@@ -143,11 +167,13 @@ final class SqueezeRouter {
 
     /// Whether a hovered field was left behind by one that went away: its panel closed or
     /// the selection moved on with the pen elsewhere. The pen is out of range, or isn't over
-    /// the field's own chrome: the Format panel for a field, the controls for the zoom.
+    /// the field's own chrome: the Format panel for a field, the form for a form's field, the
+    /// controls for the zoom.
     private static func isLeftBehind(_ hovered: Scrubber.Target, at viewPoint: CGPoint?, in model: AppModel) -> Bool {
         guard let viewPoint else { return true }
         switch hovered.owner {
         case .panel: return !model.isOverFormatPanel(viewPoint)
+        case .form: return model.chromeFrames[formChrome]?.contains(viewPoint) != true
         case .zoom: return !model.isOverChrome(viewPoint)
         }
     }

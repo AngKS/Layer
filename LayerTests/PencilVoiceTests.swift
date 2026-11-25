@@ -27,7 +27,7 @@ private final class SlowWarmingRunner: VoiceCommandRunner {
 @MainActor
 private final class Bench {
     let app: AppModel
-    let screen: DesignScreen.ID
+    let screen: TreeScreen.ID
     let runner = FakeRunner()
     var routes: [FakeRoute] = []
     var now = ContinuousClock.now
@@ -69,8 +69,8 @@ private final class Bench {
     }
 
     func element(_ index: Int) -> CanvasSelection {
-        let id = app.store.screen(screen)!.elements[index].id
-        return .element(.init(host: .screen(screen), element: id))
+        let id = app.store.screenLeaves(screen)[index].id
+        return .element(.init(host: .screen(screen), node: id))
     }
 
     var title: CanvasSelection { element(0) }
@@ -97,7 +97,12 @@ private final class Bench {
     /// The open route hears some words, and the call shows them.
     func hear(_ words: String, on route: Int = 0) async -> Bool {
         routes[route].send(.hearing(words))
-        return await eventually { self.pencil.call?.caption?.kind == .hearing && self.pencil.call?.caption?.text == words }
+        return await eventually { self.shows(words) }
+    }
+
+    /// Whether the call shows `words` as heard.
+    func shows(_ words: String) -> Bool {
+        pencil.call?.caption?.kind == .hearing && pencil.call?.caption?.text == words
     }
 
     func end() {
@@ -109,15 +114,19 @@ private final class Bench {
 @Suite("Push-to-talk with Apple Pencil Pro", .serialized)
 @MainActor
 struct PencilVoiceTests {
-    @Test func aQuickSqueezeTogglesAndTheNextSends() async {
+    /// It waits on what the bubble and the call show, never on a clock: polled against 3 s, a stall of the main actor
+    /// that every suite shares ran the limit out before the call's few hops to listening could run (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func aQuickSqueezeTogglesAndTheNextSends() async {
         let bench = Bench()
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: .radians(0.1))
         #expect(bench.pencil.bubble == PencilVoice.Bubble(anchor: Bench.overButton, azimuth: .radians(0.1), state: .gettingReady))
         bench.now += .milliseconds(200)
         bench.pencil.squeezeEnded()
-        #expect(await eventually { bench.state == .listening })
+        #expect(await observed { bench.state == .listening })
         #expect(bench.routes.count == 1 && bench.routes[0].finishCount == 0)
-        #expect(await bench.hear("make it blue"))
+        bench.routes[0].send(.hearing("make it blue"))
+        #expect(await observed { bench.shows("make it blue") })
 
         // The second squeeze sends; letting go of it does nothing more.
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: .radians(0.1))
@@ -129,9 +138,10 @@ struct PencilVoiceTests {
 
         bench.pencil.call?.captionTimes = (.milliseconds(100), .milliseconds(100))
         bench.routes[0].send(.command("make it blue"))
-        #expect(await eventually { bench.runner.commands == ["make it blue"] })
-        #expect(await eventually { bench.state == .done })
-        #expect(await eventually { bench.pencil.bubble == nil })
+        // Done once the command has run: what it ran is read then.
+        #expect(await observed { bench.state == .done })
+        #expect(bench.runner.commands == ["make it blue"])
+        #expect(await observed { bench.pencil.bubble == nil })
         bench.end()
     }
 
@@ -226,10 +236,10 @@ struct PencilVoiceTests {
     @Test func aSqueezeOverADrawingTargetsWhatIsBeneath() async {
         let bench = Bench()
         // Ink over the button. Locked, it is picked by its frame.
-        var ink = DesignStore.newElement(.drawing)
+        var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = bench.app.store.addFloating(ink, scale: 1)
+        let drawing = NodeRef(host: .canvas, node: bench.app.store.addCanvasNode(ink, scale: 1))
         #expect(bench.app.hoverTarget(at: Bench.overButton) == .element(drawing))
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
         #expect(bench.app.selection == bench.button)
@@ -250,7 +260,8 @@ struct PencilVoiceTests {
     }
 
     /// F6: a squeeze over a member of a selected group keeps the group, as one over part of
-    /// several things keeps them all; and what voice is told is selected is what is in it.
+    /// several things keeps them all; and what voice is told is selected is the group itself,
+    /// with what is in it under it (plan 6, call 7).
     @Test func aSqueezeOnAMemberOfASelectedGroupKeepsTheGroup() async throws {
         let bench = Bench()
         // Taken first: grouping can change where they are in the list.
@@ -264,8 +275,9 @@ struct PencilVoiceTests {
 
         let picture = CanvasPicture.capture(from: bench.app, handles: VoiceHandles())
         let selected = picture.screens.flatMap(\.elements).filter(\.isSelected)
-        #expect(Set(selected.map(\.kind)) == ["title", "button"])
-        #expect(selected.count == 2)
+        #expect(selected.map(\.kind) == ["group"])
+        #expect(Set(selected.flatMap(\.children).map(\.kind)) == ["title", "button"])
+        #expect(!selected.flatMap(\.children).map(\.isSelected).contains(true))
         bench.end()
     }
 
@@ -286,7 +298,7 @@ struct PencilVoiceTests {
         let device = bench.app.store.canvas.sketchDevice
         #expect(DesignActions.placementForNewScreen(device, in: bench.app, near: anchor).origin == anchor)
         bench.app.generateScreen(from: "a settings screen", near: anchor)
-        let made = try #require(bench.app.store.screens.last)
+        let made = try #require(bench.app.store.tree.screens.last)
         #expect(made.origin == anchor)
         bench.app.stopGenerating()
         await bench.app.waitForGeneration()
@@ -297,12 +309,13 @@ struct PencilVoiceTests {
 
     @Test func aNewScreenAtAPointMovesRightPastAScreenThere() throws {
         let (app, screen) = VoiceFixture.login()
-        let login = try #require(app.store.screen(screen))
+        let login = try #require(app.store.treeScreen(screen))
+        let frame = login.canvasFrame(on: app.store.tree.device(of: login))
         let placement = DesignActions.placementForNewScreen(.iPhone, in: app, near: CGPoint(x: 3900, y: 4100))
-        #expect(placement.origin == CGPoint(x: (login.canvasFrame.maxX + 60).rounded(), y: 4100))
+        #expect(placement.origin == CGPoint(x: (frame.maxX + 60).rounded(), y: 4100))
         // With no point, as before: to the right of the rightmost screen, level with it.
         let usual = DesignActions.placementForNewScreen(.iPhone, in: app)
-        #expect(usual.origin == CGPoint(x: (login.canvasFrame.maxX + 60).rounded(), y: login.origin.y))
+        #expect(usual.origin == CGPoint(x: (frame.maxX + 60).rounded(), y: login.origin.y))
     }
 
     @Test func aToggleLeftSilentCloses() async {
@@ -502,7 +515,7 @@ struct PencilVoiceTests {
         pencil?.hovered()
         #expect(await eventually { pencil?.call?.phase == .listening })
         try? await Task.sleep(for: .milliseconds(50))
-        weak var call = pencil?.call
+        weak let call = pencil?.call
         pencil = nil
         #expect(await eventually { call == nil })
     }
@@ -1027,10 +1040,10 @@ struct PencilVoiceTests {
     /// on it is about the whole selection, not what lies beneath it (final fix 13).
     @Test func aSqueezeOnADrawingInTheSelectionKeepsTheWholeSelection() async {
         let bench = Bench()
-        var ink = DesignStore.newElement(.drawing)
+        var ink = LayerNode.standard(.drawing)
         ink.frame = CGRect(x: 4050, y: 4200, width: 150, height: 100)
         ink.isLocked = true
-        let drawing = bench.app.store.addFloating(ink, scale: 1)
+        let drawing = NodeRef(host: .canvas, node: bench.app.store.addCanvasNode(ink, scale: 1))
         let both = CanvasSelection([.element(drawing), bench.title])
         bench.app.selection = both
         bench.pencil.squeezeBegan(at: Bench.overButton, azimuth: nil)
@@ -1229,9 +1242,9 @@ struct PencilVoiceTests {
     /// starts. Profile stays selected, so its field, and a hold or words typed there, stay
     /// too. A spoken command about a thing still selects it as it starts: the agent reads
     /// what was pointed at from the selection.
-    @Test func aQueuedChangeForLoginLeavesProfileSelected() async {
+    @Test func aQueuedChangeForLoginLeavesProfileSelected() async throws {
         let bench = Bench()
-        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6)).id
+        let profile = try #require(bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))).id
         bench.runner.holds = true
         #expect(await bench.hold())
         bench.routes[0].send(.command("make it blue"))
@@ -1959,6 +1972,57 @@ struct SqueezeRouterTests {
         bench.end()
     }
 
+    /// A form's number fields over the canvas, the board menu's design tokens and a device's
+    /// form, are the window's scrubber's as the Format panel's are (review I1): with Squeeze to
+    /// Talk on, a squeeze over one scrubs it and starts no voice command. While the form is up,
+    /// its handler has the squeezes rather than the window's, and gives them back as it goes.
+    @Test func aSqueezeOverAFormsFieldScrubsItAndStartsNoVoiceCommand() async {
+        let bench = Bench()
+        let router = bench.app.squeezeRouter
+        let scrubber = bench.app.scrubber
+        #expect(router.talks && router.windowHandlerIsOn)
+        // The board menu, with its token fields, up at the window's top left.
+        bench.app.chromeFrames[SqueezeRouter.formChrome] = CGRect(x: 0, y: 0, width: 360, height: 700)
+        router.formCameUp()
+        #expect(router.formHandlerIsOn && !router.windowHandlerIsOn && !router.sheetHandlerIsOn)
+        // A token's field, then a device form's.
+        for (label, start) in [("Title size", CGFloat(28)), ("Width", CGFloat(393))] {
+            let field = ScrubbedField(start)
+            var target = field.target(label, at: CGRect(x: 20, y: 80, width: 80, height: 32), range: 1...4000)
+            target.owner = .form
+            scrubber.hovered = target
+            router.began(at: overField, azimuth: nil, roll: .degrees(0))
+            #expect(router.taker == .ruler)
+            #expect(scrubber.target?.label == label && scrubber.target?.owner == .form)
+            router.ended()
+            scrubber.rolled(to: .degrees(3))
+            #expect(field.value == start + 3)
+            // The next squeeze keeps the value and puts the ruler away.
+            router.began(at: overField, azimuth: nil, roll: .degrees(3))
+            router.ended()
+            #expect(scrubber.target == nil && field.value == start + 3)
+            scrubber.hovered = nil
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(bench.pencil.bubble == nil && bench.routes.isEmpty)
+
+        // A form field's hover with the pen gone off the form isn't a field's.
+        let left = ScrubbedField(8)
+        var leftTarget = left.target("Small radius", at: .zero, range: 1...400)
+        leftTarget.owner = .form
+        scrubber.hovered = leftTarget
+        router.began(at: Bench.overButton, azimuth: nil, roll: nil)
+        #expect(scrubber.target == nil && scrubber.hovered == nil)
+        #expect(router.taker == .voice)
+        router.failed()
+
+        // Gone, the form gives the squeezes back to the window.
+        router.formWent()
+        bench.app.chromeFrames[SqueezeRouter.formChrome] = nil
+        #expect(router.windowHandlerIsOn && !router.formHandlerIsOn)
+        bench.end()
+    }
+
     /// A Format field's hover is a field's only while the pen is over the Format panel, not
     /// over other chrome; the zoom's hover is the zoom's over the controls.
     @Test func aFieldsHoverIsAFieldsOnlyOverTheFormatPanel() {
@@ -2105,10 +2169,8 @@ struct SqueezeRouterTests {
 @MainActor
 struct ScreenEditorTests {
     /// A second screen, Profile, to the right of Login.
-    private func addProfile(to bench: Bench) -> DesignScreen.ID {
-        let profile = bench.app.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 4600, y: 4000), scale: 0.6))
-        bench.app.store.updateScreen(profile.id) { $0.name = "Profile" }
-        return profile.id
+    private func addProfile(to bench: Bench) -> TreeScreen.ID {
+        bench.app.store.addFreeScreen([], name: "Profile", origin: CGPoint(x: 4600, y: 4000), scale: 0.6)
     }
 
     @Test func aChangeShowsItsStepThenItsReplyThenClears() async throws {

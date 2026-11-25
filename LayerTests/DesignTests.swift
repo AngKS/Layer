@@ -6,18 +6,25 @@ import Testing
 import UIKit
 @testable import Layer
 
-private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, text: String? = nil) -> DesignElement {
-    DesignElement(kind: kind, frame: CGRect(x: x, y: y, width: width, height: height), text: text ?? kind.placeholder, tint: Theme.accent)
+private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, text: String? = nil) -> LayerNode {
+    .leaf(kind, frame: CGRect(x: x, y: y, width: width, height: height), text: text ?? kind.placeholder, tint: Theme.accent)
 }
 
-/// The finished screen from the reference demo.
-private func demoScreen() -> DesignScreen {
-    DesignScreen(name: "Screen 1", origin: CGPoint(x: 400, y: 100), scale: 0.75, elements: [
+/// What the finished screen from the reference demo holds.
+private func demoElements() -> [LayerNode] {
+    [
         element(.button, 20, 744, 353, 50),
         element(.title, 82, 112, 228, 40),
         element(.image, 30, 184, 333, 368),
         element(.body, 48, 580, 297, 44),
-    ])
+    ]
+}
+
+/// The finished screen from the reference demo, on a free root.
+private func demoScreen() -> TreeScreen {
+    var root = LayerNode(kind: .group)
+    root.children = demoElements()
+    return TreeScreen(name: "Screen 1", origin: CGPoint(x: 400, y: 100), scale: 0.75, deviceID: nil, root: root)
 }
 
 /// A store wired to an undo manager that, like a test, isn't driven by a run loop.
@@ -90,9 +97,10 @@ struct ElementLayoutTests {
     }
 
     @Test func spacingIsMeasuredToNeighboursAndScreenEdges() throws {
-        let screen = demoScreen()
-        let image = try #require(screen.elements.first { $0.kind == .image })
-        let guides = SpacingGuides.measure(image, in: screen)
+        let elements = demoElements()
+        let image = try #require(elements.first { $0.kind == .image })
+        let others = elements.filter { $0.id != image.id && !$0.isHidden }.map(\.frame)
+        let guides = SpacingGuides.measure(image.frame, among: others, in: CGRect(origin: .zero, size: DeviceFrame.iPhone.size))
         #expect(guides.top.distance == 32)
         #expect(guides.bottom.distance == 28)
         #expect(guides.left.distance == 30)
@@ -150,43 +158,43 @@ struct ViewportTests {
 struct DesignStoreTests {
     @Test func sketchesBecomeScreensAndElementsAndEachCanBeUndoneAndRedone() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         #expect(screen.name == "Screen 1")
 
-        let sketch = screen.canvasRect(for: titleSketch)
-        #expect(store.screen(under: sketch)?.id == screen.id)
-        let title = try #require(store.addElement(.title, from: sketch, to: screen.id))
-        #expect(title.text == "Title")
+        let sketch = screen.placement.canvasRect(for: titleSketch)
+        #expect(store.screenID(under: sketch) == screen.id)
+        let title = try #require(store.sketched(.title, from: sketch, to: screen.id))
+        #expect(store.node(title.id)?.content.text == "Title")
         #expect(title.frame == CGRect(x: 82.5, y: 112, width: 228, height: 40))
 
         undo.undo()
-        #expect(store.screens.first?.elements.isEmpty == true)
+        #expect(store.shownLeaves(onScreenAt: 0)?.isEmpty == true)
         undo.undo()
-        #expect(store.screens.isEmpty)
+        #expect(store.tree.screens.isEmpty)
         #expect(!undo.canUndo)
 
         undo.redo()
         undo.redo()
-        #expect(store.screens.first?.elements.map(\.id) == [title.id])
+        #expect(store.shownLeaves(onScreenAt: 0)?.map(\.id) == [title.id])
     }
 
     @Test func aGradualEditUndoesAsOneStep() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
 
         store.beginEdit()
         for step in 1...20 {
-            store.update(ref) { $0.frame.origin.y = 112 + CGFloat(step) }
+            store.update(ref.node) { $0.frame.origin.y = 112 + CGFloat(step) }
         }
         store.endEdit()
-        #expect(store.screens[0].elements[0].frame.minY == 132)
+        #expect(store.shownLeaves(onScreenAt: 0)?.first?.frame.minY == 132)
 
         undo.undo()
-        #expect(store.screens[0].elements[0].frame.minY == 112)
+        #expect(store.shownLeaves(onScreenAt: 0)?.first?.frame.minY == 112)
         undo.redo()
-        #expect(store.screens[0].elements[0].frame.minY == 132)
+        #expect(store.shownLeaves(onScreenAt: 0)?.first?.frame.minY == 132)
     }
 
     /// Undo pressed while a spoken command or a generation holds its step open. It used to
@@ -194,55 +202,55 @@ struct DesignStoreTests {
     /// close then put that earlier step back, so undo behaved as redo.
     @Test func undoWhileAnEditIsHeldTakesBackWhatItHasDoneSoFar() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
-        let before = store.content
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
+        let before = store.tree
 
         store.beginHeldEdit()
-        store.actingForCommand { store.update(ref) { $0.text = "One" } }
+        store.actingForCommand { store.update(ref.node) { $0.content.text = "One" } }
         undo.undo()
         // The command's change so far is what goes; the title added before it stays.
-        #expect(store.content == before)
-        store.actingForCommand { store.update(ref) { $0.text = "Two" } }
+        #expect(store.tree == before)
+        store.actingForCommand { store.update(ref.node) { $0.content.text = "Two" } }
         store.endHeldEdit()
-        #expect(store.resolve(ref)?.element.text == "Two")
+        #expect(store.node(ref.node)?.content.text == "Two")
 
         undo.undo()
-        #expect(store.content == before)
+        #expect(store.tree == before)
         undo.undo()
-        #expect(store.screens.first?.elements.isEmpty == true)
+        #expect(store.shownLeaves(onScreenAt: 0)?.isEmpty == true)
     }
 
     @Test func redoWhileAnEditIsHeldStillRedoes() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        _ = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
-        let withTitle = store.content
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        _ = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
+        let withTitle = store.tree
         undo.undo()
 
         store.beginHeldEdit()
         undo.redo()
-        #expect(store.content == withTitle)
-        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Renamed" } }
+        #expect(store.tree == withTitle)
+        store.actingForCommand { store.updateTreeScreen(screen.id) { $0.name = "Renamed" } }
         store.endHeldEdit()
         undo.undo()
-        #expect(store.content == withTitle)
+        #expect(store.tree == withTitle)
     }
 
     /// The history moves on with every step made, undone or redone, and not otherwise.
     @Test func theHistoryMarkMovesWithEveryStep() throws {
         let (store, undo) = makeStore()
         let start = store.historyMark
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
         let afterAdd = store.historyMark
         #expect(afterAdd != start)
         store.setTitle("Quiet", undoable: false)
         #expect(store.historyMark == afterAdd)
         store.beginHeldEdit()
-        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "One" } }
+        store.actingForCommand { store.updateTreeScreen(screen.id) { $0.name = "One" } }
         let inEdit = store.historyMark
-        store.actingForCommand { store.updateScreen(screen.id) { $0.name = "Two" } }
+        store.actingForCommand { store.updateTreeScreen(screen.id) { $0.name = "Two" } }
         store.endHeldEdit()
         #expect(store.historyMark == inEdit, "a held edit is one step, however many changes")
         undo.undo()
@@ -268,116 +276,116 @@ struct DesignStoreTests {
 
     @Test func movingAScreenTakesItsElementsWithIt() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
-        let before = try #require(store.resolve(ref)).placement.canvasRect(for: title.frame)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
+        let ref = NodeRef(host: .screen(screen.id), node: title.id)
+        let before = try #require(store.placed(ref)).placement.canvasRect(for: title.frame)
 
-        store.updateScreen(screen.id) { $0.origin.x += 300 }
-        let after = try #require(store.resolve(ref)).placement.canvasRect(for: title.frame)
+        store.updateTreeScreen(screen.id) { $0.origin.x += 300 }
+        let after = try #require(store.placed(ref)).placement.canvasRect(for: title.frame)
         #expect(after == before.offsetBy(dx: 300, dy: 0))
 
         undo.undo()
-        #expect(store.screens[0].origin == screen.origin)
+        #expect(store.tree.screens[0].origin == screen.origin)
     }
 
     @Test func anElementDroppedOffItsScreenFloatsWhereItWasDropped() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
-        let onScreen = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
+        let onScreen = NodeRef(host: .screen(screen.id), node: title.id)
 
-        store.update(onScreen) { $0.frame.origin.x += 900 }
-        let dropped = try #require(store.resolve(onScreen))
-        let droppedAt = dropped.placement.canvasRect(for: dropped.element.frame)
+        store.update(onScreen.node) { $0.frame.origin.x += 900 }
+        let dropped = try #require(store.placed(onScreen))
+        let droppedAt = dropped.placement.canvasRect(for: dropped.frame)
 
         let home = store.rehost(onScreen)
-        #expect(home == DesignStore.ElementRef(host: .canvas, element: title.id))
-        #expect(store.screens[0].elements.isEmpty)
-        let floating = try #require(store.floating.first)
+        #expect(home == NodeRef(host: .canvas, node: title.id))
+        #expect(store.screenLeaves(screen.id).isEmpty)
+        let floating = try #require(store.tree.canvas.first)
         #expect(floating.scale == screen.scale)
-        #expect(floating.element.frame.size == title.frame.size)
-        #expect(isClose(center(floating.canvasFrame), center(droppedAt)))
+        #expect(floating.frame.size == title.frame.size)
+        #expect(isClose(center(try #require(store.canvasRect(of: floating.id))), center(droppedAt)))
     }
 
     @Test func anElementDroppedOnAnotherScreenJoinsItAndTheMoveUndoes() throws {
         let (store, undo) = makeStore()
-        let left = store.addScreen(from: leftScreenSketch)
-        let right = store.addScreen(from: rightScreenSketch)
-        let title = try #require(store.addElement(.title, from: left.canvasRect(for: titleSketch), to: left.id))
-        let ref = DesignStore.ElementRef(host: .screen(left.id), element: title.id)
+        let left = try #require(store.addScreen(from: leftScreenSketch))
+        let right = try #require(store.addScreen(from: rightScreenSketch))
+        let title = try #require(store.sketched(.title, from: left.placement.canvasRect(for: titleSketch), to: left.id))
+        let ref = NodeRef(host: .screen(left.id), node: title.id)
 
         // Drag it across to the middle of the other screen.
-        let target = left.placement.localPoint(for: center(right.canvasFrame))
+        let target = left.placement.localPoint(for: center(right.canvasFrame(on: right.device)))
         store.beginEdit()
-        store.update(ref) { $0.frame.origin = CGPoint(x: target.x - 114, y: target.y - 20) }
+        store.update(ref.node) { $0.frame.origin = CGPoint(x: target.x - 114, y: target.y - 20) }
         let home = store.rehost(ref)
         store.endEdit()
 
-        #expect(home == DesignStore.ElementRef(host: .screen(right.id), element: title.id))
-        #expect(store.screens[0].elements.isEmpty)
-        let moved = try #require(store.screens[1].elements.first)
+        #expect(home == NodeRef(host: .screen(right.id), node: title.id))
+        #expect(store.screenLeaves(left.id).isEmpty)
+        let moved = try #require(store.shownLeaves(on: right.id).first)
         #expect(moved.frame.size == CGSize(width: 228, height: 40))
-        #expect(isClose(center(right.canvasRect(for: moved.frame)), center(right.canvasFrame)))
+        #expect(isClose(center(right.placement.canvasRect(for: moved.frame)), center(right.canvasFrame(on: right.device))))
         #expect(store.rehost(home) == home, "an element that hasn't moved stays where it lives")
 
         undo.undo()
-        #expect(store.screens[0].elements.map(\.frame) == [title.frame])
-        #expect(store.screens[1].elements.isEmpty)
+        #expect(store.shownLeaves(on: left.id).map(\.frame) == [title.frame])
+        #expect(store.screenLeaves(right.id).isEmpty)
     }
 
     @Test func aSymbolLandsOnTheScreenUnderItOrOnTheOpenCanvas() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
 
-        let onScreen = store.place(DesignStore.newElement(.symbol, symbol: "heart.fill"), centeredAt: center(screen.canvasFrame))
+        let onScreen = try #require(store.place(LayerNode.standard(.symbol, symbol: "heart.fill"), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(onScreen.host == .screen(screen.id))
-        let heart = try #require(store.resolve(onScreen))
-        #expect(heart.element.symbol == "heart.fill")
-        #expect(heart.element.frame.size == CGSize(width: 44, height: 44))
-        #expect(isClose(center(heart.placement.canvasRect(for: heart.element.frame)), center(screen.canvasFrame)))
+        let heart = try #require(store.placed(onScreen))
+        #expect(heart.node.content.symbol == "heart.fill")
+        #expect(heart.frame.size == CGSize(width: 44, height: 44))
+        #expect(isClose(center(heart.placement.canvasRect(for: heart.frame)), center(screen.canvasFrame(on: screen.device))))
 
         let elsewhere = CGPoint(x: 3000, y: 2500)
-        let onCanvas = store.place(DesignStore.newElement(.symbol, symbol: "star"), centeredAt: elsewhere)
+        let onCanvas = try #require(store.place(LayerNode.standard(.symbol, symbol: "star"), centredAt: elsewhere))
         #expect(onCanvas.host == .canvas)
-        #expect(isClose(center(try #require(store.floating.first).canvasFrame), elsewhere))
+        #expect(isClose(center(try #require(store.tree.canvas.first.flatMap { store.canvasRect(of: $0.id) })), elsewhere))
 
         store.delete(onCanvas)
-        #expect(store.floating.isEmpty)
+        #expect(store.tree.canvas.isEmpty)
         undo.undo()
-        #expect(store.floating.count == 1)
+        #expect(store.tree.canvas.count == 1)
     }
 
     @Test func aDeviceFrameIsAddedAtItsOwnSizeAndElementsKeepTheirMarginsOnIt() throws {
         let (store, _) = makeStore()
         let iPad = try #require(DeviceFrame.all.first { $0.id == "ipad" })
-        let screen = store.addScreen(iPad, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
-        #expect(screen.size == CGSize(width: 820, height: 1180))
-        #expect(screen.canvasFrame == CGRect(x: 100, y: 100, width: 410, height: 590))
+        let screen = try #require(store.addScreen(iPad, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5)))
+        #expect(screen.device.size == CGSize(width: 820, height: 1180))
+        #expect(screen.canvasFrame(on: screen.device) == CGRect(x: 100, y: 100, width: 410, height: 590))
 
         // A button on a phone has 20-point margins; it keeps them on the wider screen.
-        let button = try #require(store.addElement(.button, from: screen.canvasRect(for: CGRect(x: 100, y: 1000, width: 600, height: 60)), to: screen.id))
+        let button = try #require(store.sketched(.button, from: screen.placement.canvasRect(for: CGRect(x: 100, y: 1000, width: 600, height: 60)), to: screen.id))
         #expect(button.frame.minX == 20)
         #expect(button.frame.width == 780)
         #expect(button.frame.maxY <= iPad.size.height - iPad.safeBottom)
 
         // Sketched screens are iPhones, and say nothing more about it in the file.
-        #expect(store.addScreen(from: leftScreenSketch).deviceID == nil)
+        #expect(try #require(store.addScreen(from: leftScreenSketch)).deviceID == nil)
         #expect(DeviceFrame.named("no-such-device") == .iPhone)
     }
 
     @Test func aStickyNoteStaysOnTheCanvasEvenOverAScreen() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(from: leftScreenSketch)
-        let note = store.place(DesignStore.newElement(.stickyNote), centeredAt: center(screen.canvasFrame))
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        let note = try #require(store.place(LayerNode.standard(.stickyNote), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(note.host == .canvas)
         #expect(store.rehost(note) == note)
-        #expect(try #require(store.floating.first).element.tint == Theme.stickyNote)
+        #expect(try #require(store.tree.canvas.first).style.tint == Theme.stickyNote)
 
         // Typed text does join the screen it is put on.
-        let text = store.place(DesignStore.newElement(.text), centeredAt: center(screen.canvasFrame))
+        let text = try #require(store.place(LayerNode.standard(.text), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(text.host == .screen(screen.id))
-        #expect(try #require(store.resolve(text)).element.text == "Text")
+        #expect(try #require(store.placed(text)).node.content.text == "Text")
     }
 
     @Test func aBoardIsNamedAndCanvasSettingsChangeWithUndo() {
@@ -409,19 +417,19 @@ struct DesignStoreTests {
         store.addScreen(from: leftScreenSketch)
         store.setTitle("Suggested", undoable: false)
         undo.undo()
-        #expect(store.screens.isEmpty)
+        #expect(store.tree.screens.isEmpty)
         #expect(store.title == "Suggested")
         undo.redo()
         #expect(store.title == "Suggested")
 
-        let screen = store.screens[0]
+        let screen = store.tree.screens[0]
         store.beginEdit()
-        store.updateScreen(screen.id) { $0.name = "Home" }
+        store.updateTreeScreen(screen.id) { $0.name = "Home" }
         store.setTitle("Login", undoable: false)
-        store.updateScreen(screen.id) { $0.name = "Start" }
+        store.updateTreeScreen(screen.id) { $0.name = "Start" }
         store.endEdit()
         undo.undo()
-        #expect(store.screen(screen.id)?.name == "Screen 1")
+        #expect(store.treeScreen(screen.id)?.name == "Screen 1")
         #expect(store.title == "Login")
     }
 
@@ -441,14 +449,14 @@ struct DesignStoreTests {
         let (store, _) = makeStore()
         #expect(store.contentBounds == nil)
 
-        let screen = store.addScreen(from: leftScreenSketch)
-        store.place(DesignStore.newElement(.symbol, symbol: "star"), centeredAt: CGPoint(x: 3000, y: 2500))
+        let screen = try #require(store.addScreen(from: leftScreenSketch))
+        store.place(LayerNode.standard(.symbol, symbol: "star"), centredAt: CGPoint(x: 3000, y: 2500))
         let bounds = try #require(store.contentBounds)
-        #expect(bounds.contains(screen.canvasFrame))
+        #expect(bounds.contains(screen.canvasFrame(on: screen.device)))
         #expect(bounds.contains(CGPoint(x: 3000, y: 2500)))
 
         store.deleteScreen(screen.id)
-        #expect(store.screens.isEmpty)
+        #expect(store.tree.screens.isEmpty)
     }
 }
 
@@ -464,15 +472,15 @@ struct AppModelTests {
         return (model, undo)
     }
 
-    @Test func tappingAScreenSelectsItAndTappingEmptyCanvasLetsGo() {
+    @Test func tappingAScreenSelectsItAndTappingEmptyCanvasLetsGo() throws {
         let (model, _) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
         model.tool = .select
         model.viewport = Viewport(offset: CGPoint(x: 200, y: 100), scale: 2)
 
-        model.canvasTapped(at: model.viewport.viewPoint(for: center(screen.canvasFrame)))
+        model.canvasTapped(at: model.viewport.viewPoint(for: center(screen.canvasFrame(on: screen.device))))
         #expect(model.selection == .screen(screen.id))
-        #expect(model.selectedScreen?.id == screen.id)
+        #expect(model.selectedScreenID == screen.id)
 
         model.canvasTapped(at: model.viewport.viewPoint(for: CGPoint(x: 5000, y: 5000)))
         #expect(model.selection == nil)
@@ -485,21 +493,22 @@ struct AppModelTests {
 
         let iPad = try #require(DeviceFrame.all.first { $0.id == "ipad" })
         model.addFrame(iPad)
-        let frame = try #require(model.store.screens.last)
+        let frame = try #require(model.store.tree.screens.last)
+        let frameOnCanvas = try #require(model.store.canvasFrame(ofScreen: frame.id))
         // A frame, unlike text, a note or a picture, comes in unselected.
         #expect(model.selection == nil)
         #expect(model.tool == .select)
-        #expect(isClose(center(frame.canvasFrame), middle, within: 2))
-        #expect(frame.canvasFrame.height <= 834 - 200, "the frame should fit in the view")
+        #expect(isClose(center(frameOnCanvas), middle, within: 2))
+        #expect(frameOnCanvas.height <= 834 - 200, "the frame should fit in the view")
 
         model.addText()
-        #expect(model.selectedElement?.element.kind == .text)
-        #expect(model.selectedElement?.ref.host == .screen(frame.id))
+        #expect(model.selectedNode?.node.kind == .text)
+        #expect(model.selectedNode?.ref.host == .screen(frame.id))
         #expect(model.isEditingText)
 
         model.addStickyNote()
-        #expect(model.selectedElement?.element.kind == .stickyNote)
-        #expect(model.selectedElement?.ref.host == .canvas)
+        #expect(model.selectedNode?.node.kind == .stickyNote)
+        #expect(model.selectedNode?.ref.host == .canvas)
 
         let picture = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 200)).image { context in
             UIColor.systemTeal.setFill()
@@ -508,11 +517,11 @@ struct AppModelTests {
         let png = try #require(picture.pngData())
         let prepared = try #require(ImageImport.prepare(png))
         model.addImage(prepared)
-        let image = try #require(model.selectedElement?.element)
-        #expect(image.kind == .image)
+        let image = try #require(model.selectedNode)
+        #expect(image.node.kind == .image)
         #expect(image.frame.width / image.frame.height == 2)
-        #expect(model.images.image(image.imageID) != nil)
-        let imageID = try #require(image.imageID)
+        #expect(model.images.image(image.node.content.imageID) != nil)
+        let imageID = try #require(image.node.content.imageID)
         #expect(model.document.current.images.keys.contains(imageID.uuidString))
     }
 
@@ -539,18 +548,18 @@ struct AppModelTests {
 
         model.addSymbol("bolt.fill")
         #expect(model.tool == .select)
-        let selected = try #require(model.selectedElement)
-        #expect(selected.element.symbol == "bolt.fill")
+        let selected = try #require(model.selectedNode)
+        #expect(selected.node.content.symbol == "bolt.fill")
         let middle = model.viewport.canvasPoint(for: CGPoint(x: 605, y: 417))
-        #expect(isClose(center(selected.placement.canvasRect(for: selected.element.frame)), middle))
+        #expect(isClose(center(selected.placement.canvasRect(for: selected.frame)), middle))
     }
 
     @Test func undoingOrDeletingTheSelectedThingClearsTheSelection() throws {
         let (model, undo) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
-        let title = try #require(model.store.addElement(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
+        let title = try #require(model.store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         model.tool = .select
-        model.selection = .element(.init(host: .screen(screen.id), element: title.id))
+        model.selection = .element(.init(host: .screen(screen.id), node: title.id))
 
         undo.undo()
         #expect(model.selection == nil)
@@ -558,12 +567,35 @@ struct AppModelTests {
         model.selection = .screen(screen.id)
         model.deleteSelection()
         #expect(model.selection == nil)
-        #expect(model.store.screens.isEmpty)
+        #expect(model.store.tree.screens.isEmpty)
     }
 
-    @Test func leavingTheSelectToolLetsGoOfTheSelection() {
+    /// A generation that wrote only an empty card has written nothing: its screen goes as it ends, as one that wrote no
+    /// line at all does. An empty row, column or card holds no element.
+    @Test func aGenerationThatWroteOnlyAnEmptyCardLeavesNoScreen() async throws {
         let (model, _) = makeModel()
-        let screen = model.store.addScreen(from: leftScreenSketch)
+        model.suggestsTitle = false
+        let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
+        model.screenStream = { _ in stream }
+        model.generateScreen(from: "a settings screen")
+        let screen = try #require(model.generation?.screenID)
+        var written = Outline.parse("card:\n  text: About", isComplete: true)
+        try #require(written.children.first?.kind == .card)
+        written.children[0].children = []
+        feed.yield(.screen(written))
+        // Merged and laid out off the main actor first: looked at again each time the design changes, not polled.
+        #expect(await until { model.store.treeScreen(screen)?.root.children.first?.kind == .card })
+        #expect(model.store.treeScreen(screen)?.root.leafCount == 0)
+
+        feed.finish()
+        await model.waitForGeneration()
+
+        #expect(model.store.treeScreen(screen) == nil)
+    }
+
+    @Test func leavingTheSelectToolLetsGoOfTheSelection() throws {
+        let (model, _) = makeModel()
+        let screen = try #require(model.store.addScreen(from: leftScreenSketch))
         model.tool = .select
         model.selection = .screen(screen.id)
         model.tool = .draw
@@ -575,22 +607,22 @@ struct AppModelTests {
 @MainActor
 struct DesignFileTests {
     private func sampleFile() -> DesignFile {
-        var content = DesignContent()
+        var content = TreeContent()
         content.screens = [demoScreen()]
-        content.floating = [
-            FloatingElement(
-                element: DesignElement(kind: .symbol, frame: CGRect(x: 900, y: 700, width: 44, height: 44), text: "", tint: Theme.inkTint, symbol: "heart.fill"),
-                scale: 0.75
-            ),
-        ]
+        var heart = LayerNode.leaf(.symbol, frame: CGRect(x: 900, y: 700, width: 44, height: 44), text: "", tint: Theme.inkTint, symbol: "heart.fill")
+        heart.scale = 0.75
+        content.canvas = [heart]
         content.title = "Onboarding"
-        content.canvas.gridStyle = .lines
+        content.settings.gridStyle = .lines
 
         let points = SketchSamples.wave(CGRect(x: 100, y: 100, width: 200, height: 30), humps: 4).enumerated().map { index, point in
             PKStrokePoint(location: point, timeOffset: Double(index) * 0.01, size: CGSize(width: 3, height: 3), opacity: 1, force: 1, azimuth: 0, altitude: 0)
         }
         let stroke = PKStroke(ink: PKInk(.pen, color: .blue), path: PKStrokePath(controlPoints: points, creationDate: .now))
-        return DesignFile(content: content, drawing: PKDrawing(strokes: [stroke]))
+        var file = DesignFile()
+        file.content = content
+        file.content.adopt(PKDrawing(strokes: [stroke]))
+        return file
     }
 
     @Test func aDesignSurvivesBeingSavedAndOpened() throws {
@@ -605,7 +637,7 @@ struct DesignFileTests {
     @Test func aDesignIsWrittenAsAPackageWithItsPartsApart() throws {
         var file = sampleFile()
         let picture = UUID()
-        file.content.floating[0].element.imageID = picture
+        file.content.canvas[0].content.imageID = picture
         file.images = [picture.uuidString: Data([1, 2, 3])]
         file.preview = Data([9, 8, 7])
         file.fileName = "Onboarding"
@@ -617,7 +649,7 @@ struct DesignFileTests {
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
         // The ink is one file for each drawing, named by the drawing.
-        let drawing = try #require(file.content.elements.first { $0.kind == .drawing })
+        let drawing = try #require(file.content.canvas.first { $0.kind == .drawing })
         for part in ["design.json", "ink/\(drawing.id.uuidString)", "images/\(picture.uuidString)", "QuickLook/Thumbnail.jpg"] {
             #expect(FileManager.default.fileExists(atPath: url.appendingPathComponent(part).path), "\(part) should be in the package")
         }
@@ -633,14 +665,14 @@ struct DesignFileTests {
     @Test func savingAgainLeavesThePartsThatHaveNotChangedAlone() throws {
         var file = sampleFile()
         let picture = UUID()
-        file.content.floating[0].element.imageID = picture
+        file.content.canvas[0].content.imageID = picture
         file.images = [picture.uuidString: Data([1, 2, 3])]
         let first = try file.wrapper()
 
         // Only the design changes: the ink and the picture on disk are handed back as they are.
         file.content.title = "Renamed"
         let second = try file.wrapper(replacing: first)
-        let drawing = try #require(file.content.elements.first { $0.kind == .drawing }).id.uuidString
+        let drawing = try #require(file.content.canvas.first { $0.kind == .drawing }).id.uuidString
         let firstInk = try #require(first.fileWrappers?["ink"]?.fileWrappers?[drawing])
         #expect(second.fileWrappers?["ink"]?.fileWrappers?[drawing] === firstInk)
         #expect(second.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] === first.fileWrappers?["images"]?.fileWrappers?[picture.uuidString])
@@ -648,27 +680,10 @@ struct DesignFileTests {
         #expect(try DesignFile(wrapper: second).content.title == "Renamed")
     }
 
-    @Test func aDesignSavedBeforeFloatingElementsAndSymbolsStillOpens() throws {
-        let older = """
-            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":{
-              "accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
-              "screens":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Screen 1","origin":[400,100],"scale":0.75,
-                "elements":[{"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
-                  "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34}}]}]}}
-            """
-        // Version 1 designs were a single file rather than a package.
-        let file = try DesignFile(wrapper: FileWrapper(regularFileWithContents: Data(older.utf8)))
-        #expect(file.content.title == nil)
-        #expect(file.content.floating.isEmpty)
-        let title = try #require(file.content.screens.first?.elements.first)
-        #expect(title.kind == .title)
-        #expect(title.symbol == nil)
-    }
-
     @Test func picturesNothingShowsAreLeftOutOfTheSavedFile() throws {
         var file = sampleFile()
         let shown = UUID()
-        file.content.floating[0].element.imageID = shown
+        file.content.canvas[0].content.imageID = shown
         file.images = [shown.uuidString: Data([1, 2, 3]), UUID().uuidString: Data([4, 5, 6])]
 
         let reopened = try DesignFile(wrapper: file.wrapper())
@@ -680,14 +695,13 @@ struct DesignFileTests {
     /// shows, and a folder of a kind it has never heard of.
     private func packageFromANewerLayer() throws -> (package: FileWrapper, picture: UUID, drawing: UUID, orphan: UUID) {
         let picture = UUID(), drawing = UUID(), orphan = UUID()
-        let tint = ["red": 0, "green": 0, "blue": 0]
         let elements: [[String: Any]] = [
-            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "textAlignment": "justified",
-             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "text": "", "tint": tint],
-            ["id": drawing.uuidString, "kind": "drawing", "textAlignment": "justified",
-             "frame": [[0, 0], [10, 10]], "text": "", "tint": tint],
+            ["id": UUID().uuidString, "kind": "image", "imageID": picture.uuidString, "style": ["textAlignment": "justified"],
+             "frame": [[0, 0], [10, 10]], "rotation": 30, "blur": 4, "scale": 1],
+            ["id": drawing.uuidString, "kind": "drawing", "style": ["textAlignment": "justified"],
+             "frame": [[0, 0], [10, 10]], "scale": 1],
         ]
-        let manifest = try JSONSerialization.data(withJSONObject: ["version": 3, "content": ["screens": [], "elements": elements]])
+        let manifest = try JSONSerialization.data(withJSONObject: ["version": 4, "content": ["screens": [], "canvas": elements]])
         let package = FileWrapper(directoryWithFileWrappers: [
             "design.json": FileWrapper(regularFileWithContents: manifest),
             "images": FileWrapper(directoryWithFileWrappers: [
@@ -703,7 +717,7 @@ struct DesignFileTests {
     @Test func savingKeepsThePictureAndInkOfElementsThisVersionCannotRead() throws {
         let (package, picture, drawing, orphan) = try packageFromANewerLayer()
         let file = try DesignFile(wrapper: package)
-        #expect(file.content.elements.isEmpty, "neither element can be read here")
+        #expect(file.content.listedEverywhere.isEmpty, "neither element can be read here")
 
         // Saved over the file it came from, and written afresh, as a copy to share is.
         for saved in [try file.wrapper(replacing: package), try file.wrapper()] {
@@ -720,7 +734,7 @@ struct DesignFileTests {
             #expect(again.fileWrappers?["fonts"]?.fileWrappers?["Brand.otf"] != nil)
             let manifest = try #require(again.fileWrappers?["design.json"]?.regularFileContents)
             let root = try #require(try JSONSerialization.jsonObject(with: manifest) as? [String: Any])
-            let written = try #require((root["content"] as? [String: Any])?["elements"] as? [[String: Any]])
+            let written = try #require((root["content"] as? [String: Any])?["canvas"] as? [[String: Any]])
             #expect(written.first?["rotation"] as? Double == 30)
             #expect(written.first?["blur"] as? Double == 4)
         }
@@ -733,32 +747,33 @@ struct DesignFileTests {
     }
 
     @Test func keysThisVersionDoesNotKnowSurviveASave() throws {
-        var content = DesignContent()
-        let screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1)
-        content.addScreen(screen)
-        var button = DesignStore.newElement(.button)
+        var button = LayerNode.standard(.button)
         button.rotation = 30
-        content.add(button, to: screen.id)
+        var holder = LayerNode(kind: .group)
+        holder.children = [button]
+        var file = DesignFile()
+        file.content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
         let mask = UUID()
-        var file = DesignFile(content: content)
         file.images = [mask.uuidString: Data([1, 2, 3])]
 
         // A newer Layer adds keys of its own at every level, one of them naming a picture,
         // and saves the design's model in a shape this version can't read.
         var root = try manifest(of: file.wrapper())
         var saved = try #require(root["content"] as? [String: Any])
-        var elements = try #require(saved["elements"] as? [[String: Any]])
+        var screens = try #require(saved["screens"] as? [[String: Any]])
+        var screenRoot = try #require(screens[0]["root"] as? [String: Any])
+        var elements = try #require(screenRoot["children"] as? [[String: Any]])
         elements[0]["skew"] = 12
         elements[0]["maskImageID"] = mask.uuidString
         elements[0]["shadowStyle"] = ["blur": 8, "colour": "#000000"]
-        saved["elements"] = elements
-        var screens = try #require(saved["screens"] as? [[String: Any]])
+        screenRoot["children"] = elements
+        screens[0]["root"] = screenRoot
         screens[0]["background"] = "#FFFFFF"
         saved["screens"] = screens
-        var canvas = try #require(saved["canvas"] as? [String: Any])
-        canvas["rulers"] = true
-        canvas["model"] = ["provider": ["name": "future"]]
-        saved["canvas"] = canvas
+        var settings = try #require(saved["settings"] as? [String: Any])
+        settings["rulers"] = true
+        settings["model"] = ["provider": ["name": "future"]]
+        saved["settings"] = settings
         saved["groups"] = [["members": [button.id.uuidString]]]
         root["content"] = saved
         root["designID"] = "B7F0"
@@ -768,28 +783,29 @@ struct DesignFileTests {
         ])
 
         var read = try DesignFile(wrapper: newer)
-        #expect(read.content.elements.first?.rotation == 30)
-        #expect(read.content.canvas.model == nil, "a model this version can't read is no choice here")
+        #expect(read.content.listedEverywhere.first?.rotation == 30)
+        #expect(read.content.settings.model == nil, "a model this version can't read is no choice here")
 
         let written = try read.wrapper(replacing: newer)
         let again = try manifest(of: written)
         #expect(again["designID"] as? String == "B7F0")
         let content2 = try #require(again["content"] as? [String: Any])
         #expect((content2["groups"] as? [[String: Any]])?.first?["members"] as? [String] == [button.id.uuidString])
-        let element = try #require((content2["elements"] as? [[String: Any]])?.first)
+        let screen2 = try #require((content2["screens"] as? [[String: Any]])?.first)
+        let element = try #require(((screen2["root"] as? [String: Any])?["children"] as? [[String: Any]])?.first)
         #expect(element["rotation"] as? Double == 30)
         #expect(element["skew"] as? Double == 12)
         #expect((element["shadowStyle"] as? [String: Any])?["blur"] as? Double == 8)
-        #expect((content2["screens"] as? [[String: Any]])?.first?["background"] as? String == "#FFFFFF")
-        let canvas2 = try #require(content2["canvas"] as? [String: Any])
-        #expect(canvas2["rulers"] as? Bool == true)
-        #expect(((canvas2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
+        #expect(screen2["background"] as? String == "#FFFFFF")
+        let settings2 = try #require(content2["settings"] as? [String: Any])
+        #expect(settings2["rulers"] as? Bool == true)
+        #expect(((settings2["model"] as? [String: Any])?["provider"] as? [String: Any])?["name"] as? String == "future")
         // The picture only the new key names is kept with it.
         #expect(written.fileWrappers?["images"]?.fileWrappers?[mask.uuidString] != nil)
 
         // A model chosen here is written in place of the one this version couldn't read.
-        read.content.canvas.model = .appleIntelligence
-        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["canvas"] as? [String: Any])
+        read.content.settings.model = .appleIntelligence
+        let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["settings"] as? [String: Any])
         #expect((chosen["model"] as? [String: Any])?["provider"] as? String == ModelChoice.appleIntelligence.provider)
     }
 
@@ -809,8 +825,8 @@ struct DesignFileTests {
         let document = LayerDocument()
         let model = AppModel(document: document)
         // Empty, apart from the model a new design starts with.
-        var empty = DesignContent()
-        empty.canvas.model = ModelPreferences.defaultChoice
+        var empty = TreeContent()
+        empty.settings.model = ModelPreferences.defaultChoice
         #expect(document.current.content == empty)
         #expect(document.current.drawing.strokes.isEmpty)
 
@@ -818,46 +834,15 @@ struct DesignFileTests {
         // Ink drawn on the canvas becomes a drawing in the design.
         var sync = DrawingSync()
         let strokes = sampleFile().drawing.strokes
-        model.inkChanged(sync.changes(for: strokes, in: model.store.content))
+        model.inkChanged(sync.changes(for: strokes, in: model.store.tree))
 
         let snapshot = try document.snapshot(contentType: .layerDesign)
         #expect(snapshot.content.screens.map(\.name) == ["Screen 1"])
-        #expect(snapshot.content.floating.map(\.element.kind) == [.drawing])
+        #expect(snapshot.content.canvasLeaves.map(\.kind) == [.drawing])
         #expect(snapshot.drawing.strokes.map(\.key) == strokes.map(\.key))
 
         // What is written to disk opens as the same design.
         #expect(try DesignFile(wrapper: snapshot.wrapper()).content == snapshot.content)
-    }
-
-    @Test func keysEarlierVersionsDroppedAreNotKeptFromAnOlderFile() throws {
-        let screen = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
-        let element = """
-            {"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","kind":"title","frame":[[82,112],[228,40]],
-             "text":"Title","tint":{"red":0.8,"green":0.42,"blue":0.34},"legacyFont":"Avenir"}
-            """
-        let content = """
-            {"accent":{"red":0.8,"green":0.42,"blue":0.34},"branchName":"feat/older","comments":[],
-             "canvas":{"oldSetting":true},
-             "screens":[{"id":"\(screen)","name":"Screen 1","origin":[400,100],"scale":0.75,"oldFrame":1,"elements":[\(element)]}]}
-            """
-        // Version 1: one file. Version 2: a package, with a key at the top of its design file.
-        let single = FileWrapper(regularFileWithContents: Data("""
-            {"version":1,"drawing":"\(PKDrawing().dataRepresentation().base64EncodedString())","content":\(content)}
-            """.utf8))
-        let package = FileWrapper(directoryWithFileWrappers: [
-            "design.json": FileWrapper(regularFileWithContents: Data("{\"version\":2,\"legacy\":true,\"content\":\(content)}".utf8)),
-        ])
-        for older in [single, package] {
-            let saved = try manifest(of: DesignFile(wrapper: older).wrapper())
-            #expect(saved["legacy"] == nil)
-            let written = try #require(saved["content"] as? [String: Any])
-            for key in ["accent", "branchName", "comments"] { #expect(written[key] == nil, "\(key)") }
-            #expect((written["canvas"] as? [String: Any])?["oldSetting"] == nil)
-            #expect((written["screens"] as? [[String: Any]])?.first?["oldFrame"] == nil)
-            let elements = try #require(written["elements"] as? [[String: Any]])
-            #expect(elements.count == 1)
-            #expect(elements.first?["legacyFont"] == nil)
-        }
     }
 
     @Test func theSharedDesignFileHasTheLatestEdit() async throws {
@@ -919,14 +904,14 @@ struct DesignFileTests {
         let document = LayerDocument()
         document.update { $0 = file }
         let model = AppModel(document: document)
-        #expect(model.store.content == file.content)
+        #expect(model.store.tree == file.content)
     }
 }
 
 @Suite("Generating SwiftUI")
 struct CodeGenerationTests {
     @Test func theDemoScreenBecomesAVerticalStackInReadingOrder() {
-        let code = SwiftUICodeGenerator.code(for: demoScreen(), settings: CodeSettings(includesPreview: false))
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: demoElements(), settings: CodeSettings(includesPreview: false))
         let expected = """
             import SwiftUI
 
@@ -967,17 +952,17 @@ struct CodeGenerationTests {
             }
             """
         #expect(code == expected)
-        #expect(SwiftUICodeGenerator.fileName(for: demoScreen()) == "Screen1.swift")
+        let design = SwiftUICodeGenerator.design(holding: demoElements())
+        #expect(SwiftUICodeGenerator.fileName(for: design.screens[0], in: SwiftUICodeGenerator.Context(design)) == "Screen1.swift")
     }
 
     @Test func aSymbolOnAScreenBecomesASystemImage() throws {
-        var screen = DesignScreen(name: "Screen 2", origin: .zero, scale: 1)
         var heart = element(.symbol, 174.5, 200, 44, 44)
-        heart.symbol = "heart.fill"
-        heart.tint = Theme.inkTint
-        screen.elements = [element(.title, 82.5, 112, 228, 40), heart]
+        heart.content.symbol = "heart.fill"
+        heart.style.tint = Theme.inkTint
+        let screen = [element(.title, 82.5, 112, 228, 40), heart]
 
-        let lines = SwiftUICodeGenerator.code(for: screen).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let lines = SwiftUICodeGenerator.code(forFreeScreenHolding: screen, named: "Screen 2").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         let image = try #require(lines.firstIndex(of: #"Image(systemName: "heart.fill")"#))
         #expect(Array(lines[image...].prefix(6)) == [
             #"Image(systemName: "heart.fill")"#,
@@ -990,17 +975,16 @@ struct CodeGenerationTests {
     }
 
     @Test func anElementsOwnStylingIsWrittenIntoItsCode() {
-        var screen = DesignScreen(name: "Screen 3", origin: .zero, scale: 1)
         var title = element(.title, 82.5, 112, 228, 40)
-        title.fontSize = 34
-        title.fontWeight = .semibold
-        title.textColor = RGBColor(hex: 0x3366FF)
-        title.opacity = 0.5
+        title.style.fontSize = 34
+        title.style.fontWeight = .semibold
+        title.style.textColor = RGBColor(hex: 0x3366FF)
+        title.style.opacity = 0.5
         var button = element(.button, 20, 744, 353, 50)
-        button.cornerRadius = 12
-        screen.elements = [title, button]
+        button.style.cornerRadius = 12
+        let screen = [title, button]
 
-        let lines = SwiftUICodeGenerator.code(for: screen).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let lines = SwiftUICodeGenerator.code(forFreeScreenHolding: screen, named: "Screen 3").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         #expect(lines.contains(".font(.system(size: 34, weight: .semibold))"))
         #expect(lines.contains(".foregroundStyle(Color(red: 0.20, green: 0.40, blue: 1.00))"))
         #expect(lines.contains(".opacity(0.5)"))
@@ -1008,20 +992,18 @@ struct CodeGenerationTests {
     }
 
     @Test func aScreenOfAnotherDeviceUsesThatDevicesEdges() {
-        var screen = DesignScreen(name: "Tablet", origin: .zero, scale: 1, deviceID: "ipad")
-        screen.elements = [element(.title, 296, 100, 228, 40)]
-        let code = SwiftUICodeGenerator.code(for: screen)
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [element(.title, 296, 100, 228, 40)], named: "Tablet",
+                                             device: DeviceFrame.named("ipad"))
         // The iPad's status bar keeps 24 points clear, and the title is centred on 820.
         #expect(code.contains(".padding(.top, 76)"))
         #expect(code.contains(".multilineTextAlignment(.center)"))
     }
 
     @Test func textIsEscapedAndAnEmptyScreenStillCompiles() {
-        var screen = DesignScreen(name: "Screen 2", origin: .zero, scale: 1)
-        #expect(SwiftUICodeGenerator.code(for: screen).contains("Color.clear"))
+        #expect(SwiftUICodeGenerator.code(forFreeScreenHolding: [], named: "Screen 2").contains("Color.clear"))
 
-        screen.elements = [element(.title, 82, 112, 228, 40, text: "Say \"hi\"\\now")]
-        #expect(SwiftUICodeGenerator.code(for: screen).contains(#"Text("Say \"hi\"\\now")"#))
+        let screen = [element(.title, 82, 112, 228, 40, text: "Say \"hi\"\\now")]
+        #expect(SwiftUICodeGenerator.code(forFreeScreenHolding: screen, named: "Screen 2").contains(#"Text("Say \"hi\"\\now")"#))
     }
 
     @Test func codeIsColouredByTokenKind() {
@@ -1486,9 +1468,12 @@ struct CloudFileTests {
 struct ResourceTests {
     /// A board of three screens and 30 drawings of 40 strokes, some 2400 points across.
     private func bigBoard() -> AppModel {
-        var content = DesignContent()
+        var content = TreeContent()
         for index in 0..<3 {
-            content.addScreen(DesignScreen(name: "Screen \(index + 1)", origin: CGPoint(x: CGFloat(index) * 800, y: 0), scale: 1, elements: [element(.title, 40, 120, 300, 40)]))
+            var root = LayerNode(kind: .group)
+            root.children = [element(.title, 40, 120, 300, 40)]
+            content.screens.append(TreeScreen(name: "Screen \(index + 1)", origin: CGPoint(x: CGFloat(index) * 800, y: 0), scale: 1, deviceID: nil,
+                                              root: root))
         }
         for index in 0..<30 {
             let origin = CGPoint(x: CGFloat(index % 6) * 400, y: 900 + CGFloat(index / 6) * 400)
@@ -1499,7 +1484,10 @@ struct ResourceTests {
                 }
                 return PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSinceReferenceDate: Double(index * 1000 + stroke))))
             }
-            if let drawing = DesignElement.drawing(strokes) { content.add(drawing, to: nil, scale: 1) }
+            if var drawing = LayerNode.drawing(strokes) {
+                drawing.scale = 1
+                content.canvas.append(drawing)
+            }
         }
         let board = content
         let document = LayerDocument()
@@ -1549,7 +1537,7 @@ struct ResourceTests {
     private nonisolated static func isMainThread() -> Bool { Thread.isMainThread }
 
     @Test func theUndoHistoryIsCappedAtFiftySteps() {
-        let store = DesignStore(content: DesignContent())
+        let store = DesignStore()
         let undo = UndoManager()
         // Each edit its own step, as each user action is in the app's run loop.
         undo.groupsByEvent = false
@@ -1644,7 +1632,7 @@ struct ClosingTests {
 
         #expect(system.hasUnsavedChanges)
         #expect(!model.store.isEditing)
-        #expect(try model.document.snapshot(contentType: .layerDesign).content.canvas.background == RGBColor(hex: 0x0000FF))
+        #expect(try model.document.snapshot(contentType: .layerDesign).content.settings.background == RGBColor(hex: 0x0000FF))
     }
 
     /// The name settled at close, the file's name and the picture for the browser are
@@ -1679,7 +1667,7 @@ struct ClosingTests {
     @Test func leavingTheScreenKeepsRedoAndTheOldestStep() throws {
         let model = AppModel(document: LayerDocument())
         let (system, undo) = systemDocument(for: model)
-        let start = model.store.content
+        let start = model.store.tree
         for step in 0..<DesignStore.undoLevels {
             model.store.setTitle("Board \(step)")
         }
@@ -1694,7 +1682,7 @@ struct ClosingTests {
         #expect(undo.canRedo)
         undo.redo()
         for _ in 0..<DesignStore.undoLevels { undo.undo() }
-        #expect(model.store.content == start)
+        #expect(model.store.tree == start)
     }
 
     /// The undo manager the system gives a design groups changes by event. Told outside any
@@ -1722,49 +1710,50 @@ struct FormatPanelEditTests {
         }
         return !model.store.isEditing
     }
-    private func makeModel() -> (model: AppModel, undo: UndoManager, screen: DesignScreen) {
+    private func makeModel() throws -> (model: AppModel, undo: UndoManager, screen: TreeScreen) {
         let undo = UndoManager()
         undo.groupsByEvent = false
         let model = AppModel(document: LayerDocument())
         model.store.undoManager = undo
         model.adjustmentPause = .milliseconds(20)
-        return (model, undo, model.store.addScreen(from: leftScreenSketch))
+        let added = try #require(model.store.addScreen(from: leftScreenSketch))
+        return (model, undo, try #require(model.store.treeScreen(added.id)))
     }
 
     @Test func thePanelsPauseEndsItsOwnEdit() async throws {
-        let (model, undo, screen) = makeModel()
-        let before = model.store.content
-        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
-        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout 2" } }
+        let (model, undo, screen) = try makeModel()
+        let before = model.store.tree
+        model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
+        model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout 2" } }
         #expect(model.store.isEditing)
         #expect(try await pauseEnds(model))
         undo.undo()
-        #expect(model.store.content == before)
+        #expect(model.store.tree == before)
     }
 
     /// A drag begun just after a colour was tapped: the pause used to end the drag's edit
     /// halfway, and every later move of the drag was an undo step of its own. The pause
     /// ends the panel's own step; the drag is one step of its own.
     @Test func aDragBegunDuringThePanelsPauseIsStillOneStep() async throws {
-        let (model, undo, screen) = makeModel()
-        let before = model.store.content
+        let (model, undo, screen) = try makeModel()
+        let before = model.store.tree
         let x = screen.origin.x
-        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
         model.store.beginEdit()
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 }
         let mark = model.store.historyMark
         try await Task.sleep(for: .milliseconds(150))
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
-        model.store.updateScreen(screen.id) { $0.origin.x += 10 }
+        model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 }
+        model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 }
         #expect(model.store.isEditing)
         #expect(model.store.historyMark == mark, "no move is a step of its own")
         model.store.endEdit()
 
         undo.undo()
-        #expect(model.store.screen(screen.id)?.origin.x == x)
-        #expect(model.store.screen(screen.id)?.name == "Checkout")
+        #expect(model.store.treeScreen(screen.id)?.origin.x == x)
+        #expect(model.store.treeScreen(screen.id)?.name == "Checkout")
         undo.undo()
-        #expect(model.store.content == before)
+        #expect(model.store.tree == before)
     }
 
     /// A spoken command holds its step open. A panel change made just before it, or during
@@ -1773,8 +1762,8 @@ struct FormatPanelEditTests {
     /// by hand" the panel had begun. Every later change then joined that one step.
     @Test(arguments: [true, false])
     func aPanelChangeAroundASpokenCommandLeavesNoEditOpen(panelFirst: Bool) async throws {
-        let (model, _, screen) = makeModel()
-        let panel = { model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } } }
+        let (model, _, screen) = try makeModel()
+        let panel = { model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } } }
         if panelFirst {
             panel()
             model.store.beginHeldEdit()
@@ -1782,56 +1771,56 @@ struct FormatPanelEditTests {
             model.store.beginHeldEdit()
             panel()
         }
-        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
+        model.store.actingForCommand { model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 } }
         try await Task.sleep(for: .milliseconds(150))
         model.store.endHeldEdit()
         #expect(try await pauseEnds(model))
 
         // The next change is a step of its own.
         let mark = model.store.historyMark
-        model.store.updateScreen(screen.id) { $0.origin.y += 10 }
+        model.store.updateTreeScreen(screen.id) { $0.origin.y += 10 }
         #expect(model.store.historyMark == mark + 1)
     }
 
     /// The command ends before the panel's pause: the step the hold left open for the
     /// panel's edit by hand is the panel's to end.
     @Test func aPanelChangeInACommandThatEndsBeforeThePauseLeavesNoEditOpen() async throws {
-        let (model, _, screen) = makeModel()
+        let (model, _, screen) = try makeModel()
         model.adjustmentPause = .milliseconds(200)
         model.store.beginHeldEdit()
-        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
-        model.store.actingForCommand { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
+        model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
+        model.store.actingForCommand { model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 } }
         model.store.endHeldEdit()
         #expect(model.store.isEditing, "the panel's edit goes on until its pause")
         #expect(try await pauseEnds(model))
 
         let mark = model.store.historyMark
-        model.store.updateScreen(screen.id) { $0.origin.y += 10 }
+        model.store.updateTreeScreen(screen.id) { $0.origin.y += 10 }
         #expect(model.store.historyMark == mark + 1)
     }
 
     /// A change in the panel during a drag is a step of its own, which the panel's pause
     /// ends while the drag goes on in its own.
     @Test func aChangeInThePanelDuringADragLeavesTheDragToEndIt() async throws {
-        let (model, undo, screen) = makeModel()
-        let before = model.store.content
+        let (model, undo, screen) = try makeModel()
+        let before = model.store.tree
         let x = screen.origin.x
         // The drag's frames are made for its edit, as a canvas drag's are.
         let drag = model.store.beginEdit()
-        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
-        model.adjusting { model.store.updateScreen(screen.id) { $0.name = "Checkout" } }
+        model.store.act(for: drag) { model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 } }
+        model.adjusting { model.store.updateTreeScreen(screen.id) { $0.name = "Checkout" } }
         try await Task.sleep(for: .milliseconds(150))
         #expect(model.store.isEditing)
         let mark = model.store.historyMark
-        model.store.act(for: drag) { model.store.updateScreen(screen.id) { $0.origin.x += 10 } }
+        model.store.act(for: drag) { model.store.updateTreeScreen(screen.id) { $0.origin.x += 10 } }
         #expect(model.store.historyMark == mark, "the move after the pause is still the drag's")
         model.store.endEdit(drag)
 
         undo.undo()
-        #expect(model.store.screen(screen.id)?.name == before.screens.first?.name)
-        #expect(model.store.screen(screen.id)?.origin.x == x + 20)
+        #expect(model.store.treeScreen(screen.id)?.name == before.screens.first?.name)
+        #expect(model.store.treeScreen(screen.id)?.origin.x == x + 20)
         undo.undo()
-        #expect(model.store.content == before)
+        #expect(model.store.tree == before)
     }
 }
 
@@ -1879,15 +1868,16 @@ struct FileCheckTests {
 
 /// Generated code for elements that are turned.
 struct TurnedCodeTests {
-    private func lines(of screen: DesignScreen, settings: CodeSettings = CodeSettings(includesPreview: false)) -> [String] {
-        SwiftUICodeGenerator.code(for: screen, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    private func lines(of screen: [LayerNode], settings: CodeSettings = CodeSettings(includesPreview: false)) -> [String] {
+        SwiftUICodeGenerator.code(forFreeScreenHolding: screen, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    private func screen(_ elements: [DesignElement]) -> DesignScreen {
-        DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: elements)
+    /// What a screen holds, on a free root of its own (`code(forFreeScreenHolding:)`).
+    private func screen(_ elements: [LayerNode]) -> [LayerNode] {
+        elements
     }
 
-    private func turned(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, by degrees: Double?) -> DesignElement {
+    private func turned(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, by degrees: Double?) -> LayerNode {
         var item = element(kind, x, y, width, height)
         item.rotation = degrees
         return item
@@ -1895,8 +1885,8 @@ struct TurnedCodeTests {
 
     @Test func anUprightElementHasNoTurnInItsCode() {
         let screen = screen([element(.button, 40, 300, 200, 50)])
-        for layout in [CodeSettings.Layout.stack, .absolute] {
-            let code = SwiftUICodeGenerator.code(for: screen, settings: CodeSettings(layout: layout, includesPreview: false))
+        for layout in [CodeSettings.Layout.structure, .absolute] {
+            let code = SwiftUICodeGenerator.code(forFreeScreenHolding: screen, settings: CodeSettings(layout: layout, includesPreview: false))
             #expect(!code.contains(".rotationEffect"))
         }
     }
@@ -1931,7 +1921,7 @@ struct TurnedCodeTests {
         ]))
         #expect(lines.filter { $0 == ".rotationEffect(.degrees(10))" }.count == 1)
         // Each line's own indent tells where the HStack block ends.
-        let raw = SwiftUICodeGenerator.code(for: screen([
+        let raw = SwiftUICodeGenerator.code(forFreeScreenHolding: screen([
             turned(.button, 20, 300, 150, 50, by: 10),
             element(.button, 220, 300, 150, 50),
         ]), settings: CodeSettings(includesPreview: false)).split(separator: "\n").map(String.init)
@@ -1943,10 +1933,10 @@ struct TurnedCodeTests {
     }
 
     /// A bordered, shadowed button inset from a full-width title, which sets the margin.
-    private func styledButton(turnedBy degrees: Double?) -> DesignScreen {
+    private func styledButton(turnedBy degrees: Double?) -> [LayerNode] {
         var button = turned(.button, 60, 300, 200, 50, by: degrees)
-        button.borderWidth = 2
-        button.hasShadow = true
+        button.style.borderWidth = 2
+        button.style.hasShadow = true
         return screen([element(.title, 20, 100, 353, 40), button])
     }
 
@@ -1973,9 +1963,9 @@ struct TurnedCodeTests {
     /// It is finished first now, as a turned one is, so the border is round the element.
     @Test func anUprightElementIsFinishedBeforeItIsPlaced() throws {
         var image = element(.image, (393 - 200) / 2, 300, 200, 150)
-        image.borderWidth = 2
+        image.style.borderWidth = 2
         var title = element(.title, 82.5, 112, 228, 40)
-        title.borderWidth = 2
+        title.style.borderWidth = 2
         let centred = lines(of: screen([title, image]))
         for kind in ["Text(\"Title\")", "Image("] {
             let start = try #require(centred.firstIndex { $0.hasPrefix(kind) })

@@ -123,7 +123,7 @@ final class SketchEngine {
     /// Reads a sketch, and says what came with the reading: what else a close call nearly
     /// was, the words written in it, and where the reading was logged.
     func outcome(for requested: SketchRequest) async -> SketchOutcome {
-        if requested.isAsked { return SketchOutcome(reading: await readAsked(requested)) }
+        if requested.isAsked { return SketchOutcome(reading: await readAsked(requested), confidence: 1, decidedBy: .asked) }
         var withText = requested
         if Self.mightBeHandwriting(requested.observation.form) {
             withText.recognizedText = await readHandwriting(requested.strokes)
@@ -137,7 +137,9 @@ final class SketchEngine {
                 reading: reading,
                 alternative: escalated ? Self.alternative(to: reading, in: request, runnerUp: runnerUp) : nil,
                 logID: await log(request, chosen: reading, escalated: escalated, decidedBy: decider),
-                recognizedText: request.recognizedText
+                recognizedText: request.recognizedText,
+                confidence: request.scoredReadings.first { $0.reading == reading }?.score ?? 0,
+                decidedBy: Self.decidedBy(decider, reading: reading, recognizedText: request.recognizedText)
             )
         }
 
@@ -161,6 +163,14 @@ final class SketchEngine {
             record(answered: false, by: asked)
             return await settled(fallback, by: "rules")
         }
+    }
+
+    /// Who settled a reading: the rules, the handwriting they were given (when a word was
+    /// read and the reading is a kind of text), or the provider.
+    nonisolated static func decidedBy(_ decider: String, reading: SketchReading, recognizedText: String?) -> LayerNode.DecidedBy {
+        guard decider == "rules" else { return .model }
+        if recognizedText != nil, case .element(let kind) = reading, [.title, .body, .text].contains(kind) { return .handwriting }
+        return .rules
     }
 
     /// What else a close call nearly was: the provider's own second choice when it names
@@ -247,13 +257,13 @@ final class SketchEngine {
     }
 
     /// A name for a board from the design's own words, with no waiting.
-    func fallbackTitle(for content: DesignContent) -> String {
+    func fallbackTitle(for content: TreeContent) -> String {
         rules.title(for: content)
     }
 
     /// A name for a board, from the provider when it can give one and from the design's
     /// own words otherwise.
-    func suggestTitle(for content: DesignContent) async -> String {
+    func suggestTitle(for content: TreeContent) async -> String {
         let fallback = rules.title(for: content)
         guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
         let asked = provider.id
@@ -334,6 +344,10 @@ struct SketchOutcome: Sendable, Equatable {
     /// A word `HandwritingRecognizer` read out of the strokes, if it tried and found one,
     /// to use as the element's text.
     var recognizedText: String? = nil
+    /// The rules' score for `reading`; 1 when it was asked for by name.
+    var confidence: Double = 1
+    /// What settled the reading.
+    var decidedBy: LayerNode.DecidedBy = .rules
 }
 
 /// Runs `work`, giving up with `CancellationError` if it takes longer than `limit`.

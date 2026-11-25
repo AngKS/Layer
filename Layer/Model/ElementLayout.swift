@@ -50,12 +50,43 @@ enum ElementLayout {
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
+    /// Where a new element of a kind goes on a screen of `device`: 16 below the lowest of `visible` (frames in the
+    /// screen's points), or 16 below the top of the safe area on an empty screen, held above the bottom safe area, and
+    /// centred across the screen, for kinds that keep their sketched place too.
+    static func newElementFrame(for kind: ElementKind, on device: DeviceFrame, below visible: [CGRect]) -> CGRect {
+        let lowest = visible.map(\.maxY).max()
+        let top = (lowest.map { $0 + 16 } ?? device.safeTop + 16)
+        var frame = ElementLayout.frame(for: kind, sketch: CGRect(x: device.size.width / 2, y: top, width: 0, height: 0), on: device)
+        frame.origin.y = min(top, max(device.safeTop, device.size.height - device.safeBottom - frame.height - 8))
+        if keepsSketchedPosition(kind) {
+            frame.origin.x = ((device.size.width - frame.width) / 2).rounded()
+        }
+        return frame
+    }
+
     /// The side margin of text that is aligned to the leading edge.
     static let margin: CGFloat = 20
     /// The gap between two elements side by side.
     static let gutter: CGFloat = 12
     /// The gaps between one element and the next that a sketched element snaps to.
-    static let rhythm: [CGFloat] = [8, 12, 16, 24, 32]
+    static let rhythm: [CGFloat] = DesignTokens.standard.rhythm
+
+    /// iOS's Title 2 and Large Title sizes: the font size the Magic Pen gives a title drawn small or large, and the
+    /// text styles the SwiftUI export writes for a title of these sizes.
+    static let titleTwoSize: CGFloat = 22
+    static let largeTitleSize: CGFloat = 34
+
+    /// The font size of a title `sketched(_:sketch:on:among:)` made `height` tall: Title 2's when it is 32 tall, and
+    /// Large Title's when it is 48. A Title, 40 tall, has none of its own and takes the design's title size, as does a
+    /// size that is the design's title size.
+    static func sketchedTitleSize(height: CGFloat, tokens: DesignTokens) -> CGFloat? {
+        let size: CGFloat? = switch height {
+        case 32: titleTwoSize
+        case 48: largeTitleSize
+        default: nil
+        }
+        return size == tokens.textSizes.title ? nil : size
+    }
 
     /// A new element drawn with the Magic Pen. It starts from `frame(for:sketch:on:)` and
     /// keeps more of what was drawn: the width of a box drawn clearly narrower than the
@@ -420,23 +451,37 @@ struct SpacingGuides: Equatable, Sendable {
 
     var gaps: [Gap] { [top, left, bottom, right] }
 
-    static func measure(_ element: DesignElement, in screen: DesignScreen) -> SpacingGuides {
-        let frame = element.shapeBounds
-        let others = screen.elements.filter { $0.id != element.id && !$0.isHidden }.map(\.shapeBounds)
+    /// The box round a thing's turned shape measured to the nearest of `others` on each side, or to the edge of
+    /// `container` where none is: all in one host's own points. With no container, a side with nothing beside it has
+    /// no gap to show (its distance is 0), and the thing is never centred.
+    static func measure(_ frame: CGRect, among others: [CGRect], in container: CGRect?) -> SpacingGuides {
         let beside = others.filter { $0.maxY > frame.minY && $0.minY < frame.maxY }
         let stacked = others.filter { $0.maxX > frame.minX && $0.minX < frame.maxX }
 
-        let above = stacked.filter { $0.maxY <= frame.minY }.map(\.maxY).max() ?? 0
-        let below = stacked.filter { $0.minY >= frame.maxY }.map(\.minY).min() ?? screen.size.height
-        let before = beside.filter { $0.maxX <= frame.minX }.map(\.maxX).max() ?? 0
-        let after = beside.filter { $0.minX >= frame.maxX }.map(\.minX).min() ?? screen.size.width
+        let above = stacked.filter { $0.maxY <= frame.minY }.map(\.maxY).max() ?? container?.minY ?? frame.minY
+        let below = stacked.filter { $0.minY >= frame.maxY }.map(\.minY).min() ?? container?.maxY ?? frame.maxY
+        let before = beside.filter { $0.maxX <= frame.minX }.map(\.maxX).max() ?? container?.minX ?? frame.minX
+        let after = beside.filter { $0.minX >= frame.maxX }.map(\.minX).min() ?? container?.maxX ?? frame.maxX
 
         return SpacingGuides(
             top: Gap(start: CGPoint(x: frame.midX, y: above), end: CGPoint(x: frame.midX, y: frame.minY)),
             left: Gap(start: CGPoint(x: before, y: frame.midY), end: CGPoint(x: frame.minX, y: frame.midY)),
             bottom: Gap(start: CGPoint(x: frame.midX, y: frame.maxY), end: CGPoint(x: frame.midX, y: below)),
             right: Gap(start: CGPoint(x: frame.maxX, y: frame.midY), end: CGPoint(x: after, y: frame.midY)),
-            isCentered: ElementLayout.isCentered(frame, in: screen.size.width)
+            isCentered: container.map { abs(frame.midX - $0.midX) <= 1 } ?? false
         )
+    }
+}
+
+extension TurnedRect {
+    /// Where one of its corners is, turned: here, beside `ElementLayout.Corner`, so that `TurnedRect.swift` builds on
+    /// macOS without it.
+    func corner(_ corner: ElementLayout.Corner) -> CGPoint {
+        switch corner {
+        case .topLeft: corners[0]
+        case .topRight: corners[1]
+        case .bottomRight: corners[2]
+        case .bottomLeft: corners[3]
+        }
     }
 }

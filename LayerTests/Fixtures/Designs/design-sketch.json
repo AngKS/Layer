@@ -1,0 +1,113 @@
+{
+  "content": {
+    "canvas": [
+      {
+        "frame": [
+          [
+            500,
+            100
+          ],
+          [
+            160,
+            160
+          ]
+        ],
+        "id": "2A62407E-9AC3-4B74-899F-DF712BBD1967",
+        "kind": "stickyNote",
+        "scale": 0.66,
+        "text": "Rethink the header"
+      }
+    ],
+    "screens": [
+      {
+        "id": "17F16029-6852-4B2C-98D1-E9142005BAD0",
+        "name": "Sketch",
+        "origin": [
+          0,
+          0
+        ],
+        "root": {
+          "children": [
+            {
+              "frame": [
+                [
+                  20,
+                  80
+                ],
+                [
+                  228,
+                  40
+                ]
+              ],
+              "id": "B5648995-EC42-4071-BED5-1DFA8C562669",
+              "kind": "title",
+              "text": "Welcome"
+            },
+            {
+              "frame": [
+                [
+                  200,
+                  140
+                ],
+                [
+                  160,
+                  120
+                ]
+              ],
+              "id": "9999C517-02BF-4F7B-AC76-0D4E2B83C7AF",
+              "kind": "image"
+            },
+            {
+              "frame": [
+                [
+                  20,
+                  700
+                ],
+                [
+                  160,
+                  50
+                ]
+              ],
+              "id": "F7DE73D8-071F-47E4-BAA0-33F39486AFC4",
+              "kind": "button",
+              "text": "Continue"
+            },
+            {
+              "frame": [
+                [
+                  310,
+                  300
+                ],
+                [
+                  51,
+                  31
+                ]
+              ],
+              "id": "32FA097D-B49B-493D-911D-69445BC6EC18",
+              "kind": "toggle"
+            }
+          ],
+          "frame": [
+            [
+              0,
+              0
+            ],
+            [
+              393,
+              852
+            ]
+          ],
+          "id": "98102E5F-F123-4189-83EC-CA51D3A9FDF3",
+          "kind": "group",
+          "layout": {
+            "type": "free"
+          }
+        },
+        "scale": 1
+      }
+    ],
+    "settings": {}
+  },
+  "fileName": "Sketch",
+  "version": 4
+}

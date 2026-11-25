@@ -25,6 +25,7 @@ extension ElementKind {
         case .drawing: Catalogue.drawing
         case .shape: Catalogue.shape
         case .group: Catalogue.group
+        case .card: Catalogue.card
         }
     }
 }
@@ -232,6 +233,18 @@ enum Catalogue {
         minimumSize: CGSize(width: 8, height: 8),
         hasEffects: false,
         traits: []
+    )
+
+    static let card = ComponentSpec(
+        name: "Card", symbol: "rectangle.inset.filled", promptName: "card",
+        writtenNames: [],
+        isAskedForOnScreens: false,
+        size: .fixed(.zero),
+        minimumSize: CGSize(width: 8, height: 8),
+        tint: DesignTokens.standard.card.fill,
+        cornerRadius: .points(DesignTokens.standard.card.radius),
+        hasEffects: true,
+        traits: [.fill, .cornerRadius, .border]
     )
 
     static let progress = ComponentSpec(

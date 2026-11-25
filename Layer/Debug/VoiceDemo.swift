@@ -86,7 +86,7 @@ enum VoiceDemo {
             let isDark = defaults.bool(forKey: "LayerVoiceDemoDark")
             model.store.updateCanvas { $0.background = isDark ? CanvasSettings.backgrounds.last : nil }
         }
-        if defaults.string(forKey: "LayerVoiceDemoDesign") == "login", model.store.screens.isEmpty {
+        if defaults.string(forKey: "LayerVoiceDemoDesign") == "login", model.store.tree.screens.isEmpty {
             addLoginScreen(to: model)
         }
     }
@@ -103,15 +103,25 @@ enum VoiceDemo {
             : VoiceAgent(model: model, testModel: ScriptedLanguageModel(script: toolScript))
     }
 
+    /// One iPhone screen, Login, on a free root: a title, a "Sign in" button and an image, which a call knows as E1, E2
+    /// and E3 on S1.
     private static func addLoginScreen(to model: AppModel) {
         let device = DeviceFrame.iPhone
-        let screen = model.store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: model))
-        model.store.updateScreen(screen.id) { $0.name = "Login" }
-        _ = model.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 75, width: 353, height: 41), text: "Welcome back", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 420, width: 353, height: 50), text: "Sign in", tint: Theme.accent),
-            DesignElement(kind: .image, frame: CGRect(x: 20, y: 500, width: 200, height: 200), text: "", tint: Theme.accent),
-        ], on: screen.id, replacing: true)
+        let placement = DesignActions.placementForNewScreen(device, in: model)
+        func leaf(_ kind: ElementKind, _ frame: CGRect, _ text: String) -> LayerNode {
+            var node = LayerNode(kind: kind)
+            node.frame = frame
+            node.content.text = text
+            node.style.tint = Theme.accent
+            return node
+        }
+        var root = LayerNode(kind: .group)
+        root.children = [
+            leaf(.title, CGRect(x: 20, y: 75, width: 353, height: 41), "Welcome back"),
+            leaf(.button, CGRect(x: 20, y: 420, width: 353, height: 50), "Sign in"),
+            leaf(.image, CGRect(x: 20, y: 500, width: 200, height: 200), ""),
+        ]
+        model.store.addScreen(TreeScreen(name: "Login", origin: placement.origin, scale: placement.scale, deviceID: nil, root: root))
         model.ink?.zoomToFit()
     }
 }
@@ -186,7 +196,7 @@ enum PencilDemo {
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .seconds(1))
-        if !model.store.screens.isEmpty { model.ink?.zoomToFit() }
+        if !model.store.tree.screens.isEmpty { model.ink?.zoomToFit() }
         try? await Task.sleep(for: .milliseconds(500))
 
         // The pen comes into range, and the call gets ready.
@@ -266,11 +276,11 @@ enum ScreenEditDemo {
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .seconds(1))
-        if !model.store.screens.isEmpty { model.ink?.zoomToFit() }
+        if !model.store.tree.screens.isEmpty { model.ink?.zoomToFit() }
         try? await Task.sleep(for: .milliseconds(500))
 
         // Only now, with the pencil scripted: the field appearing starts the pencil's call.
-        guard let screen = model.store.screens.first else {
+        guard let screen = model.store.tree.screens.first else {
             VoiceLog.log.error("screen edit demo: no screen to select; launch with -LayerVoiceDemoDesign login")
             return
         }

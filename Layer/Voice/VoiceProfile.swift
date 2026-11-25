@@ -81,13 +81,9 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             // The on-device model has little: one screen in full, the tools that make
             // sense for the canvas as it is, and only the last couple of commands.
             Profile {
-                Instructions(VoiceRules.compact)
+                Instructions(VoiceRules.compact(hasScreens: picture.hasScreens))
                 CanvasBrief(detail: .compact)
-                if picture.hasScreens {
-                    offered(VoiceTools.all(actor, canEndCall: canEndCall))
-                } else {
-                    offered(VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall))
-                }
+                offered(Self.onDeviceTools(actor, canEndCall: canEndCall, hasScreens: picture.hasScreens))
             }
             .historyTransform { Self.trimmed($0, keepingCommands: 2) }
             .maximumResponseTokens(200)
@@ -97,6 +93,18 @@ struct VoiceProfile: LanguageModelSession.DynamicProfile {
             .samplingMode(.greedy)
             .reporting(to: hooks, turns: turns)
         }
+    }
+
+    /// Whether the model of the profile in force is handed every tool: a test's stand-in, or a hosted model this system
+    /// can run, as `body`'s first two branches choose. False for the on-device model (`onDeviceTools`).
+    static func handsAllTools(_ choice: ModelChoice, hasTestModel: Bool) -> Bool {
+        hasTestModel || (choice.hostedProvider != nil && choice.model != nil && HostedLanguageModel.isSupported)
+    }
+
+    /// The tools the on-device model is handed: with a screen, all but the two it has no room for (`VoiceTools.compact`);
+    /// with none, those for an empty canvas.
+    static func onDeviceTools(_ actor: any VoiceActing, canEndCall: Bool, hasScreens: Bool) -> [any Tool] {
+        hasScreens ? VoiceTools.compact(actor, canEndCall: canEndCall) : VoiceTools.forEmptyCanvas(actor, canEndCall: canEndCall)
     }
 
     /// `tools` as the model is handed them, each taking its turn. A change for one screen

@@ -90,7 +90,8 @@ extension SketchRequest {
             if inner == .cross {
                 return [ScoredReading(reading: .element(.image), score: 1)]
             }
-            return bigEnclosureScoredReadings(ratio: Double(local.width / max(local.height, 1)), roundness: roundness)
+            let readings = bigEnclosureScoredReadings(ratio: Double(local.width / max(local.height, 1)), roundness: roundness)
+            return withCardReading(to: readings, local: local, existing: existing)
         case .stackedLines:
             return [ScoredReading(reading: .element(.body), score: 1)]
         case .line:
@@ -134,6 +135,31 @@ extension SketchRequest {
         }
         let weighted = rescued.map { ScoredReading(reading: $0.reading, score: $0.score * match.confidence) }
         return (weighted + squiggle).sorted { $0.score > $1.score }
+    }
+
+    /// A big outline round things already on the screen can be a card. Round two or more, a
+    /// card is by far the likeliest and everything else is scaled down; round one, it is
+    /// only one more candidate, ranked with the rest. A thing is inside when at least
+    /// `StructureConventions.enclosedShare` of its area is inside. The card has no sketch
+    /// hint, so a model's instructions are what they were.
+    private static func withCardReading(to readings: [ScoredReading], local: CGRect, existing: [ExistingElement]) -> [ScoredReading] {
+        let enclosed = existing.filter { element in
+            let area = element.frame.width * element.frame.height
+            guard area > 0 else { return false }
+            let inside = element.frame.intersection(local)
+            return !inside.isNull && Double(inside.width * inside.height / area) >= StructureConventions.enclosedShare
+        }.count
+        switch enclosed {
+        case 0:
+            return readings
+        case 1:
+            return (readings + [ScoredReading(reading: .element(.card), score: SketchConventions.cardAroundOne)])
+                .sorted { $0.score > $1.score }
+        default:
+            let others = readings.map { ScoredReading(reading: $0.reading, score: $0.score * SketchConventions.cardElsewhere) }
+            return ([ScoredReading(reading: .element(.card), score: SketchConventions.cardAroundSeveral)] + others)
+                .sorted { $0.score > $1.score }
+        }
     }
 
     /// Image, button or textField: an outline wide enough to be considered at all. The old

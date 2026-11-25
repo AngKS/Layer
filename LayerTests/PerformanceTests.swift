@@ -26,7 +26,7 @@ final class DesignIndexerPerformanceTests: XCTestCase {
     }
 }
 
-/// Saving a design re-encodes `drawing.data` every time, even when only the design's
+/// Saving a design writes its design file every time, even when only the design's
 /// screens and elements changed and the ink was left untouched. That should be cheap.
 @MainActor
 final class DesignFilePerformanceTests: XCTestCase {
@@ -109,12 +109,13 @@ final class InkBoardPerformanceTests: XCTestCase {
     }
 
     /// A board of 30 drawings of 40 strokes each, 1200 strokes in all.
-    private func board() -> DesignContent {
-        var content = DesignContent()
+    private func board() -> TreeContent {
+        var content = TreeContent()
         for index in 0..<30 {
             let origin = CGPoint(x: CGFloat(index % 6) * 400, y: CGFloat(index / 6) * 400)
-            let drawing = DesignElement.drawing(strokes(40, at: origin, firstKey: Double(index) * 1000))!
-            content.add(drawing, to: nil, scale: 1)
+            var drawing = LayerNode.drawing(strokes(40, at: origin, firstKey: Double(index) * 1000))!
+            drawing.scale = 1
+            content.canvas.append(drawing)
         }
         return content
     }
@@ -123,13 +124,12 @@ final class InkBoardPerformanceTests: XCTestCase {
     /// design's drawings again (I5).
     func testDraggingOneDrawingAmongManyRedoesOnlyThatOne() {
         var content = board()
-        let dragged = content.elements[0].id
         var sync = DrawingSync()
         var shown = sync.strokes(showing: content, on: []) ?? []
 
         measure {
             for _ in 0..<30 {
-                content.update(dragged) { $0.frame.origin.x += 2 }
+                content.changeNode(on: .canvas, at: [0]) { $0.frame.origin.x += 2 }
                 shown = sync.strokes(showing: content, on: shown) ?? shown
             }
         }
@@ -138,10 +138,10 @@ final class InkBoardPerformanceTests: XCTestCase {
     /// A big drawing selected while the canvas pans: the selection's summary is worked out
     /// every frame (I4).
     func testCountingTheStrokesOfASelectedDrawingEveryFrame() {
-        let drawing = DesignElement.drawing(strokes(400, at: .zero, firstKey: 0))!
+        let drawing = LayerNode.drawing(strokes(400, at: .zero, firstKey: 0))!
         var total = 0
         measure {
-            for _ in 0..<120 { total += drawing.strokeCount }
+            for _ in 0..<120 { total += drawing.content.ink.flatMap { DecodedInk.drawing(drawing.id, ink: $0) }?.strokes.count ?? 0 }
         }
         XCTAssertEqual(total % 400, 0)
     }

@@ -30,7 +30,7 @@ struct InkGhost: Identifiable, Equatable {
 struct KindSuggestion: Identifiable, Equatable {
     let id = UUID()
     /// The element the sketch became.
-    var ref: DesignStore.ElementRef
+    var ref: NodeRef
     /// What it nearly was instead.
     var kind: ElementKind
     /// Where it was sketched, in canvas points, so that the other kind is laid out from
@@ -265,6 +265,19 @@ final class AppModel {
     /// True while an element is being dragged or resized, which shows the spacing guides.
     var isAdjusting = false
 
+    /// The screens that hold what is being dragged, one thing or several, a thing lifted out of
+    /// a row among them: each is drawn above the others until what it holds is dropped. Each
+    /// thing is found by its node id in the index, wherever it is now.
+    var screensBeingDraggedFrom: Set<TreeScreen.ID> {
+        guard isAdjusting else { return [] }
+        var ids: [UUID] = []
+        for case .element(let ref) in selection?.things ?? [] { ids.append(ref.node) }
+        if let lifted = drags?.lifted { ids.append(lifted.node) }
+        return Set(ids.compactMap { id in
+            if case .screen(let screen)? = store.ref(of: id)?.host { screen } else { nil }
+        })
+    }
+
     private(set) var effects: [RetraceEffect] = []
     private(set) var ghosts: [InkGhost] = []
     /// True while there is Magic Pen ink on the canvas that hasn't become anything.
@@ -399,8 +412,8 @@ final class AppModel {
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
-        engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
-        appliedModel = .some(file.content.canvas.model)
+        engine = SketchEngine(provider: file.content.settings.resolvedModel.sketchProvider)
+        appliedModel = .some(file.content.settings.model)
         hasHadName = file.content.title != nil
         store.onChange = { [weak self, document] content in
             // A command or generation still unwinding after the design closed doesn't
@@ -448,7 +461,7 @@ final class AppModel {
     // MARK: The model
 
     /// The model this design uses, as saved in its file or the app's default.
-    var modelChoice: ModelChoice { store.content.canvas.resolvedModel }
+    var modelChoice: ModelChoice { store.content.settings.resolvedModel }
 
     /// Changes the model this design uses, saved in its file. Undoable like any setting.
     func setModelChoice(_ choice: ModelChoice) {
@@ -476,7 +489,7 @@ final class AppModel {
 
     // MARK: Generating screens
 
-    /// A screen being written by the design's model, element by element.
+    /// A screen being written by the design's model, line by line.
     struct ScreenGeneration: Equatable {
         enum Phase: Equatable {
             case writing
@@ -484,23 +497,41 @@ final class AppModel {
             case failed(String)
         }
 
-        var screenID: DesignScreen.ID
+        var screenID: TreeScreen.ID
         var description: String
+        /// The leaves of the screen as the model last wrote it.
         var elementCount = 0
         var phase = Phase.writing
         /// True until the model starts writing its answer.
         var isThinking = true
+        /// How many parts of what the model wrote couldn't be brought in: every diagnostic but a button's action,
+        /// which Layer never runs. Said once the answer is complete.
+        var leftOut = 0
+        /// What is still wrong with what the model wrote after the fix and the layout, by kind, with the nodes it is
+        /// said of. The person's own nodes on the screen are never in it.
+        var unfixedIssues: [UnfixedIssue: [UUID]] = [:]
+        /// How many nodes have an issue, as of the last update: said once the answer is complete.
+        var unfixed: Int { UnfixedIssue.nodes(in: unfixedIssues) }
+        /// What was left out and what is still wrong, in sentences (`UnfixedIssue.report`). Nil when there is neither.
+        var report: String? { UnfixedIssue.report(leftOut: leftOut, unfixedIssues) }
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
     private(set) var generation: ScreenGeneration?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationDismissal: Task<Void, Never>?
+    /// How long a finished generation's outcome is shown before it goes.
+    @ObservationIgnored var generationOutcomePause: Duration = .seconds(4)
 
     var isGenerating: Bool { generation?.phase == .writing }
 
     /// Adds a new screen and has the design's model write it from `description`. Its
     /// elements appear as the model writes them; the whole screen is one undo step.
+    ///
+    /// The screen is a column, as the outline lays one out. Each update the model writes is
+    /// merged by the generation's reconciler over the screen as it is now, laid out off the
+    /// main actor, and committed as one change (`GenerationWriter`): a node keeps its id
+    /// through every update, and what the person changes or adds meanwhile stays theirs.
     ///
     /// `name` is what to call the screen; without one it is named from the description.
     /// `device` is what it is a screen of; without one, the canvas's own device.
@@ -511,62 +542,111 @@ final class AppModel {
     /// The screen is an undo step of its own (`DesignStore.Edit`), or, asked for by a spoken
     /// command, part of the command's: either way, what the person does while it is
     /// written is a step of its own, which the screen's never takes in or closes (G4).
-    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil, device: DeviceFrame? = nil) {
+    ///
+    /// Returns the new screen's id. Nil, and nothing changes, when there is nothing to write
+    /// or the store refuses the screen: on a device that can't be used, or with no room for
+    /// it. A refusal asked for by hand says why (`screenNotice`); a spoken command says it
+    /// itself. The last generation's outcome stays up until its own time. An update the
+    /// store refuses later, at the 5,000 cap, is never counted: the model is stopped, what
+    /// was written before stays, and the generation fails saying the design is full.
+    @discardableResult
+    func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil,
+                        device: DeviceFrame? = nil) -> TreeScreen.ID? {
         let prompt = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isGenerating, !isClosed else { return }
-        generationTask?.cancel()
-        generationDismissal?.cancel()
+        guard !prompt.isEmpty, !isGenerating, !isClosed else { return nil }
 
         let device = device ?? store.canvas.sketchDevice
         // What the design says already, before the new screen joins it, so the new one's
         // words match. Nothing for an empty design.
-        let board = store.content.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
+        let board = store.tree.screens.isEmpty ? nil : SketchPrompt.describe(board: store.content)
         // Part of a spoken command's step, which waits for the screen; otherwise a step of its
         // own, even when asked for inside a one-off step that ends at once (review M-5).
         let joined = store.actingEdit.flatMap { $0 === store.heldEdit ? $0 : nil }
         let ownsEdit = joined == nil
         let edit = joined ?? store.beginEditOfItsOwn(by: .app)
         store.name(edit, String(localized: "Generate Screen"))
+        let tokens = store.canvas.tokens
         // A command the pencil pointed at empty canvas for puts the screen where it pointed.
-        let screen = store.act(for: edit) { () -> DesignScreen in
-            let screen = store.addScreen(device, at: DesignActions.placementForNewScreen(device, in: self, near: anchor))
-            store.updateScreen(screen.id) { $0.name = name ?? ScreenGenerator.name(for: prompt) }
-            return screen
+        let placement = DesignActions.placementForNewScreen(device, in: self, near: anchor)
+        // An empty column, as the outline of nothing is: the model's lines fill it.
+        let added = store.act(for: edit) {
+            store.addScreen(TreeScreen(name: name ?? ScreenGenerator.name(for: prompt), origin: placement.origin,
+                                       scale: placement.scale, deviceID: device == .iPhone ? nil : device.id,
+                                       root: Outline.parse("", isComplete: true, tokens: tokens)))
         }
+        // A design with no room for another screen, or a device that can't be used, refuses it:
+        // there is nothing to write on, so the model isn't asked, and the step ends with nothing
+        // in it.
+        guard let screenID = added else {
+            if ownsEdit {
+                store.endEdit(edit)
+                screenNotice = Self.whyNoScreen(on: device)
+            }
+            return nil
+        }
+        generationTask?.cancel()
+        generationDismissal?.cancel()
         // Shown, not selected: a new screen comes in without selection handles round it.
-        DesignActions.reveal(.screen(screen.id), in: self, selecting: false)
-        generation = ScreenGeneration(screenID: screen.id, description: prompt)
+        DesignActions.reveal(.screen(screenID), in: self, selecting: false)
+        generation = ScreenGeneration(screenID: screenID, description: prompt)
 
-        let choice = modelChoice
-        let stream = screenStream(prompt, board, choice)
+        let request = ScreenGenerator.Request(description: prompt, board: board, choice: modelChoice, tokens: tokens)
+        let stream = screenStream(request)
+        // One writer for the whole generation, so that each key keeps its id through every update.
+        let writer = GenerationWriter(screenID: screenID)
+        #if DEBUG
+        writer.beforeCommit = { [weak self] in self?.beforeGenerationCommit?() }
+        #endif
         generationWasStopped = false
         generationTask = Task { [weak self] in
-            // What the generation has written, by place in its latest version.
-            var written: [DesignElement?] = []
+            // Whether the store refused an update, at the 5,000 cap or 32 deep: the generation ends saying so.
+            var isRefused = false
             do {
                 for try await update in stream {
                     guard let self else { return }
                     // The screen was taken away, by undo or by hand: there is nothing left to
                     // write on, but the generation still finishes, or it is stuck writing.
-                    guard let current = store.screen(screen.id) else { break }
+                    guard store.root(of: screenID) != nil else { break }
                     switch update {
                     case .startedWriting:
                         generation?.isThinking = false
-                    case .screen(let blueprint):
-                        withAnimation(.snappy(duration: 0.25)) {
-                            written = store.act(for: edit) {
-                                store.writeGenerated(blueprint.layout(on: current.device), on: screen.id, over: written)
+                    case .screen(let root):
+                        // Merged and laid out off the main actor; then one change, part of the
+                        // generation's step. The commit alone is animated: `withAnimation` takes
+                        // no asynchronous work, so this is `writer.write(_:to:in:)` with the
+                        // animation round its commit. Nothing is written once the design closes.
+                        let prepared = await writer.prepare(root, from: store)
+                        var isCommitted = false
+                        if let prepared, !isClosed {
+                            withAnimation(.snappy(duration: 0.25)) {
+                                isCommitted = store.act(for: edit) { writer.commit(prepared, to: store) }
                             }
                         }
                         generation?.isThinking = false
-                        generation?.elementCount = blueprint.itemCount
+                        // What is said is what was written: an update the store refused counts nothing.
+                        if let prepared, isCommitted {
+                            generation?.elementCount = root.leafCount
+                            generation?.unfixedIssues = prepared.unfixed
+                        } else if prepared != nil, !isClosed, store.root(of: screenID) != nil {
+                            isRefused = true
+                        }
+                    case .leftOut(let diagnostics):
+                        generation?.leftOut = diagnostics.count { $0.reason != .actionNotRun }
                     }
+                    // Every later update holds at least as much as the one refused: the model is stopped.
+                    if isRefused { break }
                 }
-                self?.finishGeneration(error: nil, edit: edit, ownsEdit: ownsEdit)
+                self?.finishGeneration(error: isRefused ? NoRoomForTheScreen() : nil, edit: edit, ownsEdit: ownsEdit)
             } catch {
                 self?.finishGeneration(error: error is CancellationError ? nil : error, edit: edit, ownsEdit: ownsEdit)
             }
         }
+        return screenID
+    }
+
+    /// Why a generation ended early: the design had no room for what the model wrote (`designIsFull`).
+    private struct NoRoomForTheScreen: LocalizedError {
+        var errorDescription: String? { AppModel.designIsFull }
     }
 
     /// Stops the model; what it has written so far stays.
@@ -582,7 +662,7 @@ final class AppModel {
     /// a reasoning model can think for tens of seconds, a paid request, before it writes
     /// the line that would find the screen gone (G11).
     private func stopGeneratingForAScreenThatIsGone() {
-        guard isGenerating, let generation, store.screen(generation.screenID) == nil else { return }
+        guard isGenerating, let generation, store.treeScreen(generation.screenID) == nil else { return }
         generationTask?.cancel()
     }
 
@@ -592,9 +672,15 @@ final class AppModel {
     }
 
     /// Where a generated screen's updates come from. A test puts its own in.
-    @ObservationIgnored var screenStream: (String, String?, ModelChoice) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
-        ScreenGenerator.stream($0, board: $1, using: $2)
+    @ObservationIgnored var screenStream: (ScreenGenerator.Request) -> AsyncThrowingStream<ScreenGenerator.Update, any Error> = {
+        ScreenGenerator.stream($0)
     }
+
+    #if DEBUG
+    /// Runs while a generated update, or a screen Build Screen rebuilds, waits for its commit, laid out but not yet
+    /// written: a test edits the screen here, as the person might meanwhile.
+    @ObservationIgnored var beforeGenerationCommit: (@MainActor () -> Void)?
+    #endif
 
     /// Ends a generation, and the screen's undo step if it has one of its own (`ownsEdit`):
     /// that and nothing else, so a drag still under way goes on as its own step (G4).
@@ -610,13 +696,14 @@ final class AppModel {
             return
         }
         // A screen taken away while it was written has nothing to show either.
-        guard let screen = store.screen(finished.screenID) else {
+        guard let screen = store.treeScreen(finished.screenID) else {
             generation = nil
             return
         }
         // A screen nothing was written on isn't left behind, unless something was put on it
-        // by hand meanwhile: it stays, with that on it (M1).
-        if finished.elementCount == 0, screen.elements.isEmpty {
+        // by hand meanwhile: it stays, with that on it (M1). An empty row, column or card isn't
+        // something: what counts is what it holds.
+        if finished.elementCount == 0, screen.root.leafCount == 0 {
             store.act(for: edit) { store.deleteScreen(finished.screenID) }
         }
         // Stopped before it wrote anything: there is nothing to say (G10).
@@ -634,7 +721,7 @@ final class AppModel {
         // Success says so briefly; a failure stays until it is dismissed.
         if finished.phase == .finished {
             generationDismissal = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: self?.generationOutcomePause ?? .zero)
                 guard !Task.isCancelled else { return }
                 withAnimation(.smooth(duration: 0.3)) { self?.dismissGeneration() }
             }
@@ -813,10 +900,11 @@ final class AppModel {
     @ObservationIgnored var openDesigns: @MainActor () -> [AppModel] = { OpenDesigns.shared.all }
 
     /// The words on the canvas, which are the ones most likely to be spoken and misheard:
-    /// the names of the screens and what their elements say.
+    /// the names of the screens and what their leaves say, read from the tree.
     var voiceVocabulary: [String] {
         var seen: Set<String> = []
-        let words = store.screens.flatMap { [$0.name] + $0.elements.map(\.text) } + store.floating.map(\.element.text)
+        let tree = store.tree
+        let words = tree.screens.flatMap { [$0.name] + $0.root.leaves.map(\.content.text) } + tree.canvasLeaves.map(\.content.text)
         return words
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0.count <= 60 && seen.insert($0).inserted }
@@ -877,6 +965,27 @@ final class AppModel {
     /// Said when Siri's undo of an action found nothing left to take back.
     var undoNotice: String?
 
+    /// Said when a screen asked for by hand, generated or dropped from the library, can't be added: see
+    /// `whyNoScreen(on:)`.
+    var screenNotice: String?
+
+    /// Said when a text, a sticky note, a picture or a thing from the library, asked for by hand, can't be added: the
+    /// design holds as much as Layer keeps (`designIsFull`).
+    var addNotice: String?
+
+    /// Why the store refused a new screen of `device`: the device can't be used (`DeviceFrame.problems`), as a file can
+    /// hold one of the design's own, or else the design holds as much as Layer keeps.
+    static func whyNoScreen(on device: DeviceFrame) -> String {
+        let problems = device.problems
+        guard problems.isEmpty else { return "The device “\(device.name)” can't be used. \(problems.joined(separator: " "))" }
+        return designIsFull
+    }
+
+    /// Why the store refused something new that it could otherwise take: the design is at Layer's limits.
+    nonisolated static var designIsFull: String {
+        "The design already holds as much as Layer keeps: \(TreeRules.maximumNodes.formatted()) things, nested at most \(TreeRules.maximumDepth) deep."
+    }
+
     /// Takes out of Siri's history the actions everything of which has been changed since,
     /// so that Siri isn't left to undo one, do nothing, and say it did. Done as the app
     /// stops being active, which is when Siri can next be asked.
@@ -925,6 +1034,7 @@ final class AppModel {
         generationDismissal?.cancel()
         settle?.cancel()
         suggestionExpiry?.cancel()
+        structureOfferExpiry?.cancel()
         for conversion in conversions { conversion.cancel() }
         conversions.removeAll()
         // A rename under way finishes: stopping it halfway would leave the file misnamed.
@@ -1065,9 +1175,9 @@ final class AppModel {
 
     /// What the board's picture shows, its ink included, so that a board changed and
     /// changed back, or touched without changing, isn't drawn again.
-    @ObservationIgnored private var previewedBoard: DesignContent?
+    @ObservationIgnored private var previewedBoard: TreeContent?
 
-    private var board: DesignContent { document.current.content }
+    private var board: TreeContent { document.current.content }
 
     private var needsPreview: Bool {
         guard document.current.preview != nil else { return true }
@@ -1152,16 +1262,17 @@ final class AppModel {
 
     // MARK: Selection
 
-    /// The one element that is selected. Nil when several things are: see `selectedElements`.
-    var selectedElement: (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
-        guard case .element(let ref) = selection, let found = store.resolve(ref) else { return nil }
-        return (ref, found.element, found.placement)
+    /// The one thing on a screen or the open canvas that is selected, where it is. Nil when several
+    /// things are, or it is gone.
+    var selectedNode: PlacedNode? {
+        guard case .element(let ref) = selection else { return nil }
+        return store.placed(ref)
     }
 
-    /// The one screen that is selected. Nil when several things are.
-    var selectedScreen: DesignScreen? {
-        guard case .screen(let id) = selection else { return nil }
-        return store.screen(id)
+    /// The one screen that is selected. Nil when several things are, or it is gone.
+    var selectedScreenID: TreeScreen.ID? {
+        guard case .screen(let id) = selection, store.treeScreen(id) != nil else { return nil }
+        return id
     }
 
     /// Everything selected, one thing at a time, in the design's own order.
@@ -1177,26 +1288,22 @@ final class AppModel {
     /// for by several views on every frame of a drag or a pan.
     @ObservationIgnored private var thingsKept: (selection: CanvasSelection?, version: Int, things: [CanvasSelection])?
 
-    /// Every element selected, alone or among other things, from the back to the front.
-    var selectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        selectedThings.compactMap { thing in
-            guard case .element(let ref) = thing, let found = store.resolve(ref) else { return nil }
-            return (ref, found.element, found.placement)
-        }
-    }
-
-    /// Every element selected, with each group among them standing for what is in it, at any
-    /// depth, that isn't a group itself: what the Format panel styles, and what voice is told
-    /// is selected, neither of which knows of groups (F6). From the back to the front.
-    var selectedLeaves: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        var seen: Set<DesignElement.ID> = []
-        return selectedElements.flatMap { selected -> [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] in
-            guard selected.element.kind == .group else { return [selected] }
-            return store.content.leaves(of: selected.element.id).compactMap { leaf in
-                let ref = DesignStore.ElementRef(host: selected.ref.host, element: leaf.id)
-                return store.resolve(ref).map { (ref, $0.element, $0.placement) }
+    /// What is selected, each container standing for its leaves at any depth; back to front, once each.
+    /// Hidden and locked ones included: what the Format panel styles, and what voice is told is selected.
+    var selectedLeafNodes: [PlacedNode] {
+        var seen: Set<UUID> = []
+        return selectedThings.flatMap { thing -> [PlacedNode] in
+            guard case .element(let ref) = thing, let selected = store.placed(ref) else { return [] }
+            guard selected.node.isContainer else { return [selected] }
+            var leaves: [UUID] = []
+            func collect(_ node: LayerNode) {
+                for child in node.children {
+                    if child.isContainer { collect(child) } else { leaves.append(child.id) }
+                }
             }
-        }.filter { seen.insert($0.ref.element).inserted }
+            collect(selected.node)
+            return leaves.compactMap(store.placed)
+        }.filter { seen.insert($0.node.id).inserted }
     }
 
     /// A tap that landed on the canvas itself rather than on an element's target: it picks
@@ -1236,25 +1343,37 @@ final class AppModel {
         // With the palette up, a finger tap reaches the canvas for elements too: their own
         // handles stay out of the Pencil's way while it draws. A drawing has no handle
         // of its own until it is selected, so a tap on its ink always reaches here.
-        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.resolve(ref)?.element.kind == .drawing {
+        if case .element(let ref)? = target, picksAnyElement || tool == .draw || store.node(ref.node)?.kind == .drawing {
             pick(target)
-        } else if case .screen(let id)? = target, let screen = store.screen(id), !screen.canvasFrame.contains(point) {
+        } else if case .screen(let id)? = target, let frame = screenFrame(id), !frame.contains(point) {
             // `hoverTarget` gives the screen for its name strip as well as for itself.
             pick(.screen(id))
-        } else if selection == nil, let screen = store.screen(at: point) {
-            pick(.screen(screen.id))
-        } else if let screen = store.screen(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen.id)) {
+        } else if selection == nil, let screen = screenID(at: point) {
+            pick(.screen(screen))
+        } else if let screen = screenID(at: point), restingOnCanvas.isEmpty, isLiftOfRestedFinger(on: .screen(screen)) {
             // The finger that rested on the screen's empty area, lifting. What it rested
             // on was the screen, but the tap would reach `pick` as a clearing, which its
             // guard wouldn't know for the lift.
             rested = nil
-        } else if let screen = store.screen(at: point), isSecondTap(on: .screen(screen.id)) {
+        } else if let screen = screenID(at: point), isSecondTap(on: .screen(screen)) {
             // A double-tap on the screen's empty area, whose first tap selected the screen:
             // a double-tap never takes a thing out.
-            pick(.screen(screen.id))
+            pick(.screen(screen))
         } else if !isNearMiss(viewPoint) {
             pick(nil)
         }
+    }
+
+    /// A screen's frame on the canvas, as the tree has it. Nil when it is gone.
+    private func screenFrame(_ id: TreeScreen.ID) -> CGRect? {
+        let tree = store.tree
+        return tree.screens.first { $0.id == id }.map { $0.canvasFrame(on: tree.device(of: $0)) }
+    }
+
+    /// The topmost screen covering a point on the canvas, as the tree has it.
+    private func screenID(at point: CGPoint) -> TreeScreen.ID? {
+        let tree = store.tree
+        return tree.screens.last { $0.canvasFrame(on: tree.device(of: $0)).contains(point) }?.id
     }
 
     /// How far from a selected thing's outline, on either side, a tap that hits nothing
@@ -1268,7 +1387,7 @@ final class AppModel {
     /// to spare.
     private func isNearMiss(_ viewPoint: CGPoint) -> Bool {
         selectedThings.contains { thing in
-            if case .element(let ref) = thing, store.resolve(ref)?.element.kind == .drawing { return false }
+            if case .element(let ref) = thing, store.node(ref.node)?.kind == .drawing { return false }
             guard let shape = store.canvasShape(of: thing).map(viewport.viewShape(for:)) else { return false }
             return Self.distance(from: viewPoint, toEdgeOf: shape) <= Self.nearMiss
         }
@@ -1285,17 +1404,19 @@ final class AppModel {
         return min(back.x - rect.minX, rect.maxX - back.x, back.y - rect.minY, rect.maxY - back.y)
     }
 
-    /// A tap on the target of an element, a group or a screen's name, or on something among
+    /// A tap on the target of an element, a container or a screen's name, or on something among
     /// several selected, at a point in the view. Ink is drawn over every element and screen,
     /// so where a drawing's ink lies over the target the tap picks the drawing, as hover and
-    /// a tap with the palette up do. On a group's target it is on the thing in the group
-    /// under it, or on the group itself in a gap between them: both taps of a double-tap find
-    /// the same one, and `pick` works out what it picks.
+    /// a tap with the palette up do. On a container's target it is on the thing in it under
+    /// the tap, at any depth, or on the container itself in a gap between them: both taps of a
+    /// double-tap find the same one, and `pick` works out what it picks.
     func targetTapped(_ thing: CanvasSelection, at viewPoint: CGPoint) {
         if let drawing = inkTarget(at: viewPoint) {
             pick(.element(drawing))
-        } else if case .element(let ref) = thing, store.groupItem(ref.element) != nil {
-            pick(.element(store.leaf(at: viewport.canvasPoint(for: viewPoint), in: ref.element) ?? ref))
+        } else if case .element(let ref) = thing, store.node(ref.node)?.isContainer == true {
+            let point = viewport.canvasPoint(for: viewPoint)
+            let leaf = TreeTargets.leaf(at: point, in: ref.node, content: store.tree, index: store.index)
+            pick(.element(leaf.map { NodeRef(host: ref.host, node: $0) } ?? ref))
         } else {
             pick(thing)
         }
@@ -1303,7 +1424,7 @@ final class AppModel {
 
     /// The drawing whose ink is at a point in the view. It lies over everything else and
     /// takes a touch there, even where an element's target is under it.
-    func inkTarget(at viewPoint: CGPoint) -> DesignStore.ElementRef? {
+    func inkTarget(at viewPoint: CGPoint) -> NodeRef? {
         drawing(at: viewport.canvasPoint(for: viewPoint))
     }
 
@@ -1319,26 +1440,39 @@ final class AppModel {
     /// The time now, which tells a double-tap's second tap from a tap of its own. A test
     /// sets a clock of its own.
     @ObservationIgnored var now: () -> ContinuousClock.Instant = { .now }
-    /// How soon a second tap on the same thing makes a double-tap. It stands in for the
-    /// system double-tap interval the spec names: iPadOS gives no public value for it to
-    /// read (L4).
+    /// How soon after a tap lifts a second on the same thing must land to make a double-tap: the system's
+    /// double-tap interval the spec names, which iPadOS gives no public value for (L4). It is UIKit's own,
+    /// `UITapGestureRecognizer`'s maximum interval between successive taps, 0.35 s on iPadOS 27, and it is timed
+    /// as UIKit times it, from the one lifting to the other landing (`isSecondTap(on:)`).
     static let doubleTapInterval: Duration = .milliseconds(350)
+    /// The finger touch the canvas saw lift last: when it landed and when it lifted. A tap's own, while the tap is
+    /// handled just after it lifts (`liftToHandling`): its landing is what a double-tap's second tap is timed to.
+    /// Supplied by the ink canvas, which sees every finger. Nil where nothing is, as in a test.
+    @ObservationIgnored var lastFingerTouch: () -> (landed: ContinuousClock.Instant, lifted: ContinuousClock.Instant)? = { nil }
+    /// The longest after a finger lifts that its tap is handled, for the finger to be taken as the tap's own. A tap is
+    /// handled within a frame or two of its lifting (6–17 ms measured); a finger that lifted longer before is another
+    /// touch's, such as a control's tapped while the Pencil taps a thing, which a Pencil or pointer tap, whose touch the
+    /// canvas doesn't see, mustn't be timed to.
+    static let liftToHandling: Duration = .milliseconds(100)
+    /// The longest a press can be held and still be a tap of a double-tap: UIKit's own, `UITapGestureRecognizer`'s
+    /// maximum single tap duration, 0.75 s on iPadOS 27.
+    static let longestTap: Duration = .milliseconds(750)
     /// The last tap that picked a thing: what it was on (a thing in a group, or a group's
     /// gap, before `pickTarget`), when, and the selection before and after it. A second tap
     /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
     @ObservationIgnored private var lastTap: (thing: CanvasSelection, at: ContinuousClock.Instant, before: CanvasSelection?, after: CanvasSelection?)?
 
-    /// Every group that holds something selected, at any depth: those that have been gone
-    /// into. A tap picks what is inside them, one level at a time, and their members have
-    /// targets of their own in place of theirs.
-    var enteredGroups: Set<DesignElement.ID> {
+    /// Every container that holds something selected, at any depth: those that have been gone
+    /// into. A tap picks what is inside them, one level at a time, and what they hold has
+    /// targets of its own in place of theirs. Read from the index (`groups(holding:)`).
+    var enteredGroups: Set<UUID> {
         enteredGroups(in: selection)
     }
 
-    private func enteredGroups(in selection: CanvasSelection?) -> Set<DesignElement.ID> {
-        var entered: Set<DesignElement.ID> = []
+    private func enteredGroups(in selection: CanvasSelection?) -> Set<UUID> {
+        var entered: Set<UUID> = []
         for case .element(let ref) in selection?.things ?? [] {
-            entered.formUnion(store.groups(holding: ref).map(\.element))
+            entered.formUnion(store.groups(holding: ref).map(\.node))
         }
         return entered
     }
@@ -1402,10 +1536,22 @@ final class AppModel {
     }
 
     /// Whether a tap on a thing is the second of a double-tap: the last tap was on the same
-    /// thing, not long before, and the selection is as it left it.
+    /// thing, the selection is as it left it, and this one landed soon after that one lifted.
+    /// A tap is handled as it lifts, so it is timed to where the canvas saw its finger land,
+    /// as UIKit times its own double tap: timed to its lifting, the second press's own length
+    /// counted against it, and two quick presses the system would take for a double-tap
+    /// weren't one. As in UIKit, a press held past the longest tap is no second tap.
+    ///
+    /// The finger is the tap's own only when it lifted just now (`liftToHandling`) and
+    /// landed after the last tap. A tap with no such finger, a Pencil's or a pointer's, which
+    /// the canvas doesn't see, is timed to now, as it lifts, as every tap was before.
     private func isSecondTap(on thing: CanvasSelection) -> Bool {
         guard let lastTap, lastTap.thing == thing, lastTap.after == selection else { return false }
-        return now() - lastTap.at < Self.doubleTapInterval
+        let time = now()
+        guard let finger = lastFingerTouch(), time - finger.lifted < Self.liftToHandling, finger.landed > lastTap.at else {
+            return time - lastTap.at < Self.doubleTapInterval
+        }
+        return finger.landed - lastTap.at < Self.doubleTapInterval && finger.lifted - finger.landed <= Self.longestTap
     }
 
     /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it
@@ -1426,10 +1572,10 @@ final class AppModel {
             var holders: [CanvasSelection] = store.groups(holding: ref).map { .element($0) }
             if case .screen(let id) = ref.host { holders.append(.screen(id)) }
             things.subtract(holders.filter(current.contains))
-            if store.groupItem(ref.element) != nil {
-                let inside = Set(store.content.contents(of: ref.element).map(\.id))
+            if let node = store.node(ref.node), node.isContainer {
+                let inside = Set(TreeEdit.ids(in: node).dropFirst())
                 things = things.filter { thing in
-                    if case .element(let selected) = thing { !inside.contains(selected.element) } else { true }
+                    if case .element(let selected) = thing { !inside.contains(selected.node) } else { true }
                 }
             }
         }
@@ -1535,31 +1681,6 @@ final class AppModel {
         self.selection = selection.removing(thing)
     }
 
-    /// Makes one change to every selected element that `applies` to, as one step: a
-    /// colour, for instance, to each that has a fill.
-    func changeSelectedElements(where applies: (DesignElement) -> Bool = { _ in true }, _ body: (inout DesignElement) -> Void) {
-        store.update(selectedElements.filter { applies($0.element) }.map(\.ref), body)
-    }
-
-    /// The elements selected that aren't locked, by themselves or by a group above them:
-    /// what corners, opacity and angle change for several things (F4).
-    var unlockedSelectedElements: [(ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)] {
-        selectedElements.filter { !store.isLocked(.element($0.ref)) }
-    }
-
-    /// Changes those of `refs` that `applies` to, in the Format panel's own edit (see
-    /// `adjusting`): the elements a field was showing, even if it is set once the selection
-    /// has moved on. With `unlockedOnly`, only those that aren't locked, by themselves or by
-    /// a group above them (F4).
-    func changeElements(_ refs: [DesignStore.ElementRef], unlockedOnly: Bool = false, where applies: (DesignElement) -> Bool, _ body: (inout DesignElement) -> Void) {
-        adjusting {
-            store.update(refs.filter { ref in
-                guard let found = store.resolve(ref) else { return false }
-                return (!unlockedOnly || !store.isLocked(.element(ref))) && applies(found.element)
-            }, body)
-        }
-    }
-
     /// Gives every element selected to whatever it now lies on, after a drag. Several
     /// things being turned go on turning about the same pivot: an element given to another
     /// host is still the same thing, though the selection now names it differently.
@@ -1579,7 +1700,11 @@ final class AppModel {
     /// than its finger lifting: SwiftUI cancelled it, the tool changed, a twist cut it short
     /// (see `CanvasDrags`). The selection goes on naming those of them it named, wherever they
     /// now are, and a turn of them under way goes on: they are still the same things.
-    func rehost(_ things: [CanvasSelection]) {
+    ///
+    /// `land` lands each instead, when the drag knows better where it goes: one thing let go
+    /// over a row's insertion line, say. Each is named afresh from the index (`ref(of:)`),
+    /// wherever it went.
+    func rehost(_ things: [CanvasSelection], landing land: ((NodeRef) -> Void)? = nil) {
         let selected = selection
         let session = turnSession.flatMap { $0.selection == selected && $0.matches(store) ? $0 : nil }
         // Moved to its new host, an element drops out of the selection until it is named again.
@@ -1591,8 +1716,8 @@ final class AppModel {
         let inOrder = CanvasSelection(things).map { store.things(in: $0) } ?? []
         store.asOneStep {
             for case .element(let ref) in inOrder {
-                let now = store.rehost(ref)
-                if now != ref { renamed[.element(ref)] = .element(now) }
+                if let land { land(ref) } else { store.rehost(ref) }
+                if let now = store.ref(of: ref.node), now != ref { renamed[.element(ref)] = .element(now) }
             }
         }
         guard let selected, selected.things.contains(where: { renamed[$0] != nil }) else { return }
@@ -1600,8 +1725,8 @@ final class AppModel {
         selection = rehosted
         // The new selection let go of the session as it was set; it is the same one.
         if let session, let rehosted { turnSession = session.rehosted(as: rehosted, in: store) }
-        if case .element(let ref, let degrees)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
-            turnStart = .element(now, degrees: degrees)
+        if case .element(let ref, let degrees, let own)? = turnStart, case .element(let now)? = renamed[.element(ref)] {
+            turnStart = .element(now, degrees: degrees, own: own)
         }
     }
 
@@ -1609,8 +1734,8 @@ final class AppModel {
     @ObservationIgnored private var isRehosting = false
 
     /// The drawing with ink at a canvas point.
-    private func drawing(at point: CGPoint) -> DesignStore.ElementRef? {
-        ink?.drawing(at: point, tolerance: 14 / viewport.scale).map { .init(host: .canvas, element: $0) }
+    private func drawing(at point: CGPoint) -> NodeRef? {
+        ink?.drawing(at: point, tolerance: 14 / viewport.scale).map { .init(host: .canvas, node: $0) }
     }
 
     /// What Apple Pencil is hovering over: on the canvas, or in the layers list. It is
@@ -1620,30 +1745,33 @@ final class AppModel {
     var isHoveringList = false
 
     /// The topmost element or screen at a point in the view, for hover, and for a tap or a
-    /// resting finger that reaches the model. Only what is drawn there: a hidden element is
+    /// resting finger that reaches the model. Only what is drawn there: a hidden thing is
     /// looked through, as is a screen's name strip while names aren't shown. Each screen's
-    /// things, and the open canvas's, are looked at as their targets lie
-    /// (`DesignStore.targets(on:entered:)`): a group that hasn't been gone into is hit
-    /// anywhere in its box, giving the thing in it there, or the group itself in a gap
-    /// between them; `pickTarget(_:)` makes either what a tap picks.
+    /// things, and the open canvas's, are looked at as their targets lie (`TreeTargets`): a
+    /// container that hasn't been gone into is hit anywhere in its box, giving the thing in it
+    /// there, at any depth, or the container itself in a gap between them; `pickTarget(_:)`
+    /// makes either what a tap picks. Read from the tree.
     ///
     /// `skippingDrawings` looks through ink to what is beneath, for voice, which can't
-    /// change a drawing; and through a group's gaps, so that voice sees elements, not groups.
+    /// change a drawing. A container's gap, a card's padding among them, is still the
+    /// container: voice sees containers (plan 6, call 7).
     func hoverTarget(at viewPoint: CGPoint, skippingDrawings: Bool = false) -> CanvasSelection? {
         let point = viewport.canvasPoint(for: viewPoint)
         // Ink lies over everything else, and is picked by its strokes, not the box round them.
         // A hidden drawing's ink isn't on the canvas.
         if !skippingDrawings, let drawing = drawing(at: point) { return .element(drawing) }
-        let targets = store.targetElements(entered: enteredGroups)
-        if let hit = topmost(at: point, among: targets[.canvas] ?? [], on: .canvas, placement: nil, skippingDrawings: skippingDrawings) {
+        let targets = store.treeTargets(entered: enteredGroups)
+        if let hit = topmost(at: point, among: targets.hosts[.canvas] ?? [], on: .canvas, skippingDrawings: skippingDrawings) {
             return .element(hit)
         }
+        let tree = store.tree
         let showsNames = store.canvas.showsFrameNames
-        for screen in store.screens.reversed() {
-            if let hit = topmost(at: point, among: targets[.screen(screen.id)] ?? [], on: .screen(screen.id), placement: screen.placement, skippingDrawings: skippingDrawings) {
+        for screen in tree.screens.reversed() {
+            if let hit = topmost(at: point, among: targets.hosts[.screen(screen.id)] ?? [], on: .screen(screen.id), skippingDrawings: skippingDrawings) {
                 return .element(hit)
             }
-            if screen.canvasFrame.contains(point) || (showsNames && screen.labelFrame.contains(point)) {
+            let device = tree.device(of: screen)
+            if screen.canvasFrame(on: device).contains(point) || (showsNames && screen.labelFrame(on: device).contains(point)) {
                 return .screen(screen.id)
             }
         }
@@ -1651,22 +1779,19 @@ final class AppModel {
     }
 
     /// The topmost of one host's targets, given back to front, that holds a canvas point: see
-    /// `hoverTarget(at:skippingDrawings:)`. `placement` is the screen's; on the open canvas,
-    /// where each thing has its own, it is nil.
+    /// `hoverTarget(at:skippingDrawings:)`.
     private func topmost(
-        at point: CGPoint, among targets: [DesignElement], on host: DesignStore.ElementRef.Host,
-        placement: Placement?, skippingDrawings: Bool
-    ) -> DesignStore.ElementRef? {
-        for element in targets.reversed() {
-            let placement = placement ?? Placement(origin: .zero, scale: element.scale ?? 1)
-            guard TurnedRect(rect: placement.canvasRect(for: element.frame), degrees: element.resolvedRotation).contains(point) else { continue }
-            if element.kind == .group {
-                if let leaf = store.leaf(at: point, in: element.id) { return leaf }
-                if skippingDrawings { continue }
-            } else if skippingDrawings, element.kind == .drawing {
+        at point: CGPoint, among targets: [TreeTargets.Target], on host: NodeRef.Host, skippingDrawings: Bool
+    ) -> NodeRef? {
+        for target in targets.reversed() where target.shape.contains(point) {
+            if target.isContainer {
+                if let leaf = TreeTargets.leaf(at: point, in: target.id, content: store.tree, index: store.index) {
+                    return .init(host: host, node: leaf)
+                }
+            } else if skippingDrawings, store.node(target.id)?.kind == .drawing {
                 continue
             }
-            return .init(host: host, element: element.id)
+            return .init(host: host, node: target.id)
         }
         return nil
     }
@@ -1718,21 +1843,22 @@ final class AppModel {
         selection.map { store.canArrange($0, arrangement) } ?? false
     }
 
-    /// Puts what is selected in a new group and selects the group: see `DesignStore.group(_:)`.
+    /// Puts what is selected in a new group and selects the group: Group as a group (`groupSelection(as:)`).
     func groupSelection() {
-        guard let selection, let group = store.group(selection) else { return }
-        self.selection = .element(group)
+        groupSelection(as: .group)
     }
 
-    /// Whether Group would make a group of what is selected (L7).
+    /// Whether Group would make a group of what is selected (L7): `canGroupSelection(as: .group)`.
     var canGroupSelection: Bool {
-        selection.map(store.canGroup) ?? false
+        canGroupSelection(as: .group)
     }
 
-    /// Whether the elements selected are on more than one screen, or on a screen and the open
-    /// canvas: why Group is off, when it is.
+    /// Whether the things selected are on more than one screen, or on a screen and the open
+    /// canvas: why Group is off, when it is. Read from the index.
     var groupSelectionSpansHosts: Bool {
-        Set(selectedElements.map(\.ref.host)).count > 1
+        Set(selectedThings.compactMap { thing -> NodeRef.Host? in
+            if case .element(let ref) = thing { ref.host } else { nil }
+        }).count > 1
     }
 
     /// Takes the selected group apart and selects its members: see `DesignStore.ungroup(_:)`.
@@ -1741,13 +1867,15 @@ final class AppModel {
         selection = members
     }
 
-    /// Whether one group is selected, and it isn't locked.
+    /// Whether one container is selected, a group, card, row, column, grid or overlay, and it isn't locked, by itself or
+    /// by one above it. Read from the tree.
     var canUngroupSelection: Bool {
-        guard let selected = selectedElement else { return false }
-        return selected.element.kind == .group && !store.isLocked(.element(selected.ref))
+        guard let selected = selectedNode else { return false }
+        return selected.node.isContainer && !selected.isLocked
     }
 
-    /// Lines up what is selected: one element with its screen, several things with each other.
+    /// Lines up what is selected: one element with its screen, several things with each other. Reached through
+    /// `lineUpSelection(_:)`, which leaves what a row, column, grid or overlay places to it.
     func alignSelection(_ alignment: ElementLayout.Alignment) {
         guard let selection, !isSelectionLocked else { return }
         switch selection {
@@ -1757,12 +1885,7 @@ final class AppModel {
         }
     }
 
-    /// Spaces the selected things evenly, across or down. It takes three to have a gap to even out.
-    func distributeSelection(_ distribution: ElementLayout.Distribution) {
-        guard let selection, canDistributeSelection else { return }
-        store.distribute(selection, distribution)
-    }
-
+    /// Whether there are things enough to space evenly: it takes three to have a gap to even out (`lineUpSelection(_:)`).
     var canDistributeSelection: Bool {
         (selection?.things.count ?? 0) >= 3 && !isSelectionLocked
     }
@@ -1771,28 +1894,29 @@ final class AppModel {
         setSelectionLocked(!isSelectionLocked)
     }
 
-    /// Hides or shows an element, or a group with everything in it, by its own flag. Hiding
-    /// one lets go of it, and of anything selected in a group hidden, since none of it can be
-    /// touched.
-    func toggleHidden(_ ref: DesignStore.ElementRef) {
-        store.update(ref) { $0.isHidden.toggle() }
-        guard let element = store.resolve(ref)?.element, element.isHidden, let selection else { return }
-        let inside = element.kind == .group ? Set(store.content.contents(of: element.id).map(\.id)) : []
+    /// Hides or shows a thing, or a container with everything in it, by its own flag. Hiding
+    /// one lets go of it, and of anything selected inside it, at any depth, since none of it
+    /// can be touched: found through the index.
+    func toggleHidden(_ ref: NodeRef) {
+        guard store.placed(ref) != nil else { return }
+        store.update(ref.node) { $0.isHidden.toggle() }
+        guard store.node(ref.node)?.isHidden == true, let selection else { return }
+        let index = store.index
         let kept = selection.things.filter { thing in
             guard case .element(let selected) = thing else { return true }
-            return selected.element != element.id && !inside.contains(selected.element)
+            return selected.node != ref.node && !index.ancestors(of: selected.node).contains(ref.node)
         }
         if kept.count != selection.things.count { self.selection = CanvasSelection(kept) }
     }
 
-    /// Locks an element, or unlocks it, which also unlocks the locked groups above it, so that
-    /// a thing locked only by its group, which offers Unlock, is unlocked and never locked.
-    func toggleLock(_ ref: DesignStore.ElementRef) {
-        guard let element = store.resolve(ref)?.element else { return }
-        if store.isLockedWithItsGroups(element) {
+    /// Locks a thing, or unlocks it, which also unlocks the locked containers above it, so that
+    /// a thing locked only by its container, which offers Unlock, is unlocked and never locked.
+    func toggleLock(_ ref: NodeRef) {
+        guard let placed = store.placed(ref) else { return }
+        if placed.isLocked {
             store.unlock(.element(ref))
         } else {
-            store.update(ref) { $0.isLocked = true }
+            store.update(ref.node) { $0.isLocked = true }
         }
     }
 
@@ -1806,7 +1930,11 @@ final class AppModel {
         case .element, .several:
             area = selectionShape.map { viewport.viewShape(for: $0).bounds }
         case .screen:
-            area = selectedScreen.map { viewport.viewRect(for: $0.canvasFrame.union($0.labelFrame)) }
+            // Read from the tree: the popover places itself against this on every frame of a screen's drag.
+            area = selectedScreenID.flatMap(store.treeScreen).map { screen in
+                let device = store.tree.device(of: screen)
+                return viewport.viewRect(for: screen.canvasFrame(on: device).union(screen.labelFrame(on: device)))
+            }
         case nil:
             return nil
         }
@@ -1818,13 +1946,14 @@ final class AppModel {
     // MARK: Turning
 
     /// Whether what is selected can be turned: something is, no screen is among it, and
-    /// at least one element of it isn't locked, by itself or by a group above it (F4).
+    /// at least one thing of it isn't locked, by itself or by a container above it (F4). Read
+    /// from the tree.
     var canTurnSelection: Bool {
         var hasUnlocked = false
         for thing in selectedThings {
             // Screens never turn.
             guard case .element(let ref) = thing else { return false }
-            if store.resolve(ref) != nil, !store.isLocked(thing) { hasUnlocked = true }
+            if let placed = store.placed(ref), !placed.isLocked { hasUnlocked = true }
         }
         return hasUnlocked
     }
@@ -1840,36 +1969,43 @@ final class AppModel {
 
     /// What the turn under way turns, and how far it was turned when the turn began.
     private enum TurnStart {
-        /// One element, and its angle.
-        case element(DesignStore.ElementRef, degrees: Double)
+        /// One thing, its angle on the canvas, and its own angle with that of what held it: put
+        /// back as it was if the turn comes back round to where it began.
+        case element(NodeRef, degrees: Double, own: DesignStore.OwnAngle?)
         /// Several things, and how far their session had turned them.
         case several(turned: Double)
     }
     @ObservationIgnored private var turnStart: TurnStart?
+    /// The design as a turn of one thing began, and its version as the turn's own last change left it, while nothing
+    /// but the turn has changed it: what the turn puts back when it comes back round to where it began. Nil once
+    /// anything else has changed the design, and for several things, whose session puts back each one's start.
+    @ObservationIgnored private var turnBegan: (tree: TreeContent, version: Int)?
     /// Several things selected, as their last turn or move left them: see `severalTurn`.
     @ObservationIgnored private var turnSession: TurnSession?
     /// That session as it was when the drag moving them began, if it held then.
     @ObservationIgnored private var moveStart: TurnSession?
 
-    /// The one element selected, unless it is locked, by itself or by a group above it, or is
-    /// a group, which turns as several things do: what a turn turns.
-    private var turnableElement: (ref: DesignStore.ElementRef, element: DesignElement)? {
-        guard let selected = selectedElement, selected.element.kind != .group, !store.isLocked(.element(selected.ref)) else { return nil }
-        return (selected.ref, selected.element)
+    /// The one thing selected, unless it is locked, by itself or by a container above it: what a
+    /// turn turns, about its own middle. A container turns as one rigid piece, everything in it
+    /// going round with it: only its angle changes. Read from the tree.
+    private var turnableNode: PlacedNode? {
+        guard let selected = selectedNode, !selected.isLocked else { return nil }
+        return selected
     }
 
-    /// Whether what is selected is one group, which turns as one rigid piece of several
-    /// things: its members, and the groups in it, go round its middle with it.
-    private var selectsOneGroup: Bool {
-        selectedElement?.element.kind == .group
+    /// Turns one thing to `degrees` on the canvas, about its own middle, as one change: only its
+    /// angle is written, less the angles of what holds it (`DesignStore.setCanvasAngles`). Given
+    /// `start`, it takes back the own angle it had then, exactly.
+    private func setCanvasAngle(of placed: PlacedNode, to degrees: Double, puttingBack start: DesignStore.OwnAngle? = nil) {
+        store.setCanvasAngles([placed.ref.node: degrees], puttingBack: start.map { [placed.ref.node: $0] } ?? [:])
     }
 
-    /// What turns several things selected, or one group: the session kept from their last
-    /// turn or move, while it is for what is selected and each of them is as it left them;
-    /// otherwise one formed from where they are now. Reading it keeps nothing. Nil unless
-    /// several things or a group are selected, or when a screen is among them.
+    /// What turns several things selected: the session kept from their last turn or move,
+    /// while it is for what is selected and each of them is as it left them; otherwise one
+    /// formed from where they are now. Reading it keeps nothing. Nil unless several things
+    /// are selected, or when a screen is among them.
     private var severalTurn: TurnSession? {
-        guard let selection, selection.isSeveral || selectsOneGroup else { return nil }
+        guard let selection, selection.isSeveral else { return nil }
         if let turnSession, turnSession.selection == selection, turnSession.matches(store) { return turnSession }
         // Formed once for the selection and design as they are, not for each read.
         let version = store.contentVersion
@@ -1889,9 +2025,10 @@ final class AppModel {
     func beginTurn(cuttingDragShort: Bool = false) -> Bool {
         guard !isTurning, canTurnSelection else { return false }
         let start: Double
-        if let turnable = turnableElement {
-            turnStart = .element(turnable.ref, degrees: turnable.element.resolvedRotation)
-            start = turnable.element.resolvedRotation
+        if let turnable = turnableNode {
+            turnStart = .element(turnable.ref, degrees: turnable.degrees, own: store.ownAngle(of: turnable.ref.node))
+            turnBegan = (store.tree, store.contentVersion)
+            start = turnable.degrees
         } else if let session = severalTurn {
             turnSession = session
             turnStart = .several(turned: session.turned)
@@ -1924,10 +2061,23 @@ final class AppModel {
     func turnSelection(by degrees: Double, snaps: Bool) -> Bool {
         let snapped: Double?
         switch turnStart {
-        case .element(let ref, let start)?:
-            guard selection == .element(ref) else { return false }
+        case .element(let ref, let start, let own)?:
+            guard selection == .element(ref), let placed = store.placed(ref) else { return false }
             let (angle, isSnapped) = snaps ? Rotation.snapped(start + degrees) : (Rotation.normalized(start + degrees), false)
-            store.act(for: turnEdit) { store.update(ref) { $0.setRotation(angle) } }
+            // Back where it began, it takes back its own angle as it was: worked out again, it could
+            // differ in its last bit, and the turn, changing nothing to the eye, would be a step. With
+            // nothing but the turn having changed the design since it began, the design is put back as it
+            // was: a turned group sized to fit, fitted round it on the way and back through its own turn,
+            // could differ in its last bits too (final review A2-M3).
+            let began = turnBegan.flatMap { $0.version == store.contentVersion ? $0.tree : nil }
+            store.act(for: turnEdit) {
+                if angle == start, let began {
+                    store.putBack(began)
+                } else {
+                    setCanvasAngle(of: placed, to: angle, puttingBack: angle == start ? own : nil)
+                }
+            }
+            turnBegan = began.map { ($0, store.contentVersion) }
             snapped = isSnapped ? angle : nil
         case .several(let start)?:
             // Changed by something else meanwhile, they are left as that left them.
@@ -1954,6 +2104,7 @@ final class AppModel {
     func endTurn() {
         guard isTurning else { return }
         turnStart = nil
+        turnBegan = nil
         isTurning = false
         isTwisting = false
         // A drag still under way, another finger's, is still adjusting the selection (C9).
@@ -2011,21 +2162,21 @@ final class AppModel {
 
     /// Turns what is selected `degrees` clockwise in one step, without snapping.
     func rotateSelection(by degrees: Double) {
-        if let turnable = turnableElement {
-            store.update(turnable.ref) { $0.setRotation($0.resolvedRotation + degrees) }
+        if let turnable = turnableNode {
+            setCanvasAngle(of: turnable, to: turnable.degrees + degrees)
         } else if canTurnSelection, var session = severalTurn {
             turn(&session, to: Rotation.normalized(session.turned + degrees))
         }
     }
 
     /// Stands what is selected upright again, in one step. Several things go back exactly
-    /// to where they were, and to the angles they had, when they were selected. A group is
+    /// to where they were, and to the angles they had, when they were selected. A container is
     /// turned about its middle until it is upright, everything in it going round with it.
     func resetSelectionTurn() {
-        if let turnable = turnableElement {
-            store.update(turnable.ref) { $0.setRotation(0) }
+        if let turnable = turnableNode {
+            setCanvasAngle(of: turnable, to: 0)
         } else if canTurnSelection, var session = severalTurn {
-            turn(&session, to: selectsOneGroup ? Rotation.normalized(-session.outline.degrees) : 0)
+            turn(&session, to: 0)
         }
     }
 
@@ -2035,122 +2186,72 @@ final class AppModel {
     /// set to 0 does: an action that did nothing would read as broken.
     func resetSelectionRotation() {
         if case .several = selection, canTurnSelection, let session = severalTurn, Rotation.kept(session.turned) == nil {
-            turnEach(unlockedSelectedElements.map(\.ref), to: 0)
+            turnEach(selectedThings.compactMap { thing in
+                guard case .element(let ref) = thing, store.placed(ref)?.isLocked == false else { return nil }
+                return ref
+            }, to: 0)
         } else {
             resetSelectionTurn()
         }
     }
 
     /// The Format panel's Rotation for several things: each of `refs` that isn't locked, by
-    /// itself or by a group above it, turned to `degrees` on its own pivot, in the panel's own
-    /// edit. A group among them turns as one piece about its middle.
-    func setAngle(of refs: [DesignStore.ElementRef], to degrees: Double) {
+    /// itself or by a container above it, turned to `degrees` on its own pivot, in the panel's own
+    /// edit. A container among them turns as one piece about its middle.
+    func setAngle(of refs: [NodeRef], to degrees: Double) {
         adjusting { turnEach(refs.filter { !store.isLocked(.element($0)) }, to: degrees) }
     }
 
-    /// The Format panel's Rotation for a group: turns it as one piece about its middle,
-    /// everything in it going round with it, to `degrees`, in the panel's own edit. Only while
-    /// it is still the one thing selected, as a turn goes by the selection: a field set once
-    /// the selection has moved on changes nothing (M5).
-    func setGroupRotation(_ ref: DesignStore.ElementRef, to degrees: Double) {
-        guard selection == .element(ref), let group = store.resolve(ref)?.element, group.kind == .group else { return }
-        adjusting { rotateSelection(by: degrees - group.resolvedRotation) }
+    /// The Format panel's Rotation for a container, a group, card, row, column, grid or overlay:
+    /// turns it as one piece about its middle, everything in it going round with it, to `degrees`
+    /// on the canvas, in the panel's own edit. Only while it is still the one thing selected, as a
+    /// turn goes by the selection: a field set once the selection has moved on changes nothing (M5).
+    func setGroupRotation(_ ref: NodeRef, to degrees: Double) {
+        guard selection == .element(ref), let container = store.placed(ref), container.node.isContainer else { return }
+        adjusting { rotateSelection(by: degrees - container.degrees) }
     }
 
-    /// The Format panel's X, Y, W and H for a group, the one way its fields change it (D3), in
-    /// the panel's own edit. The values are in its host's points, as the panel shows them: the
-    /// box's X and Y, and its width and height, in its own axes when it is turned.
-    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the
-    ///   change is in the host's points, and `position` takes canvas points.
-    /// - W or H scales everything in it in proportion, both sides by the side typed, from its
-    ///   top-left: a group is scaled by the ratio of its widths, so an H given alone would
-    ///   scale nothing (L8).
-    ///
-    /// Nothing happens to a group that is locked, by itself or by a group above it.
-    func setGroupBox(_ ref: DesignStore.ElementRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
-        adjusting {
-            if x != nil || y != nil, let (item, placement) = store.resolve(ref), item.kind == .group,
-               let box = store.canvasShape(of: .element(ref))?.bounds {
-                let across = ((x ?? item.frame.minX) - item.frame.minX) * placement.scale
-                let down = ((y ?? item.frame.minY) - item.frame.minY) * placement.scale
-                store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
-            }
-            if width != nil || height != nil, let item = store.resolve(ref)?.element, item.kind == .group,
-               item.frame.width > 0, item.frame.height > 0 {
-                // The side typed exactly; given both, the width, as the ratio is the widths'.
-                let box = item.frame
-                let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
-                    ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
-                store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
-            }
-        }
+    /// The Format panel's X, Y, W and H for a container, a group, card, row, column, grid or
+    /// overlay: the one way its fields change it (D3), in the panel's own edit. The store's
+    /// `setBox(of:x:y:width:height:)`, which voice's `moveElement` calls too, says what each does.
+    func setGroupBox(_ ref: NodeRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+        adjusting { store.setBox(of: ref, x: x, y: y, width: width, height: height) }
     }
 
-    /// Turns each of `refs` to `degrees`, in one step: an element on its own pivot, and a
-    /// group as one piece about the middle of its box, as a group selected alone turns, unless
-    /// it is locked, by itself or by a group above it.
-    private func turnEach(_ refs: [DesignStore.ElementRef], to degrees: Double) {
-        var angles: [DesignElement.ID: Double] = [:]
-        var frames: [DesignElement.ID: CGRect] = [:]
-        for ref in refs {
-            guard let element = store.resolve(ref)?.element else { continue }
-            guard element.kind == .group else {
-                angles[ref.element] = degrees
-                continue
-            }
-            guard let session = TurnSession.form(for: .element(ref), in: store) else { continue }
-            for (part, place) in session.placed(turnedBy: degrees - element.resolvedRotation) {
-                angles[part.element] = place.rotation ?? 0
-                if part.element != element.id { frames[part.element] = place.frame }
-            }
-        }
-        guard !angles.isEmpty else { return }
-        store.apply { content in
-            for (id, angle) in angles {
-                content.update(id) {
-                    // A group's box is fitted round what is in it.
-                    if $0.kind != .group, let frame = frames[id] { $0.frame = frame }
-                    $0.setRotation(angle)
-                }
-            }
-        }
+    /// Turns each of `refs` to `degrees` on the canvas, in one step, each about its own middle:
+    /// a container as one piece, everything in it going round with it, as one selected alone
+    /// turns, and a laid-out child in place. Only their angles are written.
+    private func turnEach(_ refs: [NodeRef], to degrees: Double) {
+        var angles: [UUID: Double] = [:]
+        for ref in refs where store.placed(ref) != nil { angles[ref.node] = degrees }
+        store.setCanvasAngles(angles)
     }
 
     /// Puts several things where their session turned `degrees` places them, as one change,
-    /// and keeps the session. A group's angle is written in the same change as its members'
-    /// places, so that its box, fitted round them at the end of it, goes round as one with
-    /// them: a group selected alone has the outline's angle.
+    /// and keeps the session. Each is written through its parent's inverse transform; a
+    /// container goes round as one piece, and what is in it with it. Come back round to where
+    /// the session formed, each is put back exactly as it was.
     private func turn(_ session: inout TurnSession, to degrees: Double) {
         session.turned = degrees
-        let placed = session.placed(turnedBy: degrees)
-        store.apply { content in
-            for (ref, place) in placed {
-                content.update(ref.element) {
-                    if $0.kind != .group { $0.frame = place.frame }
-                    $0.rotation = place.rotation
-                }
-            }
-        }
+        store.setCanvasPoses(session.placed(turnedBy: degrees), puttingBack: session.startsPutBack(turnedBy: degrees))
         session.expect(store)
         turnSession = session
     }
 
-    /// How far what is selected is turned, for the readout beside the knob: one element's
-    /// angle, a group's among them, or how far several things have turned since they were
-    /// selected.
+    /// How far what is selected is turned, for the readout beside the knob: one thing's
+    /// angle on the canvas, or how far several things have turned since they were selected.
     var selectionTurn: Double? {
         if case .several = selection { return severalTurn.map { Rotation.normalized($0.turned) } }
-        return selectedElement?.element.resolvedRotation
+        return selectedNode?.degrees
     }
 
     /// The shape of what is selected, in canvas points, turned as it is. For several
-    /// things, or a group, the outline they turn within (`TurnSession.shape`), which goes
-    /// round rigidly with them; with a screen among several, the upright box round them all.
+    /// things, the outline they turn within (`TurnSession.shape`), which goes round rigidly
+    /// with them; with a screen among several, the upright box round them all.
     var selectionShape: TurnedRect? {
         guard let selection else { return nil }
-        guard selection.isSeveral || selectsOneGroup else { return store.canvasShape(of: selection) }
-        if let session = severalTurn { return session.shape }
         guard selection.isSeveral else { return store.canvasShape(of: selection) }
+        if let session = severalTurn { return session.shape }
         return store.canvasFrame(of: selection).map { TurnedRect(rect: $0, degrees: 0) }
     }
 
@@ -2196,20 +2297,37 @@ final class AppModel {
         self.selection = nil
     }
 
+    /// Read from the store's index on every change: what is selected is still there where the selection
+    /// says, and a suggestion's element where it was offered.
     private func dropSelectionOfMissingThings() {
         if let selection {
             let present = selection.things.filter { thing in
                 switch thing {
-                case .element(let ref): store.resolve(ref) != nil
-                case .screen(let id): store.screen(id) != nil
+                case .element(let ref): store.ref(of: ref.node) == ref
+                case .screen(let id): store.treeScreen(id) != nil
                 case .several: false
                 }
             }
             if present.count != selection.things.count { self.selection = CanvasSelection(present) }
         }
         // Taking an offer lays the element out again from its sketch: once it, or its
-        // screen, has been moved, resized or turned, that would undo the move.
-        if suggestion != nil, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+        // screen, has been moved, resized or turned, that would undo the move. The structure
+        // pass lining it up is the app's own doing, and leaves it (`keepingTheSuggestion`).
+        if suggestion != nil, !isKeepingTheSuggestion, suggestedPlace != suggestion.flatMap(place(of:)) { dismissSuggestion() }
+        // "Make a row?" goes too once one of its members, or their screen, has changed (call 12).
+        if structureOfferIsStale { dismissStructureOffer() }
+    }
+
+    /// Makes the structure pass's own changes without taking a "Did you mean" away: lining its node up in a row is the
+    /// app's doing, not the person's, and taking the offer still lays the node out from its sketch in what holds it.
+    /// Its place is read again once they are made, and it goes only if its node has.
+    func keepingTheSuggestion(_ body: () -> Void) {
+        let outer = isKeepingTheSuggestion
+        isKeepingTheSuggestion = true
+        body()
+        isKeepingTheSuggestion = outer
+        guard !outer, let suggestion else { return }
+        if let place = place(of: suggestion) { suggestedPlace = place } else { dismissSuggestion() }
     }
 
     /// Where a suggestion's element is: its frame and turn, and where its screen is.
@@ -2220,7 +2338,7 @@ final class AppModel {
     }
 
     private func place(of suggestion: KindSuggestion) -> SuggestedPlace? {
-        store.resolve(suggestion.ref).map { SuggestedPlace(frame: $0.element.frame, rotation: $0.element.resolvedRotation, placement: $0.placement) }
+        store.placed(suggestion.ref).map { SuggestedPlace(frame: $0.frame, rotation: $0.degrees, placement: $0.placement) }
     }
 
     // MARK: Did you mean
@@ -2233,12 +2351,37 @@ final class AppModel {
     /// How long a suggestion stays up when it is left alone.
     static let suggestionLifetime: Duration = .seconds(8)
 
+    // MARK: The structure pass's state (its work is in AppModel+Structure.swift)
+
+    /// What the last structure pass offered, while that is on offer: shown once no "Did you mean" is up (call 12).
+    /// Set only by the pass's own methods, which live in another file and so can't be given a private setter.
+    var structureOffer: StructureOffer?
+    /// Takes the offer away once it has shown for `StructureConventions.offerLifetime`, while it shows.
+    @ObservationIgnored var structureOfferExpiry: Task<Void, Never>?
+    /// How long the offer has still to show: all of its time once offered, less what it has shown for (call 12).
+    @ObservationIgnored var structureOfferTimeLeft: Duration = StructureConventions.offerLifetime
+    /// When the offer last began to show, while its time runs.
+    @ObservationIgnored var structureOfferShownSince: ContinuousClock.Instant?
+    /// Where each member of the offer was when it was offered: see `OfferedPlace`.
+    @ObservationIgnored var structureOfferPlaces: [UUID: OfferedPlace] = [:]
+    /// The nodes the readings have made since the batch began, for the pass once it settles (call 1).
+    @ObservationIgnored var sketchBatch: [UUID] = []
+    /// Each row, column and grid the pass built in this session, as it was once built (F10). One that is still exactly
+    /// that, everything in it included, may grow; any change by the person stops it. Kept in memory only.
+    @ObservationIgnored var builtStructures: [UUID: LayerNode] = [:]
+    /// True while the pass makes its own changes: see `keepingTheSuggestion(_:)`.
+    @ObservationIgnored private var isKeepingTheSuggestion = false
+    /// Readings begun (`convertNow`, `convertSelection`) and not yet finished: the batch ends at the commit of the last.
+    @ObservationIgnored private var conversionsUnderWay = 0
+
     /// Offers to make what a sketch became into what it nearly was. One offer shows at a
     /// time, and goes by itself after a while.
     func offer(_ suggestion: KindSuggestion) {
         suggestionExpiry?.cancel()
         suggestedPlace = place(of: suggestion)
         self.suggestion = suggestion
+        // A structure offer showing waits for it, its time stopped (call 12).
+        pauseStructureOfferClock()
         suggestionExpiry = Task { [weak self] in
             try? await Task.sleep(for: Self.suggestionLifetime)
             guard !Task.isCancelled else { return }
@@ -2251,11 +2394,14 @@ final class AppModel {
     func acceptSuggestion() {
         guard let suggestion else { return }
         dismissSuggestion()
-        let changed = store.changeKind(of: suggestion.ref, to: suggestion.kind, sketchedAt: suggestion.sketch) {
+        // The node remembers where it was drawn; the suggestion's own sketch is only for one that doesn't.
+        guard case .screen(let screenID) = suggestion.ref.host, let screen = store.treeScreen(screenID) else { return }
+        let changed = store.changeKind(of: suggestion.ref.node, to: suggestion.kind,
+                                       fallback: screen.placement.localRect(for: suggestion.sketch)) {
             $0.adoptMarks(of: suggestion.observation)
         }
         guard changed != nil else { return }
-        Task { await SketchReadingLog.shared.noteCorrected(suggestion.ref.element, to: suggestion.kind.rawValue) }
+        Task { await SketchReadingLog.shared.noteCorrected(suggestion.ref.node, to: suggestion.kind.rawValue) }
     }
 
     func dismissSuggestion() {
@@ -2263,6 +2409,8 @@ final class AppModel {
         suggestionExpiry = nil
         suggestion = nil
         suggestedPlace = nil
+        // A structure offer that waited for it shows now, and its time starts (call 12).
+        startStructureOfferClock()
     }
 
     /// True while a number field is being scrubbed.
@@ -2308,6 +2456,12 @@ final class AppModel {
         }
     }
 
+    /// Returns once the format panel's pause has ended its run of changes, or at once when no run waits for it. A test
+    /// waits on the pause itself here, rather than on a clock.
+    func waitForAdjustmentPause() async {
+        await adjustmentEnd?.value
+    }
+
     /// Opens the panel's own edit, unless it is open already.
     private func beginAdjustment() {
         guard adjustment?.isOpen != true else { return }
@@ -2332,20 +2486,16 @@ final class AppModel {
         viewport.canvasPoint(for: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 
-    /// Puts a new element in the middle of the view, or centred on `point` in canvas
-    /// points, selected and ready to be dragged. Over a screen it joins the screen, kept
-    /// inside its edges.
+    /// Puts a new leaf in the middle of the view, or centred on `point` in canvas points,
+    /// selected and ready to be dragged: see `DesignStore.place(_:centredAt:)`. Over a screen
+    /// it joins the screen, kept inside its edges. Nil, and nothing changes, when the design
+    /// can't take it, which, `sayingWhyNot`, is said (`addNotice`).
     @discardableResult
-    private func add(_ element: DesignElement, at point: CGPoint? = nil) -> DesignStore.ElementRef {
-        var center = point ?? middleOfView
-        if element.kind.belongsOnScreens, let screen = store.screens.last(where: { $0.canvasFrame.contains(center) }) {
-            var local = screen.placement.localPoint(for: center)
-            let half = CGSize(width: element.frame.width / 2, height: element.frame.height / 2)
-            if half.width * 2 <= screen.size.width { local.x = min(max(local.x, half.width), screen.size.width - half.width) }
-            if half.height * 2 <= screen.size.height { local.y = min(max(local.y, half.height), screen.size.height - half.height) }
-            center = screen.placement.canvasPoint(for: local)
+    private func add(_ node: LayerNode, at point: CGPoint? = nil, sayingWhyNot: Bool = true) -> NodeRef? {
+        guard let ref = store.place(node, centredAt: point ?? middleOfView) else {
+            if sayingWhyNot { addNotice = Self.designIsFull }
+            return nil
         }
-        let ref = store.place(element, centeredAt: center)
         tool = .select
         selection = .element(ref)
         return ref
@@ -2358,80 +2508,104 @@ final class AppModel {
         AssetLibrary.noteUsed(asset, in: settings)
         switch asset.content {
         case .symbol(let name):
-            add(DesignStore.newElement(.symbol, symbol: name), at: point)
+            add(LayerNode.standard(.symbol, symbol: name), at: point)
         case .shape(let kind, let filled):
-            var element = DesignStore.newElement(.shape)
-            element.shape = kind
-            element.frame.size = kind.size
-            element.isOn = filled
-            add(element, at: point)
+            var node = LayerNode.standard(.shape)
+            node.content.shape = kind
+            node.frame.size = kind.size
+            node.content.isOn = filled
+            add(node, at: point)
         case .component(let id):
-            guard let element = AssetLibrary.element(forComponent: id) else { return }
-            add(element, at: point)
-            if element.kind == .stickyNote { isEditingText = true }
+            guard let node = AssetLibrary.element(forComponent: id), add(node, at: point) != nil else { return }
+            if node.kind == .stickyNote { isEditingText = true }
         case .frame(let id):
-            guard let device = DeviceFrame.all.first(where: { $0.id == id }) else { return }
+            // A built-in, or one of the design's own; a frame this design doesn't have adds nothing.
+            let device = store.tree.settings.device(named: id)
+            guard device.id == id else { return }
             addFrame(device, centeredAt: point)
         case .template(let name):
             addTemplate(name, centeredAt: point)
         }
     }
 
-    /// Adds a ready-made screen from the library, laid out on the design's usual device,
-    /// as one undo step.
+    /// Adds a ready-made screen from the library, with its rows, cards and grids, spaced and
+    /// padded by the design's own tokens and laid out on the design's usual device, as one undo
+    /// step. It is placed and sized as `addFrame` places an empty frame, and comes in unselected
+    /// as one does.
     func addTemplate(_ name: String, centeredAt point: CGPoint? = nil) {
-        guard let blueprint = AssetLibrary.template(named: name) else { return }
+        guard let root = AssetLibrary.template(named: name, tokens: store.canvas.tokens) else { return }
         let device = store.canvas.sketchDevice
-        // Its own step even in the middle of a drag, which it leaves open (M3).
-        store.asOwnStep {
-            let screen = addFrame(device, centeredAt: point)
-            store.updateScreen(screen.id) { $0.name = name }
-            _ = store.setElements(blueprint.layout(on: device), on: screen.id, replacing: true)
+        let placement = framePlacement(device, centeredAt: point)
+        // Its own step even in the middle of a drag, which it leaves open (M3). Refused by the store, nothing changes.
+        let added = store.asOwnStep {
+            store.addScreen(TreeScreen(name: name, origin: placement.origin, scale: placement.scale,
+                                       deviceID: device == .iPhone ? nil : device.id, root: root))
         }
+        guard added != nil else {
+            screenNotice = Self.whyNoScreen(on: device)
+            return
+        }
+        tool = .select
+        selection = nil
+        suggestTitleIfNeeded()
     }
 
     func addSymbol(_ name: String) {
-        add(DesignStore.newElement(.symbol, symbol: name))
+        add(LayerNode.standard(.symbol, symbol: name))
     }
 
-    /// Adds a piece of text and opens it for typing.
+    /// Adds a piece of text and opens it for typing. With no room for it, nothing is opened.
     func addText() {
-        add(DesignStore.newElement(.text))
+        guard add(LayerNode.standard(.text)) != nil else { return }
         isEditingText = true
         suggestTitleIfNeeded()
     }
 
     func addStickyNote() {
-        add(DesignStore.newElement(.stickyNote))
+        guard add(LayerNode.standard(.stickyNote)) != nil else { return }
         isEditingText = true
     }
 
-    /// Adds a picture, drawn no wider than most of a phone screen.
-    func addImage(_ prepared: ImageImport.Prepared) {
+    /// Adds a picture, drawn no wider than most of a phone screen. Returns where it is: nil when the design has no room
+    /// for it, which leaves the selection as it was and, `sayingWhyNot`, is said (`addNotice`). A picture's data a
+    /// refused image leaves in the document isn't saved: a file keeps only the pictures its images show.
+    @discardableResult
+    func addImage(_ prepared: ImageImport.Prepared, sayingWhyNot: Bool = true) -> NodeRef? {
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
-        var element = DesignStore.newElement(.image)
+        var node = LayerNode.standard(.image)
         let width = min(prepared.image.size.width, 280)
-        element.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
-        element.imageID = id
-        add(element)
+        node.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
+        node.content.imageID = id
+        return add(node, sayingWhyNot: sayingWhyNot)
     }
 
     /// Adds a device frame in the middle of the view, or centred on `point` in canvas
-    /// points, sized to fit comfortably in the view.
+    /// points, sized to fit comfortably in the view. Nil, and nothing changes, when the store
+    /// refuses it: a device of the design's own that can't be used, or no room for a screen.
     @discardableResult
-    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> DesignScreen {
-        let room = (canvasSize.height - 220) / viewport.scale
-        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
-        let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
-        let middle = point ?? middleOfView
-        let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
-        let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
+    func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> TreeScreen? {
+        // The store's empty screen, as it holds it: named by how many there are, its root taking the screen's id.
+        guard let screen = store.addScreen(device, at: framePlacement(device, centeredAt: point)) else {
+            screenNotice = Self.whyNoScreen(on: device)
+            return nil
+        }
         tool = .select
         // A new frame comes in unselected.
         selection = nil
         suggestTitleIfNeeded()
         return screen
+    }
+
+    /// Where a new screen of `device` goes: centred on `point` in canvas points, or in the middle
+    /// of the view, and scaled to fit comfortably in the view.
+    private func framePlacement(_ device: DeviceFrame, centeredAt point: CGPoint?) -> Placement {
+        let room = (canvasSize.height - 220) / viewport.scale
+        let scale = min(max((room / device.size.height * 100).rounded() / 100, 0.15), 1)
+        let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
+        let middle = point ?? middleOfView
+        let origin = CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded())
+        return Placement(origin: origin, scale: scale)
     }
 
     /// Names the board once, the first time it has something on it worth naming.
@@ -2481,6 +2655,7 @@ final class AppModel {
         let zoom = viewport.scale
         for group in unreadGroups(zoom: zoom) {
             inFlight.formUnion(group.map(\.key))
+            conversionsUnderWay += 1
             let conversion = Task { [weak self] () -> Void in await self?.convert(group, zoom: zoom) }
             conversions.append(conversion)
             Task { [weak self] in
@@ -2493,11 +2668,12 @@ final class AppModel {
     /// Reads the selected drawing as a sketch, told what `prompt` says of it, and puts what
     /// it means in its place. The drawing stays if it can't be read as anything.
     func convertSelection(prompt: String) {
-        guard let selected = selectedElement, selected.element.kind == .drawing else { return }
-        let strokes = selected.element.sketchStrokes
+        guard let selected = selectedNode, selected.node.kind == .drawing else { return }
+        let strokes = selected.node.sketchStrokes
         guard !strokes.isEmpty else { return }
         selection = nil
         let zoom = viewport.scale
+        conversionsUnderWay += 1
         let conversion = Task { [weak self] () -> Void in
             guard let self else { return }
             await convert(onScreen(strokes, zoom: zoom), zoom: zoom, drawing: selected.ref, prompt: prompt)
@@ -2553,12 +2729,15 @@ final class AppModel {
     /// Reads one sketch, given at its on-screen size, and puts what it means on the canvas.
     /// A Magic Pen sketch is read on its own; `drawing` is set instead for a drawing
     /// that was selected and asked to be read, with the `prompt` typed for it.
-    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: DesignStore.ElementRef? = nil, prompt: String? = nil) async {
+    private func convert(_ group: [SketchStroke], zoom: CGFloat, drawing: NodeRef? = nil, prompt: String? = nil) async {
         let keys = Set(group.map(\.key))
         let isDrawing = drawing != nil
         defer { if !isDrawing { inFlight.subtract(keys) } }
+        defer { conversionsUnderWay -= 1 }
         guard let observation = SketchAnalyzer.observe(group) else {
             if !isDrawing { reject(keys) }
+            // The last of a batch that made nothing: the pass over what the batch made is a step of its own (call 1).
+            if conversionsUnderWay == 1 { endSketchBatch() }
             return
         }
 
@@ -2566,12 +2745,15 @@ final class AppModel {
         let bounds = observation.bounds.applying(CGAffineTransform(scaleX: 1 / zoom, y: 1 / zoom))
         let canvasStrokes = group.map { $0.points.map { CGPoint(x: $0.x / zoom, y: $0.y / zoom) } }
 
-        let host = store.screen(under: bounds)
+        // The screen and what is on it, read from the tree.
+        let host = store.screenID(under: bounds).flatMap { id in
+            store.treeScreen(id).flatMap { screen in store.device(of: id).map { (screen: screen, device: $0) } }
+        }
         let placement: SketchPlacement = if let host {
             .onScreen(
-                local: host.localRect(for: bounds),
-                existing: host.elements.map { ExistingElement(kind: $0.kind, frame: $0.frame) },
-                size: host.size
+                local: host.screen.placement.localRect(for: bounds),
+                existing: store.sketchNeighbours(on: host.screen.id),
+                size: host.device.size
             )
         } else {
             .openCanvas
@@ -2580,7 +2762,8 @@ final class AppModel {
 
         var band: CGRect?
         if let host, !observation.form.isEnclosure, request.candidates != [.scratchOut] {
-            band = CGRect(x: host.canvasFrame.minX, y: bounds.midY, width: host.canvasFrame.width, height: 0)
+            let frame = host.screen.canvasFrame(on: host.device)
+            band = CGRect(x: frame.minX, y: bounds.midY, width: frame.width, height: 0)
         }
         let effect = RetraceEffect(strokes: canvasStrokes, band: band)
         withAnimation(.easeOut(duration: 0.2)) { effects.append(effect) }
@@ -2613,26 +2796,36 @@ final class AppModel {
             defer { store.endEdit(conversion) }
             store.act(for: conversion) {
                 var converted = false
-                var added: DesignStore.ElementRef?
+                var added: NodeRef?
                 switch reading {
                 case .screen:
-                    _ = store.addScreen(from: bounds)
-                    converted = true
+                    // A design that can't hold another screen, or whose device for new screens can't be used, leaves
+                    // the sketch unread (F9).
+                    converted = store.addScreen(from: bounds) != nil
                 case .element(let kind):
-                    if let host {
-                        if let element = store.addElement(kind, from: bounds, to: host.id, adjust: { $0.adoptMarks(of: observation) }) {
+                    if host != nil {
+                        // Where it lands, laid out there, remembering its sketch and its reading. A design that can't
+                        // hold another thing leaves the sketch unread (F9).
+                        if let id = store.addSketched(kind, from: bounds, confidence: outcome.confidence, decidedBy: outcome.decidedBy,
+                                                      adjust: { $0.adoptMarks(of: observation) }) {
                             converted = true
-                            added = .init(host: .screen(host.id), element: element.id)
+                            added = store.ref(of: id)
                         }
-                    } else if !kind.belongsOnScreens || kind == .text {
-                        added = store.addFloating(kind, from: bounds)
+                    } else if !kind.belongsOnScreens || kind == .text,
+                              let floating = store.placeLoose(kind, sketchedAs: bounds) {
+                        // On the open canvas it remembers the sketch's canvas bounds, and no screen.
+                        store.update(floating.node) {
+                            $0.sketch = LayerNode.SketchIntent(sketched: bounds, on: nil, margin: 0,
+                                                               confidence: outcome.confidence, decidedBy: outcome.decidedBy)
+                        }
+                        added = floating
                         converted = true
                     }
                     if let added, let readingLogID {
-                        Task { await SketchReadingLog.shared.link(element: added.element, toEntry: readingLogID) }
+                        Task { await SketchReadingLog.shared.link(element: added.node, toEntry: readingLogID) }
                     }
-                    if let added, let recognizedText, store.resolve(added)?.element.kind.hasText == true {
-                        store.update(added) { $0.text = recognizedText }
+                    if let added, let recognizedText, store.node(added.node)?.kind.hasText == true {
+                        store.update(added.node) { $0.content.text = recognizedText }
                     }
                     // A close call says what else it nearly was, in case that is what was meant.
                     if let added, host != nil, case .element(let other)? = outcome.alternative, other != kind {
@@ -2645,8 +2838,8 @@ final class AppModel {
                 // Words the prompt gave for the element go on it, and a drawing read on request
                 // ends with what it became selected.
                 if let added, isDrawing {
-                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.resolve(added)?.element.kind.hasText == true {
-                        store.update(added) { $0.text = label }
+                    if let label = prompt.flatMap(SketchPrompt.label(in:)), store.node(added.node)?.kind.hasText == true {
+                        store.update(added.node) { $0.content.text = label }
                     }
                     selection = .element(added)
                 }
@@ -2656,6 +2849,11 @@ final class AppModel {
                 } else if !isDrawing {
                     reject(keys)
                 }
+                // What a reading made on a screen joins the batch, and the last reading of the batch ends it: the pass
+                // over what it made is part of this step, so that a structure it is sure of undoes with this reading,
+                // or is the step itself when this reading made nothing (call 1).
+                if let added, case .screen = added.host { sketchBatch.append(added.node) }
+                if conversionsUnderWay == 1 { endSketchBatch() }
             }
         }
     }

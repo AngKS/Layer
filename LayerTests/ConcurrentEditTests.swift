@@ -15,13 +15,13 @@ struct ConcurrentEditTests {
     @MainActor private struct Board {
         let model: AppModel
         let undo: UndoManager
-        let screen: DesignScreen.ID
-        let title: DesignStore.ElementRef
-        let button: DesignStore.ElementRef
+        let screen: TreeScreen.ID
+        let title: NodeRef
+        let button: NodeRef
         var store: DesignStore { model.store }
 
-        func frame(of ref: DesignStore.ElementRef) -> CGRect? { store.resolve(ref)?.element.frame }
-        func rotation(of ref: DesignStore.ElementRef) -> Double? { store.resolve(ref)?.element.rotation }
+        func frame(of ref: NodeRef) -> CGRect? { store.placed(ref)?.frame }
+        func rotation(of ref: NodeRef) -> Double? { store.placed(ref).flatMap { Rotation.kept($0.degrees) } }
     }
 
     /// A screen with a title and a button, and an empty history. Generations are written
@@ -35,19 +35,19 @@ struct ConcurrentEditTests {
         // A name the app suggests has no step, so undo leaves it: landing at a moment of
         // its own choosing, it made "everything undone is the start" fail now and then.
         model.suggestsTitle = false
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let refs = model.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let refs = model.store.add([
+            LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
+            LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], onScreen: screen)
         undo.removeAllActions()
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        model.screenStream = { _, _, _ in stream }
-        return (Board(model: model, undo: undo, screen: screen.id, title: refs[0], button: refs[1]), feed)
+        model.screenStream = { _ in stream }
+        return (Board(model: model, undo: undo, screen: screen, title: refs[0], button: refs[1]), feed)
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
-        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+        .screen(Outline.parse(text, isComplete: true))
     }
 
     /// A finger drags the button while the knob turns the title. Whichever ends first, the
@@ -55,22 +55,22 @@ struct ConcurrentEditTests {
     @Test(arguments: [true, false])
     func aDragAndATurnAtOnceAreAStepEachEndedInEitherOrder(dragEndsFirst: Bool) throws {
         let (board, _) = board()
-        let start = board.store.content
+        let start = board.store.tree
         let buttonFrame = try #require(board.frame(of: board.button))
         board.model.selection = .element(board.title)
 
         board.store.beginEdit()
-        board.store.update(board.button) { $0.frame.origin.y -= 1 }
+        board.store.update(board.button.node) { $0.frame.origin.y -= 1 }
         #expect(board.model.beginTurn())
         board.model.turnSelection(by: 10, snaps: false)
-        board.store.update(board.button) { $0.frame.origin.y -= 1 }
+        board.store.update(board.button.node) { $0.frame.origin.y -= 1 }
         if dragEndsFirst {
             board.store.endEdit()
             for degrees in 11...70 { board.model.turnSelection(by: Double(degrees), snaps: false) }
             board.model.endTurn()
         } else {
             board.model.endTurn()
-            for _ in 0..<60 { board.store.update(board.button) { $0.frame.origin.y -= 1 } }
+            for _ in 0..<60 { board.store.update(board.button.node) { $0.frame.origin.y -= 1 } }
             board.store.endEdit()
         }
         #expect(!board.store.isEditing)
@@ -81,7 +81,7 @@ struct ConcurrentEditTests {
         let moved = board.frame(of: board.button) != buttonFrame
         #expect(turned != moved)
         board.undo.undo()
-        #expect(board.store.content == start)
+        #expect(board.store.tree == start)
         #expect(!board.undo.canUndo)
     }
 
@@ -89,9 +89,9 @@ struct ConcurrentEditTests {
     /// its own step and nothing else: a drag still under way goes on as one step.
     @Test func aTurnEndedByASelectionChangeEndsOnlyItsOwnStep() throws {
         let (board, _) = board()
-        let start = board.store.content
+        let start = board.store.tree
         let drag = board.store.beginEdit()
-        board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = 30 } }
+        board.store.act(for: drag) { board.store.update(board.button.node) { $0.frame.origin.x = 30 } }
         board.model.selection = .element(board.title)
         #expect(board.model.beginTurn())
         board.model.turnSelection(by: 10, snaps: false)
@@ -99,14 +99,14 @@ struct ConcurrentEditTests {
         #expect(!board.model.isTurning)
         #expect(board.store.isEditing(by: .hand))
         let mark = board.store.historyMark
-        for x in 31...60 { board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = CGFloat(x) } } }
+        for x in 31...60 { board.store.act(for: drag) { board.store.update(board.button.node) { $0.frame.origin.x = CGFloat(x) } } }
         #expect(board.store.historyMark == mark, "the drag's frames are still the drag's one step")
         board.store.endEdit(drag)
         board.undo.undo()
         #expect(board.rotation(of: board.title) == nil)
         #expect(board.frame(of: board.button)?.minX == 60)
         board.undo.undo()
-        #expect(board.store.content == start)
+        #expect(board.store.tree == start)
         #expect(!board.undo.canUndo)
     }
 
@@ -115,29 +115,29 @@ struct ConcurrentEditTests {
     @Test(arguments: ["template", "Siri"])
     func aOneShotEditDuringADragLeavesTheDragOneStep(oneShot: String) throws {
         let (board, _) = board()
-        let start = board.store.content
+        let start = board.store.tree
         board.store.beginEdit()
-        board.store.update(board.button) { $0.frame.origin.y -= 1 }
+        board.store.update(board.button.node) { $0.frame.origin.y -= 1 }
         if oneShot == "template" {
             board.model.addTemplate("Sign In")
-            #expect(board.store.screens.count == 2)
+            #expect(board.store.tree.screens.count == 2)
         } else {
             DesignActions.edit(board.model, undoManager: nil, actionName: "Rename") {
-                board.store.updateScreen(board.screen) { $0.name = "Renamed" }
+                board.store.updateTreeScreen(board.screen) { $0.name = "Renamed" }
             }
         }
-        for _ in 0..<60 { board.store.update(board.button) { $0.frame.origin.y -= 1 } }
+        for _ in 0..<60 { board.store.update(board.button.node) { $0.frame.origin.y -= 1 } }
         #expect(board.store.isEditing, "the drag's step is still open")
         board.store.endEdit()
 
         board.undo.undo()
         // The one-shot is taken back; the drag stays where it ended.
-        #expect(board.store.screens.count == 1)
-        #expect(board.store.screen(board.screen)?.name == start.screens.first?.name)
+        #expect(board.store.tree.screens.count == 1)
+        #expect(board.store.treeScreen(board.screen)?.name == start.screens.first?.name)
         let draggedTo: CGFloat = 700 - 61
         #expect(board.frame(of: board.button)?.minY == draggedTo)
         board.undo.undo()
-        #expect(board.store.content == start)
+        #expect(board.store.tree == start)
         #expect(!board.undo.canUndo)
     }
 
@@ -147,31 +147,31 @@ struct ConcurrentEditTests {
     /// drag's (C1, G4, M2).
     @Test func aLongDragDuringAGenerationIsOneDragStepAndOneGenerationStep() async throws {
         let (board, feed) = board()
-        let start = board.store.content
+        let start = board.store.tree
         board.model.generateScreen(from: "a settings screen")
         let generated = try #require(board.model.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { board.store.screen(generated)?.elements.count == 1 })
+        #expect(await eventually { board.store.screenLeaves(generated).count == 1 })
 
         board.store.beginEdit()
-        for frame in 0..<100 { board.store.update(board.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+        for frame in 0..<100 { board.store.update(board.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
-        #expect(await eventually { board.store.screen(generated)?.elements.count == 2 })
-        for frame in 100..<150 { board.store.update(board.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+        #expect(await eventually { board.store.screenLeaves(generated).count == 2 })
+        for frame in 100..<150 { board.store.update(board.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
         feed.yield(Self.written("title: Settings\nbutton: Save\ntext: Notifications\n"))
         feed.finish()
         await board.model.waitForGeneration()
-        #expect(board.store.screen(generated)?.elements.count == 3)
+        #expect(board.store.screenLeaves(generated).count == 3)
         // The generation's end leaves the drag going (G4, M2).
         #expect(board.store.isEditing(by: .hand))
-        for frame in 150..<200 { board.store.update(board.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+        for frame in 150..<200 { board.store.update(board.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
         board.store.endEdit()
 
         board.undo.undo()
-        #expect(board.store.screen(generated) == nil)
+        #expect(board.store.treeScreen(generated) == nil)
         #expect(board.frame(of: board.button)?.minX == 219)
         board.undo.undo()
-        #expect(board.store.content == start)
+        #expect(board.store.tree == start)
         #expect(!board.undo.canUndo)
     }
 
@@ -181,35 +181,35 @@ struct ConcurrentEditTests {
     @Test func undoingOneEditLeavesWhatAnotherDidMeanwhile() throws {
         let (board, _) = board()
         let store = board.store
-        let start = store.content
-        let extra = { (text: String) in DesignElement(kind: .body, frame: CGRect(x: 20, y: 300, width: 200, height: 40), text: text, tint: Theme.accent) }
+        let start = store.tree
+        let extra = { (text: String) in LayerNode.leaf(.body, frame: CGRect(x: 20, y: 300, width: 200, height: 40), text: text, tint: Theme.accent) }
         let a = store.beginEdit(by: .app)
         let b = store.beginEdit(by: .app)
-        store.act(for: a) { store.update(board.title) { $0.text = "A" } }
+        store.act(for: a) { store.update(board.title.node) { $0.content.text = "A" } }
         store.act(for: b) {
-            store.update(board.title) { $0.frame.origin.x += 5 }
+            store.update(board.title.node) { $0.frame.origin.x += 5 }
             store.delete(board.button)
-            _ = store.setElements([extra("From B")], on: board.screen, replacing: false)
+            _ = store.add([extra("From B")], onScreen: board.screen)
         }
         store.act(for: a) {
-            store.update(board.title) { $0.text = "AA" }
-            _ = store.setElements([extra("From A")], on: board.screen, replacing: false)
+            store.update(board.title.node) { $0.content.text = "AA" }
+            _ = store.add([extra("From A")], onScreen: board.screen)
         }
         store.endEdit(b)
         store.endEdit(a)
-        let end = store.content
+        let end = store.tree
 
         // A's step went in first, so B's is on top: its move, delete and add are taken back,
         // and A's words and element stay.
         board.undo.undo()
-        let screen = try #require(store.screen(board.screen))
-        #expect(screen.elements.map(\.text) == ["AA", "Go", "From A"])
+        _ = try #require(store.treeScreen(board.screen))
+        #expect(store.screenLeaves(board.screen).map(\.content.text) == ["AA", "Go", "From A"])
         #expect(board.frame(of: board.title)?.minX == 20)
         board.undo.undo()
-        #expect(store.content == start)
+        #expect(store.tree == start)
         board.undo.redo()
         board.undo.redo()
-        #expect(store.content == end)
+        #expect(store.tree == end)
     }
 
     /// A finger picks something up while a screen is written and drops it on that screen
@@ -219,33 +219,31 @@ struct ConcurrentEditTests {
     /// then puts it back where it came from.
     @Test func undoingAGenerationLeavesNothingOnNoScreen() async throws {
         let (board, feed) = board()
-        let start = board.store.content
+        let start = board.store.tree
         board.model.generateScreen(from: "a settings screen")
         let generated = try #require(board.model.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { board.store.screen(generated)?.elements.count == 1 })
+        #expect(await eventually { board.store.screenLeaves(generated).count == 1 })
         let drag = board.store.beginEdit()
-        board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x += 5 } }
+        board.store.act(for: drag) { board.store.update(board.button.node) { $0.frame.origin.x += 5 } }
         feed.finish()
         await board.model.waitForGeneration()
         let dropped = try #require(board.store.act(for: drag) {
             board.store.move(board.button, toScreen: generated, origin: CGPoint(x: 20, y: 400))
         })
         board.store.endEdit(drag)
-        let onScreen = try #require(board.store.resolve(dropped))
+        let onScreen = try #require(board.store.placed(dropped))
 
         board.undo.undo()
-        #expect(board.store.screen(generated) == nil)
-        #expect(board.store.content.elementsOnMissingScreens.isEmpty)
-        let floating = try #require(board.store.floating.first { $0.id == dropped.element })
+        #expect(board.store.treeScreen(generated) == nil)
+        let floating = try #require(board.store.placed(NodeRef(host: .canvas, node: dropped.node)))
         // Where it was on the canvas, at the screen's scale.
-        #expect(floating.canvasFrame == onScreen.placement.canvasRect(for: onScreen.element.frame))
+        #expect(floating.placement.canvasRect(for: floating.frame) == onScreen.placement.canvasRect(for: onScreen.frame))
         board.undo.redo()
-        #expect(board.store.resolve(dropped) != nil)
+        #expect(board.store.placed(dropped) != nil)
         board.undo.undo()
         board.undo.undo()
-        #expect(board.store.content == start)
-        #expect(board.store.content.elementsOnMissingScreens.isEmpty)
+        #expect(board.store.tree == start)
     }
 
     /// Something else changes the design while a change is being made, as the ink canvas
@@ -256,33 +254,33 @@ struct ConcurrentEditTests {
         undo.groupsByEvent = false
         let store = DesignStore()
         store.undoManager = undo
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let refs = store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        let screen = try #require(store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
+        let refs = store.add([
+            LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
+            LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], onScreen: screen.id)
         undo.removeAllActions()
-        let start = store.content
+        let start = store.tree
         let erasing = store.beginEdit()
         let writing = store.beginEdit(by: .app)
-        store.act(for: erasing) { store.update(refs[0]) { $0.text = "1" } }
+        store.act(for: erasing) { store.update(refs[0].node) { $0.content.text = "1" } }
         var follows = true
         store.onChange = { _ in
             guard follows else { return }
             follows = false
-            store.act(for: erasing) { store.update(refs[0]) { $0.text = "2" } }
+            store.act(for: erasing) { store.update(refs[0].node) { $0.content.text = "2" } }
         }
-        store.act(for: writing) { store.update(refs[1]) { $0.frame.origin.y = 600 } }
+        store.act(for: writing) { store.update(refs[1].node) { $0.frame.origin.y = 600 } }
         store.onChange = nil
         store.endEdit(writing)
         store.endEdit(erasing)
 
         // The line's step takes back the line, and leaves the erasure whole.
         undo.undo()
-        #expect(store.resolve(refs[0])?.element.text == "2")
-        #expect(store.resolve(refs[1])?.element.frame.minY == 700)
+        #expect(store.node(refs[0].node)?.content.text == "2")
+        #expect(store.placed(refs[1])?.frame.minY == 700)
         undo.undo()
-        #expect(store.content == start)
+        #expect(store.tree == start)
     }
 
     /// A screen finishing used to move its step to the top of the history, and registering
@@ -293,15 +291,15 @@ struct ConcurrentEditTests {
         board.model.generateScreen(from: "a settings screen")
         feed.yield(Self.written("title: Settings\n"))
         #expect(await eventually { board.model.generation?.elementCount == 1 })
-        board.store.update(board.title) { $0.text = "Hello" }
-        board.store.update(board.button) { $0.text = "Next" }
+        board.store.update(board.title.node) { $0.content.text = "Hello" }
+        board.store.update(board.button.node) { $0.content.text = "Next" }
         board.undo.undo()
         #expect(board.undo.canRedo)
         feed.finish()
         await board.model.waitForGeneration()
         #expect(board.undo.canRedo)
         board.undo.redo()
-        #expect(board.store.resolve(board.button)?.element.text == "Next")
+        #expect(board.store.node(board.button.node)?.content.text == "Next")
     }
 
     /// A drag and a turn whose frames take turns: each step used to start a new run, two
@@ -309,12 +307,12 @@ struct ConcurrentEditTests {
     /// what the other changed meanwhile when that touched nothing of the run's.
     @Test func editsTakingTurnsFrameByFrameKeepFewRuns() throws {
         let (board, _) = board()
-        let start = board.store.content
+        let start = board.store.tree
         board.model.selection = .element(board.title)
         let drag = board.store.beginEdit()
         #expect(board.model.beginTurn())
         for frame in 1...200 {
-            board.store.act(for: drag) { board.store.update(board.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            board.store.act(for: drag) { board.store.update(board.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
             board.model.turnSelection(by: Double(frame) / 10, snaps: false)
         }
         #expect(board.store.recordedRuns(of: drag) <= 2)
@@ -322,7 +320,7 @@ struct ConcurrentEditTests {
         board.model.endTurn()
         board.undo.undo()
         board.undo.undo()
-        #expect(board.store.content == start)
+        #expect(board.store.tree == start)
     }
 
     /// A generation started as part of a one-off step, which ends at once, took that step
@@ -336,9 +334,9 @@ struct ConcurrentEditTests {
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
         feed.finish()
         await board.model.waitForGeneration()
-        #expect(board.store.screen(generated)?.elements.count == 2)
+        #expect(board.store.screenLeaves(generated).count == 2)
         board.undo.undo()
-        #expect(board.store.screen(generated) == nil)
+        #expect(board.store.treeScreen(generated) == nil)
         #expect(!board.undo.canUndo)
     }
 
@@ -363,7 +361,7 @@ struct ConcurrentEditTests {
         board.model.generateScreen(from: "a settings screen")
         let generated = try #require(board.model.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { board.store.screen(generated)?.elements.count == 1 })
+        #expect(await eventually { board.store.screenLeaves(generated).count == 1 })
         board.store.beginEdit()
         board.store.setTitle("Mine")
         board.store.endEdit()
@@ -371,10 +369,10 @@ struct ConcurrentEditTests {
         feed.yield(Self.written("title: Settings\nbutton: Save\ntext: Notifications\n"))
         feed.finish()
         await board.model.waitForGeneration()
-        #expect(board.store.screen(generated)?.elements.count == 3)
+        #expect(board.store.screenLeaves(generated).count == 3)
 
         board.undo.undo()
-        #expect(board.store.screen(generated) == nil)
+        #expect(board.store.treeScreen(generated) == nil)
         #expect(board.store.title == "Mine")
         board.undo.undo()
         #expect(board.store.title == nil)
@@ -390,7 +388,7 @@ struct ConcurrentEditTests {
 @Suite("Changes under way at once, grouped by event", .serialized)
 @MainActor
 struct ConcurrentEditsGroupedByEventTests {
-    private func board() -> (model: AppModel, undo: UndoManager, screen: DesignScreen.ID, title: DesignStore.ElementRef, button: DesignStore.ElementRef, feed: AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
+    private func board() -> (model: AppModel, undo: UndoManager, screen: TreeScreen.ID, title: NodeRef, button: NodeRef, feed: AsyncThrowingStream<ScreenGenerator.Update, any Error>.Continuation) {
         let undo = UndoManager()
         undo.groupsByEvent = true
         let model = AppModel(document: LayerDocument())
@@ -399,14 +397,14 @@ struct ConcurrentEditsGroupedByEventTests {
         // A name the app suggests has no step, so undo leaves it: landing at a moment of
         // its own choosing, it made "everything undone is the start" fail now and then.
         model.suggestsTitle = false
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let refs = model.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen.id, replacing: false)
+        let screen = model.store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let refs = model.store.add([
+            LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 353, height: 40), text: "Welcome", tint: Theme.accent),
+            LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
+        ], onScreen: screen)
         let (stream, feed) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
-        model.screenStream = { _, _, _ in stream }
-        return (model, undo, screen.id, refs[0], refs[1], feed)
+        model.screenStream = { _ in stream }
+        return (model, undo, screen, refs[0], refs[1], feed)
     }
 
     /// The run loop turns, as between two touches, and the event's group closes.
@@ -421,38 +419,38 @@ struct ConcurrentEditsGroupedByEventTests {
     }
 
     private static func written(_ text: String) -> ScreenGenerator.Update {
-        .screen(ScreenGenerator.blueprint(ofFinishedLinesIn: text, isComplete: true)!)
+        .screen(Outline.parse(text, isComplete: true))
     }
 
     @Test func aDragIsOneStep() async throws {
         let b = board()
         await clearHistory(b.undo)
-        let start = b.model.store.content
+        let start = b.model.store.tree
         let drag = b.model.store.beginEdit()
         for frame in 1...20 {
-            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            b.model.store.act(for: drag) { b.model.store.update(b.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
             await nextEvent()
         }
         b.model.store.endEdit(drag)
-        let end = b.model.store.content
+        let end = b.model.store.tree
         await nextEvent()
         b.undo.undo()
-        #expect(b.model.store.content == start)
+        #expect(b.model.store.tree == start)
         #expect(!b.undo.canUndo)
         b.undo.redo()
-        #expect(b.model.store.content == end)
+        #expect(b.model.store.tree == end)
     }
 
     @Test(arguments: [true, false])
     func aDragAndATurnAtOnceAreAStepEach(dragEndsFirst: Bool) async throws {
         let b = board()
         await clearHistory(b.undo)
-        let start = b.model.store.content
+        let start = b.model.store.tree
         b.model.selection = .element(b.title)
         let drag = b.model.store.beginEdit()
         #expect(b.model.beginTurn())
         for frame in 1...20 {
-            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.y = 700 - CGFloat(frame) } }
+            b.model.store.act(for: drag) { b.model.store.update(b.button.node) { $0.frame.origin.y = 700 - CGFloat(frame) } }
             b.model.turnSelection(by: Double(frame), snaps: false)
             await nextEvent()
         }
@@ -462,18 +460,18 @@ struct ConcurrentEditsGroupedByEventTests {
             if dragEndsFirst {
                 b.model.turnSelection(by: Double(frame), snaps: false)
             } else {
-                b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.y = 700 - CGFloat(frame) } }
+                b.model.store.act(for: drag) { b.model.store.update(b.button.node) { $0.frame.origin.y = 700 - CGFloat(frame) } }
             }
             await nextEvent()
         }
         if dragEndsFirst { b.model.endTurn() } else { b.model.store.endEdit(drag) }
         await nextEvent()
         b.undo.undo()
-        let turned = b.model.store.resolve(b.title)?.element.rotation != nil
-        let moved = b.model.store.resolve(b.button)?.element.frame.minY != 700
+        let turned = b.model.store.placed(b.title).flatMap { Rotation.kept($0.degrees) } != nil
+        let moved = b.model.store.placed(b.button)?.frame.minY != 700
         #expect(turned != moved)
         b.undo.undo()
-        #expect(b.model.store.content == start)
+        #expect(b.model.store.tree == start)
         #expect(!b.undo.canUndo)
     }
 
@@ -482,15 +480,15 @@ struct ConcurrentEditsGroupedByEventTests {
     @Test func aDragDuringAGenerationAndATemplateAreAStepEach() async throws {
         let b = board()
         await clearHistory(b.undo)
-        let start = b.model.store.content
+        let start = b.model.store.tree
         b.model.generateScreen(from: "a settings screen")
         let generated = try #require(b.model.generation?.screenID)
         await nextEvent()
         b.feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { b.model.store.screen(generated)?.elements.count == 1 })
+        #expect(await eventually { b.model.store.screenLeaves(generated).count == 1 })
         let drag = b.model.store.beginEdit()
         for frame in 0..<200 {
-            b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x = 20 + CGFloat(frame) } }
+            b.model.store.act(for: drag) { b.model.store.update(b.button.node) { $0.frame.origin.x = 20 + CGFloat(frame) } }
             if frame == 50 { b.feed.yield(Self.written("title: Settings\nbutton: Save\n")) }
             if frame == 100 { b.model.addTemplate("Sign In") }
             if frame == 150 { b.feed.finish() }
@@ -499,13 +497,13 @@ struct ConcurrentEditsGroupedByEventTests {
         await b.model.waitForGeneration()
         b.model.store.endEdit(drag)
         await nextEvent()
-        #expect(b.model.store.screens.count == 3)
+        #expect(b.model.store.tree.screens.count == 3)
         // The generation finished last and touched nothing else: it goes first.
         b.undo.undo()
-        #expect(b.model.store.screen(generated) == nil)
+        #expect(b.model.store.treeScreen(generated) == nil)
         b.undo.undo()
         b.undo.undo()
-        #expect(b.model.store.content == start)
+        #expect(b.model.store.tree == start)
         #expect(!b.undo.canUndo)
     }
 
@@ -515,20 +513,20 @@ struct ConcurrentEditsGroupedByEventTests {
     @Test func aMagicPenConversionIsOneStep() async throws {
         let b = board()
         await clearHistory(b.undo)
-        let start = b.model.store.content
+        let start = b.model.store.tree
         b.model.engine.readHandwriting = { _ in "Sign in" }
         let wave = StrokeScript.wave(CGRect(x: 150, y: 300, width: 96, height: 40), humps: 3)
         b.model.sketchChanged([SketchStroke(key: 1, points: wave)])
         b.model.convertNow()
-        #expect(await eventually(within: .seconds(10)) { b.model.store.screen(b.screen)?.elements.count == 3 })
+        #expect(await eventually(within: .seconds(10)) { b.model.store.screenLeaves(b.screen).count == 3 })
         // With no ink canvas here, the sketch is taken away by hand.
         b.model.sketchChanged([])
-        let added = try #require(b.model.store.screen(b.screen)?.elements.last)
-        #expect(b.model.store.screen(b.screen)?.elements.count == 3)
-        #expect(added.text == "Sign in")
+        let added = try #require(b.model.store.screenLeaves(b.screen).last)
+        #expect(b.model.store.screenLeaves(b.screen).count == 3)
+        #expect(added.content.text == "Sign in")
         await nextEvent()
         b.undo.undo()
-        #expect(b.model.store.content == start)
+        #expect(b.model.store.tree == start)
         #expect(!b.undo.canUndo)
     }
 
@@ -539,14 +537,14 @@ struct ConcurrentEditsGroupedByEventTests {
         await clearHistory(b.undo)
         b.model.generateScreen(from: "a settings screen")
         await nextEvent()
-        b.model.store.update(b.title) { $0.text = "Mine" }
+        b.model.store.update(b.title.node) { $0.content.text = "Mine" }
         await nextEvent()
         b.feed.finish(throwing: URLError(.notConnectedToInternet))
         await b.model.waitForGeneration()
         await nextEvent()
-        #expect(b.model.store.screens.count == 1)
+        #expect(b.model.store.tree.screens.count == 1)
         b.undo.undo()
-        #expect(b.model.store.resolve(b.title)?.element.text == "Welcome")
+        #expect(b.model.store.node(b.title.node)?.content.text == "Welcome")
         #expect(!b.undo.canUndo)
     }
 
@@ -558,11 +556,11 @@ struct ConcurrentEditsGroupedByEventTests {
         b.model.generateScreen(from: "a settings screen")
         let generated = try #require(b.model.generation?.screenID)
         b.feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { b.model.store.screen(generated)?.elements.count == 1 })
+        #expect(await eventually { b.model.store.screenLeaves(generated).count == 1 })
         let drag = b.model.store.beginEdit()
-        b.model.store.act(for: drag) { b.model.store.update(b.button) { $0.frame.origin.x += 5 } }
+        b.model.store.act(for: drag) { b.model.store.update(b.button.node) { $0.frame.origin.x += 5 } }
         await nextEvent()
-        b.model.store.update(b.title) { $0.text = "Mine" }
+        b.model.store.update(b.title.node) { $0.content.text = "Mine" }
         await nextEvent()
         b.undo.undo()
         #expect(b.undo.canRedo)
@@ -570,7 +568,7 @@ struct ConcurrentEditsGroupedByEventTests {
         await b.model.waitForGeneration()
         #expect(b.undo.canRedo)
         b.undo.redo()
-        #expect(b.model.store.resolve(b.title)?.element.text == "Mine")
+        #expect(b.model.store.node(b.title.node)?.content.text == "Mine")
         let dropped = try #require(b.model.store.act(for: drag) {
             b.model.store.move(b.button, toScreen: generated, origin: CGPoint(x: 20, y: 400))
         })
@@ -578,15 +576,13 @@ struct ConcurrentEditsGroupedByEventTests {
         await nextEvent()
         while b.undo.canUndo {
             b.undo.undo()
-            #expect(b.model.store.content.elementsOnMissingScreens.isEmpty)
             await nextEvent()
         }
-        #expect(b.model.store.resolve(b.button)?.element.frame.minX == 20)
+        #expect(b.model.store.placed(b.button)?.frame.minX == 20)
         while b.undo.canRedo {
             b.undo.redo()
-            #expect(b.model.store.content.elementsOnMissingScreens.isEmpty)
             await nextEvent()
         }
-        #expect(b.model.store.resolve(dropped) != nil)
+        #expect(b.model.store.placed(dropped) != nil)
     }
 }

@@ -1,0 +1,100 @@
+import CoreGraphics
+import Foundation
+
+/// The store's verbs for whole roots made off the main actor: a generator's update of a screen, and screens made
+/// whole, as an import makes them. Each is one change, so one undo step, or part of the edit it is made for
+/// (`act(for:)`), as the store's other verbs are. A root laid out ahead with `TreeRules.laidOut` is committed as it
+/// is: the rules lay nothing out for it (plan 3, calls 1 and 6).
+extension DesignStore {
+    /// A screen's root, as the store holds it. Nil when the screen is gone.
+    func root(of screenID: TreeScreen.ID) -> LayerNode? {
+        tree.screens.first { $0.id == screenID }?.root
+    }
+
+    /// A generator's one write: `root` becomes the screen's root in one change, through `reconcile(_:_:)`. When the
+    /// screen's root is still `base`, `root` was laid out from it off the main actor, and the rules lay nothing out
+    /// there. False when the screen is gone.
+    ///
+    /// Also false, and nothing changes, for what `reconcile` refuses: a node deeper than 32, or a design of more
+    /// than 5,000 nodes. The root keeps the screen's root's id, and a node whose id the design holds elsewhere is
+    /// given a new one, which the rules then lay out.
+    @discardableResult
+    func commitGenerated(_ root: LayerNode, on screenID: TreeScreen.ID, laidOutOver base: LayerNode?) -> Bool {
+        guard let current = self.root(of: screenID) else { return false }
+        var landing = root
+        landing.id = current.id
+        let made = landing
+        let isLaidOut = base.map { $0 == current } ?? false
+        let committed = withLaidOutAhead(isLaidOut ? [screenID: made] : [:]) {
+            reconcile(screenID) { $0 = made }
+        }
+        #if DEBUG
+        if committed { GenerationWork.committed(on: screenID) }
+        #endif
+        return committed
+    }
+
+    /// New screens whose roots were laid out off the main actor, added in one change after the others. The rules lay
+    /// nothing out for them. Returns the ids of those added.
+    ///
+    /// Each root must be as `TreeRules.laidOut` gave it for the screen's device and this design's settings: the rules
+    /// trust it, and a root that wasn't laid out stays as it was given.
+    ///
+    /// A screen is left out, as `addScreen(_:)` refuses one, when its device is one of the design's own that can't be
+    /// used (`DeviceFrame.problems`), which a file can hold, or for `accepts(newScreen:besides:)`'s refusals, a screen
+    /// before it in `screens` counting as the design's.
+    @discardableResult
+    func addLaidOutScreens(_ screens: [TreeScreen]) -> [TreeScreen.ID] {
+        var taken = takenByScreens
+        var added: [TreeScreen] = []
+        for screen in screens where tree.device(of: screen).problems.isEmpty && accepts(newScreen: screen, besides: &taken) {
+            added.append(screen)
+        }
+        guard !added.isEmpty else { return [] }
+        let made = added
+        withLaidOutAhead(Dictionary(made.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })) {
+            apply { $0.screens += made }
+        }
+        #if DEBUG
+        for screen in made { GenerationWork.committed(on: screen.id) }
+        #endif
+        return made.map(\.id)
+    }
+
+    // MARK: New screens
+
+    /// What new screens must not repeat: the design's screens' ids, its nodes' ids and how many nodes it holds, and
+    /// what screens added with them in the same change have taken (`accepts(newScreen:besides:)`).
+    struct TakenByScreens {
+        fileprivate var screens: Set<TreeScreen.ID>
+        /// Ids taken by the screens accepted so far, besides the design's own, which its index holds.
+        fileprivate var nodes: Set<UUID> = []
+        /// The design's nodes and theirs.
+        fileprivate var count: Int
+    }
+
+    /// What the design's own screens and nodes take, before any new screen is accepted.
+    var takenByScreens: TakenByScreens {
+        TakenByScreens(screens: Set(tree.screens.map(\.id)), count: index.count)
+    }
+
+    /// Whether `screen` can be added as a new screen beside what is `taken`, as `addScreen(keepingItsDevice:)` and
+    /// `addLaidOutScreens(_:)` both add one; when it can, `taken` takes it in. Refused when the design, or a screen
+    /// accepted before it, has its id or one of its nodes', or it gives one id twice; when it holds a drawing or a
+    /// sticky note, or a node deeper than 32; or when the design would hold more than 5,000 nodes. Its device isn't
+    /// asked about: see `addScreen(_:)`.
+    func accepts(newScreen screen: TreeScreen, besides taken: inout TakenByScreens) -> Bool {
+        let index = index
+        let ids = TreeEdit.ids(in: screen.root)
+        let fresh = Set(ids)
+        guard !taken.screens.contains(screen.id), fresh.count == ids.count,
+              fresh.allSatisfy({ index[$0] == nil }), taken.nodes.isDisjoint(with: fresh),
+              TreeEdit.levels(below: screen.root) <= TreeRules.maximumDepth,
+              !TreeEdit.holds(screen.root, where: { !$0.kind.belongsOnScreens }),
+              taken.count + ids.count <= TreeRules.maximumNodes else { return false }
+        taken.screens.insert(screen.id)
+        taken.nodes.formUnion(fresh)
+        taken.count += ids.count
+        return true
+    }
+}

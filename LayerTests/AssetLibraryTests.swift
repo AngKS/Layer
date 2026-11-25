@@ -46,7 +46,7 @@ struct AssetLibraryTests {
             #expect(AssetLibrary.element(forComponent: component.id)?.kind == component.kind)
         }
         for template in AssetLibrary.templates {
-            #expect((AssetLibrary.template(named: template.name)?.itemCount ?? 0) >= 4, "\(template.name)")
+            #expect((AssetLibrary.template(named: template.name)?.leafCount ?? 0) >= 4, "\(template.name)")
         }
     }
 
@@ -146,53 +146,119 @@ struct AddingAssetsTests {
         let model = makeModel()
         let arrow = try #require(AssetLibrary.asset(id: "shape:arrowRight:line"))
         model.addAsset(arrow, at: CGPoint(x: 300, y: 200))
-        let added = try #require(model.selectedElement)
+        let added = try #require(model.selectedNode)
         #expect(added.ref.host == .canvas)
-        #expect(added.element.kind == .shape)
-        #expect(added.element.shape == .arrowRight)
-        #expect(added.element.isOn == false, "an outline isn't filled")
-        let frame = try #require(model.store.floating.first).canvasFrame
+        #expect(added.node.kind == .shape)
+        #expect(added.node.content.shape == .arrowRight)
+        #expect(added.node.content.isOn == false, "an outline isn't filled")
+        let frame = try #require(model.store.tree.canvas.first.flatMap { model.store.canvasRect(of: $0.id) })
         #expect(abs(frame.midX - 300) <= 1 && abs(frame.midY - 200) <= 1)
     }
 
     @Test func aComponentDroppedOnAScreenJoinsItInsideItsEdges() throws {
         let model = makeModel()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1))
+        let screen = try #require(model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1))).id
         let button = try #require(AssetLibrary.asset(id: "component:button"))
         // Dropped near the screen's right edge: a full-width button can't sit centred there.
         model.addAsset(button, at: CGPoint(x: 470, y: 400))
-        let added = try #require(model.selectedElement)
-        #expect(added.ref.host == .screen(screen.id))
-        #expect(added.element.frame.minX >= 0 && added.element.frame.maxX <= DeviceFrame.iPhone.size.width)
+        let added = try #require(model.selectedNode)
+        #expect(added.ref.host == .screen(screen))
+        #expect(added.frame.minX >= 0 && added.frame.maxX <= DeviceFrame.iPhone.size.width)
+    }
+
+    /// A text, a sticky note, a component, a symbol, a shape or a picture the design has no room for says why, as a
+    /// refused screen does, and opens nothing for typing: the text selected before is left as it was, not opened in its
+    /// place (plan 6 final review B, M6).
+    @Test func aThingRefusedAtTheCapSaysWhyAndOpensNothing() throws {
+        let model = makeModel()
+        let store = model.store
+        let words = LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 120, height: 24), text: "Hello")
+        let screen = store.addFreeScreen([words], name: "Login")
+        let room = TreeRules.maximumNodes - store.index.count - 1
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 3_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes)
+        let selected = CanvasSelection.element(NodeRef(host: .screen(screen), node: words.id))
+        model.selection = selected
+        let before = store.tree
+        let drawn = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 32)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 32))
+        }
+        let data = try #require(drawn.pngData())
+        let picture = try #require(ImageImport.prepare(data))
+        let adds: [(String, () -> Void)] = [
+            ("text", { model.addText() }),
+            ("sticky note", { model.addStickyNote() }),
+            ("component", { model.addAsset(AssetLibrary.asset(id: "component:stickyNote")!) }),
+            ("symbol", { model.addSymbol("heart") }),
+            ("shape", { model.addAsset(AssetLibrary.asset(id: "shape:arrowRight:line")!) }),
+            ("picture", { model.addImage(picture) }),
+        ]
+        for (name, add) in adds {
+            add()
+            #expect(model.addNotice == AppModel.designIsFull, "\(name)")
+            #expect(!model.isEditingText, "\(name)")
+            #expect(model.selection == selected, "\(name)")
+            #expect(store.tree == before, "\(name)")
+            model.addNotice = nil
+            model.isEditingText = false
+        }
+        #expect(AssetLibrary.asset(id: "component:stickyNote") != nil)
     }
 
     @Test func aTemplateIsAWholeScreenInOneUndoStep() throws {
         let model = makeModel()
         let settings = try #require(AssetLibrary.asset(id: "template:Settings"))
         model.addAsset(settings, at: CGPoint(x: 600, y: 400))
-        let screen = try #require(model.store.screens.first)
+        let screen = try #require(model.store.tree.screens.first)
         #expect(screen.name == "Settings")
-        #expect(screen.elements.contains { $0.kind == .toggle })
+        #expect(screen.root.leaves.contains { $0.kind == .toggle })
         model.store.undoManager?.undo()
-        #expect(model.store.screens.isEmpty)
+        #expect(model.store.tree.screens.isEmpty)
+    }
+
+    /// A template comes in on the design's own numbers, as a generated or imported screen does; its thumbnail stays on
+    /// the standard ones (final review B-m1).
+    @Test func aTemplateTakesTheDesignsTokens() throws {
+        let model = makeModel()
+        model.store.updateCanvas { $0.tokens.rhythm = [4, 10, 20, 40] }
+
+        model.addTemplate("Settings")
+
+        let root = try #require(model.store.tree.screens.first?.root)
+        let tokens = model.store.canvas.tokens
+        guard case .stack(let screen) = root.resolvedLayout, case .stack(let section)? = root.children.first?.resolvedLayout else {
+            Issue.record("the template is a column of sections")
+            return
+        }
+        #expect(screen.spacing == tokens.spacing(nearest: 24))
+        #expect(section.spacing == tokens.spacing(nearest: 12))
+        #expect(screen.spacing != DesignTokens.standard.spacing(nearest: 24))
+        guard case .stack(let standard)? = AssetLibrary.template(named: "Settings")?.resolvedLayout else {
+            Issue.record("the standard template is a column")
+            return
+        }
+        #expect(standard.spacing == 24)
     }
 
     @Test func aMacFrameHasAMenuBarsWorthOfRoomAtTheTop() throws {
         let model = makeModel()
         let iMac = try #require(AssetLibrary.asset(id: "frame:imac"))
         model.addAsset(iMac)
-        let screen = try #require(model.store.screens.last)
+        let screen = try #require(model.store.tree.screens.last?.id)
         // New frames come in unselected.
         #expect(model.selection == nil)
-        #expect(screen.device.family == .desktop)
-        #expect(screen.canvasFrame.height <= 834 - 200, "even an iMac fits in the view")
+        #expect(model.store.device(of: screen)?.family == .desktop)
+        let frame = try #require(model.store.canvasFrame(ofScreen: screen))
+        #expect(frame.height <= 834 - 200, "even an iMac fits in the view")
     }
 
     @Test func aFrameDroppedOnTheCanvasIsCentredThere() throws {
         let model = makeModel()
         let iPad = try #require(AssetLibrary.asset(id: "frame:ipad"))
         model.addAsset(iPad, at: CGPoint(x: 500, y: 420))
-        let frame = try #require(model.store.screens.last).canvasFrame
+        let frame = try #require(model.store.tree.screens.last.flatMap { model.store.canvasFrame(ofScreen: $0.id) })
         #expect(abs(frame.midX - 500) <= 1 && abs(frame.midY - 420) <= 1)
     }
 }
@@ -200,13 +266,13 @@ struct AddingAssetsTests {
 @Suite("Shapes")
 struct ShapeTests {
     @Test func aShapeIsSavedAndOpensAgain() throws {
-        var element = DesignStore.newElement(.shape)
-        element.shape = .star
-        element.isOn = false
+        var element = LayerNode.standard(.shape)
+        element.content.shape = .star
+        element.content.isOn = false
         let data = try JSONEncoder().encode(element)
-        let opened = try JSONDecoder().decode(DesignElement.self, from: data)
-        #expect(opened.shape == .star)
-        #expect(opened.isOn == false)
+        let opened = try JSONDecoder().decode(LayerNode.self, from: data)
+        #expect(opened.content.shape == .star)
+        #expect(opened.content.isOn == false)
     }
 
     @Test func everyPolygonStaysInsideItsFrame() {
@@ -218,17 +284,16 @@ struct ShapeTests {
     }
 
     @Test func shapesAreWrittenAsSwiftUI() {
-        var screen = DesignScreen(name: "Shapes", origin: .zero, scale: 1)
-        var circle = DesignStore.newElement(.shape)
-        circle.shape = .ellipse
+        var circle = LayerNode.standard(.shape)
+        circle.content.shape = .ellipse
         circle.frame = CGRect(x: 20, y: 100, width: 80, height: 80)
-        var triangle = DesignStore.newElement(.shape)
-        triangle.shape = .triangle
-        triangle.isOn = false
+        var triangle = LayerNode.standard(.shape)
+        triangle.content.shape = .triangle
+        triangle.content.isOn = false
         triangle.frame = CGRect(x: 20, y: 300, width: 100, height: 100)
-        screen.elements = [circle, triangle]
 
-        let lines = SwiftUICodeGenerator.code(for: screen).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [circle, triangle], named: "Shapes")
+        let lines = code.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         #expect(lines.contains("Ellipse()"))
         #expect(lines.contains(".frame(width: 80, height: 80)"))
         // The outline is drawn inside the frame, half the line's width in from each edge.

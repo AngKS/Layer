@@ -8,7 +8,7 @@ enum VoiceTarget: Equatable, Sendable {
     case canvas(CGPoint)
     /// A change typed, or held to speak, about one screen and everything on it. It can
     /// change nothing else.
-    case screenEdit(DesignScreen.ID)
+    case screenEdit(TreeScreen.ID)
 }
 
 /// Where the phone call that is up, in whichever window, is kept. Only one listens the

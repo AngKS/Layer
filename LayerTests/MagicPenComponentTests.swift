@@ -14,14 +14,14 @@ private func reading(_ paths: [[CGPoint]]) throws -> SketchReading {
     RuleInterpreter().reading(for: try request(paths))
 }
 
-/// The element a sketch becomes, with what its inner marks say applied.
-private func element(from paths: [[CGPoint]]) throws -> DesignElement {
+/// The leaf a sketch becomes, with what its inner marks say applied.
+private func element(from paths: [[CGPoint]]) throws -> LayerNode {
     let request = try request(paths)
     guard case .element(let kind) = RuleInterpreter().reading(for: request) else {
         Issue.record("not an element")
         throw CancellationError()
     }
-    var element = DesignStore.newElement(kind)
+    var element = LayerNode.standard(kind)
     element.adoptMarks(of: request.observation)
     return element
 }
@@ -32,10 +32,10 @@ private func inner(_ paths: [[CGPoint]]) throws -> SketchObservation.InnerMark? 
 }
 
 @MainActor
-private func makeStore() -> (store: DesignStore, screen: DesignScreen) {
-    let store = DesignStore(content: DesignContent())
+private func makeStore() -> (store: DesignStore, screen: TreeScreen.ID) {
+    let store = DesignStore()
     store.undoManager = UndoManager()
-    return (store, store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
+    return (store, store.addEmptyScreen(.iPhone, at: Placement(origin: .zero, scale: 1)))
 }
 
 private let tinySquare = CGRect(x: 40, y: 300, width: 30, height: 30)
@@ -68,8 +68,8 @@ struct InnerMarkTests {
 struct SmallControlTests {
     @Test func aTinySquareIsACheckboxTickedWhenItHasAMark() throws {
         #expect(try reading([SketchSamples.box(tinySquare, radius: 4)]) == .element(.checkbox))
-        #expect(try element(from: [SketchSamples.box(tinySquare, radius: 4)]).isOn == false)
-        #expect(try element(from: [SketchSamples.box(tinySquare, radius: 4), SketchSamples.tick(tinySquare)]).isOn)
+        #expect(try element(from: [SketchSamples.box(tinySquare, radius: 4)]).content.isOn == false)
+        #expect(try element(from: [SketchSamples.box(tinySquare, radius: 4), SketchSamples.tick(tinySquare)]).content.isOn)
         // A tiny square with an X is a checked box rather than an image.
         #expect(try element(from: [SketchSamples.box(tinySquare, radius: 4)] + SketchSamples.cross(tinySquare)).kind == .checkbox)
     }
@@ -78,11 +78,11 @@ struct SmallControlTests {
         let center = CGPoint(x: 55, y: 315)
         let selected = try element(from: [SketchSamples.circle(center: center, radius: 15), SketchSamples.circle(center: center, radius: 4)])
         #expect(selected.kind == .radio)
-        #expect(selected.isOn)
+        #expect(selected.content.isOn)
 
         let empty = try element(from: [SketchSamples.circle(center: center, radius: 12)])
         #expect(empty.kind == .radio)
-        #expect(!empty.isOn)
+        #expect(!empty.content.isOn)
     }
 
     @Test func largerCirclesAreStillAvatars() throws {
@@ -93,10 +93,10 @@ struct SmallControlTests {
         let pill = CGRect(x: 300, y: 300, width: 64, height: 30)
         let right = try element(from: [SketchSamples.box(pill, radius: 15), SketchSamples.circle(center: CGPoint(x: 349, y: 315), radius: 11)])
         #expect(right.kind == .toggle)
-        #expect(right.isOn)
+        #expect(right.content.isOn)
         let left = try element(from: [SketchSamples.box(pill, radius: 15), SketchSamples.circle(center: CGPoint(x: 315, y: 315), radius: 11)])
         #expect(left.kind == .toggle)
-        #expect(!left.isOn)
+        #expect(!left.content.isOn)
     }
 
     @Test func aLongThinOutlineIsAProgressBarFilledAsFarAsItIsShaded() throws {
@@ -130,13 +130,15 @@ struct SmallControlTests {
 struct SketchedLayoutTests {
     @Test func twoHalfWidthButtonsBecomeTwoColumnsInOneRow() throws {
         let (store, screen) = makeStore()
-        let first = try #require(store.addElement(.button, from: CGRect(x: 24, y: 700, width: 160, height: 50), to: screen.id))
-        let second = try #require(store.addElement(.button, from: CGRect(x: 210, y: 704, width: 160, height: 46), to: screen.id))
+        let first = try #require(store.sketched(.button, from: CGRect(x: 24, y: 700, width: 160, height: 50), to: screen))
+        let firstNode = try #require(store.node(first.id))
+        let second = try #require(store.sketched(.button, from: CGRect(x: 210, y: 704, width: 160, height: 46), to: screen))
+        let secondNode = try #require(store.node(second.id))
         #expect(first.frame == CGRect(x: 20, y: 700, width: 170, height: 50))
         #expect(second.frame == CGRect(x: 203, y: 700, width: 170, height: 50))
         // The second button on a screen is outlined.
-        #expect(first.resolvedButtonLook == .filled)
-        #expect(second.buttonLook == .bordered)
+        #expect(firstNode.resolvedButtonLook == .filled)
+        #expect(secondNode.content.buttonLook == .bordered)
     }
 
     @Test func aWideSketchStillRunsAcross() {
@@ -175,27 +177,23 @@ struct SketchedLayoutTests {
 
 @Suite("Code for the new controls")
 struct NewControlCodeTests {
-    private func screen(_ elements: [DesignElement]) -> DesignScreen {
-        DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: elements)
-    }
-
     @Test func buttonsSideBySideBecomeAHorizontalStack() {
-        var cancel = DesignElement(kind: .button, frame: CGRect(x: 203, y: 700, width: 170, height: 50), text: "Cancel", tint: Theme.accent)
-        cancel.buttonLook = .bordered
-        let done = DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 170, height: 50), text: "Done", tint: Theme.accent)
-        let code = SwiftUICodeGenerator.code(for: screen([cancel, done]), settings: CodeSettings(includesPreview: false))
+        var cancel = LayerNode.leaf(.button, frame: CGRect(x: 203, y: 700, width: 170, height: 50), text: "Cancel", tint: Theme.accent)
+        cancel.content.buttonLook = .bordered
+        let done = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 170, height: 50), text: "Done", tint: Theme.accent)
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [cancel, done], settings: CodeSettings(includesPreview: false))
         #expect(code.contains("HStack(alignment: .center, spacing: 13) {"))
         #expect(code.range(of: "Done")!.lowerBound < code.range(of: "Cancel")!.lowerBound, "leading first")
         #expect(code.contains(".strokeBorder("))
     }
 
     @Test func checkboxesRadioButtonsAndProgressBarsHaveCode() {
-        var radio = DesignElement(kind: .radio, frame: CGRect(x: 20, y: 200, width: 24, height: 24), text: "", tint: Theme.accent)
-        radio.isOn = false
-        var progress = DesignElement(kind: .progress, frame: CGRect(x: 20, y: 300, width: 353, height: 6), text: "", tint: Theme.accent)
-        progress.value = 0.25
-        let checkbox = DesignElement(kind: .checkbox, frame: CGRect(x: 20, y: 100, width: 24, height: 24), text: "", tint: Theme.accent)
-        let code = SwiftUICodeGenerator.code(for: screen([checkbox, radio, progress]))
+        var radio = LayerNode.leaf(.radio, frame: CGRect(x: 20, y: 200, width: 24, height: 24), text: "", tint: Theme.accent)
+        radio.content.isOn = false
+        var progress = LayerNode.leaf(.progress, frame: CGRect(x: 20, y: 300, width: 353, height: 6), text: "", tint: Theme.accent)
+        progress.content.value = 0.25
+        let checkbox = LayerNode.leaf(.checkbox, frame: CGRect(x: 20, y: 100, width: 24, height: 24), text: "", tint: Theme.accent)
+        let code = SwiftUICodeGenerator.code(forFreeScreenHolding: [checkbox, radio, progress])
         #expect(code.contains("Image(systemName: \"checkmark.square.fill\")"))
         #expect(code.contains("Image(systemName: \"circle\")"))
         #expect(code.contains("ProgressView(value: 0.25)"))

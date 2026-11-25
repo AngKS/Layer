@@ -51,3 +51,227 @@ checks that they add up to the measured wording, word for word.
 The first column reproduces `stage1-radio-fix.md` exactly. Candidate-only hints are
 worse, so `.all` stays the default; `LAYER_SKETCH_HINTS=candidates` still selects the
 other placement in debug builds.
+
+## The outline (plan 3), 2026-11-24
+
+Branch `st3/lane-a` (from ae12bd3), macOS 27.2.1 on an Apple M4 Max, the on-device Apple Intelligence model natively
+(its calls fail in the simulator). `Tools/ScreenBenchmarkHarness/run.sh outline 3`: the harness is now a Swift package
+that links the A2UI SDK and compiles the app's own outline and A2UI readers, prompts and hosted client. Each of the 8
+briefs above is written 3 times, 24 screens a run, with the app's own call: `ScreenPrompt.instructions(.compact, …)` as
+the session's instructions, the description as the message, `streamResponse` with the session's default options (the
+2026-11-18 runs used `respond` at temperature 0.7), and the answer read by `OutlineStream` as it streams.
+
+The machine was quiet: no other lane and no `xcodebuild` ran during any run (checked before each, and sampled every
+15 seconds). The 1-minute load stayed between 3.8 and 9.5 in every run but round 1's second, where something outside
+the project raised it to between 12.9 and 17.8; its latencies are no slower than the others'. Round 3 ran later the
+same morning, after waiting for Spotlight's indexing to settle, at 1-minute loads of 7.3 to 9.4, and round 4 at 6.0
+to 9.2, again after waiting for it; nothing else was building during either. Round 5 (plan 3's Task 13) waited for the
+1-minute load to be under 10 with no build running at two checks 15 seconds apart, and ran at 5.2 to 7.4.
+
+What each number is, from the whole answer:
+
+- **Valid**: the outline read by `Outline.parse` holds something and `TreeValidator.fixGenerated` had nothing to fix.
+  From round 4 the harness reads it as generation does, passing over text sizes, and from round 5 every number in a
+  look: a radius, a border width and an opacity too (no answer in rounds 2 to 5 wrote any of them).
+- **More than one filled button**: before the polish, from the lines as written; after `withOnePrimaryAction`, from
+  the tree.
+- **Coloured nodes**: nodes given a colour (a tint). "text grey" is a text colour and isn't counted, as the blueprint's
+  scores didn't count it.
+- **Kinds** and **leaves** per screen; **rows**, **cards** and **grids** per screen, the containers the tree holds.
+- **Split sections**: sections the parser made beyond the ones the model's blank lines started, such as a grid 24 points
+  from the heading written right above it.
+- **Copied example lines**: lines of the examples, over 12 characters, found word for word in the answers. Nearly all
+  are lines any such screen has: "text field: Email", "button: Sign in".
+- **First content**: from the request until `OutlineStream` first hands on a screen, what the canvas first shows.
+  **Completion**: until the answer ends.
+
+| Per 24 screens | 2026-11-18 (new prompt, blueprint) | Round 0: today's prompt and parser | (a) `column:` taught | (b) the parser joins | Round 1 (2 runs) | Round 2 (3 runs) | Round 3 (fix round 1) | **Round 4, final wording (fix round 2)** | Round 5: the same wording, every look number passed over (Task 13) |
+|---|---|---|---|---|---|---|---|---|---|
+| Valid | 24 (parsed) | 24 | 24 | 24 | 24, 24 | 24, 24, 24 | 24 | **24** | 24 |
+| More than one filled button, before polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | 0 | **0** | 0 |
+| More than one filled button, after polish | 0 | 0 | 0 | 0 | 0, 0 | 0, 0, 0 | 0 | **0** | 0 |
+| Coloured nodes | 5 | 7 | 6 | 10 | 3, 3 | 0, 5, 1 | 0 | **0** | 0 |
+| Kinds per screen | 5.3 | 5.33 | 4.96 | 5.38 | 5.04, 4.83 | 5.58, 5.00, 5.12 | 5.42 | **5.71** | 5.58 |
+| Leaves per screen | 8.5 | 8.79 | 8.00 | 8.42 | 8.12, 8.17 | 8.92, 8.12, 8.42 | 8.67 | **8.50** | 8.83 |
+| Rows / cards / grids per screen | not measured | 1.71 / 0 / 0.17 | 1.92 / 0 / 0 | 1.50 / 0 / 0.25 | 1.92 / 0 / 0.04, 1.96 / 0.04 / 0.04 | 1.46 / 0.67 / 0.12, 1.46 / 0.62 / 0, 1.38 / 0.75 / 0.08 | 1.38 / 0.62 / 0.08 | **1.08 / 0.50 / 0.29** | 1.29 / 0.71 / 0.17 |
+| Split sections | not measured | 7 | 0 | 0 | 0, 0 | 0, 0, 1 | 0 | **1** | 0 |
+| Copied example lines | not measured | 10 | 7 | 8 | 6, 7 | 7, 12, 11 | 8 | **7** | 10 |
+| First content p50 / p95 ms | not measured | 1013 / 1121 | 987 / 1209 | 996 / 1077 | 968 / 1129, 975 / 1080 | 1041 / 1163, 1041 / 1167, 1037 / 1225 | 1000 / 1129 | **1049 / 1127** | 1041 / 1211 |
+| Completion p50 / p95 ms | not measured | 1701 / 2451 | 1655 / 2450 | 1731 / 2350 | 1669 / 2214, 1653 / 2245 | 1866 / 2596, 1809 / 2584, 1935 / 2598 | 2090 / 2904 | **1891 / 2461** | 1930 / 2713 |
+
+The bar was the 2026-11-18 column: 24 valid, no screen with more than one filled button after the polish, at most 5
+coloured nodes, at least 5 kinds and 5 to 14 leaves per screen. Round 2's wording met it in all three runs; its 72
+screens together: 72 valid, 6 coloured nodes (2 per 24), 5.24 kinds and 8.49 leaves per screen, 0.68 cards per
+screen, first content p50 1041 ms and p95 1225 ms, completion p50 1936 ms and p95 2598 ms. Rounds 3 and 4, one run
+each as the fix rounds asked, meet it too. Round 3's completion was slower, p50 2090 ms: its settings screens came out
+longer (13 to 14 leaves), and more lines used "text grey" (23, against 13 to 18 in round 2's runs). Round 4, the final
+wording, is back in round 2's range (p50 1891 ms) with the most kinds per screen of any run, 5.71, and grids at 0.29
+per screen; its one split section is a grid that starts a section, with lines straight after it. Round 5 measured the
+same wording again after generation began passing over every number in a look, and meets the bar: 24 valid, no colour,
+5.58 kinds and 8.83 leaves per screen, no split section, first content p50 1041 / p95 1211 ms, completion p50 1930 /
+p95 2713 ms. None of its answers wrote a radius, a border width, an opacity or a text size, so passing them over moved
+no score; it differs from round 4 as round 2's three runs differ from one another.
+
+### A heading with its container: the parser, not the prompt
+
+The outline parser made a container written at the top level a section of its own, so a form's fields came out as
+[name, street] / row / [phone], 24 points apart, and a profile's "Recent work" sat 24 points from its grid. Round 0
+shows the model writing this way in 5 of 24 screens (7 split sections): a checkout's fields round a row of two, two
+profiles' headings over their grids, a habit tracker's divider over its grid.
+
+- (a) taught `column:` in the grammar ("a column keeps them together in one section", with a heading over a grid shown
+  in one), and wrapped the form's and the profile's examples in `column:`. Only 3 of 24 screens wrote `column:`, all
+  checkouts copying the form's shape; every profile stopped after its first section, with no grid (5 leaves each), and
+  kinds and leaves per screen fell to 4.96 and 8.00.
+- (b) changed the parser: a container written straight after a section's lines, with no blank line between, joins that
+  section. With the prompt as it was, the run was 24 valid with 5.38 kinds and 8.42 leaves per screen and no split
+  section; the 7 of round 0 are each of this kind, and the parser now joins them whatever the model writes.
+
+(b) is kept: it needs no prompt change, takes nothing from what the model writes, and fixes every case measured. It is
+decided as the container opens, so a key never changes as more lines stream in. A container that starts a section,
+first or after a blank line, is still a section of its own, and lines straight after it start the next one: round 2's
+third run has one such screen (a card, then a divider and a second card). Joining those would wrap a lone container in
+a section once lines follow it, which changes its key mid-stream.
+
+### The rounds
+
+- Round 0 missed on colour (7): `[grey]` on fields and text, which reads as a tint, and blue or red on the main button.
+- Round 1 changed the compact rules' colour line from "No colours unless the description names one." to "No colour
+  words, not even blue, red or grey, unless the description names a colour. Quieter words are text grey." Colour fell
+  to 3, but kinds per screen were 5.0, then 4.8 in a second run: under the bar. Profiles and empty states often came
+  out as four elements of four kinds.
+- Round 2 kept that and changed two more compact rules: the shape rule gains "Details that belong together, such as a
+  summary or a set of figures, go in a card: or a grid 2:.", and "Use 5 to 12 elements." became "Use 6 to 12
+  elements." Cards went from none to 0.7 per screen, kinds to 5.0 to 5.6, colour to 0 to 5. Three runs all meet the bar.
+- Round 3, the fix round, after review: the compact prompt contradicted itself twice. Its settings example showed
+  `button: Turn off all notifications [plain, red]` under a rule that says "not even blue, red or grey", and that rule
+  banned grey, then prescribed text grey. Now the compact prompt shows its example without the colours its looks give
+  elements (`ScreenPrompt.withoutColour`: a look word that names a colour is left out, "text grey" stays), so the
+  settings example's button is `[plain]`; and the rule's last sentence, "Quieter words are text grey.", became "For
+  quieter words use text grey, which isn't one." The example library itself is unchanged, so the full prompt and the
+  Settings template keep the red Turn off button, which the full rules allow ("red only for something destructive").
+  One run: 24 valid, no colour, 5.42 kinds and 8.67 leaves per screen.
+- Round 4, the second fix round, on the controller's rulings:
+  - Turning off notifications isn't destructive, so the settings example's button is `[plain]` in the library itself:
+    in both prompts and in the Settings template. No example carries a colour now, so round 3's filter for the compact
+    prompt is gone; `OutlinePromptTests.noExampleCarriesAColour` holds the library to it.
+  - No model picks a number (spec §14), text sizes included: the grammar no longer offers "a size such as 28pt", and an
+    outline a model writes is read without its text sizes (`Outline.parse(…, readsTextSizes: false)`, which
+    `OutlineStream` and Build Screen pass; renamed `readsLookNumbers` in round 5), so a `28pt` leaves the kind's token
+    size. A hand-written or imported outline still reads them. Build Screen's description no longer offers a size either.
+  - One run: 24 valid, no colour, 5.71 kinds and 8.50 leaves per screen.
+- Round 5, plan 3's Task 13, on the controller's ruling "T12 numbers, refined": a radius, a border width and an opacity
+  are looks too, so an outline a model writes passes them over as it does a text size (`Outline.parse(…,
+  readsLookNumbers: false)`, through `Look.withoutNumbers`), and each kind keeps its own; a border colour still gets the
+  default width. A progress bar's `40%` is what the bar shows, not a look, and stays. Hand-written outlines, templates
+  and imports read every number. Neither outline prompt taught a radius, a border width or an opacity, so their wording
+  and pins are unchanged, and `OutlinePromptTests.thePromptsTeachNoLookNumber` now holds them to it; Build Screen's
+  description dropped "radius 12" and "opacity 50%". One run: 24 valid, no colour, 5.58 kinds and 8.83 leaves per
+  screen.
+
+The compact prompt changed in rounds 1 to 4; the full prompt changed only in round 4, in its grammar's looks and its
+settings example. Round 5 changed how an answer is read, not the wording. The A2UI prompt is unchanged. Indentation cost nothing: every screen of every run was valid, and none
+needed a fix, so the compact grammar keeps teaching `row:`, `card:` and `grid 2:`. `ScreenPromptWordingTests` pins the
+final wording of both outline prompts, of the A2UI prompt and of every example in both libraries, word for word, with
+the keywords that pick each, so a change to any example fails a pin.
+
+### Hosted models: LM Studio, smoke only
+
+`run.sh hosted google/gemma-4-26b-a4b a2ui 1` and `… outline 1`: one screen per brief, the full prompts, through
+`HostedModelClient` as the app sends them. These only show that the hosted modes run end to end; the comparison that
+picks the hosted default is plan 6's. The model reasons before it answers, so most of the time and the tokens are its
+reasoning.
+
+| Per 8 screens | A2UI | Outline (full prompt) |
+|---|---|---|
+| Valid | 5 | 8 |
+| More than one filled button, before / after polish | 0 / 0 | 0 / 0 |
+| Coloured nodes | 0 | 1 |
+| Kinds / leaves per screen | 4.4 / 12.2 | 5.8 / 14.9 |
+| Rows / cards / grids per screen | 2.2 / 0.9 / 0.1 | 3.5 / 0.9 / 0.0 |
+| First content p50 / p95 ms | 52812 / 63155 | 27910 / 63867 |
+| Completion p50 / p95 ms | 59592 / 69913 | 29164 / 66184 |
+| Output tokens per screen, p50 (total) | 4525 (35641) | 2504 (26988) |
+
+The three A2UI screens that weren't valid had lines that weren't JSON, children that named components never written,
+and an `Icon` named with an SF Symbol name ("cloud.fill") rather than one of A2UI's icon names. Every outline screen was
+valid; five of the eight ran past the full rules' 14 elements. Both ran one after the other with nothing else working,
+at 1-minute loads of 4 to 10.
+
+## Hosted formats (plan 6), 2026-11-25
+
+Branch `st6/early` at 5a7f030, the semantic tree's last task, on the same Mac (macOS 27.2, Apple M4 Max). No prompt has
+changed since plan 3's round 5: `ScreenPrompt`, `A2UIPrompt` and their examples are as plan 3 left them. Both runs began
+with no `xcodebuild` running and a 1-minute load under 10, while the other agents had paused their builds.
+
+**On-device, the outline.** `run.sh outline 3` from 15:16:52 to 15:17:47, at loads of 7.0 to 7.8: 24 screens, the compact
+prompt, as round 5.
+
+| Per 24 screens | Round 5 (plan 3) | Plan 6 |
+|---|---|---|
+| Valid | 24 | 24 |
+| More than one filled button, before / after polish | 0 / 0 | 0 / 0 |
+| Coloured nodes | 0 | 0 |
+| Kinds / leaves per screen | 5.58 / 8.83 | 5.21 / 8.33 |
+| Rows / cards / grids per screen | 1.29 / 0.71 / 0.17 | 1.42 / 0.62 / 0.17 |
+| Split sections | 0 | 0 |
+| Copied example lines | 10 | 10 |
+| First content p50 / p95 ms | 1041 / 1211 | 1148 / 1290 |
+| Completion p50 / p95 ms | 1930 / 2713 | 2090 / 3038 |
+
+The wording is the same, so the differences are run to run: round 2's three runs of one wording differed as much in
+kinds per screen (5.00 to 5.58). First content is 10% slower than round 5 at p50, at a slightly higher load. The
+on-device model reports no tokens.
+
+**Hosted: both formats on LM Studio.** `run.sh hosted google/gemma-4-26b-a4b both 3` from 15:18:17 to 16:12:14: the 8
+briefs, each written three times in each format, the two formats taking turns on each brief (A2UI first on the odd ones).
+The full prompts go through `HostedModelClient` as the app sends them. The model reasons before it answers, so most of the
+time and the tokens are its reasoning. LM Studio listed the model but hadn't loaded it; one short request loaded it at
+15:18, before the run, so no screen's time includes the load.
+
+| Per 24 screens | The outline (full prompt) | A2UI |
+|---|---|---|
+| Valid | **24** | **13** |
+| More than one filled button, before / after polish | 0 / 0 | 1 / 0 |
+| Coloured nodes | 2 | 0 |
+| Kinds / leaves per screen | 5.96 / 14.17 | 4.21 / 10.25 |
+| Rows / cards / grids per screen | 3.21 / 1.08 / 0.17 | 2.58 / 1.04 / 0.12 |
+| Split sections | 5 | 0 |
+| Copied example lines | 18 | 5 |
+| First content p50 / p95 ms | **43459** / 91399 | **57976** / 132540 |
+| Completion p50 / p95 ms | 45375 / 94918 | 67019 / 143921 |
+| Output tokens per screen, p50 (all) | 3197 (80057) | 3641 (109932) |
+
+**The rule** (My call 8, `HostedFormatRule`): hosted models write A2UI unless A2UI has fewer valid screens than the outline,
+or its first-content median is more than 25% above the outline's. The run ended:
+
+```
+hosted default: outline — valid 13/24 vs 24/24; first content p50 57976 ms vs 43459 ms (+33%)
+```
+
+**The decision.** Both conditions hold, so hosted models now write the outline: `ScreenGenerator.hostedFormat` is
+`.outline`, and a hosted model is told `ScreenPrompt.instructions(.full, …)`. The outline won on validity, as the rule
+reads; A2UI's quality columns were better: the outline split 5 sections against A2UI's 0, copied 18 example lines
+against 5, and coloured 2 nodes against 0. A2UI is still read when a caller asks for
+it (`ScreenGenerator.stream(_:format:)`), and Layer still imports, pastes and shares A2UI.
+
+**Why 11 A2UI screens weren't valid.**
+- 8 had lines that weren't JSON: 18 lines in all. Each was one long message with a `:` or a `,` missing between two of
+  its fields, or once a raw control character inside a string. The components those lines held went missing, and the
+  children that named them were left out.
+- 2 named an icon outside A2UI's set: `person.crop.circle`, an SF Symbol name, and `cloud-sun`.
+- 1 wrote components that nothing reached from the root.
+
+Plan 3's smoke run found the first two kinds. A prompt could teach the icon names, which would make 2 of the 11 valid:
+15 of 24, still fewer than the outline's 24. The broken lines are slips in the JSON itself, inside lines of several
+hundred characters, which no rule in the prompt asks for.
+
+**The machine.** No `xcodebuild` ran during either run. The 1-minute load stayed between 2.7 and 11.2, except from 15:49
+to 15:52, when something outside the project raised it to 44.7 for about two minutes. That touched one or two hosted
+screens' times. The valid count alone flips the default, so the decision doesn't rest on them.
+
+**Against plan 3's smoke run** (one screen a brief, above): A2UI's first content p50 was 52812 ms and is 57976 ms; the
+outline's was 27910 ms and is 43459 ms, with more output tokens a screen (3197 against 2504), most of them reasoning.
+Both formats ran past the full rules' 14 elements on some screens, as in the smoke run: 14 of the outline's 24 and 4 of
+A2UI's. The outline's 5 split sections are in 4 screens; the two looked at are running profiles whose figures are a grid
+that starts a section, with a row of labels straight after it, which the parser keeps apart (round 2, above).
