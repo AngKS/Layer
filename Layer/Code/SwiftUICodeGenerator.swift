@@ -406,13 +406,18 @@ extension SwiftUICodeGenerator.ScreenWriter {
     /// what it holds, its content placed in it as the engine places it. A grid that fits its
     /// width is first held to it: nothing offers it a width there, so the engine makes its
     /// columns as wide as its widest cell, but its cells grow across to sit in their columns, and
-    /// SwiftUI would stretch it over the room offered (plan 5, Task 11).
+    /// SwiftUI would stretch it over the room offered (plan 5, Task 11). A row, column or overlay
+    /// that fits its width, holding something that fills across, is framed to its width for the
+    /// same reason: the engine offers what fills no width there, so it takes its own and the
+    /// container hugs it (Task 11's third concern).
     func framesInFreeParent(_ node: LayerNode) -> [String] {
         var held: [String] = []
-        if case .grid = node.resolvedLayout, node.width.mode == .fit {
+        let isGrid = if case .grid = node.resolvedLayout { true } else { false }
+        if isGrid, node.width.mode == .fit {
             held.append(".fixedSize(horizontal: true, vertical: false)")
         }
-        let width: CGFloat? = node.width.mode == .fit ? nil : node.frame.width
+        let fillsAcross = !isGrid && node.children.contains { isWritten($0) && Self.fills($0.width) }
+        let width: CGFloat? = node.width.mode == .fit && !fillsAcross ? nil : node.frame.width
         let height: CGFloat? = node.height.mode == .fit ? nil : node.frame.height
         guard width != nil || height != nil else { return held }
         let own = Generator.contentAlignment(of: node)

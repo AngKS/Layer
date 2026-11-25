@@ -94,25 +94,43 @@ extension SwiftUICodeGenerator.ScreenWriter {
     /// A free container below the screen root: inferred inside its content box, with no safe
     /// areas and no bottom `Spacer()`, then padded and framed to its size. Its modifiers are
     /// indented, as a view's are.
+    ///
+    /// The canvas places a free container's children from its frame's corner, padding or not, and
+    /// a sketched card holds what it takes where it is on the screen, often closer to its edge
+    /// than its padding. So each side is padded only as far as what it holds is in from that side
+    /// (plan 5's final review, B2), and what it holds is written where the canvas draws it.
     mutating func freeContainer(_ node: LayerNode) -> [String] {
-        let inset = node.padding
+        let found = items(of: node)
+        var padded = node
+        if let first = found.first?.frame {
+            let held = found.dropFirst().reduce(first) { $0.union($1.frame) }
+            let padding = node.padding
+            padded.padding = LayerNode.Padding(top: max(0, min(padding.top, held.minY)),
+                                               leading: max(0, min(padding.leading, held.minX)),
+                                               bottom: max(0, min(padding.bottom, node.frame.height - held.maxY)),
+                                               trailing: max(0, min(padding.trailing, node.frame.width - held.maxX)))
+        }
+        let inset = padded.padding
         let box = Generator.InferenceBox(size: CGSize(width: max(0, node.frame.width - inset.leading - inset.trailing),
                                                       height: max(0, node.frame.height - inset.top - inset.bottom)),
                                          top: 0, bottom: 0, isScreen: false)
-        let placed = items(of: node).map { item in
+        let placed = found.map { item in
             var item = item
             item.frame.origin = CGPoint(x: item.frame.minX - inset.leading, y: item.frame.minY - inset.top)
             return item
         }
         return inferred(placed, in: box)
-            + padding(node)
+            + padding(padded)
             + ["    .frame(width: \(Generator.number(node.frame.width)), height: \(Generator.number(node.frame.height)), alignment: .topLeading)"]
     }
 
     /// Today's vertical stack of `items`, sorted top to bottom, in `box`: rows by vertical overlap,
-    /// gaps as padding, the side margin inferred.
+    /// gaps as padding, the side margin inferred. A container's rows are spaced no wider than its
+    /// closest two (B2), so that none is written lower than the canvas draws it; a screen's are
+    /// spaced as they always were.
     mutating func inferred(_ items: [Generator.Item], in box: Generator.InferenceBox) -> [String] {
-        let spacing = Generator.spacing
+        let rows = Generator.rows(of: items)
+        let spacing = box.isScreen ? Generator.spacing : Generator.rowSpacing(of: rows)
         let width = box.size.width
         let margin = items.map { min($0.frame.minX, width - $0.frame.maxX) }.min().map { max(0, $0) } ?? 0
         let contentWidth = width - margin * 2
@@ -122,7 +140,6 @@ extension SwiftUICodeGenerator.ScreenWriter {
         var previousBottom: CGFloat?
         var usesSpacer = false
 
-        let rows = Generator.rows(of: items)
         for (index, row) in rows.enumerated() {
             let item = row[0]
             let bounds = row.dropFirst().reduce(item.frame) { $0.union($1.frame) }
@@ -216,6 +233,14 @@ extension SwiftUICodeGenerator {
             }
         }
         return rows.map { $0.sorted { $0.frame.minX < $1.frame.minX } }
+    }
+
+    /// The space between the rows of a free container: the inference's, or the least gap between
+    /// two rows when that is less, and never less than none.
+    static func rowSpacing(of rows: [[Item]]) -> CGFloat {
+        let bounds = rows.map { row in row.dropFirst().reduce(row[0].frame) { $0.union($1.frame) } }
+        let least = zip(bounds, bounds.dropFirst()).map { $1.minY - $0.maxY }.min() ?? spacing
+        return max(0, min(spacing, least))
     }
 
     private static func sharesRow(_ a: CGRect, _ b: CGRect) -> Bool {
