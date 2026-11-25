@@ -20,15 +20,18 @@ import Foundation
 ///     else in front. That slot then moves as little as needed so that nothing seen is wholly hidden by one thing,
 ///     where some slot can do that. Hidden things count for none of this.
 ///   - In a row, column, grid or overlay, round what it can take there in place (`SketchLanding.takenInPlace`), it takes
-///     that: their slot, and them, held as that container held them, padded by the design's card padding and fitting
-///     them, so that only the padding moves what is after it (plan 5's final review, B1 and its follow-up). Round nothing
-///     there, it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as wide as what holds
-///     it when it was drawn across the screen (`PlacementIntent.proportional`).
+///     that: their slot, and them, held as that container held them, padded by the design's card padding (plan 5's
+///     final review, B1 and its follow-up). It never makes what holds it wider: it is as wide as they were, and its
+///     padding narrows them, never below 44 pt. Down, it grows by its padding, so only what lies below it there moves,
+///     by exactly that (plan 6's Task P5C, `inPlace`). Round nothing there, it takes nothing, and keeps the drawn box: as
+///     tall as drawn, and as wide as drawn, or as wide as what holds it when it was drawn across the screen
+///     (`PlacementIntent.proportional`).
 enum SketchedNode {
     struct Made: Equatable, Sendable {
         var node: LayerNode
         var landing: SketchLanding
         /// What a card takes: the receiving container's children it encloses, back to front. Empty for anything else.
+        /// A card in a row, column, grid or overlay holds them already in `node`, fitted to it (`inPlace`).
         var takes: [UUID]
         /// What a card in a free container goes in just behind, so that nothing goes out of sight
         /// (`behind(_:taking:among:)`). Nil: in front.
@@ -193,12 +196,20 @@ enum SketchedNode {
         return (node, takes, behind(node.frame, taking: Set(takes), among: parent.children))
     }
 
-    /// `card`, drawn round `drawn` in a row, column, grid or overlay (call 6, as ruled in plan 5's final review, B1).
-    /// Round what it can take there in place (`SketchLanding.takenInPlace`), all within depth 32 once inside it (F9), it
-    /// holds that as the container held it and fits it, filling an axis where something it takes fills that axis. It
-    /// keeps the card's padding: the person drew a card, so it looks like one. So it is as long as they were, the spacing
-    /// between them included, and its padding more, and in their slot only that padding moves what is after it. Else it
-    /// takes nothing, as drawn.
+    /// `card`, drawn round `drawn` in a row, column, grid or overlay (call 6, as ruled in plan 5's final review, B1, and
+    /// in plan 6's Task P5C). Round what it can take there in place (`SketchLanding.takenInPlace`), all within depth 32
+    /// once inside it (F9), it holds that as the container held it, in their slot, with the card's padding: the person
+    /// drew a card, so it looks like one. Screens scroll down, never across, so:
+    /// - Across, it never makes what holds it wider. It is as wide as what it takes was (`horizontalExtent`), filling
+    ///   when they filled, and its padding there insets them: each too wide for the room left fills it, so it is
+    ///   narrower by the padding (`narrowed`). No member is narrowed below 44 pt; where the card's whole padding would
+    ///   do that, its padding across is only what leaves that room, down to none.
+    /// - Down, it grows by its padding and its members keep their heights: what lies below it in what holds it moves
+    ///   down by exactly that padding (the members after it in a column, the rows below in a grid), and a row grows
+    ///   taller. It fits them, or, along a column whose members fill it, fills with their weights together.
+    ///
+    /// `card`'s `children` are then what it takes, fitted so, in its space. Round nothing there, it takes nothing, as
+    /// drawn.
     private static func inPlace(_ card: LayerNode, drawn: CGRect, in parent: LayerNode,
                                 at depth: Int) -> (LayerNode, takes: [UUID]) {
         guard let takes = SketchLanding.takenInPlace(by: drawn, in: parent), !takes.isEmpty else { return (card, []) }
@@ -220,22 +231,95 @@ enum SketchedNode {
         case .free:
             return (card, [])
         }
-        /// Filling: one thing's own sizing, or, along a stack, their weights together. Else fitting.
-        func sizing(_ length: KeyPath<LayerNode, LayerNode.Sizing>, along: Bool) -> LayerNode.Sizing {
+        /// Filling: one thing's own sizing, or, along a stack, their weights together. Else `otherwise`.
+        func sizing(_ length: KeyPath<LayerNode, LayerNode.Sizing>, along: Bool,
+                    otherwise: LayerNode.Sizing.Mode) -> LayerNode.Sizing {
             let weights = taken.compactMap { thing -> CGFloat? in
                 if case .fill(let weight) = thing[keyPath: length].mode { weight } else { nil }
             }
-            if weights.isEmpty { return LayerNode.Sizing(.fit) }
+            if weights.isEmpty { return LayerNode.Sizing(otherwise) }
             if taken.count == 1 { return taken[0][keyPath: length] }
             return LayerNode.Sizing(.fill(weight: along ? weights.reduce(0, +) : 1))
         }
-        node.width = sizing(\.width, along: axis == .horizontal)
-        node.height = sizing(\.height, along: axis == .vertical)
         let held = taken.dropFirst().reduce(taken[0].frame) { $0.union($1.frame) }
-        let padding = node.padding
-        node.frame = CGRect(x: held.minX, y: held.minY, width: held.width + padding.leading + padding.trailing,
-                            height: held.height + padding.top + padding.bottom)
+        let extent = horizontalExtent(of: held, in: parent)
+        node.width = sizing(\.width, along: axis == .horizontal, otherwise: .fixed)
+        node.height = sizing(\.height, along: axis == .vertical, otherwise: .fit)
+        let fitted = narrowed(taken, into: extent, sideBySide: axis == .horizontal, padding: &node.padding)
+        node.frame = CGRect(x: held.minX, y: held.minY, width: extent,
+                            height: held.height + node.padding.top + node.padding.bottom)
+        // In its space, where the card's padding starts them; the card lays them out.
+        node.children = fitted.map { thing in
+            var inside = thing
+            inside.frame.origin = CGPoint(x: thing.frame.minX - held.minX + node.padding.leading,
+                                          y: thing.frame.minY - held.minY + node.padding.top)
+            return inside
+        }
         return (node, takes)
+    }
+
+    /// How wide a card taking things whose box is `held` in `parent` is: their box's width, or in a grid the width of a
+    /// column, which is the cell's.
+    private static func horizontalExtent(of held: CGRect, in parent: LayerNode) -> CGFloat {
+        guard case .grid(let grid) = parent.resolvedLayout else { return held.width }
+        let columns = CGFloat(min(12, max(1, grid.columns)))
+        let content = parent.frame.width - parent.padding.leading - parent.padding.trailing
+        let column = (content - (columns - 1) * max(0, grid.columnSpacing)) / columns
+        return column.isFinite && column > 0 ? column : held.width
+    }
+
+    /// The least a card narrows a member to: the height of the smallest control (`TreeValidator`), across.
+    private static let narrowest: CGFloat = 44
+
+    /// `taken`, back to front, fitted across a card `extent` wide whose `padding` is the design's, which is cut across
+    /// to what leaves each member at least `narrowest` wide (or its own width, when that is less), down to none.
+    /// - Side by side (a row), the members together are narrower by the padding: each gives up a share of what it has
+    ///   past `narrowest`, at a fixed width. When some fill, they alone give it up, as the card shares its room.
+    /// - Otherwise each is on its own: one too wide for the card's room inside fills it, so it is narrowed to that room
+    ///   and follows the card's width from then on.
+    private static func narrowed(_ taken: [LayerNode], into extent: CGFloat, sideBySide: Bool,
+                                 padding: inout LayerNode.Padding) -> [LayerNode] {
+        func fills(_ thing: LayerNode) -> Bool {
+            if case .fill = thing.width.mode { true } else { false }
+        }
+        let wanted = padding.leading + padding.trailing
+        var fitted = taken
+        if sideBySide {
+            let giving = taken.contains(where: fills) ? taken.indices.filter { fills(taken[$0]) } : Array(taken.indices)
+            let spare = giving.map { max(0, (taken[$0].frame.width - narrowest).rounded(.down)) }
+            let given = min(wanted, spare.reduce(0, +))
+            cut(&padding, to: given)
+            guard given > 0 else { return fitted }
+            // Shares of what is given, by what each can spare, in whole points; what rounding leaves goes one by one.
+            let total = spare.reduce(0, +)
+            var shares = spare.map { ($0 * given / total).rounded(.down) }
+            var left = given - shares.reduce(0, +)
+            for place in shares.indices where left > 0 && shares[place] < spare[place] {
+                shares[place] += 1
+                left -= 1
+            }
+            for (place, index) in giving.enumerated() where shares[place] > 0 {
+                if !fills(fitted[index]) { fitted[index].width.mode = .fixed }
+                fitted[index].frame.size.width -= shares[place]
+            }
+            return fitted
+        }
+        let widest = taken.map(\.frame.width).max() ?? 0
+        let room = max(extent - min(widest, narrowest), 0)
+        cut(&padding, to: min(wanted, room.rounded(.down)))
+        let inside = extent - padding.leading - padding.trailing
+        for index in fitted.indices where fitted[index].frame.width > inside + 0.5 {
+            if !fills(fitted[index]) { fitted[index].width.mode = .fill(weight: 1) }
+            fitted[index].frame.size.width = inside
+        }
+        return fitted
+    }
+
+    /// `padding` with `across` points across it in all, shared evenly between its leading and trailing sides.
+    private static func cut(_ padding: inout LayerNode.Padding, to across: CGFloat) {
+        guard across < padding.leading + padding.trailing else { return }
+        padding.leading = (across / 2).rounded(.down)
+        padding.trailing = across - padding.leading
     }
 
     /// Whether `thing`, held by a card that goes in a container at `depth`, stays within depth 32 (F9): a child of the
@@ -326,11 +410,15 @@ enum SketchedNode {
         var children = node.children
         if !made.takes.isEmpty {
             let taking = Set(made.takes)
-            // Back to front as they were, each where it is on screen: moved into the card's space.
-            added.children = children.filter { taking.contains($0.id) }.map { child in
-                var held = child
-                held.frame.origin = CGPoint(x: child.frame.minX - added.frame.minX, y: child.frame.minY - added.frame.minY)
-                return held
+            if added.children.isEmpty {
+                // Back to front as they were, each where it is on screen: moved into the card's space. A card taken in
+                // a row, column, grid or overlay holds them already, fitted to it (`inPlace`).
+                added.children = children.filter { taking.contains($0.id) }.map { child in
+                    var held = child
+                    held.frame.origin = CGPoint(x: child.frame.minX - added.frame.minX,
+                                                y: child.frame.minY - added.frame.minY)
+                    return held
+                }
             }
             children.removeAll { taking.contains($0.id) }
         }

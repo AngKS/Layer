@@ -358,10 +358,11 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(try root(of: screen, in: store).children.map(\.id).suffix(2) == [empty, across])
     }
 
-    /// Call 6, as plan 5's final review ruled it (B1 and its follow-up): an outline round two fields of a column the pass
-    /// built makes a card holding both, in the column where they were. The card is the person's own, so it has the
-    /// design's card padding round them: the fields before it don't move, and the field after it moves down by exactly
-    /// the padding it adds.
+    /// Call 6, as plan 5's final review ruled it (B1 and its follow-up) and plan 6's Task P5C: an outline round two fields
+    /// of a column the pass built on an iPhone makes a card holding both, in the column where they were. The card is the
+    /// person's own, so it has the design's card padding round them. It is the column's width, never wider, so its fields
+    /// are inset by its padding across; down, it grows by its padding. The fields before it don't move, the field after
+    /// it moves down by exactly that padding, nothing moves sideways, and nothing leaves the iPhone.
     @Test func aCardRoundTwoFieldsOfABuiltColumnTakesThemWhereTheyAre() async throws {
         let (model, undo) = makeModel()
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
@@ -372,6 +373,7 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         try #require(column.sketch?.decidedBy == .structure)
         try #require(column.children.map(\.id) == fields.map(\.id))
         let before = fields.map { model.store.placed($0.id)?.frame }
+        let columnBefore = try #require(model.store.placed(column.id)?.frame)
 
         // Round the second and third, 10 pt clear of them.
         let outline = try strokes("box 10 150 373 124 16")
@@ -388,17 +390,25 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(card.kind == .card)
         #expect(after.children.map(\.id) == [fields[0].id, card.id, fields[3].id])
         #expect(card.children.map(\.id) == [fields[1].id, fields[2].id])
-        // It holds them as the column did, padded as a card is, and fits them.
+        // It holds them as the column did, padded as a card is: the column's width, and as tall as they are and its
+        // padding.
         let padding = DesignTokens.standard.card.padding
         #expect(card.layout == column.layout)
         #expect(card.padding == LayerNode.Padding(all: padding))
-        #expect(card.width.mode == .fit && card.height.mode == .fit)
-        #expect(card.frame == CGRect(x: 0, y: 60, width: 353 + 2 * padding, height: 104 + 2 * padding))
+        #expect(card.width.mode == .fixed && card.height.mode == .fit)
+        #expect(card.frame == CGRect(x: 0, y: 60, width: 353, height: 104 + 2 * padding))
+        // The fields it holds fill it, so they are narrower by its padding.
+        #expect(card.children.map(\.width.mode) == [.fill(weight: 1), .fill(weight: 1)])
         let now = fields.map { model.store.placed($0.id)?.frame }
         #expect(now[0] == before[0])
-        #expect(now[1] == before[1]?.offsetBy(dx: padding, dy: padding))
-        #expect(now[2] == before[2]?.offsetBy(dx: padding, dy: padding))
+        #expect(now[1] == CGRect(x: 20 + padding, y: 160 + padding, width: 353 - 2 * padding, height: 44))
+        #expect(now[2] == CGRect(x: 20 + padding, y: 220 + padding, width: 353 - 2 * padding, height: 44))
         #expect(now[3] == before[3]?.offsetBy(dx: 0, dy: 2 * padding))
+        // Nothing moves sideways, and the column is as wide as it was.
+        let columnNow = try #require(model.store.placed(column.id)?.frame)
+        #expect(columnNow.minX == columnBefore.minX && columnNow.width == columnBefore.width)
+        #expect(columnNow.height == columnBefore.height + 2 * padding)
+        #expect(try #require(model.store.placed(card.id)?.frame).maxX <= DeviceFrame.iPhone.size.width - 20)
         #expect(card.style.tint == nil)
         #expect(card.sketch?.originalBounds == drawn)
 
@@ -407,8 +417,9 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(fields.map { model.store.placed($0.id)?.frame } == before)
     }
 
-    /// In a row, the card is a row of what it takes, at their slot, padded: the button after it moves along by exactly
-    /// the padding it adds (B1 and its follow-up).
+    /// In a row, the card is a row of what it takes, at their slot, padded (B1 and its follow-up). It is as wide as they
+    /// were, so its padding narrows them and the button after it doesn't move; down, it grows by its padding, so the row
+    /// grows taller (plan 6's Task P5C).
     @Test func aCardRoundMembersOfARowHoldsThemAsTheRowDid() throws {
         let (store, screen, undo) = makeStore()
         var row = rowOfTwoButtons()
@@ -428,18 +439,69 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         let padding = DesignTokens.standard.card.padding
         #expect(made.layout == row.layout)
         #expect(made.padding == LayerNode.Padding(all: padding))
-        #expect(made.frame == CGRect(x: 0, y: 0, width: 212 + 2 * padding, height: 44 + 2 * padding))
+        #expect(made.width.mode == .fixed && made.height.mode == .fit)
+        #expect(made.frame == CGRect(x: 0, y: 0, width: 212, height: 44 + 2 * padding))
+        // The two buttons share the padding across, each narrower by half of it, and keep their height.
         let now = buttons.map { store.placed($0)?.frame }
-        #expect(now[0] == before[0]?.offsetBy(dx: padding, dy: padding))
-        #expect(now[1] == before[1]?.offsetBy(dx: padding, dy: padding))
-        #expect(now[2] == before[2]?.offsetBy(dx: 2 * padding, dy: 0))
+        #expect(now[0] == CGRect(x: 20 + padding, y: 300 + padding, width: 100 - padding, height: 44))
+        #expect(now[1] == CGRect(x: 20 + padding + 100 - padding + 12, y: 300 + padding, width: 100 - padding, height: 44))
+        #expect(now[2] == before[2])
+        #expect(store.placed(row.id)?.frame == CGRect(x: 20, y: 300, width: 324, height: 44 + 2 * padding))
 
         undo.undo()
         #expect(store.node(row.id)?.children.map(\.id) == buttons)
+        #expect(buttons.map { store.placed($0)?.frame } == before)
     }
 
-    /// A card round one cell of a grid takes it in its cell, padded. Round two, it would move each cell after them back a
-    /// cell, so it lands round the grid instead and goes behind it, and nothing moves (B1 and its follow-up).
+    /// No member is narrowed below 44 pt: where the card's whole padding across would do that, it is cut to what leaves
+    /// that, down to none (plan 6's Task P5C). Two 50-pt buttons in a row can give up 12 pt between them, so the card's
+    /// padding across is 6 a side; one 44-pt button alone in a column can give up nothing, so the card has none across.
+    /// Down, the padding is kept whole.
+    @Test func aCardCutsItsPaddingAcrossSoThatNothingIsNarrowerThan44() throws {
+        let (store, screen, _) = makeStore()
+        var row = rowOfTwoButtons()
+        row.children = [leaf(.button, CGRect(x: 0, y: 0, width: 50, height: 44)),
+                        leaf(.button, CGRect(x: 62, y: 0, width: 50, height: 44)),
+                        leaf(.button, CGRect(x: 124, y: 0, width: 100, height: 44))]
+        row.frame = CGRect(x: 20, y: 300, width: 224, height: 44)
+        #expect(store.add(row, to: .screen(screen)))
+        let buttons = row.children.map(\.id)
+
+        // Round the first two, at (20, 300) and (82, 300) on the screen.
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 12, y: 290, width: 128, height: 64),
+                                                  confidence: 0.95, decidedBy: .rules))
+        let padding = DesignTokens.standard.card.padding
+        let made = try #require(store.node(card))
+        #expect(made.children.map(\.id) == [buttons[0], buttons[1]])
+        #expect(made.padding == LayerNode.Padding(top: padding, leading: 6, bottom: padding, trailing: 6))
+        #expect(made.frame.size == CGSize(width: 112, height: 44 + 2 * padding))
+        #expect(store.placed(buttons[0])?.frame == CGRect(x: 26, y: 300 + padding, width: 44, height: 44))
+        #expect(store.placed(buttons[1])?.frame == CGRect(x: 82, y: 300 + padding, width: 44, height: 44))
+        #expect(store.placed(buttons[2])?.frame == CGRect(x: 144, y: 300, width: 100, height: 44))
+
+        var column = LayerNode(kind: .group)
+        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 16))
+        (column.width, column.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        column.frame = CGRect(x: 20, y: 500, width: 200, height: 104)
+        column.children = [leaf(.button, CGRect(x: 0, y: 0, width: 44, height: 44)),
+                           leaf(.button, CGRect(x: 0, y: 60, width: 200, height: 44))]
+        #expect(store.add(column, to: .screen(screen)))
+        let small = column.children[0].id
+
+        // Round the 44-pt button alone.
+        let round = try #require(store.addSketched(.card, from: CGRect(x: 12, y: 492, width: 60, height: 60),
+                                                   confidence: 0.95, decidedBy: .rules))
+        let held = try #require(store.node(round))
+        #expect(held.children.map(\.id) == [small])
+        #expect(held.padding == LayerNode.Padding(top: padding, leading: 0, bottom: padding, trailing: 0))
+        #expect(held.frame.size == CGSize(width: 44, height: 44 + 2 * padding))
+        #expect(store.placed(small)?.frame == CGRect(x: 20, y: 500 + padding, width: 44, height: 44))
+    }
+
+    /// A card round one cell of a grid takes it in its cell, padded (B1 and its follow-up). It is the cell's width, so no
+    /// column widens and its image is inset by its padding across; down, it grows by its padding, so the row below moves
+    /// down by exactly that, and nothing leaves the iPhone (plan 6's Task P5C). Round two cells, it would move each cell
+    /// after them back a cell, so it lands round the grid instead and goes behind it, and nothing moves.
     @Test func aCardTakesOneCellOfAGridAndLiesBehindTwo() throws {
         let (store, screen, _) = makeStore()
         var grid = LayerNode(kind: .group)
@@ -453,6 +515,8 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(store.add(grid, to: .screen(screen)))
         let cells = grid.children.map(\.id)
         let before = cells.map { store.placed($0)?.frame }
+        #expect(before == [CGRect(x: 30, y: 300, width: 160, height: 120), CGRect(x: 202, y: 300, width: 160, height: 120),
+                           CGRect(x: 30, y: 436, width: 160, height: 120), CGRect(x: 202, y: 436, width: 160, height: 120)])
 
         // Round the second cell, at (202, 300) on the screen.
         let one = try #require(store.addSketched(.card, from: CGRect(x: 196, y: 294, width: 172, height: 132),
@@ -462,10 +526,22 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         let held = try #require(store.node(one))
         #expect(held.children.map(\.id) == [cells[1]])
         #expect(held.padding == LayerNode.Padding(all: padding))
-        #expect(held.frame.size == CGSize(width: 160 + 2 * padding, height: 120 + 2 * padding))
-        #expect(store.placed(cells[0])?.frame == before[0])
+        #expect(held.width.mode == .fixed && held.height.mode == .fit)
+        // Every cell: the first where it was, the card in the second's cell at its width, the image in it narrower by
+        // the padding, and the row below down by exactly the padding added.
         let card = try #require(store.placed(one)?.frame)
-        #expect(store.placed(cells[1])?.frame == CGRect(x: card.minX + padding, y: card.minY + padding, width: 160, height: 120))
+        #expect(card == CGRect(x: 202, y: 300, width: 160, height: 120 + 2 * padding))
+        #expect(store.placed(cells[0])?.frame == before[0])
+        #expect(store.placed(cells[1])?.frame == CGRect(x: 202 + padding, y: 300 + padding, width: 160 - 2 * padding,
+                                                         height: 120))
+        #expect(store.placed(cells[2])?.frame == before[2]?.offsetBy(dx: 0, dy: 2 * padding))
+        #expect(store.placed(cells[3])?.frame == before[3]?.offsetBy(dx: 0, dy: 2 * padding))
+        // No column widens, and nothing leaves a 393-pt iPhone.
+        let laidGrid = try #require(store.placed(grid.id)?.frame)
+        #expect(laidGrid == CGRect(x: 30, y: 300, width: 332, height: 256 + 2 * padding))
+        for frame in cells.compactMap({ store.placed($0)?.frame }) + [card, laidGrid] {
+            #expect(frame.minX >= 0 && frame.maxX <= DeviceFrame.iPhone.size.width)
+        }
 
         // Round the first row: the first cell, and the card holding the second.
         let firstRow = try #require(store.placed(cells[0])?.frame).union(card)

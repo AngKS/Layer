@@ -16,13 +16,15 @@ struct SketchLanding: Equatable, Sendable {
     var index: Int?
 
     /// The topmost screen under the sketch's centre (canvas points), then the deepest visible, unlocked container there;
-    /// a locked or hidden one hands it to its nearest unlocked, visible ancestor. `forCard` skips containers the sketch
-    /// encloses (call 7), and a row, column, grid or overlay round some of whose members it is drawn but can't take them
-    /// there in place (`takenInPlace(by:in:)`, call 6), so that it lands round that container. Nil off every screen.
+    /// a locked or hidden one hands it to its nearest unlocked, visible ancestor. `forCard` stops at a container the
+    /// sketch encloses (call 7), and at a row, column, grid or overlay round some of whose members it is drawn but can't
+    /// take them there in place (`takenInPlace(by:in:)`, call 6), so that it lands round that container, in what holds
+    /// it, and never in a container behind it (plan 6's Task P5C). Nil off every screen.
     ///
-    /// A container is under the centre when its turned shape holds it; the frontmost is looked in first, and a hidden one
-    /// isn't there to be seen, so what is behind it is looked at instead. A container whose child would sit deeper than
-    /// `TreeRules.maximumDepth` hands it to its parent too (F9). A screen's root, when nothing else will do, always takes it.
+    /// A container is under the centre when its turned shape holds it; at each level only the frontmost is looked in, and
+    /// a hidden one isn't there to be seen, so what is behind it is looked at instead. A container whose child would sit
+    /// deeper than `TreeRules.maximumDepth` hands it to its parent too (F9). A screen's root, when nothing else will do,
+    /// always takes it.
     static func of(_ sketch: CGRect, in content: TreeContent, index: TreeIndex, forCard: Bool = false) -> SketchLanding? {
         let canvasCentre = CGPoint(x: sketch.midX, y: sketch.midY)
         guard let screen = content.screens.last(where: { $0.canvasFrame(on: content.device(of: $0)).contains(canvasCentre) })
@@ -30,19 +32,16 @@ struct SketchLanding: Equatable, Sendable {
         let drawn = screen.placement.localRect(for: sketch)
         let centre = CGPoint(x: drawn.midX, y: drawn.midY)
 
-        // Down through the containers under the centre, frontmost first.
+        // Down through the frontmost container under the centre at each level.
         var chain = [screen.root]
         while let next = chain[chain.count - 1].children.last(where: { child in
-            guard child.isContainer, !child.isHidden, let shape = index[child.id]?.hostShape, shape.contains(centre)
-            else { return false }
-            guard forCard else { return true }
-            // A card takes a container it encloses from where that lies, and lands round one that lays its children out
-            // when it can't take what it encloses there in place.
-            if share(of: shape.bounds, inside: drawn) >= StructureConventions.enclosedShare { return false }
-            guard child.resolvedLayout != .free else { return true }
-            guard let space = ownSpace(of: child, on: screen, in: content, index: index) else { return false }
-            return takenInPlace(by: space.local(of: drawn), in: child) != nil
+            guard child.isContainer, !child.isHidden, let shape = index[child.id]?.hostShape else { return false }
+            return shape.contains(centre)
         }) {
+            // A card takes a container it encloses from where that lies, and lands round one that lays its children out
+            // when it can't take what it encloses there in place: round it, and never in a container behind it (plan 6's
+            // Task P5C).
+            if forCard, !cardGoesIn(next, drawn: drawn, on: screen, in: content, index: index) { break }
             chain.append(next)
         }
         // Up to the deepest that takes it.
@@ -95,6 +94,18 @@ struct SketchLanding: Equatable, Sendable {
     }
 
     // MARK: - How it is worked out
+
+    /// Whether a card drawn at `drawn` (screen points) goes into `container`, the frontmost under its centre: not when it
+    /// encloses the container, which it takes whole, nor when the container lays its children out and the card is drawn
+    /// round some of them that it can't take there in place.
+    private static func cardGoesIn(_ container: LayerNode, drawn: CGRect, on screen: TreeScreen, in content: TreeContent,
+                                   index: TreeIndex) -> Bool {
+        guard let shape = index[container.id]?.hostShape,
+              share(of: shape.bounds, inside: drawn) < StructureConventions.enclosedShare else { return false }
+        guard container.resolvedLayout != .free else { return true }
+        guard let space = ownSpace(of: container, on: screen, in: content, index: index) else { return false }
+        return takenInPlace(by: space.local(of: drawn), in: container) != nil
+    }
 
     /// Whether a card may take a thing: not locked, hidden or turned, which stay where they are. A drawing never sits where
     /// a card is drawn.

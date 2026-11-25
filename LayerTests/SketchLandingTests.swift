@@ -198,6 +198,35 @@ private func close(_ a: CGRect, _ b: CGRect, within tolerance: CGFloat = 0.000_0
         #expect(other.parent == group.id)
     }
 
+    /// A card lands round a grid it can't go into, in what holds the grid, and never in a container behind it (plan 6's
+    /// Task P5C): drawn round two of its cells, which the grid can't take in place, or round the whole grid, which the
+    /// card then takes.
+    @Test func aCardRoundAGridLandsRoundItNotInAContainerBehindIt() throws {
+        let behind = container(.group, nil, CGRect(x: 10, y: 200, width: 373, height: 500),
+                               [leaf(CGRect(x: 10, y: 10, width: 100, height: 40))])
+        let cells = [(0, 0), (172, 0), (0, 136), (172, 136)].map { x, y in
+            leaf(.image, CGRect(x: x, y: y, width: 160, height: 120))
+        }
+        let grid = container(.group, .grid(LayerNode.Grid(columns: 2, columnSpacing: 12, rowSpacing: 16)),
+                             CGRect(x: 30, y: 300, width: 332, height: 256), cells)
+        let content = design([behind, grid])
+        let root = content.screens[0].root
+
+        // Round the first row's two cells.
+        let firstRow = CGRect(x: 20, y: 290, width: 352, height: 140)
+        let twoCells = try #require(landing(firstRow, in: content, forCard: true))
+        #expect(twoCells.parent == root.id)
+        // Round the whole grid, which it takes.
+        let whole = try #require(landing(CGRect(x: 20, y: 290, width: 352, height: 276), in: content, forCard: true))
+        #expect(whole.parent == root.id)
+        #expect(SketchLanding.enclosed(by: whole.local, in: root) == [grid.id])
+
+        // Anything else drawn there goes into the grid, and a card drawn clear of the grid into the container behind.
+        #expect(try #require(landing(firstRow, in: content)).parent == grid.id)
+        let clear = try #require(landing(CGRect(x: 20, y: 600, width: 200, height: 80), in: content, forCard: true))
+        #expect(clear.parent == behind.id)
+    }
+
     @Test func whatACardEnclosesIsMostlyInsideAndCanBeTaken() {
         let inside = leaf(CGRect(x: 20, y: 110, width: 100, height: 40))
         let mostly = leaf(CGRect(x: 20, y: 195, width: 100, height: 40))   // 37 of 40 tall inside

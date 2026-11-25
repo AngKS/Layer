@@ -34,21 +34,30 @@ extension LayerNode {
 }
 
 extension TreeContent {
-    /// The person's own placing is the newest instruction (plan 5's final review, A4): each sketched node that `self`
-    /// has somewhere new since `before`, in a free container on a screen, has its placement intent read again from its
-    /// upright frame on the screen, by Task 1's zones (`PlacementIntent.of`), so that a device change keeps it where the
-    /// person last put it. Somewhere new is on another screen, or more than half a point off where it was there: a node
-    /// carried by what holds it, or taken into a card or out of a group where it lay, isn't. A node whose kind or intent
-    /// the change also set (a "Did you mean", a reading) keeps the intent it was given. Only the placement is read again.
-    mutating func followPlacements(since before: TreeContent) {
+    /// The person's own placing is the newest instruction (plan 5's final review, A4): each sketched node that a change
+    /// put somewhere new since `before`, in a free container on a screen, has its placement intent read again from its
+    /// upright frame on the screen as it is now, `self`, by Task 1's zones (`PlacementIntent.of`), so that a device change
+    /// keeps it where the person last put it. Somewhere new is on another screen, or more than half a point off where it
+    /// was there: a node carried by what holds it, or taken into a card or out of a group where it lay, isn't.
+    ///
+    /// Where the change put it is read from `written`, the design as the change wrote it before the tree's rules laid it
+    /// out, so that only the person's moves and resizes count, never the engine's (plan 6's Task P5C): a row that grows
+    /// as its text is typed, or a column that grows round a card, keeps its intent. A node the rules alone would hold
+    /// isn't found there under its parent, and is read from where it is now. A node whose kind or intent the change also
+    /// set (a "Did you mean", a reading) keeps the intent it was given. Only the placement is read again.
+    mutating func followPlacements(since before: TreeContent, written: TreeContent) {
         let earlier = Dictionary(before.screens.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })
+        let wrote = Dictionary(written.screens.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })
         var follower = PlacementFollower(before: before)
         for index in screens.indices {
             let screen = screens[index]
             guard earlier[screen.id] != screen.root else { continue }
             follower.device = device(of: screen)
             follower.host = .screen(screen.id)
-            if let root = follower.followed(screen.root, was: earlier[screen.id], toHost: .identity, wasToHost: .identity) {
+            let now = PlacementFollower.Pose(node: screen.root, toHost: .identity)
+            let was = earlier[screen.id].map { PlacementFollower.Pose(node: $0, toHost: .identity) }
+            let put = wrote[screen.id].map { PlacementFollower.Pose(node: $0, toHost: .identity) }
+            if let root = follower.followed(now, was: was, written: put) {
                 screens[index].root = root
             }
         }
@@ -77,43 +86,65 @@ private struct PlacementFollower {
         self.before = before
     }
 
-    /// `node` with its children, and theirs, followed; nil when none changes. `was` is `node` as it was, when its parent
-    /// held it then. `toHost` takes the space `node` lies in to the screen's now, and `wasToHost` as it was. Only what
-    /// changes is copied, so that what doesn't stays shared with the tree as it was.
-    mutating func followed(_ node: LayerNode, was: LayerNode?, toHost: CGAffineTransform,
-                           wasToHost: CGAffineTransform) -> LayerNode? {
-        let own = node.transformToParent.concatenating(toHost)
-        let wasOwn = was.map { $0.transformToParent.concatenating(wasToHost) } ?? .identity
+    /// A node, and the transform that takes the space it lies in to its screen's.
+    struct Pose {
+        var node: LayerNode
+        var toHost: CGAffineTransform
+
+        /// The transform that takes the space its children lie in to the screen's.
+        var own: CGAffineTransform { node.transformToParent.concatenating(toHost) }
+
+        /// Its child `child`, as it lies in it.
+        func holding(_ child: LayerNode) -> Pose { Pose(node: child, toHost: own) }
+
+        /// Its child with `id`, looked for first at `index`; nil when it holds none.
+        func child(_ id: UUID, at index: Int) -> Pose? {
+            let children = node.children
+            if children.indices.contains(index), children[index].id == id { return holding(children[index]) }
+            return children.first { $0.id == id }.map(holding)
+        }
+    }
+
+    /// `now`'s node with its children, and theirs, followed; nil when none changes. `was` is the node as it was, when
+    /// its parent held it then, and `written` as the change wrote it, when its parent held it there. Only what changes is
+    /// copied, so that what doesn't stays shared with the tree as it was.
+    mutating func followed(_ now: Pose, was: Pose?, written: Pose?) -> LayerNode? {
+        let node = now.node
         let isFree = node.resolvedLayout == .free
         var held: [UUID: Int]?
         var rewritten: LayerNode?
         for index in node.children.indices {
             var child = node.children[index]
-            var then: LayerNode?
+            var then: Pose?
             if let was {
-                if was.children.indices.contains(index), was.children[index].id == child.id {
-                    then = was.children[index]
+                let children = was.node.children
+                if children.indices.contains(index), children[index].id == child.id {
+                    then = was.holding(children[index])
                 } else {
                     if held == nil {
-                        held = Dictionary(was.children.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+                        held = Dictionary(children.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
                     }
-                    then = held?[child.id].map { was.children[$0] }
+                    then = held?[child.id].map { was.holding(children[$0]) }
                 }
             }
-            if let then, then == child { continue }
+            if let then, then.node == child { continue }
+            let put = written?.child(child.id, at: index)
             var changed = false
             if isFree, let sketch = child.sketch {
-                let placed = Self.upright(child, in: own)
-                let prior = then.map { Was(host: host, frame: Self.upright($0, in: wasOwn), kind: $0.kind, sketch: $0.sketch) }
+                let placed = Self.upright(child, in: now.own)
+                let prior = then.map { Was(host: host, frame: Self.upright($0.node, in: $0.toHost), kind: $0.node.kind,
+                                           sketch: $0.node.sketch) }
                     ?? elsewhere(child.id)
+                // Where the change put it, before the engine laid anything out.
+                let moved = put.map { Self.upright($0.node, in: $0.toHost) } ?? placed
                 let placement = LayerNode.PlacementIntent.of(placed, screenWidth: device.size.width, margin: device.margin)
                 if let prior, prior.kind == child.kind, prior.sketch == sketch, placement != sketch.placement,
-                   prior.host != host || !Self.isClose(prior.frame, placed) {
+                   prior.host != host || !Self.isClose(prior.frame, moved) {
                     child.sketch?.placement = placement
                     changed = true
                 }
             }
-            if let deeper = followed(child, was: then, toHost: own, wasToHost: wasOwn) {
+            if let deeper = followed(now.holding(child), was: then, written: put) {
                 child = deeper
                 changed = true
             }

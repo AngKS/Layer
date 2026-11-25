@@ -15,12 +15,12 @@ import Foundation
 /// y is kept. A node upright and fixed on an axis that reaches across the whole old screen on it, a background or a
 /// bleed, reaches across the new one, as far past each edge as it was (plan 5's final review, A5): a full-screen
 /// background covers the new screen. A row, column or grid the pass made whose every member is proportional fills the
-/// new width as they would loose (A3). Anything that isn't fixed is then kept inside the new screen by its turned
-/// shape's bounds, the leading and top edges winning when it can't fit; past an edge only as far as it was already
-/// (Task 4's M3), so that a deliberate bleed keeps its overhang. Only the root's own children move, and the members of
-/// such a row, column or grid: a container carries what it holds. What a rule works out is in whole points, a half
-/// point rounded to even, so that a round trip between two widths of different parity (the iPhone's 393 and the
-/// iPad's 820) leaves a centred node where it was.
+/// new width as they would loose (A3), a card as wide as it included (P5C). Anything that isn't fixed is then kept
+/// inside the new screen by its turned shape's bounds, the leading and top edges winning when it can't fit; past an
+/// edge only as far as it was already (Task 4's M3), so that a deliberate bleed keeps its overhang. Only the root's
+/// own children move, and the members of such a row, column or grid: a container carries what it holds. What a rule
+/// works out is in whole points, a half point rounded to even, so that a round trip between two widths of different
+/// parity (the iPhone's 393 and the iPad's 820) leaves a centred node where it was.
 ///
 /// A device of the same size moves nothing, whatever its margin or safe areas, since a free root is inset by neither:
 /// a screen saved as a device of its own, or a device renamed or saved again, isn't asking for anything to move.
@@ -85,7 +85,10 @@ enum DeviceReflow {
     /// A row, column or grid the pass made whose every visible member is proportional, by its saved intent or else by
     /// where it is on the old screen (A3): each member upright, unlocked and fixed across scales its width by W′ / W, the
     /// container its x, and the engine fits the container round them, as it will lay it out; it is then kept inside
-    /// the new screen. Its frame and each member's that changes; nil for anything else, which moves by its own intent.
+    /// the new screen. A card as wide as the container, as a card drawn round full-width members is, counts as
+    /// proportional whatever was drawn, and scales with it; what it holds that fills it follows it as the store lays it
+    /// out (plan 6's Task P5C). Its frame and each member's that changes; nil for anything else, which moves by its own
+    /// intent.
     private static func scaled(_ node: LayerNode, from old: DeviceFrame, to new: DeviceFrame,
                                tokens: DesignTokens) -> [UUID: CGRect]? {
         let frame = node.frame
@@ -96,7 +99,10 @@ enum DeviceReflow {
         case .free, .overlay: return nil
         }
         let shown = node.children.filter { !$0.isHidden }
+        let inside = frame.width - node.padding.leading - node.padding.trailing
         guard !shown.isEmpty, shown.allSatisfy({ member in
+            // A card as wide as what holds it, as one drawn round full-width members is, fills it, whatever was drawn.
+            if member.kind == .card, member.frame.width >= inside - 0.5 { return true }
             let onScreen = member.frame.offsetBy(dx: frame.minX, dy: frame.minY)
             return (member.sketch?.placement ?? .of(onScreen, screenWidth: old.size.width, margin: old.margin)) == .proportional
         }) else { return nil }

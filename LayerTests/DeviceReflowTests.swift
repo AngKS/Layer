@@ -274,6 +274,128 @@ struct DeviceReflowTests {
         #expect(model.store.node(saved.id) == saved)
     }
 
+    /// Only the person's moves and resizes rewrite an intent, never the engine's (plan 6's Task P5C): a row put in the
+    /// middle reads as centred, and stays so while its text is typed and it grows to the right, far enough that its
+    /// frame no longer reads as centred.
+    @Test func aRowThatGrowsAsItsTextIsTypedKeepsItsIntent() throws {
+        var label = node(CGRect(x: 0, y: 0, width: 20, height: 20), .text)
+        label.content.text = "Hi"
+        (label.width, label.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        var row = LayerNode(kind: .group)
+        row.layout = .stack(LayerNode.Stack(axis: .horizontal, spacing: 8))
+        (row.width, row.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        row.frame = CGRect(x: 20, y: 400, width: 20, height: 20)
+        row.children = [label]
+        row.sketch = LayerNode.SketchIntent(sketched: row.frame, on: DeviceFrame.iPhone.size,
+                                            margin: DeviceFrame.iPhone.margin, confidence: 1, decidedBy: .structure)
+        #expect(row.sketch?.placement == .leading)
+        let screen = freeScreen([row])
+        let (model, _) = makeModel([screen])
+        let laid = try #require(model.store.node(row.id)?.frame)
+
+        // The person puts it in the middle.
+        let middle = CGRect(x: ((DeviceFrame.iPhone.size.width - laid.width) / 2).rounded(), y: 400, width: laid.width,
+                            height: laid.height)
+        model.store.place(row.id, at: middle)
+        #expect(model.store.node(row.id)?.frame == middle)
+        #expect(model.store.node(row.id)?.sketch?.placement == .centered)
+
+        model.store.update(label.id) { $0.content.text = "Typed until the row is far wider than it was" }
+
+        let grown = try #require(model.store.node(row.id))
+        #expect(grown.frame.minX == middle.minX && grown.frame.width > middle.width + 100)
+        #expect(LayerNode.PlacementIntent.of(grown.frame, screenWidth: DeviceFrame.iPhone.size.width,
+                                             margin: DeviceFrame.iPhone.margin) != .centered)
+        #expect(grown.sketch?.placement == .centered)
+    }
+
+    /// The person's resize counts however the engine then fits what was resized (plan 6's Task P5C): a row the pass
+    /// built at the left, stretched by its trailing edge across the screen, reads as proportional from then on.
+    @Test func aPassBuiltRowStretchedByItsTrailingEdgeTakesItsNewIntent() throws {
+        let buttons = [20, 112, 204].map { node(CGRect(x: $0, y: 600, width: 80, height: 44)) }
+        let screen = freeScreen(buttons)
+        let (model, _) = makeModel([screen])
+        model.structurePass(over: buttons.map(\.id))
+        let row = try #require(model.store.treeScreen(screen.id)?.root.children.first)
+        try #require(row.sketch?.decidedBy == .structure)
+        try #require(row.children.map(\.id) == buttons.map(\.id))
+        #expect(row.width.mode == .fit)
+        #expect(row.sketch?.placement == .leading)
+
+        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: row.id)
+        model.store.resizeGroup(ref, to: CGRect(x: 20, y: 600, width: 353, height: 44))
+
+        let stretched = try #require(model.store.node(row.id))
+        #expect(stretched.frame == CGRect(x: 20, y: 600, width: 353, height: 44))
+        #expect(stretched.sketch?.placement == .proportional)
+    }
+
+    /// A card drawn round two fields of a column the pass built is the column's width, and its fields fill it (plan 6's
+    /// Task P5C). Going to an iPad and back, the column scales as its fields would loose, the card with it, and the
+    /// card's fields with the card, inset by its padding; back on the iPhone everything is where it was, and fits.
+    @Test func aColumnHoldingADrawnCardScalesWithTheScreenAndBack() throws {
+        let fields = [200, 272, 344, 416].map { node(CGRect(x: 20, y: $0, width: 353, height: 48), .textField) }
+        let screen = freeScreen(fields)
+        let (model, _) = makeModel([screen])
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(model.store.treeScreen(screen.id)?.root.children.first)
+        try #require(column.children.map(\.id) == fields.map(\.id))
+        // Round the second and third.
+        let card = try #require(model.store.addSketched(.card, from: CGRect(x: 10, y: 262, width: 373, height: 140),
+                                                        confidence: 0.95, decidedBy: .rules))
+        try #require(model.store.node(card)?.children.map(\.id) == [fields[1].id, fields[2].id])
+        let padding = DesignTokens.standard.card.padding
+        let things = fields.map(\.id) + [card, column.id]
+        let onIPhone = things.map { model.store.placed($0)?.frame }
+        #expect(model.store.placed(card)?.frame == CGRect(x: 20, y: 272, width: 353, height: 120 + 2 * padding))
+
+        model.store.changeDevice(of: screen.id, to: iPad)
+
+        #expect(model.store.placed(fields[0].id)?.frame == CGRect(x: 42, y: 200, width: 737, height: 48))
+        #expect(model.store.placed(card)?.frame == CGRect(x: 42, y: 272, width: 737, height: 120 + 2 * padding))
+        #expect(model.store.placed(fields[1].id)?.frame == CGRect(x: 42 + padding, y: 272 + padding,
+                                                                  width: 737 - 2 * padding, height: 48))
+        #expect(model.store.placed(fields[2].id)?.frame == CGRect(x: 42 + padding, y: 344 + padding,
+                                                                  width: 737 - 2 * padding, height: 48))
+        #expect(model.store.placed(fields[3].id)?.frame == CGRect(x: 42, y: 416 + 2 * padding, width: 737, height: 48))
+
+        model.store.changeDevice(of: screen.id, to: .iPhone)
+
+        #expect(things.map { model.store.placed($0)?.frame } == onIPhone)
+        let root = try #require(model.store.treeScreen(screen.id)?.root)
+        #expect(!TreeValidator.check(root, on: .iPhone).contains { $0.kind == .clipped })
+    }
+
+    /// A column built on an iPad, holding a card drawn round two of its fields a little inside their ends, goes to an
+    /// iPhone and fits it (plan 6's Task P5C): the card is as wide as the column, so it scales with it whatever its drawn
+    /// box reads as, here centred, and its fields with it.
+    @Test func aColumnBuiltOnAnIPadHoldingACardFitsAnIPhone() throws {
+        let fields = [200, 272, 344, 416].map { node(CGRect(x: 42, y: $0, width: 737, height: 48), .textField) }
+        let screen = freeScreen(fields, on: iPad.id)
+        let (model, _) = makeModel([screen])
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(model.store.treeScreen(screen.id)?.root.children.first)
+        try #require(column.children.map(\.id) == fields.map(\.id))
+        // Round the second and third, 670 wide in the middle, which reads as centred on an iPad.
+        let card = try #require(model.store.addSketched(.card, from: CGRect(x: 75, y: 262, width: 670, height: 140),
+                                                        confidence: 0.95, decidedBy: .rules))
+        try #require(model.store.node(card)?.children.map(\.id) == [fields[1].id, fields[2].id])
+        #expect(model.store.node(card)?.sketch?.placement == .centered)
+        let padding = DesignTokens.standard.card.padding
+
+        model.store.changeDevice(of: screen.id, to: .iPhone)
+
+        #expect(model.store.placed(fields[0].id)?.frame == CGRect(x: 20, y: 200, width: 353, height: 48))
+        #expect(model.store.placed(card)?.frame == CGRect(x: 20, y: 272, width: 353, height: 120 + 2 * padding))
+        #expect(model.store.placed(fields[1].id)?.frame == CGRect(x: 20 + padding, y: 272 + padding,
+                                                                  width: 353 - 2 * padding, height: 48))
+        #expect(model.store.placed(fields[2].id)?.frame == CGRect(x: 20 + padding, y: 344 + padding,
+                                                                  width: 353 - 2 * padding, height: 48))
+        #expect(model.store.placed(fields[3].id)?.frame == CGRect(x: 20, y: 416 + 2 * padding, width: 353, height: 48))
+        let root = try #require(model.store.treeScreen(screen.id)?.root)
+        #expect(!TreeValidator.check(root, on: .iPhone).contains { $0.kind == .clipped })
+    }
+
     /// A background that fills the screen fills the new one; a locked one stays (A5, ported from ScreenTidy's
     /// `aBackgroundFillsTheNewDevice`, retired under (o)).
     @Test func aBackgroundFillsTheNewDevice() throws {

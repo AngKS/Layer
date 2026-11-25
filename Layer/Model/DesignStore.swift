@@ -1014,8 +1014,10 @@ final class DesignStore {
     /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
     ///
     /// With `followingPlacements`, each sketched thing the change put somewhere new in a free container on a screen has
-    /// its placement intent read again from where it is (`TreeContent.followPlacements(since:)`), in the same change and
-    /// so the same step: undoing the move puts the intent back with it.
+    /// its placement intent read again from where it is (`TreeContent.followPlacements(since:written:)`), in the same
+    /// change and so the same step: undoing the move puts the intent back with it. Where the change itself put it, before
+    /// the rules ran, is what counts, so that the engine resizing a node, as a row grows while its text is typed, rewrites
+    /// nothing (plan 6's Task P5C).
     ///
     /// With `decliningWhatLeftAStructure` (plan 5's call 11, F4), a node the change took out of a container the
     /// structure pass made, into another parent, is declined, whichever verb moved it: the canvas's drops and lifts, the
@@ -1028,8 +1030,11 @@ final class DesignStore {
                                  decliningWhatLeftAStructure: Bool) {
         body(&content)
         content.pendingPointers = [:]
+        // What the change itself wrote, before the rules lay anything out: only that is the person's placing. Held as a
+        // value, it is copied only where the rules then change the tree.
+        let written = followingPlacements ? content.tree : nil
         TreeRules.apply(to: &content.tree, after: holding(laidOutAhead, in: previous.tree, as: content.tree))
-        if followingPlacements { content.tree.followPlacements(since: previous.tree) }
+        if let written { content.tree.followPlacements(since: previous.tree, written: written) }
         if decliningWhatLeftAStructure {
             let leaving = takenOutOfStructures(from: previous.tree, to: content.tree)
             if !leaving.isEmpty { content.tree = declining(Set(leaving), in: content.tree) }
