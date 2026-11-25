@@ -650,8 +650,11 @@ TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b xcodebuild test \
 going, but some were under way when one was marked; those lanes wait for the load to fall below 20 before they time
 anything. Four runs were stopped when that happened and are left out: an on-device `structure` run at 01:22; the hosted
 round 2 at 04:48, 11 of its 27 runs done; and the first tries at round 4's hosted run and the after all-tools run, at
-05:52, both run again in full. Two ran on to their end: round 2's all-tools run, started 6 s before the mark, and
-round 2's `newtools`, started 2 minutes before one.
+05:52, both run again in full. Three ran on to their end: round 1's hosted run, started 4 minutes before a mark at
+03:46:02, which sent LM Studio 77 requests after it, until 03:57:14; round 2's all-tools run, started 6 s before the
+same mark; and round 2's `newtools`, started 2 minutes before the mark at 04:42:42. Since then the live suites check
+for the mark before every request they can see (`TEST_RUNNER_LAYER_QUIET_FILE`), and the scripts stop a run within
+10 s of a mark appearing.
 
 | Run | Start | Load (1, 5, 15 min) before |
 |---|---|---|

@@ -30,6 +30,7 @@ struct VoiceAgentLiveTests {
     private func say(_ command: String, to agent: VoiceAgent) async -> VoiceOutcome {
         var steps: [String] = []
         agent.onStep = { steps.append($0) }
+        await QuietWindow.wait()
         let start = ContinuousClock.now
         let outcome = await agent.run(command)
         let seconds = Double((ContinuousClock.now - start).components.attoseconds) / 1e18 + Double((ContinuousClock.now - start).components.seconds)
@@ -305,7 +306,11 @@ struct VoiceStructureLiveTests {
             let looker = CanvasLooker(app: app, handles: handles)
             let turns = VoiceToolTurns()
             let session = LanguageModelSession(profile: VoiceProfile(
-                actor: recorder, hooks: VoiceHooks(willRun: { _ in }, didRun: { await looker.look() }, mayRun: { true }), turns: turns
+                actor: recorder, hooks: VoiceHooks(willRun: { _ in }, didRun: {
+                    await looker.look()
+                    // Before the model is asked again with this tool's result.
+                    await QuietWindow.wait()
+                }, mayRun: { true }), turns: turns
             ))
             turns.session = session
             looker.session = session
@@ -313,6 +318,7 @@ struct VoiceStructureLiveTests {
             looker.look()
             var said = ""
             var calls: [RecordingToolbox.Call] = []
+            await QuietWindow.wait()
             do {
                 said = try await session.respond(to: testCase.command).content
                 calls = recorder.calls
@@ -337,6 +343,25 @@ struct VoiceStructureLiveTests {
         let picked = picks.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
         print("VOICE-STRUCTURE-SUM \(right)/\(Self.runs) right, \(rightTool)/\(Self.runs) right tool | “\(testCase.command)” | picks: \(picked)")
         return (right, rightTool)
+    }
+}
+
+/// LM Studio is shared with other work on this Mac, some of it timed. With `TEST_RUNNER_LAYER_QUIET_FILE=<path>`, the
+/// live suites send it nothing while that file exists: they wait before each command, and the structure suite also
+/// before each request after a tool. Without it, they never wait.
+enum QuietWindow {
+    static let path = ProcessInfo.processInfo.environment["LAYER_QUIET_FILE"]
+
+    static func wait() async {
+        guard let path, !path.isEmpty else { return }
+        var announced = false
+        while FileManager.default.fileExists(atPath: path) {
+            if !announced {
+                print("VOICE-QUIET waiting while \(path) exists")
+                announced = true
+            }
+            try? await Task.sleep(for: .seconds(30))
+        }
     }
 }
 
