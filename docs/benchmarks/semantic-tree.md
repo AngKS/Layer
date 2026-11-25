@@ -20,6 +20,7 @@ from `Tools/ScreenBenchmarkHarness` on macOS, where the on-device model runs.
 | A drag frame, on the large design | the same test: a leaf on screen 5 (free) dragged 60 frames by the canvas's own drag, snapping off, the index read after each frame; and, on each frame's own trees, the store's comparison of the design with the one before and the placement-intent follower, as the design is and with every leaf on the screen a sketch's | p95 under 16 ms | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | at eede551: p50 2.113 ms, p95 2.275 ms. The comparison and the follower weren't timed; the follower as it was before the sweep's item 6, at 5174831, took p50 149.0 µs, p95 150.5 µs (152.2 / 154.7 µs sketched) | p50 0.588 ms, p95 0.598 ms, a quarter of the baseline's. The comparison p50 24.1 µs, p95 24.3 µs; the follower 40.8 / 41.2 µs, 140.1 / 141.0 µs sketched. **Met** |
 | Where a dragged container would go | the same test: `TreeDrop.target` for a card of 200 texts on the canvas, the finger over screen 6's column, 50 runs | none of its own (a drag frame's) | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured at eede551: the row came just before item 7, at 0989483, p50 0.178 ms, p95 0.182 ms | p50 0.129 ms, p95 0.133 ms: the dragged subtree walked once a frame, not three times (item 7) |
 | Siri's element query, on the large design | `StoreChangeBenchmarkTests.siriElementsOnALargeDesign`: `ElementQuery.entities(for:)` for 10 identifiers spread over the design, open in its window, 20 runs | none | not measurable on main | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured at eede551: the row came just before item 8, at 2358da9, p50 78.742 ms, p95 83.996 ms | p50 6.983 ms, p95 7.335 ms: a snapshot's elements worked out once for all the identifiers asked, from the open design's index (item 8) |
+| Opening a design | `StoreChangeBenchmarkTests.openingALargeDesign` (the sweep's review, minor 4): the file's read (`DesignFile(wrapper:)`, which decodes the design and lays it out in full) and the store's check, since the sweep, that it follows the rules (`DesignStore.init`), 10 runs each after one untimed, on the large design and on 4,994 nodes | none | not measured | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | not measured: the sweep added this row | no check at open; the read was not timed | at the merged head 0fbf74d, p50 / p95 ms: the large design's read 17.009 / 17.579 and check 4.257 / 4.463; 4,994 nodes' read 80.279 / 80.946 and check 20.121 / 20.544. The check adds about a quarter to opening, once |
 
 ## Budgets after the sweep
 
@@ -632,25 +633,38 @@ was timed.
   remote-desktop session and the system's media analysis kept the load near 20 through the first.)
 - **Each item, before and after.** The build products of every commit were cloned (`cp -c`) and timed with the script's
   own `test-without-building`, `TEST_RUNNER_LAYER_BENCHMARK=1`, the CI plan, Debug, from the clone's `.xctestrun`, after
-  the same check as the script's (no other `xcodebuild` and a 1-minute load under 20). Three rounds, each timing every
-  commit in order, from 19:21 to 19:34, at loads of 5.1 to 20.0 (medians 6.3 to 8.7 for each commit). The report
-  `sweep-1-report.md` in plan 6's ledger holds each item's table. The column above, and its baselines, are a fourth set:
-  three more rounds of eede551 and 5174831 taking turns, from 20:02 to 20:04, at loads of 8.0 to 10.2. The sketch
-  reading's figures are the medians of the script's run and two more of each, from 20:01 to 20:02, at loads of 16.7 to
-  19.1.
+  the same check as the script's (no other `xcodebuild`, and a 1-minute load under 20). The item table below comes from
+  three rounds after the sweep's review, from 20:49 to 22:06. Each round timed the store benchmark of every commit in
+  order, the budgets of eede551, 5174831 and the merged head, and the drag frame benchmark of ff30355 and 3a09d8d: 54
+  runs, at 1-minute loads of 16.22 to 19.98 before them. Each run's load is recorded in `sweep-1-report.md`'s "Hardening
+  round", in plan 6's ledger, with the full tables. The first rounds, from 19:21 to 19:34, gave the same figures within
+  their spread. Their highest load before a run was 19.95, under the limit, which this paragraph once rounded to 20.0;
+  their per-run loads weren't kept, so the table isn't theirs.
+- **The column above.** Its figures and its baselines are another set: three rounds of eede551 and 5174831 taking turns,
+  from 20:02 to 20:04. The load before each run, the store benchmark then the budgets: eede551 10.16 and 9.66, 9.11 and
+  8.17, 8.46 and 8.51; 5174831 9.85 and 9.38, 8.08 and 8.07, 8.31 and 7.96. The sketch reading's figures are the medians
+  of the script's run and two more of each, from 20:01 to 20:02, at loads of 17.31 (the script's), 19.12 and 16.78 for
+  eede551, and 5.65 (the script's), 17.98 and 16.72 for 5174831. The merged head 0fbf74d, with lane 2 and the review's
+  tests, times within 2% of 5174831 on every store, tree and large-design row in the rounds above.
+- **Opening a design (the review's minor 4).** Since the sweep, the store checks once, as a design opens, that it follows
+  the rules: `DesignStore.init` applies them in full to a copy and compares, after the file's read has laid the design
+  out. `StoreChangeBenchmarkTests.openingALargeDesign` times both, at the merged head in the rounds above (loads 17.41 to
+  18.06), each 10 runs after one untimed. On the large design (1,055 nodes) the read takes p50 17.009 ms, p95 17.579 ms,
+  and the check 4.257 / 4.463 ms. On 4,994 nodes, near the 5,000 cap, the read takes 80.279 / 80.946 ms and the check
+  20.121 / 20.544 ms. So the check adds about a quarter to opening (Debug, in the simulator), on the main actor, once.
 - **What each item changed, at p50, before and after it** (the large design's rows unless named; the full tables are in
   the report):
 
   | Item | Commit | What it changed | The row that shows it |
   |---|---|---|---|
-  | 2. The index kept across changes | 2e1d3f3, ff30355 | the store brings its index up to date where the design changed (`TreeIndex.refresh`), not built again | move with its read 2.054 → 1.140 ms; add with its read 3.310 → 1.386 ms |
-  | 3. The structure passes only where something changed | 01afc8d | the rules know the store's last version follows them (`TreeRules.apply`'s `kept`), and look only at the screens and canvas nodes that changed | move 0.959 → 0.584 ms; the drag frame 1.173 → 0.825 ms |
-  | 4. A look lays nothing out | 3cf02e8 | a screen or canvas container the engine lays out alike (`LayoutEngine.laysOutAlike`) keeps its frames | a look 0.632 → 0.334 ms |
-  | 5. A token lays out only what it measures | 7e5ebca | only what holds text measured at a changed size is laid out (`NaturalSize.isMeasuredDifferently`) | the card's radius 4.555 → 0.168 ms; the title's size 4.683 → 4.034 ms |
-  | 2 to 4, cheaper | ff30355 | lists of children kept in place, and nodes compared by their shared list of children, not all they hold | the 100-node store's add 1.120 → 0.833 ms (item 2 had made it 1.145 from 0.866) |
-  | 6. The per-change extras | 3a09d8d | the decline check looks only where the pass made a structure; the follower passes over leaves with no intent | the 100-node store's move 0.549 → 0.396 ms; the drag frame 0.791 → 0.588 ms; the follower 149.0 → 39.1 µs |
-  | 7. TreeDrop walks once | 2358da9 | the dragged subtree walked once a frame | where a 200-text card would go 0.178 → 0.123 ms |
-  | 8. Siri's element query | 9d59b1e | a snapshot's elements worked out once a query, from the open design's index | 10 identifiers 78.742 → 7.008 ms |
+  | 2. The index kept across changes | 2e1d3f3, ff30355 | the store brings its index up to date where the design changed (`TreeIndex.refresh`), not built again | move with its read 2.140 → 1.143 ms; add with its read 3.380 → 1.423 ms |
+  | 3. The structure passes only where something changed | 01afc8d | the rules know the store's last version follows them (`TreeRules.apply`'s `kept`), and look only at the screens and canvas nodes that changed | move 0.963 → 0.608 ms; the drag frame 1.195 → 0.831 ms |
+  | 4. A look lays nothing out | 3cf02e8 | a screen or canvas container the engine lays out alike (`LayoutEngine.laysOutAlike`) keeps its frames | a look 0.656 → 0.350 ms |
+  | 5. A token lays out only what it measures | 7e5ebca | only what holds text measured at a changed size is laid out (`NaturalSize.isMeasuredDifferently`) | the card's radius 4.698 → 0.172 ms; the title's size 4.763 → 4.126 ms |
+  | 2 to 4, cheaper | ff30355 | lists of children kept in place, and nodes compared by their shared list of children, not all they hold | the 100-node store's add 1.161 → 0.932 ms (item 2 had made it 1.128 from 0.901) |
+  | 6. The per-change extras | 3a09d8d | the decline check looks only where the pass made a structure; the follower passes over leaves with no intent | the 100-node store's move 0.567 → 0.394 ms; the drag frame 0.810 → 0.610 ms; the follower 152.6 → 40.9 µs |
+  | 7. TreeDrop walks once | 2358da9 | the dragged subtree walked once a frame | where a 200-text card would go 0.190 → 0.128 ms |
+  | 8. Siri's element query | 9d59b1e | a snapshot's elements worked out once a query, from the open design's index | 10 identifiers 82.477 → 7.531 ms |
 
 - **The deep comparison (item 6).** The store still compares the design with the one before after every change, to
   find a change that changed nothing. Lists nothing was written to are shared, and `==` passes over a shared list at once,
