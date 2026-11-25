@@ -12,6 +12,8 @@ struct DesignSnapshot: Sendable {
     /// False for a design listed by its name alone, which iCloud hasn't downloaded: see
     /// `DesignSummary.isRead`.
     var isRead = true
+    /// Where every node of `content` is, when it is at hand: an open design's store keeps it (`DesignStore.index`).
+    var index: TreeIndex?
 
     var entity: DesignEntity {
         DesignEntity(id: id, content: content, fallbackName: name, modified: modified)
@@ -25,7 +27,7 @@ struct DesignSnapshot: Sendable {
     /// containers that hold them (My call 9). Each is locked or hidden as it is with the containers above it, though
     /// not with its screen's lock.
     var elements: [ElementEntity] {
-        let index = TreeIndex(content)
+        let index = index ?? TreeIndex(content)
         func entity(_ leaf: LayerNode, on host: TreeIndex.Host, called hostName: String) -> ElementEntity {
             let entry = index[leaf.id]
             return ElementEntity(design: id, host: host, hostName: hostName, node: leaf,
@@ -48,7 +50,7 @@ enum DesignActions {
     static func snapshot(of model: AppModel) -> DesignSnapshot? {
         guard let id = model.designID else { return nil }
         let name = model.store.title ?? model.fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
-        return DesignSnapshot(id: id, name: name, content: model.store.tree, modified: .now)
+        return DesignSnapshot(id: id, name: name, content: model.store.tree, modified: .now, index: model.store.index)
     }
 
     /// A design by the identifier Siri or Shortcuts holds for it, which may be one it had
@@ -56,7 +58,7 @@ enum DesignActions {
     /// and its screens and elements answer to the identifiers they were asked for by.
     static func snapshot(design id: String) async -> DesignSnapshot? {
         if let model = OpenDesigns.shared.model(forDesign: id), let open = snapshot(of: model) {
-            return DesignSnapshot(id: id, name: open.name, content: open.content, modified: open.modified)
+            return DesignSnapshot(id: id, name: open.name, content: open.content, modified: open.modified, index: open.index)
         }
         guard let summary = await DesignLibrary.summary(for: OpenDesigns.shared.currentID(for: id)) else { return nil }
         return DesignSnapshot(id: id, name: summary.title, content: summary.content, modified: summary.modified)
@@ -399,10 +401,17 @@ struct ElementQuery: EntityStringQuery {
     func entities(for identifiers: [ElementEntity.ID]) async throws -> [ElementEntity] {
         var found: [ElementEntity] = []
         var snapshots: [String: DesignSnapshot] = [:]
+        // Each snapshot's elements, by id, worked out once for every identifier asked for in it: `elements` works out
+        // where everything is each time it is read.
+        var elements: [String: [ElementEntity.ID: ElementEntity]] = [:]
         for id in identifiers {
             guard let key = EntityKey.parseElement(id) else { continue }
             if snapshots[key.design] == nil { snapshots[key.design] = await DesignActions.snapshot(design: key.design) }
-            if let element = snapshots[key.design]?.elements.first(where: { $0.id == id }) { found.append(element) }
+            guard let snapshot = snapshots[key.design] else { continue }
+            if elements[key.design] == nil {
+                elements[key.design] = Dictionary(snapshot.elements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            }
+            if let element = elements[key.design]?[id] { found.append(element) }
         }
         return found
     }
