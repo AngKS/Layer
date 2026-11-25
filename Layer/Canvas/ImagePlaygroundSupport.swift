@@ -6,7 +6,7 @@ import SwiftUI
 struct ImagePlaygroundRequest: Identifiable, Equatable, Sendable {
     enum Target: Equatable, Sendable {
         /// A new image element, on this screen, or in the middle of the view when nil.
-        case newImage(onScreen: DesignScreen.ID?)
+        case newImage(onScreen: TreeScreen.ID?)
         /// A new picture for this image element, which keeps its place and size.
         case replace(DesignStore.ElementRef)
     }
@@ -37,9 +37,9 @@ extension AppModel {
 
     /// Opens Image Playground for a new image: on the selected screen, or the screen the
     /// selected element is on, or in the middle of the view.
-    func makeImageWithPlayground(prompt: String? = nil, style: GeneratedImageStyle? = nil, onScreen screenID: DesignScreen.ID? = nil) {
-        let screen = screenID ?? selectedScreen?.id ?? {
-            if let selected = selectedElement, case .screen(let id) = selected.ref.host { return id }
+    func makeImageWithPlayground(prompt: String? = nil, style: GeneratedImageStyle? = nil, onScreen screenID: TreeScreen.ID? = nil) {
+        let screen = screenID ?? selectedScreenID ?? {
+            if let selected = selectedNode, case .screen(let id) = selected.ref.host { return id }
             return nil
         }()
         imagePlaygroundRequest = ImagePlaygroundRequest(target: .newImage(onScreen: screen), prompt: prompt, style: style)
@@ -55,20 +55,27 @@ extension AppModel {
     /// about travel without being asked.
     func imageConcepts(for request: ImagePlaygroundRequest) -> (prompt: String?, context: String?, title: String?) {
         let prompt = request.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let screenID: DesignScreen.ID? = switch request.target {
+        let screenID: TreeScreen.ID? = switch request.target {
         case .newImage(let id): id
         case .replace(let ref): if case .screen(let id) = ref.host { id } else { nil }
         }
+        let screen = screenID.flatMap(store.treeScreen)
         var context: String?
-        if let screen = screenID.flatMap(store.screen) {
-            let words = screen.elements
-                .filter { !$0.isHidden && [.title, .body, .text, .button].contains($0.kind) && $0.text != $0.kind.placeholder }
-                .sorted { $0.frame.minY < $1.frame.minY }
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let screen {
+            // Its visible leaves, top to bottom by what is seen of them.
+            let index = store.index
+            let words = screen.root.leaves
+                .compactMap { leaf -> (words: String, top: CGFloat)? in
+                    guard let entry = index[leaf.id], !entry.isHiddenWithAncestors, [.title, .body, .text, .button].contains(leaf.kind),
+                          leaf.content.text != leaf.kind.placeholder else { return nil }
+                    return (leaf.content.text.trimmingCharacters(in: .whitespacesAndNewlines), entry.hostShape.rect.minY)
+                }
+                .sorted { $0.top < $1.top }
+                .map(\.words)
                 .filter { !$0.isEmpty }
             if !words.isEmpty { context = words.joined(separator: ". ") }
         }
-        let title = [store.title, screenID.flatMap(store.screen)?.name].compactMap(\.self).joined(separator: " – ")
+        let title = [store.title, screen?.name].compactMap(\.self).joined(separator: " – ")
         return (prompt?.isEmpty == false ? prompt : nil, context, title.isEmpty ? nil : title)
     }
 
@@ -77,9 +84,9 @@ extension AppModel {
     func imageSize(for request: ImagePlaygroundRequest) -> CGSize {
         switch request.target {
         case .replace(let ref):
-            return store.resolve(ref)?.element.frame.size ?? CGSize(width: 333, height: 333)
+            return store.placed(ref)?.frame.size ?? CGSize(width: 333, height: 333)
         case .newImage(let screenID):
-            let width = screenID.flatMap(store.screen).map { $0.size.width - 40 } ?? 320
+            let width = screenID.flatMap(store.device(of:)).map { $0.size.width - 40 } ?? 320
             return CGSize(width: width, height: width)
         }
     }
@@ -91,32 +98,34 @@ extension AppModel {
         imagePlaygroundRequest = nil
         if case .newImage(nil) = request.target {
             addImage(prepared)
-            return selectedElement?.ref
+            return selectedNode?.ref
         }
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
         let ref: DesignStore.ElementRef
         switch request.target {
         case .replace(let existing):
-            guard store.resolve(existing) != nil else { return nil }
-            store.update(existing) { $0.imageID = id }
+            // A picture for the image where it is, in whatever holds it: its frame and its place stay.
+            guard store.placed(existing) != nil else { return nil }
+            store.update(existing.element) { $0.content.imageID = id }
             ref = existing
         case .newImage(let screenID?):
-            guard let screen = store.screen(screenID) else { return nil }
-            var element = DesignStore.newElement(.image)
-            element.imageID = id
+            guard let device = store.device(of: screenID) else { return nil }
+            var image = LayerNode.standard(.image)
+            image.content.imageID = id
             // As wide as a full-width image, as tall as the picture's shape asks, below
             // what is already on the screen.
-            let width = min(screen.size.width - 40, 400).rounded()
+            let width = min(device.size.width - 40, 400).rounded()
             let aspect = prepared.image.size.height / max(prepared.image.size.width, 1)
-            let size = CGSize(width: width, height: min((width * aspect).rounded(), (screen.size.height / 2).rounded()))
-            let below = DesignActions.frameForNewElement(element, on: screen).minY
-            let lowest = screen.size.height - screen.device.safeBottom - 8 - size.height
-            element.frame = CGRect(
-                origin: CGPoint(x: ((screen.size.width - size.width) / 2).rounded(), y: max(screen.device.safeTop, min(below, lowest))),
+            let size = CGSize(width: width, height: min((width * aspect).rounded(), (device.size.height / 2).rounded()))
+            let below = store.newElementFrame(.image, on: screenID)?.minY ?? device.safeTop
+            let lowest = device.size.height - device.safeBottom - 8 - size.height
+            image.frame = CGRect(
+                origin: CGPoint(x: ((device.size.width - size.width) / 2).rounded(), y: max(device.safeTop, min(below, lowest))),
                 size: size
             )
-            ref = store.setElements([element], on: screenID)[0]
+            guard store.add(image, to: .screen(screenID)) else { return nil }
+            ref = DesignStore.ElementRef(host: .screen(screenID), element: image.id)
         case .newImage(nil):
             return nil
         }
@@ -167,7 +176,7 @@ struct ImagePlaygroundPresenter: ViewModifier {
     /// The picture an image element shows now, to make a new one from.
     private func sourceImage(for request: ImagePlaygroundRequest?) -> Image? {
         guard case .replace(let ref)? = request?.target,
-              let picture = model.store.resolve(ref).flatMap({ model.images.image($0.element.imageID) })
+              let picture = model.store.placed(ref).flatMap({ model.images.image($0.node.content.imageID) })
         else { return nil }
         return Image(uiImage: picture)
     }

@@ -89,60 +89,18 @@ enum DesignActions {
         try await model(for: design?.id)
     }
 
-    static func screen(_ entity: ScreenEntity) async throws -> (model: AppModel, screen: DesignScreen) {
+    /// A screen by its entity, as the tree holds it, with the design it is in.
+    static func screen(_ entity: ScreenEntity) async throws -> (model: AppModel, screen: TreeScreen) {
         guard let id = entity.screenID else { throw LayerIntentError.screenNotFound }
         let model = try await model(for: entity.designID)
-        guard let screen = model.store.screen(id) else { throw LayerIntentError.screenNotFound }
+        guard let screen = model.store.treeScreen(id) else { throw LayerIntentError.screenNotFound }
         return (model, screen)
-    }
-
-    /// The screen named, or the selected one, or the one an element is selected on, or
-    /// the design's only or newest screen.
-    static func screenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: DesignScreen) {
-        if let entity { return try await screen(entity) }
-        let model = try await model(for: nil as String?)
-        if let screen = model.selectedScreen { return (model, screen) }
-        if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
-            return (model, screen)
-        }
-        guard let screen = model.store.screens.last else { throw LayerIntentError.screenNotFound }
-        return (model, screen)
-    }
-
-    static func element(_ entity: ElementEntity) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        guard let ref = entity.ref else { throw LayerIntentError.elementNotFound }
-        let model = try await model(for: entity.designID)
-        guard let found = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
-        return (model, ref, found.element)
     }
 
     /// Throws `locked` when an element is locked, by itself or by a group above it: Siri
     /// doesn't move, align or delete it, as a finger can't (F4).
     static func requireUnlocked(_ ref: DesignStore.ElementRef, in model: AppModel) throws {
         guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
-    }
-
-    /// The element named, or else the selected one: see `selected(in:)`.
-    static func elementOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        if let entity { return try await element(entity) }
-        return try selected(in: try await model(for: nil as String?))
-    }
-
-    /// The one element selected in a design, as Siri sees it: see `selectedElement(in:)`.
-    /// Throws `elementNotFound` when there is none, as when several things are selected, or
-    /// a group.
-    static func selected(in model: AppModel) throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        guard let selected = selectedElement(in: model) else { throw LayerIntentError.elementNotFound }
-        return (model, selected.ref, selected.element)
-    }
-
-    /// The one element selected, unless it is a group: Siri, which knows nothing of groups,
-    /// sees what is in one, never the group item itself (F6). Taken as one element, a group
-    /// would be moved or changed alone, and its members ungrouped. A member selected inside a
-    /// group is an element like any other.
-    static func selectedElement(in model: AppModel) -> (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
-        guard let selected = model.selectedElement, selected.element.kind != .group else { return nil }
-        return selected
     }
 
     // MARK: Finding nodes
@@ -175,13 +133,8 @@ enum DesignActions {
 
     /// The screen named, or the selected one, or the one a thing is selected on, or the design's newest screen, as the
     /// tree holds it.
-    static func treeScreenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: TreeScreen) {
-        if let entity {
-            guard let id = entity.screenID else { throw LayerIntentError.screenNotFound }
-            let model = try await model(for: entity.designID)
-            guard let screen = model.store.treeScreen(id) else { throw LayerIntentError.screenNotFound }
-            return (model, screen)
-        }
+    static func screenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: TreeScreen) {
+        if let entity { return try await screen(entity) }
         let model = try await model(for: nil as String?)
         if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) { return (model, screen) }
         if let selected = model.selectedNode, case .screen(let id) = selected.ref.host, let screen = model.store.treeScreen(id) {
@@ -226,12 +179,14 @@ enum DesignActions {
 
     // MARK: Changing designs
 
-    /// Makes a change to a design as one undo step, in the design's own undo history and,
-    /// when the system offers one, in the action's undo manager too.
+    /// Makes a change to a design as one undo step, named `actionName`, in the design's own undo history and, when the
+    /// system offers one, in the action's undo manager too.
     static func edit<T>(_ model: AppModel, undoManager: UndoManager?, actionName: String, _ body: () throws -> T) rethrows -> T {
         let before = model.store.content
         // Its own step, even in the middle of a drag, which goes on as its own (M3).
         let edit = model.store.beginEdit(by: .app)
+        // "Undo Move Text" in the Edit menu, as the system's history calls it.
+        model.store.name(edit, actionName)
         defer {
             model.store.endEdit(edit)
             let after = model.store.content
@@ -272,8 +227,13 @@ enum DesignActions {
     ///
     /// With a `point`, in canvas points, the screen's top-left corner goes there instead,
     /// moved right past any screen it would lie over.
+    ///
+    /// Each screen takes up its frame on the canvas drawn as its own device, the design's own included.
     static func placementForNewScreen(_ device: DeviceFrame, in model: AppModel, near point: CGPoint? = nil) -> Placement {
-        let scale = model.store.screens.last?.scale ?? 0.6
+        let tree = model.store.tree
+        let screens = tree.screens
+        let scale = screens.last?.scale ?? 0.6
+        func frame(of screen: TreeScreen) -> CGRect { screen.canvasFrame(on: tree.device(of: screen)) }
         if let point {
             // The screen with its name above it, which is what mustn't lie over another.
             let nameHeight = 34 * scale
@@ -282,24 +242,38 @@ enum DesignActions {
                 x: point.x.rounded(), y: top - nameHeight,
                 width: device.size.width * scale, height: device.size.height * scale + nameHeight
             )
+            let covered = screens.map { frame(of: $0).union($0.labelFrame(on: tree.device(of: $0))) }
             // Each move clears one screen and only goes rightwards, so this ends.
-            while let blocking = model.store.screens.map({ $0.canvasFrame.union($0.labelFrame) }).first(where: { $0.intersects(taken) }) {
+            while let blocking = covered.first(where: { $0.intersects(taken) }) {
                 taken.origin.x = (blocking.maxX + 60).rounded()
             }
             return Placement(origin: CGPoint(x: taken.minX, y: top), scale: scale)
         }
-        if let rightmost = model.store.screens.max(by: { $0.canvasFrame.maxX < $1.canvasFrame.maxX }) {
-            return Placement(origin: CGPoint(x: (rightmost.canvasFrame.maxX + 60).rounded(), y: rightmost.origin.y), scale: scale)
+        if let rightmost = screens.max(by: { frame(of: $0).maxX < frame(of: $1).maxX }) {
+            return Placement(origin: CGPoint(x: (frame(of: rightmost).maxX + 60).rounded(), y: rightmost.origin.y), scale: scale)
         }
         let middle = CGPoint(x: Viewport.canvasSize.width / 2, y: Viewport.canvasSize.height / 2)
         let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
         return Placement(origin: CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded()), scale: scale)
     }
 
-    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Plan 6's Task 5
-    /// moves its callers to `DesignStore.newElementFrame(_:on:)` and deletes it.
+    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Siri no longer
+    /// calls it: it is kept only for voice's `VoiceToolbox` (lane C), whose plan 6 Task 7 moves it to
+    /// `DesignStore.newElementFrame(_:on:)`; the last lane to move deletes it (F11, F16).
     static func frameForNewElement(_ element: DesignElement, on screen: DesignScreen) -> CGRect {
         ElementLayout.newElementFrame(for: element.kind, on: screen.device, below: screen.elements.filter { !$0.isHidden }.map(\.frame))
+    }
+
+    // MARK: Devices
+
+    /// The device an action asks for (call 6): `custom`, one of the design's own by its name ignoring case and the space
+    /// round it (`CanvasSettings.customDevice(named:)`), when it is given and isn't blank; else `choice`'s frame; nil when
+    /// neither is given. Throws `deviceNotFound` for a name the design has no device of its own called.
+    static func device(_ choice: DeviceChoice?, custom: String?, in model: AppModel) throws -> DeviceFrame? {
+        let name = custom?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else { return choice?.frame }
+        guard let device = model.store.tree.settings.customDevice(named: name) else { throw LayerIntentError.deviceNotFound(name) }
+        return device
     }
 }
 
@@ -481,7 +455,8 @@ enum DesignDescriber {
         describe(kind: node.kind, text: node.content.text, symbol: node.content.symbol)
     }
 
-    /// The same for a flat element, which voice and Siri's actions still hand over until plan 6's Tasks 5 and 7.
+    /// The same for a flat element, which voice still hands over until plan 6's Task 7; Siri's actions no longer do. The
+    /// last lane to move deletes it.
     static func describe(_ element: DesignElement) -> String {
         describe(kind: element.kind, text: element.text, symbol: element.symbol)
     }

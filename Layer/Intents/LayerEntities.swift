@@ -13,8 +13,9 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case locked
     case nothingToExport
     case invalidColour(String)
-    case invalidBlueprint
-    /// Building it would take the design past what a design holds: 5,000 nodes, nested at most 32 deep.
+    /// Build Screen's outline had nothing in it to build.
+    case invalidScreenDescription
+    /// Building it would take the design past what a design holds: 5,000 things, nested at most 32 deep.
     case designTooLarge
     case imagePlaygroundUnavailable
     case notAnImage
@@ -27,6 +28,10 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     /// is arranged among, which for a member of a group is the others in its group.
     case cantGoFurther(withinGroup: Bool)
     case invalidImage
+    /// What a row, column or grid places, or for Align an overlay too, isn't moved or arranged on its own (spec §10).
+    case laidOut
+    /// No device of the design's own has the name given.
+    case deviceNotFound(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -38,8 +43,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .locked: "That's locked. Unlock it in Layer first."
         case .nothingToExport: "There's nothing on that design to export yet."
         case .invalidColour(let text): "“\(text)” isn't a colour Layer knows. Use a name such as blue, or a hex code such as #0A84FF."
-        case .invalidBlueprint: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
-        case .designTooLarge: "That would make the design larger than Layer keeps: \(TreeRules.maximumNodes.formatted()) elements in all, none nested more than \(TreeRules.maximumDepth) deep. Nothing was built."
+        case .invalidScreenDescription: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
+        case .designTooLarge: "That would make the design larger than Layer keeps: more than \(TreeRules.maximumNodes.formatted()) things, or nested more than \(TreeRules.maximumDepth) deep. Nothing was built."
         case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."
@@ -50,6 +55,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .cantGoFurther(withinGroup: true): "That element can't go any further that way within its group. To move it past things outside the group, ungroup it first, or arrange the group."
         case .cantGoFurther(withinGroup: false): "That element can't go any further that way."
         case .invalidImage: "Layer couldn't read that file as a picture."
+        case .laidOut: "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first."
+        case .deviceNotFound(let name): "This design has no device called “\(name)”. Make one with Custom Size… in the device picker."
         }
     }
 }
@@ -187,11 +194,17 @@ struct ScreenEntity: IndexedEntity {
     var designID: String { EntityKey.parseScreen(id)?.design ?? "" }
     var screenID: UUID? { EntityKey.parseScreen(id)?.screen }
 
+    /// What the subtitle calls the device: its frame's name, a built-in's own as before, and one of the design's own by
+    /// the name it was given (`deviceName`), never the iPhone that `device` falls back to for one.
+    private let shownDevice: String
+
     /// A screen of a design whose canvas is set up as `settings` says, which hold the design's own devices. Its elements
     /// are its leaves (My call 9).
     init(design: String, designName: String, screen: TreeScreen, settings: CanvasSettings) {
         let frame = settings.device(named: screen.deviceID)
         id = EntityKey.screen(design: design, screen: screen.id)
+        // Before the properties, whose setters need every plain stored property set.
+        shownDevice = frame.name
         name = screen.name
         device = DeviceChoice(frame)
         deviceName = DeviceChoice.displayName(of: frame)
@@ -203,9 +216,23 @@ struct ScreenEntity: IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(name)",
-            subtitle: "\(device.name) · \(designName)",
+            subtitle: "\(shownDevice) · \(designName)",
             image: .init(systemName: device == .iPad ? "ipad" : "iphone")
         )
+    }
+}
+
+/// The design's own devices, by name, for a Custom Device parameter (call 6): Shortcuts offers them, and any name can
+/// still be typed, which `DesignActions.device(_:custom:in:)` looks up.
+struct CustomDeviceOptions: DynamicOptionsProvider {
+    /// `names(in:)` of the design at the front, or none when no design is open.
+    func results() async throws -> [String] {
+        await MainActor.run { OpenDesigns.shared.current.map(Self.names(in:)) ?? [] }
+    }
+
+    /// The design's own devices' names, in the order they were made. What tests call, with the model (F17).
+    @MainActor static func names(in model: AppModel) -> [String] {
+        model.store.tree.settings.customDevices.map(\.name)
     }
 }
 

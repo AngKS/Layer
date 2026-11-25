@@ -12,7 +12,8 @@ import Foundation
 /// and cards, are listed beside them, in `containers` and `canvasContainers`, with their children's ids.
 enum DesignLayoutWriter {
     /// Today's JSON, plus the tree (call 4). Leaves gain "sizing", "parent" and "rotation"; screens gain "deviceName",
-    /// "layout", "padding" and "containers"; the top level gains "canvasContainers". "device" is the device's id.
+    /// "layout", "padding" and "containers"; the top level gains "canvasContainers", and the canvas "newScreenDeviceName".
+    /// "device" and "newScreenDevice" are the device's id.
     /// Frames are host shapes: screen points on screens, canvas points on the canvas (call 3). Sorted keys.
     static func json(for snapshot: DesignSnapshot, ink: (count: Int, bounds: CGRect?)? = nil, hasUnreadSketch: Bool = false) -> String {
         let content = snapshot.content
@@ -46,7 +47,10 @@ enum DesignLayoutWriter {
             "snapsToGrid": settings.snapsToGrid,
             "showsMeasurements": settings.showsMeasurements,
             "showsFrameNames": settings.showsFrameNames,
-            "newScreenDevice": DeviceChoice(settings.sketchDevice).rawValue,
+            // Its id, as a screen's "device" is: a built-in's as before, and the design's own device's where the iPhone
+            // it falls back to was written; with the name Siri and Shortcuts know it by.
+            "newScreenDevice": settings.sketchDevice.id,
+            "newScreenDeviceName": DeviceChoice.displayName(of: settings.sketchDevice),
             // The option's value, which Update Canvas Settings takes, not the layout's own name.
             "codeLayout": CodeLayoutOption(settings.code.layout).rawValue,
             "codeIncludesPreview": settings.code.includesPreview,

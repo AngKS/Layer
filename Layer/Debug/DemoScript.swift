@@ -34,12 +34,12 @@ enum DemoScript {
             model.panelTab = parts[0] == "code" ? .code : .layers
             withAnimation(.smooth(duration: 0.35)) { model.isLayersOpen = true }
         case "select", "adjust":
-            guard let screen = model.store.screens.first,
+            guard let screen = model.store.tree.screens.first,
                   let kind = parts.dropFirst().first.flatMap(ElementKind.init(rawValue:)),
-                  let element = screen.elements.first(where: { $0.kind == kind })
+                  let leaf = screen.root.leaves.first(where: { $0.kind == kind })
             else { return }
             model.tool = .select
-            model.selection = .element(.init(host: .screen(screen.id), element: element.id))
+            model.selection = .element(.init(host: .screen(screen.id), element: leaf.id))
             model.isAdjusting = parts[0] == "adjust"
         default:
             break
@@ -54,9 +54,10 @@ enum DemoScript {
             let rect = CGRect(x: visible.midX - 130, y: visible.minY + 124 / model.viewport.scale, width: 260, height: 560)
             return [SketchSamples.box(rect, radius: 26)]
         }
-        guard let screen = model.store.screens.first else { return nil }
+        let tree = model.store.tree
+        guard let screen = tree.screens.first else { return nil }
         func onScreen(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> CGRect {
-            screen.canvasRect(for: CGRect(x: x, y: y, width: width, height: height))
+            screen.placement.canvasRect(for: CGRect(x: x, y: y, width: width, height: height))
         }
         switch step {
         case "button":
@@ -93,7 +94,7 @@ enum DemoScript {
             }
             return [points]
         case "note":
-            let frame = screen.canvasFrame
+            let frame = screen.canvasFrame(on: tree.device(of: screen))
             return [SketchSamples.box(CGRect(x: frame.maxX + 60, y: frame.minY + 40, width: 140, height: 130), radius: 6)]
         default:
             return nil

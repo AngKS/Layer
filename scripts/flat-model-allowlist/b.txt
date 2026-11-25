@@ -3,18 +3,6 @@
 # and takes a file's line out once its last hit has gone: the gate fails on a stale line.
 # The owners are the ledger's table (plan 6, Task 1).
 
-# Siri: Tasks 3-5. DesignActions.swift is in a.txt (F16).
-Layer/Canvas/ImagePlaygroundSupport.swift
-Layer/Debug/DemoScript.swift
-Layer/Intents/CanvasIntents.swift
-Layer/Intents/ElementIntents.swift
-Layer/Intents/ImageIntents.swift
-Layer/Intents/ScreenIntents.swift
-LayerTests/BuildScreenTests.swift
-LayerTests/LookWordsEverywhereTests.swift        # Task 5 (F24)
-LayerTests/SiriIntentsLiveTests.swift
-LayerTests/SiriIntentsTests.swift
-
 # Task 11, by the coordinator's ruling on plan 6's Task 3: a new test whose only flat read is the proof that a lowering
 # counter is live, retired under (s). The one line lane B adds.
 LayerTests/SiriOnTheTreeTests.swift              # (s): readingDoesNotLower's store.screens read; Task 11 retires it

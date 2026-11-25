@@ -55,7 +55,7 @@ struct GenerateImageIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard AppModel.canUseImagePlayground else { throw LayerIntentError.imagePlaygroundUnavailable }
         if let element {
-            let (model, ref, found) = try await DesignActions.element(element)
+            let (model, ref, found) = try await DesignActions.node(element)
             guard found.kind == .image else { throw LayerIntentError.notAnImage }
             DesignActions.reveal(.element(ref), in: model)
             model.remakeImageWithPlayground(ref, prompt: prompt, style: style?.style)
@@ -65,7 +65,7 @@ struct GenerateImageIntent: AppIntent {
             model.makeImageWithPlayground(prompt: prompt, style: style?.style, onScreen: target.id)
         } else {
             let model = try await DesignActions.model(for: nil as String?)
-            if let selected = model.selectedElement, selected.element.kind == .image {
+            if let selected = DesignActions.selectedLeaf(in: model), selected.node.kind == .image {
                 model.remakeImageWithPlayground(selected.ref, prompt: prompt, style: style?.style)
             } else {
                 model.makeImageWithPlayground(prompt: prompt, style: style?.style)
@@ -128,7 +128,7 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
         let model: AppModel
         let request: ImagePlaygroundRequest
         if let element {
-            let (found, ref, existing) = try await DesignActions.element(element)
+            let (found, ref, existing) = try await DesignActions.node(element)
             guard existing.kind == .image else { throw LayerIntentError.notAnImage }
             model = found
             request = ImagePlaygroundRequest(target: .replace(ref))
@@ -142,17 +142,18 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
         }
         let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> DesignStore.ElementRef? in
             guard let ref = model.placeGeneratedImage(prepared, for: request) else { return nil }
-            if element == nil, x != nil || y != nil || width != nil || height != nil {
-                model.store.update(ref) { image in
-                    let aspect = image.frame.height / max(image.frame.width, 1)
-                    if let width {
-                        image.frame.size.width = CGFloat(width)
-                        if height == nil { image.frame.size.height = (CGFloat(width) * aspect).rounded() }
-                    }
-                    if let height { image.frame.size.height = CGFloat(height) }
-                    if let x { image.frame.origin.x = CGFloat(x) }
-                    if let y { image.frame.origin.y = CGFloat(y) }
+            if element == nil, x != nil || y != nil || width != nil || height != nil, let placed = model.store.placed(ref) {
+                // In its host's points, as Move Element takes them: a screen root that lays it out keeps its place.
+                var frame = placed.frame
+                let aspect = frame.height / max(frame.width, 1)
+                if let width {
+                    frame.size.width = CGFloat(width)
+                    if height == nil { frame.size.height = (CGFloat(width) * aspect).rounded() }
                 }
+                if let height { frame.size.height = CGFloat(height) }
+                if let x { frame.origin.x = CGFloat(x) }
+                if let y { frame.origin.y = CGFloat(y) }
+                model.store.place(ref.element, at: frame)
             }
             return ref
         }
