@@ -358,6 +358,130 @@ private func makeModel() -> (model: AppModel, undo: UndoManager) {
         #expect(try root(of: screen, in: store).children.map(\.id).suffix(2) == [empty, across])
     }
 
+    /// Call 6, as plan 5's final review ruled it (B1): an outline round two fields of a column the pass built makes a
+    /// card holding both, in the column where they were. Nothing in the column moves, the fields after it included.
+    @Test func aCardRoundTwoFieldsOfABuiltColumnTakesThemWhereTheyAre() async throws {
+        let (model, undo) = makeModel()
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let fields = (0..<4).map { leaf(.textField, CGRect(x: 20, y: 100 + 60 * CGFloat($0), width: 353, height: 44)) }
+        for field in fields { #expect(model.store.add(field, to: .screen(screen))) }
+        model.structurePass(over: fields.map(\.id))
+        let column = try #require(model.store.treeScreen(screen)?.root.children.first)
+        try #require(column.sketch?.decidedBy == .structure)
+        try #require(column.children.map(\.id) == fields.map(\.id))
+        let before = fields.map { model.store.placed($0.id)?.frame }
+
+        // Round the second and third, 10 pt clear of them.
+        let outline = try strokes("box 10 150 373 124 16")
+        let drawn = try #require(SketchAnalyzer.observe(outline)).bounds
+        model.sketchChanged(outline)
+        model.convertNow()
+        // With no ink canvas here, the sketch is taken away by hand, as the canvas does once it is read.
+        model.sketchChanged([])
+        await model.waitForConversions()
+
+        let after = try #require(model.store.node(column.id))
+        #expect(after.children.count == 3)
+        let card = try #require(after.children.dropFirst().first)
+        #expect(card.kind == .card)
+        #expect(after.children.map(\.id) == [fields[0].id, card.id, fields[3].id])
+        #expect(card.children.map(\.id) == [fields[1].id, fields[2].id])
+        #expect(fields.map { model.store.placed($0.id)?.frame } == before)
+        // It holds them as the column did, and hugs them, so that it is as long as they were.
+        #expect(card.layout == column.layout)
+        #expect(card.padding == LayerNode.Padding())
+        #expect(card.width.mode == .fit && card.height.mode == .fit)
+        #expect(card.frame == CGRect(x: 0, y: 60, width: 353, height: 104))
+        #expect(card.style.tint == nil)
+        #expect(card.sketch?.originalBounds == drawn)
+
+        undo.undo()
+        #expect(model.store.node(column.id)?.children.map(\.id) == fields.map(\.id))
+        #expect(fields.map { model.store.placed($0.id)?.frame } == before)
+    }
+
+    /// In a row, the card is a row of what it takes, at their slot (B1).
+    @Test func aCardRoundMembersOfARowHoldsThemAsTheRowDid() throws {
+        let (store, screen, undo) = makeStore()
+        var row = rowOfTwoButtons()
+        row.children.append(leaf(.button, CGRect(x: 224, y: 0, width: 100, height: 44)))
+        #expect(store.add(row, to: .screen(screen)))
+        let buttons = row.children.map(\.id)
+        let before = buttons.map { store.placed($0)?.frame }
+
+        // Round the first two, at (20, 300) and (132, 300) on the screen; the third is at (244, 300).
+        let card = try #require(store.asOwnStep {
+            store.addSketched(.card, from: CGRect(x: 12, y: 290, width: 228, height: 64), confidence: 0.95, decidedBy: .rules)
+        })
+
+        #expect(store.node(row.id)?.children.map(\.id) == [card, buttons[2]])
+        let made = try #require(store.node(card))
+        #expect(made.children.map(\.id) == [buttons[0], buttons[1]])
+        #expect(made.layout == row.layout)
+        #expect(made.padding == LayerNode.Padding())
+        #expect(made.frame == CGRect(x: 0, y: 0, width: 212, height: 44))
+        #expect(buttons.map { store.placed($0)?.frame } == before)
+
+        undo.undo()
+        #expect(store.node(row.id)?.children.map(\.id) == buttons)
+    }
+
+    /// A card round one cell of a grid takes it in its cell. Round two, it would move each cell after them back a cell,
+    /// so it lands round the grid instead and goes behind it, and nothing moves (B1).
+    @Test func aCardTakesOneCellOfAGridAndLiesBehindTwo() throws {
+        let (store, screen, _) = makeStore()
+        var grid = LayerNode(kind: .group)
+        grid.layout = .grid(LayerNode.Grid(columns: 2, columnSpacing: 12, rowSpacing: 16,
+                                           alignment: LayerNode.Alignment(horizontal: .start, vertical: .start)))
+        (grid.width, grid.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        grid.frame = CGRect(x: 30, y: 300, width: 332, height: 256)
+        grid.children = [(0, 0), (172, 0), (0, 136), (172, 136)].map { x, y in
+            leaf(.image, CGRect(x: x, y: y, width: 160, height: 120))
+        }
+        #expect(store.add(grid, to: .screen(screen)))
+        let cells = grid.children.map(\.id)
+        let before = cells.map { store.placed($0)?.frame }
+
+        // Round the second cell, at (202, 300) on the screen.
+        let one = try #require(store.addSketched(.card, from: CGRect(x: 196, y: 294, width: 172, height: 132),
+                                                 confidence: 0.95, decidedBy: .rules))
+        #expect(store.node(grid.id)?.children.map(\.id) == [cells[0], one, cells[2], cells[3]])
+        #expect(store.node(one)?.children.map(\.id) == [cells[1]])
+        #expect(cells.map { store.placed($0)?.frame } == before)
+
+        // Round the first row: the first cell, and the card holding the second.
+        let two = try #require(store.addSketched(.card, from: CGRect(x: 20, y: 290, width: 352, height: 140),
+                                                 confidence: 0.95, decidedBy: .rules))
+        #expect(try root(of: screen, in: store).children.map(\.id) == [two, grid.id])
+        #expect(store.node(two)?.children.isEmpty == true)
+        #expect(store.node(grid.id)?.children.map(\.id) == [cells[0], one, cells[2], cells[3]])
+        #expect(cells.map { store.placed($0)?.frame } == before)
+    }
+
+    /// What a card takes in a column is one unbroken run: round two fields with a locked one between them, it lands
+    /// round the column and goes behind it, and nothing moves (B1).
+    @Test func aCardRoundALockedMemberOfAColumnLiesBehindIt() throws {
+        let (store, screen, _) = makeStore()
+        var column = LayerNode(kind: .group)
+        column.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: 16))
+        (column.width, column.height) = (LayerNode.Sizing(.fit), LayerNode.Sizing(.fit))
+        column.frame = CGRect(x: 20, y: 100, width: 353, height: 224)
+        column.children = (0..<4).map { leaf(.textField, CGRect(x: 0, y: 60 * CGFloat($0), width: 353, height: 44)) }
+        column.children[1].isLocked = true
+        #expect(store.add(column, to: .screen(screen)))
+        let fields = column.children.map(\.id)
+        let before = fields.map { store.placed($0)?.frame }
+
+        // Round the first three, and so not round the column.
+        let card = try #require(store.addSketched(.card, from: CGRect(x: 10, y: 90, width: 373, height: 184),
+                                                  confidence: 0.95, decidedBy: .rules))
+
+        #expect(try root(of: screen, in: store).children.map(\.id) == [card, column.id])
+        #expect(store.node(card)?.children.isEmpty == true)
+        #expect(store.node(column.id)?.children.map(\.id) == fields)
+        #expect(fields.map { store.placed($0)?.frame } == before)
+    }
+
     @Test func aCardLeavesLockedThingsWhereTheyAre() throws {
         let (store, screen, _) = makeStore()
         let title = leaf(.title, CGRect(x: 20, y: 112, width: 353, height: 40))

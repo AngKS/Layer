@@ -19,8 +19,11 @@ import Foundation
 ///     final box lies on, such as a background, and of anything that lay behind a thing it takes and overlapped it;
 ///     else in front. That slot then moves as little as needed so that nothing seen is wholly hidden by one thing,
 ///     where some slot can do that. Hidden things count for none of this.
-///   - In a row, column or grid it takes nothing, and keeps the drawn box: as tall as drawn, and as wide as drawn, or as
-///     wide as what holds it when it was drawn across the screen (`PlacementIntent.proportional`).
+///   - In a row, column, grid or overlay, round what it can take there in place (`SketchLanding.takenInPlace`), it takes
+///     that: their slot, and them, held as that container held them, with no padding and hugging them, so that nothing
+///     there moves (plan 5's final review, B1). Round nothing there, it takes nothing, and keeps the drawn box: as tall
+///     as drawn, and as wide as drawn, or as wide as what holds it when it was drawn across the screen
+///     (`PlacementIntent.proportional`).
 enum SketchedNode {
     struct Made: Equatable, Sendable {
         var node: LayerNode
@@ -107,12 +110,18 @@ enum SketchedNode {
             : DeviceFrame.custom(name: parent.kind.rawValue, size: parent.frame.size, family: device.family)
 
         var node: LayerNode
+        var landing = landing
         var takes: [UUID] = []
         var behind: UUID?
         if kind == .card {
             (node, takes, behind) = card(in: parent, at: depth, landing: landing, tokens: content.settings.tokens)
-            // Call 6: as drawn, in a row, column or grid too. Drawn across the screen, it is as wide as what holds it.
-            if landing.isLaidOut, intent.placement == .proportional { node.width = LayerNode.Sizing(.fill(weight: 1)) }
+            if landing.isLaidOut, let first = takes.first {
+                // Call 6, as ruled (B1): in the slot of what it takes.
+                landing.index = parent.children.firstIndex { $0.id == first }
+            } else if landing.isLaidOut, intent.placement == .proportional {
+                // Call 6: round nothing, as drawn. Drawn across the screen, it is as wide as what holds it.
+                node.width = LayerNode.Sizing(.fill(weight: 1))
+            }
         } else {
             node = leaf(kind, in: parent, landing: landing, on: standIn, tokens: content.settings.tokens)
             if kind == .button, hasFilledButton(screen.root, except: without) {
@@ -162,8 +171,8 @@ enum SketchedNode {
 
     /// A card at the drawn box in whole points, `.fixed`, what it takes, and what it goes behind. In a free container it
     /// takes what it encloses (`SketchLanding.enclosed`) whose subtrees stay within depth 32 once inside it (F9), and the
-    /// box grows to hold them; where it goes among what stays is `behind(_:taking:among:)`'s. `depth` is the receiving
-    /// container's.
+    /// box grows to hold them; where it goes among what stays is `behind(_:taking:among:)`'s. In a row, column, grid or
+    /// overlay it is `inPlace(_:drawn:in:at:)`. `depth` is the receiving container's.
     private static func card(in parent: LayerNode, at depth: Int, landing: SketchLanding,
                              tokens: DesignTokens) -> (LayerNode, takes: [UUID], behind: UUID?) {
         var node = LayerNode(kind: .card)
@@ -171,15 +180,63 @@ enum SketchedNode {
         let drawn = landing.local
         let minX = drawn.minX.rounded(), minY = drawn.minY.rounded()
         node.frame = CGRect(x: minX, y: minY, width: drawn.maxX.rounded() - minX, height: drawn.maxY.rounded() - minY)
-        guard !landing.isLaidOut else { return (node, [], nil) }
-        let enclosed = Set(SketchLanding.enclosed(by: drawn, in: parent))
-        // A child of the card sits two levels below the receiving container.
-        let taken = parent.children.filter {
-            enclosed.contains($0.id) && depth + 2 + TreeEdit.levels(below: $0) <= TreeRules.maximumDepth
+        guard !landing.isLaidOut else {
+            let (held, takes) = inPlace(node, drawn: drawn, in: parent, at: depth)
+            return (held, takes, nil)
         }
+        let enclosed = Set(SketchLanding.enclosed(by: drawn, in: parent))
+        let taken = parent.children.filter { enclosed.contains($0.id) && fitsInACard($0, at: depth) }
         if let box = TreeEdit.shapesBox(of: taken) { node.frame = node.frame.union(box).integral }
         let takes = taken.map(\.id)
         return (node, takes, behind(node.frame, taking: Set(takes), among: parent.children))
+    }
+
+    /// `card`, drawn round `drawn` in a row, column, grid or overlay (call 6, as ruled in plan 5's final review, B1).
+    /// Round what it can take there in place (`SketchLanding.takenInPlace`), all within depth 32 once inside it (F9), it
+    /// holds that as the container held it, with no padding, and fits it, filling an axis where something it takes fills
+    /// that axis. So it is as long as they were, the spacing between them included, and in their slot nothing there
+    /// moves. Else it takes nothing, as drawn.
+    private static func inPlace(_ card: LayerNode, drawn: CGRect, in parent: LayerNode,
+                                at depth: Int) -> (LayerNode, takes: [UUID]) {
+        guard let takes = SketchLanding.takenInPlace(by: drawn, in: parent), !takes.isEmpty else { return (card, []) }
+        let taking = Set(takes)
+        let taken = parent.children.filter { taking.contains($0.id) }
+        guard taken.allSatisfy({ fitsInACard($0, at: depth) }) else { return (card, []) }
+
+        var node = card
+        node.padding = LayerNode.Padding()
+        var axis: LayerNode.Axis?
+        switch parent.resolvedLayout {
+        case .stack(let stack):
+            node.layout = .stack(LayerNode.Stack(axis: stack.axis, spacing: stack.spacing, alignment: stack.alignment))
+            axis = stack.axis
+        case .overlay(let alignment):
+            node.layout = .overlay(alignment)
+        case .grid(let grid):
+            // Holding one cell.
+            node.layout = .overlay(grid.alignment)
+        case .free:
+            return (card, [])
+        }
+        /// Filling: one thing's own sizing, or, along a stack, their weights together. Else fitting.
+        func sizing(_ length: KeyPath<LayerNode, LayerNode.Sizing>, along: Bool) -> LayerNode.Sizing {
+            let weights = taken.compactMap { thing -> CGFloat? in
+                if case .fill(let weight) = thing[keyPath: length].mode { weight } else { nil }
+            }
+            if weights.isEmpty { return LayerNode.Sizing(.fit) }
+            if taken.count == 1 { return taken[0][keyPath: length] }
+            return LayerNode.Sizing(.fill(weight: along ? weights.reduce(0, +) : 1))
+        }
+        node.width = sizing(\.width, along: axis == .horizontal)
+        node.height = sizing(\.height, along: axis == .vertical)
+        node.frame = taken.dropFirst().reduce(taken[0].frame) { $0.union($1.frame) }
+        return (node, takes)
+    }
+
+    /// Whether `thing`, held by a card that goes in a container at `depth`, stays within depth 32 (F9): a child of the
+    /// card sits two levels below the container.
+    private static func fitsInACard(_ thing: LayerNode, at depth: Int) -> Bool {
+        depth + 2 + TreeEdit.levels(below: thing) <= TreeRules.maximumDepth
     }
 
     /// What a card whose final box is `box`, taking `taking` from `children` (back to front), goes in just behind, so

@@ -17,7 +17,8 @@ struct SketchLanding: Equatable, Sendable {
 
     /// The topmost screen under the sketch's centre (canvas points), then the deepest visible, unlocked container there;
     /// a locked or hidden one hands it to its nearest unlocked, visible ancestor. `forCard` skips containers the sketch
-    /// encloses (call 7). Nil off every screen.
+    /// encloses (call 7), and a row, column, grid or overlay round some of whose members it is drawn but can't take them
+    /// there in place (`takenInPlace(by:in:)`, call 6), so that it lands round that container. Nil off every screen.
     ///
     /// A container is under the centre when its turned shape holds it; the frontmost is looked in first, and a hidden one
     /// isn't there to be seen, so what is behind it is looked at instead. A container whose child would sit deeper than
@@ -34,7 +35,13 @@ struct SketchLanding: Equatable, Sendable {
         while let next = chain[chain.count - 1].children.last(where: { child in
             guard child.isContainer, !child.isHidden, let shape = index[child.id]?.hostShape, shape.contains(centre)
             else { return false }
-            return !(forCard && share(of: shape.bounds, inside: drawn) >= StructureConventions.enclosedShare)
+            guard forCard else { return true }
+            // A card takes a container it encloses from where that lies, and lands round one that lays its children out
+            // when it can't take what it encloses there in place.
+            if share(of: shape.bounds, inside: drawn) >= StructureConventions.enclosedShare { return false }
+            guard child.resolvedLayout != .free else { return true }
+            guard let space = ownSpace(of: child, on: screen, in: content, index: index) else { return false }
+            return takenInPlace(by: space.local(of: drawn), in: child) != nil
         }) {
             chain.append(next)
         }
@@ -69,6 +76,22 @@ struct SketchLanding: Equatable, Sendable {
     /// hidden or turned, back to front. The person's own containers are among them, and become the card's (call 7).
     static func enclosed(by rect: CGRect, in parent: LayerNode) -> [UUID] {
         parent.children.filter { canBeTaken($0) && isMostlyInside($0, rect) }.map(\.id)
+    }
+
+    /// What a card drawn round `rect` (the container's space) takes from a row, column, grid or overlay (call 6): what it
+    /// encloses (`enclosed(by:in:)`), in order, when that can become one thing in its place with nothing else there moving.
+    /// That is an unbroken run of a row, column or overlay, which hidden things, taking no room, don't break; or one cell
+    /// of a grid, since the cells after two taken would each move back a cell. Empty when it encloses nothing there; nil
+    /// when what it encloses can't be one thing in place.
+    static func takenInPlace(by rect: CGRect, in container: LayerNode) -> [UUID]? {
+        let taken = Set(enclosed(by: rect, in: container))
+        guard !taken.isEmpty else { return [] }
+        if case .grid = container.resolvedLayout { return taken.count == 1 ? Array(taken) : nil }
+        let shown = container.children.filter { !$0.isHidden }
+        guard let first = shown.firstIndex(where: { taken.contains($0.id) }),
+              let last = shown.lastIndex(where: { taken.contains($0.id) }),
+              shown[first...last].allSatisfy({ taken.contains($0.id) }) else { return nil }
+        return shown[first...last].map(\.id)
     }
 
     // MARK: - How it is worked out
