@@ -4,10 +4,10 @@ import Foundation
 /// message per line, so the screen is shown growing as each line is finished (`A2UIStream`).
 ///
 /// A model writes A2UI only when a caller asks for it (`ScreenGenerator.stream(_:format:)`): every model writes the
-/// outline by default (`ScreenGenerator.format(for:)`, plan 6's measure). The prompt is always the full one: the form,
-/// two examples chosen for the description as `ScreenPrompt.examples` chooses the outline's, and today's rules in
-/// A2UI's words. It names no spacing, size or colour: Layer's tokens set them, and a model's Layer look is ignored
-/// (§14). It builds on macOS, for the screen harness.
+/// outline by default (`ScreenGenerator.format(for:)`, plan 6's measure and 2026-11-26's). The prompt is always the
+/// full one: the form, a component a line, two examples chosen for the description as `ScreenPrompt.examples` chooses
+/// the outline's, and today's rules in A2UI's words. It names no spacing, size or colour: Layer's tokens set them, and
+/// a model's Layer look is ignored (§14). It builds on macOS, for the screen harness.
 enum A2UIPrompt {
     /// The surface a model writes its screen on.
     static let surfaceID = "screen"
