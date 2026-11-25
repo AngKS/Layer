@@ -31,10 +31,12 @@ enum A2UIPrompt {
         The first line creates the screen's surface:
         \(createSurface)
 
-        Each line after it is an updateComponents message that adds the next part of the screen, from top to bottom:
-        \(message(#"…"#))
+        Each line after it is an updateComponents message holding one component, the next part of the screen, from \
+        top to bottom:
+        \(message(#"{"id":"…","component":"…",…}"#))
         The first holds the root: a Column with the id root, whose children are the ids of the screen's sections, in \
-        order. Each one after it adds the next section: the component the root names, and what it holds.
+        order. Then each section the root names, each followed by what it holds, a line for each component. Every id \
+        a component names has a line of its own.
 
         Every component has an id, its own on the screen, and a component. Use only these:
         - Column: children, a list of ids, from top to bottom.
@@ -43,11 +45,11 @@ enum A2UIPrompt {
         - LayerGrid: children, filled row by row, and columns, a whole number from 1 to 12, which is required.
         - Text: text. "# " or "## " before the words makes the screen's heading; variant caption is for small print.
         - Image: url "" and a description of what it shows; variant avatar for a person.
-        - Icon: name, one of A2UI's icon names, such as search, settings or favorite.
-        - LayerSymbol: name, an SF Symbol name, such as bell or gearshape.
+        - LayerSymbol: name, an SF Symbol name, such as bell, gearshape or chevron.right. Every icon is one.
         - Button: child, the id of a Text with its words; variant primary, default or borderless; and action.
         - TextField: label, saying what goes in it, and value "".
-        - CheckBox, LayerToggle and LayerRadio: label, and value true or false.
+        - CheckBox, LayerToggle and LayerRadio: label, always, even beside a Text that says the same, and value true \
+        or false.
         - LayerProgress: value, from 0 to 1.
         - Divider.
 
@@ -90,45 +92,111 @@ enum A2UIPrompt {
     }
 
     /// The outline library's six screens as A2UI JSON lines, by the same names, with the same elements in the same
-    /// order: each a message per line, the root first, then a section at a time.
+    /// order: a message per line and a component per message, the root first, then each section followed by what it
+    /// holds. A line holding several components broke more often: plan 6's and 2026-11-26's broken lines were all
+    /// long ones (docs/benchmarks/screen-prompt.md).
     static let library: [ScreenPrompt.Example] = [
         example("settings", lines(
-            ###"{"id":"root","component":"Column","children":["heading","alerts","turn_off"]},{"id":"heading","component":"Text","text":"## Notifications"}"###,
-            #"{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]},{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]},{"id":"push_label","component":"Text","text":"Push notifications"},{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}"#,
-            #"{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]},{"id":"summary_label","component":"Text","text":"Daily summary"},{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}"#,
-            #"{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]},{"id":"mentions_label","component":"Text","text":"Mentions only"},{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}"#,
-            #"{"id":"divider","component":"Divider"},{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]},{"id":"quiet_label","component":"Text","text":"Quiet hours"},{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}"#,
-            #"{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}},{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}"#
+            #"{"id":"root","component":"Column","children":["heading","alerts","turn_off"]}"#,
+            ###"{"id":"heading","component":"Text","text":"## Notifications"}"###,
+            #"{"id":"alerts","component":"Column","children":["push","summary","mentions","divider","quiet"]}"#,
+            #"{"id":"push","component":"Row","justify":"spaceBetween","align":"center","children":["push_label","push_switch"]}"#,
+            #"{"id":"push_label","component":"Text","text":"Push notifications"}"#,
+            #"{"id":"push_switch","component":"LayerToggle","label":"Push notifications","value":true}"#,
+            #"{"id":"summary","component":"Row","justify":"spaceBetween","align":"center","children":["summary_label","summary_switch"]}"#,
+            #"{"id":"summary_label","component":"Text","text":"Daily summary"}"#,
+            #"{"id":"summary_switch","component":"LayerToggle","label":"Daily summary","value":false}"#,
+            #"{"id":"mentions","component":"Row","justify":"spaceBetween","align":"center","children":["mentions_label","mentions_switch"]}"#,
+            #"{"id":"mentions_label","component":"Text","text":"Mentions only"}"#,
+            #"{"id":"mentions_switch","component":"LayerToggle","label":"Mentions only","value":true}"#,
+            #"{"id":"divider","component":"Divider"}"#,
+            #"{"id":"quiet","component":"Row","justify":"spaceBetween","align":"center","children":["quiet_label","quiet_hours"]}"#,
+            #"{"id":"quiet_label","component":"Text","text":"Quiet hours"}"#,
+            #"{"id":"quiet_hours","component":"Text","text":"22:00 – 07:00","variant":"caption"}"#,
+            #"{"id":"turn_off","component":"Button","child":"turn_off_label","variant":"borderless","action":{"event":{"name":"turnOffAllNotifications"}}}"#,
+            #"{"id":"turn_off_label","component":"Text","text":"Turn off all notifications"}"#
         )),
         example("product", lines(
-            #"{"id":"root","component":"Column","children":["photo","about","details","actions"]},{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}"#,
-            ###"{"id":"about","component":"Column","children":["name","summary"]},{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"},{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}"###,
-            #"{"id":"details","component":"Card","child":"details_rows"},{"id":"details_rows","component":"Column","children":["size","colour"]},{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]},{"id":"size_label","component":"Text","text":"Size"},{"id":"size_value","component":"Text","text":"26 cm"}"#,
-            #"{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]},{"id":"colour_label","component":"Text","text":"Colour"},{"id":"colour_value","component":"Text","text":"Black"}"#,
-            #"{"id":"actions","component":"Column","children":["add","save"]},{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}},{"id":"add_label","component":"Text","text":"Add to bag"},{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}},{"id":"save_label","component":"Text","text":"Save for later"}"#
+            #"{"id":"root","component":"Column","children":["photo","about","details","actions"]}"#,
+            #"{"id":"photo","component":"Image","url":"","description":"A black cast-iron skillet"}"#,
+            #"{"id":"about","component":"Column","children":["name","summary"]}"#,
+            ###"{"id":"name","component":"Text","text":"## Cast-iron skillet, 26 cm"}"###,
+            #"{"id":"summary","component":"Text","text":"Pre-seasoned and oven-safe. Ships in two days."}"#,
+            #"{"id":"details","component":"Card","child":"details_rows"}"#,
+            #"{"id":"details_rows","component":"Column","children":["size","colour"]}"#,
+            #"{"id":"size","component":"Row","justify":"spaceBetween","align":"center","children":["size_label","size_value"]}"#,
+            #"{"id":"size_label","component":"Text","text":"Size"}"#,
+            #"{"id":"size_value","component":"Text","text":"26 cm"}"#,
+            #"{"id":"colour","component":"Row","justify":"spaceBetween","align":"center","children":["colour_label","colour_value"]}"#,
+            #"{"id":"colour_label","component":"Text","text":"Colour"}"#,
+            #"{"id":"colour_value","component":"Text","text":"Black"}"#,
+            #"{"id":"actions","component":"Column","children":["add","save"]}"#,
+            #"{"id":"add","component":"Button","child":"add_label","variant":"primary","action":{"event":{"name":"addToBag"}}}"#,
+            #"{"id":"add_label","component":"Text","text":"Add to bag"}"#,
+            #"{"id":"save","component":"Button","child":"save_label","variant":"borderless","action":{"event":{"name":"saveForLater"}}}"#,
+            #"{"id":"save_label","component":"Text","text":"Save for later"}"#
         )),
         example("profile", lines(
-            ###"{"id":"root","component":"Column","children":["person","work"]},{"id":"person","component":"Column","children":["avatar","name","bio","contact"]},{"id":"avatar","component":"Image","url":"","variant":"avatar","description":"Maya Okafor"},{"id":"name","component":"Text","text":"## Maya Okafor"},{"id":"bio","component":"Text","text":"Ceramicist in Lisbon. Small-batch tableware."}"###,
-            #"{"id":"contact","component":"Row","align":"center","children":["follow","message"]},{"id":"follow","component":"Button","child":"follow_label","variant":"primary","action":{"event":{"name":"follow"}}},{"id":"follow_label","component":"Text","text":"Follow"},{"id":"message","component":"Button","child":"message_label","variant":"default","action":{"event":{"name":"message"}}},{"id":"message_label","component":"Text","text":"Message"}"#,
-            #"{"id":"work","component":"Column","children":["work_heading","work_grid"]},{"id":"work_heading","component":"Text","text":"Recent work"},{"id":"work_grid","component":"LayerGrid","columns":3,"children":["bowl","plate","mug","vase","jug","cup"]},{"id":"bowl","component":"Image","url":"","description":"A speckled bowl"},{"id":"plate","component":"Image","url":"","description":"A blue-rimmed plate"},{"id":"mug","component":"Image","url":"","description":"A stoneware mug"},{"id":"vase","component":"Image","url":"","description":"A tall glazed vase"},{"id":"jug","component":"Image","url":"","description":"A cream jug"},{"id":"cup","component":"Image","url":"","description":"A handleless cup"}"#
+            #"{"id":"root","component":"Column","children":["person","work"]}"#,
+            #"{"id":"person","component":"Column","children":["avatar","name","bio","contact"]}"#,
+            #"{"id":"avatar","component":"Image","url":"","variant":"avatar","description":"Maya Okafor"}"#,
+            ###"{"id":"name","component":"Text","text":"## Maya Okafor"}"###,
+            #"{"id":"bio","component":"Text","text":"Ceramicist in Lisbon. Small-batch tableware."}"#,
+            #"{"id":"contact","component":"Row","align":"center","children":["follow","message"]}"#,
+            #"{"id":"follow","component":"Button","child":"follow_label","variant":"primary","action":{"event":{"name":"follow"}}}"#,
+            #"{"id":"follow_label","component":"Text","text":"Follow"}"#,
+            #"{"id":"message","component":"Button","child":"message_label","variant":"default","action":{"event":{"name":"message"}}}"#,
+            #"{"id":"message_label","component":"Text","text":"Message"}"#,
+            #"{"id":"work","component":"Column","children":["work_heading","work_grid"]}"#,
+            #"{"id":"work_heading","component":"Text","text":"Recent work"}"#,
+            #"{"id":"work_grid","component":"LayerGrid","columns":3,"children":["bowl","plate","mug","vase","jug","cup"]}"#,
+            #"{"id":"bowl","component":"Image","url":"","description":"A speckled bowl"}"#,
+            #"{"id":"plate","component":"Image","url":"","description":"A blue-rimmed plate"}"#,
+            #"{"id":"mug","component":"Image","url":"","description":"A stoneware mug"}"#,
+            #"{"id":"vase","component":"Image","url":"","description":"A tall glazed vase"}"#,
+            #"{"id":"jug","component":"Image","url":"","description":"A cream jug"}"#,
+            #"{"id":"cup","component":"Image","url":"","description":"A handleless cup"}"#
         )),
         example("form", lines(
-            ###"{"id":"root","component":"Column","children":["heading","address","billing","next"]},{"id":"heading","component":"Text","text":"## Delivery address"}"###,
-            #"{"id":"address","component":"Column","children":["full_name","street","town","phone"]},{"id":"full_name","component":"TextField","label":"Full name","value":""},{"id":"street","component":"TextField","label":"Street and number","value":""}"#,
-            #"{"id":"town","component":"Row","children":["postcode","city"]},{"id":"postcode","component":"TextField","label":"Postcode","value":""},{"id":"city","component":"TextField","label":"City","value":""}"#,
+            #"{"id":"root","component":"Column","children":["heading","address","billing","next"]}"#,
+            ###"{"id":"heading","component":"Text","text":"## Delivery address"}"###,
+            #"{"id":"address","component":"Column","children":["full_name","street","town","phone"]}"#,
+            #"{"id":"full_name","component":"TextField","label":"Full name","value":""}"#,
+            #"{"id":"street","component":"TextField","label":"Street and number","value":""}"#,
+            #"{"id":"town","component":"Row","children":["postcode","city"]}"#,
+            #"{"id":"postcode","component":"TextField","label":"Postcode","value":""}"#,
+            #"{"id":"city","component":"TextField","label":"City","value":""}"#,
             #"{"id":"phone","component":"TextField","label":"Phone, for the courier","value":""}"#,
-            #"{"id":"billing","component":"Row","justify":"spaceBetween","align":"center","children":["billing_label","billing_switch"]},{"id":"billing_label","component":"Text","text":"Same address for billing"},{"id":"billing_switch","component":"LayerToggle","label":"Same address for billing","value":true}"#,
-            #"{"id":"next","component":"Button","child":"next_label","variant":"primary","action":{"event":{"name":"continueToPayment"}}},{"id":"next_label","component":"Text","text":"Continue to payment"}"#
+            #"{"id":"billing","component":"Row","justify":"spaceBetween","align":"center","children":["billing_label","billing_switch"]}"#,
+            #"{"id":"billing_label","component":"Text","text":"Same address for billing"}"#,
+            #"{"id":"billing_switch","component":"LayerToggle","label":"Same address for billing","value":true}"#,
+            #"{"id":"next","component":"Button","child":"next_label","variant":"primary","action":{"event":{"name":"continueToPayment"}}}"#,
+            #"{"id":"next_label","component":"Text","text":"Continue to payment"}"#
         )),
         example("empty", lines(
-            ###"{"id":"root","component":"Column","children":["message","browse"]},{"id":"message","component":"Column","children":["tray","heading","explanation"]},{"id":"tray","component":"LayerSymbol","name":"tray"},{"id":"heading","component":"Text","text":"## No orders yet"},{"id":"explanation","component":"Text","text":"When you buy something, it shows up here with its tracking."}"###,
-            #"{"id":"browse","component":"Button","child":"browse_label","variant":"primary","action":{"event":{"name":"browseTheShop"}}},{"id":"browse_label","component":"Text","text":"Browse the shop"}"#
+            #"{"id":"root","component":"Column","children":["message","browse"]}"#,
+            #"{"id":"message","component":"Column","children":["tray","heading","explanation"]}"#,
+            #"{"id":"tray","component":"LayerSymbol","name":"tray"}"#,
+            ###"{"id":"heading","component":"Text","text":"## No orders yet"}"###,
+            #"{"id":"explanation","component":"Text","text":"When you buy something, it shows up here with its tracking."}"#,
+            #"{"id":"browse","component":"Button","child":"browse_label","variant":"primary","action":{"event":{"name":"browseTheShop"}}}"#,
+            #"{"id":"browse_label","component":"Text","text":"Browse the shop"}"#
         )),
         example("sign in", lines(
-            ###"{"id":"root","component":"Column","children":["intro","fields","links"]},{"id":"intro","component":"Column","children":["heading","subtitle"]},{"id":"heading","component":"Text","text":"## Sign in to Fieldnote"},{"id":"subtitle","component":"Text","text":"Pick up your notes where you left them."}"###,
-            #"{"id":"fields","component":"Column","children":["email","password","sign_in"]},{"id":"email","component":"TextField","label":"Email","value":""},{"id":"password","component":"TextField","label":"Password","value":""}"#,
-            #"{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}},{"id":"sign_in_label","component":"Text","text":"Sign in"}"#,
-            #"{"id":"links","component":"Row","justify":"spaceBetween","children":["forgot","create"]},{"id":"forgot","component":"Button","child":"forgot_label","variant":"borderless","action":{"event":{"name":"resetPassword"}}},{"id":"forgot_label","component":"Text","text":"Forgot password?"},{"id":"create","component":"Button","child":"create_label","variant":"borderless","action":{"event":{"name":"createAccount"}}},{"id":"create_label","component":"Text","text":"Create account"}"#
+            #"{"id":"root","component":"Column","children":["intro","fields","links"]}"#,
+            #"{"id":"intro","component":"Column","children":["heading","subtitle"]}"#,
+            ###"{"id":"heading","component":"Text","text":"## Sign in to Fieldnote"}"###,
+            #"{"id":"subtitle","component":"Text","text":"Pick up your notes where you left them."}"#,
+            #"{"id":"fields","component":"Column","children":["email","password","sign_in"]}"#,
+            #"{"id":"email","component":"TextField","label":"Email","value":""}"#,
+            #"{"id":"password","component":"TextField","label":"Password","value":""}"#,
+            #"{"id":"sign_in","component":"Button","child":"sign_in_label","variant":"primary","action":{"event":{"name":"signIn"}}}"#,
+            #"{"id":"sign_in_label","component":"Text","text":"Sign in"}"#,
+            #"{"id":"links","component":"Row","justify":"spaceBetween","children":["forgot","create"]}"#,
+            #"{"id":"forgot","component":"Button","child":"forgot_label","variant":"borderless","action":{"event":{"name":"resetPassword"}}}"#,
+            #"{"id":"forgot_label","component":"Text","text":"Forgot password?"}"#,
+            #"{"id":"create","component":"Button","child":"create_label","variant":"borderless","action":{"event":{"name":"createAccount"}}}"#,
+            #"{"id":"create_label","component":"Text","text":"Create account"}"#
         )),
     ]
 
@@ -139,14 +207,14 @@ enum A2UIPrompt {
         #"{"version":"1.0","createSurface":{"surfaceId":"\#(surfaceID)","catalogId":"\#(LayerCatalog.id)"}}"#
     }
 
-    /// An updateComponents line adding `components`, written as JSON objects separated by commas.
+    /// An updateComponents line adding `components`, written as JSON: the examples' lines each add one.
     private static func message(_ components: String) -> String {
         #"{"version":"1.0","updateComponents":{"surfaceId":"\#(surfaceID)","components":[\#(components)]}}"#
     }
 
-    /// A screen as a model writes it: the surface, then a message per part.
-    private static func lines(_ parts: String...) -> String {
-        ([createSurface] + parts.map(message)).joined(separator: "\n")
+    /// A screen as a model writes it: the surface, then a message for each component.
+    private static func lines(_ components: String...) -> String {
+        ([createSurface] + components.map(message)).joined(separator: "\n")
     }
 
     /// The library screen `name` in A2UI, picked by the outline example's keywords.

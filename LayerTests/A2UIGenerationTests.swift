@@ -361,6 +361,37 @@ struct A2UIGenerationTests {
         }
     }
 
+    /// A line holding several components broke far more often than one holding one (2026-11-26,
+    /// docs/benchmarks/screen-prompt.md), so the model is asked for one component a message, and every example shows it.
+    @Test func theA2UIPromptAsksForOneComponentAMessage() throws {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(prompt.contains("an updateComponents message holding one component"))
+        #expect(prompt.contains(#"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"…","component":"…",…}]}}"#))
+        for example in A2UIPrompt.library {
+            for line in example.lines.split(separator: "\n").dropFirst() {
+                let message = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], "\(example.name)")
+                let components = (message["updateComponents"] as? [String: Any])?["components"] as? [Any]
+                #expect(components?.count == 1, "\(example.name): \(line)")
+            }
+        }
+    }
+
+    /// A model wrote SF Symbol names in A2UI's `Icon` (plan 6 and 2026-11-26), so the prompt offers one way to write an
+    /// icon, Layer's own symbol by its SF Symbol name.
+    @Test func theA2UIPromptOffersOneWayToWriteAnIcon() {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(!prompt.contains("- Icon:"))
+        #expect(!prompt.contains("A2UI's icon names"))
+        #expect(prompt.contains("- LayerSymbol: name, an SF Symbol name, such as bell, gearshape or chevron.right. Every icon is one."))
+        #expect(A2UIPrompt.library.allSatisfy { !$0.lines.contains(#""component":"Icon""#) })
+    }
+
+    /// A model left a LayerToggle's label out beside a Text saying the same (2026-11-26), and a label is required.
+    @Test func theA2UIPromptSaysAControlAlwaysHasItsLabel() {
+        let prompt = A2UIPrompt.instructions(for: "a profile")
+        #expect(prompt.contains("- CheckBox, LayerToggle and LayerRadio: label, always, even beside a Text that says the same, and value true or false."))
+    }
+
     // MARK: - What a generation says it left out
 
     @Test @MainActor func aGenerationSaysWhatItLeftOut() async throws {
