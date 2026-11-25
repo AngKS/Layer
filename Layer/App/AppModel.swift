@@ -512,6 +512,8 @@ final class AppModel {
         var unfixedIssues: [UnfixedIssue: [UUID]] = [:]
         /// How many nodes have an issue, as of the last update: said once the answer is complete.
         var unfixed: Int { UnfixedIssue.nodes(in: unfixedIssues) }
+        /// What was left out and what is still wrong, in sentences (`UnfixedIssue.report`). Nil when there is neither.
+        var report: String? { UnfixedIssue.report(leftOut: leftOut, unfixedIssues) }
     }
 
     /// The screen being generated, or the last one while its outcome is shown.
@@ -2528,15 +2530,18 @@ final class AppModel {
         isEditingText = true
     }
 
-    /// Adds a picture, drawn no wider than most of a phone screen.
-    func addImage(_ prepared: ImageImport.Prepared) {
+    /// Adds a picture, drawn no wider than most of a phone screen. Returns where it is: nil when the design has no room
+    /// for it, which leaves the selection as it was. A picture's data a refused image leaves in the document isn't
+    /// saved: a file keeps only the pictures its images show.
+    @discardableResult
+    func addImage(_ prepared: ImageImport.Prepared) -> NodeRef? {
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
         var node = LayerNode.standard(.image)
         let width = min(prepared.image.size.width, 280)
         node.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
         node.content.imageID = id
-        add(node)
+        return add(node)
     }
 
     /// Adds a device frame in the middle of the view, or centred on `point` in canvas

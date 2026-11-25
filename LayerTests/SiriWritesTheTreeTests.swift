@@ -179,6 +179,43 @@ struct SiriWritesTheTreeTests {
         #expect(store.tree == before)
     }
 
+    /// A row child given a position whose centre falls in its own slot is kept there by the row: Siri says so, with
+    /// `laidOut`, and never "Moved". Nothing is kept, a size given with the position included, and nothing is offered to
+    /// undo. Move to Screen onto its own screen goes the same way (plan 6 final review A, I1).
+    @Test func aRowChildMovedWithinItsOwnSlotIsRefused() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let store = login.model.store
+        let label = try ref(login.label, in: login)
+        let shown = try #require(store.index[login.label]?.hostShape.rect)
+        let siri = systemUndo()
+        let before = store.tree
+
+        let kept = #expect(throws: LayerIntentError.self) {
+            try MoveElementIntent.move(label, in: login.model, x: Double(shown.minX) + 5, y: nil, width: nil, height: nil,
+                                       undoManager: siri)
+        }
+        #expect(isLaidOut(kept))
+        #expect(said(kept) == Self.laidOutLine)
+        #expect(store.tree == before)
+
+        // The size alone would be kept, as resizing a row child is, but the position can't be.
+        let resized = #expect(throws: LayerIntentError.self) {
+            try MoveElementIntent.move(label, in: login.model, x: Double(shown.minX) + 5, y: nil, width: 90, height: nil,
+                                       undoManager: siri)
+        }
+        #expect(isLaidOut(resized))
+        #expect(store.tree == before)
+
+        let onItsScreen = #expect(throws: LayerIntentError.self) {
+            _ = try MoveElementToScreenIntent.move(label, toScreen: login.screen, x: Double(shown.minX) + 5, y: nil,
+                                                   in: login.model, undoManager: siri)
+        }
+        #expect(isLaidOut(onItsScreen))
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
+        #expect(!siri.canUndo)
+    }
+
     @Test func aLaidOutChildStaysOnItsScreen() throws {
         let login = TreeFixture.loginWithACardAndARow()
         let store = login.model.store
@@ -498,6 +535,54 @@ struct SiriWritesTheTreeTests {
         #expect(store.node(image.id)?.content.imageID != nil)
         #expect(store.ownFrame(image.id) == frame)
         #expect(store.parent(of: image.id) == .node(login.card))
+    }
+
+    /// A teal picture 64 × 32, as a file gives one.
+    private func picture() throws -> ImageImport.Prepared {
+        let drawn = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 32)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 32))
+        }
+        let data = try #require(drawn.pngData())
+        return try #require(ImageImport.prepare(data))
+    }
+
+    /// Brings the fixture's design to 5,000 nodes with a screen of texts, its root among them.
+    private func fill(_ login: TreeFixture.Login) throws {
+        let store = login.model.store
+        let room = TreeRules.maximumNodes - store.index.count - 1
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 2_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes)
+        login.undo.removeAllActions()
+    }
+
+    /// Add Picture in a full design, on the open canvas or on a screen, hands back nothing and says the design is full.
+    /// Nothing is written: what was selected isn't moved to the X and Y the picture was given (plan 6 final review A, I2).
+    @Test func aPictureAddedToAFullDesignIsRefusedAsTooLarge() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model, store = model.store
+        try fill(login)
+        model.selection = .element(try ref(login.title, in: login))
+        let picture = try picture()
+        let before = store.tree
+        func isTooLarge(_ error: LayerIntentError?) -> Bool {
+            error.map { if case .designTooLarge = $0 { true } else { false } } == true
+        }
+
+        #expect(model.placeGeneratedImage(picture, for: ImagePlaygroundRequest(target: .newImage(onScreen: nil))) == nil)
+        let onCanvas = #expect(throws: LayerIntentError.self) {
+            _ = try AddImageFileIntent.add(picture, for: ImagePlaygroundRequest(target: .newImage(onScreen: nil)), in: model,
+                                           x: 300, y: 300, width: nil, height: nil, undoManager: nil)
+        }
+        #expect(isTooLarge(onCanvas))
+        let onScreen = #expect(throws: LayerIntentError.self) {
+            _ = try AddImageFileIntent.add(picture, for: ImagePlaygroundRequest(target: .newImage(onScreen: login.screen)), in: model,
+                                           x: 300, y: 300, width: nil, height: nil, undoManager: nil)
+        }
+        #expect(isTooLarge(onScreen))
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
     }
 
     // MARK: - Task 5's review, carried to Task 10

@@ -355,8 +355,10 @@ final class VoiceToolbox: VoiceActing {
         } onCancel: {
             Task { @MainActor in model.stopGenerating() }
         }
-        let outcome = model.generation?.phase
-        // The pill has said how it went, so the canvas's own notice isn't left behind.
+        // Read before the status goes: what it says of what was left out or couldn't be put right (spec §9) is said by
+        // the reply below, so the canvas's own notice isn't left behind.
+        let finished = model.generation
+        let outcome = finished?.phase
         model.dismissGeneration()
         try Task.checkCancellation()
         if case .failed(let reason) = outcome { return failed(reason) }
@@ -366,9 +368,10 @@ final class VoiceToolbox: VoiceActing {
         }
         // Told as a person would count what is on it: its leaves, not the rows and cards that hold them.
         let count = screen.root.leaves.count
+        let report = finished?.report.map { " \($0)" } ?? ""
         // Said so: seeing the new screen in its canvas list, a model took it for another
         // one already there with the same name.
-        return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements"). It is the \(handles.handle(forScreen: screenID)) now in the canvas list.")
+        return done("Made the screen “\(screen.name)” as \(handles.handle(forScreen: screenID)), with \(count == 1 ? "1 element" : "\(count) elements").\(report) It is the \(handles.handle(forScreen: screenID)) now in the canvas list.")
     }
 
     func renameScreen(screen: String, name: String) -> String {
@@ -1101,8 +1104,8 @@ final class VoiceToolbox: VoiceActing {
     }
 
     /// What places a thing a row, column, grid or overlay lays out: that one's handle, or its screen's for a screen's
-    /// root, and the word its layout goes by.
-    private struct Placer {
+    /// root, and the word its layout goes by. Internal for VoiceToolbox+Structure.swift's reorder.
+    struct Placer {
         var handle: String
         /// `row`, `column`, `grid` or `overlay`.
         var word: String
@@ -1116,7 +1119,8 @@ final class VoiceToolbox: VoiceActing {
     }
 
     /// What places `found`, or nil when it is in a free parent: a free container, a free root or the open canvas.
-    private func placer(of found: Found) -> Placer? {
+    /// Internal for VoiceToolbox+Structure.swift's reorder.
+    func placer(of found: Found) -> Placer? {
         guard found.placed.isLaidOut else { return nil }
         return placer(of: found.id)
     }

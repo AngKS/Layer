@@ -29,18 +29,23 @@ extension CanvasPicture {
         /// Ink is a node like any other in the design, and a board can hold hundreds of drawings. They are the
         /// Pencil's: a model is told nothing of them, so it has no handle to change one by, and the on-device
         /// model's room isn't spent on them.
-        func picture(of placed: TreeIndex.OwnSpace.Placed, _ node: LayerNode, isOnAScreen: Bool) -> Element? {
+        ///
+        /// A node is told locked when it or a container above it is (`inLocked`), as voice refuses to move it then.
+        func picture(of placed: TreeIndex.OwnSpace.Placed, _ node: LayerNode, isOnAScreen: Bool, inLocked: Bool = false) -> Element? {
             guard node.kind != .drawing else { return nil }
+            let isLocked = inLocked || node.isLocked
             var element = Element(
                 handle: handles.handle(forNode: node.id), kind: node.kind.layerName.lowercased(),
                 text: node.kind == .symbol ? (node.content.symbol ?? "") : node.content.text.trimmingCharacters(in: .whitespacesAndNewlines),
                 frame: isOnAScreen ? placed.frame : nil, rotation: Rotation.kept(placed.degrees) ?? 0,
-                isSelected: selectedNodes.contains(node.id), isLocked: node.isLocked, isHidden: node.isHidden
+                isSelected: selectedNodes.contains(node.id), isLocked: isLocked, isHidden: node.isHidden
             )
             if node.isContainer {
                 element.isContainer = true
                 element.layout = words(for: node.layout)
-                element.children = inReadingOrder(node, in: placed.space).compactMap { picture(of: $0.placed, $0.node, isOnAScreen: isOnAScreen) }
+                element.children = inReadingOrder(node, in: placed.space).compactMap {
+                    picture(of: $0.placed, $0.node, isOnAScreen: isOnAScreen, inLocked: isLocked)
+                }
             } else {
                 element.look = look(of: node)
             }
@@ -59,7 +64,9 @@ extension CanvasPicture {
             whole.screens.append(Screen(
                 handle: handle, name: screen.name, size: inWholePoints(device.size), visibleShare: share,
                 isSelected: selectedScreens.contains(screen.id), isLocked: screen.isLocked == true,
-                elements: inReadingOrder(screen.root, in: root).compactMap { picture(of: $0.placed, $0.node, isOnAScreen: true) },
+                elements: inReadingOrder(screen.root, in: root).compactMap {
+                    picture(of: $0.placed, $0.node, isOnAScreen: true, inLocked: screen.root.isLocked)
+                },
                 layout: words(for: screen.root.layout)
             ))
         }

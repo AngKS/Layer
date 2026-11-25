@@ -129,6 +129,27 @@ struct CanvasPictureTreeTests {
         #expect(handles.node("E9") == nil)
     }
 
+    /// Everything in a locked container is told as locked, at any depth, as voice refuses to move it: the model is told
+    /// what will be refused. What is beside the container isn't (plan 6 final review A, minor 4).
+    @Test func whatALockedContainerHoldsIsToldLocked() {
+        let login = TreeFixture.loginWithACardAndARow()
+        let inner = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .vertical, spacing: 8)),
+                                        frame: CGRect(x: 16, y: 100, width: 0, height: 0),
+                                        children: [.leaf(.text, frame: CGRect(x: 0, y: 0, width: 80, height: 24), text: "Deep")])
+        #expect(login.model.store.add(inner, to: .node(login.card)))
+        login.model.store.update(login.card) { $0.isLocked = true }
+
+        let lines = told(login)
+        func line(_ prefix: String) -> String? { lines.first { $0.hasPrefix(prefix) } }
+        #expect(line("  E2 card ")?.contains("[locked]") == true)
+        #expect(line(#"    E3 text "About me" "#)?.contains("[locked]") == true)
+        #expect(line("    E4 body ")?.contains("[locked]") == true)
+        #expect(line("    E5 column")?.contains("[locked]") == true, "\(lines)")
+        #expect(line(#"      E6 text "Deep" "#)?.contains("[locked]") == true, "\(lines)")
+        #expect(line(#"  E1 title "Welcome" "#)?.contains("[locked]") == false)
+        #expect(line("  E7 row")?.contains("[locked]") == false, "\(lines)")
+    }
+
     @Test func theDesignsOwnDevicesAreTold() throws {
         let login = TreeFixture.loginWithACardAndARow()
         #expect(!told(login).contains { $0.hasPrefix("This design's own devices") })

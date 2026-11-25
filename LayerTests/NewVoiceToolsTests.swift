@@ -303,9 +303,32 @@ struct NewVoiceToolsTests {
         let ids = [bench.login.title, bench.login.card, bench.login.about, bench.login.body, bench.login.row, bench.login.label,
                    bench.login.toggle, bench.x, bench.y]
         let frames = ids.map(bench.store.ownFrame)
-        #expect(bench.box.reorder(element: "E1", position: "after", target: "E5") == "Moved E1 after E5.")
+        #expect(bench.box.reorder(element: "E1", position: "after", target: "E5") == "Put E1 in front of E5.")
         #expect(bench.root?.children.map(\.id) == [bench.login.card, bench.login.row, bench.login.title, bench.x, bench.y])
         #expect(ids.map(bench.store.ownFrame) == frames)
+        // Before is behind: it changes which is in front, never where anything is, and so never says it moved (final
+        // review A, minor 1).
+        #expect(bench.box.reorder(element: "E1", position: "before", target: "E2") == "Put E1 behind E2.")
+        #expect(bench.root?.children.map(\.id) == [bench.login.title, bench.login.card, bench.login.row, bench.x, bench.y])
+        #expect(bench.box.reorder(element: "E1", position: "before", target: "E2") == "E1 is behind E2 already.")
+        #expect(ids.map(bench.store.ownFrame) == frames)
+    }
+
+    /// In an overlay a side such as "above" is refused without sending the model to `placeElement`, which refuses an
+    /// overlay's child with a pointer back here: what can be done is said instead, its order or taking it out first.
+    /// Before and after there put it behind or in front (final review A, minor 1).
+    @Test func aSideInAnOverlayIsRefusedWithWhatCanBeDone() {
+        let bench = bench { login, _, _ in
+            login.model.store.update(login.row) { $0.layout = .overlay(LayerNode.Alignment()) }
+        }
+        let before = bench.store.tree
+        let refusal = bench.box.reorder(element: "E6", position: "above", target: "E7")
+        #expect(refusal == "E6 and E7 are in the overlay E5, which puts them in one place, so their order is only which is in front: before or after puts E6 behind or in front of E7. To put E6 above E7, take it out of E5 first: call moveElement with takeOut yes and where it goes.")
+        #expect(!refusal.contains("placeElement"))
+        #expect(bench.box.lastFailed)
+        #expect(bench.store.tree == before)
+        #expect(bench.box.reorder(element: "E6", position: "after", target: "E7") == "Put E6 in front of E7.")
+        #expect(bench.store.node(bench.login.row)?.children.map(\.id) == [bench.login.toggle, bench.login.label])
     }
 
     @Test func positionWordsAreTolerated() {
@@ -478,7 +501,7 @@ struct NewVoiceToolsTests {
         #expect(bench.box.reorder(element: "E1", position: "left of", target: "E5")
             == "E1 and E5 aren't in a row, column or grid, so their order is only which is in front. To put E1 left of E5, call placeElement.")
         #expect(bench.store.tree == before)
-        #expect(bench.box.reorder(element: "E1", position: "after", target: "E5") == "Moved E1 after E5.")
+        #expect(bench.box.reorder(element: "E1", position: "after", target: "E5") == "Put E1 in front of E5.")
     }
 
     @Test func allOfAFreeGroupIsntGroupedAgain() {

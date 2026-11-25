@@ -170,8 +170,10 @@ extension VoiceToolbox {
 
     /// Puts a thing before or after another among those they share a parent with, as the Layers panel does: in a row,
     /// column or grid that is its place in the layout; in a free parent or an overlay, its place front to back, and
-    /// nothing moves. So there a side, such as "above", is refused with a pointer to `placeElement`: the person asked
-    /// for a place, which a new order wouldn't give. This is how a laid-out child is moved (call 8).
+    /// nothing moves, so there it is said to be put behind or in front, never moved. A side, such as "above", is refused
+    /// there: the person asked for a place, which a new order wouldn't give. In a free parent the refusal points at
+    /// `placeElement`; in an overlay, which places what it holds and so sends `placeElement` back here, at what can be
+    /// done instead, a new order or taking it out first. This is how a laid-out child is moved (call 8).
     func reorder(element: String, position: String, target: String) -> String {
         forCommand {
             guard let model else { return gone }
@@ -190,9 +192,15 @@ extension VoiceToolbox {
                 return failed("\(handle) and \(self.handle(of: other)) aren't in the same row, column, grid or group.")
             }
             guard !moving.placed.isLocked else { return failed("\(handle) is locked.") }
-            if !Self.laysOutInOrder(parent, in: store), let spoken = Self.side(in: position) {
-                let by = self.handle(of: other)
-                return failed("\(handle) and \(by) aren't in a row, column or grid, so their order is only which is in front. To put \(handle) \(spoken) \(by), call placeElement.")
+            let by = self.handle(of: other)
+            // Where the order is only which is in front, before is behind and after is in front.
+            let isInOrder = Self.laysOutInOrder(parent, in: store)
+            let said = isInOrder ? side : (isBefore ? "behind" : "in front of")
+            if !isInOrder, let spoken = Self.side(in: position) {
+                guard let overlay = placer(of: moving) else {
+                    return failed("\(handle) and \(by) aren't in a row, column or grid, so their order is only which is in front. To put \(handle) \(spoken) \(by), call placeElement.")
+                }
+                return failed(overlaidLine(handle, by, spoken, overlay))
             }
             let order = Self.children(of: parent, in: store).map(\.id)
             let rest = order.filter { $0 != moving.id }
@@ -200,11 +208,24 @@ extension VoiceToolbox {
             let index = isBefore ? at : at + 1
             var wanted = rest
             wanted.insert(moving.id, at: index)
-            guard wanted != order else { return noted("\(handle) is \(side) \(self.handle(of: other)) already.") }
+            guard wanted != order else { return noted("\(handle) is \(said) \(by) already.") }
             guard store.move(moving.id, to: parent, at: index) else { return failed("\(handle) couldn't be moved.") }
             reveal(.element(moving.ref), in: model)
-            return done("Moved \(handle) \(side) \(self.handle(of: other)).")
+            return done(isInOrder ? "Moved \(handle) \(side) \(by)." : "Put \(handle) \(said) \(by).")
         }
+    }
+
+    /// Why a thing an overlay holds isn't put by another it holds, `spoken` (above, below, left of or right of) it, and
+    /// what can be done instead: `placeElement` refuses an overlay's child, so it isn't named. Its order puts it behind
+    /// or in front; taking it out of the overlay first lets it go anywhere. Under a screen's root that is an overlay,
+    /// which has no free top to take it out to, the root is made free instead.
+    private func overlaidLine(_ handle: String, _ by: String, _ spoken: String, _ overlay: Placer) -> String {
+        let line = "\(handle) and \(by) are in the overlay \(overlay.handle), which puts them in one place, so their order is only which is in front: before or after puts \(handle) behind or in front of \(by)."
+        guard overlay.canTakeOut else {
+            let free = offersStructureTools ? "call setLayout on \(overlay.handle) with free" : "make \(overlay.handle) free in the Format panel's Layout section"
+            return line + " To put \(handle) \(spoken) \(by), first \(free)."
+        }
+        return line + " To put \(handle) \(spoken) \(by), take it out of \(overlay.handle) first: call moveElement with takeOut yes and where it goes."
     }
 
     /// Whether some words say before (true) or after (false): "above" and "left of" are before, "below" and "right of"

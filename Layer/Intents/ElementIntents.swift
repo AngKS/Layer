@@ -381,8 +381,9 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
     ///
     /// A number within 0.05 of what Get Design Layout says of the node, which rounds to a tenth, is no change, and when
     /// every one given is none nothing is written, so a frame read back moves nothing (F8). Throws `laidOut` for a child
-    /// of a screen's laid-out root sent where it can't be kept (F15), `locked` for a locked one, and `elementNotFound`
-    /// when it has gone.
+    /// of a screen's laid-out root sent where it can't be kept (F15), and for a laid-out child whose row, column or grid
+    /// keeps it in its own slot, so that a position given changes nothing: then nothing is kept, a size given with it
+    /// included, and nothing is offered to undo. Throws `locked` for a locked one, and `elementNotFound` when it has gone.
     @MainActor
     static func move(_ ref: NodeRef, in model: AppModel, x: Double?, y: Double?, width: Double?, height: Double?, undoManager: UndoManager?) throws {
         let store = model.store
@@ -407,10 +408,18 @@ struct MoveElementIntent: AppIntent, UndoableIntent {
         // A screen's points are its nodes' host points; on the canvas those are the top-level node's own points, canvas
         // points ÷ its scale.
         let frame = ref.host == .canvas ? placed.placement.localRect(for: asked) : asked
+        let isPositioned = newX != nil || newY != nil
+        let before = store.content
         let outcome = DesignActions.edit(model, undoManager: undoManager, actionName: "Move \(placed.node.kind.layerName)") {
-            store.move(ref.node, toHostFrame: frame, size: newX == nil && newY == nil)
+            let outcome = store.move(ref.node, toHostFrame: frame, size: !isPositioned)
+            // Kept in its own slot, a laid-out child can't go where it was asked: a size given with the position isn't
+            // kept either, so the step changes nothing and is withdrawn.
+            if placed.isLaidOut, isPositioned, outcome == .resized { store.restore(before) }
+            return outcome
         }
-        if outcome == .refused { throw LayerIntentError.laidOut }
+        if outcome == .refused || (placed.isLaidOut && isPositioned && [.unchanged, .resized].contains(outcome)) {
+            throw LayerIntentError.laidOut
+        }
     }
 }
 

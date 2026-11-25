@@ -57,14 +57,8 @@ struct GenerationStatus: View {
     /// What a finished generation says: how much it wrote, or, when some of what the model wrote
     /// couldn't be brought in, how much that was.
     static func finishedText(_ generation: AppModel.ScreenGeneration) -> String {
-        guard generation.leftOut > 0 || generation.unfixed > 0 else { return "Wrote \(elements(generation.elementCount))" }
-        var text = "Finished."
-        if generation.leftOut > 0 {
-            let parts = generation.leftOut == 1 ? "1 part" : "\(generation.leftOut) parts"
-            text += " \(parts) couldn't be brought in."
-        }
-        if generation.unfixed > 0 { text += " \(UnfixedIssue.sentence(generation.unfixedIssues))." }
-        return text
+        guard let report = generation.report else { return "Wrote \(elements(generation.elementCount))" }
+        return "Finished. \(report)"
     }
 
     private static func elements(_ count: Int) -> String {

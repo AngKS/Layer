@@ -181,6 +181,36 @@ struct DesignLayoutTreeTests {
         #expect(onPhone["deviceName"] as? String == "Phone")
     }
 
+    /// A number a file can hold that is past any layout's (a custom device 1e308 wide, a screen at x 1e308, a frame's
+    /// x of 1e308) is written as the farthest a picture tells, 1e12, and what isn't a number as 0: nothing infinite or
+    /// NaN reaches `JSONSerialization`, which would end the app rather than throw (plan 6 final review A, I4).
+    @Test func numbersPastAnyLayoutAreWrittenFinite() throws {
+        let huge = DeviceFrame.custom(name: "Huge", size: CGSize(width: 1e308, height: 1e308), family: .other)
+        let far = LayerNode.leaf(.text, frame: CGRect(x: 1e308, y: 20, width: 100, height: 24), text: "Far")
+        let odd = LayerNode.leaf(.text, frame: CGRect(x: 20, y: CGFloat.nan, width: 100, height: CGFloat.nan), text: "Odd")
+        var wall = TreeScreen(name: "Wall", origin: CGPoint(x: 1e308, y: 0), scale: 1, deviceID: huge.id)
+        wall.root.children = [far, odd]
+        var content = TreeContent()
+        content.settings.customDevices = [huge]
+        content.settings.gridSpacing = 1e308
+        content.screens = [wall]
+
+        let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Design", content: content, modified: nil))
+
+        let layout = try parse(json)
+        #expect((layout["canvas"] as? Object)?["gridSpacing"] as? Double == 1e12)
+        let screen = try screen(wall.id, in: layout)
+        #expect(screen["x"] as? Double == 1e12)
+        #expect(screen["width"] as? Double == 1e12)
+        #expect(screen["height"] as? Double == 1e12)
+        #expect(try entry(far.id, in: screen["elements"])["x"] as? Double == 1e12)
+        // What a NaN height touches in the frame is 0: its y and its height, and its x, which its middle is found by.
+        let notANumber = frame(of: try entry(odd.id, in: screen["elements"]))
+        #expect(notANumber.allSatisfy { $0?.isFinite == true }, "\(notANumber)")
+        #expect(notANumber[1] == 0 && notANumber[3] == 0, "\(notANumber)")
+        #expect(notANumber[2] == 100)
+    }
+
     @Test func theContainersGoldenHolds() throws {
         let login = TreeFixture.loginWithACardAndARow()
         let snapshot = try #require(DesignActions.snapshot(of: login.model))

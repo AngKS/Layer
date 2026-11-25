@@ -132,14 +132,13 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
             model = try await DesignActions.model(for: design)
             target = nil
         }
-        let id = try await Self.build(layout, on: target, name: name, device: device, custom: customDevice, in: model,
-                                      undoManager: undoManager)
-        DesignActions.reveal(.screen(id), in: model, selecting: false)
-        guard let built = model.store.treeScreen(id), let entity = DesignActions.entity(for: id, in: model) else {
+        let built = try await Self.built(layout, on: target, name: name, device: device, custom: customDevice, in: model,
+                                         undoManager: undoManager)
+        DesignActions.reveal(.screen(built.screen), in: model, selecting: false)
+        guard let said = Self.dialog(for: built, in: model), let entity = DesignActions.entity(for: built.screen, in: model) else {
             throw LayerIntentError.screenNotFound
         }
-        let count = model.store.root(of: id)?.leafCount ?? 0
-        return .result(value: entity, dialog: "Built \(built.name) with \(count == 1 ? "1 element" : "\(count) elements").")
+        return .result(value: entity, dialog: "\(said)")
     }
 }
 
@@ -157,14 +156,45 @@ enum BuildScreenError: LocalizedError, Equatable {
 }
 
 extension BuildScreenIntent {
+    /// A screen a build made or rebuilt, and what it couldn't bring in or put right, in sentences
+    /// (`UnfixedIssue.report`): nil when there is neither.
+    struct Built: Equatable {
+        var screen: TreeScreen.ID
+        var report: String?
+    }
+
+    /// What Build Screen says of a screen it built: its name and how many elements are on it, then what the build
+    /// couldn't bring in or put right, as a generation's status says it (spec §9). Nil when the screen has gone.
+    @MainActor
+    static func dialog(for built: Built, in model: AppModel) -> String? {
+        guard let screen = model.store.treeScreen(built.screen) else { return nil }
+        let count = screen.root.leafCount
+        let said = "Built \(screen.name) with \(count == 1 ? "1 element" : "\(count) elements")."
+        return built.report.map { "\(said) \($0)" } ?? said
+    }
+
     /// `build(_:on:name:device:in:undoManager:)` with the device as the intent's parameters give it: `custom`, one of
     /// the design's own by name (`DesignActions.device(_:custom:in:)`), else `choice`. The device is looked up only for
     /// a new screen, which is the only build that uses it: rebuilding `target` never fails on a name it wouldn't use.
     @MainActor
     static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device choice: DeviceChoice, custom: String?,
                       in model: AppModel, undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        try await built(layout, on: target, name: name, device: choice, custom: custom, in: model, undoManager: undoManager).screen
+    }
+
+    /// `build(_:on:name:device:custom:in:undoManager:)`, with what the build couldn't bring in or put right.
+    @MainActor
+    static func built(_ layout: String, on target: TreeScreen.ID?, name: String?, device choice: DeviceChoice, custom: String?,
+                      in model: AppModel, undoManager: UndoManager?) async throws -> Built {
         let device = target == nil ? try DesignActions.device(choice, custom: custom, in: model) ?? choice.frame : choice.frame
-        return try await build(layout, on: target, name: name, device: device, in: model, undoManager: undoManager)
+        return try await built(layout, on: target, name: name, device: device, in: model, undoManager: undoManager)
+    }
+
+    /// `built(_:on:name:device:in:undoManager:)`'s screen.
+    @MainActor
+    static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
+                      undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        try await built(layout, on: target, name: name, device: device, in: model, undoManager: undoManager).screen
     }
 
     /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline, read off the
@@ -177,13 +207,16 @@ extension BuildScreenIntent {
     /// laid out off the main actor, then committed. When the person changed the screen meanwhile, the writer merges
     /// again over it as it is then, and the rules lay that out (call 1).
     ///
+    /// What the build couldn't bring in or put right comes back with the screen (`Built.report`), as a generation's
+    /// status says it (spec §9).
+    ///
     /// Siri sees leaves only. A build the design has no room for (more than 5,000 things, or nested deeper than 32)
     /// changes nothing and throws `designTooLarge`. A new screen on a device of the design's own that can't be used
     /// (`DeviceFrame.problems`), such as a New Screens device a file held broken, throws `deviceNotFound` before
     /// anything is read or laid out, as the store would refuse it.
     @MainActor
-    static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
-                      undoManager: UndoManager?) async throws -> TreeScreen.ID {
+    static func built(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
+                      undoManager: UndoManager?) async throws -> Built {
         guard let target else {
             return try await buildScreen(layout, name: name, device: device, in: model, undoManager: undoManager)
         }
@@ -192,10 +225,10 @@ extension BuildScreenIntent {
         return try await rebuild(target, from: layout, in: model, undoManager: undoManager)
     }
 
-    /// A new screen built from `layout`.
+    /// A new screen built from `layout`, with what its layout couldn't put right: all of it is the build's.
     @MainActor
     private static func buildScreen(_ layout: String, name: String?, device: DeviceFrame, in model: AppModel,
-                                    undoManager: UndoManager?) async throws -> TreeScreen.ID {
+                                    undoManager: UndoManager?) async throws -> Built {
         guard device.problems.isEmpty else { throw LayerIntentError.deviceNotFound(device.name) }
         let deviceID: String? = device == .iPhone ? nil : device.id
         var made: Made
@@ -203,30 +236,35 @@ extension BuildScreenIntent {
             let settings = model.store.tree.settings
             made = try await Task.detached {
                 let read = try Read(layout, tokens: settings.tokens)
-                return Made(read: read, settings: settings,
-                            laidOut: TreeRules.laidOut(read.generated, deviceID: deviceID, settings: settings, previous: nil))
+                let laidOut = TreeRules.laidOutReporting(read.generated, deviceID: deviceID, settings: settings, previous: nil)
+                return Made(read: read, settings: settings, laidOut: laidOut.root,
+                            unfixed: UnfixedIssue.found(in: laidOut.root, on: device, diagnostics: laidOut.diagnostics))
             }.value
         } while made.settings != model.store.tree.settings
 
-        return try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
+        let id = try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
             let screen = Self.newScreen(made, name: name, device: device, in: model)
             guard let id = model.store.addLaidOutScreens([screen]).first else { throw LayerIntentError.designTooLarge }
             return id
         }
+        return Built(screen: id, report: UnfixedIssue.report(leftOut: made.read.leftOut, made.unfixed))
     }
 
-    /// The screen `target` rebuilt from `layout`.
+    /// The screen `target` rebuilt from `layout`, with what the build couldn't put right among what it wrote: what the
+    /// person made there is never checked, as a generation's isn't.
     @MainActor
     private static func rebuild(_ target: TreeScreen.ID, from layout: String, in model: AppModel,
-                                undoManager: UndoManager?) async throws -> TreeScreen.ID {
+                                undoManager: UndoManager?) async throws -> Built {
         // Read and laid out again whenever the design's settings change meanwhile, so the commit lays nothing out
         // unless the screen itself changed.
         var writer: GenerationWriter
         var prepared: GenerationWriter.Prepared
         var settings: CanvasSettings
+        var leftOut: Int
         repeat {
             settings = model.store.tree.settings
             let read = try await Task.detached { [tokens = settings.tokens] in try Read(layout, tokens: tokens) }.value
+            leftOut = read.leftOut
             guard let root = model.store.root(of: target) else { throw LayerIntentError.screenNotFound }
             writer = GenerationWriter(screenID: target, reconciler: TreeReconciler(adopting: root))
             #if DEBUG
@@ -236,12 +274,13 @@ extension BuildScreenIntent {
             prepared = ready
         } while settings != model.store.tree.settings
 
-        return try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
+        let id = try DesignActions.edit(model, undoManager: undoManager, actionName: "Build Screen") { () throws -> TreeScreen.ID in
             guard let screen = model.store.tree.screens.first(where: { $0.id == target }) else { throw LayerIntentError.screenNotFound }
             guard screen.isLocked != true else { throw LayerIntentError.locked }
             guard writer.commit(prepared, to: model.store) else { throw LayerIntentError.designTooLarge }
             return target
         }
+        return Built(screen: id, report: UnfixedIssue.report(leftOut: leftOut, prepared.unfixed))
     }
 
     /// The new screen a build makes, named, placed and on `device`.
@@ -263,6 +302,9 @@ extension BuildScreenIntent {
         var generated: LayerNode
         /// The name the A2UI's surface gives its screen, as it was written.
         var surfaceName: String?
+        /// How many parts of the A2UI couldn't be brought in, as a generation counts them: every diagnostic but a
+        /// button's action, which Layer never runs. None for the outline, which reads every line it can.
+        var leftOut = 0
 
         init(_ layout: String, tokens: DesignTokens) throws {
             if A2UIImporter.looksLikeA2UI(layout) {
@@ -273,6 +315,7 @@ extension BuildScreenIntent {
                 }
                 generated = screen.root
                 surfaceName = screen.name
+                leftOut = imported.diagnostics.count { $0.reason != .actionNotRun }
             } else {
                 // Read as a generated outline: its look's numbers are passed over (spec §14).
                 generated = Outline.parse(layout, isComplete: true, tokens: tokens, readsLookNumbers: false)
@@ -286,6 +329,8 @@ extension BuildScreenIntent {
         var read: Read
         var settings: CanvasSettings
         var laidOut: LayerNode
+        /// What is still wrong with it as laid out (`UnfixedIssue`).
+        var unfixed: [UnfixedIssue: [UUID]]
     }
 }
 

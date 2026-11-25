@@ -103,6 +103,45 @@ struct UnfixedIssuesTests {
         #expect(GenerationStatus.finishedText(generation) == "Finished. 1 thing runs off the screen.")
     }
 
+    /// A screen voice made says what the generation couldn't put right, as the generation's status does, and the status
+    /// goes once the reply has said it: the pill is the only place it is shown (plan 6 final review A, I3).
+    @Test func aScreenMadeByVoiceSaysWhatItCouldntFix() async throws {
+        let (app, feed) = bench()
+        let handles = VoiceHandles()
+        _ = CanvasPicture.capture(from: app, handles: handles)
+        let box = VoiceToolbox(model: app, handles: handles)
+        var fixed = wideImageRoot()
+        _ = TreeValidator.fixGenerated(&fixed)
+        feed.yield(.screen(fixed))
+        feed.finish()
+
+        let line = try await box.createScreen(name: "Photos", description: "a photo screen", device: nil)
+
+        #expect(line == "Made the screen “Photos” as S1, with 2 elements. 1 thing runs off the screen. It is the S1 now in the canvas list.")
+        #expect(box.lines == ["Made the screen “Photos”, with 2 elements. 1 thing runs off the screen."])
+        #expect(app.generation == nil)
+    }
+
+    /// Siri's Build Screen says what a screen it built or rebuilt couldn't put right, as a generation's status does, and
+    /// says nothing more of one it could (plan 6 final review A, I3).
+    @Test func aBuiltScreenSaysWhatItCouldntFix() async throws {
+        let model = makeModel()
+        let wide = String(decoding: wideImageA2UI(), as: UTF8.self)
+
+        let built = try await BuildScreenIntent.built(wide, on: nil, name: "Wide", device: .iPhone, custom: nil, in: model,
+                                                      undoManager: nil)
+        #expect(BuildScreenIntent.dialog(for: built, in: model) == "Built Wide with 2 elements. 1 thing runs off the screen.")
+
+        let rebuilt = try await BuildScreenIntent.built(wide, on: built.screen, name: nil, device: .iPhone, custom: nil, in: model,
+                                                        undoManager: nil)
+        #expect(rebuilt.screen == built.screen)
+        #expect(BuildScreenIntent.dialog(for: rebuilt, in: model) == "Built Wide with 2 elements. 1 thing runs off the screen.")
+
+        let plain = try await BuildScreenIntent.built("title: Hello\nbutton: Go", on: nil, name: "Plain", device: .iPhone, custom: nil,
+                                                      in: model, undoManager: nil)
+        #expect(BuildScreenIntent.dialog(for: plain, in: model) == "Built Plain with 2 elements.")
+    }
+
     @Test func theLeftOutWordsComeFirst() {
         var generation = AppModel.ScreenGeneration(screenID: UUID(), description: "")
         generation.leftOut = 2

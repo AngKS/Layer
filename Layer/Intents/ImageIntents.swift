@@ -140,9 +140,23 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
             model = found
             request = ImagePlaygroundRequest(target: .newImage(onScreen: target.id))
         }
+        let ref = try Self.add(prepared, for: request, in: model, x: x, y: y, width: width, height: height, undoManager: undoManager)
+        guard let entity = DesignActions.entity(for: ref, in: model) else { throw LayerIntentError.elementNotFound }
+        return .result(value: entity, dialog: "Added the picture to \(entity.screenName).")
+    }
+
+    /// What `perform` does once it knows where the picture goes, as one step, "Add Picture": a new image element where
+    /// `request` asks, at X, Y, Width and Height when given, in its host's points as Move Element takes them, or the new
+    /// picture of the image `request` replaces, which keeps its place and size. Returns where it is. Throws
+    /// `designTooLarge`, with nothing changed, when the design has no room for a new image, on a screen or on the open
+    /// canvas, and `elementNotFound` when it, or the image it replaces, has gone.
+    @MainActor
+    static func add(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest, in model: AppModel, x: Double?, y: Double?,
+                    width: Double?, height: Double?, undoManager: UndoManager?) throws -> NodeRef {
+        let isNew = if case .newImage = request.target { true } else { false }
         let ref = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Picture") { () -> NodeRef? in
             guard let ref = model.placeGeneratedImage(prepared, for: request) else { return nil }
-            if element == nil, x != nil || y != nil || width != nil || height != nil, let placed = model.store.placed(ref) {
+            if isNew, x != nil || y != nil || width != nil || height != nil, let placed = model.store.placed(ref) {
                 // In its host's points, as Move Element takes them: a screen root that lays it out keeps its place.
                 var frame = placed.frame
                 let aspect = frame.height / max(frame.width, 1)
@@ -157,7 +171,8 @@ struct AddImageFileIntent: AppIntent, UndoableIntent {
             }
             return ref
         }
-        guard let ref, let entity = DesignActions.entity(for: ref, in: model) else { throw LayerIntentError.elementNotFound }
-        return .result(value: entity, dialog: "Added the picture to \(entity.screenName).")
+        // The screen a new image goes on was found just now, so a new one refused is one the design had no room for.
+        guard let ref else { throw isNew ? LayerIntentError.designTooLarge : LayerIntentError.elementNotFound }
+        return ref
     }
 }

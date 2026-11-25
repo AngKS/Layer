@@ -64,4 +64,15 @@ enum UnfixedIssue: String, CaseIterable, Sendable {
         guard let last = clauses.last else { return "" }
         return clauses.count == 1 ? last : clauses.dropLast().joined(separator: ", ") + " and " + last
     }
+
+    /// What a generated or built screen couldn't take in or put right, in whole sentences, as the generation's status
+    /// says it once finished (spec §9): how many parts of what was written couldn't be brought in (`leftOut`), then
+    /// `found`'s sentence. "1 part couldn't be brought in. 1 thing runs off the screen." Nil when there is neither. The
+    /// status, voice's createScreen and Siri's Build Screen all say it.
+    static func report(leftOut: Int, _ found: [UnfixedIssue: [UUID]]) -> String? {
+        var sentences: [String] = []
+        if leftOut > 0 { sentences.append("\(leftOut == 1 ? "1 part" : "\(leftOut) parts") couldn't be brought in.") }
+        if nodes(in: found) > 0 { sentences.append("\(sentence(found)).") }
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+    }
 }

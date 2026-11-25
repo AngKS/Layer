@@ -92,13 +92,13 @@ extension AppModel {
     }
 
     /// Puts the picture Image Playground made where it was asked for, selected, as one
-    /// undo step. Returns where it is.
+    /// undo step. Returns where it is: nil, with nothing changed and the selection left as
+    /// it was, when the image it replaces has gone or the design has no room for a new one.
     @discardableResult
     func placeGeneratedImage(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest) -> NodeRef? {
         imagePlaygroundRequest = nil
         if case .newImage(nil) = request.target {
-            addImage(prepared)
-            return selectedNode?.ref
+            return addImage(prepared)
         }
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }

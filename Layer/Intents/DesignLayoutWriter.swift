@@ -62,10 +62,16 @@ enum DesignLayoutWriter {
         ["x": number(rect.minX), "y": number(rect.minY), "width": number(rect.width), "height": number(rect.height)]
     }
 
-    /// Rounded to a tenth of a point, which is all a layout needs.
+    /// Rounded to a tenth of a point, which is all a layout needs. A file can hold any number: what isn't one is written
+    /// as 0, and what is past any design's length as the farthest one written, as the canvas picture tells them, so that
+    /// nothing infinite reaches `JSONSerialization`, which ends the app rather than throwing.
     fileprivate static func number(_ value: CGFloat) -> Double {
-        (Double(value) * 10).rounded() / 10
+        guard value.isFinite else { return 0 }
+        return (min(max(Double(value), -farthest), farthest) * 10).rounded() / 10
     }
+
+    /// The farthest a number is written: 1e12 points, as the canvas picture's.
+    private static let farthest: Double = 1_000_000_000_000
 
     /// An angle seen, from 0 up to 360, to a tenth of a degree. Nil when it is upright.
     fileprivate static func turn(_ degrees: Double) -> Double? {
