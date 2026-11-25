@@ -78,7 +78,9 @@ enum TreeRules {
         /// Whether `list[index]` is as it is here, unchanged (`LayerNode.isUnchanged(from:)`).
         func holds(_ list: [LayerNode], at index: Int) -> Bool {
             let node = list[index]
-            if nodes.indices.contains(index), nodes[index].id == node.id { return node.isUnchanged(from: nodes[index]) }
+            if nodes.indices.contains(index), nodes[index].id == node.id {
+                return node.isUnchanged(from: nodes[index])
+            }
             return byID[node.id].map(node.isUnchanged(from:)) ?? false
         }
     }
@@ -91,8 +93,10 @@ enum TreeRules {
         /// The tokens the design is laid out with now.
         let tokens: DesignTokens
         /// Made when first looked in.
-        private lazy var screens = Dictionary(content.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        private lazy var canvas = Dictionary(content.canvas.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        private lazy var screens = Dictionary(content.screens.map { ($0.id, $0) },
+                                              uniquingKeysWith: { first, _ in first })
+        private lazy var canvas = Dictionary(content.canvas.map { ($0.id, $0) },
+                                             uniquingKeysWith: { first, _ in first })
 
         init(_ content: TreeContent, laidOutWith tokens: DesignTokens) {
             self.content = content
@@ -101,7 +105,9 @@ enum TreeRules {
 
         /// Whether `screen`, of `design`, is laid out alike on the same device here.
         func laysOutAlike(_ screen: TreeScreen, in design: TreeContent) -> Bool {
-            guard let own = screens[screen.id], content.device(of: own) == design.device(of: screen) else { return false }
+            guard let own = screens[screen.id], content.device(of: own) == design.device(of: screen) else {
+                return false
+            }
             return LayoutEngine.laysOutAlike(screen.root, own.root) && isMeasuredAlike(screen.root)
         }
 
@@ -169,7 +175,9 @@ enum TreeRules {
         }
         // Looked for first, so that a canvas with nothing to move isn't copied to look inside it.
         let canvas = content.canvas
-        let looked = canvasKept.map { kept in canvas.isShared(with: kept.nodes) ? [] : canvas.indices.filter { !kept.holds(canvas, at: $0) } }
+        let looked = canvasKept.map { kept in
+            canvas.isShared(with: kept.nodes) ? [] : canvas.indices.filter { !kept.holds(canvas, at: $0) }
+        }
         for index in looked ?? Array(canvas.indices) where holds(content.canvas[index], where: isDrawing) {
             let top = content.canvas[index]
             // In the space the top-level node sits in, so at its scale.
@@ -214,11 +222,12 @@ enum TreeRules {
 
     /// Removes the empty groups among `nodes` and dissolves the free groups of one, and does
     /// the same inside each first, so that a group left empty or alone by that goes too.
-    /// Returns the indices of those removed. A node `kept` holds as it is needs none of it.
-    private static func tidy(_ nodes: inout [LayerNode], besides kept: KeptNodes? = nil) -> [Int] {
+    /// Returns the indices of those removed. A node `unchanged` holds as it is needs none of it.
+    private static func tidy(_ nodes: inout [LayerNode], besides unchanged: KeptNodes? = nil) -> [Int] {
         let list = nodes
-        if let kept {
-            guard !list.isShared(with: kept.nodes), list.indices.contains(where: { !kept.holds(list, at: $0) && needsTidying(list[$0]) })
+        if let unchanged {
+            guard !list.isShared(with: unchanged.nodes),
+                  list.indices.contains(where: { !unchanged.holds(list, at: $0) && needsTidying(list[$0]) })
             else { return [] }
         }
         guard nodes.contains(where: needsTidying) else { return [] }
