@@ -122,15 +122,3 @@ extension Viewport {
     }
 }
 
-extension DesignElement {
-    /// How far it is turned, 0 when upright.
-    var resolvedRotation: Double { rotation ?? 0 }
-
-    /// Turns it to `degrees`, kept from 0 up to 360. An upright element stores nothing.
-    mutating func setRotation(_ degrees: Double) {
-        rotation = Rotation.kept(degrees)
-    }
-
-    /// The upright box round the turned frame, in its host's points. The frame itself when upright.
-    var shapeBounds: CGRect { TurnedRect(rect: frame, degrees: resolvedRotation).bounds }
-}

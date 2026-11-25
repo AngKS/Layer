@@ -8,12 +8,11 @@ enum ElementKind: String, CaseIterable, Codable, Sendable {
     case shape
     /// Ink kept as it was drawn: a sketch, a figure, an arrow, a handwritten note.
     case drawing
-    /// Several things kept together as one. It is never drawn, written or described itself:
-    /// its members are, and they point at it with their `group`. Its frame is the box round
-    /// them, which the design keeps current; see `DesignContent.keepGroupsSound()`.
+    /// A container: several things kept together as one, which it holds as its children. It is
+    /// never drawn itself, and lays out what it holds when it has a layout (`LayerNode.Layout`).
+    /// A free one's frame is the box round what it holds, which the tree's rules keep current.
     case group
-    /// A container the design lays out: a rounded, filled box holding other nodes. Like a
-    /// group it is never drawn, written or described itself by the old model.
+    /// A container the design lays out: a rounded, filled box holding other nodes.
     case card
 
     // What each kind is called and how it behaves is in `Catalogue`; see `spec`.
@@ -64,120 +63,6 @@ enum FontWeightChoice: String, CaseIterable, Codable, Sendable {
     var name: String { rawValue.capitalized }
 }
 
-/// One thing on the board. All of them are kept in one list, `DesignContent.elements`,
-/// and each says what it is on.
-struct DesignElement: Identifiable, Equatable, Codable, Sendable {
-    var id = UUID()
-    var kind: ElementKind
-    /// The screen it is on, or nil on the open canvas.
-    var parent: DesignScreen.ID?
-    /// On the open canvas: how many canvas points each of its own points is drawn as, so
-    /// that it keeps the proportions it would have on a screen drawn at that scale. Nil
-    /// on a screen, which has a scale of its own.
-    var scale: CGFloat?
-    /// In its screen's own points, the same units the generated SwiftUI uses.
-    var frame: CGRect
-    /// How far it is turned about its centre, in degrees clockwise from 0 up to 360.
-    /// Nil when upright. Set it with `setRotation`.
-    var rotation: Double?
-    var text: String
-    /// The element's own colour: a button's or sticky note's fill, a symbol's ink.
-    var tint: RGBColor
-    /// For symbols: the SF Symbol's name.
-    var symbol: String?
-    /// For shapes: which one. A rectangle when unset.
-    var shape: ShapeKind?
-    /// For images that show an attached picture: which one.
-    var imageID: UUID?
-
-    // Each of these overrides the kind's usual look when set. See `ElementStyle`.
-    var fontSize: CGFloat?
-    var fontWeight: FontWeightChoice?
-    var textColor: RGBColor?
-    var cornerRadius: CGFloat?
-    var opacity: Double?
-    var textAlignment: TextAlignmentChoice?
-    /// An outline round the element, drawn when the width is above zero.
-    var borderColor: RGBColor?
-    var borderWidth: CGFloat?
-    var hasShadow = false
-
-    /// The name shown in the Layers panel and used in generated code; the kind's name when unset.
-    var name: String?
-    /// A locked element can be selected but not moved, resized or scratched out.
-    var isLocked = false
-    /// A hidden element isn't drawn, can't be touched on the canvas, and is left out of the code.
-    var isHidden = false
-    /// The group it belongs to: a `.group` element on the same screen, or also on the open
-    /// canvas. Nil when it is in none. Its lock and hide hold for it too; see
-    /// `DesignContent.isLockedWithItsGroups(_:)`.
-    var group: DesignElement.ID? = nil
-    /// For toggles, checkboxes and radio buttons: whether it is drawn on. For shapes:
-    /// whether it is filled with its colour, rather than outlined in it.
-    var isOn = true
-    /// For progress bars: how full, from 0 to 1. Half when unset.
-    var value: Double?
-    /// For buttons: filled when unset.
-    var buttonLook: ButtonLook?
-    /// For drawings: the ink, as PencilKit writes a drawing out, measured from the frame's
-    /// top-left corner, so that moving the frame moves the ink and resizing it stretches
-    /// the ink. Kept beside the design in its file rather than inside it: see `DesignFile`.
-    var ink: Data?
-    /// What a newer Layer saved with the element that this version doesn't know, to be
-    /// written back with it.
-    var unknownKeys = UnknownKeys()
-
-    /// Everything about an element that is saved with the design. `ink` is saved apart.
-    enum CodingKeys: String, CodingKey {
-        case id, kind, parent, scale, frame, rotation, text, tint, symbol, shape, imageID
-        case fontSize, fontWeight, textColor, cornerRadius, opacity, textAlignment, borderColor, borderWidth, hasShadow
-        case name, isLocked, isHidden, group, isOn, value, buttonLook
-    }
-
-    var displayName: String {
-        guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return kind.layerName }
-        return name
-    }
-}
-
-extension DesignElement {
-    /// Reads every property that is present, so elements saved before one existed still open.
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        kind = try container.decode(ElementKind.self, forKey: .kind)
-        parent = try container.decodeIfPresent(UUID.self, forKey: .parent)
-        scale = try container.decodeIfPresent(CGFloat.self, forKey: .scale)
-        frame = try container.decode(CGRect.self, forKey: .frame)
-        // Kept as an angle set here is: from 0 up to 360, nothing when upright or not a number.
-        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation).flatMap(Rotation.kept)
-        text = try container.decode(String.self, forKey: .text)
-        tint = try container.decode(RGBColor.self, forKey: .tint)
-        symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
-        shape = try container.decodeIfPresent(ShapeKind.self, forKey: .shape)
-        imageID = try container.decodeIfPresent(UUID.self, forKey: .imageID)
-        fontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize)
-        fontWeight = try container.decodeIfPresent(FontWeightChoice.self, forKey: .fontWeight)
-        textColor = try container.decodeIfPresent(RGBColor.self, forKey: .textColor)
-        cornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .cornerRadius)
-        opacity = try container.decodeIfPresent(Double.self, forKey: .opacity)
-        textAlignment = try container.decodeIfPresent(TextAlignmentChoice.self, forKey: .textAlignment)
-        borderColor = try container.decodeIfPresent(RGBColor.self, forKey: .borderColor)
-        borderWidth = try container.decodeIfPresent(CGFloat.self, forKey: .borderWidth)
-        hasShadow = try container.decodeIfPresent(Bool.self, forKey: .hasShadow) ?? false
-        name = try container.decodeIfPresent(String.self, forKey: .name)
-        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
-        isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
-        group = try container.decodeIfPresent(UUID.self, forKey: .group)
-        isOn = try container.decodeIfPresent(Bool.self, forKey: .isOn) ?? true
-        value = try container.decodeIfPresent(Double.self, forKey: .value)
-        buttonLook = try container.decodeIfPresent(ButtonLook.self, forKey: .buttonLook)
-        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
-    }
-}
-
-extension DesignElement: KeepsUnknownKeys {}
-
 /// Where a group of elements sits on the canvas: where its own origin falls, and how
 /// large its points are drawn.
 struct Placement: Equatable, Sendable {
@@ -199,20 +84,6 @@ struct Placement: Equatable, Sendable {
     func localRect(for canvas: CGRect) -> CGRect {
         CGRect(origin: localPoint(for: canvas.origin), size: CGSize(width: canvas.width / scale, height: canvas.height / scale))
     }
-}
-
-/// An element that sits on the open canvas rather than on a screen. Its frame is in points
-/// of its own, `scale` canvas points each, so it keeps the proportions it would have on
-/// a screen drawn at that scale.
-///
-/// A view of the design: the elements in its list that have no parent. See `DesignContent`.
-struct FloatingElement: Identifiable, Equatable, Codable, Sendable {
-    var element: DesignElement
-    var scale: CGFloat
-
-    var id: DesignElement.ID { element.id }
-    var placement: Placement { Placement(origin: .zero, scale: scale) }
-    var canvasFrame: CGRect { placement.canvasRect(for: element.frame) }
 }
 
 /// A device a screen can be drawn as: its size in points and the furniture round its edges,
@@ -425,58 +296,6 @@ extension DeviceFrame {
     }
 }
 
-/// One device screen on the canvas. Elements live in the screen's logical points; `origin`
-/// and `scale` say where and how large the screen is drawn on the canvas.
-///
-/// A design keeps its elements in one list, not screen by screen. A `DesignScreen` that
-/// comes from a design is a view of it: the screen together with the elements in that
-/// list that are on it. See `DesignContent`.
-struct DesignScreen: Identifiable, Equatable, Codable, Sendable {
-    var id = UUID()
-    var name: String
-    var origin: CGPoint
-    var scale: CGFloat
-    /// Which device this is; an iPhone when unset.
-    var deviceID: String?
-    /// What is on the screen. Later elements sit on top.
-    var elements: [DesignElement] = []
-    /// A locked screen can't be moved or deleted until it is unlocked. Its elements can
-    /// still be edited.
-    var isLocked: Bool?
-    /// What a newer Layer saved with the screen that this version doesn't know, to be
-    /// written back with it.
-    var unknownKeys = UnknownKeys()
-    /// The device when it is a custom frame, which `deviceID` alone can't name here. Not
-    /// saved; set where a screen is made from a design's tree.
-    var resolvedDevice: DeviceFrame?
-
-    var device: DeviceFrame { resolvedDevice ?? DeviceFrame.named(deviceID) }
-    var size: CGSize { device.size }
-
-    var placement: Placement { Placement(origin: origin, scale: scale) }
-
-    var canvasFrame: CGRect {
-        placement.canvasRect(for: CGRect(origin: .zero, size: size))
-    }
-
-    /// Where the screen's name is drawn, above its top-left corner.
-    var labelFrame: CGRect {
-        placement.canvasRect(for: CGRect(x: 0, y: -34, width: 150, height: 30))
-    }
-
-    func canvasPoint(for local: CGPoint) -> CGPoint { placement.canvasPoint(for: local) }
-    func canvasRect(for local: CGRect) -> CGRect { placement.canvasRect(for: local) }
-    func localRect(for canvas: CGRect) -> CGRect { placement.localRect(for: canvas) }
-
-    /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name
-    /// that is one of the types the view's own code uses, or a Swift keyword, has "Screen"
-    /// added: a view called `Image` hid SwiftUI's `Image` from its own body.
-    var typeName: String { Self.typeName(forScreenNamed: name) }
-
-    /// The view a screen of this name is written as: see `typeName` and `TreeScreen.typeName(forScreenNamed:)`.
-    static func typeName(forScreenNamed name: String) -> String { TreeScreen.typeName(forScreenNamed: name) }
-}
-
 extension TreeScreen {
     /// "Screen 1" becomes `Screen1`, the name of the generated view and its file. A name that is one of the types the
     /// view's own code uses, or a Swift keyword, has "Screen" added: a view called `Image` hid SwiftUI's `Image` from its
@@ -505,65 +324,6 @@ extension TreeScreen {
         "repeat", "rethrows", "return", "self", "some", "static", "struct", "subscript", "super", "switch", "throw",
         "throws", "true", "try", "typealias", "var", "where", "while",
     ]
-}
-
-extension DesignScreen {
-    enum CodingKeys: String, CodingKey {
-        case id, name, origin, scale, deviceID, elements, isLocked
-    }
-
-    /// Reads a screen, with the elements it held when designs were saved screen by screen.
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        origin = try container.decode(CGPoint.self, forKey: .origin)
-        scale = try container.decode(CGFloat.self, forKey: .scale)
-        deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
-        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked)
-        elements = container.contains(.elements) ? try DesignElement.readList(in: container, forKey: .elements).elements : []
-        unknownKeys = try UnknownKeys(from: decoder, besides: CodingKeys.self)
-    }
-
-    /// A screen is saved without its elements, which are saved in the design's one list.
-    func encode(to encoder: any Encoder) throws {
-        try unknownKeys.encode(to: encoder)
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(origin, forKey: .origin)
-        try container.encode(scale, forKey: .scale)
-        try container.encodeIfPresent(deviceID, forKey: .deviceID)
-        try container.encodeIfPresent(isLocked, forKey: .isLocked)
-    }
-}
-
-/// An element that was read from a design but not understood, kept as it was read with
-/// its place in the list, to be written back.
-struct UnreadElement: Equatable, Sendable {
-    var index: Int
-    var json: JSONValue
-}
-
-extension DesignElement {
-    /// Reads a list of elements one at a time, so that one this version can't read, of a
-    /// kind added since for instance, doesn't stop the design from opening. Those come
-    /// back as `unread`.
-    static func readList<Key: CodingKey>(in container: KeyedDecodingContainer<Key>, forKey key: Key) throws -> (elements: [DesignElement], unread: [UnreadElement]) {
-        var list = try container.nestedUnkeyedContainer(forKey: key)
-        var elements: [DesignElement] = []
-        var unread: [UnreadElement] = []
-        while !list.isAtEnd {
-            let index = list.currentIndex
-            // A failed read leaves the list where it was, so the same entry is read again as it is.
-            if let element = try? list.decode(DesignElement.self) {
-                elements.append(element)
-            } else {
-                unread.append(UnreadElement(index: index, json: try list.decode(JSONValue.self)))
-            }
-        }
-        return (elements, unread)
-    }
 }
 
 /// How the canvas itself looks and behaves, kept with each design.

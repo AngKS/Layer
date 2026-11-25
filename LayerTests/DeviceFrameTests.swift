@@ -219,15 +219,6 @@ import Testing
         #expect(settings.sketchDevice == .iPhone)
     }
 
-    @Test func aProjectedScreenUsesItsResolvedDevice() {
-        var screen = DesignScreen(name: "S", origin: .zero, scale: 1, deviceID: "ipad")
-        #expect(screen.device == .named("ipad"))
-        let frame = Self.watch()
-        screen.resolvedDevice = frame
-        #expect(screen.device == frame)
-        #expect(screen.size == frame.size)
-    }
-
     // MARK: - The rules
 
     @Test func aScreenOnACustomFrameIsKeptToItsSize() {

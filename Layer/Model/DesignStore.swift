@@ -13,13 +13,13 @@ final class DesignStore {
     /// Points at one element: where it lives, and which one it is there.
     struct ElementRef: Hashable, Sendable {
         enum Host: Hashable, Sendable {
-            case screen(DesignScreen.ID)
+            case screen(TreeScreen.ID)
             /// The open canvas, outside every screen.
             case canvas
         }
 
         var host: Host
-        var element: DesignElement.ID
+        var element: UUID
     }
 
     private(set) var content: TreeContent {
@@ -182,7 +182,7 @@ final class DesignStore {
     }
 
     /// Tells the sketch reading log which elements were deleted: see `SketchReadingLog`.
-    func tellTheReadingLogOfDeleted(_ ids: Set<DesignElement.ID>) {
+    func tellTheReadingLogOfDeleted(_ ids: Set<UUID>) {
         // One task for them all: a group of 200 is not 200 hops to the log's actor.
         guard !ids.isEmpty else { return }
         #if DEBUG
@@ -636,7 +636,7 @@ final class DesignStore {
     /// elements on it before and after. Nil when it changed nothing, or anything else: the
     /// board, another screen, or an element on the open canvas, or moved on or off it; or
     /// when it made that screen or took it away.
-    func onlyScreen(changedBy edit: Edit) -> DesignScreen.ID? {
+    func onlyScreen(changedBy edit: Edit) -> TreeScreen.ID? {
         edit.step?.onlyScreen
     }
 
@@ -923,8 +923,8 @@ final class DesignStore {
         }
 
         /// The one screen all its changes were to or on: see `DesignStore.onlyScreen(changedBy:)`.
-        var onlyScreen: DesignScreen.ID? {
-            var screens: Set<DesignScreen.ID> = []
+        var onlyScreen: TreeScreen.ID? {
+            var screens: Set<TreeScreen.ID> = []
             for run in runs {
                 let touched = TreeChange(from: run.before, to: run.after)
                 guard !touched.board else { return nil }
