@@ -97,10 +97,10 @@ struct SystemSymbolTests {
     /// as given would draw nothing at all.
     @MainActor
     @Test func theCanvasDrawsAnIconForANameTheSystemDoesntKnow() throws {
-        var github = DesignStore.newElement(.symbol, symbol: "GitHub")
+        var github = LayerNode.standard(.symbol, symbol: "GitHub")
         github.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
         let asGiven = try Self.inkedPixels(Image(systemName: "GitHub").resizable().scaledToFit())
-        let drawn = try Self.inkedPixels(ElementView(node: LayerNode(element: github)).environment(ImageLibrary([:])))
+        let drawn = try Self.inkedPixels(ElementView(node: github).environment(ImageLibrary([:])))
         #expect(asGiven == 0, "the name as given draws nothing")
         #expect(drawn > 40, "the element should draw an icon")
     }
@@ -121,23 +121,22 @@ struct SystemSymbolTests {
     }
 
     @Test func theCodeDrawsTheSameIconAsTheCanvas() {
-        var screen = DesignScreen(name: "Footer", origin: .zero, scale: 1)
-        var mail = DesignStore.newElement(.symbol, symbol: "Email")
+        var mail = LayerNode.standard(.symbol, symbol: "Email")
         mail.frame = CGRect(x: 40, y: 700, width: 28, height: 28)
-        var github = DesignStore.newElement(.symbol, symbol: "GitHub")
+        var github = LayerNode.standard(.symbol, symbol: "GitHub")
         github.frame = CGRect(x: 100, y: 700, width: 28, height: 28)
-        var heart = DesignStore.newElement(.symbol, symbol: "heart.fill")
+        var heart = LayerNode.standard(.symbol, symbol: "heart.fill")
         heart.frame = CGRect(x: 160, y: 700, width: 28, height: 28)
-        screen.elements = [mail, github, heart]
+        let screen = [mail, github, heart]
 
         for layout in CodeSettings.Layout.allCases {
-            let code = SwiftUICodeGenerator.code(for: screen, settings: CodeSettings(layout: layout))
+            let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen, named: "Footer", settings: CodeSettings(layout: layout))
             #expect(code.contains(#"Image(systemName: "envelope")"#), "\(layout)")
             #expect(code.contains(#"Image(systemName: "link")"#), "\(layout)")
             #expect(code.contains(#"Image(systemName: "heart.fill")"#), "\(layout)")
             #expect(!code.contains(#"systemName: "Email""#) && !code.contains(#"systemName: "GitHub""#), "\(layout)")
         }
         // The elements keep the names they were given, for a later model or system to know.
-        #expect(screen.elements.map(\.symbol) == ["Email", "GitHub", "heart.fill"])
+        #expect(screen.map(\.content.symbol) == ["Email", "GitHub", "heart.fill"])
     }
 }

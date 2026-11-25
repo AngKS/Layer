@@ -228,22 +228,22 @@ final class HostedModelTests {
         let undo = UndoManager()
         app.store.undoManager = undo
         app.setModelChoice(.hosted(.openAI, model: "gpt-test"))
-        let screensBefore = app.store.screens.count
+        let screensBefore = app.store.tree.screens.count
 
         app.generateScreen(from: "a sign-in screen")
         #expect(app.isGenerating)
         #expect(app.generation?.isThinking == true, "nothing is written yet, so it is thinking")
         let screenID = try #require(app.generation?.screenID)
-        #expect(app.store.screen(screenID)?.name == "A sign-in screen")
+        #expect(app.store.treeScreen(screenID)?.name == "A sign-in screen")
         let deadline = ContinuousClock.now + .seconds(10)
         while app.isGenerating, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
 
         #expect(app.generation?.phase == .finished)
         #expect(app.generation?.isThinking == false)
         #expect(app.generation?.elementCount == 4)
-        let screen = try #require(app.store.screen(screenID))
-        #expect(screen.elements.map(\.kind) == [.title, .textField, .textField, .button])
-        #expect(screen.elements.map(\.text) == ["Welcome back", "Email", "Password", "Sign in"])
+        let screen = try #require(app.store.treeScreen(screenID)).root.leaves
+        #expect(screen.map(\.kind) == [.title, .textField, .textField, .button])
+        #expect(screen.map(\.content.text) == ["Welcome back", "Email", "Password", "Sign in"])
         // The description went to the design's model, with the generator's instructions.
         // (Switching models also sends the engine's own short check, so it's one of several.)
         let systems = StubProvider.requests.compactMap { request -> String? in
@@ -254,7 +254,7 @@ final class HostedModelTests {
 
         // One undo takes the whole generated screen away.
         undo.undo()
-        #expect(app.store.screens.count == screensBefore)
+        #expect(app.store.tree.screens.count == screensBefore)
     }
 
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
@@ -286,7 +286,7 @@ final class HostedModelTests {
         let deadline = ContinuousClock.now + .seconds(10)
         while app.isGenerating, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(app.generation?.phase == .failed(HostedModelError.keyRejected(.anthropic).localizedDescription))
-        #expect(app.store.screens.isEmpty)
+        #expect(app.store.tree.screens.isEmpty)
     }
 
     @Test func modelsAreListedFromEachProvider() async throws {
@@ -380,22 +380,21 @@ extension HostedModelTests {
 @Suite("Each design remembers its model", .serialized)
 struct ModelChoiceTests {
     @Test func theChoiceIsSavedInTheDesignFileAndReadBack() throws {
-        var content = DesignContent()
-        content.canvas.model = .hosted(.anthropic, model: "claude-sonnet-test")
-        let saved = DesignFile(content: content)
+        var saved = DesignFile()
+        saved.content.tree.settings.model = .hosted(.anthropic, model: "claude-sonnet-test")
         let reopened = try DesignFile(wrapper: saved.wrapper())
-        #expect(reopened.content.canvas.model == .hosted(.anthropic, model: "claude-sonnet-test"))
-        #expect(reopened.content.canvas.resolvedModel.hostedProvider == .anthropic)
+        #expect(reopened.content.tree.settings.model == .hosted(.anthropic, model: "claude-sonnet-test"))
+        #expect(reopened.content.tree.settings.resolvedModel.hostedProvider == .anthropic)
     }
 
     /// The default is the app's, so it is never changed here, even for a moment: other
     /// tests running alongside read it.
     @Test func aDesignSavedBeforeThereWasAChoiceUsesTheDefault() throws {
         let old = #"{"screens":[],"canvas":[],"settings":{"showsGrid":true}}"#
-        let content = try JSONDecoder().decode(DesignContent.self, from: Data(old.utf8))
-        #expect(content.canvas.model == nil)
-        #expect(content.canvas.resolvedModel(defaultingTo: .hosted(.openAI, model: "gpt-test")) == .hosted(.openAI, model: "gpt-test"))
-        #expect(content.canvas.resolvedModel == ModelPreferences.defaultChoice)
+        let content = try JSONDecoder().decode(TreeContent.self, from: Data(old.utf8))
+        #expect(content.settings.model == nil)
+        #expect(content.settings.resolvedModel(defaultingTo: .hosted(.openAI, model: "gpt-test")) == .hosted(.openAI, model: "gpt-test"))
+        #expect(content.settings.resolvedModel == ModelPreferences.defaultChoice)
     }
 
     @Test func theDefaultIsKeptInTheSettings() throws {
@@ -410,13 +409,13 @@ struct ModelChoiceTests {
 
     @Test func aChoiceFromANewerLayerStillOpens() throws {
         let newer = #"{"canvas":[],"settings":{"model":{"provider":42}}}"#
-        let content = try JSONDecoder().decode(DesignContent.self, from: Data(newer.utf8))
-        #expect(content.canvas.model == nil)
+        let content = try JSONDecoder().decode(TreeContent.self, from: Data(newer.utf8))
+        #expect(content.settings.model == nil)
     }
 
     @Test func aNewDesignStartsWithTheDefaultModel() {
-        #expect(LayerDocument(model: .hosted(.anthropic, model: "claude-new")).current.content.canvas.model == .hosted(.anthropic, model: "claude-new"))
-        #expect(LayerDocument().current.content.canvas.model == ModelPreferences.defaultChoice)
+        #expect(LayerDocument(model: .hosted(.anthropic, model: "claude-new")).current.content.tree.settings.model == .hosted(.anthropic, model: "claude-new"))
+        #expect(LayerDocument().current.content.tree.settings.model == ModelPreferences.defaultChoice)
     }
 
     @Test func aHostedChoiceRunsItsModelWhereItCan() {

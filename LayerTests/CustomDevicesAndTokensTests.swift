@@ -449,25 +449,19 @@ struct CustomDevicesAndTokensTests {
         #expect(CustomDeviceDraft(from: made, named: made.name).device(id: made.id) == made)
     }
 
-    /// The `updateScreen` view and `screenFrames` show a screen on one of the design's own devices as that device,
-    /// not the iPhone `deviceID` alone names (plan 2, carried).
+    /// A screen on one of the design's own devices is that device, not the iPhone `deviceID` alone names, and keeps it
+    /// through a change to the screen (plan 2, carried). The flat screen views that also showed it so (`screenFrames`,
+    /// and the flat screen that `updateScreen` handed its closure) went with the projection (plan 6, clause (s)).
     @Test func aScreensViewsResolveTheDesignsOwnDevices() throws {
         let frame = watch()
         let s = screen(on: frame.id, free: true)
-        var content = DesignContent(tree: design([s], devices: [frame]))
-        #expect(content.screenFrames.first?.device == frame)
-        #expect(content.screenFrames.first?.size == frame.size)
-
-        var seen: DeviceFrame?
-        content.updateScreen(s.id) { seen = $0.device; $0.name = "Watch face" }
-        #expect(seen == frame)
-        #expect(content.tree.screens.first?.deviceID == frame.id)
-        #expect(content.tree.screens.first?.name == "Watch face")
+        let content = design([s], devices: [frame])
+        #expect(content.device(of: content.screens[0]) == frame)
+        #expect(content.device(of: content.screens[0]).size == frame.size)
 
         let (model, _) = makeModel(design([s], devices: [frame]))
-        var shown: CGSize?
-        model.store.updateScreen(s.id) { shown = $0.size; $0.origin.x = 40 }
-        #expect(shown == frame.size)
+        model.store.updateTreeScreen(s.id) { $0.origin.x = 40 }
+        #expect(model.store.device(of: s.id)?.size == frame.size)
         #expect(model.store.treeScreen(s.id)?.deviceID == frame.id)
     }
 

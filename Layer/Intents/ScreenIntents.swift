@@ -132,8 +132,8 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
             model = try await DesignActions.model(for: design)
             target = nil
         }
-        let frame = try DesignActions.device(device, custom: customDevice, in: model) ?? device.frame
-        let id = try await Self.build(layout, on: target, name: name, device: frame, in: model, undoManager: undoManager)
+        let id = try await Self.build(layout, on: target, name: name, device: device, custom: customDevice, in: model,
+                                      undoManager: undoManager)
         DesignActions.reveal(.screen(id), in: model, selecting: false)
         guard let built = model.store.treeScreen(id), let entity = DesignActions.entity(for: id, in: model) else {
             throw LayerIntentError.screenNotFound
@@ -157,6 +157,16 @@ enum BuildScreenError: LocalizedError, Equatable {
 }
 
 extension BuildScreenIntent {
+    /// `build(_:on:name:device:in:undoManager:)` with the device as the intent's parameters give it: `custom`, one of
+    /// the design's own by name (`DesignActions.device(_:custom:in:)`), else `choice`. The device is looked up only for
+    /// a new screen, which is the only build that uses it: rebuilding `target` never fails on a name it wouldn't use.
+    @MainActor
+    static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device choice: DeviceChoice, custom: String?,
+                      in model: AppModel, undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        let device = target == nil ? try DesignActions.device(choice, custom: custom, in: model) ?? choice.frame : choice.frame
+        return try await build(layout, on: target, name: name, device: device, in: model, undoManager: undoManager)
+    }
+
     /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline, read off the
     /// main actor with the design's tokens. All the work off the main actor is done again when the design's settings
     /// change meanwhile. One step through `DesignActions.edit` ("Build Screen").
@@ -410,12 +420,25 @@ struct DuplicateScreenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
-        let copy = DesignActions.edit(model, undoManager: undoManager, actionName: "Duplicate Screen") {
-            model.store.duplicateTreeScreen(target.id)
-        }
-        guard let copy, let entity = DesignActions.entity(for: copy, in: model) else { throw LayerIntentError.screenNotFound }
+        let copy = try Self.duplicate(target.id, in: model, undoManager: undoManager)
+        guard let entity = DesignActions.entity(for: copy, in: model) else { throw LayerIntentError.screenNotFound }
         DesignActions.reveal(.screen(copy), in: model)
         return .result(value: entity, dialog: "Made \(entity.name).")
+    }
+
+    /// Copies a screen with everything on it to its right, as one step, "Duplicate Screen"
+    /// (`DesignStore.duplicateTreeScreen`). Returns the copy's id.
+    ///
+    /// Throws `screenNotFound` for a screen that has gone, and `designTooLarge` when the design can't hold the copy:
+    /// past 5,000 things, the store makes none.
+    @MainActor
+    static func duplicate(_ screen: TreeScreen.ID, in model: AppModel, undoManager: UndoManager?) throws -> TreeScreen.ID {
+        guard model.store.treeScreen(screen) != nil else { throw LayerIntentError.screenNotFound }
+        let copy = DesignActions.edit(model, undoManager: undoManager, actionName: "Duplicate Screen") {
+            model.store.duplicateTreeScreen(screen)
+        }
+        guard let copy else { throw LayerIntentError.designTooLarge }
+        return copy
     }
 }
 

@@ -23,7 +23,7 @@ import Testing
 
     @Test func theFileIsNamedForTheScreensView() throws {
         let screen = try Self.profileScreen(named: "Sign In", deviceID: nil)
-        #expect(SharedA2UI(screen: screen, typeName: DesignScreen.typeName(forScreenNamed: screen.name)).fileName == "SignIn.a2ui.json")
+        #expect(SharedA2UI(screen: screen, typeName: SwiftUICodeGenerator.typeName(of: screen)).fileName == "SignIn.a2ui.json")
     }
 
     /// The Share menu names a screen's A2UI file and its SwiftUI file from one set of view names, so a second "Sign In"

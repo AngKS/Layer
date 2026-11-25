@@ -231,15 +231,15 @@ struct LMStudioLiveTests {
         var counts: [Int] = []
         let deadline = ContinuousClock.now + .seconds(240)
         while app.isGenerating, ContinuousClock.now < deadline {
-            let count = app.store.screen(screenID)?.elements.count ?? 0
+            let count = app.store.screenLeaves(screenID).count
             if counts.last != count { counts.append(count) }
             try await Task.sleep(for: .milliseconds(50))
         }
-        let screen = try #require(app.store.screen(screenID))
-        print("LMSTUDIO generated \(screen.elements.map { "\($0.kind.rawValue): \($0.text)" }) — counts seen while streaming: \(counts)")
+        let screen = try #require(app.store.treeScreen(screenID)).root.leaves
+        print("LMSTUDIO generated \(screen.map { "\($0.kind.rawValue): \($0.content.text)" }) — counts seen while streaming: \(counts)")
         #expect(app.generation?.phase == .finished)
-        #expect(screen.elements.count >= 3)
-        #expect(screen.elements.contains { $0.kind == .button })
+        #expect(screen.count >= 3)
+        #expect(screen.contains { $0.kind == .button })
         #expect(counts.filter { $0 > 0 }.count >= 2, "elements should appear while the model is still writing: \(counts)")
     }
 }
@@ -271,13 +271,13 @@ struct ScreenGenerationLifecycleTests {
         app.generateScreen(from: "a settings screen")
         let screen = try #require(app.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
+        #expect(await eventually { app.store.screenLeaves(screen).count == 1 })
         undo.undo()
-        #expect(app.store.screen(screen) == nil)
+        #expect(app.store.treeScreen(screen) == nil)
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
         #expect(await eventually { !app.isGenerating })
         #expect(app.generation == nil)
-        #expect(app.store.screen(screen) == nil)
+        #expect(app.store.treeScreen(screen) == nil)
         // Its edit is closed: a change now is a step of its own.
         let mark = app.store.historyMark
         app.store.setTitle("Next")
@@ -297,10 +297,10 @@ struct ScreenGenerationLifecycleTests {
     @Test func aGenerationThatWritesNothingLeavesNoUndoStep() async throws {
         let (app, undo, feed) = bench()
         app.generateScreen(from: "a settings screen")
-        #expect(app.store.screens.count == 1)
+        #expect(app.store.tree.screens.count == 1)
         feed.finish(throwing: URLError(.notConnectedToInternet))
         await app.waitForGeneration()
-        #expect(app.store.screens.isEmpty)
+        #expect(app.store.tree.screens.isEmpty)
         #expect(!undo.canUndo)
 
         let (stream, empty) = AsyncThrowingStream<ScreenGenerator.Update, any Error>.makeStream()
@@ -308,7 +308,7 @@ struct ScreenGenerationLifecycleTests {
         app.generateScreen(from: "a profile screen")
         empty.finish()
         await app.waitForGeneration()
-        #expect(app.store.screens.isEmpty)
+        #expect(app.store.tree.screens.isEmpty)
         #expect(!undo.canUndo)
     }
 
@@ -342,7 +342,7 @@ struct ScreenGenerationLifecycleTests {
         app.generateScreen(from: "a settings screen")
         let screen = try #require(app.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
+        #expect(await eventually { app.store.screenLeaves(screen).count == 1 })
         app.store.deleteScreen(screen)
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
         #expect(await eventually { !app.isGenerating })
@@ -358,22 +358,22 @@ struct ScreenGenerationLifecycleTests {
         app.generateScreen(from: "a settings screen")
         let screen = try #require(app.generation?.screenID)
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 1 })
-        let title = try #require(app.store.screen(screen)?.elements.first)
-        var note = DesignStore.newElement(.text)
+        #expect(await eventually { app.store.screenLeaves(screen).count == 1 })
+        let title = try #require(app.store.screenLeaves(screen).first)
+        var note = LayerNode.standard(.text)
         note.frame.origin = CGPoint(x: 40, y: 600)
-        let added = app.store.setElements([note], on: screen)[0]
-        app.store.update(added) { $0.text = "typed" }
+        try #require(app.store.add(note, to: .screen(screen)))
+        app.store.update(note.id) { $0.content.text = "typed" }
         app.selection = .element(.init(host: .screen(screen), element: title.id))
 
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 3 })
-        #expect(app.store.element(added.element)?.text == "typed")
-        #expect(app.store.element(title.id)?.kind == .title, "the title is the same element")
+        #expect(await eventually { app.store.screenLeaves(screen).count == 3 })
+        #expect(app.store.node(note.id)?.content.text == "typed")
+        #expect(app.store.node(title.id)?.kind == .title, "the title is the same element")
         #expect(app.selection == .element(.init(host: .screen(screen), element: title.id)))
         feed.finish()
         await app.waitForGeneration()
-        #expect(app.store.element(added.element)?.text == "typed")
+        #expect(app.store.node(note.id)?.content.text == "typed")
     }
 
     /// An element the generation wrote and the person then moved, retyped or deleted is
@@ -383,18 +383,18 @@ struct ScreenGenerationLifecycleTests {
         app.generateScreen(from: "a settings screen")
         let screen = try #require(app.generation?.screenID)
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 2 })
-        let written = try #require(app.store.screen(screen)?.elements)
+        #expect(await eventually { app.store.screenLeaves(screen).count == 2 })
+        let written = app.store.screenLeaves(screen)
         let title = DesignStore.ElementRef(host: .screen(screen), element: written[0].id)
         let button = DesignStore.ElementRef(host: .screen(screen), element: written[1].id)
-        app.store.update(title) { $0.text = "Mine"; $0.frame.origin.y += 40 }
+        app.store.update(title.element) { $0.content.text = "Mine"; $0.frame.origin.y += 40 }
         app.store.delete(button)
-        let moved = try #require(app.store.element(title.element))
+        let moved = try #require(app.store.node(title.element))
 
         feed.yield(Self.written("title: Settings\nbutton: Save\ntext: Notifications\n"))
-        #expect(await eventually { app.store.screen(screen)?.elements.count == 2 })
-        #expect(app.store.element(title.element) == moved)
-        #expect(app.store.element(button.element) == nil, "a deleted element isn't brought back")
+        #expect(await eventually { app.store.screenLeaves(screen).count == 2 })
+        #expect(app.store.node(title.element) == moved)
+        #expect(app.store.node(button.element) == nil, "a deleted element isn't brought back")
         feed.finish()
         await app.waitForGeneration()
     }
@@ -409,12 +409,13 @@ struct ScreenGenerationLifecycleTests {
         let screen = try #require(app.generation?.screenID)
         feed.yield(.startedWriting)
         #expect(await eventually { app.generation?.isThinking == false })
-        let added = app.store.setElements([DesignStore.newElement(.text)], on: screen)[0]
-        app.store.update(added) { $0.text = "typed" }
+        let added = LayerNode.standard(.text)
+        try #require(app.store.add(added, to: .screen(screen)))
+        app.store.update(added.id) { $0.content.text = "typed" }
         if fails { feed.finish(throwing: URLError(.notConnectedToInternet)) } else { feed.finish() }
         await app.waitForGeneration()
-        #expect(app.store.screen(screen) != nil)
-        #expect(app.store.element(added.element)?.text == "typed")
+        #expect(app.store.treeScreen(screen) != nil)
+        #expect(app.store.node(added.id)?.content.text == "typed")
     }
 
     /// Stop pressed before the first line: the screen goes, as there is nothing on it, and
@@ -425,7 +426,7 @@ struct ScreenGenerationLifecycleTests {
         let screen = try #require(app.generation?.screenID)
         app.stopGenerating()
         await app.waitForGeneration()
-        #expect(app.store.screen(screen) == nil)
+        #expect(app.store.treeScreen(screen) == nil)
         #expect(app.generation == nil)
         feed.finish()
     }
@@ -446,7 +447,7 @@ struct ScreenGenerationLifecycleTests {
         let (app, _, feed) = bench()
         app.generateScreen(from: "a settings screen")
         feed.yield(Self.written("title: Settings\n"))
-        #expect(await eventually { app.store.screens.first?.elements.count == 1 })
+        #expect(await eventually { app.store.tree.screens.first?.root.leaves.count == 1 })
         let saved = app.document.current.content
         app.close()
         await app.waitForGeneration()

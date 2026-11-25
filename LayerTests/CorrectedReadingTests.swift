@@ -3,13 +3,15 @@ import Foundation
 import Testing
 @testable import Layer
 
+/// A phone screen at the canvas's origin, at scale 1, so a sketch's canvas points are its screen points: what
+/// `changeKind(of:to:fallback:)` lays a node out from when it has no sketch of its own.
 @MainActor
-private func makeStore() -> (store: DesignStore, screen: DesignScreen, undo: UndoManager) {
+private func makeStore() -> (store: DesignStore, screen: TreeScreen.ID, undo: UndoManager) {
     let undo = UndoManager()
     undo.groupsByEvent = false
-    let store = DesignStore(content: DesignContent())
+    let store = DesignStore()
     store.undoManager = undo
-    return (store, store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)), undo)
+    return (store, store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id, undo)
 }
 
 private let titleSketch = CGRect(x: 150, y: 112, width: 96, height: 40)
@@ -20,50 +22,48 @@ private let boxSketch = CGRect(x: 30, y: 300, width: 330, height: 44)
 struct ChangedKindTests {
     @Test func anElementBecomesTheOtherKindAsIfItHadBeenReadThatWay() throws {
         let (store, screen, _) = makeStore()
-        let title = try #require(store.addElement(.title, from: titleSketch, to: screen.id))
-        let field = try #require(store.addElement(.textField, from: boxSketch, to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: field.id)
+        let title = try #require(store.sketched(.title, from: titleSketch, to: screen))
+        let field = try #require(store.sketched(.textField, from: boxSketch, to: screen))
 
-        let button = try #require(store.changeKind(of: ref, to: .button, sketchedAt: boxSketch))
+        let changed = try #require(store.changeKind(of: field.id, to: .button, fallback: boxSketch))
+        let button = try #require(store.node(changed))
 
         let (fresh, freshScreen, _) = makeStore()
-        _ = fresh.addElement(.title, from: titleSketch, to: freshScreen.id)
-        let expected = try #require(fresh.addElement(.button, from: boxSketch, to: freshScreen.id))
+        _ = fresh.sketched(.title, from: titleSketch, to: freshScreen)
+        let expected = try #require(fresh.sketched(.button, from: boxSketch, to: freshScreen))
         #expect(button.kind == .button)
-        #expect(button.frame == expected.frame)
-        #expect(button.text == "Continue")
-        #expect(store.resolve(ref)?.element == button)
+        #expect(store.ownFrame(changed) == expected.frame)
+        #expect(button.content.text == "Continue")
+        #expect(store.node(field.id) == button)
         // It is the same element, in the same place among the others.
-        #expect(button.id == field.id)
-        #expect(store.screen(screen.id)?.elements.map(\.id) == [title.id, field.id])
+        #expect(changed == field.id)
+        #expect(store.screenLeaves(screen).map(\.id) == [title.id, field.id])
     }
 
     @Test func wordsWrittenForItCarryOver() throws {
         let (store, screen, _) = makeStore()
-        let field = try #require(store.addElement(.textField, from: boxSketch, to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: field.id)
-        store.update(ref) { $0.text = "Sign in" }
+        let field = try #require(store.sketched(.textField, from: boxSketch, to: screen))
+        store.update(field.id) { $0.content.text = "Sign in" }
 
-        #expect(store.changeKind(of: ref, to: .button, sketchedAt: boxSketch)?.text == "Sign in")
+        #expect(store.changeKind(of: field.id, to: .button, fallback: boxSketch).flatMap { store.node($0)?.content.text } == "Sign in")
         // A kind that shows no words drops them.
-        #expect(store.changeKind(of: ref, to: .image, sketchedAt: boxSketch)?.text == "")
+        #expect(store.changeKind(of: field.id, to: .image, fallback: boxSketch).flatMap { store.node($0)?.content.text } == "")
     }
 
     @Test func theChangeIsOneUndoStep() throws {
         let (store, screen, undo) = makeStore()
-        let field = try #require(store.addElement(.textField, from: boxSketch, to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: field.id)
+        let added = try #require(store.sketched(.textField, from: boxSketch, to: screen))
+        let field = try #require(store.node(added.id))
 
-        store.changeKind(of: ref, to: .button, sketchedAt: boxSketch)
+        store.changeKind(of: field.id, to: .button, fallback: boxSketch)
         undo.undo()
 
-        #expect(store.resolve(ref)?.element == field)
+        #expect(store.node(field.id) == field)
     }
 
     @Test func somethingThatIsGoneIsNotChanged() throws {
-        let (store, screen, _) = makeStore()
-        let missing = DesignStore.ElementRef(host: .screen(screen.id), element: UUID())
-        #expect(store.changeKind(of: missing, to: .button, sketchedAt: boxSketch) == nil)
+        let (store, _, _) = makeStore()
+        #expect(store.changeKind(of: UUID(), to: .button, fallback: boxSketch) == nil)
     }
 }
 
@@ -75,9 +75,9 @@ struct KindSuggestionTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let field = try #require(model.store.addElement(.textField, from: boxSketch, to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: field.id)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let field = try #require(model.store.sketched(.textField, from: boxSketch, to: screen))
+        let ref = DesignStore.ElementRef(host: .screen(screen), element: field.id)
         let observation = try #require(SketchAnalyzer.observe(SketchSamples.strokes([SketchSamples.box(boxSketch, radius: 10)])))
         return (model, ref, KindSuggestion(ref: ref, kind: .button, sketch: boxSketch, observation: observation))
     }
@@ -89,7 +89,7 @@ struct KindSuggestionTests {
 
         model.acceptSuggestion()
 
-        #expect(model.store.resolve(ref)?.element.kind == .button)
+        #expect(model.store.node(ref.element)?.kind == .button)
         #expect(model.suggestion == nil)
     }
 
@@ -97,7 +97,7 @@ struct KindSuggestionTests {
         let (model, ref, suggestion) = try makeModel()
         model.offer(suggestion)
         model.dismissSuggestion()
-        #expect(model.store.resolve(ref)?.element.kind == .textField)
+        #expect(model.store.node(ref.element)?.kind == .textField)
         #expect(model.suggestion == nil)
     }
 
@@ -117,22 +117,22 @@ struct KindSuggestionTests {
         model.offer(suggestion)
         guard case .screen(let screen) = ref.host else { return }
         switch change {
-        case "moved": model.store.update(ref) { $0.frame.origin.y += 100 }
-        case "resized": model.store.update(ref) { $0.frame.size.width -= 40 }
-        case "turned": model.store.update(ref) { $0.rotation = 15 }
-        default: model.store.updateScreen(screen) { $0.origin.x += 200 }
+        case "moved": model.store.update(ref.element) { $0.frame.origin.y += 100 }
+        case "resized": model.store.update(ref.element) { $0.frame.size.width -= 40 }
+        case "turned": model.store.update(ref.element) { $0.rotation = 15 }
+        default: model.store.updateTreeScreen(screen) { $0.origin.x += 200 }
         }
-        let changed = try #require(model.store.resolve(ref)?.element)
+        let changed = try #require(model.store.node(ref.element))
         #expect(model.suggestion == nil)
         model.acceptSuggestion()
-        #expect(model.store.resolve(ref)?.element == changed)
+        #expect(model.store.node(ref.element) == changed)
     }
 
     /// Words put on it, as Magic Pen does just after offering, don't take the offer away.
     @Test func aSuggestionStaysWhenOnlyItsWordsChange() throws {
         let (model, ref, suggestion) = try makeModel()
         model.offer(suggestion)
-        model.store.update(ref) { $0.text = "Email" }
+        model.store.update(ref.element) { $0.content.text = "Email" }
         #expect(model.suggestion == suggestion)
     }
 }

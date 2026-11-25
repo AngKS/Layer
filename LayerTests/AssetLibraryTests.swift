@@ -146,35 +146,35 @@ struct AddingAssetsTests {
         let model = makeModel()
         let arrow = try #require(AssetLibrary.asset(id: "shape:arrowRight:line"))
         model.addAsset(arrow, at: CGPoint(x: 300, y: 200))
-        let added = try #require(model.selectedElement)
+        let added = try #require(model.selectedNode)
         #expect(added.ref.host == .canvas)
-        #expect(added.element.kind == .shape)
-        #expect(added.element.shape == .arrowRight)
-        #expect(added.element.isOn == false, "an outline isn't filled")
-        let frame = try #require(model.store.floating.first).canvasFrame
+        #expect(added.node.kind == .shape)
+        #expect(added.node.content.shape == .arrowRight)
+        #expect(added.node.content.isOn == false, "an outline isn't filled")
+        let frame = try #require(model.store.tree.canvas.first.flatMap { model.store.frameOnCanvas(of: $0.id) })
         #expect(abs(frame.midX - 300) <= 1 && abs(frame.midY - 200) <= 1)
     }
 
     @Test func aComponentDroppedOnAScreenJoinsItInsideItsEdges() throws {
         let model = makeModel()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1))
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 0), scale: 1)).id
         let button = try #require(AssetLibrary.asset(id: "component:button"))
         // Dropped near the screen's right edge: a full-width button can't sit centred there.
         model.addAsset(button, at: CGPoint(x: 470, y: 400))
-        let added = try #require(model.selectedElement)
-        #expect(added.ref.host == .screen(screen.id))
-        #expect(added.element.frame.minX >= 0 && added.element.frame.maxX <= DeviceFrame.iPhone.size.width)
+        let added = try #require(model.selectedNode)
+        #expect(added.ref.host == .screen(screen))
+        #expect(added.frame.minX >= 0 && added.frame.maxX <= DeviceFrame.iPhone.size.width)
     }
 
     @Test func aTemplateIsAWholeScreenInOneUndoStep() throws {
         let model = makeModel()
         let settings = try #require(AssetLibrary.asset(id: "template:Settings"))
         model.addAsset(settings, at: CGPoint(x: 600, y: 400))
-        let screen = try #require(model.store.screens.first)
+        let screen = try #require(model.store.tree.screens.first)
         #expect(screen.name == "Settings")
-        #expect(screen.elements.contains { $0.kind == .toggle })
+        #expect(screen.root.leaves.contains { $0.kind == .toggle })
         model.store.undoManager?.undo()
-        #expect(model.store.screens.isEmpty)
+        #expect(model.store.tree.screens.isEmpty)
     }
 
     /// A template comes in on the design's own numbers, as a generated or imported screen does; its thumbnail stays on
@@ -205,18 +205,19 @@ struct AddingAssetsTests {
         let model = makeModel()
         let iMac = try #require(AssetLibrary.asset(id: "frame:imac"))
         model.addAsset(iMac)
-        let screen = try #require(model.store.screens.last)
+        let screen = try #require(model.store.tree.screens.last?.id)
         // New frames come in unselected.
         #expect(model.selection == nil)
-        #expect(screen.device.family == .desktop)
-        #expect(screen.canvasFrame.height <= 834 - 200, "even an iMac fits in the view")
+        #expect(model.store.device(of: screen)?.family == .desktop)
+        let frame = try #require(model.store.screenFrameOnCanvas(screen))
+        #expect(frame.height <= 834 - 200, "even an iMac fits in the view")
     }
 
     @Test func aFrameDroppedOnTheCanvasIsCentredThere() throws {
         let model = makeModel()
         let iPad = try #require(AssetLibrary.asset(id: "frame:ipad"))
         model.addAsset(iPad, at: CGPoint(x: 500, y: 420))
-        let frame = try #require(model.store.screens.last).canvasFrame
+        let frame = try #require(model.store.tree.screens.last.flatMap { model.store.screenFrameOnCanvas($0.id) })
         #expect(abs(frame.midX - 500) <= 1 && abs(frame.midY - 420) <= 1)
     }
 }
@@ -224,13 +225,13 @@ struct AddingAssetsTests {
 @Suite("Shapes")
 struct ShapeTests {
     @Test func aShapeIsSavedAndOpensAgain() throws {
-        var element = DesignStore.newElement(.shape)
-        element.shape = .star
-        element.isOn = false
+        var element = LayerNode.standard(.shape)
+        element.content.shape = .star
+        element.content.isOn = false
         let data = try JSONEncoder().encode(element)
-        let opened = try JSONDecoder().decode(DesignElement.self, from: data)
-        #expect(opened.shape == .star)
-        #expect(opened.isOn == false)
+        let opened = try JSONDecoder().decode(LayerNode.self, from: data)
+        #expect(opened.content.shape == .star)
+        #expect(opened.content.isOn == false)
     }
 
     @Test func everyPolygonStaysInsideItsFrame() {
@@ -242,17 +243,16 @@ struct ShapeTests {
     }
 
     @Test func shapesAreWrittenAsSwiftUI() {
-        var screen = DesignScreen(name: "Shapes", origin: .zero, scale: 1)
-        var circle = DesignStore.newElement(.shape)
-        circle.shape = .ellipse
+        var circle = LayerNode.standard(.shape)
+        circle.content.shape = .ellipse
         circle.frame = CGRect(x: 20, y: 100, width: 80, height: 80)
-        var triangle = DesignStore.newElement(.shape)
-        triangle.shape = .triangle
-        triangle.isOn = false
+        var triangle = LayerNode.standard(.shape)
+        triangle.content.shape = .triangle
+        triangle.content.isOn = false
         triangle.frame = CGRect(x: 20, y: 300, width: 100, height: 100)
-        screen.elements = [circle, triangle]
 
-        let lines = SwiftUICodeGenerator.code(for: screen).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [circle, triangle], named: "Shapes")
+        let lines = code.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         #expect(lines.contains("Ellipse()"))
         #expect(lines.contains(".frame(width: 80, height: 80)"))
         // The outline is drawn inside the frame, half the line's width in from each edge.

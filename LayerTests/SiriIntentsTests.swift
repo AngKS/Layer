@@ -732,15 +732,20 @@ struct DesignActionTests {
         // What Siri is offered, as the design's snapshot lists it: the title, then the button.
         let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.tree, modified: nil).elements
         #expect(entities.compactMap(\.ref) == refs)
+        func isNotFound(_ error: LayerIntentError?) -> Bool {
+            error.map { if case .elementNotFound = $0 { true } else { false } } == true
+        }
 
-        // The flat model's lookups of the one element selected went with it: the one leaf selected is
-        // `selectedLeaf(in:)`, and Siri's "this element" (`nodeOrSelected`) throws `elementNotFound` when it is nil.
+        // The one leaf selected is `selectedLeaf(in:)`, and Siri's "this element" (`selected(in:)`, which
+        // `nodeOrSelected` calls) throws `elementNotFound` when it is nil.
         model.selection = .element(g)
         #expect(DesignActions.selectedLeaf(in: model) == nil)
+        #expect(isNotFound(#expect(throws: LayerIntentError.self) { try DesignActions.selected(in: model) }))
         #expect(DesignActions.suggested(entities, in: model).map(\.id) == entities.map(\.id), "nothing is put first")
 
         model.selection = .element(refs[1])
         #expect(DesignActions.selectedLeaf(in: model)?.ref == refs[1])
+        #expect(try DesignActions.selected(in: model).ref == refs[1])
         #expect(DesignActions.suggested(entities, in: model).first?.ref == refs[1], "the button is put first")
     }
 
@@ -850,7 +855,7 @@ struct DesignActionTests {
         let model = model()
         let siri = UndoManager()
         siri.groupsByEvent = false
-        DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
+        _ = DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
             model.store.addFreeScreen([])
         }
         #expect(siri.canUndo)
@@ -1133,6 +1138,8 @@ struct LookWordTests {
     }
 }
 
+/// Siri's Move to Screen (`MoveElementToScreenIntent.move`), the live path since plan 6's Task 5: the store's flat
+/// `move(_:toScreen:origin:)`, which these tests drove before, is called by nothing in the app.
 @Suite("Moving things from code")
 @MainActor
 struct MovingTests {
@@ -1151,7 +1158,7 @@ struct MovingTests {
         let second = model.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 400, y: 0), scale: 0.5)
         let ref = DesignStore.ElementRef(host: .screen(first), element: button.id)
 
-        let moved = try #require(model.store.move(ref, toScreen: second, origin: CGPoint(x: 20, y: 100)))
+        let moved = try MoveElementToScreenIntent.move(ref, toScreen: second, x: 20, y: 100, in: model, undoManager: nil)
         #expect(moved.host == .screen(second))
         #expect(model.store.screenLeaves(first).isEmpty)
         #expect(model.store.placed(moved)?.frame == CGRect(x: 20, y: 100, width: 353, height: 50))
@@ -1168,7 +1175,7 @@ struct MovingTests {
         let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
         let before = try #require(model.store.placed(ref)).placement.canvasRect(for: title.frame)
 
-        let moved = try #require(model.store.move(ref, toScreen: nil, origin: nil))
+        let moved = try MoveElementToScreenIntent.move(ref, toScreen: nil, x: nil, y: nil, in: model, undoManager: nil)
         #expect(moved.host == .canvas)
         let after = try #require(model.store.placed(moved))
         #expect(after.placement.canvasRect(for: after.frame) == before)
@@ -1178,7 +1185,10 @@ struct MovingTests {
         let model = model()
         let screen = model.store.addFreeScreen([])
         let note = DesignStore.ElementRef(host: .canvas, element: model.store.addCanvasNode(.standard(.stickyNote)))
-        #expect(model.store.move(note, toScreen: screen, origin: .zero) == nil)
+        let refused = #expect(throws: LayerIntentError.self) {
+            try MoveElementToScreenIntent.move(note, toScreen: screen, x: 0, y: 0, in: model, undoManager: nil)
+        }
+        #expect(refused.map { if case .cantGoOnScreens = $0 { true } else { false } } == true)
         #expect(model.store.tree.canvas.count == 1)
     }
 

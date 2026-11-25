@@ -15,7 +15,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case invalidColour(String)
     /// Build Screen's outline had nothing in it to build.
     case invalidScreenDescription
-    /// Building it would take the design past what a design holds: 5,000 things, nested at most 32 deep.
+    /// Building, adding or copying it would take the design past what a design holds: 5,000 things, nested at most 32
+    /// deep. Said after Build Screen, Add Screen, Add Element, Duplicate Element and Duplicate Screen alike.
     case designTooLarge
     case imagePlaygroundUnavailable
     case notAnImage
@@ -44,7 +45,7 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .nothingToExport: "There's nothing on that design to export yet."
         case .invalidColour(let text): "“\(text)” isn't a colour Layer knows. Use a name such as blue, or a hex code such as #0A84FF."
         case .invalidScreenDescription: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
-        case .designTooLarge: "That would make the design larger than Layer keeps: more than \(TreeRules.maximumNodes.formatted()) things, or nested more than \(TreeRules.maximumDepth) deep. Nothing was built."
+        case .designTooLarge: "That would make the design larger than Layer keeps: more than \(TreeRules.maximumNodes.formatted()) things, or nested more than \(TreeRules.maximumDepth) deep. Nothing was changed."
         case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."
@@ -194,17 +195,11 @@ struct ScreenEntity: IndexedEntity {
     var designID: String { EntityKey.parseScreen(id)?.design ?? "" }
     var screenID: UUID? { EntityKey.parseScreen(id)?.screen }
 
-    /// What the subtitle calls the device: its frame's name, a built-in's own as before, and one of the design's own by
-    /// the name it was given (`deviceName`), never the iPhone that `device` falls back to for one.
-    private let shownDevice: String
-
     /// A screen of a design whose canvas is set up as `settings` says, which hold the design's own devices. Its elements
     /// are its leaves (My call 9).
     init(design: String, designName: String, screen: TreeScreen, settings: CanvasSettings) {
         let frame = settings.device(named: screen.deviceID)
         id = EntityKey.screen(design: design, screen: screen.id)
-        // Before the properties, whose setters need every plain stored property set.
-        shownDevice = frame.name
         name = screen.name
         device = DeviceChoice(frame)
         deviceName = DeviceChoice.displayName(of: frame)
@@ -216,7 +211,7 @@ struct ScreenEntity: IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(name)",
-            subtitle: "\(shownDevice) · \(designName)",
+            subtitle: "\(deviceName) · \(designName)",
             image: .init(systemName: device == .iPad ? "ipad" : "iphone")
         )
     }

@@ -427,14 +427,16 @@ struct SketchEngineTests {
 @Suite("Naming boards")
 @MainActor
 struct BoardTitleTests {
+    /// A board of one phone screen, holding a title saying `text` when one is given, as the naming signatures take it.
     private func board(titled text: String?) -> DesignContent {
-        var screen = DesignScreen(name: "Screen 1", origin: .zero, scale: 1)
+        var screen = TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil)
+        screen.root.layout = .free
         if let text {
-            screen.elements = [DesignElement(kind: .title, frame: CGRect(x: 82.5, y: 112, width: 228, height: 40), text: text, tint: Theme.accent)]
+            screen.root.children = [.leaf(.title, frame: CGRect(x: 82.5, y: 112, width: 228, height: 40), text: text, tint: Theme.accent)]
         }
-        var content = DesignContent()
+        var content = TreeContent()
         content.screens = [screen]
-        return content
+        return DesignContent(tree: content)
     }
 
     @Test func withoutAModelABoardIsNamedForWhatItSaysOrWhatItIsFor() {

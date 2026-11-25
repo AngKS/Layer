@@ -499,4 +499,142 @@ struct SiriWritesTheTreeTests {
         #expect(store.ownFrame(image.id) == frame)
         #expect(store.parent(of: image.id) == .node(login.card))
     }
+
+    // MARK: - Task 5's review, carried to Task 10
+
+    private func isDeviceNotFound(_ error: LayerIntentError?, named name: String) -> Bool {
+        error.map { if case .deviceNotFound(let said) = $0 { said == name } else { false } } == true
+    }
+
+    /// M1: one of the design's own devices that can't be used (`problems`, which a file can hold, though the device
+    /// picker never makes one) is refused by its name, as a name the design has no device for is, by each action that
+    /// takes a Custom Device, before anything is written.
+    @Test func aCustomDeviceThatCantBeUsedIsRefusedByName() async throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model, store = model.store
+        let sliver = DeviceFrame.custom(name: "Sliver", size: CGSize(width: 1, height: 1920), family: .other)
+        #expect(!sliver.problems.isEmpty)
+        store.updateCanvas { $0.customDevices.append(sliver) }
+        try #require(store.tree.settings.customDevice(named: "Sliver") != nil)
+        login.undo.removeAllActions()
+        let before = store.tree
+        let design = try #require(DesignActions.snapshot(of: model)).entity
+
+        #expect(isDeviceNotFound(#expect(throws: LayerIntentError.self) {
+            try DesignActions.device(.iPhone, custom: " Sliver ", in: model)
+        }, named: "Sliver"))
+        let changed = #expect(throws: LayerIntentError.self) {
+            try ChangeScreenDeviceIntent.change(login.screen, to: .iPhone, custom: "Sliver", in: model, undoManager: nil)
+        }
+        #expect(isDeviceNotFound(changed, named: "Sliver"))
+        #expect(said(changed) == "This design has no device called “Sliver”. Make one with Custom Size… in the device picker.")
+
+        let add = AddScreenIntent()
+        add.design = design
+        add.device = .iPhone
+        add.customDevice = "Sliver"
+        let added = await #expect(throws: LayerIntentError.self) { _ = try await add.perform() }
+        #expect(isDeviceNotFound(added, named: "Sliver"))
+
+        let built = await #expect(throws: LayerIntentError.self) {
+            _ = try await BuildScreenIntent.build("title: Lobby", on: nil, name: "Lobby", device: .iPhone, custom: "Sliver",
+                                                  in: model, undoManager: nil)
+        }
+        #expect(isDeviceNotFound(built, named: "Sliver"))
+
+        let settings = UpdateCanvasSettingsIntent()
+        settings.design = design
+        settings.customSketchDevice = "Sliver"
+        let set = await #expect(throws: LayerIntentError.self) { _ = try await settings.perform() }
+        #expect(isDeviceNotFound(set, named: "Sliver"))
+
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
+    }
+
+    /// M2: Duplicate Screen copies a screen in one step, and with no room for the copy says the design is full, not that
+    /// the screen has gone; the words read right after a copy.
+    @Test func aScreenCopiedIntoAFullDesignIsRefusedAsTooLarge() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model, store = model.store
+
+        let copy = try DuplicateScreenIntent.duplicate(login.screen, in: model, undoManager: nil)
+        #expect(store.treeScreen(copy)?.name == "Login Copy")
+        login.undo.undo()
+        #expect(store.treeScreen(copy) == nil)
+        #expect(!login.undo.canUndo, "one step")
+
+        // A screen of texts that brings the design to 5,000 nodes, its root among them.
+        let room = TreeRules.maximumNodes - store.index.count - 1
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 2_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes)
+        login.undo.removeAllActions()
+        let before = store.tree
+
+        let refused = #expect(throws: LayerIntentError.self) {
+            try DuplicateScreenIntent.duplicate(login.screen, in: model, undoManager: nil)
+        }
+        #expect(refused.map { if case .designTooLarge = $0 { true } else { false } } == true)
+        #expect(said(refused) == "That would make the design larger than Layer keeps: more than \(TreeRules.maximumNodes.formatted()) things, or nested more than \(TreeRules.maximumDepth) deep. Nothing was changed.")
+        #expect(store.tree == before)
+        #expect(!login.undo.canUndo)
+
+        let gone = #expect(throws: LayerIntentError.self) {
+            try DuplicateScreenIntent.duplicate(TreeScreen.ID(), in: model, undoManager: nil)
+        }
+        #expect(gone.map { if case .screenNotFound = $0 { true } else { false } } == true)
+    }
+
+    /// M5: Move to Screen onto the open canvas at X and Y, in canvas points, puts the thing's corner there, drawn as large
+    /// as it was, in one step. `MovingTests` moves one off a screen where it is, and refuses a sticky note a screen.
+    @Test func movingOntoTheOpenCanvasPutsItsCornerWhereAsked() throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let store = login.model.store
+
+        let moved = try MoveElementToScreenIntent.move(try ref(login.title, in: login), toScreen: nil, x: 600, y: 400,
+                                                       in: login.model, undoManager: nil)
+
+        #expect(moved == DesignStore.ElementRef(host: .canvas, element: login.title))
+        #expect(store.frameOnCanvas(of: login.title) == CGRect(x: 600, y: 400, width: 228, height: 40))
+        login.undo.undo()
+        #expect(store.ref(of: login.title)?.host == .screen(login.screen))
+        #expect(!login.undo.canUndo, "one step")
+    }
+
+    /// M6: Build Screen looks up its Custom Device only for a new screen, the one build that uses it, so a rebuild isn't
+    /// refused for a name it wouldn't use.
+    @Test func aRebuildLooksUpNoCustomDevice() async throws {
+        let login = TreeFixture.loginWithACardAndARow()
+        let model = login.model
+
+        let rebuilt = try await BuildScreenIntent.build("title: Again", on: login.screen, name: nil, device: .iPhone, custom: "Wall",
+                                                        in: model, undoManager: nil)
+        #expect(rebuilt == login.screen)
+        #expect(model.store.screenLeaves(login.screen).contains { $0.content.text == "Again" })
+
+        let refused = await #expect(throws: LayerIntentError.self) {
+            _ = try await BuildScreenIntent.build("title: New", on: nil, name: nil, device: .iPhone, custom: "Wall", in: model,
+                                                  undoManager: nil)
+        }
+        #expect(isDeviceNotFound(refused, named: "Wall"))
+    }
+
+    /// M7: a screen's subtitle names its device as Siri and Shortcuts show it (`deviceName`): a built-in by the name
+    /// Siri gives it, never its own trademarked one (F23), and one of the design's own by the name it was given.
+    @Test func aScreensSubtitleNamesItsDeviceAsSiriShowsIt() throws {
+        let (login, _, second) = try withKioskAndASecondScreen()
+        let store = login.model.store
+        _ = try ChangeScreenDeviceIntent.change(login.screen, to: .iPhone, custom: "Kiosk", in: login.model, undoManager: nil)
+        let settings = store.tree.settings
+        func subtitle(_ id: TreeScreen.ID) throws -> String? {
+            let screen = try #require(store.treeScreen(id))
+            let entity = ScreenEntity(design: "design", designName: "Design", screen: screen, settings: settings)
+            return entity.displayRepresentation.subtitle.map { String(localized: $0) }
+        }
+
+        #expect(try subtitle(login.screen) == "Kiosk · Design")
+        #expect(try subtitle(second) == "\(DeviceChoice.displayName(of: .iPhone)) · Design")
+        #expect(try subtitle(second) != "iPhone · Design")
+    }
 }

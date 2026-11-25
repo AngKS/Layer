@@ -119,8 +119,15 @@ enum DesignActions {
     static func nodeOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
         if let entity { return try await node(entity) }
         let model = try await model(for: nil as String?)
-        guard let selected = selectedLeaf(in: model) else { throw LayerIntentError.elementNotFound }
+        let selected = try selected(in: model)
         return (model, selected.ref, selected.node)
+    }
+
+    /// Siri's "this element" in a design: the one leaf selected (`selectedLeaf(in:)`). Throws `elementNotFound` when no
+    /// one leaf is selected: nothing, several things, or a container.
+    static func selected(in model: AppModel) throws -> PlacedNode {
+        guard let selected = selectedLeaf(in: model) else { throw LayerIntentError.elementNotFound }
+        return selected
     }
 
     /// The one leaf selected. Nil for a container, several things or nothing: Siri sees what is in a container, never
@@ -268,11 +275,15 @@ enum DesignActions {
 
     /// The device an action asks for (call 6): `custom`, one of the design's own by its name ignoring case and the space
     /// round it (`CanvasSettings.customDevice(named:)`), when it is given and isn't blank; else `choice`'s frame; nil when
-    /// neither is given. Throws `deviceNotFound` for a name the design has no device of its own called.
+    /// neither is given. Throws `deviceNotFound` for a name the design has no device of its own called, and for one of
+    /// its own that can't be used (`problems`), which a file can hold and the store refuses everywhere: so Change Screen
+    /// Device, Add Screen, Build Screen and Update Canvas Settings refuse it before anything is written.
     static func device(_ choice: DeviceChoice?, custom: String?, in model: AppModel) throws -> DeviceFrame? {
         let name = custom?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !name.isEmpty else { return choice?.frame }
-        guard let device = model.store.tree.settings.customDevice(named: name) else { throw LayerIntentError.deviceNotFound(name) }
+        guard let device = model.store.tree.settings.customDevice(named: name), device.problems.isEmpty else {
+            throw LayerIntentError.deviceNotFound(name)
+        }
         return device
     }
 }
