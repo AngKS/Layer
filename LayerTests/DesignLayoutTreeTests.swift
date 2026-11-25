@@ -256,7 +256,8 @@ struct DesignLayoutTreeTests {
         var content = TreeContent()
         content.screens = [screen]
 
-        let layout = try parse(DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Edges", content: content, modified: nil)))
+        let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Edges", content: content, modified: nil))
+        let layout = try parse(json)
 
         let written = try self.screen(screen.id, in: layout)
         #expect(try sorted(written["layout"]) == (try asTheFileWrites(screen.root.layout)))
@@ -269,8 +270,10 @@ struct DesignLayoutTreeTests {
         }
         let leafEntry = try entry(leaf.id, in: written["elements"])
         #expect(try sorted(leafEntry["sizing"]) == (try asTheFileWrites(Sizes(width: leaf.width, height: leaf.height))))
-        // The edges are there to be written: a negative zero is 0, and what isn't finite empties its part.
-        #expect(try sorted(written["layout"]).contains(#""spacing":0,"#))
+        // The edges are there to be written: a negative zero is 0, and what isn't finite empties its part. Read back, a
+        // negative zero is 0 either way, so the text itself is looked at.
+        #expect(json.contains(#""spacing" : 0,"#))
+        #expect(!json.contains(" : -0,") && !json.contains(" : -0\n"), "a negative zero is written as 0")
         #expect(try sorted(try entry(card.id, in: written["containers"])["padding"]) == "{}")
         #expect(try sorted(leafEntry["sizing"]) == "{}")
     }
