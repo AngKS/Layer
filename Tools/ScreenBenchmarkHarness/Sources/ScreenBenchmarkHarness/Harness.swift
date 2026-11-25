@@ -18,13 +18,15 @@ import Foundation
         case "hosted" where arguments.count >= 3:
             guard let format = Format(rawValue: arguments[2]) else { usage() }
             await hosted(model: arguments[1], format: format, runs: runs(arguments.dropFirst(3).first))
+        case "rescore" where arguments.count >= 2:
+            rescore(log: arguments[1])
         default:
             usage()
         }
     }
 
     private static func usage() -> Never {
-        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui|both> [runs]")
+        print("usage: run.sh check | outline [runs] | hosted <LM Studio model id> <outline|a2ui|both> [runs] | rescore <log>")
         exit(2)
     }
 
@@ -63,6 +65,37 @@ import Foundation
         let ok = handedOn && outlineValid == 1 && a2uiValid == 1
         print("harness \(ok ? "ok" : "FAILED"): outline \(outlineValid)/1 valid, a2ui \(a2uiValid)/1 valid")
         return ok
+    }
+
+    // MARK: Scoring again
+
+    /// Scores again, with today's readers, every A2UI answer a `hosted` run printed to `log`: the text between a
+    /// "=== … a2ui · <brief>" line and its "--- valid=" line. No model runs. Each answer's new score is printed, then
+    /// how many are valid now and how many were then.
+    private static func rescore(log path: String) {
+        guard let log = try? String(contentsOfFile: path, encoding: .utf8) else {
+            print("ERR can't read \(path)")
+            exit(1)
+        }
+        var summary = Summary(label: "rescore a2ui")
+        var validThen = 0
+        var answer: [String]?
+        for line in log.components(separatedBy: "\n") {
+            if line.hasPrefix("=== "), line.contains(" a2ui · ") {
+                answer = []
+                print(line)
+            } else if line.hasPrefix("--- valid="), let text = answer {
+                if line.hasPrefix("--- valid=1") { validThen += 1 }
+                let score = Score.a2ui(text.joined(separator: "\n"))
+                print("then \(line.prefix(11)) now \(score.line)\n")
+                summary.scores.append(score)
+                answer = nil
+            } else if answer != nil {
+                answer?.append(line)
+            }
+        }
+        print(summary.line)
+        print("rescore: valid now \(summary.valid)/\(summary.screens), then \(validThen)/\(summary.screens)")
     }
 
     // MARK: Models

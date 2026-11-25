@@ -15,6 +15,8 @@
 #   Tools/ScreenBenchmarkHarness/run.sh hosted <LM Studio model id> both [runs per brief]
 #       both formats, one after the other on each brief (A2UI first on the odd ones); each format's summary, then
 #       "hosted default: ..." from HostedFormatRule.
+#   Tools/ScreenBenchmarkHarness/run.sh rescore <log>
+#       scores again, with today's readers and no model, every A2UI answer a hosted run printed to <log>.
 set -eu
 cd "$(dirname "$0")/../.."
 R="$(pwd)"
