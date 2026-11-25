@@ -546,7 +546,9 @@ final class AppModel {
     /// Returns the new screen's id. Nil, and nothing changes, when there is nothing to write
     /// or the store refuses the screen: on a device that can't be used, or with no room for
     /// it. A refusal asked for by hand says why (`screenNotice`); a spoken command says it
-    /// itself. The last generation's outcome stays up until its own time.
+    /// itself. The last generation's outcome stays up until its own time. An update the
+    /// store refuses later, at the 5,000 cap, is never counted: the model is stopped, what
+    /// was written before stays, and the generation fails saying the design is full.
     @discardableResult
     func generateScreen(from description: String, named name: String? = nil, near anchor: CGPoint? = nil,
                         device: DeviceFrame? = nil) -> TreeScreen.ID? {
@@ -597,6 +599,8 @@ final class AppModel {
         #endif
         generationWasStopped = false
         generationTask = Task { [weak self] in
+            // Whether the store refused an update, at the 5,000 cap or 32 deep: the generation ends saying so.
+            var isRefused = false
             do {
                 for try await update in stream {
                     guard let self else { return }
@@ -612,24 +616,37 @@ final class AppModel {
                         // no asynchronous work, so this is `writer.write(_:to:in:)` with the
                         // animation round its commit. Nothing is written once the design closes.
                         let prepared = await writer.prepare(root, from: store)
+                        var isCommitted = false
                         if let prepared, !isClosed {
                             withAnimation(.snappy(duration: 0.25)) {
-                                _ = store.act(for: edit) { writer.commit(prepared, to: store) }
+                                isCommitted = store.act(for: edit) { writer.commit(prepared, to: store) }
                             }
                         }
                         generation?.isThinking = false
-                        generation?.elementCount = root.leafCount
-                        if let prepared { generation?.unfixedIssues = prepared.unfixed }
+                        // What is said is what was written: an update the store refused counts nothing.
+                        if let prepared, isCommitted {
+                            generation?.elementCount = root.leafCount
+                            generation?.unfixedIssues = prepared.unfixed
+                        } else if prepared != nil, !isClosed, store.root(of: screenID) != nil {
+                            isRefused = true
+                        }
                     case .leftOut(let diagnostics):
                         generation?.leftOut = diagnostics.count { $0.reason != .actionNotRun }
                     }
+                    // Every later update holds at least as much as the one refused: the model is stopped.
+                    if isRefused { break }
                 }
-                self?.finishGeneration(error: nil, edit: edit, ownsEdit: ownsEdit)
+                self?.finishGeneration(error: isRefused ? NoRoomForTheScreen() : nil, edit: edit, ownsEdit: ownsEdit)
             } catch {
                 self?.finishGeneration(error: error is CancellationError ? nil : error, edit: edit, ownsEdit: ownsEdit)
             }
         }
         return screenID
+    }
+
+    /// Why a generation ended early: the design had no room for what the model wrote (`designIsFull`).
+    private struct NoRoomForTheScreen: LocalizedError {
+        var errorDescription: String? { AppModel.designIsFull }
     }
 
     /// Stops the model; what it has written so far stays.
@@ -952,12 +969,21 @@ final class AppModel {
     /// `whyNoScreen(on:)`.
     var screenNotice: String?
 
+    /// Said when a text, a sticky note, a picture or a thing from the library, asked for by hand, can't be added: the
+    /// design holds as much as Layer keeps (`designIsFull`).
+    var addNotice: String?
+
     /// Why the store refused a new screen of `device`: the device can't be used (`DeviceFrame.problems`), as a file can
     /// hold one of the design's own, or else the design holds as much as Layer keeps.
     static func whyNoScreen(on device: DeviceFrame) -> String {
         let problems = device.problems
         guard problems.isEmpty else { return "The device “\(device.name)” can't be used. \(problems.joined(separator: " "))" }
-        return "The design already holds as much as Layer keeps: \(TreeRules.maximumNodes.formatted()) things, nested at most \(TreeRules.maximumDepth) deep."
+        return designIsFull
+    }
+
+    /// Why the store refused something new that it could otherwise take: the design is at Layer's limits.
+    nonisolated static var designIsFull: String {
+        "The design already holds as much as Layer keeps: \(TreeRules.maximumNodes.formatted()) things, nested at most \(TreeRules.maximumDepth) deep."
     }
 
     /// Takes out of Siri's history the actions everything of which has been changed since,
@@ -2161,33 +2187,10 @@ final class AppModel {
     }
 
     /// The Format panel's X, Y, W and H for a container, a group, card, row, column, grid or
-    /// overlay: the one way its fields change it (D3), in the panel's own edit. The values are in
-    /// its host's points, as the panel shows them: the box's X and Y, and its width and height,
-    /// in its own axes when it is turned.
-    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the
-    ///   change is in the host's points, and `position` takes canvas points.
-    /// - W or H scales everything in it in proportion, both sides by the side typed, from its
-    ///   top-left: a container is scaled by the ratio of its widths, so an H given alone would
-    ///   scale nothing (L8).
-    ///
-    /// Nothing happens to a container that is locked, by itself or by one above it. Read from the tree.
+    /// overlay: the one way its fields change it (D3), in the panel's own edit. The store's
+    /// `setBox(of:x:y:width:height:)`, which voice's `moveElement` calls too, says what each does.
     func setGroupBox(_ ref: NodeRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
-        adjusting {
-            if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
-                let box = item.canvasShape.bounds
-                let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
-                let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
-                store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
-            }
-            if width != nil || height != nil, let item = store.placed(ref), item.node.isContainer,
-               item.frame.width > 0, item.frame.height > 0 {
-                // The side typed exactly; given both, the width, as the ratio is the widths'.
-                let box = item.frame
-                let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
-                    ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
-                store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
-            }
-        }
+        adjusting { store.setBox(of: ref, x: x, y: y, width: width, height: height) }
     }
 
     /// Turns each of `refs` to `degrees` on the canvas, in one step, each about its own middle:
@@ -2455,10 +2458,13 @@ final class AppModel {
     /// Puts a new leaf in the middle of the view, or centred on `point` in canvas points,
     /// selected and ready to be dragged: see `DesignStore.place(_:centredAt:)`. Over a screen
     /// it joins the screen, kept inside its edges. Nil, and nothing changes, when the design
-    /// can't take it.
+    /// can't take it, which, `sayingWhyNot`, is said (`addNotice`).
     @discardableResult
-    private func add(_ node: LayerNode, at point: CGPoint? = nil) -> NodeRef? {
-        guard let ref = store.place(node, centredAt: point ?? middleOfView) else { return nil }
+    private func add(_ node: LayerNode, at point: CGPoint? = nil, sayingWhyNot: Bool = true) -> NodeRef? {
+        guard let ref = store.place(node, centredAt: point ?? middleOfView) else {
+            if sayingWhyNot { addNotice = Self.designIsFull }
+            return nil
+        }
         tool = .select
         selection = .element(ref)
         return ref
@@ -2479,8 +2485,7 @@ final class AppModel {
             node.content.isOn = filled
             add(node, at: point)
         case .component(let id):
-            guard let node = AssetLibrary.element(forComponent: id) else { return }
-            add(node, at: point)
+            guard let node = AssetLibrary.element(forComponent: id), add(node, at: point) != nil else { return }
             if node.kind == .stickyNote { isEditingText = true }
         case .frame(let id):
             // A built-in, or one of the design's own; a frame this design doesn't have adds nothing.
@@ -2518,30 +2523,30 @@ final class AppModel {
         add(LayerNode.standard(.symbol, symbol: name))
     }
 
-    /// Adds a piece of text and opens it for typing.
+    /// Adds a piece of text and opens it for typing. With no room for it, nothing is opened.
     func addText() {
-        add(LayerNode.standard(.text))
+        guard add(LayerNode.standard(.text)) != nil else { return }
         isEditingText = true
         suggestTitleIfNeeded()
     }
 
     func addStickyNote() {
-        add(LayerNode.standard(.stickyNote))
+        guard add(LayerNode.standard(.stickyNote)) != nil else { return }
         isEditingText = true
     }
 
     /// Adds a picture, drawn no wider than most of a phone screen. Returns where it is: nil when the design has no room
-    /// for it, which leaves the selection as it was. A picture's data a refused image leaves in the document isn't
-    /// saved: a file keeps only the pictures its images show.
+    /// for it, which leaves the selection as it was and, `sayingWhyNot`, is said (`addNotice`). A picture's data a
+    /// refused image leaves in the document isn't saved: a file keeps only the pictures its images show.
     @discardableResult
-    func addImage(_ prepared: ImageImport.Prepared) -> NodeRef? {
+    func addImage(_ prepared: ImageImport.Prepared, sayingWhyNot: Bool = true) -> NodeRef? {
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }
         var node = LayerNode.standard(.image)
         let width = min(prepared.image.size.width, 280)
         node.frame.size = CGSize(width: width.rounded(), height: (width * prepared.image.size.height / max(prepared.image.size.width, 1)).rounded())
         node.content.imageID = id
-        return add(node)
+        return add(node, sayingWhyNot: sayingWhyNot)
     }
 
     /// Adds a device frame in the middle of the view, or centred on `point` in canvas
@@ -2549,10 +2554,8 @@ final class AppModel {
     /// refuses it: a device of the design's own that can't be used, or no room for a screen.
     @discardableResult
     func addFrame(_ device: DeviceFrame, centeredAt point: CGPoint? = nil) -> TreeScreen? {
-        let placement = framePlacement(device, centeredAt: point)
-        let screen = TreeScreen(name: "Screen \(store.tree.screens.count + 1)", origin: placement.origin,
-                                scale: placement.scale, deviceID: device == .iPhone ? nil : device.id)
-        guard store.addScreen(screen) != nil else {
+        // The store's empty screen, as it holds it: named by how many there are, its root taking the screen's id.
+        guard let screen = store.addScreen(device, at: framePlacement(device, centeredAt: point)) else {
             screenNotice = Self.whyNoScreen(on: device)
             return nil
         }

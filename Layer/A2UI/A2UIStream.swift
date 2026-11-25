@@ -1,7 +1,7 @@
 import Foundation
 import OrderedJSON
 
-/// A screen read as a hosted model writes it in A2UI 1.0, one message per line (call 9): each time a finished line
+/// A screen read as a model asked for A2UI 1.0 writes it, one message per line (call 9): each time a finished line
 /// adds to the screen, the screen so far is handed on, as `OutlineStream` hands on an outline's.
 ///
 /// - Each finished line is decoded only through the importer's guarded `decodeJSON` (F1). It is good when it is a

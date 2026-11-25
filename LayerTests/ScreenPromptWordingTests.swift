@@ -12,7 +12,8 @@ import Testing
         #expect(ScreenPrompt.instructions(.full, for: Self.brief) == Self.full)
     }
 
-    /// The A2UI prompt hosted models are told. Plan 6 measures it, and changes this literal when it changes the words.
+    /// The A2UI prompt a model is told when a caller asks for A2UI: no model is by default since plan 6's measure, which
+    /// left the words as they were. A change to them changes this literal.
     @Test func theA2UIPromptIsUnchanged() {
         #expect(A2UIPrompt.instructions(for: Self.brief) == Self.a2ui)
     }

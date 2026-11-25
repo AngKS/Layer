@@ -99,12 +99,12 @@ self-correction — not reported as a clean win across every pair, because it is
   (`existing` is mostly empty by construction), so the tool had almost nothing concrete to
   add, and the extra round trip just gave the model more room to second-guess a right
   answer — the same self-correction asymmetry the report's cited literature warns about,
-  measured directly rather than assumed. The type stays in the codebase
+  measured directly rather than assumed. The type stayed in the codebase
   (`Layer/Sketch/SketchContextTool.swift`), documented as unused by default with the exact
-  numbers, rather than wired in on the strength of the idea alone or deleted outright: a
-  corpus with more genuinely neighbour-dependent escalated cases (a primary button already
-  on screen, say) might show differently, and the implementation is ready to re-test
-  against one.
+  numbers, rather than wired in on the strength of the idea alone: a corpus with more
+  genuinely neighbour-dependent escalated cases (a primary button already on screen, say)
+  might show differently. Plan 6's final fix wave (2026-11-25) deleted it, since nothing
+  constructed it; it is in the history at cef9c70, ready to restore and re-test.
 
 Per the brief's decision rule — keep a piece only if the benchmark shows it helps without
 pushing latency past target — both reverted pieces earned their removal on the numbers,

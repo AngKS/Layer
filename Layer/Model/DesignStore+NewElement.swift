@@ -16,8 +16,8 @@ extension DesignStore {
 }
 
 extension LayerNode {
-    /// A new leaf as the store's flat `newElement` made one: the kind's placeholder text, `style.tint` the kind's tint,
-    /// its standard size, `.fixed` on both axes, at the origin. Siri's Add, voice's add and the library use it (F13).
+    /// A new leaf of `kind`: the kind's placeholder text, `style.tint` the kind's tint, its standard size, `.fixed` on
+    /// both axes, at the origin. Siri's Add, voice's add and the library use it (F13).
     static func standard(_ kind: ElementKind, symbol: String? = nil) -> LayerNode {
         var node = LayerNode(kind: kind)
         node.frame = CGRect(origin: .zero, size: ElementLayout.size(for: kind, sketch: .zero))

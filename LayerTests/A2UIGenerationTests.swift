@@ -3,8 +3,9 @@ import Foundation
 import Testing
 @testable import Layer
 
-/// Hosted models write a screen in A2UI 1.0, a message per line, read as it comes (plan 3, Task 6).
-@Suite("Hosted models write screens in A2UI")
+/// A model asked for A2UI 1.0 writes a screen a message per line, read as it comes (plan 3, Task 6). Every model writes
+/// the outline by default since plan 6's measure (`ScreenGenerator.hostedFormat`).
+@Suite("Screens written in A2UI")
 struct A2UIGenerationTests {
     static let createSurface = #"{"version":"1.0","createSurface":{"surfaceId":"screen","catalogId":"urn:layer:a2ui:catalog:1"}}"#
 

@@ -142,6 +142,31 @@ struct UnfixedIssuesTests {
         #expect(BuildScreenIntent.dialog(for: plain, in: model) == "Built Plain with 2 elements.")
     }
 
+    /// An update the design has no room for is never counted: what a refused commit would have made, and what would
+    /// have been wrong with it, isn't said. The generation says the design is full instead, and its screen, with nothing
+    /// written on it, goes (plan 6 final review B, M12).
+    @Test func anUpdateTheDesignHasNoRoomForIsNeverCounted() async throws {
+        let (app, feed) = bench()
+        let store = app.store
+        // Room for the new screen's root and nothing more.
+        let room = TreeRules.maximumNodes - store.index.count - 2
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 3_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes - 1)
+        let screen = try #require(app.generateScreen(from: "a photo screen"))
+        var fixed = wideImageRoot()
+        _ = TreeValidator.fixGenerated(&fixed)
+        feed.yield(.screen(fixed))
+        feed.finish()
+        await app.waitForGeneration()
+
+        let generation = try #require(app.generation)
+        #expect(generation.elementCount == 0)
+        #expect(generation.unfixedIssues.isEmpty, "\(generation.unfixedIssues)")
+        #expect(generation.phase == .failed(AppModel.designIsFull))
+        #expect(store.treeScreen(screen) == nil)
+    }
+
     @Test func theLeftOutWordsComeFirst() {
         var generation = AppModel.ScreenGeneration(screenID: UUID(), description: "")
         generation.leftOut = 2

@@ -98,7 +98,8 @@ extension AppModel {
     func placeGeneratedImage(_ prepared: ImageImport.Prepared, for request: ImagePlaygroundRequest) -> NodeRef? {
         imagePlaygroundRequest = nil
         if case .newImage(nil) = request.target {
-            return addImage(prepared)
+            // A refusal is said by whoever asked: Image Playground's sheet, or Siri.
+            return addImage(prepared, sayingWhyNot: false)
         }
         let id = images.add(prepared)
         document.update { $0.images[id.uuidString] = prepared.data }

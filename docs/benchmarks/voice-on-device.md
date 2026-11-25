@@ -583,11 +583,11 @@ The run was made under other lanes' builds, at a load of 64 to 91, so its times 
 - "Put these in a column" now names only the two fields, E8 and E9, but still goes to `stackElements`.
 
 **The older tools.** The older tools' on-device numbers are lower than before: the controls are 15 of 25 right, against
-20 this morning, and the new screen 20 of 30, against 25 on 2026-11-21. Both are within the bar, which needs 13 of 25
+20 in the run at 10:27:38 on 2026-11-25, and the new screen 20 of 30, against 25 on 2026-11-21. Both are within the bar, which needs 13 of 25
 for the controls and sets no floor for the new-screen row.
 
-Every run in this round handed the model the on-device list, without `--all-tools`. "Before the fix" is this
-morning's run of the on-device list (10:27:38); the all-tools run (10:18:30) scored the same in every row. Each cell is
+Every run in this round handed the model the on-device list, without `--all-tools`. "Before the fix" is the run of
+the on-device list at 10:27:38 on 2026-11-25; the all-tools run (10:18:30) scored the same in every row. Each cell is
 two numbers: right, then right tool.
 
 | Commands | Before the fix, on-device list: right, right tool | The new wording, on-device list: right, right tool | With the empty canvas's rules too, on-device list: right, right tool |

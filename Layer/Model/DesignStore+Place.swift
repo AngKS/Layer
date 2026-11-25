@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-// The library's drop on the tree (plan 6, F2): what the flat store's placing of an element and the app's `add(_:at:)`
-// did together, for a node.
+// The library's drop on the tree (plan 6, F2): where a new node goes when it is dropped or added by hand, with the
+// app's `add(_:at:)`.
 
 extension DesignStore {
     /// A new node centred on `point` (canvas points), as the library drops it. For a kind that belongs on screens, the

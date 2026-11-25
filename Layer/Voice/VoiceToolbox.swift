@@ -706,7 +706,7 @@ final class VoiceToolbox: VoiceActing {
     }
 
     /// In a free parent, a position or a size is where it goes or how big it is, in its host's points. A container goes
-    /// whole, moved and resized exactly as the Format panel's X, Y, W and H move and resize one (`setBox`): a size
+    /// whole, moved and resized as the Format panel's X, Y, W and H move and resize one (`DesignStore.setBox`): a size
     /// scales it in proportion. A thing a row, column, grid or overlay places is
     /// only resized by its numbers, which fixes the axes they change: a position changes nothing, and the model is
     /// told how to reorder it or take it out, which `takeOut` does through the drag rule (call 8). Under a screen's
@@ -767,7 +767,7 @@ final class VoiceToolbox: VoiceActing {
                     return self.takeOut(found, handle: handle, from: placer, to: frame)
                 }
                 if found.node.isContainer {
-                    Self.setBox(of: found.ref, x: values[0], y: values[1], width: values[2], height: values[3], in: store)
+                    store.setBox(of: found.ref, x: values[0], y: values[1], width: values[2], height: values[3])
                 } else {
                     store.place(found.id, at: frame)
                 }
@@ -795,31 +795,6 @@ final class VoiceToolbox: VoiceActing {
             var nowhere = placer
             nowhere.canTakeOut = false
             return failed(placedLine(handle, nowhere))
-        }
-    }
-
-    /// A container's X, Y, W and H, in its host's points, as the Format panel sets them: a copy of the body of
-    /// `AppModel.setGroupBox(_:x:y:width:height:)` (AppModel.swift), which runs in the panel's own edit (`adjusting`) and
-    /// so can't join a spoken command's step. Keep the two the same.
-    /// - X or Y moves everything in it as one piece, by as far as the box moves (`position` takes canvas points).
-    /// - W or H scales everything in it in proportion, both sides by the side given, from its top-left: by the width
-    ///   whenever a width is given, so a width as it is with a new height changes nothing. A row, column, grid or
-    ///   overlay is scaled the same way, and fixed on both axes that change (`resizeGroup`).
-    private static func setBox(of ref: NodeRef, x: CGFloat?, y: CGFloat?, width: CGFloat?, height: CGFloat?,
-                               in store: DesignStore) {
-        if x != nil || y != nil, let item = store.placed(ref), item.node.isContainer {
-            let box = item.canvasShape.bounds
-            let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
-            let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
-            store.position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
-        }
-        if width != nil || height != nil, let item = store.placed(ref), item.node.isContainer,
-           item.frame.width > 0, item.frame.height > 0 {
-            // The side given exactly; given both, the width, as the ratio is the widths'.
-            let box = item.frame
-            let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
-                ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
-            store.resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
         }
     }
 

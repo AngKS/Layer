@@ -1,9 +1,10 @@
 import Foundation
 
-/// What a hosted model is told when it writes a whole screen in A2UI 1.0 (spec §6, call 9): Layer's catalogue, a
+/// What a model is told when it is asked to write a whole screen in A2UI 1.0 (spec §6, call 9): Layer's catalogue, a
 /// message per line, so the screen is shown growing as each line is finished (`A2UIStream`).
 ///
-/// Only hosted models write A2UI (`ScreenGenerator.format(for:)`), so the prompt is always the full one: the form,
+/// A model writes A2UI only when a caller asks for it (`ScreenGenerator.stream(_:format:)`): every model writes the
+/// outline by default (`ScreenGenerator.format(for:)`, plan 6's measure). The prompt is always the full one: the form,
 /// two examples chosen for the description as `ScreenPrompt.examples` chooses the outline's, and today's rules in
 /// A2UI's words. It names no spacing, size or colour: Layer's tokens set them, and a model's Layer look is ignored
 /// (§14). It builds on macOS, for the screen harness.

@@ -166,6 +166,47 @@ struct AddingAssetsTests {
         #expect(added.frame.minX >= 0 && added.frame.maxX <= DeviceFrame.iPhone.size.width)
     }
 
+    /// A text, a sticky note, a component, a symbol, a shape or a picture the design has no room for says why, as a
+    /// refused screen does, and opens nothing for typing: the text selected before is left as it was, not opened in its
+    /// place (plan 6 final review B, M6).
+    @Test func aThingRefusedAtTheCapSaysWhyAndOpensNothing() throws {
+        let model = makeModel()
+        let store = model.store
+        let words = LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 120, height: 24), text: "Hello")
+        let screen = store.addFreeScreen([words], name: "Login")
+        let room = TreeRules.maximumNodes - store.index.count - 1
+        let texts = (0..<room).map { _ in LayerNode.leaf(.text, frame: CGRect(x: 20, y: 100, width: 80, height: 20), text: "Text") }
+        store.addFreeScreen(texts, name: "Crowd", origin: CGPoint(x: 3_000, y: 0))
+        try #require(store.index.count == TreeRules.maximumNodes)
+        let selected = CanvasSelection.element(NodeRef(host: .screen(screen), node: words.id))
+        model.selection = selected
+        let before = store.tree
+        let drawn = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 32)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 32))
+        }
+        let data = try #require(drawn.pngData())
+        let picture = try #require(ImageImport.prepare(data))
+        let adds: [(String, () -> Void)] = [
+            ("text", { model.addText() }),
+            ("sticky note", { model.addStickyNote() }),
+            ("component", { model.addAsset(AssetLibrary.asset(id: "component:stickyNote")!) }),
+            ("symbol", { model.addSymbol("heart") }),
+            ("shape", { model.addAsset(AssetLibrary.asset(id: "shape:arrowRight:line")!) }),
+            ("picture", { model.addImage(picture) }),
+        ]
+        for (name, add) in adds {
+            add()
+            #expect(model.addNotice == AppModel.designIsFull, "\(name)")
+            #expect(!model.isEditingText, "\(name)")
+            #expect(model.selection == selected, "\(name)")
+            #expect(store.tree == before, "\(name)")
+            model.addNotice = nil
+            model.isEditingText = false
+        }
+        #expect(AssetLibrary.asset(id: "component:stickyNote") != nil)
+    }
+
     @Test func aTemplateIsAWholeScreenInOneUndoStep() throws {
         let model = makeModel()
         let settings = try #require(AssetLibrary.asset(id: "template:Settings"))

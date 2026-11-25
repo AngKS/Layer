@@ -9,10 +9,11 @@ import os
 /// ranked, scored candidates rather than starting from the shape alone, answering with
 /// `{chosen, runnerUp}`, both restricted to this sketch's own candidates.
 ///
-/// Two pieces the brief asked for are implemented but, measured, don't earn a place in
-/// the live call — kept as working code (`SketchContextTool`, the `reason` field this
-/// type's `agentSchema` could still generate), not shipped, per the brief's own rule to
-/// keep a piece only if the benchmark shows it helps:
+/// Two pieces the brief asked for were implemented but, measured, don't earn a place in
+/// the live call, per the brief's own rule to keep a piece only if the benchmark shows it
+/// helps. Neither is in the code now: the `reason` field was cut from `agentSchema`, and
+/// `SketchContextTool`, never constructed, was deleted in plan 6's final fix wave (it is in
+/// the history at cef9c70, `Layer/Sketch/SketchContextTool.swift`, to test again):
 ///
 /// - **`reason`** (a one-sentence explanation): with it in the schema, System 2 latency
 ///   p50/p95 rose to 1.78s/2.01s, nearly double the report's own ~1s target for one tool
@@ -76,8 +77,8 @@ struct AppleIntelligenceInterpreter: SketchInterpreter {
             + scored.map { "\(SketchPrompt.name(for: $0.reading)) (score \(String(format: "%.2f", $0.score)))" }.joined(separator: ", ") + "."
         let prompt = [SketchPrompt.describe(request), rankedLine].compactMap { $0 }.joined(separator: " ")
 
-        // No tools: see this type's doc comment for why `SketchContextTool`, implemented
-        // and working, measured worse than leaving it out on this benchmark.
+        // No tools: see this type's doc comment for why `SketchContextTool` measured worse
+        // than leaving it out on this benchmark.
         //
         // Built fresh, not from `WarmSessions`: a tool-carrying session's data would be
         // this one sketch's own context, which a cached session from an earlier sketch

@@ -463,7 +463,6 @@
 		DDB9D7AB0D8CFD271CFDDDAE /* LibraryOnTheTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE494F93AEFBA91E29A79E61 /* LibraryOnTheTreeTests.swift */; };
 		DF19E8611108717502DCDFF6 /* TreeDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BA685CACDB1AFCD6558A1E2 /* TreeDrop.swift */; };
 		DF3BD3B82D1D31BE1FE222CB /* LayerRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 773DF8DAF667C9898FA5E901 /* LayerRowsTests.swift */; };
-		DF3E66ABDC4F44BCBF462695 /* SketchContextTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F296EF7BB53596E9E6D60C7 /* SketchContextTool.swift */; };
 		DF4B7DF0EF197EAC75AB7E8C /* scratchOut_jittered_1a.json in Resources */ = {isa = PBXBuildFile; fileRef = 628D793BEF215C004356BB14 /* scratchOut_jittered_1a.json */; };
 		E035B8033DED2ADF09EC41F0 /* MagicPenComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3347ECDC6BC88B87DCA5D675 /* MagicPenComponentTests.swift */; };
 		E09B90B347FBB96ABCCB2D8C /* VoiceScreenLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158D37B7210214BB15429492 /* VoiceScreenLayoutTests.swift */; };
@@ -602,7 +601,6 @@
 		0C2474707D9CE44292D1BEAD /* divider_jittered_2b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = divider_jittered_2b.json; sourceTree = "<group>"; };
 		0C32E2AFBFA5D07D74D53568 /* checkbox_jittered_1b.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = checkbox_jittered_1b.json; sourceTree = "<group>"; };
 		0E457CBACB8B8C7AF0F460D7 /* DrawingInk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingInk.swift; sourceTree = "<group>"; };
-		0F296EF7BB53596E9E6D60C7 /* SketchContextTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchContextTool.swift; sourceTree = "<group>"; };
 		1027DCB477677F246B2A1CDD /* title_body_title_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = title_body_title_2.json; sourceTree = "<group>"; };
 		10460E4EBE99925335C2B78D /* screen_clean_2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = screen_clean_2.json; sourceTree = "<group>"; };
 		10755A04BF7B4317FD3A8BB7 /* BuildScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildScreenTests.swift; sourceTree = "<group>"; };
@@ -1542,7 +1540,6 @@
 				450E3AF29ABC2CF8B0EB9654 /* ScreenPrompt.swift */,
 				3E0900921ACCCC6C81E0525B /* ScreenStream.swift */,
 				E4BCDF3D9FEFFA7185068830 /* SketchAnalyzer.swift */,
-				0F296EF7BB53596E9E6D60C7 /* SketchContextTool.swift */,
 				65C984B2557BA67C651E9EE6 /* SketchedNode.swift */,
 				3A834F3E5C52B77D1C250633 /* SketchEngine.swift */,
 				1E5D745E1FC169922426572F /* SketchInterpreter.swift */,
@@ -2524,7 +2521,6 @@
 				2B737C1728743984C36AADE4 /* ShareMenu.swift in Sources */,
 				ADBE4776182FCDF56714EDFB /* SketchAnalyzer.swift in Sources */,
 				3FC82F34F63292043534C213 /* SketchBenchmark.swift in Sources */,
-				DF3E66ABDC4F44BCBF462695 /* SketchContextTool.swift in Sources */,
 				3F74BB724FD5F672444FF466 /* SketchEngine.swift in Sources */,
 				CA50927BD1C83B3DABB19186 /* SketchIntent+Making.swift in Sources */,
 				A82BCCADC9AD237D3B197543 /* SketchInterpreter.swift in Sources */,

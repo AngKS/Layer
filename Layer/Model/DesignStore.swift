@@ -201,6 +201,7 @@ final class DesignStore {
     /// its own lock and hide. The copy is unlocked and named for the original, and keeps its
     /// device, even one a file held that can't be used: no new device is chosen. Nil when the
     /// screen is gone, or the copy would take the design past 5,000 things.
+    // Kept for tests: the app copies a screen with `duplicateTreeScreen(_:)`.
     @discardableResult
     func duplicateScreen(_ id: TreeScreen.ID) -> TreeScreen? {
         duplicateTreeScreen(id).flatMap { treeScreen($0) }
@@ -351,6 +352,7 @@ final class DesignStore {
     /// points, and a container goes whole, everything in it with it (`move(_:to:at:)`). Returns
     /// where it now lives, or nil when the element or screen is gone or the element can't go on
     /// screens. One step to undo.
+    // Kept for tests: no app path calls it (Siri's Move Element to Screen takes things out with `takeOut`).
     @discardableResult
     func move(_ ref: NodeRef, toScreen screenID: TreeScreen.ID?, origin: CGPoint?) -> NodeRef? {
         guard let placed = placed(ref) else { return nil }

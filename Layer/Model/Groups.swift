@@ -83,6 +83,34 @@ extension DesignStore {
     /// The most a group can be scaled to, by a frame asked for in one go.
     static let largestGroupScale: CGFloat = 100
 
+    /// A container's X, Y, W and H, in its host's points as the Format panel shows them: the box's X and Y, and its
+    /// width and height, in its own axes when it is turned. The panel's fields (`AppModel.setGroupBox`, in its own edit)
+    /// and voice's `moveElement` (in its command's step) both come this way.
+    /// - X or Y moves everything in it as one piece, by as far as the box moves (L8): the change is in the host's
+    ///   points, and `position` takes canvas points.
+    /// - W or H scales everything in it in proportion, both sides by the side given, from its top-left: a container is
+    ///   scaled by the ratio of its widths, so a width as it is with a new height changes nothing, and an H given alone
+    ///   scales by the heights (L8). A row, column, grid or overlay is scaled the same way, and fixed on both axes that
+    ///   change (`resizeGroup`).
+    ///
+    /// Nothing happens to a container that is locked, by itself or by one above it. Read from the tree.
+    func setBox(of ref: NodeRef, x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil) {
+        if x != nil || y != nil, let item = placed(ref), item.node.isContainer {
+            let box = item.canvasShape.bounds
+            let across = ((x ?? item.frame.minX) - item.frame.minX) * item.placement.scale
+            let down = ((y ?? item.frame.minY) - item.frame.minY) * item.placement.scale
+            position([.element(ref): CGPoint(x: box.minX + across, y: box.minY + down)])
+        }
+        if width != nil || height != nil, let item = placed(ref), item.node.isContainer,
+           item.frame.width > 0, item.frame.height > 0 {
+            // The side given exactly; given both, the width, as the ratio is the widths'.
+            let box = item.frame
+            let size = width.map { CGSize(width: $0, height: box.height * $0 / box.width) }
+                ?? CGSize(width: box.width * (height ?? box.height) / box.height, height: height ?? box.height)
+            resizeGroup(ref, to: CGRect(origin: box.origin, size: size))
+        }
+    }
+
     /// Resizes a container to `frame`, in its host's own points, as one change on the tree: from
     /// `start`, the container as a handle drag on it began, or from where it is now. With s the new
     /// box's width over the start's, the middle of each thing in it goes where it was in the start

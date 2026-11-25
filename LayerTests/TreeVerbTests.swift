@@ -718,4 +718,19 @@ struct TreeVerbTests {
         #expect(model.screenNotice?.hasPrefix("The device “Sliver” can't be used.") == true)
         #expect(before.screens == named.screens)
     }
+
+    /// A frame from the library is the store's empty screen: its root takes the screen's id, and what comes back is the
+    /// screen as the store holds it, laid out on the design's own device (plan 6 final review B, M5).
+    @Test func aLibraryFrameIsTheStoresEmptyScreen() throws {
+        let model = AppModel(document: LayerDocument())
+        model.canvasSize = CGSize(width: 1210, height: 834)
+        let kioskID = model.store.addCustomDevice(.custom(name: "Kiosk", size: CGSize(width: 1080, height: 1920), family: .other))
+        let kiosk = try #require(model.store.tree.settings.customDevices.first { $0.id == kioskID })
+
+        let added = try #require(model.addFrame(kiosk))
+
+        #expect(added.root.id == added.id)
+        #expect(added == model.store.treeScreen(added.id))
+        #expect(added.root.frame.size == CGSize(width: 1080, height: 1920))
+    }
 }

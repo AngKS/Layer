@@ -250,7 +250,9 @@ hosted default: outline — valid 13/24 vs 24/24; first content p50 57976 ms vs 
 ```
 
 **The decision.** Both conditions hold, so hosted models now write the outline: `ScreenGenerator.hostedFormat` is
-`.outline`, and a hosted model is told `ScreenPrompt.instructions(.full, …)`. A2UI is still read when a caller asks for
+`.outline`, and a hosted model is told `ScreenPrompt.instructions(.full, …)`. The outline won on validity, as the rule
+reads; A2UI's quality columns were better: the outline split 5 sections against A2UI's 0, copied 18 example lines
+against 5, and coloured 2 nodes against 0. A2UI is still read when a caller asks for
 it (`ScreenGenerator.stream(_:format:)`), and Layer still imports, pastes and shares A2UI.
 
 **Why 11 A2UI screens weren't valid.**
