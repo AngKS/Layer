@@ -62,8 +62,10 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     private var holdingStart = false
     private var holdingSettle = false
     private var started = false
-    /// Waits for it to start listening (`untilStarted()`).
-    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Waits for it to start listening (`untilStarted()`), by the wait's id.
+    private var startWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// Waits cancelled before they began waiting: they don't.
+    private var abandonedWaits: Set<UUID> = []
 
     /// While set, getting ready waits, as it does while what speech needs is fetched.
     var holdsPrepare: Bool {
@@ -86,14 +88,25 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
     /// Whether it was ever asked to listen.
     var wasStarted: Bool { state.withLock { started } }
 
-    /// Returns once it has been asked to listen, and can be told what it hears: at once if it has been.
+    /// Returns once it has been asked to listen, and can be told what it hears: at once if it has been, and at once
+    /// when the wait is cancelled, as at a test's time limit.
     func untilStarted() async {
-        await withCheckedContinuation { waiter in
-            let isStarted = state.withLock {
-                if !started { startWaiters.append(waiter) }
-                return started
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter in
+                let resumesNow = state.withLock {
+                    let now = started || abandonedWaits.contains(id)
+                    if !now { startWaiters[id] = waiter }
+                    return now
+                }
+                if resumesNow { waiter.resume() }
             }
-            if isStarted { waiter.resume() }
+        } onCancel: {
+            let waiter = state.withLock {
+                abandonedWaits.insert(id)
+                return startWaiters.removeValue(forKey: id)
+            }
+            waiter?.resume()
         }
     }
 
@@ -120,10 +133,10 @@ final class FakeRecogniser: PhraseRecogniser, @unchecked Sendable {
             self.continuation = continuation
             told = vocabulary
             started = true
-            defer { startWaiters = [] }
+            defer { startWaiters = [:] }
             return startWaiters
         }
-        for waiter in waiters { waiter.resume() }
+        for waiter in waiters.values { waiter.resume() }
         Task {
             for await _ in sound { self.state.withLock { self.chunks += 1 } }
         }

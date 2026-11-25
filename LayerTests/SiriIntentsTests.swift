@@ -624,8 +624,41 @@ struct OpeningDesignTests {
         let picking = Task {
             try await DocumentBrowser.pick(url, in: browser, limit: nil) { _ in } picking: { _ in }
         }
-        guard case .success = await picking.result else {
+        // Cancelled at the time limit, the open is too, and ends.
+        let result = await withTaskCancellationHandler { await picking.result } onCancel: { picking.cancel() }
+        guard case .success = result else {
             Issue.record("a dismiss tried while the design was still coming up was never finished")
+            return
+        }
+        #expect(browser.presentedViewController == nil)
+    }
+
+    /// Holds the thread, as a long piece of work on it does: nothing else runs on it meanwhile.
+    private func holdTheMainThread(for seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
+    /// The app's own limit is counted in the main thread's turns, not by the clock: a stall of the thread longer than
+    /// the limit, while a design is still coming up, uses up one look, and the design is put away once it is up. Timed
+    /// by the clock, the wait woke from the stall before UIKit could finish the presentation, and the open gave up
+    /// (sweep 2 review, M-2).
+    @Test(.timeLimit(.minutes(1)))
+    func aStallLongerThanTheLimitDoesntGiveUpOnADesignComingUp() async throws {
+        let (window, browser, design) = try browserShowingADesign(animated: true)
+        defer { window.isHidden = true }
+        // The presentation under way, and the open waiting on it.
+        try await Task.sleep(for: .milliseconds(50))
+        try #require(design.isBeingPresented)
+        let url = URL(fileURLWithPath: "/designs/B.layer")
+        let picking = Task {
+            try await DocumentBrowser.pick(url, in: browser, limit: .seconds(1)) { _ in } picking: { _ in }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        // The main thread held for longer than the limit, and than the presentation's animation.
+        holdTheMainThread(for: 1.5)
+        let result = await withTaskCancellationHandler { await picking.result } onCancel: { picking.cancel() }
+        guard case .success = result else {
+            Issue.record("a stall longer than the limit gave up on a design coming up: \(result)")
             return
         }
         #expect(browser.presentedViewController == nil)

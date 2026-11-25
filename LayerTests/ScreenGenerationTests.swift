@@ -307,7 +307,8 @@ struct ScreenGenerationLifecycleTests {
         undo.undo()
         #expect(app.store.treeScreen(screen) == nil)
         feed.yield(Self.written("title: Settings\nbutton: Save\n"))
-        await app.waitForGeneration()
+        // Cancelled at the time limit, the generation is stopped, and ends.
+        await withTaskCancellationHandler { await app.waitForGeneration() } onCancel: { Task { @MainActor in app.stopGenerating() } }
         #expect(!app.isGenerating)
         #expect(app.generation == nil)
         #expect(app.store.treeScreen(screen) == nil)
