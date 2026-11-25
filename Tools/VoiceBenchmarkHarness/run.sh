@@ -15,7 +15,10 @@
 set -eu
 cd "$(dirname "$0")/../.."
 REPO_ROOT="$(pwd)"
-BIN="/tmp/VoiceBenchmarkHarness"
+# In this checkout's own build folder (ignored by git), so that runs from two worktrees at once don't overwrite each
+# other's binary.
+BIN="$REPO_ROOT/build/VoiceBenchmarkHarness"
+mkdir -p "$(dirname "$BIN")"
 
 swiftc \
     -parse-as-library \
