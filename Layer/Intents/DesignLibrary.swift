@@ -9,7 +9,7 @@ struct DesignSummary: Sendable {
     let modified: Date?
     /// Empty when the file couldn't be read, or, in the list of every design, when iCloud
     /// hasn't downloaded it to this iPad. A design this version refuses to open has no summary.
-    let content: DesignContent
+    let content: TreeContent
     /// False for a design listed by its name alone, which iCloud hasn't downloaded: its
     /// content wasn't read, rather than empty.
     var isRead = true
@@ -89,12 +89,12 @@ enum DesignLibrary {
     nonisolated static func read(_ url: URL) -> DesignSummary? {
         let name = url.deletingPathExtension().lastPathComponent
         let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        var content = DesignContent()
+        var content = TreeContent()
         var refused = false
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: .withoutChanges, error: &error) { readable in
             do {
-                content = try DesignFile.content(at: readable)
+                content = try DesignFile.content(at: readable).tree
             } catch is DesignFile.ReadError {
                 refused = true
             } catch {}
@@ -146,7 +146,7 @@ enum DesignLibrary {
 
     /// A design listed by its name alone, without reading it.
     private nonisolated static func byName(_ url: URL, modified: Date?) -> DesignSummary {
-        DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: DesignContent(), isRead: false)
+        DesignSummary(id: id(for: url), url: url, title: url.deletingPathExtension().lastPathComponent, modified: modified, content: TreeContent(), isRead: false)
     }
 
     private nonisolated static func modified(of url: URL) -> Date? {

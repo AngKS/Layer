@@ -128,7 +128,9 @@ struct GetDesignLayoutIntent: AppIntent {
         """
         Returns a Layer design as JSON with every position and size: each screen's device, canvas position and \
         scale, and its elements' frames in the screen's own points, text and look; loose elements in canvas \
-        points; the canvas settings; and how much ink is drawn. Use it to see exactly where things are before \
+        points; the canvas settings; and how much ink is drawn. Each element also gives its sizing, its rotation \
+        and its parent, the container it is in. Each screen gives its layout and lists its containers, groups and \
+        cards, with their layout, sizing, rotation and children. Use it to see exactly where things are before \
         moving, styling or drawing.
         """,
         categoryName: "Designs"
@@ -200,8 +202,8 @@ struct GenerateSwiftUICodeIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let source: (screen: TreeScreen.ID, name: String, design: TreeContent)
         if let screen, let id = screen.screenID, let snapshot = await DesignActions.snapshot(design: screen.designID),
-           let found = snapshot.content.tree.screens.first(where: { $0.id == id }) {
-            source = (found.id, found.name, snapshot.content.tree)
+           let found = snapshot.content.screens.first(where: { $0.id == id }) {
+            source = (found.id, found.name, snapshot.content)
         } else if screen == nil {
             let current = try await DesignActions.screenOrCurrent(nil)
             source = (current.screen.id, current.screen.name, current.model.store.tree)

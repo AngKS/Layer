@@ -21,7 +21,7 @@ loose, drawn large: 228x40 | drawn small: 228x40
 in an outline: 58x34 | in a row: 58x34 | at 40pt: 81x48
 laid out: 20,79 58x34 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## body
 name: Body | symbol: text.alignleft | placeholder: A short description goes here, a line or two that says what this is.
@@ -46,7 +46,7 @@ loose, drawn large: 297x44 | drawn small: 297x44
 in an outline: 325x36 | in a row: 168x54 | at 40pt: 323x191
 laid out: 20,79 353x36 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## image
 name: Image | symbol: photo | placeholder: 
@@ -71,7 +71,7 @@ loose, drawn large: 333x120 | drawn small: 333x120
 in an outline: 353x200 | in a row: 170x200 | at 40pt: 353x200
 laid out: 20,79 353x200 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## button
 name: Button | symbol: capsule.fill | placeholder: Continue
@@ -96,7 +96,7 @@ loose, drawn large: 353x50 | drawn small: 353x50
 in an outline: 112x50 | in a row: 112x50 | at 40pt: 112x50
 laid out: 20,79 353x50 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: buttonStyle, colour, height, kind, name, text, width, x, y
+layout data: buttonStyle, colour, height, kind, name, sizing, text, width, x, y
 
 ## textField
 name: Text Field | symbol: character.cursor.ibeam | placeholder: Placeholder
@@ -121,7 +121,7 @@ loose, drawn large: 333x48 | drawn small: 333x48
 in an outline: 353x48 | in a row: 170x48 | at 40pt: 353x48
 laid out: 20,79 353x48 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## divider
 name: Divider | symbol: minus | placeholder: 
@@ -146,7 +146,7 @@ loose, drawn large: 333x1 | drawn small: 333x1
 in an outline: 353x1 | in a row: 170x1 | at 40pt: 353x1
 laid out: 20,79 353x1 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## symbol
 name: Symbol | symbol: star | placeholder: 
@@ -171,7 +171,7 @@ loose, drawn large: 44x44 | drawn small: 44x44
 in an outline: 44x44 | in a row: 44x44 | at 40pt: 44x44
 laid out: 20,79 44x44 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## text
 name: Text | symbol: character.textbox | placeholder: Text
@@ -196,7 +196,7 @@ loose, drawn large: 455x24 | drawn small: 80x24
 in an outline: 32x21 | in a row: 32x21 | at 40pt: 71x48
 laid out: 20,79 32x21 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## stickyNote
 name: Sticky Note | symbol: note.text | placeholder: Note
@@ -221,7 +221,7 @@ loose, drawn large: 320x320 | drawn small: 100x100
 in an outline: 150x150 | in a row: 150x150 | at 40pt: 150x150
 laid out: not kept on a screen
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, text, width, x, y
+layout data: colour, height, kind, name, sizing, text, width, x, y
 
 ## toggle
 name: Toggle | symbol: switch.2 | placeholder: 
@@ -246,7 +246,7 @@ loose, drawn large: 51x31 | drawn small: 51x31
 in an outline: 51x31 | in a row: 51x31 | at 40pt: 51x31
 laid out: 20,79 51x31 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on false value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## avatar
 name: Avatar | symbol: person.crop.circle | placeholder: 
@@ -271,7 +271,7 @@ loose, drawn large: 40x40 | drawn small: 40x40
 in an outline: 48x48 | in a row: 48x48 | at 40pt: 48x48
 laid out: 20,79 48x48 alignment -
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 ## checkbox
 name: Checkbox | symbol: checkmark.square | placeholder: 
@@ -296,7 +296,7 @@ loose, drawn large: 24x24 | drawn small: 24x24
 in an outline: 24x24 | in a row: 24x24 | at 40pt: 24x24
 laid out: 20,79 24x24 alignment -
 marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## radio
 name: Radio Button | symbol: largecircle.fill.circle | placeholder: 
@@ -321,7 +321,7 @@ loose, drawn large: 24x24 | drawn small: 24x24
 in an outline: 24x24 | in a row: 24x24 | at 40pt: 24x24
 laid out: 20,79 24x24 alignment -
 marks: empty on false value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, width, x, y
+layout data: colour, height, kind, name, on, sizing, width, x, y
 
 ## progress
 name: Progress Bar | symbol: progress.indicator | placeholder: 
@@ -346,7 +346,7 @@ loose, drawn large: 333x6 | drawn small: 333x6
 in an outline: 353x6 | in a row: 170x6 | at 40pt: 353x6
 laid out: 20,79 353x6 alignment -
 marks: empty on true value - | dot on the right on true value 0.9 | shaded to 0.42 on true value 0.4
-layout data: colour, height, kind, name, progress, width, x, y
+layout data: colour, height, kind, name, progress, sizing, width, x, y
 
 ## shape
 name: Shape | symbol: square.on.circle | placeholder: 
@@ -371,7 +371,7 @@ loose, drawn large: 100x100 | drawn small: 100x100
 in an outline: not written
 laid out: not written
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, on, shape, width, x, y
+layout data: colour, height, kind, name, on, shape, sizing, width, x, y
 
 ## drawing
 name: Drawing | symbol: scribble | placeholder: 
@@ -396,7 +396,7 @@ loose, drawn large: 120x120 | drawn small: 120x120
 in an outline: not written
 laid out: not written
 marks: empty on true value - | dot on the right on true value - | shaded to 0.42 on true value -
-layout data: colour, height, kind, name, width, x, y
+layout data: colour, height, kind, name, sizing, width, x, y
 
 asked for on a screen: title, bodyText, image, button, textField, divider, toggle, avatar, checkbox, radioButton, progressBar
 asked for on the open canvas: text, stickyNote, phoneScreen

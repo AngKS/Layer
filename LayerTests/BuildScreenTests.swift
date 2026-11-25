@@ -173,7 +173,7 @@ private final class BuildBundleMarker {}
     @Test func rebuildingALockedScreenIsRefused() async throws {
         let (model, _) = makeModel()
         let id = try await build("title: A", in: model)
-        model.store.updateScreen(id) { $0.isLocked = true }
+        model.store.updateTreeScreen(id) { $0.isLocked = true }
         let before = model.store.content
 
         await #expect(throws: LayerIntentError.self) { _ = try await self.build("title: B", on: id, in: model) }
@@ -188,7 +188,7 @@ private final class BuildBundleMarker {}
             _ = try await build("   \n---\n", in: model)
             Issue.record("an outline with no leaves should be refused")
         } catch let error as LayerIntentError {
-            #expect(String(localized: error.localizedStringResource) == String(localized: LayerIntentError.invalidBlueprint.localizedStringResource))
+            #expect(String(localized: error.localizedStringResource) == String(localized: LayerIntentError.invalidScreenDescription.localizedStringResource))
         }
 
         let rootless = """

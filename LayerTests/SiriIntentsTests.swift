@@ -130,7 +130,7 @@ struct EntityKeyTests {
         let board = OrderBoard()
         let g = board.group(board.b, board.d)
         let notes = board.group(board.note1, board.note2, named: "N")
-        let content = board.store.content
+        let content = board.store.tree
 
         // Siri's elements are the members too.
         let entities = DesignSnapshot(id: "design", name: "Design", content: content, modified: nil).elements
@@ -160,16 +160,15 @@ struct DesignLibraryTests {
 
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1, elements: [
-            DesignStore.newElement(.title),
-        ])]
+        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil,
+                                                root: .container(children: [.standard(.title)]))]
         let url = folder.appendingPathComponent("Travel.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
         let summary = try #require(DesignLibrary.read(url))
         #expect(summary.title == "Travel")
         #expect(summary.content.screens.map(\.name) == ["Login"])
-        #expect(summary.content.screens[0].elements.count == 1)
+        #expect(summary.content.leaves(on: summary.content.screens[0].id).count == 1)
     }
 
     /// A folder with one design in it, named "Trip" on disk and "Travel" inside.
@@ -178,7 +177,7 @@ struct DesignLibraryTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.screens = [DesignScreen(name: "Login", origin: .zero, scale: 1)]
+        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil)]
         let url = folder.appendingPathComponent("Trip.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
         return url
@@ -383,9 +382,9 @@ struct DesignIndexTests {
     }
 
     private func snapshot(_ id: String, screens names: [String]) -> DesignSnapshot {
-        var content = DesignContent()
+        var content = TreeContent()
         for (index, name) in names.enumerated() {
-            content.addScreen(DesignScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1))
+            content.screens.append(TreeScreen(name: name, origin: CGPoint(x: CGFloat(index) * 500, y: 0), scale: 1, deviceID: nil))
         }
         return DesignSnapshot(id: id, name: name(of: id), content: content, modified: nil)
     }
@@ -419,9 +418,9 @@ struct DesignIndexTests {
         // The next: Kept has lost a screen, Away is in iCloud and not on this iPad, and
         // Gone has been deleted.
         var fewer = kept.content
-        fewer.removeScreen(kept.content.screens[1].id)
+        fewer.screens.removeAll { $0.id == kept.content.screens[1].id }
         let keptNow = DesignSnapshot(id: kept.id, name: kept.name, content: fewer, modified: nil)
-        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: DesignContent(), modified: nil, isRead: false)
+        let awayNow = DesignSnapshot(id: away.id, name: away.name, content: TreeContent(), modified: nil, isRead: false)
         await DesignIndexer.reindex([keptNow, awayNow])
 
         let designs = await index.designs, screens = await index.screens
@@ -641,34 +640,34 @@ struct DesignActionTests {
 
     @Test func anEditIsOneUndoStep() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = model.store.addFreeScreen([])
         let written = Outline.parse("title: A\nbody: B\nbutton: C", isComplete: true)
         DesignActions.edit(model, undoManager: nil, actionName: "Build Screen") {
-            model.store.replaceChildren(of: .screen(screen.id), with: written.children)
-            model.store.updateScreen(screen.id) { $0.name = "Login" }
+            model.store.replaceChildren(of: .screen(screen), with: written.children)
+            model.store.updateTreeScreen(screen) { $0.name = "Login" }
         }
-        #expect(model.store.screen(screen.id)?.elements.count == 3)
-        #expect(model.store.screen(screen.id)?.name == "Login")
+        #expect(model.store.screenLeaves(screen).count == 3)
+        #expect(model.store.treeScreen(screen)?.name == "Login")
         model.store.undoManager?.undo()
-        #expect(model.store.screen(screen.id)?.elements.isEmpty == true)
-        #expect(model.store.screen(screen.id)?.name == screen.name)
+        #expect(model.store.screenLeaves(screen).isEmpty)
+        #expect(model.store.treeScreen(screen)?.name == "Screen 1")
     }
 
     @Test func theActionsOwnUndoPutsTheDesignBack() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let before = model.store.content
+        let screen = model.store.addFreeScreen([])
+        let before = model.store.tree
         let siriUndo = UndoManager()
         siriUndo.groupsByEvent = false
         DesignActions.edit(model, undoManager: siriUndo, actionName: "Add Title") {
-            var title = DesignStore.newElement(.title)
-            title.frame = DesignActions.frameForNewElement(title, on: screen)
-            model.store.setElements([title], on: screen.id)
+            var title = LayerNode.standard(.title)
+            title.frame = model.store.newElementFrame(.title, on: screen) ?? title.frame
+            model.store.add(title, to: .screen(screen))
         }
-        #expect(model.store.content != before)
+        #expect(model.store.tree != before)
         #expect(siriUndo.canUndo)
         siriUndo.undo()
-        #expect(model.store.content == before)
+        #expect(model.store.tree == before)
     }
 
     @Test func siriUndoTakesBackOnlyItsOwnAction() {
@@ -677,22 +676,21 @@ struct DesignActionTests {
         siri.groupsByEvent = false
         DesignActions.edit(model, undoManager: siri, actionName: "Rename Design") { model.store.setTitle("A") }
         // Then a screen is added by hand.
-        model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        model.store.addFreeScreen([])
         siri.undo()
         #expect(model.store.title == nil)
-        #expect(model.store.screens.count == 1)
+        #expect(model.store.tree.screens.count == 1)
         // Taking it back is a step of the design's own, which its Undo can take back in turn.
         model.store.undoManager?.undo()
         #expect(model.store.title == "A")
-        #expect(model.store.screens.count == 1)
+        #expect(model.store.tree.screens.count == 1)
     }
 
     @Test func siriUndoLeavesWhatWasChangedSinceAndBringsBackWhatItTookAway() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let other = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
-        let title = DesignStore.newElement(.title), button = DesignStore.newElement(.button), note = DesignStore.newElement(.body)
-        model.store.setElements([title, button, note], on: screen.id)
+        let title = LayerNode.standard(.title), button = LayerNode.standard(.button), note = LayerNode.standard(.body)
+        let screen = model.store.addFreeScreen([title, button, note])
+        let other = model.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 500, y: 0))
         let siri = UndoManager()
         siri.groupsByEvent = false
         let red = RGBColor(hex: 0xFF0000)
@@ -700,23 +698,23 @@ struct DesignActionTests {
         // One action recolours the title and the button, deletes the note, adds a symbol
         // and moves the second screen.
         DesignActions.edit(model, undoManager: siri, actionName: "Restyle") {
-            model.store.update(.init(host: .screen(screen.id), element: title.id)) { $0.tint = red }
-            model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.tint = red }
-            model.store.delete(.init(host: .screen(screen.id), element: note.id))
-            model.store.setElements([DesignStore.newElement(.symbol)], on: screen.id)
-            model.store.updateScreen(other.id) { $0.origin.x = 900 }
+            model.store.update(title.id) { $0.style.tint = red }
+            model.store.update(button.id) { $0.style.tint = red }
+            model.store.delete(nodes: [note.id])
+            model.store.add(.standard(.symbol), to: .screen(screen))
+            model.store.updateTreeScreen(other) { $0.origin.x = 900 }
         }
         // By hand since: the button is given words of its own, and a screen is added.
-        model.store.update(.init(host: .screen(screen.id), element: button.id)) { $0.text = "Go" }
-        let third = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 1400, y: 0), scale: 1))
+        model.store.update(button.id) { $0.content.text = "Go" }
+        let third = model.store.addFreeScreen([], name: "Screen 3", origin: CGPoint(x: 1400, y: 0))
 
         siri.undo()
-        let elements = try #require(model.store.screen(screen.id)?.elements)
+        let elements = model.store.screenLeaves(screen)
         #expect(elements.map(\.id) == [title.id, button.id, note.id], "the note is back where it was, the symbol gone")
-        #expect(elements[0].tint == title.tint, "the title is as it was")
-        #expect(elements[1].tint == red && elements[1].text == "Go", "the button, changed since, is left as it is")
-        #expect(model.store.screen(other.id)?.origin.x == 500)
-        #expect(model.store.screen(third.id) != nil)
+        #expect(elements[0].style.tint == title.style.tint, "the title is as it was")
+        #expect(elements[1].style.tint == red && elements[1].content.text == "Go", "the button, changed since, is left as it is")
+        #expect(model.store.treeScreen(other)?.origin.x == 500)
+        #expect(model.store.treeScreen(third) != nil)
     }
 
     /// F6: a selected group is no single element to Siri, as several things aren't. Taken as
@@ -724,26 +722,29 @@ struct DesignActionTests {
     /// member selected inside the group is the one, as an element is.
     @Test func aSelectedGroupIsNoSingleElementForSiri() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        var button = DesignStore.newElement(.button)
+        var button = LayerNode.standard(.button)
         button.frame.origin.y = 200
-        let refs = model.store.setElements([DesignStore.newElement(.title), button], on: screen.id)
+        let title = LayerNode.standard(.title)
+        let screen = model.store.addFreeScreen([title, button])
+        let refs = [title.id, button.id].map { DesignStore.ElementRef(host: .screen(screen), element: $0) }
         let both = try #require(CanvasSelection(refs.map(CanvasSelection.element)))
         let g = try #require(model.store.group(both))
         // What Siri is offered, as the design's snapshot lists it: the title, then the button.
-        let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.content, modified: nil).elements
+        let entities = DesignSnapshot(id: "design", name: "Design", content: model.store.tree, modified: nil).elements
         #expect(entities.compactMap(\.ref) == refs)
         func isNotFound(_ error: LayerIntentError?) -> Bool {
             error.map { if case .elementNotFound = $0 { true } else { false } } == true
         }
 
+        // The one leaf selected is `selectedLeaf(in:)`, and Siri's "this element" (`selected(in:)`, which
+        // `nodeOrSelected` calls) throws `elementNotFound` when it is nil.
         model.selection = .element(g)
-        #expect(DesignActions.selectedElement(in: model) == nil)
+        #expect(DesignActions.selectedLeaf(in: model) == nil)
         #expect(isNotFound(#expect(throws: LayerIntentError.self) { try DesignActions.selected(in: model) }))
         #expect(DesignActions.suggested(entities, in: model).map(\.id) == entities.map(\.id), "nothing is put first")
 
         model.selection = .element(refs[1])
-        #expect(DesignActions.selectedElement(in: model)?.ref == refs[1])
+        #expect(DesignActions.selectedLeaf(in: model)?.ref == refs[1])
         #expect(try DesignActions.selected(in: model).ref == refs[1])
         #expect(DesignActions.suggested(entities, in: model).first?.ref == refs[1], "the button is put first")
     }
@@ -756,21 +757,21 @@ struct DesignActionTests {
         let i = board.group(board.c, board.e, named: "I") { $0.isLocked = true }
         let g = board.group(board.a, i, named: "G") { $0.isLocked = true }
         #expect(board.store.isLocked(.element(board.c)))
-        let locked = board.store.content
+        let locked = board.store.tree
 
         try SetElementLockedIntent.setLocked(false, board.c, in: board.model, undoManager: nil)
 
         #expect(!board.store.isLocked(.element(board.c)))
-        #expect(board.store.element(i.element)?.isLocked == false && board.store.element(g.element)?.isLocked == false)
+        #expect(board.store.node(i.element)?.isLocked == false && board.store.node(g.element)?.isLocked == false)
         board.undo.undo()
-        #expect(board.store.content == locked, "one step")
+        #expect(board.store.tree == locked, "one step")
 
         let unlocked = OrderBoard()
         let inner = unlocked.group(unlocked.c, unlocked.e, named: "I")
         let outer = unlocked.group(unlocked.a, inner, named: "G")
         try SetElementLockedIntent.setLocked(true, unlocked.c, in: unlocked.model, undoManager: nil)
-        #expect(unlocked.store.element(unlocked.c.element)?.isLocked == true)
-        #expect(unlocked.store.element(inner.element)?.isLocked == false && unlocked.store.element(outer.element)?.isLocked == false)
+        #expect(unlocked.store.node(unlocked.c.element)?.isLocked == true)
+        #expect(unlocked.store.node(inner.element)?.isLocked == false && unlocked.store.node(outer.element)?.isLocked == false)
         #expect(!unlocked.store.isLocked(.element(unlocked.e)))
     }
 
@@ -779,7 +780,7 @@ struct DesignActionTests {
     @Test func siriLeavesAMemberOfALockedGroupWhereItIs() throws {
         let board = OrderBoard()
         board.group(board.b, board.d) { $0.isLocked = true }
-        let before = board.store.content
+        let before = board.store.tree
         func isLocked(_ error: LayerIntentError?) -> Bool {
             error.map { if case .locked = $0 { true } else { false } } == true
         }
@@ -792,72 +793,70 @@ struct DesignActionTests {
         #expect(isLocked(#expect(throws: LayerIntentError.self) {
             try DeleteElementIntent.delete(board.d, in: board.model, undoManager: nil)
         }))
-        #expect(board.store.content == before)
+        #expect(board.store.tree == before)
 
         // What isn't locked is moved and deleted.
         try MoveElementIntent.move(board.a, in: board.model, x: 10, y: nil, width: nil, height: nil, undoManager: nil)
-        #expect(board.store.element(board.a.element)?.frame.minX == 10)
+        #expect(board.store.ownFrame(board.a.element)?.minX == 10)
         try DeleteElementIntent.delete(board.c, in: board.model, undoManager: nil)
-        #expect(board.store.element(board.c.element) == nil)
+        #expect(board.store.node(board.c.element) == nil)
     }
 
     @Test func anElementMovedOffAScreenThatHasSinceGoneStaysWhereItIs() throws {
         let model = model()
-        let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 500, y: 0), scale: 1))
-        let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: first.id)
+        let button = LayerNode.standard(.button)
+        let first = model.store.addFreeScreen([button])
+        let second = model.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 500, y: 0))
         let siri = UndoManager()
         siri.groupsByEvent = false
         DesignActions.edit(model, undoManager: siri, actionName: "Move Button") {
-            model.store.apply { $0.move(button.id, to: second.id, frame: button.frame) }
+            // Onto the second screen, where its frame puts it there.
+            model.store.move(button.id, to: .screen(second))
+            model.store.update(button.id) { $0.frame = button.frame }
         }
         // The screen it came from is deleted by hand.
-        model.store.deleteScreen(first.id)
+        model.store.deleteScreen(first)
         let now = model.store.content
         #expect(!(model.takenActions.first?.canTakeBack(from: now) ?? true), "there is nowhere to put it back")
 
         siri.undo()
-        #expect(model.store.content == now)
-        let screens = Set(model.store.screens.map(\.id))
-        #expect(model.store.content.elements.allSatisfy { $0.parent.map(screens.contains) ?? true }, "nothing is left on a screen that has gone")
-        #expect(model.store.screen(second.id)?.elements.map(\.id) == [button.id])
+        #expect(model.store.tree == now.tree)
+        // (b): the tree holds nothing on a screen that has gone, so the flat list's check of that is dropped.
+        #expect(model.store.screenLeaves(second).map(\.id) == [button.id])
     }
 
     @Test func siriUndoDuringADragIsAStepOfItsOwnAndLeavesTheDragOne() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: screen.id)
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
+        let button = LayerNode.standard(.button)
+        model.store.addFreeScreen([button])
         let siri = UndoManager()
         siri.groupsByEvent = false
         DesignActions.edit(model, undoManager: siri, actionName: "Rename Design") { model.store.setTitle("A") }
 
         // Siri's undo comes while a drag is under way.
         let drag = model.store.beginEdit(by: .hand)
-        model.store.update(ref) { $0.frame.origin.x += 10 }
+        model.store.update(button.id) { $0.frame.origin.x += 10 }
         siri.undo()
-        model.store.update(ref) { $0.frame.origin.x += 10 }
+        model.store.update(button.id) { $0.frame.origin.x += 10 }
         model.store.endEdit(drag)
         #expect(model.store.title == nil)
-        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX + 20)
+        #expect(model.store.ownFrame(button.id)?.minX == button.frame.minX + 20)
 
         // Siri's undo is a step of its own, and the drag one step of its own.
         model.store.undoManager?.undo()
         #expect(model.store.title == "A")
-        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX + 20)
+        #expect(model.store.ownFrame(button.id)?.minX == button.frame.minX + 20)
         model.store.undoManager?.undo()
         #expect(model.store.title == "A")
-        #expect(model.store.element(button.id)?.frame.minX == button.frame.minX)
+        #expect(model.store.ownFrame(button.id)?.minX == button.frame.minX)
     }
 
     @Test func siriIsNotOfferedAnUndoOnceTheDesignHasClosed() throws {
         let model = model()
         let siri = UndoManager()
         siri.groupsByEvent = false
-        DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
-            model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        _ = DesignActions.edit(model, undoManager: siri, actionName: "Add Screen") {
+            model.store.addFreeScreen([])
         }
         #expect(siri.canUndo)
         model.close()
@@ -865,62 +864,61 @@ struct DesignActionTests {
         #expect(!siri.canUndo)
         let reopened = AppModel(document: LayerDocument(file: model.document.current))
         if siri.canUndo { siri.undo() }
-        #expect(reopened.store.screens.count == 1)
+        #expect(reopened.store.tree.screens.count == 1)
         reopened.close()
     }
 
     @Test func anUndoWithNothingLeftToTakeBackChangesNothingAndSaysSo() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let button = DesignStore.newElement(.button)
-        model.store.setElements([button], on: screen.id)
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: button.id)
+        let button = LayerNode.standard(.button)
+        model.store.addFreeScreen([button])
         let siri = UndoManager()
         siri.groupsByEvent = false
 
         DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
-            model.store.update(ref) { $0.tint = RGBColor(hex: 0xFF0000) }
+            model.store.update(button.id) { $0.style.tint = RGBColor(hex: 0xFF0000) }
         }
         // The button is recoloured again by hand: what Siri changed is gone.
-        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
-        let now = model.store.content
+        model.store.update(button.id) { $0.style.tint = RGBColor(hex: 0x00FF00) }
+        let now = model.store.tree
         siri.undo()
-        #expect(model.store.content == now)
+        #expect(model.store.tree == now)
         #expect(model.undoNotice?.contains("Style Button") == true)
 
         // Checked before Siri can be asked, as the app stops being active, such an undo
         // is taken out of Siri's history instead.
         model.undoNotice = nil
         DesignActions.edit(model, undoManager: siri, actionName: "Style Button") {
-            model.store.update(ref) { $0.tint = RGBColor(hex: 0x0000FF) }
+            model.store.update(button.id) { $0.style.tint = RGBColor(hex: 0x0000FF) }
         }
         model.withdrawTakenActionsWithNothingLeft()
         #expect(siri.canUndo, "the button is still as Siri left it")
-        model.store.update(ref) { $0.tint = RGBColor(hex: 0x00FF00) }
+        model.store.update(button.id) { $0.style.tint = RGBColor(hex: 0x00FF00) }
         model.withdrawTakenActionsWithNothingLeft()
         #expect(!siri.canUndo)
     }
 
-    @Test func newElementsGoBelowWhatIsThere() {
+    @Test func newElementsGoBelowWhatIsThere() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        var title = DesignStore.newElement(.title)
-        title.frame = DesignActions.frameForNewElement(title, on: screen)
-        model.store.setElements([title], on: screen.id)
-        let updated = model.store.screen(screen.id)!
-        let button = DesignStore.newElement(.button)
-        let frame = DesignActions.frameForNewElement(button, on: updated)
+        let screen = model.store.addFreeScreen([])
+        var title = LayerNode.standard(.title)
+        title.frame = try #require(model.store.newElementFrame(.title, on: screen))
+        model.store.add(title, to: .screen(screen))
+        let device = try #require(model.store.device(of: screen))
+        let frame = try #require(model.store.newElementFrame(.button, on: screen))
         #expect(frame.minY >= title.frame.maxY)
-        #expect(frame.maxY <= updated.size.height - updated.device.safeBottom)
+        #expect(frame.maxY <= device.size.height - device.safeBottom)
     }
 
     @Test func entitiesDescribeTheDesign() {
         let content = {
-            var content = DesignContent()
+            var content = TreeContent()
             content.title = "Shop"
-            var button = DesignStore.newElement(.button)
-            button.text = "Buy now"
-            content.screens = [DesignScreen(name: "Checkout", origin: .zero, scale: 1, elements: [button])]
+            var button = LayerNode.standard(.button)
+            button.content.text = "Buy now"
+            var checkout = TreeScreen(name: "Checkout", origin: .zero, scale: 1, deviceID: nil)
+            checkout.root.children = [button]
+            content.screens = [checkout]
             return content
         }()
         let snapshot = DesignSnapshot(id: "local:Shop.layer", name: "Shop", content: content, modified: nil)
@@ -937,17 +935,16 @@ struct DesignActionTests {
 @Suite("Image Playground")
 @MainActor
 struct ImagePlaygroundTests {
-    private func modelWithScreen() -> (AppModel, DesignScreen) {
+    private func modelWithScreen() -> (AppModel, TreeScreen.ID) {
         let model = AppModel(document: LayerDocument())
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
         model.store.setTitle("Wander")
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
+        let screen = model.store.addFreeScreen([], name: "Welcome")
         let written = Outline.parse("title: Plan your trip\nbody: Beaches, cities and mountains\nbutton: Get started\ntext field", isComplete: true)
-        model.store.replaceChildren(of: .screen(screen.id), with: written.children)
-        model.store.updateScreen(screen.id) { $0.name = "Welcome" }
-        return (model, model.store.screen(screen.id)!)
+        model.store.replaceChildren(of: .screen(screen), with: written.children)
+        return (model, screen)
     }
 
     /// A small square picture, as Image Playground hands one back.
@@ -962,7 +959,7 @@ struct ImagePlaygroundTests {
 
     @Test func conceptsTakeThePromptAndTheScreensOwnWords() {
         let (model, screen) = modelWithScreen()
-        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen.id), prompt: "  a lighthouse  ")
+        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen), prompt: "  a lighthouse  ")
         let concepts = model.imageConcepts(for: request)
         #expect(concepts.prompt == "a lighthouse")
         // Placeholder words, such as an untouched text field's, are left out.
@@ -972,37 +969,39 @@ struct ImagePlaygroundTests {
 
     @Test func aNewImageGoesBelowWhatIsOnTheScreenAndIsSelected() throws {
         let (model, screen) = modelWithScreen()
-        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen.id))
+        let lowestBefore = model.store.screenLeaves(screen).compactMap { model.store.ownFrame($0.id)?.maxY }.max() ?? 0
+        let size = try #require(model.store.device(of: screen)).size
+        let request = ImagePlaygroundRequest(target: .newImage(onScreen: screen))
         model.imagePlaygroundRequest = request
         let ref = try #require(model.placeGeneratedImage(try picture(), for: request))
-        let placed = try #require(model.store.resolve(ref)?.element)
+        let placed = try #require(model.store.placed(ref)?.node)
+        let frame = try #require(model.store.ownFrame(ref.element))
         #expect(placed.kind == .image)
-        #expect(placed.imageID != nil)
-        #expect(model.document.current.images[placed.imageID!.uuidString] != nil)
+        #expect(placed.content.imageID != nil)
+        #expect(model.document.current.images[placed.content.imageID!.uuidString] != nil)
         // Its shape follows the picture's, 2:1 here.
-        #expect(placed.frame.width == screen.size.width - 40)
-        #expect(placed.frame.height == (placed.frame.width / 2).rounded())
-        let lowestBefore = screen.elements.map(\.frame.maxY).max() ?? 0
-        #expect(placed.frame.minY >= lowestBefore)
+        #expect(frame.width == size.width - 40)
+        #expect(frame.height == (frame.width / 2).rounded())
+        #expect(frame.minY >= lowestBefore)
         #expect(model.selection == .element(ref))
         #expect(model.imagePlaygroundRequest == nil)
     }
 
     @Test func aNewPictureForAnImageKeepsItsPlaceAndUndoes() throws {
         let (model, screen) = modelWithScreen()
-        var image = DesignStore.newElement(.image)
-        image.frame = CGRect(x: 30, y: 400, width: 200, height: 120)
-        let ref = model.store.setElements([image], on: screen.id)[0]
+        let image = LayerNode.leaf(.image, frame: CGRect(x: 30, y: 400, width: 200, height: 120))
+        model.store.add(image, to: .screen(screen))
+        let ref = DesignStore.ElementRef(host: .screen(screen), element: image.id)
 
         let request = ImagePlaygroundRequest(target: .replace(ref), prompt: "mountains")
         #expect(model.imageSize(for: request) == CGSize(width: 200, height: 120))
         try #require(model.placeGeneratedImage(try picture(), for: request) == ref)
-        let replaced = try #require(model.store.resolve(ref)?.element)
-        #expect(replaced.imageID != nil)
-        #expect(replaced.frame == image.frame)
+        let replaced = try #require(model.store.placed(ref)?.node)
+        #expect(replaced.content.imageID != nil)
+        #expect(model.store.ownFrame(image.id) == image.frame)
 
         model.store.undoManager?.undo()
-        #expect(model.store.resolve(ref)?.element.imageID == nil)
+        #expect(model.store.placed(ref)?.node.content.imageID == nil)
     }
 }
 
@@ -1139,6 +1138,8 @@ struct LookWordTests {
     }
 }
 
+/// Siri's Move to Screen (`MoveElementToScreenIntent.move`), the live path since plan 6's Task 5: the store's flat
+/// `move(_:toScreen:origin:)`, which these tests drove before, is called by nothing in the app.
 @Suite("Moving things from code")
 @MainActor
 struct MovingTests {
@@ -1152,51 +1153,52 @@ struct MovingTests {
 
     @Test func anElementMovesToAnotherScreenAndBack() throws {
         let model = model()
-        let first = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5))
-        let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 400, y: 0), scale: 0.5))
-        var button = DesignStore.newElement(.button)
-        button.frame = CGRect(x: 20, y: 700, width: 353, height: 50)
-        let ref = model.store.setElements([button], on: first.id)[0]
+        let button = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50))
+        let first = model.store.addFreeScreen([button], scale: 0.5)
+        let second = model.store.addFreeScreen([], name: "Screen 2", origin: CGPoint(x: 400, y: 0), scale: 0.5)
+        let ref = DesignStore.ElementRef(host: .screen(first), element: button.id)
 
-        let moved = try #require(model.store.move(ref, toScreen: second.id, origin: CGPoint(x: 20, y: 100)))
-        #expect(moved.host == .screen(second.id))
-        #expect(model.store.screen(first.id)?.elements.isEmpty == true)
-        #expect(model.store.resolve(moved)?.element.frame == CGRect(x: 20, y: 100, width: 353, height: 50))
+        let moved = try MoveElementToScreenIntent.move(ref, toScreen: second, x: 20, y: 100, in: model, undoManager: nil)
+        #expect(moved.host == .screen(second))
+        #expect(model.store.screenLeaves(first).isEmpty)
+        #expect(model.store.placed(moved)?.frame == CGRect(x: 20, y: 100, width: 353, height: 50))
 
         model.store.undoManager?.undo()
-        #expect(model.store.resolve(ref)?.element.frame == button.frame)
-        #expect(model.store.screen(second.id)?.elements.isEmpty == true)
+        #expect(model.store.placed(ref)?.frame == button.frame)
+        #expect(model.store.screenLeaves(second).isEmpty)
     }
 
     @Test func offAScreenItKeepsItsPlaceAndSize() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
-        var title = DesignStore.newElement(.title)
-        title.frame = CGRect(x: 40, y: 80, width: 200, height: 40)
-        let ref = model.store.setElements([title], on: screen.id)[0]
-        let before = try #require(model.store.resolve(ref)).placement.canvasRect(for: title.frame)
+        let title = LayerNode.leaf(.title, frame: CGRect(x: 40, y: 80, width: 200, height: 40))
+        let screen = model.store.addFreeScreen([title], origin: CGPoint(x: 100, y: 100), scale: 0.5)
+        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
+        let before = try #require(model.store.placed(ref)).placement.canvasRect(for: title.frame)
 
-        let moved = try #require(model.store.move(ref, toScreen: nil, origin: nil))
+        let moved = try MoveElementToScreenIntent.move(ref, toScreen: nil, x: nil, y: nil, in: model, undoManager: nil)
         #expect(moved.host == .canvas)
-        let after = try #require(model.store.resolve(moved))
-        #expect(after.placement.canvasRect(for: after.element.frame) == before)
+        let after = try #require(model.store.placed(moved))
+        #expect(after.placement.canvasRect(for: after.frame) == before)
     }
 
     @Test func stickyNotesStayOffScreens() {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let note = model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 1)
-        #expect(model.store.move(note, toScreen: screen.id, origin: .zero) == nil)
-        #expect(model.store.floating.count == 1)
+        let screen = model.store.addFreeScreen([])
+        let note = DesignStore.ElementRef(host: .canvas, element: model.store.addCanvasNode(.standard(.stickyNote)))
+        let refused = #expect(throws: LayerIntentError.self) {
+            try MoveElementToScreenIntent.move(note, toScreen: screen, x: 0, y: 0, in: model, undoManager: nil)
+        }
+        #expect(refused.map { if case .cantGoOnScreens = $0 { true } else { false } } == true)
+        #expect(model.store.tree.canvas.count == 1)
     }
 
     @Test func theLayoutReadsBackAsJSON() throws {
         let model = model()
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 10, y: 20), scale: 0.5))
+        let screen = model.store.addFreeScreen([], origin: CGPoint(x: 10, y: 20), scale: 0.5)
         let written = Outline.parse("title: Hello\ntoggle [off]", isComplete: true)
-        model.store.replaceChildren(of: .screen(screen.id), with: written.children)
-        model.store.addFloating(DesignStore.newElement(.stickyNote), scale: 0.5)
-        let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.content, modified: nil)
+        model.store.replaceChildren(of: .screen(screen), with: written.children)
+        model.store.addCanvasNode(.standard(.stickyNote), scale: 0.5)
+        let snapshot = DesignSnapshot(id: "local:Test.layer", name: "Test", content: model.store.tree, modified: nil)
 
         let json = DesignLayoutWriter.json(for: snapshot, ink: (count: 3, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)))
         let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])

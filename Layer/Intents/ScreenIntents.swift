@@ -31,8 +31,13 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Scale", description: "How large it is drawn on the canvas, as a percentage of its real size, from 10 to 400. The newest screen's scale if not given.", inclusiveRange: (10, 400))
     var scale: Double?
 
+    @Parameter(title: "Custom Device", description: "One of this design's own devices, by name. Used instead of Device when given.",
+               optionsProvider: CustomDeviceOptions())
+    var customDevice: String?
+
     static var parameterSummary: some ParameterSummary {
         Summary("Add \(\.$device) screen named \(\.$name)") {
+            \.$customDevice
             \.$design
             \.$x
             \.$y
@@ -43,22 +48,25 @@ struct AddScreenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> & ProvidesDialog {
         let model = try await DesignActions.model(for: design)
-        let frame = device.frame
+        let frame = try DesignActions.device(device, custom: customDevice, in: model) ?? device.frame
         var placement = DesignActions.placementForNewScreen(frame, in: model)
         if let scale { placement.scale = CGFloat(scale) / 100 }
         if let x { placement.origin.x = CGFloat(x) }
         if let y { placement.origin.y = CGFloat(y) }
-        let screen = DesignActions.edit(model, undoManager: undoManager, actionName: "Add Screen") {
-            var screen = model.store.addScreen(frame, at: placement)
-            if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                model.store.updateScreen(screen.id) { $0.name = name }
-                screen.name = name
-            }
-            return screen
+        let named = name.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        let id = try DesignActions.edit(model, undoManager: undoManager, actionName: "Add Screen") { () throws -> TreeScreen.ID in
+            var screen = TreeScreen(name: named ?? "Screen \(model.store.tree.screens.count + 1)", origin: placement.origin,
+                                    scale: placement.scale, deviceID: frame == .iPhone ? nil : frame.id)
+            // A screen's root takes the screen's identifier, as one the canvas adds does. `init` keeps a root to a
+            // built-in device only: this one may be the design's own.
+            screen.root.id = screen.id
+            screen.keepRootToDevice(frame)
+            guard let id = model.store.addScreen(screen) else { throw LayerIntentError.designTooLarge }
+            return id
         }
-        DesignActions.reveal(.screen(screen.id), in: model, selecting: false)
-        guard let entity = DesignActions.entity(for: screen, in: model) else { throw LayerIntentError.screenNotFound }
-        return .result(value: entity, dialog: "Added \(screen.name).")
+        DesignActions.reveal(.screen(id), in: model, selecting: false)
+        guard let entity = DesignActions.entity(for: id, in: model) else { throw LayerIntentError.screenNotFound }
+        return .result(value: entity, dialog: "Added \(entity.name).")
     }
 }
 
@@ -100,8 +108,13 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Design", description: "The design to add a new screen to. The design at the front if not given.")
     var design: DesignEntity?
 
+    @Parameter(title: "Custom Device", description: "One of this design's own devices, by name. Used instead of Device when given.",
+               optionsProvider: CustomDeviceOptions())
+    var customDevice: String?
+
     static var parameterSummary: some ParameterSummary {
         Summary("Build \(\.$device) screen \(\.$name) from \(\.$layout)") {
+            \.$customDevice
             \.$screen
             \.$design
         }
@@ -119,9 +132,10 @@ struct BuildScreenIntent: AppIntent, UndoableIntent {
             model = try await DesignActions.model(for: design)
             target = nil
         }
-        let id = try await Self.build(layout, on: target, name: name, device: device.frame, in: model, undoManager: undoManager)
+        let id = try await Self.build(layout, on: target, name: name, device: device, custom: customDevice, in: model,
+                                      undoManager: undoManager)
         DesignActions.reveal(.screen(id), in: model, selecting: false)
-        guard let built = model.store.screen(id), let entity = DesignActions.entity(for: built, in: model) else {
+        guard let built = model.store.treeScreen(id), let entity = DesignActions.entity(for: id, in: model) else {
             throw LayerIntentError.screenNotFound
         }
         let count = model.store.root(of: id)?.leafCount ?? 0
@@ -143,6 +157,16 @@ enum BuildScreenError: LocalizedError, Equatable {
 }
 
 extension BuildScreenIntent {
+    /// `build(_:on:name:device:in:undoManager:)` with the device as the intent's parameters give it: `custom`, one of
+    /// the design's own by name (`DesignActions.device(_:custom:in:)`), else `choice`. The device is looked up only for
+    /// a new screen, which is the only build that uses it: rebuilding `target` never fails on a name it wouldn't use.
+    @MainActor
+    static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device choice: DeviceChoice, custom: String?,
+                      in model: AppModel, undoManager: UndoManager?) async throws -> TreeScreen.ID {
+        let device = target == nil ? try DesignActions.device(choice, custom: custom, in: model) ?? choice.frame : choice.frame
+        return try await build(layout, on: target, name: name, device: device, in: model, undoManager: undoManager)
+    }
+
     /// What `perform` does. `layout` is A2UI JSON when `A2UIImporter.looksLikeA2UI`, else the outline, read off the
     /// main actor with the design's tokens. All the work off the main actor is done again when the design's settings
     /// change meanwhile. One step through `DesignActions.edit` ("Build Screen").
@@ -153,7 +177,7 @@ extension BuildScreenIntent {
     /// laid out off the main actor, then committed. When the person changed the screen meanwhile, the writer merges
     /// again over it as it is then, and the rules lay that out (call 1).
     ///
-    /// Siri sees leaves only. A build the design has no room for (more than 5,000 nodes, or nested deeper than 32)
+    /// Siri sees leaves only. A build the design has no room for (more than 5,000 things, or nested deeper than 32)
     /// changes nothing and throws `designTooLarge`.
     @MainActor
     static func build(_ layout: String, on target: TreeScreen.ID?, name: String?, device: DeviceFrame, in model: AppModel,
@@ -249,7 +273,7 @@ extension BuildScreenIntent {
             } else {
                 // Read as a generated outline: its look's numbers are passed over (spec §14).
                 generated = Outline.parse(layout, isComplete: true, tokens: tokens, readsLookNumbers: false)
-                guard generated.leafCount > 0 else { throw LayerIntentError.invalidBlueprint }
+                guard generated.leafCount > 0 else { throw LayerIntentError.invalidScreenDescription }
             }
         }
     }
@@ -320,7 +344,7 @@ struct RenameScreenIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Rename Screen") {
-            model.store.updateScreen(target.id) { $0.name = name }
+            model.store.updateTreeScreen(target.id) { $0.name = name }
         }
         return .result(dialog: "Renamed \(target.name) to \(name).")
     }
@@ -329,7 +353,12 @@ struct RenameScreenIntent: AppIntent, UndoableIntent {
 struct ChangeScreenDeviceIntent: AppIntent, UndoableIntent {
     static let title: LocalizedStringResource = "Change Screen Device"
     static let description = IntentDescription(
-        "Changes the device a screen in a Layer design is drawn as, such as from a phone to a tablet. Its elements keep their positions.",
+        """
+        Changes the device a screen in a Layer design is drawn as, such as from a phone to a tablet, or to one of the \
+        design's own devices. On a free screen, everything follows where it was drawn: what sits against an edge or in \
+        the middle stays there, and what spans the screen stretches with it. A screen laid out as a column is laid out \
+        again for the new size.
+        """,
         categoryName: "Screens"
     )
     static let supportedModes: IntentModes = .foreground
@@ -340,17 +369,39 @@ struct ChangeScreenDeviceIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Device", description: "Phone, large phone, small phone or tablet.")
     var device: DeviceChoice
 
+    @Parameter(title: "Custom Device", description: "One of this design's own devices, by name. Used instead of Device when given.",
+               optionsProvider: CustomDeviceOptions())
+    var customDevice: String?
+
     static var parameterSummary: some ParameterSummary {
-        Summary("Make \(\.$screen) an \(\.$device) screen")
+        Summary("Make \(\.$screen) an \(\.$device) screen") {
+            \.$customDevice
+        }
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
+        let said = try Self.change(target.id, to: device, custom: customDevice, in: model, undoManager: undoManager)
+        return .result(dialog: "\(said)")
+    }
+
+    /// Draws the screen as `custom`, one of the design's own devices by name, when it is given, else as `choice`, as one
+    /// step, "Change Device" (`DesignStore.changeDevice(of:to:)`): what a free root holds follows its placement intent,
+    /// and any other root is laid out again. Returns the dialog, which takes "an" before a device name that starts with
+    /// a vowel letter, and "a" otherwise: "an iPhone", "an iPad", "a MacBook Air 13″", "a Kiosk" (F23).
+    ///
+    /// Throws `deviceNotFound` for a name the design has no device of its own called, and `screenNotFound`.
+    @MainActor
+    static func change(_ screen: TreeScreen.ID, to choice: DeviceChoice, custom: String?, in model: AppModel,
+                       undoManager: UndoManager?) throws -> String {
+        guard let target = model.store.treeScreen(screen) else { throw LayerIntentError.screenNotFound }
+        let device = try DesignActions.device(choice, custom: custom, in: model) ?? choice.frame
         DesignActions.edit(model, undoManager: undoManager, actionName: "Change Device") {
-            model.store.changeDevice(of: target.id, to: DeviceFrame.named(device.rawValue))
+            model.store.changeDevice(of: screen, to: device)
         }
-        return .result(dialog: "\(target.name) is now an \(device.name) screen.")
+        let article = device.name.first.map { "aeiou".contains($0.lowercased()) } == true ? "an" : "a"
+        return "\(target.name) is now \(article) \(device.name) screen."
     }
 }
 
@@ -369,12 +420,25 @@ struct DuplicateScreenIntent: AppIntent, UndoableIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<ScreenEntity> & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
+        let copy = try Self.duplicate(target.id, in: model, undoManager: undoManager)
+        guard let entity = DesignActions.entity(for: copy, in: model) else { throw LayerIntentError.screenNotFound }
+        DesignActions.reveal(.screen(copy), in: model)
+        return .result(value: entity, dialog: "Made \(entity.name).")
+    }
+
+    /// Copies a screen with everything on it to its right, as one step, "Duplicate Screen"
+    /// (`DesignStore.duplicateTreeScreen`). Returns the copy's id.
+    ///
+    /// Throws `screenNotFound` for a screen that has gone, and `designTooLarge` when the design can't hold the copy:
+    /// past 5,000 things, the store makes none.
+    @MainActor
+    static func duplicate(_ screen: TreeScreen.ID, in model: AppModel, undoManager: UndoManager?) throws -> TreeScreen.ID {
+        guard model.store.treeScreen(screen) != nil else { throw LayerIntentError.screenNotFound }
         let copy = DesignActions.edit(model, undoManager: undoManager, actionName: "Duplicate Screen") {
-            model.store.duplicateScreen(target.id)
+            model.store.duplicateTreeScreen(screen)
         }
-        guard let copy, let entity = DesignActions.entity(for: copy, in: model) else { throw LayerIntentError.screenNotFound }
-        DesignActions.reveal(.screen(copy.id), in: model)
-        return .result(value: entity, dialog: "Made \(copy.name).")
+        guard let copy else { throw LayerIntentError.designTooLarge }
+        return copy
     }
 }
 
@@ -394,7 +458,7 @@ struct DeleteScreenIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, target) = try await DesignActions.screen(screen)
         guard target.isLocked != true else { throw LayerIntentError.locked }
-        try await requestConfirmation(dialog: "Delete \(target.name) and its \(target.elements.count) elements?")
+        try await requestConfirmation(dialog: "Delete \(target.name) and its \(target.root.leaves.count) elements?")
         DesignActions.edit(model, undoManager: undoManager, actionName: "Delete Screen") {
             model.store.deleteScreen(target.id)
         }
@@ -439,7 +503,7 @@ struct MoveScreenIntent: AppIntent, UndoableIntent {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
         guard target.isLocked != true else { throw LayerIntentError.locked }
         DesignActions.edit(model, undoManager: undoManager, actionName: "Move Screen") {
-            model.store.updateScreen(target.id) { screen in
+            model.store.updateTreeScreen(target.id) { screen in
                 if let x { screen.origin.x = CGFloat(x) }
                 if let y { screen.origin.y = CGFloat(y) }
                 if let scale { screen.scale = CGFloat(scale) / 100 }
@@ -471,7 +535,7 @@ struct SetScreenLockedIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (model, target) = try await DesignActions.screenOrCurrent(screen)
         DesignActions.edit(model, undoManager: undoManager, actionName: locked ? "Lock Screen" : "Unlock Screen") {
-            model.store.updateScreen(target.id) { $0.isLocked = locked ? true : nil }
+            model.store.updateTreeScreen(target.id) { $0.isLocked = locked ? true : nil }
         }
         return .result(dialog: locked ? "Locked \(target.name)." : "Unlocked \(target.name).")
     }

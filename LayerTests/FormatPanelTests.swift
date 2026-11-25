@@ -40,12 +40,12 @@ private struct TypingIntoTheSelection: View {
 /// element had at the last update, and setting it as one adjustment, which undoes as a step.
 private struct TypingIntoAnElement: View {
     let model: AppModel
-    let ref: DesignStore.ElementRef
+    let id: UUID
 
     var body: some View {
-        let x = model.store.resolve(ref)?.element.frame.origin.x ?? 0
+        let x = model.store.ownFrame(id)?.origin.x ?? 0
         TypedNumber(label: "X", value: Binding(get: { x }, set: { value in
-            model.adjusting { model.store.update(ref) { $0.frame.origin.x = value } }
+            model.adjusting { model.store.update(id) { $0.frame.origin.x = value } }
         }), range: -99_999...99_999, wraps: false) {}
             .frame(width: 200, height: 40)
     }
@@ -228,13 +228,13 @@ extension HostedWindowSuites {
             model.store.undoManager = undo
             model.adjustmentPause = .milliseconds(10)
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-            var button = DesignStore.newElement(.button)
+            var button = LayerNode.standard(.button)
             button.frame = CGRect(x: 20, y: 300, width: 353, height: 50)
-            let ref = model.store.setElements([button], on: screen)[0]
-            func x() -> CGFloat? { model.store.resolve(ref)?.element.frame.origin.x }
+            try #require(model.store.add(button, to: .screen(screen)))
+            func x() -> CGFloat? { model.store.ownFrame(button.id)?.origin.x }
             undo.removeAllActions()
 
-            let (window, view) = try await host(TypingIntoAnElement(model: model, ref: ref))
+            let (window, view) = try await host(TypingIntoAnElement(model: model, id: button.id))
             defer { window.isHidden = true }
             let field = try await focusedField(in: view)
             type("100", into: field)
@@ -531,23 +531,24 @@ struct PanelChangesBesideADragTests {
         model.store.undoManager = undo
         model.adjustmentPause = .milliseconds(10)
         let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
-        let refs = model.store.setElements([
-            DesignElement(kind: .title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent),
-            DesignElement(kind: .button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent),
-        ], on: screen)
-        let (title, button) = (refs[0], refs[1])
+        let titleNode = LayerNode.leaf(.title, frame: CGRect(x: 20, y: 80, width: 300, height: 40), text: "Welcome", tint: Theme.accent)
+        let buttonNode = LayerNode.leaf(.button, frame: CGRect(x: 20, y: 700, width: 353, height: 50), text: "Go", tint: Theme.accent)
+        model.store.asOneStep {
+            model.store.add(titleNode, to: .screen(screen))
+            model.store.add(buttonNode, to: .screen(screen))
+        }
+        let (title, button) = (titleNode.id, DesignStore.ElementRef(host: .screen(screen), element: buttonNode.id))
         undo.removeAllActions()
-        func frame(_ ref: DesignStore.ElementRef) -> CGRect? { model.store.resolve(ref)?.element.frame }
+        func frame(_ id: UUID) -> CGRect? { model.store.ownFrame(id) }
         let titleBefore = try #require(frame(title))
-        let buttonBefore = try #require(frame(button))
+        let buttonBefore = try #require(frame(button.element))
 
-        // A finger drags the button.
+        // A finger drags the button, as a drag on it does: read from the tree as the drag begins.
         let drags = CanvasDrags()
         model.drags = drags
         let owner = CanvasDrags.Owner()
-        let found = try #require(model.store.resolve(button))
         func drag(by dx: CGFloat) {
-            drags.moveElement(button, from: found.element.frame, placement: found.placement, by: CGSize(width: dx, height: 0), startingAt: .zero, owner: owner, model: model) {
+            drags.moveNode(button, by: CGSize(width: dx, height: 0), startingAt: .zero, owner: owner, model: model) { _ in
                 { origin, translation in (origin.offsetBy(dx: translation.width, dy: translation.height), []) }
             }
         }
@@ -561,7 +562,7 @@ struct PanelChangesBesideADragTests {
         func field(_ label: String, _ keyPath: WritableKeyPath<CGRect, CGFloat>, at y: CGFloat) -> Scrubber.Target {
             Scrubber.Target(
                 label: label, unit: label, frame: CGRect(x: 0, y: y, width: 80, height: 32), range: 0...4000,
-                get: { model.store.resolve(title)?.element.frame[keyPath: keyPath] ?? 0 },
+                get: { model.store.ownFrame(title)?[keyPath: keyPath] ?? 0 },
                 set: { value in model.adjusting { model.store.update(title) { $0.frame[keyPath: keyPath] = value } } }
             )
         }
@@ -579,7 +580,7 @@ struct PanelChangesBesideADragTests {
         drags.dropElement(button, findsNewHome: false, owner: owner, model: model)
         for _ in 0..<100 where model.store.isEditing { try await Task.sleep(for: .milliseconds(20)) }
         #expect(!model.store.isEditing)
-        let moved = try #require(frame(button))
+        let moved = try #require(frame(button.element))
         #expect(moved.minX == buttonBefore.minX + 30)
 
         // Undo takes each back on its own, the last first: the typed number, the finger's
@@ -592,9 +593,9 @@ struct PanelChangesBesideADragTests {
         #expect(frame(title)?.width == titleBefore.width + 5)
         undo.undo()
         #expect(frame(title) == titleBefore)
-        #expect(frame(button) == moved)
+        #expect(frame(button.element) == moved)
         undo.undo()
-        #expect(frame(button) == buttonBefore)
+        #expect(frame(button.element) == buttonBefore)
     }
 }
 

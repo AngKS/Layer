@@ -29,16 +29,16 @@ struct SiriIntentsLiveTests {
         addScreen.device = .iPad
         addScreen.name = "Settings"
         _ = try await addScreen.perform()
-        #expect(model.store.screens.map(\.name) == ["Settings"])
-        #expect(model.store.screens.first?.deviceID == "ipad")
+        #expect(model.store.tree.screens.map(\.name) == ["Settings"])
+        #expect(model.store.tree.screens.first?.deviceID == "ipad")
 
         let build = BuildScreenIntent()
         build.layout = "title: Welcome back\ntext field: Email\nbutton: Sign in [blue]"
         build.name = "Login"
         build.device = .iPhone
         _ = try await build.perform()
-        let login = try #require(model.store.screens.first { $0.name == "Login" })
-        #expect(login.elements.map(\.kind) == [.title, .textField, .button])
+        let login = try #require(model.store.tree.screens.first { $0.name == "Login" })
+        #expect(model.store.screenLeaves(login.id).map(\.kind) == [.title, .textField, .button])
         // A built screen is shown and selected, so “this screen” means it.
         #expect(model.selection == .screen(login.id))
 
@@ -50,9 +50,9 @@ struct SiriIntentsLiveTests {
         style.weight = .bold
         style.cornerRadius = 20
         _ = try await style.perform()
-        let styled = try #require(model.store.screens.first { $0.name == "Login" }?.elements.first { $0.kind == .button })
-        #expect(styled.fontWeight == .bold)
-        #expect(styled.cornerRadius == 20)
+        let styled = try #require(model.store.screenLeaves(login.id).first { $0.kind == .button })
+        #expect(styled.style.fontWeight == .bold)
+        #expect(styled.style.cornerRadius == 20)
 
         let describe = DescribeDesignIntent()
         _ = try await describe.perform()
@@ -62,8 +62,8 @@ struct SiriIntentsLiveTests {
 
         // Undo in Layer takes back the last change, the styling.
         _ = try await UndoIntent().perform()
-        let unstyled = model.store.screens.first { $0.name == "Login" }?.elements.first { $0.kind == .button }
-        #expect(unstyled?.fontWeight == nil)
+        let unstyled = model.store.screenLeaves(login.id).first { $0.kind == .button }
+        #expect(unstyled?.style.fontWeight == nil)
 
         // The design is found again by name, as Siri would find it.
         let found = try await DesignQuery().entities(matching: String(name.suffix(6)))
@@ -82,6 +82,6 @@ struct SiriIntentsLiveTests {
         open.target = try #require(found.first { $0.id == designID })
         _ = try await open.perform()
         #expect(OpenDesigns.shared.current?.designID == designID)
-        #expect(OpenDesigns.shared.current?.store.screens.map(\.name).contains("Login") == true)
+        #expect(OpenDesigns.shared.current?.store.tree.screens.map(\.name).contains("Login") == true)
     }
 }

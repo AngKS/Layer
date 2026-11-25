@@ -56,9 +56,12 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
     @Parameter(title: "Convert After a Pause", description: "Whether Magic Pen sketches are read on their own once the pen rests. Applies to every design.")
     var convertsAutomatically: Bool?
 
-
     @Parameter(title: "Design", description: "The design to change. The design at the front if not given.")
     var design: DesignEntity?
+
+    @Parameter(title: "Custom Device for New Screens", description: "One of this design's own devices, by name, that a tall rectangle drawn with the Magic Pen becomes. Used instead of New Screen Device when given.",
+               optionsProvider: CustomDeviceOptions())
+    var customSketchDevice: String?
 
     static var parameterSummary: some ParameterSummary {
         Summary("Change canvas settings") {
@@ -72,6 +75,7 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
             \.$background
             \.$backgroundHex
             \.$sketchDevice
+            \.$customSketchDevice
             \.$codeLayout
             \.$includesPreview
             \.$usesNavigationTitle
@@ -84,6 +88,7 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
     func perform() async throws -> some IntentResult {
         let colour = try ColourOption.resolve(background, hex: backgroundHex)
         let model = try await DesignActions.model(for: design)
+        let newScreens = try DesignActions.device(sketchDevice, custom: customSketchDevice, in: model)
         DesignActions.edit(model, undoManager: undoManager, actionName: "Canvas Settings") {
             model.store.updateCanvas { canvas in
                 if let showsGrid { canvas.showsGrid = showsGrid }
@@ -94,7 +99,7 @@ struct UpdateCanvasSettingsIntent: AppIntent, UndoableIntent {
                 if let showsFrameNames { canvas.showsFrameNames = showsFrameNames }
                 if let showsMeasurements { canvas.showsMeasurements = showsMeasurements }
                 if let colour { canvas.background = colour }
-                if let sketchDevice { canvas.sketchDeviceID = sketchDevice == .iPhone ? nil : sketchDevice.rawValue }
+                if let newScreens { canvas.sketchDeviceID = newScreens == .iPhone ? nil : newScreens.id }
                 if let codeLayout { canvas.code.layout = codeLayout.layout }
                 if let includesPreview { canvas.code.includesPreview = includesPreview }
                 if let usesNavigationTitle { canvas.code.usesNavigationTitle = usesNavigationTitle }
@@ -280,7 +285,7 @@ struct DrawStrokesIntent: AppIntent {
     @MainActor
     private static func contents(of model: AppModel) -> String {
         let snapshot = DesignActions.snapshot(of: model)
-            ?? DesignSnapshot(id: "", name: model.store.title ?? "The design", content: model.store.content, modified: nil)
+            ?? DesignSnapshot(id: "", name: model.store.title ?? "The design", content: model.store.tree, modified: nil)
         return DesignDescriber.describe(snapshot)
     }
 }
@@ -331,14 +336,14 @@ struct EraseInkIntent: AppIntent {
         if let screen {
             let (found, target) = try await DesignActions.screen(screen)
             model = found
-            area = area.map(target.canvasRect(for:)) ?? target.canvasFrame
+            area = area.map(target.placement.canvasRect(for:)) ?? target.canvasFrame(on: model.store.tree.device(of: target))
         } else {
             model = try await DesignActions.model(for: nil as String?)
         }
         guard let ink = model.ink else { throw LayerIntentError.canvasNotReady }
         let keys = ink.inkKeys(touching: area)
         guard !keys.isEmpty else { return .result(dialog: "There's no ink there.") }
-        if model.selectedElement?.element.kind == .drawing { model.selection = nil }
+        if model.selectedNode?.node.kind == .drawing { model.selection = nil }
         ink.deleteInk(keys)
         return .result(dialog: "Erased \(keys.count) strokes.")
     }

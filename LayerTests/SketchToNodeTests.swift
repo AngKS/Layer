@@ -8,7 +8,7 @@ private func makeStore(_ device: DeviceFrame = .iPhone, origin: CGPoint = .zero,
                        scale: CGFloat = 1) -> (store: DesignStore, screen: TreeScreen.ID, undo: UndoManager) {
     let undo = UndoManager()
     undo.groupsByEvent = false
-    let store = DesignStore(content: DesignContent())
+    let store = DesignStore()
     store.undoManager = undo
     let screen = store.addScreen(device, at: Placement(origin: origin, scale: scale))
     return (store, screen.id, undo)

@@ -7,7 +7,7 @@ import Foundation
 struct DesignSnapshot: Sendable {
     let id: String
     let name: String
-    let content: DesignContent
+    let content: TreeContent
     let modified: Date?
     /// False for a design listed by its name alone, which iCloud hasn't downloaded: see
     /// `DesignSummary.isRead`.
@@ -18,13 +18,23 @@ struct DesignSnapshot: Sendable {
     }
 
     var screens: [ScreenEntity] {
-        content.screens.map { ScreenEntity(design: id, designName: name, screen: $0) }
+        content.screens.map { ScreenEntity(design: id, designName: name, screen: $0, settings: content.settings) }
     }
 
+    /// Every screen's leaves, then the open canvas's, each depth first and back to front: Siri sees leaves, never the
+    /// containers that hold them (My call 9). Each is locked or hidden as it is with the containers above it, though
+    /// not with its screen's lock.
     var elements: [ElementEntity] {
-        content.screens.flatMap { screen in
-            screen.elements.map { ElementEntity(design: id, host: .screen(screen.id), hostName: screen.name, element: $0) }
-        } + content.floating.map { ElementEntity(design: id, host: .canvas, hostName: "Canvas", element: $0.element) }
+        let index = TreeIndex(content)
+        func entity(_ leaf: LayerNode, on host: TreeIndex.Host, called hostName: String) -> ElementEntity {
+            let entry = index[leaf.id]
+            return ElementEntity(design: id, host: host, hostName: hostName, node: leaf,
+                                 isLocked: entry?.isLockedWithAncestors ?? leaf.isLocked,
+                                 isHidden: entry?.isHiddenWithAncestors ?? leaf.isHidden)
+        }
+        return content.screens.flatMap { screen in
+            screen.root.leaves.map { entity($0, on: .screen(screen.id), called: screen.name) }
+        } + content.canvasLeaves.map { entity($0, on: .canvas, called: "Canvas") }
     }
 }
 
@@ -38,7 +48,7 @@ enum DesignActions {
     static func snapshot(of model: AppModel) -> DesignSnapshot? {
         guard let id = model.designID else { return nil }
         let name = model.store.title ?? model.fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
-        return DesignSnapshot(id: id, name: name, content: model.store.content, modified: .now)
+        return DesignSnapshot(id: id, name: name, content: model.store.tree, modified: .now)
     }
 
     /// A design by the identifier Siri or Shortcuts holds for it, which may be one it had
@@ -79,31 +89,12 @@ enum DesignActions {
         try await model(for: design?.id)
     }
 
-    static func screen(_ entity: ScreenEntity) async throws -> (model: AppModel, screen: DesignScreen) {
+    /// A screen by its entity, as the tree holds it, with the design it is in.
+    static func screen(_ entity: ScreenEntity) async throws -> (model: AppModel, screen: TreeScreen) {
         guard let id = entity.screenID else { throw LayerIntentError.screenNotFound }
         let model = try await model(for: entity.designID)
-        guard let screen = model.store.screen(id) else { throw LayerIntentError.screenNotFound }
+        guard let screen = model.store.treeScreen(id) else { throw LayerIntentError.screenNotFound }
         return (model, screen)
-    }
-
-    /// The screen named, or the selected one, or the one an element is selected on, or
-    /// the design's only or newest screen.
-    static func screenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: DesignScreen) {
-        if let entity { return try await screen(entity) }
-        let model = try await model(for: nil as String?)
-        if let screen = model.selectedScreen { return (model, screen) }
-        if let selected = model.selectedElement, case .screen(let id) = selected.ref.host, let screen = model.store.screen(id) {
-            return (model, screen)
-        }
-        guard let screen = model.store.screens.last else { throw LayerIntentError.screenNotFound }
-        return (model, screen)
-    }
-
-    static func element(_ entity: ElementEntity) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        guard let ref = entity.ref else { throw LayerIntentError.elementNotFound }
-        let model = try await model(for: entity.designID)
-        guard let found = model.store.resolve(ref) else { throw LayerIntentError.elementNotFound }
-        return (model, ref, found.element)
     }
 
     /// Throws `locked` when an element is locked, by itself or by a group above it: Siri
@@ -112,33 +103,59 @@ enum DesignActions {
         guard !model.store.isLocked(.element(ref)) else { throw LayerIntentError.locked }
     }
 
-    /// The element named, or else the selected one: see `selected(in:)`.
-    static func elementOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        if let entity { return try await element(entity) }
-        return try selected(in: try await model(for: nil as String?))
+    // MARK: Finding nodes
+
+    /// The node an entity names, with where it is. Throws `elementNotFound` when it is gone, or has gone to another
+    /// host since.
+    static func node(_ entity: ElementEntity) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+        guard let ref = entity.ref else { throw LayerIntentError.elementNotFound }
+        let model = try await model(for: entity.designID)
+        guard let placed = model.store.placed(ref) else { throw LayerIntentError.elementNotFound }
+        return (model, ref, placed.node)
     }
 
-    /// The one element selected in a design, as Siri sees it: see `selectedElement(in:)`.
-    /// Throws `elementNotFound` when there is none, as when several things are selected, or
-    /// a group.
-    static func selected(in model: AppModel) throws -> (model: AppModel, ref: DesignStore.ElementRef, element: DesignElement) {
-        guard let selected = selectedElement(in: model) else { throw LayerIntentError.elementNotFound }
-        return (model, selected.ref, selected.element)
+    /// The node named, or else the one leaf selected: see `selectedLeaf(in:)`. Throws `elementNotFound` when nothing
+    /// is named and no one leaf is selected.
+    static func nodeOrSelected(_ entity: ElementEntity?) async throws -> (model: AppModel, ref: DesignStore.ElementRef, node: LayerNode) {
+        if let entity { return try await node(entity) }
+        let model = try await model(for: nil as String?)
+        let selected = try selected(in: model)
+        return (model, selected.ref, selected.node)
     }
 
-    /// The one element selected, unless it is a group: Siri, which knows nothing of groups,
-    /// sees what is in one, never the group item itself (F6). Taken as one element, a group
-    /// would be moved or changed alone, and its members ungrouped. A member selected inside a
-    /// group is an element like any other.
-    static func selectedElement(in model: AppModel) -> (ref: DesignStore.ElementRef, element: DesignElement, placement: Placement)? {
-        guard let selected = model.selectedElement, selected.element.kind != .group else { return nil }
+    /// Siri's "this element" in a design: the one leaf selected (`selectedLeaf(in:)`). Throws `elementNotFound` when no
+    /// one leaf is selected: nothing, several things, or a container.
+    static func selected(in model: AppModel) throws -> PlacedNode {
+        guard let selected = selectedLeaf(in: model) else { throw LayerIntentError.elementNotFound }
         return selected
     }
 
-    /// The elements of a design as Siri offers them: the one selected first (see
-    /// `selectedElement(in:)`), then the rest as `elements` has them.
+    /// The one leaf selected. Nil for a container, several things or nothing: Siri sees what is in a container, never
+    /// the container itself (My call 9). Taken as one element, a container would be moved or changed without what it
+    /// holds. A leaf selected inside a container is one like any other.
+    static func selectedLeaf(in model: AppModel) -> PlacedNode? {
+        guard let selected = model.selectedNode, !selected.node.isContainer else { return nil }
+        return selected
+    }
+
+    /// The screen named, or the selected one, or the one a thing is selected on, or the design's newest screen, as the
+    /// tree holds it.
+    static func screenOrCurrent(_ entity: ScreenEntity?) async throws -> (model: AppModel, screen: TreeScreen) {
+        if let entity { return try await screen(entity) }
+        let model = try await model(for: nil as String?)
+        if let id = model.selectedScreenID, let screen = model.store.treeScreen(id) { return (model, screen) }
+        if let selected = model.selectedNode, case .screen(let id) = selected.ref.host, let screen = model.store.treeScreen(id) {
+            return (model, screen)
+        }
+        guard let screen = model.store.tree.screens.last else { throw LayerIntentError.screenNotFound }
+        return (model, screen)
+    }
+
+    /// The elements of a design as Siri offers them: the one leaf selected first (see `selectedLeaf(in:)`), then the
+    /// rest as `elements` has them.
     static func suggested(_ elements: [ElementEntity], in model: AppModel) -> [ElementEntity] {
-        guard let selected = selectedElement(in: model), let index = elements.firstIndex(where: { $0.ref?.element == selected.ref.element }) else {
+        guard let selected = selectedLeaf(in: model),
+              let index = elements.firstIndex(where: { $0.ref?.element == selected.node.id }) else {
             return elements
         }
         var elements = elements
@@ -146,28 +163,37 @@ enum DesignActions {
         return elements
     }
 
+    /// The entity of the leaf a ref points at, locked or hidden as it is with the containers above it. Nil when it is
+    /// gone, has gone to another host, or is a container, which Siri doesn't see (My call 9).
     static func entity(for ref: DesignStore.ElementRef, in model: AppModel) -> ElementEntity? {
-        guard let id = model.designID, let found = model.store.resolve(ref) else { return nil }
-        let hostName = switch ref.host {
-        case .screen(let screenID): model.store.screen(screenID)?.name ?? "Screen"
+        guard let id = model.designID, let placed = model.store.placed(ref), !placed.node.isContainer,
+              let host = model.store.index[ref.element]?.host else { return nil }
+        let hostName = switch host {
+        case .screen(let screenID): model.store.treeScreen(screenID)?.name ?? "Screen"
         case .canvas: "Canvas"
         }
-        return ElementEntity(design: id, host: ref.host, hostName: hostName, element: found.element)
+        return ElementEntity(design: id, host: host, hostName: hostName, node: placed.node,
+                             isLocked: placed.isLocked, isHidden: placed.isHidden)
     }
 
-    static func entity(for screen: DesignScreen, in model: AppModel) -> ScreenEntity? {
-        guard let snapshot = snapshot(of: model) else { return nil }
-        return ScreenEntity(design: snapshot.id, designName: snapshot.name, screen: screen)
+    /// The entity of a screen in the design. Nil when the design has no such screen, or isn't saved anywhere yet.
+    static func entity(for screenID: TreeScreen.ID, in model: AppModel) -> ScreenEntity? {
+        guard let snapshot = snapshot(of: model), let screen = snapshot.content.screens.first(where: { $0.id == screenID }) else {
+            return nil
+        }
+        return ScreenEntity(design: snapshot.id, designName: snapshot.name, screen: screen, settings: snapshot.content.settings)
     }
 
     // MARK: Changing designs
 
-    /// Makes a change to a design as one undo step, in the design's own undo history and,
-    /// when the system offers one, in the action's undo manager too.
+    /// Makes a change to a design as one undo step, named `actionName`, in the design's own undo history and, when the
+    /// system offers one, in the action's undo manager too.
     static func edit<T>(_ model: AppModel, undoManager: UndoManager?, actionName: String, _ body: () throws -> T) rethrows -> T {
         let before = model.store.content
         // Its own step, even in the middle of a drag, which goes on as its own (M3).
         let edit = model.store.beginEdit(by: .app)
+        // "Undo Move Text" in the Edit menu, as the system's history calls it.
+        model.store.name(edit, actionName)
         defer {
             model.store.endEdit(edit)
             let after = model.store.content
@@ -187,15 +213,19 @@ enum DesignActions {
         return try model.store.act(for: edit, body)
     }
 
-    /// Selects something and glides the canvas to show it.
-    /// `selecting` false shows it without selecting it, as for a screen just made.
+    /// Selects something and glides the canvas to show it: a node by the box round its turned shape on the canvas, a
+    /// screen with its name. `selecting` false shows it without selecting it, as for a screen just made.
     static func reveal(_ target: CanvasSelection, in model: AppModel, selecting: Bool = true) {
         model.tool = .select
         if selecting { model.selection = target }
         let area: CGRect? = switch target {
-        case .element(let ref): model.store.resolve(ref).map { $0.placement.canvasRect(for: $0.element.frame) }
-        case .screen(let id): model.store.screen(id).map { $0.canvasFrame.union($0.labelFrame) }
-        case .several: model.store.canvasFrame(of: target)
+        case .element, .several:
+            model.store.canvasFrame(of: target)
+        case .screen(let id):
+            model.store.treeScreen(id).map { screen in
+                let device = model.store.tree.device(of: screen)
+                return screen.canvasFrame(on: device).union(screen.labelFrame(on: device))
+            }
         }
         if let area { model.ink?.glide(toShow: area) }
     }
@@ -204,8 +234,13 @@ enum DesignActions {
     ///
     /// With a `point`, in canvas points, the screen's top-left corner goes there instead,
     /// moved right past any screen it would lie over.
+    ///
+    /// Each screen takes up its frame on the canvas drawn as its own device, the design's own included.
     static func placementForNewScreen(_ device: DeviceFrame, in model: AppModel, near point: CGPoint? = nil) -> Placement {
-        let scale = model.store.screens.last?.scale ?? 0.6
+        let tree = model.store.tree
+        let screens = tree.screens
+        let scale = screens.last?.scale ?? 0.6
+        func frame(of screen: TreeScreen) -> CGRect { screen.canvasFrame(on: tree.device(of: screen)) }
         if let point {
             // The screen with its name above it, which is what mustn't lie over another.
             let nameHeight = 34 * scale
@@ -214,24 +249,42 @@ enum DesignActions {
                 x: point.x.rounded(), y: top - nameHeight,
                 width: device.size.width * scale, height: device.size.height * scale + nameHeight
             )
+            let covered = screens.map { frame(of: $0).union($0.labelFrame(on: tree.device(of: $0))) }
             // Each move clears one screen and only goes rightwards, so this ends.
-            while let blocking = model.store.screens.map({ $0.canvasFrame.union($0.labelFrame) }).first(where: { $0.intersects(taken) }) {
+            while let blocking = covered.first(where: { $0.intersects(taken) }) {
                 taken.origin.x = (blocking.maxX + 60).rounded()
             }
             return Placement(origin: CGPoint(x: taken.minX, y: top), scale: scale)
         }
-        if let rightmost = model.store.screens.max(by: { $0.canvasFrame.maxX < $1.canvasFrame.maxX }) {
-            return Placement(origin: CGPoint(x: (rightmost.canvasFrame.maxX + 60).rounded(), y: rightmost.origin.y), scale: scale)
+        if let rightmost = screens.max(by: { frame(of: $0).maxX < frame(of: $1).maxX }) {
+            return Placement(origin: CGPoint(x: (frame(of: rightmost).maxX + 60).rounded(), y: rightmost.origin.y), scale: scale)
         }
         let middle = CGPoint(x: Viewport.canvasSize.width / 2, y: Viewport.canvasSize.height / 2)
         let size = CGSize(width: device.size.width * scale, height: device.size.height * scale)
         return Placement(origin: CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded()), scale: scale)
     }
 
-    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Plan 6's Task 5
-    /// moves its callers to `DesignStore.newElementFrame(_:on:)` and deletes it.
+    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Siri no longer
+    /// calls it: it is kept only for voice's `VoiceToolbox` (lane C), whose plan 6 Task 7 moves it to
+    /// `DesignStore.newElementFrame(_:on:)`; the last lane to move deletes it (F11, F16).
     static func frameForNewElement(_ element: DesignElement, on screen: DesignScreen) -> CGRect {
         ElementLayout.newElementFrame(for: element.kind, on: screen.device, below: screen.elements.filter { !$0.isHidden }.map(\.frame))
+    }
+
+    // MARK: Devices
+
+    /// The device an action asks for (call 6): `custom`, one of the design's own by its name ignoring case and the space
+    /// round it (`CanvasSettings.customDevice(named:)`), when it is given and isn't blank; else `choice`'s frame; nil when
+    /// neither is given. Throws `deviceNotFound` for a name the design has no device of its own called, and for one of
+    /// its own that can't be used (`problems`), which a file can hold and the store refuses everywhere: so Change Screen
+    /// Device, Add Screen, Build Screen and Update Canvas Settings refuse it before anything is written.
+    static func device(_ choice: DeviceChoice?, custom: String?, in model: AppModel) throws -> DeviceFrame? {
+        let name = custom?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else { return choice?.frame }
+        guard let device = model.store.tree.settings.customDevice(named: name), device.problems.isEmpty else {
+            throw LayerIntentError.deviceNotFound(name)
+        }
+        return device
     }
 }
 
@@ -385,131 +438,57 @@ struct ElementQuery: EntityStringQuery {
 
 /// Designs and screens in words, for Siri to read out and for Spotlight to index.
 enum DesignDescriber {
-    static func summary(of screen: DesignScreen) -> String {
-        let visible = screen.elements.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
-        guard !visible.isEmpty else { return "An empty \(screen.device.name) screen." }
-        return visible.map(describe).joined(separator: ", ")
+    /// What a screen shows, top to bottom: its visible leaves by the tops of their frames in screen points, each as
+    /// `describe(_:)` says it, or that it is empty. A leaf in a hidden container isn't visible.
+    static func summary(of screen: TreeScreen, in content: TreeContent) -> String {
+        summary(of: screen, on: content.device(of: screen))
     }
 
+    /// `summary(of:in:)` for a screen drawn as `device`: what a screen's entity says, which has the design's settings
+    /// but not the rest of it.
+    static func summary(of screen: TreeScreen, on device: DeviceFrame) -> String {
+        // The screen alone is indexed: its leaves' frames don't depend on anything else in the design.
+        var alone = TreeContent()
+        alone.screens = [screen]
+        let index = TreeIndex(alone)
+        let visible = screen.root.leaves
+            .compactMap { leaf -> (leaf: LayerNode, top: CGFloat)? in
+                guard let entry = index[leaf.id], !entry.isHiddenWithAncestors else { return nil }
+                return (leaf, entry.hostShape.rect.minY)
+            }
+            .sorted { $0.top < $1.top }
+        guard !visible.isEmpty else { return "An empty \(device.name) screen." }
+        return visible.map { describe($0.leaf) }.joined(separator: ", ")
+    }
+
+    /// A leaf in a few words: its kind and its words, or a symbol's name.
+    static func describe(_ node: LayerNode) -> String {
+        describe(kind: node.kind, text: node.content.text, symbol: node.content.symbol)
+    }
+
+    /// The same for a flat element, which voice still hands over until plan 6's Task 7; Siri's actions no longer do. The
+    /// last lane to move deletes it.
     static func describe(_ element: DesignElement) -> String {
-        let words = element.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let kind = element.kind.layerName.lowercased()
-        if element.kind == .symbol, let symbol = element.symbol { return "\(symbol) symbol" }
-        return words.isEmpty ? kind : "\(kind) “\(words)”"
+        describe(kind: element.kind, text: element.text, symbol: element.symbol)
+    }
+
+    private static func describe(kind: ElementKind, text: String, symbol: String?) -> String {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = kind.layerName.lowercased()
+        if kind == .symbol, let symbol { return "\(symbol) symbol" }
+        return words.isEmpty ? name : "\(name) “\(words)”"
     }
 
     static func describe(_ snapshot: DesignSnapshot) -> String {
-        let screens = snapshot.content.screens
+        let content = snapshot.content
+        let screens = content.screens
         var lines = ["\(snapshot.name) has \(screens.count == 1 ? "1 screen" : "\(screens.count) screens")."]
         for screen in screens {
-            lines.append("\(screen.name) (\(screen.device.name)): \(summary(of: screen))")
+            let device = content.device(of: screen)
+            lines.append("\(screen.name) (\(device.name)): \(summary(of: screen, on: device))")
         }
-        let loose = snapshot.content.floating.count
+        let loose = content.canvasLeaves.count
         if loose > 0 { lines.append("Plus \(loose == 1 ? "1 element" : "\(loose) elements") on the open canvas.") }
         return lines.joined(separator: "\n")
-    }
-}
-
-// MARK: Layout as data
-
-/// A design as JSON, with every position and size, for a model or a shortcut that edits a
-/// design and needs to see exactly where things are. Screens give their canvas position and
-/// scale; their elements give frames in the screen's own points. Loose elements give frames
-/// in canvas points. Each element's `id` is the identifier its entity goes by.
-enum DesignLayoutWriter {
-    static func json(for snapshot: DesignSnapshot, ink: (count: Int, bounds: CGRect?)? = nil, hasUnreadSketch: Bool = false) -> String {
-        let content = snapshot.content
-        var root: [String: Any] = [
-            "design": snapshot.name,
-            "id": snapshot.id,
-            "canvas": canvas(content.canvas),
-            "screens": content.screens.map { screen in
-                [
-                    "id": EntityKey.screen(design: snapshot.id, screen: screen.id),
-                    "name": screen.name,
-                    "device": DeviceChoice(screen.device).rawValue,
-                    "width": number(screen.size.width),
-                    "height": number(screen.size.height),
-                    "x": number(screen.origin.x),
-                    "y": number(screen.origin.y),
-                    "scale": number(screen.scale * 100),
-                    "locked": screen.isLocked == true,
-                    "safeAreaTop": number(screen.device.safeTop),
-                    "safeAreaBottom": number(screen.device.safeBottom),
-                    "elements": screen.elements.map { element(design: snapshot.id, host: .screen(screen.id), $0, frame: $0.frame) },
-                ] as [String: Any]
-            },
-            "canvasElements": content.floating.map { floating in
-                element(design: snapshot.id, host: .canvas, floating.element, frame: floating.canvasFrame)
-            },
-        ]
-        if let ink {
-            var drawing: [String: Any] = ["strokes": ink.count]
-            if let bounds = ink.bounds { drawing["bounds"] = rect(bounds) }
-            root["ink"] = drawing
-        }
-        if hasUnreadSketch { root["unreadMagicPenSketch"] = true }
-        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private static func element(design: String, host: DesignStore.ElementRef.Host, _ element: DesignElement, frame: CGRect) -> [String: Any] {
-        var info: [String: Any] = [
-            "id": EntityKey.element(design: design, host: host, element: element.id),
-            "kind": element.kind.rawValue,
-            "name": element.displayName,
-            "x": number(frame.minX),
-            "y": number(frame.minY),
-            "width": number(frame.width),
-            "height": number(frame.height),
-            "colour": element.tint.hex,
-        ]
-        if element.kind.hasText { info["text"] = element.text }
-        if let symbol = element.symbol { info["symbol"] = symbol }
-        if element.kind == .shape { info["shape"] = (element.shape ?? .rectangle).rawValue }
-        if element.imageID != nil { info["hasPicture"] = true }
-        if let fontSize = element.fontSize { info["fontSize"] = number(fontSize) }
-        if let weight = element.fontWeight { info["fontWeight"] = weight.rawValue }
-        if let textColor = element.textColor { info["textColour"] = textColor.hex }
-        if let alignment = element.textAlignment { info["textAlignment"] = alignment.rawValue }
-        if let radius = element.cornerRadius { info["cornerRadius"] = number(radius) }
-        if let opacity = element.opacity { info["opacity"] = opacity }
-        if let width = element.borderWidth, width > 0 {
-            info["borderWidth"] = number(width)
-            if let colour = element.borderColor { info["borderColour"] = colour.hex }
-        }
-        if element.hasShadow { info["shadow"] = true }
-        if element.isLocked { info["locked"] = true }
-        if element.isHidden { info["hidden"] = true }
-        if element.hasOnState { info["on"] = element.isOn }
-        if element.hasValue { info["progress"] = element.value ?? 0.5 }
-        if element.hasButtonLooks { info["buttonStyle"] = (element.buttonLook ?? .filled).rawValue }
-        return info
-    }
-
-    private static func canvas(_ settings: CanvasSettings) -> [String: Any] {
-        [
-            "background": settings.resolvedBackground.hex,
-            "showsGrid": settings.showsGrid,
-            "gridStyle": settings.gridStyle.rawValue,
-            "gridSpacing": number(settings.gridSpacing),
-            "snapsToGuides": settings.snapsToGuides,
-            "snapsToGrid": settings.snapsToGrid,
-            "showsMeasurements": settings.showsMeasurements,
-            "showsFrameNames": settings.showsFrameNames,
-            "newScreenDevice": DeviceChoice(settings.sketchDevice).rawValue,
-            "codeLayout": settings.code.layout.rawValue,
-            "codeIncludesPreview": settings.code.includesPreview,
-            "codeUsesNavigationTitle": settings.code.usesNavigationTitle,
-        ]
-    }
-
-    private static func rect(_ rect: CGRect) -> [String: Double] {
-        ["x": number(rect.minX), "y": number(rect.minY), "width": number(rect.width), "height": number(rect.height)]
-    }
-
-    /// Rounded to a tenth of a point, which is all a layout needs.
-    private static func number(_ value: CGFloat) -> Double {
-        (Double(value) * 10).rounded() / 10
     }
 }

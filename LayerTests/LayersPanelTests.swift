@@ -16,15 +16,19 @@ extension HostedWindowSuites {
         private func board() -> (model: AppModel, lines: [DesignStore.ElementRef]) {
             let model = AppModel(document: LayerDocument())
             let screen = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
-            let lines = model.store.setElements((0..<20).map { index in
-                DesignElement(kind: .text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
-            }, on: screen)
-            for index in 0..<8 {
-                var drawing = DesignStore.newElement(.drawing)
-                drawing.frame = CGRect(x: 700, y: 100 + CGFloat(index) * 60, width: 100, height: 40)
-                model.store.addFloating(drawing, scale: 1)
+            let lines = (0..<20).map { index in
+                LayerNode.leaf(.text, frame: CGRect(x: 20, y: 60 + CGFloat(index) * 19, width: 200, height: 16), text: "Line \(index)", tint: Theme.accent)
             }
-            return (model, lines)
+            let store = model.store
+            store.asOneStep {
+                for line in lines { store.add(line, to: .screen(screen)) }
+            }
+            for index in 0..<8 {
+                var drawing = LayerNode.standard(.drawing)
+                drawing.frame = CGRect(x: 700, y: 100 + CGFloat(index) * 60, width: 100, height: 40)
+                store.addCanvasNode(drawing, scale: 1)
+            }
+            return (model, lines.map { DesignStore.ElementRef(host: .screen(screen), element: $0.id) })
         }
 
         /// Every id on the board, which is what its panel counts its rows and code under (F9, clause (k)):
@@ -63,7 +67,7 @@ extension HostedWindowSuites {
         /// 60 frames of a drag, one every few milliseconds, as touches come in.
         private func drag(_ ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws {
             for step in 1...60 {
-                model.store.update(ref) { $0.frame.origin.x = 20 + CGFloat(step) }
+                model.store.update(ref.element) { $0.frame.origin.x = 20 + CGFloat(step) }
                 view.layoutIfNeeded()
                 try await Task.sleep(for: .milliseconds(4))
             }
@@ -77,7 +81,7 @@ extension HostedWindowSuites {
         private func waitForRowsToSettle(nudging ref: DesignStore.ElementRef, in model: AppModel, view: UIView) async throws -> Bool {
             for step in 0..<40 {
                 let before = rows(in: model)
-                model.store.update(ref) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
+                model.store.update(ref.element) { $0.frame.origin.y += step.isMultiple(of: 2) ? 1 : -1 }
                 try await Task.sleep(for: .milliseconds(50))
                 if rows(in: model) == before { return true }
             }
@@ -150,14 +154,14 @@ extension HostedWindowSuites {
         /// (Review Focus 6).
         @Test func aDragOfAGroupedThingBuildsNoRows() async throws {
             let (model, lines) = board()
-            var item = DesignStore.newElement(.group)
-            item.name = "Group"
-            let made = item
-            let g = DesignStore.ElementRef(host: lines[0].host, element: made.id)
-            model.store.apply { content in
-                content.add(made, to: lines[0].host.parent)
-                for line in lines[2...4] { content.update(line.element) { $0.group = made.id } }
+            // A free group named "Group" round three of the lines, where they are, in one step.
+            let store = model.store
+            var made: UUID?
+            store.asOneStep {
+                made = store.wrap(lines[2...4].map(\.element), in: .group, layout: .free)
+                if let made { store.update(made) { $0.name = "Group" } }
             }
+            let g = DesignStore.ElementRef(host: lines[0].host, element: try #require(made))
             model.selection = .element(lines[3])
             #expect(model.enteredGroups.contains(g.element), "the group is open while a member is selected")
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))
@@ -187,8 +191,8 @@ extension HostedWindowSuites {
             let model = AppModel(document: LayerDocument())
             let first = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 1)).id
             let second = model.store.addScreen(.iPhone, at: Placement(origin: CGPoint(x: 600, y: 100), scale: 1)).id
-            model.store.updateScreen(first) { $0.name = "Login" }
-            model.store.updateScreen(second) { $0.name = "Login" }
+            model.store.updateTreeScreen(first) { $0.name = "Login" }
+            model.store.updateTreeScreen(second) { $0.name = "Login" }
             let window = try await testWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 900))
             let host = UIHostingController(rootView: CodePane(screenID: .constant(second)).environment(model))
             window.rootViewController = host
@@ -197,7 +201,7 @@ extension HostedWindowSuites {
             _ = try await poll(host.view) { LayersPanelWork.codes(for: second) > 0 }
             #expect(LayersPanelWork.lastCode(for: second).contains("struct Login2: View"))
 
-            model.store.updateScreen(first) { $0.name = "Home" }
+            model.store.updateTreeScreen(first) { $0.name = "Home" }
             _ = try await poll(host.view) { LayersPanelWork.lastCode(for: second).contains("struct Login: View") }
             #expect(LayersPanelWork.lastCode(for: second).contains("struct Login: View"), "the code still declares the name it had")
         }

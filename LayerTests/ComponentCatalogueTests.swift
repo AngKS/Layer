@@ -73,24 +73,24 @@ private func describe(_ kind: ElementKind) throws -> [String] {
         + " | keeping shape: \(r(ElementLayout.resizedKeepingShape(box, from: .bottomRight, by: CGSize(width: 20, height: 5), kind: kind)))"
         + " | keeping shape from top left: \(r(ElementLayout.resizedKeepingShape(box, from: .topLeft, by: CGSize(width: -20, height: -5), kind: kind)))")
 
-    // A new one, and its usual look.
-    let new = DesignStore.newElement(kind)
-    lines.append("new: \(s(new.frame.size)) tint \(c(new.tint)) text \"\(new.text)\"")
+    // A new one, and its usual look, with the standard tokens.
+    let new = LayerNode.standard(kind)
+    lines.append("new: \(s(new.frame.size)) tint \(c(new.resolvedTint)) text \"\(new.content.text)\"")
     var element = new
     element.frame = CGRect(x: 0, y: 0, width: 120, height: 40)
     var outlined = element
-    outlined.buttonLook = .bordered
-    lines.append("font: \(n(element.resolvedFontSize)) \(element.resolvedFontWeight.rawValue)"
+    outlined.content.buttonLook = .bordered
+    lines.append("font: \(n(element.resolvedFontSize(tokens: .standard))) \(element.resolvedFontWeight.rawValue)"
         + " | text colour: \(c(element.resolvedTextColor)), bordered \(c(outlined.resolvedTextColor))"
-        + " | radius: \(n(element.resolvedCornerRadius)) | alignment: \(element.resolvedTextAlignment.rawValue)")
+        + " | radius: \(n(element.resolvedCornerRadius(tokens: .standard))) | alignment: \(element.resolvedTextAlignment.rawValue)")
     lines.append("hasFill: \(element.hasFill) | hasCornerRadius: \(element.hasCornerRadius) | hasBorder: \(element.hasBorder)"
-        + " | hasOnState: \(element.hasOnState) | hasTextAlignment: \(element.hasTextAlignment)")
+        + " | hasOnState: \(kind.spec.traits.contains(.onState)) | hasTextAlignment: \(kind.spec.traits.contains(.textAlignment))")
 
     // On the open canvas, drawn large and drawn small.
-    let store = DesignStore(content: DesignContent())
-    let large = store.resolve(store.addFloating(kind, from: CGRect(x: 0, y: 0, width: 300, height: 200)))
-    let small = store.resolve(store.addFloating(kind, from: CGRect(x: 0, y: 0, width: 30, height: 20)))
-    lines.append("loose, drawn large: \(s(large?.element.frame.size ?? .zero)) | drawn small: \(s(small?.element.frame.size ?? .zero))")
+    let store = DesignStore()
+    let large = store.addLooseSketch(kind, from: CGRect(x: 0, y: 0, width: 300, height: 200)).flatMap { store.node($0) }
+    let small = store.addLooseSketch(kind, from: CGRect(x: 0, y: 0, width: 30, height: 20)).flatMap { store.node($0) }
+    lines.append("loose, drawn large: \(s(large?.frame.size ?? .zero)) | drawn small: \(s(small?.frame.size ?? .zero))")
 
     // In a written or generated screen: the leaf the one-line outline of its first written name makes, its natural
     // size offered a phone's column and a row's share, and where the rules lay it out on a phone.
@@ -115,18 +115,18 @@ private func describe(_ kind: ElementKind) throws -> [String] {
 
     // What the marks inside a sketch say.
     func marked(_ inner: SketchObservation.InnerMark, at bounds: CGRect?) -> String {
-        var element = DesignStore.newElement(kind)
+        var element = LayerNode.standard(kind)
         element.adoptMarks(of: SketchObservation(
             bounds: CGRect(x: 0, y: 0, width: 60, height: 30), form: .enclosure(roundness: 0.5, inner: inner), strokeCount: 2, innerBounds: bounds
         ))
-        return "on \(element.isOn) value \(element.value.map { n(CGFloat($0)) } ?? "-")"
+        return "on \(element.content.isOn) value \(element.content.value.map { n(CGFloat($0)) } ?? "-")"
     }
     lines.append("marks: empty \(marked(.none, at: nil)) | dot on the right \(marked(.dot, at: CGRect(x: 0.6, y: 0.2, width: 0.3, height: 0.6)))"
         + " | shaded to 0.42 \(marked(.other, at: CGRect(x: 0, y: 0, width: 0.42, height: 1)))")
 
     // What a design's layout, written out as data, says of it.
-    var content = DesignContent()
-    content.screens = [DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: [new])]
+    var content = TreeContent()
+    content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: .container(children: [.standard(kind)]))]
     let json = DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Design", content: content, modified: nil))
     let root = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     let screens = try #require(root["screens"] as? [[String: Any]])

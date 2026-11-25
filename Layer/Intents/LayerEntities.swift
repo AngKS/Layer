@@ -13,8 +13,10 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     case locked
     case nothingToExport
     case invalidColour(String)
-    case invalidBlueprint
-    /// Building it would take the design past what a design holds: 5,000 nodes, nested at most 32 deep.
+    /// Build Screen's outline had nothing in it to build.
+    case invalidScreenDescription
+    /// Building, adding or copying it would take the design past what a design holds: 5,000 things, nested at most 32
+    /// deep. Said after Build Screen, Add Screen, Add Element, Duplicate Element and Duplicate Screen alike.
     case designTooLarge
     case imagePlaygroundUnavailable
     case notAnImage
@@ -27,6 +29,10 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
     /// is arranged among, which for a member of a group is the others in its group.
     case cantGoFurther(withinGroup: Bool)
     case invalidImage
+    /// What a row, column or grid places, or for Align an overlay too, isn't moved or arranged on its own (spec §10).
+    case laidOut
+    /// No device of the design's own has the name given.
+    case deviceNotFound(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -38,8 +44,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .locked: "That's locked. Unlock it in Layer first."
         case .nothingToExport: "There's nothing on that design to export yet."
         case .invalidColour(let text): "“\(text)” isn't a colour Layer knows. Use a name such as blue, or a hex code such as #0A84FF."
-        case .invalidBlueprint: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
-        case .designTooLarge: "That would make the design larger than Layer keeps: \(TreeRules.maximumNodes.formatted()) elements in all, none nested more than \(TreeRules.maximumDepth) deep. Nothing was built."
+        case .invalidScreenDescription: "Layer couldn't read that screen description. Write one element per line, such as “title: Welcome back”."
+        case .designTooLarge: "That would make the design larger than Layer keeps: more than \(TreeRules.maximumNodes.formatted()) things, or nested more than \(TreeRules.maximumDepth) deep. Nothing was changed."
         case .imagePlaygroundUnavailable: "Image Playground isn't available. It needs Apple Intelligence turned on in Settings, and its models downloaded."
         case .notAnImage: "That element isn't an image. Choose an image element, or leave it out to add a new image."
         case .canvasNotReady: "The design's canvas isn't on screen yet. Try again once Layer is showing it."
@@ -50,6 +56,8 @@ enum LayerIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .cantGoFurther(withinGroup: true): "That element can't go any further that way within its group. To move it past things outside the group, ungroup it first, or arrange the group."
         case .cantGoFurther(withinGroup: false): "That element can't go any further that way."
         case .invalidImage: "Layer couldn't read that file as a picture."
+        case .laidOut: "That element's place comes from the row, column or grid it's in. Change its order in the Layers panel, or move it out of the container first."
+        case .deviceNotFound(let name): "This design has no device called “\(name)”. Make one with Custom Size… in the device picker."
         }
     }
 }
@@ -127,7 +135,7 @@ struct DesignEntity: IndexedEntity {
         modified = summary.modified
     }
 
-    init(id: String, content: DesignContent, fallbackName: String, modified: Date? = nil) {
+    init(id: String, content: TreeContent, fallbackName: String, modified: Date? = nil) {
         self.id = id
         name = content.title ?? fallbackName
         screenCount = content.screens.count
@@ -169,6 +177,11 @@ struct ScreenEntity: IndexedEntity {
     @Property(title: "Device")
     var device: DeviceChoice
 
+    /// The name of the design's own device for a screen on one, else the built-in's name as Siri and Shortcuts show it
+    /// ("Phone", "Tablet"…), never the built-in's own name, which is a trademark (F23).
+    @Property(title: "Device Name")
+    var deviceName: String
+
     @Property(title: "Design")
     var designName: String
 
@@ -182,21 +195,39 @@ struct ScreenEntity: IndexedEntity {
     var designID: String { EntityKey.parseScreen(id)?.design ?? "" }
     var screenID: UUID? { EntityKey.parseScreen(id)?.screen }
 
-    init(design: String, designName: String, screen: DesignScreen) {
+    /// A screen of a design whose canvas is set up as `settings` says, which hold the design's own devices. Its elements
+    /// are its leaves (My call 9).
+    init(design: String, designName: String, screen: TreeScreen, settings: CanvasSettings) {
+        let frame = settings.device(named: screen.deviceID)
         id = EntityKey.screen(design: design, screen: screen.id)
         name = screen.name
-        device = DeviceChoice(screen.device)
+        device = DeviceChoice(frame)
+        deviceName = DeviceChoice.displayName(of: frame)
         self.designName = designName
-        elementCount = screen.elements.count
-        summary = DesignDescriber.summary(of: screen)
+        elementCount = screen.root.leaves.count
+        summary = DesignDescriber.summary(of: screen, on: frame)
     }
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(name)",
-            subtitle: "\(device.name) · \(designName)",
+            subtitle: "\(deviceName) · \(designName)",
             image: .init(systemName: device == .iPad ? "ipad" : "iphone")
         )
+    }
+}
+
+/// The design's own devices, by name, for a Custom Device parameter (call 6): Shortcuts offers them, and any name can
+/// still be typed, which `DesignActions.device(_:custom:in:)` looks up.
+struct CustomDeviceOptions: DynamicOptionsProvider {
+    /// `names(in:)` of the design at the front, or none when no design is open.
+    func results() async throws -> [String] {
+        await MainActor.run { OpenDesigns.shared.current.map(Self.names(in:)) ?? [] }
+    }
+
+    /// The design's own devices' names, in the order they were made. What tests call, with the model (F17).
+    @MainActor static func names(in model: AppModel) -> [String] {
+        model.store.tree.settings.customDevices.map(\.name)
     }
 }
 
@@ -238,15 +269,19 @@ struct ElementEntity: AppEntity {
     var designID: String { EntityKey.parseElement(id)?.design ?? "" }
     var ref: DesignStore.ElementRef? { EntityKey.parseElement(id)?.ref }
 
-    init(design: String, host: DesignStore.ElementRef.Host, hostName: String, element: DesignElement) {
-        id = EntityKey.element(design: design, host: host, element: element.id)
-        kind = ElementKindChoice(element.kind)
-        text = element.text
-        name = element.name ?? element.kind.layerName
+    /// A leaf on `host`, called `hostName`, locked or hidden as `isLocked` and `isHidden` say: with the containers
+    /// above it, as the design's index has it.
+    init(design: String, host: TreeIndex.Host, hostName: String, node: LayerNode, isLocked: Bool, isHidden: Bool) {
+        // Until plan 6's Task 11 renames the ref, the index's host and a ref's are two enums of one shape, converted
+        // here alone (F29).
+        id = EntityKey.element(design: design, host: DesignStore.ElementRef.Host(host), element: node.id)
+        kind = ElementKindChoice(node.kind)
+        text = node.content.text
+        name = node.name ?? node.kind.layerName
         screenName = hostName
-        colourHex = element.tint.hex
-        isHidden = element.isHidden
-        isLocked = element.isLocked
+        colourHex = node.resolvedTint.hex
+        self.isHidden = isHidden
+        self.isLocked = isLocked
     }
 
     var displayRepresentation: DisplayRepresentation {
@@ -324,6 +359,18 @@ enum DeviceChoice: String, AppEnum {
 
     var frame: DeviceFrame { DeviceFrame.named(rawValue) }
     var name: String { frame.name }
+
+    /// What Siri and Shortcuts call it ("Phone", "Tablet"…): its display representation's title, which names no
+    /// trademark, where `name` does.
+    var displayName: String {
+        Self.caseDisplayRepresentations[self].map { String(localized: $0.title) } ?? rawValue
+    }
+
+    /// What Siri and Shortcuts call a device: one of the design's own by its name, a built-in by its `displayName`
+    /// (F23). A screen's entity and Get Design Layout both say it.
+    static func displayName(of device: DeviceFrame) -> String {
+        DeviceChoice(rawValue: device.id)?.displayName ?? device.name
+    }
 }
 
 enum FontWeightOption: String, AppEnum {
@@ -442,6 +489,15 @@ enum CodeLayoutOption: String, AppEnum {
     var layout: CodeSettings.Layout {
         switch self {
         case .stack: .structure
+        case .absolute: .absolute
+        }
+    }
+
+    /// The option a code layout is chosen by, which Get Design Layout writes, so that a shortcut can hand it back as it
+    /// was given: "stack" for the structure, as before the layout was renamed.
+    init(_ layout: CodeSettings.Layout) {
+        self = switch layout {
+        case .structure: .stack
         case .absolute: .absolute
         }
     }

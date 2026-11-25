@@ -128,9 +128,9 @@ struct GenerationThroughTheReconcilerTests {
         }
         #expect(stack.axis == .vertical)
         #expect(stack.spacing == 24)
-        let title = try #require(app.store.screen(screen)?.elements.first)
+        let title = try #require(app.store.screenLeaves(screen).first)
         #expect(title.kind == .title)
-        #expect(title.frame.minY == DeviceFrame.iPhone.safeTop + 20)
+        #expect(app.store.ownFrame(title.id)?.minY == DeviceFrame.iPhone.safeTop + 20)
         feed.finish()
         await app.waitForGeneration()
     }

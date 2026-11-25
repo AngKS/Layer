@@ -113,7 +113,7 @@ import Testing
         let report = await model.importA2UI(data)
 
         #expect(report.screens.count == 2)
-        let frames = report.screens.compactMap { model.store.screen($0)?.canvasFrame }
+        let frames = report.screens.compactMap { model.store.screenFrameOnCanvas($0) }
         #expect(frames.count == 2)
         #expect(frames[1].minX > frames[0].maxX, "\(frames)")
         #expect(report.screens.map { name(of: $0, in: model) } == ["One", "Two"])

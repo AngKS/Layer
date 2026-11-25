@@ -3,22 +3,33 @@ import Foundation
 import Testing
 @testable import Layer
 
-private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> DesignElement {
-    DesignElement(kind: kind, frame: CGRect(x: x, y: y, width: width, height: height), text: kind.placeholder, tint: Theme.accent)
+/// A leaf of a kind with its kind's words, in the app's accent, where its frame puts it.
+private func element(_ kind: ElementKind, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> LayerNode {
+    .leaf(kind, frame: CGRect(x: x, y: y, width: width, height: height), text: kind.placeholder, tint: Theme.accent)
 }
 
 @MainActor
-private func makeStore(_ content: DesignContent = DesignContent()) -> (store: DesignStore, undo: UndoManager) {
+private func makeStore() -> (store: DesignStore, undo: UndoManager) {
     let undo = UndoManager()
     undo.groupsByEvent = false
-    let store = DesignStore(content: content)
+    let store = DesignStore()
     store.undoManager = undo
     return (store, undo)
 }
 
-/// A screen at the canvas origin, drawn at full size, so canvas and screen points agree.
-private func screenWith(_ elements: [DesignElement]) -> DesignScreen {
-    DesignScreen(name: "Screen 1", origin: .zero, scale: 1, elements: elements)
+/// A screen at the canvas origin, drawn at full size, so canvas and screen points agree, its free root holding `nodes`.
+private func screenWith(_ nodes: [LayerNode]) -> TreeScreen {
+    var root = LayerNode(kind: .group)
+    root.layout = .free
+    root.children = nodes
+    return TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: root)
+}
+
+/// Screens named `names`, at the canvas's origin, each with nothing on it, alone in a design.
+private func design(ofEmptyScreensNamed names: [String]) -> TreeContent {
+    var content = TreeContent()
+    content.screens = names.map { TreeScreen(name: $0, origin: .zero, scale: 1, deviceID: nil) }
+    return content
 }
 
 /// A zigzag scrubbed back and forth across `rect`, as drawn to cross something out.
@@ -51,35 +62,36 @@ struct SettingsTests {
               {"id":"\(UUID().uuidString)","kind":"title","frame":[[82,112],[228,40]],"text":"Hi","style":{"tint":{"red":0,"green":0,"blue":0}}}
             ]}}],"canvas":[],"settings":{"showsGrid":false,"gridStyle":"lines","gridSpacing":16,"snapsToGuides":true}}
             """
-        let content = try JSONDecoder().decode(DesignContent.self, from: Data(old.utf8))
-        let title = try #require(content.screens.first?.elements.first)
-        #expect(!title.isLocked && !title.isHidden && !title.hasShadow && title.isOn)
+        let content = try JSONDecoder().decode(TreeContent.self, from: Data(old.utf8))
+        let title = try #require(content.screens.first?.root.leaves.first)
+        #expect(!title.isLocked && !title.isHidden && !title.style.hasShadow && title.content.isOn)
         #expect(title.displayName == "Title")
-        #expect(content.canvas.showsGrid == false && content.canvas.gridSpacing == 16)
-        #expect(content.canvas.showsFrameNames && content.canvas.showsMeasurements && !content.canvas.snapsToGrid)
-        #expect(content.canvas.code == CodeSettings())
+        #expect(content.settings.showsGrid == false && content.settings.gridSpacing == 16)
+        #expect(content.settings.showsFrameNames && content.settings.showsMeasurements && !content.settings.snapsToGrid)
+        #expect(content.settings.code == CodeSettings())
     }
 
     @Test func newSettingsSurviveSavingAndOpening() throws {
-        var content = DesignContent()
+        var content = TreeContent()
         var avatar = element(.avatar, 20, 100, 64, 64)
         avatar.name = "Profile"
         avatar.isLocked = true
-        avatar.borderWidth = 2
-        avatar.hasShadow = true
+        avatar.style.borderWidth = 2
+        avatar.style.hasShadow = true
         content.screens = [screenWith([avatar])]
-        content.canvas.background = RGBColor(hex: 0x2A2A2E)
-        content.canvas.snapsToGrid = true
-        content.canvas.code.layout = .absolute
-        let reopened = try JSONDecoder().decode(DesignContent.self, from: JSONEncoder().encode(content))
+        content.settings.background = RGBColor(hex: 0x2A2A2E)
+        content.settings.snapsToGrid = true
+        content.settings.code.layout = .absolute
+        let reopened = try JSONDecoder().decode(TreeContent.self, from: JSONEncoder().encode(content))
         #expect(reopened == content)
-        #expect(reopened.canvas.isDark)
+        #expect(reopened.settings.isDark)
     }
 
     @Test func anAvatarIsRoundAndAToggleHasNoText() {
         let avatar = element(.avatar, 0, 0, 64, 64)
-        #expect(avatar.resolvedCornerRadius == 32)
-        #expect(avatar.isCircular)
+        #expect(avatar.resolvedCornerRadius(tokens: .standard) == 32)
+        // Round as its code and its view draw it.
+        #expect(SwiftUICodeGenerator.Leaf(node: avatar, frame: avatar.frame, rotation: nil, tokens: .standard).isCircular)
         #expect(!ElementKind.toggle.hasText)
         #expect(element(.toggle, 0, 0, 51, 31).hasFill)
     }
@@ -90,50 +102,49 @@ struct SettingsTests {
 struct FreeformBehaviourTests {
     @Test func duplicatingAnElementPutsACopyBesideItOnTop() throws {
         let (store, undo) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let original = try #require(store.addElement(.button, from: CGRect(x: 20, y: 700, width: 353, height: 50), to: screen.id))
-        store.update(.init(host: .screen(screen.id), element: original.id)) { $0.isLocked = true }
+        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let original = try #require(store.sketched(.button, from: CGRect(x: 20, y: 700, width: 353, height: 50), to: screen))
+        store.update(original.id) { $0.isLocked = true }
 
-        let copy = try #require(store.duplicate(.init(host: .screen(screen.id), element: original.id)))
-        let elements = try #require(store.screen(screen.id)).elements
+        let copy = try #require(store.duplicate(.init(host: .screen(screen), element: original.id)))
+        let elements = store.screenLeaves(screen)
         #expect(elements.count == 2)
         #expect(elements.last?.id == copy.element)
-        #expect(elements.last?.frame == original.frame.offsetBy(dx: 16, dy: 16))
+        #expect(elements.last.flatMap { store.ownFrame($0.id) } == original.frame.offsetBy(dx: 16, dy: 16))
         // A copy of a locked element can be moved.
         #expect(elements.last?.isLocked == false)
 
         undo.undo()
-        #expect(store.screen(screen.id)?.elements.count == 1)
+        #expect(store.screenLeaves(screen).count == 1)
     }
 
     @Test func duplicatingAScreenCopiesItsElementsToTheRight() throws {
         let (store, _) = makeStore()
-        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5))
-        store.addElement(.title, from: CGRect(x: 40, y: 50, width: 100, height: 20), to: screen.id)
-        let copy = try #require(store.duplicateScreen(screen.id))
+        let screen = store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 0.5)).id
+        _ = store.sketched(.title, from: CGRect(x: 40, y: 50, width: 100, height: 20), to: screen)
+        let copy = try #require(store.duplicateTreeScreen(screen).flatMap(store.treeScreen))
         #expect(copy.name == "Screen 1 Copy")
-        #expect(copy.origin.x > screen.canvasFrame.maxX)
-        #expect(copy.elements.count == 1)
-        #expect(copy.elements.first?.id != store.screen(screen.id)?.elements.first?.id)
+        let original = try #require(store.screenFrameOnCanvas(screen))
+        #expect(copy.origin.x > original.maxX)
+        #expect(copy.root.leaves.count == 1)
+        #expect(copy.root.leaves.first?.id != store.screenLeaves(screen).first?.id)
         #expect(DesignStore.copyName(for: "Screen 1", among: ["Screen 1 Copy"]) == "Screen 1 Copy 2")
     }
 
     @Test func elementsCanBeArrangedUpAndDown() throws {
         let a = element(.image, 0, 0, 100, 100), b = element(.title, 0, 0, 100, 40), c = element(.button, 0, 0, 100, 50)
-        var content = DesignContent()
-        content.screens = [screenWith([a, b, c])]
-        let (store, _) = makeStore(content)
-        let id = content.screens[0].id
+        let (store, _) = makeStore()
+        let id = store.addFreeScreen([a, b, c])
         let ref = DesignStore.ElementRef(host: .screen(id), element: a.id)
 
         #expect(!store.canArrange(ref, .backward))
         store.arrange(ref, .forward)
-        #expect(store.screen(id)?.elements.map(\.id) == [b.id, a.id, c.id])
+        #expect(store.screenLeaves(id).map(\.id) == [b.id, a.id, c.id])
         store.arrange(ref, .front)
-        #expect(store.screen(id)?.elements.map(\.id) == [b.id, c.id, a.id])
+        #expect(store.screenLeaves(id).map(\.id) == [b.id, c.id, a.id])
         #expect(!store.canArrange(ref, .front))
         store.arrange(ref, .back)
-        #expect(store.screen(id)?.elements.map(\.id) == [a.id, b.id, c.id])
+        #expect(store.screenLeaves(id).map(\.id) == [a.id, b.id, c.id])
     }
 
     @Test func anElementAlignsToItsScreensEdgesAndMiddle() {
@@ -147,27 +158,27 @@ struct FreeformBehaviourTests {
 
     @Test func aLockedElementCanNotBeDeleted() throws {
         let model = AppModel(document: LayerDocument())
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
+        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
         model.selection = .element(ref)
         model.toggleLockOfSelection()
         model.deleteSelection()
-        #expect(model.store.resolve(ref) != nil)
+        #expect(model.store.placed(ref) != nil)
         model.toggleLockOfSelection()
         model.deleteSelection()
-        #expect(model.store.resolve(ref) == nil)
+        #expect(model.store.placed(ref) == nil)
     }
 
     @Test func hidingTheSelectedElementLetsGoOfIt() throws {
         let model = AppModel(document: LayerDocument())
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
+        let ref = DesignStore.ElementRef(host: .screen(screen), element: title.id)
         model.selection = .element(ref)
         model.toggleHidden(ref)
         #expect(model.selection == nil)
-        #expect(model.store.resolve(ref)?.element.isHidden == true)
+        #expect(model.store.placed(ref)?.isHidden == true)
     }
 
     @Test func aDraggedFrameSnapsToANeighboursEdgeAndShowsTheGuide() throws {
@@ -215,8 +226,8 @@ struct FreeformBehaviourTests {
     @Test func sketchedScreensUseTheChosenDevice() {
         let (store, _) = makeStore()
         store.updateCanvas { $0.sketchDeviceID = "iphone-se" }
-        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 300, height: 530))
-        #expect(screen.device.id == "iphone-se")
+        let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 300, height: 530)).id
+        #expect(store.device(of: screen)?.id == "iphone-se")
     }
 }
 
@@ -272,35 +283,36 @@ struct MoreMagicPenTests {
 
     @Test func aStickyNoteSketchedBesideTheScreensLandsWhereItWasDrawn() throws {
         let (store, _) = makeStore()
-        let ref = store.addFloating(.stickyNote, from: CGRect(x: 900, y: 100, width: 140, height: 120))
-        let note = try #require(store.floating.first { $0.id == ref.element })
-        #expect(ref.host == .canvas)
-        #expect(abs(note.canvasFrame.midX - 970) <= 1)
-        #expect(abs(note.canvasFrame.midY - 160) <= 1)
+        let note = try #require(store.addLooseSketch(.stickyNote, from: CGRect(x: 900, y: 100, width: 140, height: 120)))
+        let onCanvas = try #require(store.frameOnCanvas(of: note))
+        #expect(store.ref(of: note)?.host == .canvas)
+        #expect(abs(onCanvas.midX - 970) <= 1)
+        #expect(abs(onCanvas.midY - 160) <= 1)
     }
 }
 
 @Suite("More SwiftUI")
 struct MoreCodeTests {
-    private func lines(_ screen: DesignScreen, _ settings: CodeSettings = CodeSettings()) -> [String] {
-        SwiftUICodeGenerator.code(for: screen, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    /// The code of a free screen of `nodes`, a line at a time, without its indent.
+    private func lines(_ nodes: [LayerNode], _ settings: CodeSettings = CodeSettings()) -> [String] {
+        SwiftUICodeGenerator.code(ofAFreeScreenHolding: nodes, settings: settings).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     @Test func eachFileEndsWithAPreviewUnlessAskedNotTo() {
-        let screen = screenWith([element(.title, 82.5, 112, 228, 40)])
-        let code = SwiftUICodeGenerator.code(for: screen)
+        let screen = [element(.title, 82.5, 112, 228, 40)]
+        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen)
         #expect(code.hasSuffix("#Preview {\n    Screen1()\n}"))
-        #expect(!SwiftUICodeGenerator.code(for: screen, settings: CodeSettings(includesPreview: false)).contains("#Preview"))
+        #expect(!SwiftUICodeGenerator.code(ofAFreeScreenHolding: screen, settings: CodeSettings(includesPreview: false)).contains("#Preview"))
     }
 
     @Test func hiddenElementsAreLeftOut() {
         var hidden = element(.button, 20, 744, 353, 50)
         hidden.isHidden = true
-        #expect(!lines(screenWith([element(.title, 82.5, 112, 228, 40), hidden])).contains("Button {"))
+        #expect(!lines([element(.title, 82.5, 112, 228, 40), hidden]).contains("Button {"))
     }
 
     @Test func exactPositionsPlaceEveryElementWhereItIs() {
-        let screen = screenWith([element(.title, 82, 112, 228, 40), element(.toggle, 320, 300, 51, 31)])
+        let screen = [element(.title, 82, 112, 228, 40), element(.toggle, 320, 300, 51, 31)]
         let code = lines(screen, CodeSettings(layout: .absolute, includesPreview: false))
         #expect(code.contains("ZStack(alignment: .topLeading) {"))
         #expect(code.contains(".offset(x: 82, y: 112)"))
@@ -311,8 +323,8 @@ struct MoreCodeTests {
 
     @Test func theTitleCanBecomeTheNavigationTitle() {
         var title = element(.title, 82.5, 112, 228, 40)
-        title.text = "Inbox"
-        let screen = screenWith([title, element(.button, 20, 744, 353, 50)])
+        title.content.text = "Inbox"
+        let screen = [title, element(.button, 20, 744, 353, 50)]
         let code = lines(screen, CodeSettings(usesNavigationTitle: true))
         #expect(code.contains("NavigationStack {"))
         #expect(code.contains(".navigationTitle(\"Inbox\")"))
@@ -322,10 +334,10 @@ struct MoreCodeTests {
     @Test func bordersShadowsAvatarsAndNamesAreWritten() {
         var avatar = element(.avatar, 30, 120, 64, 64)
         avatar.name = "Profile Photo"
-        avatar.borderWidth = 2
-        avatar.borderColor = RGBColor(hex: 0xFFFFFF)
-        avatar.hasShadow = true
-        let code = lines(screenWith([avatar]))
+        avatar.style.borderWidth = 2
+        avatar.style.borderColor = RGBColor(hex: 0xFFFFFF)
+        avatar.style.hasShadow = true
+        let code = lines([avatar])
         #expect(code.contains("// Profile Photo"))
         #expect(code.contains("Image(\"profile-photo\")"))
         #expect(code.contains(".clipShape(.circle)"))
@@ -336,14 +348,12 @@ struct MoreCodeTests {
 
     @Test func textAlignmentIsWritten() {
         var body = element(.body, 48, 580, 297, 44)
-        body.textAlignment = .leading
-        #expect(lines(screenWith([body])).contains(".multilineTextAlignment(.leading)"))
+        body.style.textAlignment = .leading
+        #expect(lines([body]).contains(".multilineTextAlignment(.leading)"))
     }
 
     @Test func everyScreenGetsItsOwnFileName() {
-        let one = DesignScreen(name: "Home", origin: .zero, scale: 1)
-        let two = DesignScreen(name: "Home", origin: .zero, scale: 1)
-        let files = SwiftUICodeGenerator.files(for: [one, two])
+        let files = SwiftUICodeGenerator.files(for: design(ofEmptyScreensNamed: ["Home", "Home"]), settings: CodeSettings())
         #expect(files.map(\.name) == ["Home.swift", "Home2.swift"])
     }
 
@@ -358,8 +368,9 @@ struct MoreCodeTests {
     /// screen was deleted, or "Sign In" beside "Sign-In". Names that differ only in case
     /// are told apart too, as a Mac's disk doesn't tell their files apart.
     @Test func screensWhoseNamesCleanToTheSameTypeDeclareDifferentViews() throws {
-        let screens = ["Sign In", "Sign-In", "Sign in"].map { DesignScreen(name: $0, origin: .zero, scale: 1) }
-        let files = SwiftUICodeGenerator.files(for: screens)
+        let content = design(ofEmptyScreensNamed: ["Sign In", "Sign-In", "Sign in"])
+        let screens = content.screens
+        let files = SwiftUICodeGenerator.files(for: content, settings: CodeSettings())
         let names = files.map { structName(in: $0.source) }
         #expect(names == ["SignIn", "SignIn2", "Signin3"])
         #expect(files.map(\.name) == ["SignIn.swift", "SignIn2.swift", "Signin3.swift"])
@@ -368,7 +379,7 @@ struct MoreCodeTests {
         // The code panel names each one as its file is named.
         let typeNames = SwiftUICodeGenerator.typeNames(for: screens)
         #expect(screens.map { typeNames[$0.id] } == ["SignIn", "SignIn2", "Signin3"])
-        #expect(structName(in: SwiftUICodeGenerator.code(for: screens[1], among: screens)) == "SignIn2")
+        #expect(structName(in: SwiftUICodeGenerator.code(for: screens[1], in: .init(content), settings: CodeSettings())) == "SignIn2")
     }
 
     /// A carriage return or other control character in an element's words, pasted from
@@ -376,9 +387,9 @@ struct MoreCodeTests {
     /// in a layer's name ended the comment, leaving the rest as code (G16).
     @Test func controlCharactersAreEscapedInStringsAndDroppedFromComments() {
         var body = element(.body, 48, 580, 297, 44)
-        body.text = "a\r\nb\tc\u{7}d"
+        body.content.text = "a\r\nb\tc\u{7}d"
         body.name = "Hero\r\nText"
-        let code = SwiftUICodeGenerator.code(for: screenWith([body]))
+        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [body])
         #expect(!code.contains("\r") && !code.contains("\t") && !code.contains("\u{7}"))
         #expect(code.contains(#"Text("a\r\nb\tc\u{07}d")"#))
         #expect(code.contains("// Hero  Text"))
@@ -389,20 +400,19 @@ struct MoreCodeTests {
     @Test func aHugeNumberIsWrittenRatherThanATrap() {
         var wide = element(.button, 20, 744, 353, 50)
         wide.frame.size.width = 1e19
-        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
         #expect(code.contains("Button"))
     }
 
     /// Siri's code for a screen names its view as the shared files and the code panel do:
     /// a second "Home" is `Home2` there too (review M-8).
     @MainActor @Test func siriNamesAScreensViewAsItsFileDoes() throws {
-        var content = DesignContent()
-        let first = DesignScreen(name: "Home", origin: .zero, scale: 1)
-        let second = DesignScreen(name: "Home", origin: CGPoint(x: 500, y: 0), scale: 1)
-        content.addScreen(first)
-        content.addScreen(second)
-        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: second, in: content)) == "Home2")
-        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: first, in: content)) == "Home")
+        var content = TreeContent()
+        let first = TreeScreen(name: "Home", origin: .zero, scale: 1, deviceID: nil)
+        let second = TreeScreen(name: "Home", origin: CGPoint(x: 500, y: 0), scale: 1, deviceID: nil)
+        content.screens = [first, second]
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: second.id, in: content) ?? "") == "Home2")
+        #expect(structName(in: GenerateSwiftUICodeIntent.code(for: first.id, in: content) ?? "") == "Home")
     }
 
     /// A non-finite size is written as Swift reads it, not as `nan` or `inf`.
@@ -410,7 +420,7 @@ struct MoreCodeTests {
         var wide = element(.button, 20, 744, 353, 50)
         wide.frame.size.width = .infinity
         wide.frame.size.height = .nan
-        let code = SwiftUICodeGenerator.code(for: screenWith([wide]), settings: CodeSettings(layout: .absolute))
+        let code = SwiftUICodeGenerator.code(ofAFreeScreenHolding: [wide], settings: CodeSettings(layout: .absolute))
         #expect(!code.contains("inf,") && !code.contains("nan"))
     }
 
@@ -418,10 +428,10 @@ struct MoreCodeTests {
     /// one named for a keyword wasn't a type name at all (G17).
     @Test func aScreenNamedAfterATypeItsCodeUsesGetsAnotherName() {
         for name in ["Image", "Text", "Button", "Color", "View", "Any", "Self", "default", "Menu", "List", "Form", "Label", "Group", "Section", "App"] {
-            let typeName = DesignScreen(name: name, origin: .zero, scale: 1).typeName
+            let typeName = SwiftUICodeGenerator.typeName(of: TreeScreen(name: name, origin: .zero, scale: 1, deviceID: nil))
             #expect(typeName == name + "Screen")
         }
-        #expect(DesignScreen(name: "Images", origin: .zero, scale: 1).typeName == "Images")
+        #expect(SwiftUICodeGenerator.typeName(of: TreeScreen(name: "Images", origin: .zero, scale: 1, deviceID: nil)) == "Images")
     }
 }
 
@@ -490,19 +500,18 @@ struct ScrubbingTests {
         let undo = UndoManager()
         undo.groupsByEvent = false
         model.store.undoManager = undo
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let start = title.frame.width
 
         model.beginScrubbing()
         for step in 1...12 {
-            model.adjusting { model.store.update(ref) { $0.frame.size.width = start + CGFloat(step) } }
+            model.adjusting { model.store.update(title.id) { $0.frame.size.width = start + CGFloat(step) } }
         }
         model.endScrubbing()
-        #expect(model.store.resolve(ref)?.element.frame.width == start + 12)
+        #expect(model.store.ownFrame(title.id)?.width == start + 12)
         undo.undo()
-        #expect(model.store.resolve(ref)?.element.frame.width == start)
+        #expect(model.store.ownFrame(title.id)?.width == start)
     }
 
     /// The window's one scrubber: the zoom's ruler is no edit, and a Format field's undoes
@@ -518,14 +527,13 @@ struct ScrubbingTests {
         #expect(undo.canUndo == false)
         #expect(model.store.isEditing == false)
 
-        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1))
-        let title = try #require(model.store.addElement(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen.id))
-        let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
+        let screen = model.store.addScreen(.iPhone, at: Placement(origin: .zero, scale: 1)).id
+        let title = try #require(model.store.sketched(.title, from: CGRect(x: 40, y: 100, width: 100, height: 30), to: screen))
         let start = title.frame.width
         model.scrubber.begin(Scrubber.Target(
             label: "W", unit: "W", frame: .zero, range: 0...4000,
-            get: { model.store.resolve(ref)?.element.frame.width ?? 0 },
-            set: { width in model.adjusting { model.store.update(ref) { $0.frame.size.width = width } } }
+            get: { model.store.ownFrame(title.id)?.width ?? 0 },
+            set: { width in model.adjusting { model.store.update(title.id) { $0.frame.size.width = width } } }
         ))
         // The model wired its scrubber: a field's scrub is the model's, from begin to end.
         #expect(model.isScrubbing)
@@ -533,8 +541,8 @@ struct ScrubbingTests {
         model.scrubber.end()
         #expect(!model.isScrubbing)
         #expect(!model.store.isEditing)
-        #expect(model.store.resolve(ref)?.element.frame.width == start + 3)
+        #expect(model.store.ownFrame(title.id)?.width == start + 3)
         undo.undo()
-        #expect(model.store.resolve(ref)?.element.frame.width == start)
+        #expect(model.store.ownFrame(title.id)?.width == start)
     }
 }
