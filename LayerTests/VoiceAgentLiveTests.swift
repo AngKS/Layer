@@ -146,13 +146,15 @@ struct VoiceAgentLiveTests {
 
 /// The voice harness's structure cases (`Tools/VoiceBenchmarkHarness/run.sh structure`), put to a real model in LM Studio
 /// set up exactly as a hosted model is in a call: the app's own profile, so the full rules, the whole canvas and all 25
-/// tools, at the app's own settings. Asked for as `VoiceAgentLiveTests` is, and run with
+/// tools, at the app's own settings, carried out by the app's own toolbox on a design built as the harness's canvas is
+/// told, the canvas taken again after each tool as a call takes it. Asked for as `VoiceAgentLiveTests` is, and run with
 /// `-only-testing:LayerTests/VoiceStructureLiveTests`.
 ///
-/// A recorder stands in for the design and answers every call as the harness's does, so that a case is scored as the
-/// harness scores it, by the model's first pick: "right" is the right tool with the right arguments and no other call;
-/// "right tool" is a first call to the right tool. Each case runs three times, each in a fresh session. A line beginning
-/// `VOICE-STRUCTURE` is printed for each run, and one beginning `VOICE-STRUCTURE-SUM` for each case and for the whole,
+/// Each case runs three times, each on a fresh design in a fresh session, and is scored as the harness scores it, by
+/// what the model asks for: "right" is the right tool with the right arguments and no other call; "right tool" is a
+/// first call to the right tool. A tool asked for with arguments that can't be read, such as a number where it takes
+/// text, counts as that tool picked and not right: in the app the command would change nothing. A line beginning
+/// `VOICE-STRUCTURE` is printed for each run, and one beginning `VOICE-STRUCTURE-SUM` for each case and for the eight,
 /// which "Structure wording (2026-11-26)" in docs/benchmarks/voice-on-device.md is written from.
 @Suite(
     "Structure commands with a real model in LM Studio", .serialized,
@@ -163,18 +165,28 @@ struct VoiceStructureLiveTests {
     let model = ProcessInfo.processInfo.environment["LAYER_LMSTUDIO"] ?? ""
     static let runs = 3
 
+    /// The design a case is spoken over.
+    enum Design {
+        /// The harness's "Account" screen, nothing selected.
+        case account
+        /// The same, with its two text fields selected.
+        case fieldsSelected
+        /// The harness's "Login" screen, with the button selected.
+        case login
+    }
+
     struct Case {
         var command: String
-        var picture = VoiceStructureLiveTests.account(fieldsSelected: false)
+        var design = Design.account
         var tool: String
         var isRight: ([String: String]) -> Bool
     }
 
     /// The harness's `structureCases`, with the same canvas and selection and the same test of the arguments.
     static let cases: [Case] = [
-        Case(command: "Put these in a column", picture: account(fieldsSelected: true), tool: "groupElements",
+        Case(command: "Put these in a column", design: .fieldsSelected, tool: "groupElements",
              isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("column") }),
-        Case(command: "Make these a row", picture: account(fieldsSelected: true), tool: "groupElements",
+        Case(command: "Make these a row", design: .fieldsSelected, tool: "groupElements",
              isRight: { ["E8", "E9"].allSatisfy(($0["elements"] ?? "").contains) && ($0["as"] ?? "").lowercased().contains("row") }),
         Case(command: "Make the card a grid of two", tool: "setLayout", isRight: { arguments in
             let layout = (arguments["layout"] ?? "").lowercased()
@@ -200,47 +212,67 @@ struct VoiceStructureLiveTests {
              isRight: { ($0["element"] ?? "").lowercased().contains("e11") && ($0["width"] ?? "").contains("50") }),
     ]
 
-    /// A control beyond the eight, for the wording that sends "put these in a column" to `groupElements`: "stack" still
-    /// goes to `stackElements`, as the harness's command from the iPad has it, over its "Login" screen with the button
-    /// selected. Scored apart from the eight.
+    /// A control beyond the eight, for wording that sends "put these in a column" to `groupElements`: "stack", as the
+    /// harness's command from the iPad says it, over its "Login" screen. The harness counts `stackElements` right.
+    /// Scored apart from the eight.
     static let stackControl = Case(
-        command: "Stack the title, the button and the image into a column.", picture: login, tool: "stackElements",
+        command: "Stack the title, the button and the image into a column.", design: .login, tool: "stackElements",
         isRight: { ($0["direction"] ?? "").lowercased().contains("column") && ["E1", "E2", "E3"].allSatisfy(($0["elements"] ?? "").contains) }
     )
 
-    /// The harness's "Login" screen: a title, the "Sign in" button, selected, and an image.
-    static let login = CanvasPicture(screens: [CanvasPicture.Screen(
-        handle: "S1", name: "Login", size: CGSize(width: 393, height: 852), visibleShare: 1,
-        elements: [
-            .init(handle: "E1", kind: "title", text: "Welcome back", frame: CGRect(x: 20, y: 75, width: 353, height: 41)),
-            .init(handle: "E2", kind: "button", text: "Sign in", frame: CGRect(x: 20, y: 420, width: 353, height: 50), look: ["colour accent"], isSelected: true),
-            .init(handle: "E3", kind: "image", text: "", frame: CGRect(x: 20, y: 500, width: 200, height: 200)),
-        ]
-    )])
+    /// A fresh design for a case, as a call captures it: S1 "Account" holds E1 the title "Account"; E2 a free card holding
+    /// E3 "About me" and E4 the body; E5 a row 12 apart, centred, holding E6 "Wi-Fi" and E7 a toggle; E8 and E9 the text
+    /// fields "Email" and "Password"; and E10 a column 12 apart holding E11 the "Sign in" button and E12 "Forgot
+    /// password?". Or the voice tests' "Login": E1 the title, E2 the "Sign in" button, E3 the image.
+    static func make(_ design: Design) -> AppModel {
+        if design == .login {
+            let (app, screen) = VoiceFixture.undoableLogin()
+            if let button = app.store.screenLeaves(screen).first(where: { $0.kind == .button }) {
+                app.selection = .element(NodeRef(host: .screen(screen), node: button.id))
+            }
+            return app
+        }
+        let app = AppModel(document: LayerDocument())
+        app.phoneLine = PhoneLine()
+        let title = LayerNode.leaf(.title, frame: CGRect(x: 20, y: 60, width: 353, height: 41), text: "Account")
+        let about = LayerNode.leaf(.text, frame: CGRect(x: 16, y: 16, width: 200, height: 24), text: "About me")
+        let body = LayerNode.leaf(.body, frame: CGRect(x: 16, y: 48, width: 321, height: 64), text: "Designing better experiences.")
+        let card = LayerNode.container(.card, frame: CGRect(x: 20, y: 121, width: 353, height: 128), width: .init(.fixed),
+                                       height: .init(.fixed), padding: 16, children: [about, body])
+        let label = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 80, height: 24), text: "Wi-Fi")
+        let toggle = LayerNode.leaf(.toggle, frame: CGRect(x: 0, y: 0, width: 51, height: 31), isOn: true)
+        let row = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .horizontal, spacing: 12, alignment: .center)),
+                                      frame: CGRect(x: 20, y: 269, width: 0, height: 0), children: [label, toggle])
+        let email = LayerNode.leaf(.textField, frame: CGRect(x: 20, y: 320, width: 353, height: 44), text: "Email")
+        let password = LayerNode.leaf(.textField, frame: CGRect(x: 20, y: 380, width: 353, height: 44), text: "Password")
+        let button = LayerNode.leaf(.button, frame: CGRect(x: 0, y: 0, width: 353, height: 50), text: "Sign in", tint: Theme.accent)
+        let forgot = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 150, height: 20), text: "Forgot password?")
+        let column = LayerNode.container(layout: .stack(LayerNode.Stack(axis: .vertical, spacing: 12)),
+                                         frame: CGRect(x: 20, y: 460, width: 0, height: 0), children: [button, forgot])
+        let screen = app.store.addFreeScreen([title, card, row, email, password, column], name: "Account")
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        app.store.undoManager = undo
+        if design == .fieldsSelected {
+            app.selection = .several([
+                .element(NodeRef(host: .screen(screen), node: email.id)), .element(NodeRef(host: .screen(screen), node: password.id)),
+            ])
+        }
+        return app
+    }
 
-    /// The harness's "Account" screen: a title, a free card (E2: a text and a body), a row (E5: the text "Wi-Fi" and a
-    /// toggle), two text fields (E8, E9) and a column (E10: a "Sign in" button and a text).
-    nonisolated static func account(fieldsSelected: Bool) -> CanvasPicture {
-        CanvasPicture(screens: [CanvasPicture.Screen(
-            handle: "S1", name: "Account", size: CGSize(width: 393, height: 852), visibleShare: 1,
-            elements: [
-                .init(handle: "E1", kind: "title", text: "Account", frame: CGRect(x: 20, y: 60, width: 353, height: 41)),
-                .init(handle: "E2", kind: "card", text: "", frame: CGRect(x: 20, y: 121, width: 353, height: 128), isContainer: true, children: [
-                    .init(handle: "E3", kind: "text", text: "About me", frame: CGRect(x: 36, y: 137, width: 200, height: 24)),
-                    .init(handle: "E4", kind: "body", text: "Designing better experiences.", frame: CGRect(x: 36, y: 169, width: 321, height: 64)),
-                ]),
-                .init(handle: "E5", kind: "group", text: "", frame: CGRect(x: 20, y: 269, width: 143, height: 31), layout: "row, spacing 12, centred", isContainer: true, children: [
-                    .init(handle: "E6", kind: "text", text: "Wi-Fi", frame: CGRect(x: 20, y: 272, width: 80, height: 24)),
-                    .init(handle: "E7", kind: "toggle", text: "", frame: CGRect(x: 112, y: 269, width: 51, height: 31), look: ["colour green", "on"]),
-                ]),
-                .init(handle: "E8", kind: "text field", text: "Email", frame: CGRect(x: 20, y: 320, width: 353, height: 44), isSelected: fieldsSelected),
-                .init(handle: "E9", kind: "text field", text: "Password", frame: CGRect(x: 20, y: 380, width: 353, height: 44), isSelected: fieldsSelected),
-                .init(handle: "E10", kind: "group", text: "", frame: CGRect(x: 20, y: 460, width: 353, height: 82), layout: "column, spacing 12", isContainer: true, children: [
-                    .init(handle: "E11", kind: "button", text: "Sign in", frame: CGRect(x: 20, y: 460, width: 353, height: 50), look: ["colour accent"]),
-                    .init(handle: "E12", kind: "text", text: "Forgot password?", frame: CGRect(x: 20, y: 522, width: 150, height: 20)),
-                ]),
-            ]
-        )])
+    /// The designs are captured with the harness's handles and selection.
+    @Test func theDesignsAreToldAsTheHarnessTellsThem() {
+        let account = CanvasPicture.capture(from: Self.make(.fieldsSelected), handles: VoiceHandles()).text(.full)
+        print("VOICE-STRUCTURE canvas:\n\(account)")
+        for line in ["E1 title \"Account\"", "E2 card", "E3 text \"About me\"", "E5 row, spacing 12", "E6 text \"Wi-Fi\"", "E7 toggle",
+                     "E8 text field \"Email\"", "E9 text field \"Password\"", "E10 column, spacing 12", "E11 button \"Sign in\"",
+                     "E12 text \"Forgot password?\""] {
+            #expect(account.contains(line), "\(line)")
+        }
+        #expect(account.components(separatedBy: "[selected]").count == 3)
+        let login = CanvasPicture.capture(from: Self.make(.login), handles: VoiceHandles()).text(.full)
+        #expect(login.contains("E2 button \"Sign in\"") && login.contains("E3 image"))
     }
 
     @Test func structureCommandsAreScored() async throws {
@@ -258,29 +290,36 @@ struct VoiceStructureLiveTests {
         #expect(failures.isEmpty, "\(failures)")
     }
 
-    /// Runs a case `runs` times, each in a fresh session, and prints each run and the case's sum.
+    /// Runs a case `runs` times, each on a fresh design in a fresh session, and prints each run and the case's sum.
     private func scored(_ testCase: Case, failures: inout [String]) async -> (right: Int, rightTool: Int) {
         var right = 0
         var rightTool = 0
         var picks: [String: Int] = [:]
         for run in 1...Self.runs {
-            let recorder = StructureRecorder()
+            let app = Self.make(testCase.design)
+            let handles = VoiceHandles()
+            let toolbox = VoiceToolbox(model: app, handles: handles)
+            toolbox.reset()
+            toolbox.spokenCommand = testCase.command
+            let recorder = RecordingToolbox(toolbox)
+            let looker = CanvasLooker(app: app, handles: handles)
             let turns = VoiceToolTurns()
             let session = LanguageModelSession(profile: VoiceProfile(
-                actor: recorder, hooks: VoiceHooks(willRun: { _ in }, didRun: {}, mayRun: { true }), turns: turns
+                actor: recorder, hooks: VoiceHooks(willRun: { _ in }, didRun: { await looker.look() }, mayRun: { true }), turns: turns
             ))
             turns.session = session
+            looker.session = session
             session.properties.voiceModel = .hosted(.lmStudio, model: model)
-            session.properties.canvasPicture = testCase.picture
+            looker.look()
             var said = ""
-            var calls: [StructureRecorder.Call] = []
+            var calls: [RecordingToolbox.Call] = []
             do {
                 said = try await session.respond(to: testCase.command).content
                 calls = recorder.calls
             } catch let error as LanguageModelSession.ToolCallError {
                 // The model asked for a tool whose arguments couldn't be read, such as a number where the tool takes
                 // text: that tool was picked, wrongly asked, and in the app the command would change nothing.
-                calls = recorder.calls + [.init(tool: error.tool.name, arguments: ["unreadable": "\(error.underlyingError)"])]
+                calls = recorder.calls + [.init(tool: error.tool.name, arguments: ["unreadable": "\(error.underlyingError)"], line: "")]
                 said = "UNREADABLE"
             } catch {
                 failures.append("\(testCase.command): \(error)")
@@ -301,110 +340,134 @@ struct VoiceStructureLiveTests {
     }
 }
 
-/// Writes down what the model asks for and answers as the voice harness's recorder does: every call goes through.
+/// Takes the canvas again for the model's next look, as a call does after each tool a hosted model runs.
 @MainActor
-final class StructureRecorder: VoiceActing {
+final class CanvasLooker {
+    let app: AppModel
+    let handles: VoiceHandles
+    weak var session: LanguageModelSession?
+
+    init(app: AppModel, handles: VoiceHandles) {
+        self.app = app
+        self.handles = handles
+    }
+
+    func look() {
+        session?.properties.canvasPicture = CanvasPicture.capture(from: app, handles: handles)
+    }
+}
+
+/// The app's own toolbox, with each call the model asks for written down as it goes through, and the line it answered.
+@MainActor
+final class RecordingToolbox: VoiceActing {
     struct Call: CustomStringConvertible {
         var tool: String
         var arguments: [String: String]
+        var line: String
 
         var description: String {
             "\(tool)(\(arguments.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: ", ")))"
+                + (line.isEmpty ? "" : " = “\(line)”")
         }
     }
 
+    let inner: VoiceToolbox
     private(set) var calls: [Call] = []
-    private var made = 20
 
-    private func note(_ tool: String, _ arguments: [String: String?], saying line: String) -> String {
-        calls.append(Call(tool: tool, arguments: arguments.compactMapValues { $0 }))
+    init(_ inner: VoiceToolbox) {
+        self.inner = inner
+    }
+
+    private func note(_ tool: String, _ arguments: [String: String?], _ line: String) -> String {
+        calls.append(Call(tool: tool, arguments: arguments.compactMapValues { $0 }, line: line))
         return line
     }
 
     func createScreen(name: String?, description: String, device: String?) async throws -> String {
-        note("createScreen", ["name": name, "description": description, "device": device], saying: "Made the screen as S9, with 6 elements.")
+        let line = try await inner.createScreen(name: name, description: description, device: device)
+        return note("createScreen", ["name": name, "description": description, "device": device], line)
     }
 
     func addElement(screen: String?, kind: String, text: String?, look: String?, relation: String?, target: String?) -> String {
-        made += 1
-        return note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look, "relation": relation, "target": target], saying: "Added a \(kind) as E\(made).")
+        note("addElement", ["screen": screen, "kind": kind, "text": text, "look": look, "relation": relation, "target": target],
+             inner.addElement(screen: screen, kind: kind, text: text, look: look, relation: relation, target: target))
     }
 
     func stackElements(elements: String, direction: String) -> String {
-        note("stackElements", ["elements": elements, "direction": direction], saying: "Stacked the elements in a \(direction).")
+        note("stackElements", ["elements": elements, "direction": direction], inner.stackElements(elements: elements, direction: direction))
     }
 
     func placeElement(element: String, relation: String, target: String) -> String {
-        note("placeElement", ["element": element, "relation": relation, "target": target], saying: "Put \(element) \(relation) \(target).")
+        note("placeElement", ["element": element, "relation": relation, "target": target],
+             inner.placeElement(element: element, relation: relation, target: target))
     }
 
     func setText(element: String, text: String) -> String {
-        note("setText", ["element": element, "text": text], saying: "Reworded \(element) to “\(text)”.")
+        note("setText", ["element": element, "text": text], inner.setText(element: element, text: text))
     }
 
     func styleElement(element: String, look: String) -> String {
-        note("styleElement", ["element": element, "look": look], saying: "Restyled \(element).")
+        note("styleElement", ["element": element, "look": look], inner.styleElement(element: element, look: look))
     }
 
     func moveElement(element: String, x: String?, y: String?, width: String?, height: String?, takeOut: String?) -> String {
-        note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height, "takeOut": takeOut], saying: "Resized \(element).")
+        note("moveElement", ["element": element, "x": x, "y": y, "width": width, "height": height, "takeOut": takeOut],
+             inner.moveElement(element: element, x: x, y: y, width: width, height: height, takeOut: takeOut))
     }
 
     func rotateElement(element: String, angle: String?, by: String?) -> String {
-        note("rotateElement", ["element": element, "angle": angle, "by": by], saying: "Turned \(element).")
+        note("rotateElement", ["element": element, "angle": angle, "by": by], inner.rotateElement(element: element, angle: angle, by: by))
     }
 
     func alignElement(element: String, alignment: String) -> String {
-        note("alignElement", ["element": element, "alignment": alignment], saying: "Aligned \(element) to the \(alignment).")
+        note("alignElement", ["element": element, "alignment": alignment], inner.alignElement(element: element, alignment: alignment))
     }
 
     func duplicateElement(element: String) -> String {
-        made += 1
-        return note("duplicateElement", ["element": element], saying: "Duplicated \(element) as E\(made).")
+        note("duplicateElement", ["element": element], inner.duplicateElement(element: element))
     }
 
     func deleteElement(element: String, named: String?) -> String {
-        note("deleteElement", ["element": element, "named": named], saying: "Deleted \(element).")
+        note("deleteElement", ["element": element, "named": named], inner.deleteElement(element: element, named: named))
     }
 
     func renameScreen(screen: String, name: String) -> String {
-        note("renameScreen", ["screen": screen, "name": name], saying: "Renamed \(screen) to “\(name)”.")
+        note("renameScreen", ["screen": screen, "name": name], inner.renameScreen(screen: screen, name: name))
     }
 
     func deleteScreen(screen: String, named: String?) -> String {
-        note("deleteScreen", ["screen": screen, "named": named], saying: "Deleted \(screen).")
+        note("deleteScreen", ["screen": screen, "named": named], inner.deleteScreen(screen: screen, named: named))
     }
 
     func tidyScreen(screen: String?) -> String {
-        note("tidyScreen", ["screen": screen], saying: "Tidied the layout of \(screen ?? "the screen").")
+        note("tidyScreen", ["screen": screen], inner.tidyScreen(screen: screen))
     }
 
     func changeScreenDevice(screen: String?, device: String) -> String {
-        note("changeScreenDevice", ["screen": screen, "device": device], saying: "Made \(screen ?? "the screen") a \(device) screen.")
+        note("changeScreenDevice", ["screen": screen, "device": device], inner.changeScreenDevice(screen: screen, device: device))
     }
 
     func groupElements(elements: String, as shape: String) -> String {
-        made += 1
-        return note("groupElements", ["elements": elements, "as": shape], saying: "Put \(elements) in a \(shape), E\(made).")
+        note("groupElements", ["elements": elements, "as": shape], inner.groupElements(elements: elements, as: shape))
     }
 
     func setLayout(target: String, layout: String?, spacing: String?) -> String {
-        let said = [layout, spacing.map { "spacing \($0)" }].compactMap { $0 }.joined(separator: ", ")
-        return note("setLayout", ["target": target, "layout": layout, "spacing": spacing], saying: "\(target) is now \(said).")
+        note("setLayout", ["target": target, "layout": layout, "spacing": spacing], inner.setLayout(target: target, layout: layout, spacing: spacing))
     }
 
     func ungroup(element: String) -> String {
-        note("ungroup", ["element": element], saying: "Took what \(element) held out of it.")
+        note("ungroup", ["element": element], inner.ungroup(element: element))
     }
 
     func reorder(element: String, position: String, target: String) -> String {
-        note("reorder", ["element": element, "position": position, "target": target], saying: "Moved \(element) \(position) \(target).")
+        note("reorder", ["element": element, "position": position, "target": target],
+             inner.reorder(element: element, position: position, target: target))
     }
 
-    func show(target: String) -> String { note("show", ["target": target], saying: "Showing \(target).") }
-    func pan(direction: String) -> String { note("pan", ["direction": direction], saying: "Moved the view \(direction).") }
-    func zoom(to level: String) -> String { note("zoom", ["level": level], saying: "Zoomed \(level).") }
-    func undo() -> String { note("undo", [:], saying: "Undid the last change.") }
-    func redo() -> String { note("redo", [:], saying: "Redid the last change.") }
-    func endCall() -> String { note("endCall", [:], saying: "Hanging up.") }
+    func show(target: String) -> String { note("show", ["target": target], inner.show(target: target)) }
+    func pan(direction: String) -> String { note("pan", ["direction": direction], inner.pan(direction: direction)) }
+    func zoom(to level: String) -> String { note("zoom", ["level": level], inner.zoom(to: level)) }
+    func undo() -> String { note("undo", [:], inner.undo()) }
+    func redo() -> String { note("redo", [:], inner.redo()) }
+    func endCall() -> String { note("endCall", [:], inner.endCall()) }
 }
