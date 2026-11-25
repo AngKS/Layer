@@ -43,10 +43,9 @@ enum TreeDrop {
                        startBoxes: [UUID: TurnedRect] = [:]) -> Target {
         guard let entry = index[id], let node = index.node(id, in: content) else { return .free(on: .canvas) }
         let parentIsFree = entry.parent.flatMap { index.node($0, in: content) }.map { $0.resolvedLayout == .free } ?? true
-        let mover = Mover(id: id, parent: entry.parent, siblingIndex: entry.siblingIndex,
-                          levels: TreeEdit.levels(below: node),
-                          goesOnScreens: !TreeEdit.holds(node) { !$0.kind.belongsOnScreens },
-                          holdsDrawing: TreeEdit.holds(node) { $0.kind == .drawing },
+        let held = Held(node)
+        let mover = Mover(id: id, parent: entry.parent, siblingIndex: entry.siblingIndex, levels: held.levels,
+                          goesOnScreens: held.goesOnScreens, holdsDrawing: held.holdsDrawing,
                           freeHolders: parentIsFree ? Set(index.ancestors(of: id)) : [])
         let search = Search(mover: mover, point: point, content: content, index: index, startBoxes: startBoxes)
 
@@ -88,6 +87,26 @@ enum TreeDrop {
     }
 
     // MARK: - How it is worked out
+
+    /// What a dragged subtree holds, as the drop rule needs it, found in one walk of it (a frame of a drag walked it three
+    /// times): how many levels it goes below its top (`TreeEdit.levels(below:)`), whether all of it may go on a screen,
+    /// and whether it holds a drawing, its top included.
+    private struct Held {
+        var levels = 0
+        var goesOnScreens: Bool
+        var holdsDrawing: Bool
+
+        init(_ node: LayerNode) {
+            goesOnScreens = node.kind.belongsOnScreens
+            holdsDrawing = node.kind == .drawing
+            for child in node.children {
+                let inside = Held(child)
+                levels = max(levels, 1 + inside.levels)
+                goesOnScreens = goesOnScreens && inside.goesOnScreens
+                holdsDrawing = holdsDrawing || inside.holdsDrawing
+            }
+        }
+    }
 
     /// What is being dragged, as the drop rule needs it.
     private struct Mover {
