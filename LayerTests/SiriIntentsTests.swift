@@ -537,16 +537,18 @@ struct OpeningDesignTests {
         return (window, browser, design)
     }
 
-    @Test func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
+    /// A real dismiss, on a main thread every suite running alongside shares: the app's limit for it, 2 s and then 8 s
+    /// here, ran out across the thread's stalls now and then. The limit isn't what this test is about: `pick` is given
+    /// none, and the test's time limit stands in (the sweep, lane 2).
+    @Test(.timeLimit(.minutes(1)))
+    func aDesignOverTheBrowserIsReadiedThenPutAwayBeforeAnotherIsPicked() async throws {
         let (window, browser, design) = try browserShowingADesign(animated: false)
         defer { window.isHidden = true }
         #expect(browser.presentedViewController === design)
 
         var steps: [String] = []
         let url = URL(fileURLWithPath: "/designs/B.layer")
-        // A real dismiss, on a main thread every suite running alongside shares: the app's
-        // 2 s for it ran out now and then. The limit isn't what this test is about.
-        try await DocumentBrowser.pick(url, in: browser, limit: .seconds(8)) { presented in
+        try await DocumentBrowser.pick(url, in: browser, limit: nil) { presented in
             steps.append(presented === design && browser.presentedViewController === design ? "readied while shown" : "readied too late")
         } picking: { picked in
             steps.append(browser.presentedViewController == nil ? "picked \(picked.lastPathComponent)" : "picked over the design")
