@@ -247,7 +247,7 @@ struct DrawingStoreTests {
         store.undoManager = undo
         var sync = DrawingSync()
         let changes = sync.changes(for: cross(at: CGPoint(x: 400, y: 300)), in: store.tree)
-        store.apply { changes.apply(to: &$0.tree) }
+        store.apply { changes.apply(to: &$0) }
         let drawing = try #require(store.tree.canvas.first)
         return (store, undo, DesignStore.ElementRef(host: .canvas, element: drawing.id))
     }
@@ -317,7 +317,7 @@ struct DrawingFileTests {
 
     @Test func aDrawingsInkIsSavedBesideTheDesignUnderItsIdentifier() throws {
         let file = fileWithDrawing()
-        let drawing = try #require(file.content.tree.canvas.first)
+        let drawing = try #require(file.content.canvas.first)
 
         let package = try file.wrapper()
 
@@ -339,7 +339,7 @@ struct DrawingFileTests {
     @Test func inkThatHasNotChangedKeepsItsFileOnTheNextSave() throws {
         var file = fileWithDrawing()
         let first = try file.wrapper()
-        let name = try #require(file.content.tree.canvas.first?.id.uuidString)
+        let name = try #require(file.content.canvas.first?.id.uuidString)
 
         file.content.title = "Renamed"
         let second = try file.wrapper(replacing: first)
@@ -570,7 +570,7 @@ struct InkFollowedAtTheEndTests {
         coordinator.canvasViewDrawingDidChange(coordinator.documentCanvas)
 
         model.close()
-        #expect(model.document.current.content.tree.canvasLeaves.first?.strokeCount == 2)
+        #expect(model.document.current.content.canvasLeaves.first?.strokeCount == 2)
     }
 
     /// Undo pressed mid-rub takes back the rub so far, and only that, as it did when every

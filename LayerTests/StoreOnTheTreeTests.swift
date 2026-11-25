@@ -4,7 +4,7 @@ import Testing
 @testable import Layer
 
 @MainActor
-private func makeStore(_ content: DesignContent = DesignContent()) -> (store: DesignStore, undo: UndoManager) {
+private func makeStore(_ content: TreeContent = TreeContent()) -> (store: DesignStore, undo: UndoManager) {
     let undo = UndoManager()
     undo.groupsByEvent = false
     let store = DesignStore(content: content)
@@ -28,7 +28,8 @@ struct StoreOnTheTreeTests {
     @Test func theStoreHoldsTheTree() throws {
         let (store, _) = makeStore()
         let screen = store.addScreen(from: CGRect(x: 0, y: 0, width: 393, height: 852))
-        let centre = CGPoint(x: screen.canvasFrame.midX, y: screen.canvasFrame.midY)
+        let frame = screen.canvasFrame(on: store.tree.device(of: screen))
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
         store.place(LayerNode.standard(.button), centredAt: centre)
 
         let root = try #require(store.tree.screens.first?.root)
@@ -45,8 +46,8 @@ struct StoreOnTheTreeTests {
         let item = LayerNode.container(children: [member])
 
         store.apply { content in
-            guard let index = content.tree.screens.firstIndex(where: { $0.id == screen.id }) else { return }
-            content.tree.screens[index].root.children.append(item)
+            guard let index = content.screens.firstIndex(where: { $0.id == screen.id }) else { return }
+            content.screens[index].root.children.append(item)
         }
 
         let root = try #require(store.tree.screens.first?.root)
@@ -97,8 +98,8 @@ struct StoreOnTheTreeTests {
         var tree = TreeContent()
         tree.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: root)]
         TreeRules.apply(to: &tree, after: nil)
-        let (store, undo) = makeStore(DesignContent(tree: tree))
-        let before = store.content.tree
+        let (store, undo) = makeStore(tree)
+        let before = store.content
         let ref = DesignStore.ElementRef(host: .screen(tree.screens[0].id), element: group.id)
 
         func node(_ id: UUID, in tree: TreeContent) throws -> LayerNode {
@@ -109,7 +110,7 @@ struct StoreOnTheTreeTests {
 
         store.position([CanvasSelection.element(ref): CGPoint(x: box.minX + 10, y: box.minY)])
 
-        let after = store.content.tree
+        let after = store.content
         #expect(close(try node(group.id, in: after).frame, groupBefore.offsetBy(dx: 10, dy: 0)))
         #expect(try node(group.id, in: after).rotation == 30)
         #expect(try node(group.id, in: after).children.map(\.id) == [big.id, small.id])
@@ -117,11 +118,11 @@ struct StoreOnTheTreeTests {
         #expect(close(try node(small.id, in: after).frame, try node(small.id, in: before).frame))
 
         undo.undo()
-        #expect(store.content.tree == before)
-        #expect(close(try node(group.id, in: store.content.tree).frame, groupBefore))
+        #expect(store.content == before)
+        #expect(close(try node(group.id, in: store.content).frame, groupBefore))
 
         undo.redo()
-        #expect(store.content.tree == after)
-        #expect(close(try node(group.id, in: store.content.tree).frame, try node(group.id, in: after).frame))
+        #expect(store.content == after)
+        #expect(close(try node(group.id, in: store.content).frame, try node(group.id, in: after).frame))
     }
 }

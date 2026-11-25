@@ -161,7 +161,7 @@ struct DesignStoreTests {
         let screen = store.addScreen(from: leftScreenSketch)
         #expect(screen.name == "Screen 1")
 
-        let sketch = screen.canvasRect(for: titleSketch)
+        let sketch = screen.placement.canvasRect(for: titleSketch)
         #expect(store.screenID(under: sketch) == screen.id)
         let title = try #require(store.sketched(.title, from: sketch, to: screen.id))
         #expect(store.node(title.id)?.content.text == "Title")
@@ -181,7 +181,7 @@ struct DesignStoreTests {
     @Test func aGradualEditUndoesAsOneStep() throws {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
 
         store.beginEdit()
@@ -203,7 +203,7 @@ struct DesignStoreTests {
     @Test func undoWhileAnEditIsHeldTakesBackWhatItHasDoneSoFar() throws {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
         let before = store.tree
 
@@ -225,7 +225,7 @@ struct DesignStoreTests {
     @Test func redoWhileAnEditIsHeldStillRedoes() throws {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        _ = try #require(store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        _ = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let withTitle = store.tree
         undo.undo()
 
@@ -267,7 +267,7 @@ struct DesignStoreTests {
     @Test func everyChangeIsReportedIncludingUndo() {
         let (store, undo) = makeStore()
         var reported: [Int] = []
-        store.onChange = { reported.append($0.tree.screens.count) }
+        store.onChange = { reported.append($0.screens.count) }
 
         store.addScreen(from: leftScreenSketch)
         undo.undo()
@@ -277,7 +277,7 @@ struct DesignStoreTests {
     @Test func movingAScreenTakesItsElementsWithIt() throws {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let ref = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
         let before = try #require(store.placed(ref)).placement.canvasRect(for: title.frame)
 
@@ -292,7 +292,7 @@ struct DesignStoreTests {
     @Test func anElementDroppedOffItsScreenFloatsWhereItWasDropped() throws {
         let (store, _) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        let title = try #require(store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let title = try #require(store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         let onScreen = DesignStore.ElementRef(host: .screen(screen.id), element: title.id)
 
         store.update(onScreen.element) { $0.frame.origin.x += 900 }
@@ -312,11 +312,11 @@ struct DesignStoreTests {
         let (store, undo) = makeStore()
         let left = store.addScreen(from: leftScreenSketch)
         let right = store.addScreen(from: rightScreenSketch)
-        let title = try #require(store.sketched(.title, from: left.canvasRect(for: titleSketch), to: left.id))
+        let title = try #require(store.sketched(.title, from: left.placement.canvasRect(for: titleSketch), to: left.id))
         let ref = DesignStore.ElementRef(host: .screen(left.id), element: title.id)
 
         // Drag it across to the middle of the other screen.
-        let target = left.placement.localPoint(for: center(right.canvasFrame))
+        let target = left.placement.localPoint(for: center(right.canvasFrame(on: right.device)))
         store.beginEdit()
         store.update(ref.element) { $0.frame.origin = CGPoint(x: target.x - 114, y: target.y - 20) }
         let home = store.rehost(ref)
@@ -326,7 +326,7 @@ struct DesignStoreTests {
         #expect(store.screenLeaves(left.id).isEmpty)
         let moved = try #require(store.shownLeaves(on: right.id).first)
         #expect(moved.frame.size == CGSize(width: 228, height: 40))
-        #expect(isClose(center(right.canvasRect(for: moved.frame)), center(right.canvasFrame)))
+        #expect(isClose(center(right.placement.canvasRect(for: moved.frame)), center(right.canvasFrame(on: right.device))))
         #expect(store.rehost(home) == home, "an element that hasn't moved stays where it lives")
 
         undo.undo()
@@ -338,12 +338,12 @@ struct DesignStoreTests {
         let (store, undo) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
 
-        let onScreen = try #require(store.place(LayerNode.standard(.symbol, symbol: "heart.fill"), centredAt: center(screen.canvasFrame)))
+        let onScreen = try #require(store.place(LayerNode.standard(.symbol, symbol: "heart.fill"), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(onScreen.host == .screen(screen.id))
         let heart = try #require(store.placed(onScreen))
         #expect(heart.node.content.symbol == "heart.fill")
         #expect(heart.frame.size == CGSize(width: 44, height: 44))
-        #expect(isClose(center(heart.placement.canvasRect(for: heart.frame)), center(screen.canvasFrame)))
+        #expect(isClose(center(heart.placement.canvasRect(for: heart.frame)), center(screen.canvasFrame(on: screen.device))))
 
         let elsewhere = CGPoint(x: 3000, y: 2500)
         let onCanvas = try #require(store.place(LayerNode.standard(.symbol, symbol: "star"), centredAt: elsewhere))
@@ -360,11 +360,11 @@ struct DesignStoreTests {
         let (store, _) = makeStore()
         let iPad = try #require(DeviceFrame.all.first { $0.id == "ipad" })
         let screen = store.addScreen(iPad, at: Placement(origin: CGPoint(x: 100, y: 100), scale: 0.5))
-        #expect(screen.size == CGSize(width: 820, height: 1180))
-        #expect(screen.canvasFrame == CGRect(x: 100, y: 100, width: 410, height: 590))
+        #expect(screen.device.size == CGSize(width: 820, height: 1180))
+        #expect(screen.canvasFrame(on: screen.device) == CGRect(x: 100, y: 100, width: 410, height: 590))
 
         // A button on a phone has 20-point margins; it keeps them on the wider screen.
-        let button = try #require(store.sketched(.button, from: screen.canvasRect(for: CGRect(x: 100, y: 1000, width: 600, height: 60)), to: screen.id))
+        let button = try #require(store.sketched(.button, from: screen.placement.canvasRect(for: CGRect(x: 100, y: 1000, width: 600, height: 60)), to: screen.id))
         #expect(button.frame.minX == 20)
         #expect(button.frame.width == 780)
         #expect(button.frame.maxY <= iPad.size.height - iPad.safeBottom)
@@ -377,13 +377,13 @@ struct DesignStoreTests {
     @Test func aStickyNoteStaysOnTheCanvasEvenOverAScreen() throws {
         let (store, _) = makeStore()
         let screen = store.addScreen(from: leftScreenSketch)
-        let note = try #require(store.place(LayerNode.standard(.stickyNote), centredAt: center(screen.canvasFrame)))
+        let note = try #require(store.place(LayerNode.standard(.stickyNote), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(note.host == .canvas)
         #expect(store.rehost(note) == note)
         #expect(try #require(store.tree.canvas.first).style.tint == Theme.stickyNote)
 
         // Typed text does join the screen it is put on.
-        let text = try #require(store.place(LayerNode.standard(.text), centredAt: center(screen.canvasFrame)))
+        let text = try #require(store.place(LayerNode.standard(.text), centredAt: center(screen.canvasFrame(on: screen.device))))
         #expect(text.host == .screen(screen.id))
         #expect(try #require(store.placed(text)).node.content.text == "Text")
     }
@@ -452,7 +452,7 @@ struct DesignStoreTests {
         let screen = store.addScreen(from: leftScreenSketch)
         store.place(LayerNode.standard(.symbol, symbol: "star"), centredAt: CGPoint(x: 3000, y: 2500))
         let bounds = try #require(store.contentBounds)
-        #expect(bounds.contains(screen.canvasFrame))
+        #expect(bounds.contains(screen.canvasFrame(on: screen.device)))
         #expect(bounds.contains(CGPoint(x: 3000, y: 2500)))
 
         store.deleteScreen(screen.id)
@@ -478,7 +478,7 @@ struct AppModelTests {
         model.tool = .select
         model.viewport = Viewport(offset: CGPoint(x: 200, y: 100), scale: 2)
 
-        model.canvasTapped(at: model.viewport.viewPoint(for: center(screen.canvasFrame)))
+        model.canvasTapped(at: model.viewport.viewPoint(for: center(screen.canvasFrame(on: screen.device))))
         #expect(model.selection == .screen(screen.id))
         #expect(model.selectedScreenID == screen.id)
 
@@ -557,7 +557,7 @@ struct AppModelTests {
     @Test func undoingOrDeletingTheSelectedThingClearsTheSelection() throws {
         let (model, undo) = makeModel()
         let screen = model.store.addScreen(from: leftScreenSketch)
-        let title = try #require(model.store.sketched(.title, from: screen.canvasRect(for: titleSketch), to: screen.id))
+        let title = try #require(model.store.sketched(.title, from: screen.placement.canvasRect(for: titleSketch), to: screen.id))
         model.tool = .select
         model.selection = .element(.init(host: .screen(screen.id), element: title.id))
 
@@ -620,8 +620,8 @@ struct DesignFileTests {
         }
         let stroke = PKStroke(ink: PKInk(.pen, color: .blue), path: PKStrokePath(controlPoints: points, creationDate: .now))
         var file = DesignFile()
-        file.content.tree = content
-        file.content.tree.adopt(PKDrawing(strokes: [stroke]))
+        file.content = content
+        file.content.adopt(PKDrawing(strokes: [stroke]))
         return file
     }
 
@@ -637,7 +637,7 @@ struct DesignFileTests {
     @Test func aDesignIsWrittenAsAPackageWithItsPartsApart() throws {
         var file = sampleFile()
         let picture = UUID()
-        file.content.tree.canvas[0].content.imageID = picture
+        file.content.canvas[0].content.imageID = picture
         file.images = [picture.uuidString: Data([1, 2, 3])]
         file.preview = Data([9, 8, 7])
         file.fileName = "Onboarding"
@@ -649,7 +649,7 @@ struct DesignFileTests {
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
 
         // The ink is one file for each drawing, named by the drawing.
-        let drawing = try #require(file.content.tree.canvas.first { $0.kind == .drawing })
+        let drawing = try #require(file.content.canvas.first { $0.kind == .drawing })
         for part in ["design.json", "ink/\(drawing.id.uuidString)", "images/\(picture.uuidString)", "QuickLook/Thumbnail.jpg"] {
             #expect(FileManager.default.fileExists(atPath: url.appendingPathComponent(part).path), "\(part) should be in the package")
         }
@@ -665,14 +665,14 @@ struct DesignFileTests {
     @Test func savingAgainLeavesThePartsThatHaveNotChangedAlone() throws {
         var file = sampleFile()
         let picture = UUID()
-        file.content.tree.canvas[0].content.imageID = picture
+        file.content.canvas[0].content.imageID = picture
         file.images = [picture.uuidString: Data([1, 2, 3])]
         let first = try file.wrapper()
 
         // Only the design changes: the ink and the picture on disk are handed back as they are.
         file.content.title = "Renamed"
         let second = try file.wrapper(replacing: first)
-        let drawing = try #require(file.content.tree.canvas.first { $0.kind == .drawing }).id.uuidString
+        let drawing = try #require(file.content.canvas.first { $0.kind == .drawing }).id.uuidString
         let firstInk = try #require(first.fileWrappers?["ink"]?.fileWrappers?[drawing])
         #expect(second.fileWrappers?["ink"]?.fileWrappers?[drawing] === firstInk)
         #expect(second.fileWrappers?["images"]?.fileWrappers?[picture.uuidString] === first.fileWrappers?["images"]?.fileWrappers?[picture.uuidString])
@@ -683,7 +683,7 @@ struct DesignFileTests {
     @Test func picturesNothingShowsAreLeftOutOfTheSavedFile() throws {
         var file = sampleFile()
         let shown = UUID()
-        file.content.tree.canvas[0].content.imageID = shown
+        file.content.canvas[0].content.imageID = shown
         file.images = [shown.uuidString: Data([1, 2, 3]), UUID().uuidString: Data([4, 5, 6])]
 
         let reopened = try DesignFile(wrapper: file.wrapper())
@@ -717,7 +717,7 @@ struct DesignFileTests {
     @Test func savingKeepsThePictureAndInkOfElementsThisVersionCannotRead() throws {
         let (package, picture, drawing, orphan) = try packageFromANewerLayer()
         let file = try DesignFile(wrapper: package)
-        #expect(file.content.tree.listedEverywhere.isEmpty, "neither element can be read here")
+        #expect(file.content.listedEverywhere.isEmpty, "neither element can be read here")
 
         // Saved over the file it came from, and written afresh, as a copy to share is.
         for saved in [try file.wrapper(replacing: package), try file.wrapper()] {
@@ -752,7 +752,7 @@ struct DesignFileTests {
         var holder = LayerNode(kind: .group)
         holder.children = [button]
         var file = DesignFile()
-        file.content.tree.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
+        file.content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
         let mask = UUID()
         file.images = [mask.uuidString: Data([1, 2, 3])]
 
@@ -783,8 +783,8 @@ struct DesignFileTests {
         ])
 
         var read = try DesignFile(wrapper: newer)
-        #expect(read.content.tree.listedEverywhere.first?.rotation == 30)
-        #expect(read.content.tree.settings.model == nil, "a model this version can't read is no choice here")
+        #expect(read.content.listedEverywhere.first?.rotation == 30)
+        #expect(read.content.settings.model == nil, "a model this version can't read is no choice here")
 
         let written = try read.wrapper(replacing: newer)
         let again = try manifest(of: written)
@@ -804,7 +804,7 @@ struct DesignFileTests {
         #expect(written.fileWrappers?["images"]?.fileWrappers?[mask.uuidString] != nil)
 
         // A model chosen here is written in place of the one this version couldn't read.
-        read.content.tree.settings.model = .appleIntelligence
+        read.content.settings.model = .appleIntelligence
         let chosen = try #require((try manifest(of: read.wrapper())["content"] as? [String: Any])?["settings"] as? [String: Any])
         #expect((chosen["model"] as? [String: Any])?["provider"] as? String == ModelChoice.appleIntelligence.provider)
     }
@@ -827,7 +827,7 @@ struct DesignFileTests {
         // Empty, apart from the model a new design starts with.
         var empty = TreeContent()
         empty.settings.model = ModelPreferences.defaultChoice
-        #expect(document.current.content.tree == empty)
+        #expect(document.current.content == empty)
         #expect(document.current.drawing.strokes.isEmpty)
 
         model.store.addScreen(from: leftScreenSketch)
@@ -837,8 +837,8 @@ struct DesignFileTests {
         model.inkChanged(sync.changes(for: strokes, in: model.store.tree))
 
         let snapshot = try document.snapshot(contentType: .layerDesign)
-        #expect(snapshot.content.tree.screens.map(\.name) == ["Screen 1"])
-        #expect(snapshot.content.tree.canvasLeaves.map(\.kind) == [.drawing])
+        #expect(snapshot.content.screens.map(\.name) == ["Screen 1"])
+        #expect(snapshot.content.canvasLeaves.map(\.kind) == [.drawing])
         #expect(snapshot.drawing.strokes.map(\.key) == strokes.map(\.key))
 
         // What is written to disk opens as the same design.
@@ -861,11 +861,11 @@ struct DesignFileTests {
         defer { try? FileManager.default.removeItem(at: shared.deletingLastPathComponent()) }
 
         #expect(shared.lastPathComponent == "Untitled 4.layer")
-        #expect(try DesignFile.content(at: shared).tree.screens.count == 1)
+        #expect(try DesignFile.content(at: shared).screens.count == 1)
         let copy = try DesignFile(wrapper: FileWrapper(url: shared))
         #expect(copy.preview != nil, "with a picture of the board as it is")
         // The design's own file is left to the system to save.
-        #expect(try DesignFile.content(at: url).tree.screens.isEmpty)
+        #expect(try DesignFile.content(at: url).screens.isEmpty)
 
         // Once the share sheet closes, the copy goes.
         ShareItem.designFile.cleanUp(shared)
@@ -904,7 +904,7 @@ struct DesignFileTests {
         let document = LayerDocument()
         document.update { $0 = file }
         let model = AppModel(document: document)
-        #expect(model.store.tree == file.content.tree)
+        #expect(model.store.tree == file.content)
     }
 }
 
@@ -1491,7 +1491,7 @@ struct ResourceTests {
         }
         let board = content
         let document = LayerDocument()
-        document.update { $0.content.tree = board }
+        document.update { $0.content = board }
         return AppModel(document: document)
     }
 
@@ -1632,7 +1632,7 @@ struct ClosingTests {
 
         #expect(system.hasUnsavedChanges)
         #expect(!model.store.isEditing)
-        #expect(try model.document.snapshot(contentType: .layerDesign).content.tree.settings.background == RGBColor(hex: 0x0000FF))
+        #expect(try model.document.snapshot(contentType: .layerDesign).content.settings.background == RGBColor(hex: 0x0000FF))
     }
 
     /// The name settled at close, the file's name and the picture for the browser are

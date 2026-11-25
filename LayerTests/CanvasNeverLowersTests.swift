@@ -58,7 +58,7 @@ extension HostedWindowSuites {
                 tree.screens = [screen]
                 tree.canvas = canvas
                 TreeRules.apply(to: &tree, after: nil)
-                model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+                model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
                 model.tool = .select
                 model.store.updateCanvas { $0.snapsToGuides = false }
                 self.screen = screen.id
@@ -199,7 +199,7 @@ struct ControlsLowerNothingTests {
         var tree = TreeContent()
         tree.screens = [screen]
         TreeRules.apply(to: &tree, after: nil)
-        let model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+        let model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
         model.canvasSize = CGSize(width: 1210, height: 834)
         let store = model.store
         let cardRef = try #require(store.ref(of: card.id)), lineRef = try #require(store.ref(of: line.id))
@@ -274,7 +274,7 @@ extension HostedWindowSuites {
             var tree = TreeContent()
             tree.screens = [screen]
             TreeRules.apply(to: &tree, after: nil)
-            let model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+            let model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
             model.tool = .select
             model.store.updateCanvas { $0.snapsToGuides = false }
             let ids = TreeEdit.ids(in: screen.root)

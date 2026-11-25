@@ -257,13 +257,13 @@ final class SketchEngine {
     }
 
     /// A name for a board from the design's own words, with no waiting.
-    func fallbackTitle(for content: DesignContent) -> String {
+    func fallbackTitle(for content: TreeContent) -> String {
         rules.title(for: content)
     }
 
     /// A name for a board, from the provider when it can give one and from the design's
     /// own words otherwise.
-    func suggestTitle(for content: DesignContent) async -> String {
+    func suggestTitle(for content: TreeContent) async -> String {
         let fallback = rules.title(for: content)
         guard readiness == .ready, !isStillResting(), !Self.isConserving else { return fallback }
         let asked = provider.id

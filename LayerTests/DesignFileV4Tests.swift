@@ -86,8 +86,8 @@ struct DesignFileV4Tests {
         var note = element(.stickyNote)
         note.scale = 0.66
         var file = DesignFile()
-        file.content.tree.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
-        file.content.tree.canvas = [note]
+        file.content.screens = [TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil, root: holder)]
+        file.content.canvas = [note]
 
         let package = try file.wrapper()
 
@@ -112,7 +112,7 @@ struct DesignFileV4Tests {
             stroke(from: CGPoint(x: 900, y: 700), to: CGPoint(x: 960, y: 760), at: 2),
         ]
         let file = DesignFile(drawing: PKDrawing(strokes: strokes))
-        let drawings = file.content.tree.canvas.filter { $0.kind == .drawing }
+        let drawings = file.content.canvas.filter { $0.kind == .drawing }
         #expect(drawings.count == 2)
 
         let package = try file.wrapper()
@@ -124,7 +124,7 @@ struct DesignFileV4Tests {
             #expect(ink[drawing.id.uuidString]?.regularFileContents == drawing.content.ink)
         }
         let reopened = try DesignFile(wrapper: package)
-        let read = reopened.content.tree.canvas.filter { $0.kind == .drawing }
+        let read = reopened.content.canvas.filter { $0.kind == .drawing }
         #expect(read.map(\.id) == drawings.map(\.id))
         #expect(read.map(\.content.ink) == drawings.map(\.content.ink))
         #expect(reopened.content == file.content)
@@ -186,9 +186,9 @@ struct DesignFileV4Tests {
 
         let file = try DesignFile(wrapper: original)
 
-        #expect(file.content.tree.canvas.map(\.kind) == [.stickyNote, .drawing])
-        #expect(file.content.tree.unreadCanvas.map(\.index) == [1])
-        #expect(file.content.tree.canvas.last?.content.ink == drawingInk)
+        #expect(file.content.canvas.map(\.kind) == [.stickyNote, .drawing])
+        #expect(file.content.unreadCanvas.map(\.index) == [1])
+        #expect(file.content.canvas.last?.content.ink == drawingInk)
         // Saved afresh, and over the file it came from.
         for saved in [try file.wrapper(), try file.wrapper(replacing: original)] {
             let written = try #require(try content(of: saved)["canvas"] as? [[String: Any]])
@@ -229,7 +229,7 @@ struct DesignFileV4Tests {
         ])
 
         var file = try DesignFile(wrapper: original)
-        let read = try #require(file.content.tree.screens.first?.root.children.first)
+        let read = try #require(file.content.screens.first?.root.children.first)
         #expect(read.unknownPartKeys["layout"]?["wraps"] == .bool(true))
         #expect(read.unknownPartKeys["padding"]?["safeArea"] == .string("keyboard"))
         let text = try #require(read.children.first)
@@ -237,7 +237,7 @@ struct DesignFileV4Tests {
         #expect(text.unknownPartKeys["style"]?["letterSpacing"] == .number(2))
         #expect(Set(text.unknownPartKeys.keys) == ["style", "width", "accessibility", "sketch", "source"])
         // The style is edited: what it didn't know stays in it.
-        file.content.tree.screens[0].root.children[0].children[0].style.fontSize = 20
+        file.content.screens[0].root.children[0].children[0].style.fontSize = 20
 
         let saved = try file.wrapper()
         let screens = try #require(try content(of: saved)["screens"] as? [[String: Any]])
@@ -258,7 +258,7 @@ struct DesignFileV4Tests {
 
         // Read again, it is the same design: nothing this version knows was taken for unknown.
         let again = try DesignFile(wrapper: saved)
-        #expect(again.content.tree == file.content.tree)
+        #expect(again.content == file.content)
     }
 
     /// A screen this build can't read, here one whose root lays its children out in a way a newer
@@ -286,8 +286,8 @@ struct DesignFileV4Tests {
 
         let file = try DesignFile(wrapper: original)
 
-        #expect(file.content.tree.screens.map(\.id) == [first, last])
-        #expect(file.content.tree.unreadScreens.map(\.index) == [1])
+        #expect(file.content.screens.map(\.id) == [first, last])
+        #expect(file.content.unreadScreens.map(\.index) == [1])
         for saved in [try file.wrapper(), try file.wrapper(replacing: original)] {
             let written = try #require(try content(of: saved)["screens"] as? [[String: Any]])
             #expect(written.map { $0["id"] as? String } == [first, unread, last].map(\.uuidString))
@@ -299,7 +299,7 @@ struct DesignFileV4Tests {
         let folder = try temporaryFolder()
         let url = folder.appendingPathComponent("Flowing.layer")
         try original.write(to: url, options: [], originalContentsURL: nil)
-        #expect(try DesignFile.content(at: url).tree.screens.map(\.id) == [first, last])
+        #expect(try DesignFile.content(at: url).screens.map(\.id) == [first, last])
     }
 
     @Test func savedFramesAreLaidOutAgainOnOpening() throws {
@@ -312,7 +312,7 @@ struct DesignFileV4Tests {
         tree.screens = [screen]
         let package = try package(tree)
 
-        let opened = try #require(try DesignFile(wrapper: package).content.tree.screens.first?.root.children.first)
+        let opened = try #require(try DesignFile(wrapper: package).content.screens.first?.root.children.first)
 
         #expect(opened.id == button.id)
         #expect(opened.frame.minX == 20)
@@ -322,7 +322,7 @@ struct DesignFileV4Tests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let url = folder.appendingPathComponent("Column.layer")
         try package.write(to: url, options: .atomic, originalContentsURL: nil)
-        let read = try #require(try DesignFile.content(at: url).tree.screens.first?.root.children.first)
+        let read = try #require(try DesignFile.content(at: url).screens.first?.root.children.first)
         #expect(read.frame == opened.frame)
     }
 
@@ -351,14 +351,14 @@ struct DesignFileV4Tests {
 
         let file = try DesignFile(wrapper: try package(tree))
 
-        #expect(file.content.tree.screens.first?.root.children.map(\.content.text) == ["One", "Two"])
-        #expect(file.content.tree.canvas.map(\.content.text) == ["A", "B"])
+        #expect(file.content.screens.first?.root.children.map(\.content.text) == ["One", "Two"])
+        #expect(file.content.canvas.map(\.content.text) == ["A", "B"])
         // Opened in a store, read and changed, nothing traps and both stay.
         let store = DesignStore(content: file.content)
         #expect(store.shownLeaves(onScreenAt: 0)?.count == 2)
         store.setTitle("Twins")
-        #expect(store.content.tree.screens.first?.root.children.map(\.content.text) == ["One", "Two"])
-        #expect(store.content.tree.canvas.map(\.content.text) == ["A", "B"])
+        #expect(store.content.screens.first?.root.children.map(\.content.text) == ["One", "Two"])
+        #expect(store.content.canvas.map(\.content.text) == ["A", "B"])
 
         var saving = file
         saving.content = store.content
@@ -382,12 +382,12 @@ struct DesignFileV4Tests {
         tree.settings.tokens.card.radius = 20
         tree.screens = [TreeScreen(name: "Kiosk", origin: .zero, scale: 1, deviceID: frame.id)]
 
-        let reopened = try DesignFile(wrapper: DesignFile(content: DesignContent(tree: tree)).wrapper()).content
+        let reopened = try DesignFile(wrapper: DesignFile(content: tree).wrapper()).content
 
-        #expect(reopened.tree.settings.customDevices == [frame])
-        #expect(reopened.tree.settings.tokens == tree.settings.tokens)
-        let screen = try #require(reopened.tree.screens.first)
-        #expect(reopened.tree.device(of: screen) == frame)
+        #expect(reopened.settings.customDevices == [frame])
+        #expect(reopened.settings.tokens == tree.settings.tokens)
+        let screen = try #require(reopened.screens.first)
+        #expect(reopened.device(of: screen) == frame)
         // Opening laid the screen out at its own device's size.
         #expect(screen.root.frame.size == frame.size)
     }
@@ -396,7 +396,7 @@ struct DesignFileV4Tests {
 
     /// A canvas of a group of two notes, a node this build can't read, and a note: the unread
     /// one at index 1, just in front of the group.
-    private func canvasWithAnUnreadNode() -> (content: DesignContent, group: LayerNode, raw: JSONValue) {
+    private func canvasWithAnUnreadNode() -> (content: TreeContent, group: LayerNode, raw: JSONValue) {
         func note(_ text: String, x: CGFloat) -> LayerNode {
             var node = LayerNode(kind: .stickyNote)
             node.content.text = text
@@ -414,12 +414,12 @@ struct DesignFileV4Tests {
         let raw = JSONValue.object(["id": .string(UUID().uuidString), "kind": .string("hologram")])
         tree.unreadCanvas = [LayerNode.UnreadChild(index: 1, raw: raw)]
         TreeRules.apply(to: &tree, after: nil)
-        return (DesignContent(tree: tree), tree.canvas[0], raw)
+        return (tree, tree.canvas[0], raw)
     }
 
     /// The kinds on the canvas as the file writes them.
-    private func writtenKinds(_ content: DesignContent) throws -> [String?] {
-        let data = try TreeManifest.encode(content.tree, fileName: nil)
+    private func writtenKinds(_ content: TreeContent) throws -> [String?] {
+        let data = try TreeManifest.encode(content, fileName: nil)
         let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let canvas = try #require((json["content"] as? [String: Any])?["canvas"] as? [[String: Any]])
         return canvas.map { $0["kind"] as? String }
@@ -435,31 +435,31 @@ struct DesignFileV4Tests {
         #expect(try writtenKinds(store.content) == ["group", "hologram", "stickyNote"])
 
         // The group's notes are deleted; the rules then take the empty group away.
-        store.apply { $0.remove(Set(group.children.map(\.id))) }
+        store.delete(nodes: Set(group.children.map(\.id)))
         let after = store.content
 
-        #expect(store.content.tree.canvas.map(\.kind) == [.stickyNote])
-        #expect(store.content.tree.unreadCanvas == [LayerNode.UnreadChild(index: 0, raw: raw)])
+        #expect(store.content.canvas.map(\.kind) == [.stickyNote])
+        #expect(store.content.unreadCanvas == [LayerNode.UnreadChild(index: 0, raw: raw)])
         #expect(try writtenKinds(store.content) == ["hologram", "stickyNote"])
         // Where the unread node sits is part of the board, for the history.
-        #expect(TreeChange(from: before.tree, to: after.tree).board)
+        #expect(TreeChange(from: before, to: after).board)
 
         // The app names the board meanwhile: a change of its own, which the undo leaves.
         store.setTitle("Named here", undoable: false)
         var late = store.content
-        var expected = before.tree
+        var expected = before
         expected.title = "Named here"
 
         undo.undo()
 
-        #expect(store.content.tree == expected)
-        #expect(store.content.tree.unreadCanvas == [LayerNode.UnreadChild(index: 1, raw: raw)])
+        #expect(store.content == expected)
+        #expect(store.content.unreadCanvas == [LayerNode.UnreadChild(index: 1, raw: raw)])
         #expect(try writtenKinds(store.content) == ["group", "hologram", "stickyNote"])
 
         // Siri's late undo takes the change back the same way.
         late.takeBack(after, to: before)
-        #expect(late.tree.canvas.map(\.id) == expected.canvas.map(\.id))
-        #expect(late.tree.unreadCanvas == [LayerNode.UnreadChild(index: 1, raw: raw)])
+        #expect(late.canvas.map(\.id) == expected.canvas.map(\.id))
+        #expect(late.unreadCanvas == [LayerNode.UnreadChild(index: 1, raw: raw)])
         #expect(try writtenKinds(late) == ["group", "hologram", "stickyNote"])
     }
 
@@ -468,10 +468,10 @@ struct DesignFileV4Tests {
         let store = DesignStore(content: content)
 
         // The group goes with what is in it, written to the canvas as a whole host.
-        store.apply { $0.remove(Set([group.id] + group.children.map(\.id))) }
+        store.delete(nodes: Set([group.id] + group.children.map(\.id)))
 
-        #expect(store.content.tree.canvas.map(\.kind) == [.stickyNote])
-        #expect(store.content.tree.unreadCanvas == [LayerNode.UnreadChild(index: 0, raw: raw)])
+        #expect(store.content.canvas.map(\.kind) == [.stickyNote])
+        #expect(store.content.unreadCanvas == [LayerNode.UnreadChild(index: 0, raw: raw)])
         #expect(try writtenKinds(store.content) == ["hologram", "stickyNote"])
     }
 }

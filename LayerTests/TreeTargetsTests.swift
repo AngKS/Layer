@@ -59,7 +59,7 @@ private struct TreeBoard {
         tree.screens = [screen]
         tree.canvas = canvas
         TreeRules.apply(to: &tree, after: nil)
-        model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+        model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.viewport = Viewport(offset: .zero, scale: 1)
         undo.groupsByEvent = false

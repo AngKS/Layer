@@ -35,7 +35,7 @@ private func makeModel(_ screens: [TreeScreen], devices: [DeviceFrame] = []) -> 
     tree.settings.customDevices = devices
     tree.screens = screens
     TreeRules.apply(to: &tree, after: nil)
-    let model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+    let model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
     let undo = UndoManager()
     undo.groupsByEvent = false
     model.store.undoManager = undo

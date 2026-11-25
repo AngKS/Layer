@@ -412,8 +412,8 @@ final class AppModel {
         let file = document.current
         store = DesignStore(content: file.content)
         images = ImageLibrary(file.images)
-        engine = SketchEngine(provider: file.content.canvas.resolvedModel.sketchProvider)
-        appliedModel = .some(file.content.canvas.model)
+        engine = SketchEngine(provider: file.content.settings.resolvedModel.sketchProvider)
+        appliedModel = .some(file.content.settings.model)
         hasHadName = file.content.title != nil
         store.onChange = { [weak self, document] content in
             // A command or generation still unwinding after the design closed doesn't
@@ -461,7 +461,7 @@ final class AppModel {
     // MARK: The model
 
     /// The model this design uses, as saved in its file or the app's default.
-    var modelChoice: ModelChoice { store.content.canvas.resolvedModel }
+    var modelChoice: ModelChoice { store.content.settings.resolvedModel }
 
     /// Changes the model this design uses, saved in its file. Undoable like any setting.
     func setModelChoice(_ choice: ModelChoice) {
@@ -1123,7 +1123,7 @@ final class AppModel {
     /// changed back, or touched without changing, isn't drawn again.
     @ObservationIgnored private var previewedBoard: TreeContent?
 
-    private var board: TreeContent { document.current.content.tree }
+    private var board: TreeContent { document.current.content }
 
     private var needsPreview: Bool {
         guard document.current.preview != nil else { return true }
@@ -2562,7 +2562,7 @@ final class AppModel {
     /// match. This is the step undo takes back, for ink as for anything else.
     func inkChanged(_ changes: DrawingSync.Changes) {
         guard !changes.isEmpty else { return }
-        store.apply { changes.apply(to: &$0.tree) }
+        store.apply { changes.apply(to: &$0) }
     }
 
     /// The Magic Pen's ink changed.

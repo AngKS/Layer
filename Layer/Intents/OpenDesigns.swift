@@ -135,7 +135,7 @@ final class OpenDesigns {
             }
             var file = DesignFile()
             file.content.title = title
-            file.content.canvas.model = ModelPreferences.defaultChoice
+            file.content.settings.model = ModelPreferences.defaultChoice
             let wrapper = try file.wrapper()
             var coordinationError: NSError?
             var writeError: Error?

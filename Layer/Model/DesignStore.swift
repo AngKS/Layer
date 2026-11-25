@@ -6,9 +6,8 @@ import Observation
 /// document's undo manager, which is also what tells the system that the document needs
 /// saving.
 ///
-/// The design is kept as a tree (`DesignContent.tree`), and the tree's rules (`TreeRules`) run
-/// inside every change, undo and redo. `screens` and `floating`, and the one list of elements
-/// they are views of, are the tree lowered (`TreeProjection`), worked out once per change.
+/// The design is kept as a tree (`TreeContent`), and the tree's rules (`TreeRules`) run inside
+/// every change, undo and redo.
 @MainActor @Observable
 final class DesignStore {
     /// Points at one element: where it lives, and which one it is there.
@@ -23,7 +22,7 @@ final class DesignStore {
         var element: DesignElement.ID
     }
 
-    private(set) var content: DesignContent {
+    private(set) var content: TreeContent {
         didSet {
             guard content != oldValue else { return }
             kept = nil
@@ -62,7 +61,7 @@ final class DesignStore {
     }
     static let undoLevels = 50
     /// Called with the new content after every change, including undo and redo.
-    @ObservationIgnored var onChange: ((DesignContent) -> Void)?
+    @ObservationIgnored var onChange: ((TreeContent) -> Void)?
     /// Moves on whenever the history does: a step made, undone, redone or taken out. A
     /// spoken correction checks it to be sure the step on top is still its command's.
     @ObservationIgnored private(set) var historyMark = 0
@@ -81,12 +80,12 @@ final class DesignStore {
     @ObservationIgnored private(set) var timesIndexed = 0
     #endif
 
-    init(content: DesignContent = DesignContent()) {
+    init(content: TreeContent = TreeContent()) {
         self.content = content
     }
 
     /// The design's tree. Read through `content`, so that whatever reads it is redrawn when it changes.
-    var tree: TreeContent { content.tree }
+    var tree: TreeContent { content }
 
     /// Where every node of the tree is, worked out once per version of the content, when it is
     /// first asked for: see `TreeIndex`.
@@ -94,7 +93,7 @@ final class DesignStore {
         // Read first, so that whatever reads it is redrawn when the content changes.
         let content = content
         if let index = kept?.index { return index }
-        let index = TreeIndex(content.tree)
+        let index = TreeIndex(content)
         #if DEBUG
         timesIndexed += 1
         #endif
@@ -124,7 +123,7 @@ final class DesignStore {
     }
 
     var title: String? { content.title }
-    var canvas: CanvasSettings { content.canvas }
+    var canvas: CanvasSettings { content.settings }
 
     // MARK: Looking things up
 
@@ -151,20 +150,20 @@ final class DesignStore {
 
     /// Adds the screen a sketch stands for: an iPhone, as large as it was drawn.
     @discardableResult
-    func addScreen(from sketch: CGRect) -> DesignScreen {
+    func addScreen(from sketch: CGRect) -> TreeScreen {
         let device = canvas.sketchDevice
         return addScreen(device, at: ElementLayout.screenPlacement(for: sketch, device: device))
     }
 
-    /// Named by how many screens the tree holds, so that a frame added from the library lowers nothing.
+    /// Adds an empty screen of `device` where `placement` puts it, on a free root, as one step. Named by how many screens
+    /// the tree holds. Its root takes the screen's identifier.
     @discardableResult
-    func addScreen(_ device: DeviceFrame, at placement: Placement) -> DesignScreen {
-        let screen = DesignScreen(
-            name: "Screen \(tree.screens.count + 1)", origin: placement.origin, scale: placement.scale,
-            deviceID: device == .iPhone ? nil : device.id
-        )
-        change { $0.addScreen(screen) }
-        return screen
+    func addScreen(_ device: DeviceFrame, at placement: Placement) -> TreeScreen {
+        var screen = TreeScreen(name: "Screen \(tree.screens.count + 1)", origin: placement.origin, scale: placement.scale,
+                                deviceID: device == .iPhone ? nil : device.id)
+        screen.root.id = screen.id
+        change { $0.screens.append(screen) }
+        return treeScreen(screen.id) ?? screen
     }
 
     /// Deletes several elements as one undo step. A container goes with everything in it, at
@@ -226,7 +225,7 @@ final class DesignStore {
         var copy = original
         copy.id = UUID()
         copy.root = TreeEdit.copyWithNewIDs(original.root)
-        // A screen's root takes the screen's identifier, as one made from a view does (`DesignContent.addScreen`).
+        // A screen's root takes the screen's identifier, as an empty one added does (`addScreen(_:at:)`).
         copy.root.id = copy.id
         copy.name = Self.copyName(for: original.name, among: tree.screens.map(\.name))
         copy.isLocked = nil
@@ -295,8 +294,8 @@ final class DesignStore {
         position([.element(ref): CGPoint(x: box.minX + distance.width * scale, y: box.minY + distance.height * scale)])
     }
 
-    func deleteScreen(_ id: DesignScreen.ID) {
-        change { $0.removeScreen(id) }
+    func deleteScreen(_ id: TreeScreen.ID) {
+        change { $0.screens.removeAll { $0.id == id } }
     }
 
     /// Names the board. A name the app suggests itself isn't something to undo.
@@ -330,12 +329,12 @@ final class DesignStore {
     }
 
     func updateCanvas(_ body: (inout CanvasSettings) -> Void) {
-        change { body(&$0.canvas) }
+        change { body(&$0.settings) }
     }
 
     /// Puts the whole design back as it was, as one undo step. Siri's own undo of an action
     /// it took uses this.
-    func restore(_ previous: DesignContent) {
+    func restore(_ previous: TreeContent) {
         change { $0 = previous }
     }
 
@@ -701,7 +700,7 @@ final class DesignStore {
     /// Applies a change to the design as one undo step. The ink canvas's changes to
     /// drawings come this way: a stroke drawn or rubbed out there is a change to a
     /// drawing here, undone like any other.
-    func apply(_ body: (inout DesignContent) -> Void) {
+    func apply(_ body: (inout TreeContent) -> Void) {
         change(body)
     }
 
@@ -746,7 +745,7 @@ final class DesignStore {
     /// an undo pressed meanwhile (the toolbar's, while a spoken command or a generation
     /// holds its step open) took back the step before, lost the edit's changes so far, and
     /// was itself undone when the edit closed.
-    private func change(_ body: (inout DesignContent) -> Void) {
+    private func change(_ body: (inout TreeContent) -> Void) {
         let before = content
         let count = changeCount
         // A hint for this change alone.
@@ -784,15 +783,13 @@ final class DesignStore {
     /// Only "Keep them as drawn" declines so (call 11): a decline a change makes is part of its step (`applying`).
     @discardableResult
     func markDeclinedOutsideTheHistory(_ ids: [UUID]) -> Bool {
-        let marked = Self.declining(Set(ids), in: content.tree)
-        guard marked != content.tree else { return false }
-        content.tree = marked
+        let marked = Self.declining(Set(ids), in: content)
+        guard marked != content else { return false }
+        content = marked
         return true
     }
 
-    /// Makes a change, then cuts the pointers it left that the tree can't hold and runs the
-    /// tree's rules, laying out what changed since `previous`. Anything that builds or moves a
-    /// group whole therefore does it in one change: see `DesignContent.keepGroupsSound()`.
+    /// Makes a change, then runs the tree's rules, laying out what changed since `previous`.
     ///
     /// A screen whose root was laid out ahead, and is that root now, is laid out already: the rules are told it was
     /// that root before, so they find nothing changed there and lay nothing out (plan 3, call 6).
@@ -809,19 +806,18 @@ final class DesignStore {
     /// into another or ungrouped declines nothing this way (`ungroup` declines on its own). The marks are part of the
     /// change, and so of its step (plan 5's final review, A9): undoing the move takes them away, and redo puts them
     /// back. Not after an undo or a redo, which never come through here anyway.
-    private static func applying(_ body: (inout DesignContent) -> Void, to content: inout DesignContent, previous: DesignContent,
+    private static func applying(_ body: (inout TreeContent) -> Void, to content: inout TreeContent, previous: TreeContent,
                                  laidOutAhead: [TreeScreen.ID: LayerNode] = [:], followingPlacements: Bool,
                                  decliningWhatLeftAStructure: Bool) {
         body(&content)
-        content.pendingPointers = [:]
         // What the change itself wrote, before the rules lay anything out: only that is the person's placing. Held as a
         // value, it is copied only where the rules then change the tree.
-        let written = followingPlacements ? content.tree : nil
-        TreeRules.apply(to: &content.tree, after: holding(laidOutAhead, in: previous.tree, as: content.tree))
-        if let written { content.tree.followPlacements(since: previous.tree, written: written) }
+        let written = followingPlacements ? content : nil
+        TreeRules.apply(to: &content, after: holding(laidOutAhead, in: previous, as: content))
+        if let written { content.followPlacements(since: previous, written: written) }
         if decliningWhatLeftAStructure {
-            let leaving = takenOutOfStructures(from: previous.tree, to: content.tree)
-            if !leaving.isEmpty { content.tree = declining(Set(leaving), in: content.tree) }
+            let leaving = takenOutOfStructures(from: previous, to: content)
+            if !leaving.isEmpty { content = declining(Set(leaving), in: content) }
         }
     }
 
@@ -858,8 +854,8 @@ final class DesignStore {
     /// else aren't the step's, and undoing it leaves them as they are.
     @MainActor fileprivate final class HistoryStep {
         struct Run {
-            var before: DesignContent
-            var after: DesignContent
+            var before: TreeContent
+            var after: TreeContent
         }
 
         private(set) var runs: [Run] = []
@@ -881,7 +877,7 @@ final class DesignStore {
         /// touched nothing the run did, which the run then takes in at both ends: two edits
         /// taking turns frame by frame, a drag and a turn, kept two designs for each frame
         /// (review M-1).
-        func record(from before: DesignContent, to after: DesignContent, change: Int) {
+        func record(from before: TreeContent, to after: TreeContent, change: Int) {
             defer { lastChange = change }
             guard let last = runs.last else {
                 runs.append(Run(before: before, after: after))
@@ -906,7 +902,7 @@ final class DesignStore {
         }
 
         /// The design with the step's changes taken back.
-        func undone(from content: DesignContent) -> DesignContent {
+        func undone(from content: TreeContent) -> TreeContent {
             runs.reversed().reduce(content) { $0.reverting($1.after, to: $1.before) }
         }
 
@@ -934,7 +930,7 @@ final class DesignStore {
                 guard !touched.board else { return nil }
                 screens.formUnion(touched.screens)
                 // Where each node it changed was, and is: a screen, or the open canvas.
-                let was = TreeChange.hosts(in: run.before.tree), now = TreeChange.hosts(in: run.after.tree)
+                let was = TreeChange.hosts(in: run.before), now = TreeChange.hosts(in: run.after)
                 for id in touched.nodes {
                     for host in [was[id], now[id]] {
                         // Not there on that side: added, or taken away.
@@ -947,8 +943,8 @@ final class DesignStore {
             // A screen the step made or took away isn't one a correction for it may undo:
             // that would take the screen away, or bring it back, again.
             guard screens.count == 1, let screen = screens.first,
-                  runs.first?.before.tree.screens.contains(where: { $0.id == screen }) == true,
-                  runs.last?.after.tree.screens.contains(where: { $0.id == screen }) == true
+                  runs.first?.before.screens.contains(where: { $0.id == screen }) == true,
+                  runs.last?.after.screens.contains(where: { $0.id == screen }) == true
             else { return nil }
             return screen
         }
@@ -1079,8 +1075,7 @@ final class DesignStore {
         var result = step.undone(from: current)
         // Taken back among changes made since, a step can leave the tree as its rules wouldn't:
         // put right here, so that the reverse step holds it too.
-        result.pendingPointers = [:]
-        TreeRules.apply(to: &result.tree, after: current.tree)
+        TreeRules.apply(to: &result, after: current)
         content = result
         let reverse = HistoryStep(runs: [.init(before: current, after: result)])
         reverse.isCommand = step.isCommand
@@ -1088,12 +1083,5 @@ final class DesignStore {
         register(reverse)
         // An edit still open whose step this was goes on from here, as a step of its own.
         for edit in edits where edit.step === step { edit.step = nil }
-    }
-}
-
-private extension TreeChange {
-    /// What a change to the content touched: what it touched in the tree.
-    init(from before: DesignContent, to after: DesignContent) {
-        self.init(from: before.tree, to: after.tree)
     }
 }

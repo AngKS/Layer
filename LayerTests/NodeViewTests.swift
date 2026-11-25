@@ -311,7 +311,7 @@ extension HostedWindowSuites {
                 screen.root.children = [g] + lines
                 var tree = TreeContent()
                 tree.screens = [screen]
-                store = DesignStore(content: DesignContent(tree: tree))
+                store = DesignStore(content: tree)
                 root = screen.root.id
                 (self.g, self.b, self.c) = (g.id, b.id, c.id)
                 self.lines = lines.map(\.id)

@@ -172,13 +172,13 @@ extension DesignStore {
         apply { content in
             // Frames and origins first: none of them changes a path, and a thing taken out of a row may.
             for container in containers {
-                content.tree.changeNode(on: container.host, at: container.path) { $0.frame.origin = container.origin }
+                content.changeNode(on: container.host, at: container.path) { $0.frame.origin = container.origin }
             }
             for (id, origin) in screens {
-                guard let index = content.tree.screens.firstIndex(where: { $0.id == id }) else { continue }
-                content.tree.screens[index].origin = origin
+                guard let index = content.screens.firstIndex(where: { $0.id == id }) else { continue }
+                content.screens[index].origin = origin
             }
-            Self.write(placings, to: &content.tree)
+            Self.write(placings, to: &content)
         }
         #if DEBUG
         if contentVersion != version { ListWork.wrote(containers.count + placings.count) }

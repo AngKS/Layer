@@ -160,7 +160,7 @@ struct DesignLibraryTests {
 
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil,
+        file.content.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil,
                                                 root: .container(children: [.standard(.title)]))]
         let url = folder.appendingPathComponent("Travel.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
@@ -177,7 +177,7 @@ struct DesignLibraryTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var file = DesignFile()
         file.content.title = "Travel"
-        file.content.tree.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil)]
+        file.content.screens = [TreeScreen(name: "Login", origin: .zero, scale: 1, deviceID: nil)]
         let url = folder.appendingPathComponent("Trip.layer")
         try file.wrapper().write(to: url, options: .atomic, originalContentsURL: nil)
         return url
@@ -820,7 +820,7 @@ struct DesignActionTests {
         #expect(!(model.takenActions.first?.canTakeBack(from: now) ?? true), "there is nowhere to put it back")
 
         siri.undo()
-        #expect(model.store.tree == now.tree)
+        #expect(model.store.tree == now)
         // (b): the tree holds nothing on a screen that has gone, so the flat list's check of that is dropped.
         #expect(model.store.screenLeaves(second).map(\.id) == [button.id])
     }

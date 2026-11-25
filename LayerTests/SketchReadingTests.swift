@@ -428,7 +428,7 @@ struct SketchEngineTests {
 @MainActor
 struct BoardTitleTests {
     /// A board of one phone screen, holding a title saying `text` when one is given, as the naming signatures take it.
-    private func board(titled text: String?) -> DesignContent {
+    private func board(titled text: String?) -> TreeContent {
         var screen = TreeScreen(name: "Screen 1", origin: .zero, scale: 1, deviceID: nil)
         screen.root.layout = .free
         if let text {
@@ -436,7 +436,7 @@ struct BoardTitleTests {
         }
         var content = TreeContent()
         content.screens = [screen]
-        return DesignContent(tree: content)
+        return content
     }
 
     @Test func withoutAModelABoardIsNamedForWhatItSaysOrWhatItIsFor() {
@@ -444,7 +444,7 @@ struct BoardTitleTests {
         #expect(rules.title(for: board(titled: "Weekend in Salzburg")) == "Weekend in Salzburg")
         #expect(rules.title(for: board(titled: "Title")) == "iPhone Wireframe")
         #expect(rules.title(for: board(titled: nil)) == "iPhone Wireframe")
-        #expect(rules.title(for: DesignContent()) == "Untitled Board")
+        #expect(rules.title(for: TreeContent()) == "Untitled Board")
     }
 
     @Test func aModelsSuggestionIsTidiedBeforeItIsUsed() async {

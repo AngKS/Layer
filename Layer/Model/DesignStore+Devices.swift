@@ -136,7 +136,7 @@ extension DesignStore {
     /// empty for a device with problems, which isn't added.
     @discardableResult
     func addCustomDeviceForNewScreens(_ device: DeviceFrame) -> String {
-        addDevice(device) { added in apply { $0.tree.settings.sketchDeviceID = added.id } }
+        addDevice(device) { added in apply { $0.settings.sketchDeviceID = added.id } }
     }
 
     /// Replaces the design's device with `device`'s id, as one step, "Edit Device". Allowed while screens use it, and
@@ -150,8 +150,8 @@ extension DesignStore {
             .map { (screen: $0.id, frames: DeviceReflow.frames(for: $0.root, from: old, to: device, tokens: tree.settings.tokens)) }
         asStep(named: String(localized: "Edit Device")) { keepingPlacementIntents {
             apply { content in
-                guard let index = content.tree.settings.customDevices.firstIndex(where: { $0.id == device.id }) else { return }
-                content.tree.settings.customDevices[index] = device
+                guard let index = content.settings.customDevices.firstIndex(where: { $0.id == device.id }) else { return }
+                content.settings.customDevices[index] = device
             }
             for each in reflows { reflow(each.screen, to: each.frames) }
         } }
@@ -168,7 +168,7 @@ extension DesignStore {
     func deleteCustomDevice(_ id: String) -> Bool {
         guard tree.settings.customDevices.contains(where: { $0.id == id }), !isCustomDeviceInUse(id) else { return false }
         asStep(named: String(localized: "Delete Device")) {
-            apply { $0.tree.settings.customDevices.removeAll { $0.id == id } }
+            apply { $0.settings.customDevices.removeAll { $0.id == id } }
         }
         return true
     }
@@ -228,7 +228,7 @@ extension DesignStore {
         let taken = Set(DeviceFrame.all.map(\.id) + settings.customDevices.map(\.id))
         let added = device.isCustom && !taken.contains(device.id) ? device : device.identified(as: DeviceFrame.customPrefix + UUID().uuidString)
         asStep(named: String(localized: "Add Device")) {
-            apply { $0.tree.settings.customDevices.append(added) }
+            apply { $0.settings.customDevices.append(added) }
             use(added)
         }
         return added.id

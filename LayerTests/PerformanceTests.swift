@@ -151,7 +151,7 @@ final class InkBoardPerformanceTests: XCTestCase {
         let model = AppModel(document: LayerDocument())
         let coordinator = InkCanvas.Coordinator(model: model)
         let content = board()
-        model.store.apply { $0.tree = content }
+        model.store.apply { $0 = content }
         coordinator.showDrawings()
         XCTAssertEqual(coordinator.documentCanvas.drawing.strokes.count, 1200)
 

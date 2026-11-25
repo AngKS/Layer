@@ -93,17 +93,6 @@ extension SketchRequest {
     var options: [SketchReading] { isAsked ? askedCandidates : candidates }
 }
 
-extension DesignElement {
-    /// Takes what the marks inside an outline say about the element drawn: which end a
-    /// toggle's knob is at, whether a checkbox is ticked or a radio button has its dot,
-    /// and how far a progress bar is shaded.
-    mutating func adoptMarks(of observation: SketchObservation) {
-        let marks = SketchMarks(of: observation, for: kind)
-        if let on = marks.isOn { isOn = on }
-        if let shaded = marks.value { value = shaded }
-    }
-}
-
 extension LayerNode {
     /// Takes what the marks inside an outline say about the node drawn, into its `content`: which end a toggle's knob is
     /// at, whether a checkbox is ticked or a radio button has its dot, and how far a progress bar is shaded.
@@ -418,25 +407,29 @@ enum SketchPrompt {
         return nil
     }
 
-    /// What is on a board, in a sentence or two, for naming it.
-    static func describe(board content: DesignContent) -> String {
+    /// What is on a board, in a sentence or two, for naming it: each screen's leaves from top to bottom, by where each is
+    /// on its screen, and then the open canvas's.
+    static func describe(board content: TreeContent) -> String {
         var sentences = [content.screens.count == 1 ? "The board has one screen." : "The board has \(content.screens.count) screens."]
+        let index = content.screens.isEmpty ? nil : TreeIndex(content)
         for screen in content.screens {
-            let parts = screen.elements.sorted { $0.frame.minY < $1.frame.minY }.map(describe(element:))
+            let top = { (leaf: LayerNode) in index?.ownPose(of: leaf.id, in: content)?.frame.minY ?? leaf.frame.minY }
+            let parts = screen.root.leaves.sorted { top($0) < top($1) }.map(describe(leaf:))
+            let device = content.device(of: screen)
             sentences.append(parts.isEmpty
-                ? "\(screen.name) is an empty \(screen.device.name) screen."
-                : "\(screen.name), an \(screen.device.name) screen, has from top to bottom: \(parts.joined(separator: ", ")).")
+                ? "\(screen.name) is an empty \(device.name) screen."
+                : "\(screen.name), an \(device.name) screen, has from top to bottom: \(parts.joined(separator: ", ")).")
         }
-        let loose = content.floating.map { describe(element: $0.element) }
+        let loose = content.canvasLeaves.map(describe(leaf:))
         if !loose.isEmpty { sentences.append("Beside the screens: \(loose.joined(separator: ", ")).") }
         return sentences.joined(separator: " ")
     }
 
-    private static func describe(element: DesignElement) -> String {
-        let kind = element.kind.layerName.lowercased()
-        if element.kind == .symbol, let symbol = element.symbol { return "a \(symbol.replacingOccurrences(of: ".", with: " ")) icon" }
-        guard element.kind.hasText, !element.text.isEmpty else { return "a \(kind)" }
-        return "a \(kind) saying “\(element.text.prefix(60))”"
+    private static func describe(leaf: LayerNode) -> String {
+        let kind = leaf.kind.layerName.lowercased()
+        if leaf.kind == .symbol, let symbol = leaf.content.symbol { return "a \(symbol.replacingOccurrences(of: ".", with: " ")) icon" }
+        guard leaf.kind.hasText, !leaf.content.text.isEmpty else { return "a \(kind)" }
+        return "a \(kind) saying “\(leaf.content.text.prefix(60))”"
     }
 
     private static func shape(_ form: SketchObservation.Form, bounds: CGRect, widthFraction: CGFloat?) -> String {

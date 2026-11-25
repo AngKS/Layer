@@ -152,7 +152,7 @@ struct CanvasDragLandingTests {
         board.model.close()
         #expect(board.store.placed(board.buttonOnB) != nil)
         let saved = board.model.document.current.content
-        #expect(saved.element(board.button.element)?.parent == board.b, "the design is saved with the button on B")
+        #expect(TreeIndex(saved)[board.button.element]?.host == .screen(board.b), "the design is saved with the button on B")
     }
 
     /// Draw on: the Pencil lands on what a finger is dragging, which lets go of it, and the
@@ -388,7 +388,7 @@ private struct RowBoard {
         tree.screens = [screen]
         tree.canvas = canvas
         TreeRules.apply(to: &tree, after: nil)
-        model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+        model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.viewport = Viewport(offset: .zero, scale: 1)
         model.tool = .select

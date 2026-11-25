@@ -231,8 +231,8 @@ extension DesignStore {
         guard screen != before else { return }
         let changed = screen
         apply { content in
-            guard let index = content.tree.screens.firstIndex(where: { $0.id == id }) else { return }
-            content.tree.screens[index] = changed
+            guard let index = content.screens.firstIndex(where: { $0.id == id }) else { return }
+            content.screens[index] = changed
         }
     }
 

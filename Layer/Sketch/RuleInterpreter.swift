@@ -35,14 +35,15 @@ struct RuleInterpreter: SketchInterpreter {
     }
 
     /// A plain name for a design: what its first screen says, or what device it is for.
-    func title(for content: DesignContent) -> String {
-        let texts = (content.screens.flatMap(\.elements) + content.floating.map(\.element))
+    /// Its words are its leaves', screen by screen and then the open canvas's, each in the order its screen lists them.
+    func title(for content: TreeContent) -> String {
+        let texts = (content.screens.flatMap(\.root.leaves) + content.canvasLeaves)
             .filter { $0.kind == .title || $0.kind == .text }
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { $0.content.text.trimmingCharacters(in: .whitespacesAndNewlines) }
         if let written = texts.first(where: { !$0.isEmpty && $0 != ElementKind.title.placeholder && $0 != ElementKind.text.placeholder }) {
             return String(written.prefix(40))
         }
         guard let screen = content.screens.first else { return "Untitled Board" }
-        return "\(screen.device.name) Wireframe"
+        return "\(content.device(of: screen).name) Wireframe"
     }
 }

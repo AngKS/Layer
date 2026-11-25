@@ -10,7 +10,7 @@ private func makeStore(_ tree: TreeContent) -> (store: DesignStore, undo: UndoMa
     TreeRules.apply(to: &tree, after: nil)
     let undo = UndoManager()
     undo.groupsByEvent = false
-    let store = DesignStore(content: DesignContent(tree: tree))
+    let store = DesignStore(content: tree)
     store.undoManager = undo
     return (store, undo)
 }

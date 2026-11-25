@@ -7,44 +7,9 @@ extension UTType {
     static let layerDesign = UTType(exportedAs: "kahshin.layer.design")
 }
 
-// PROJECTION: deleted in plan 6
-/// The part of a design that the design tools edit: its screens, everything on them and
-/// on the open canvas, its title and how its canvas is set up.
-///
-/// It is kept as a tree, `tree`: each screen's root holds what is on the screen, and the
-/// canvas holds its own nodes. The members below are the flat list the app was written
-/// against, one list of elements each saying what it is on, worked out from the tree
-/// (`TreeProjection`) and written back into it until each caller reads and writes the tree
-/// itself. A field or frame written to one element goes to its node alone; a write that
-/// changes what is on a host, or what holds what, lowers that host, makes the change on
-/// its list as the list did, and lifts the list back into the tree.
-struct DesignContent: Equatable, Sendable {
-    var tree = TreeContent()
-    /// Pointers a flat write named that the tree can't hold yet; cut when the change ends. Not saved, not compared.
-    var pendingPointers: [UUID: UUID] = [:]
-
-    init() {}
-
-    init(tree: TreeContent) {
-        self.tree = tree
-    }
-
-    /// The board's name. Nil until one has been suggested or typed.
-    var title: String? {
-        get { tree.title }
-        set { tree.title = newValue }
-    }
-
-    var canvas: CanvasSettings {
-        get { tree.settings }
-        set { tree.settings = newValue }
-    }
-
-    /// The tree, with what it couldn't read. Pointers waiting for a change to end aren't compared.
-    static func == (a: DesignContent, b: DesignContent) -> Bool {
-        a.tree == b.tree
-    }
-
+/// What the file needs of a design's tree beside its coding: the pictures it shows, and the names of what this version read
+/// but didn't understand.
+extension TreeContent {
     /// The pictures the design shows.
     var imageIDs: Set<UUID> {
         var ids: Set<UUID> = []
@@ -61,25 +26,24 @@ struct DesignContent: Equatable, Sendable {
     /// the identifiers of drawings and pictures. The files they name are kept when the design
     /// is saved, so that the newer Layer that wrote them still finds them.
     var unreadNames: Set<String> {
-        var names = tree.unknownKeys.strings.union(tree.manifestUnknownKeys.strings)
-        let settings = tree.settings
+        var names = unknownKeys.strings.union(manifestUnknownKeys.strings)
         names.formUnion(settings.unknownKeys.strings)
         names.formUnion(settings.tokens.unknownKeys.strings)
         for device in settings.customDevices where !device.unknownKeys.values.isEmpty { names.formUnion(device.unknownKeys.strings) }
         for json in settings.unreadDevices { names.formUnion(json.strings) }
-        for unread in tree.unreadCanvas { names.formUnion(unread.raw.strings) }
-        for unread in tree.unreadScreens { names.formUnion(unread.raw.strings) }
+        for unread in unreadCanvas { names.formUnion(unread.raw.strings) }
+        for unread in unreadScreens { names.formUnion(unread.raw.strings) }
         func visit(_ node: LayerNode) {
             if !node.unknownKeys.values.isEmpty { names.formUnion(node.unknownKeys.strings) }
             for keys in node.unknownPartKeys.values { names.formUnion(keys.strings) }
             for unread in node.unreadChildren { names.formUnion(unread.raw.strings) }
             node.children.forEach(visit)
         }
-        for screen in tree.screens {
+        for screen in screens {
             if !screen.unknownKeys.values.isEmpty { names.formUnion(screen.unknownKeys.strings) }
             visit(screen.root)
         }
-        tree.canvas.forEach(visit)
+        canvas.forEach(visit)
         return names
     }
 
@@ -89,273 +53,8 @@ struct DesignContent: Equatable, Sendable {
             body(node)
             for child in node.children { visit(child) }
         }
-        for screen in tree.screens { screen.root.children.forEach(visit) }
-        tree.canvas.forEach(visit)
-    }
-
-    // MARK: Views of the list
-
-    /// Everything on the board that isn't a screen, back to front, host by host: the screens'
-    /// in their order, then the open canvas's. Each container is a group item just in front of
-    /// what it holds, which points at it with `group`. Among elements on the same screen, or
-    /// together on the open canvas, later ones sit on top; the order of two elements that share
-    /// neither means nothing.
-    var elements: [DesignElement] {
-        TreeProjection.lower(tree, pending: pendingPointers).elements
-    }
-
-    /// Each screen with what is on it. Group items are left out, and each member is locked or
-    /// hidden as it is with its groups: what reads this draws, exports and describes the
-    /// members as they are, unaware of groups. See `Groups.swift`.
-    ///
-    /// Set, each screen keeps its root as it is, and a new one gets a free root. What each holds
-    /// is lifted into it, with the group items it had that weren't given, every screen against
-    /// the design as it was, so that what moves between them keeps what only the tree knows.
-    var screens: [DesignScreen] {
-        get { TreeProjection.lower(tree, pending: pendingPointers).screens }
-        set {
-            let given = Set(newValue.flatMap(\.elements).map(\.id))
-            let lists = newValue.map { screen in (host: Optional(screen.id), elements: screen.elements + groupItems(on: screen.id, besides: given)) }
-            let wanted = Set(newValue.map(\.id))
-            let gone = tree.screens.filter { !wanted.contains($0.id) }
-            let kept = Dictionary(tree.screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            // Those it no longer has stay until the lift, where what has moved off them is found.
-            tree.screens = newValue.map { view in
-                var screen = kept[view.id] ?? Self.newScreen(view)
-                Self.write(view, to: &screen)
-                return screen
-            } + gone
-            tree.projectedSetHosts(lists, pending: &pendingPointers)
-            let goneIDs = Set(gone.map(\.id))
-            tree.screens.removeAll { goneIDs.contains($0.id) }
-        }
-    }
-
-    /// The elements on the open canvas, outside every screen. Group items are left out, and
-    /// each member is locked or hidden as it is with its groups, as in `screens`.
-    var floating: [FloatingElement] {
-        get { TreeProjection.lower(tree, pending: pendingPointers).floating }
-        set {
-            let given = Set(newValue.map(\.id))
-            let list = newValue.map { floating in
-                var element = floating.element
-                element.scale = floating.scale
-                return element
-            }
-            tree.projectedSetHost(nil, to: list + groupItems(on: nil, besides: given), pending: &pendingPointers)
-        }
-    }
-
-    /// The group items on a screen, or on the open canvas, apart from any among `given`.
-    private func groupItems(on host: DesignScreen.ID?, besides given: Set<DesignElement.ID>) -> [DesignElement] {
-        children(of: host).filter { $0.kind == .group && !given.contains($0.id) }
-    }
-
-    /// One screen with what is on it, as `screens` shows it: group items left out, and each
-    /// member locked or hidden as it is with its groups. `children(of:)` has the list as it is.
-    func screen(_ id: DesignScreen.ID) -> DesignScreen? {
-        guard let screen = tree.screens.first(where: { $0.id == id }) else { return nil }
-        var view = view(of: screen)
-        view.elements = TreeProjection.lowerHostNodes(.screen(id), in: tree, pending: pendingPointers)
-            .filter { !$0.node.isContainer }.map(\.shown)
-        return view
-    }
-
-    func element(_ id: DesignElement.ID) -> DesignElement? {
-        tree.projectedElement(id, pending: pendingPointers)
-    }
-
-    /// What is on a screen, or on the open canvas when `parent` is nil, back to front.
-    func children(of parent: DesignScreen.ID?) -> [DesignElement] {
-        TreeProjection.lowerHost(parent.map { .screen($0) } ?? .canvas, in: tree, pending: pendingPointers)
-    }
-
-    // MARK: Changing the list
-
-    /// Puts an element on a screen, or on the open canvas when `parent` is nil, where it
-    /// is drawn `scale` canvas points to each of its own. It goes on top of what is
-    /// already there. Returns the element as it is kept.
-    @discardableResult
-    mutating func add(_ element: DesignElement, to parent: DesignScreen.ID?, scale: CGFloat? = nil) -> DesignElement {
-        tree.projectedAdd(element, to: parent, scale: scale, pending: &pendingPointers)
-    }
-
-    /// Changes an element in place. What it is and what it is on stay as they are: use
-    /// `move` for the second.
-    mutating func update(_ id: DesignElement.ID, _ body: (inout DesignElement) -> Void) {
-        tree.projectedUpdate(id, pending: &pendingPointers, body)
-    }
-
-    mutating func remove(_ ids: Set<DesignElement.ID>) {
-        tree.projectedRemove(ids, pending: &pendingPointers)
-    }
-
-    /// Gives an element to another screen, or to the open canvas, at `frame` there. It
-    /// goes on top of what is already there.
-    mutating func move(_ id: DesignElement.ID, to parent: DesignScreen.ID?, scale: CGFloat? = nil, frame: CGRect) {
-        tree.projectedMove(id, to: parent, scale: scale, frame: frame, pending: &pendingPointers)
-    }
-
-    /// Puts the elements on one screen, or on the open canvas, in a new order, back to
-    /// front. `order` holds the same identifiers they have now.
-    mutating func reorder(_ parent: DesignScreen.ID?, to order: [DesignElement.ID]) {
-        tree.projectedReorder(parent, to: order, pending: &pendingPointers)
-    }
-
-    /// Replaces what is on a screen. Its group items that `children` doesn't hold stay on it,
-    /// after the rest; those it holds aren't written twice (F8). The groups are put in front
-    /// of their members as the list is lifted into the tree.
-    mutating func setChildren(of screen: DesignScreen.ID, to children: [DesignElement]) {
-        let kept = groupItems(on: screen, besides: Set(children.map(\.id)))
-        tree.projectedSetHost(screen, to: children + kept, asKept: true, pending: &pendingPointers)
-    }
-
-    /// Adds a screen, with whatever it holds. Its root is free.
-    mutating func addScreen(_ screen: DesignScreen) {
-        tree.screens.append(Self.newScreen(screen))
-        guard !screen.elements.isEmpty else { return }
-        tree.projectedSetHost(screen.id, to: screen.elements, asKept: true, pending: &pendingPointers)
-    }
-
-    /// Removes a screen and everything on it.
-    mutating func removeScreen(_ id: DesignScreen.ID) {
-        tree.screens.removeAll { $0.id == id }
-    }
-
-    /// Changes a screen. `body` is given the screen with what is on it, and may change that too.
-    mutating func updateScreen(_ id: DesignScreen.ID, _ body: (inout DesignScreen) -> Void) {
-        guard let index = tree.screens.firstIndex(where: { $0.id == id }) else { return }
-        let before = children(of: id)
-        var screen = view(of: tree.screens[index])
-        screen.elements = before
-        body(&screen)
-        Self.write(screen, to: &tree.screens[index])
-        if screen.elements != before { setChildren(of: id, to: screen.elements) }
-    }
-
-    /// A screen new to the tree, as a view gives it: with a free root, and nothing on it yet.
-    /// The root takes the screen's identifier, so that a screen made from the same view twice
-    /// is the same tree.
-    private static func newScreen(_ view: DesignScreen) -> TreeScreen {
-        var screen = TreeScreen(name: view.name, origin: view.origin, scale: view.scale, deviceID: view.deviceID)
-        screen.id = view.id
-        screen.root.id = view.id
-        write(view, to: &screen)
-        return screen
-    }
-
-    /// A screen's own fields, as a view gives them, written over the tree's screen. Its root,
-    /// and what is on it, stay as they are, and so does its identifier.
-    private static func write(_ view: DesignScreen, to screen: inout TreeScreen) {
-        screen.name = view.name
-        screen.origin = view.origin
-        screen.scale = view.scale
-        screen.deviceID = view.deviceID
-        screen.isLocked = view.isLocked
-        screen.unknownKeys = view.unknownKeys
-    }
-
-    // MARK: Taking a change back
-
-    /// The screens themselves, without what is on them.
-    var screenFrames: [DesignScreen] { tree.screens.map(view(of:)) }
-
-    /// A screen as `screens` shows it, without what is on it: its device a built-in or one of the design's own, as
-    /// the design's settings resolve it (`resolvedDevice`).
-    private func view(of screen: TreeScreen) -> DesignScreen {
-        var view = TreeProjection.view(of: screen)
-        let device = tree.device(of: screen)
-        if device != view.device { view.resolvedDevice = device }
-        return view
-    }
-
-    /// Elements that say they are on a screen the design doesn't have. The tree can't hold
-    /// any: what an undo leaves on a screen that has gone lands on the open canvas.
-    var elementsOnMissingScreens: [DesignElement.ID] { [] }
-
-    /// Whether the board itself differs: its name, its canvas, or what wasn't understood.
-    func boardDiffers(from other: DesignContent) -> Bool {
-        title != other.title || canvas != other.canvas || tree.unreadCanvas != other.tree.unreadCanvas
-            || tree.unreadScreens != other.tree.unreadScreens
-            || tree.unknownKeys != other.tree.unknownKeys || tree.manifestUnknownKeys != other.tree.manifestUnknownKeys
-    }
-
-    /// This content with the change that turned `before` into `after` taken back, and only
-    /// that change: whatever has changed since `after` stays as it is now. With nothing
-    /// else changed since, that is `before` itself. See `TreeContent.reverting(_:to:)`.
-    ///
-    /// An undo step is taken back this way, so that a step made while something else was
-    /// changing the design too (a screen being written, a spoken command, a drag) takes
-    /// back its own changes and leaves the others'.
-    func reverting(_ after: DesignContent, to before: DesignContent) -> DesignContent {
-        DesignContent(tree: tree.reverting(after.tree, to: before.tree))
-    }
-
-    /// Takes back the change that turned `before` into `after`, as far as what it changed
-    /// is still as the change left it. Whatever has been changed since, the same things
-    /// included, is left as it is now. Siri's undo of an action taken a while ago works this
-    /// way, so that it doesn't take back what was done by hand meanwhile. See
-    /// `TreeContent.takeBack(_:to:)`.
-    mutating func takeBack(_ after: DesignContent, to before: DesignContent) {
-        tree.takeBack(after.tree, to: before.tree)
-    }
-}
-
-// PROJECTION: deleted in plan 6
-private extension DesignElement {
-    func placed(on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
-        var element = self
-        element.parent = parent
-        element.scale = scale
-        return element
-    }
-}
-
-// PROJECTION: deleted in plan 6
-/// The list operations that the projection's writes run on a host's lowered list, as the
-/// design's one list ran them (F15).
-extension [DesignElement] {
-    /// `element` as `add` and `move` put it on a screen, or on the open canvas when `parent` is nil:
-    /// said to be there, drawn `scale` canvas points to each of its own on the open canvas (1 when
-    /// not given), and with no scale of its own on a screen, which has one.
-    static func placed(_ element: DesignElement, on parent: DesignScreen.ID?, scale: CGFloat?) -> DesignElement {
-        element.placed(on: parent, scale: parent == nil ? scale ?? 1 : nil)
-    }
-
-    /// Puts the elements at `slots` in a new order, back to front: `order` holds the identifiers
-    /// they have now. The rest of the list keeps its places. Only the slots whose element changes
-    /// are written, and counted as written; their number is returned. Two with one identifier, which
-    /// only a damaged file has, can't be told apart: then, as when `order` doesn't hold exactly what
-    /// is at `slots`, nothing changes.
-    @discardableResult
-    static func reorder(_ list: inout [DesignElement], slots: [Int], to order: [DesignElement.ID]) -> Int {
-        let siblings = Dictionary(slots.map { (list[$0].id, list[$0]) }, uniquingKeysWith: { first, _ in first })
-        guard siblings.count == slots.count, order.count == slots.count, Set(order) == Set(siblings.keys) else { return 0 }
-        var written = 0
-        for (slot, id) in zip(slots, order) where list[slot].id != id {
-            if let element = siblings[id] {
-                list[slot] = element
-                written += 1
-            }
-        }
-        #if DEBUG
-        ListWork.wrote(written)
-        #endif
-        return written
-    }
-}
-
-// PROJECTION: deleted in plan 6
-/// A design's content is coded as its tree is: `TreeContent`'s coding, exactly. The file reads
-/// and writes the tree through `TreeManifest`; this is for what codes the content on its own.
-/// Reading runs no rules: opening a file does (`DesignFile`).
-extension DesignContent: Codable {
-    init(from decoder: any Decoder) throws {
-        self.init(tree: try TreeContent(from: decoder))
-    }
-
-    func encode(to encoder: any Encoder) throws {
-        try tree.encode(to: encoder)
+        for screen in screens { screen.root.children.forEach(visit) }
+        canvas.forEach(visit)
     }
 }
 
@@ -384,9 +83,9 @@ struct DesignFile: Sendable {
     var version = currentVersion
     /// The design, its drawings' ink included. Magic Pen sketches are never saved: they
     /// either become elements or disappear.
-    var content = DesignContent()
+    var content = TreeContent()
     /// All the ink that shows on the board, where it lies on the canvas.
-    var drawing: PKDrawing { content.tree.visibleInk }
+    var drawing: PKDrawing { content.visibleInk }
     /// Attached pictures, as image file data, by the UUID that elements refer to them with.
     var images: [String: Data] = [:]
     /// A small picture of the board, as JPEG data. Nil for a board with nothing on it.
@@ -403,9 +102,9 @@ struct DesignFile: Sendable {
 
     /// `drawing` is ink for the board as one PencilKit drawing, which is taken in as
     /// drawings: strokes that touch become one drawing each.
-    init(content: DesignContent = DesignContent(), drawing: PKDrawing = PKDrawing(), images: [String: Data] = [:]) {
+    init(content: TreeContent = TreeContent(), drawing: PKDrawing = PKDrawing(), images: [String: Data] = [:]) {
         self.content = content
-        self.content.tree.adopt(drawing)
+        self.content.adopt(drawing)
         self.images = images
     }
 
@@ -422,8 +121,8 @@ struct DesignFile: Sendable {
         // Each drawing's ink is beside the design, under the drawing's identifier. The rules
         // have put every drawing among the canvas's nodes.
         let ink = parts[DesignPackage.ink]?.fileWrappers ?? [:]
-        for index in content.tree.canvas.indices where content.tree.canvas[index].kind == .drawing {
-            content.tree.canvas[index].content.ink = ink[content.tree.canvas[index].id.uuidString]?.regularFileContents
+        for index in content.canvas.indices where content.canvas[index].kind == .drawing {
+            content.canvas[index].content.ink = ink[content.canvas[index].id.uuidString]?.regularFileContents
         }
         // So is the ink of drawings this version can't read, which is kept for writing back.
         let named = content.unreadNames
@@ -442,10 +141,10 @@ struct DesignFile: Sendable {
     /// The design in a package's design file, with the tree's rules applied: the frames it was
     /// saved with are a snapshot, and each screen is laid out again. That is no change, and
     /// makes no undo step.
-    private static func read(_ data: Data) throws -> (content: DesignContent, fileName: String?) {
+    private static func read(_ data: Data) throws -> (content: TreeContent, fileName: String?) {
         var (tree, fileName) = try TreeManifest.decode(data)
         TreeRules.apply(to: &tree, after: nil)
-        return (DesignContent(tree: tree), fileName)
+        return (tree, fileName)
     }
 
     /// Why a single file can't be opened: only version 1 saved a design as one file. Its JSON
@@ -470,7 +169,7 @@ struct DesignFile: Sendable {
         let old = existing?.isDirectory == true ? existing?.fileWrappers ?? [:] : [:]
         var parts: [String: FileWrapper] = [:]
 
-        let design = try TreeManifest.encode(content.tree, fileName: fileName, version: version)
+        let design = try TreeManifest.encode(content, fileName: fileName, version: version)
         parts[DesignPackage.design] = Self.file(design, named: DesignPackage.design, onDisk: old[DesignPackage.design])
 
         // A drawing whose ink is on disk unchanged keeps its file.
@@ -539,7 +238,7 @@ struct DesignFile: Sendable {
     /// settings from its file, leaving the ink and pictures where they are: what Siri, Shortcuts
     /// and Spotlight need. The tree's rules are applied, as on opening. A design this version
     /// can't open throws as opening it does. Reads the disk, so not for the main thread.
-    nonisolated static func content(at url: URL) throws -> DesignContent {
+    nonisolated static func content(at url: URL) throws -> TreeContent {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
             throw CocoaError(.fileNoSuchFile)

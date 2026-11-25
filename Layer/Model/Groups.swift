@@ -239,7 +239,7 @@ extension DesignStore {
         var members: [UUID] = []
         asOneStep {
             members = unwrap(ref.element)
-            if wasThePasses { apply { $0.tree = Self.declining(Set(members), in: $0.tree) } }
+            if wasThePasses { apply { $0 = Self.declining(Set(members), in: $0) } }
         }
         return CanvasSelection(members.map { .element(ElementRef(host: ref.host, element: $0)) })
     }

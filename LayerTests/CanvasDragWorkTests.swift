@@ -219,7 +219,7 @@ struct CanvasDragWorkTests {
         var tree = TreeContent()
         tree.screens = [first, second]
         TreeRules.apply(to: &tree, after: nil)
-        let model = AppModel(document: LayerDocument(file: DesignFile(content: DesignContent(tree: tree))))
+        let model = AppModel(document: LayerDocument(file: DesignFile(content: tree)))
         model.canvasSize = CGSize(width: 1210, height: 834)
         model.tool = .select
         let store = model.store

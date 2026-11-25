@@ -656,7 +656,7 @@ struct TurningOneElementTests {
         board.model.close()
         #expect(!board.model.isTurning)
         #expect(!board.store.isEditing)
-        #expect(board.model.document.current.content.tree.node(board.note.element)?.rotation == 20)
+        #expect(board.model.document.current.content.node(board.note.element)?.rotation == 20)
     }
 
     /// What the knob was turning let go of mid-turn, by the Pencil landing on it with the

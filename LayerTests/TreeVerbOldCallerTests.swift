@@ -11,7 +11,7 @@ private func makeStore(_ tree: TreeContent) -> (store: DesignStore, undo: UndoMa
     TreeRules.apply(to: &tree, after: nil)
     let undo = UndoManager()
     undo.groupsByEvent = false
-    let store = DesignStore(content: DesignContent(tree: tree))
+    let store = DesignStore(content: tree)
     store.undoManager = undo
     return (store, undo)
 }
@@ -254,7 +254,7 @@ struct TreeVerbOldCallerTests {
         let kept = try #require(store.tree.screens.first?.root.children.first?.id)
 
         // Given to the screen's root in one change: the rules at its end put the note on the canvas.
-        store.apply { $0.tree.screens[0].root.children += [title, note] }
+        store.apply { $0.screens[0].root.children += [title, note] }
 
         #expect([title.id, note.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: note.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])
@@ -343,7 +343,7 @@ struct TreeVerbOldCallerTests {
         drawing.frame.origin = CGPoint(x: 40, y: 60)
 
         // Given to the screen's root in one change: the rules at its end put the drawing on the canvas.
-        store.apply { $0.tree.screens[0].root.children += [title, drawing] }
+        store.apply { $0.screens[0].root.children += [title, drawing] }
 
         #expect([title.id, drawing.id].compactMap(store.ref(of:)) == [.init(host: .screen(screenID), element: title.id), .init(host: .canvas, element: drawing.id)])
         #expect(store.tree.screens.first?.root.children.map(\.id) == [kept, title.id])

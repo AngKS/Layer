@@ -15,7 +15,7 @@ extension OrderBoard {
         adjust: (inout LayerNode) -> Void = { _ in }
     ) -> DesignStore.ElementRef {
         var made: UUID?
-        store.apply { made = $0.tree.group(refs.map(\.element), named: name, scale: scale, adjust: adjust) }
+        store.apply { made = $0.group(refs.map(\.element), named: name, scale: scale, adjust: adjust) }
         if made == nil { Issue.record("The board's things couldn't be grouped") }
         return DesignStore.ElementRef(host: refs[0].host, element: made ?? UUID())
     }
@@ -287,7 +287,7 @@ struct GroupModelTests {
         }
         let notes = board.group(board.note1, board.note2, named: "N")
 
-        let reopened = try DesignFile(wrapper: DesignFile(content: board.store.content).wrapper()).content.tree
+        let reopened = try DesignFile(wrapper: DesignFile(content: board.store.content).wrapper()).content
 
         #expect(reopened == board.store.tree)
         #expect(names(reopened, on: board.screen) == ["A", "C", "B", "D", "G", "E"])

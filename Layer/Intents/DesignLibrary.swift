@@ -94,7 +94,7 @@ enum DesignLibrary {
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: .withoutChanges, error: &error) { readable in
             do {
-                content = try DesignFile.content(at: readable).tree
+                content = try DesignFile.content(at: readable)
             } catch is DesignFile.ReadError {
                 refused = true
             } catch {}

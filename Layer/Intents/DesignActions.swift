@@ -264,13 +264,6 @@ enum DesignActions {
         return Placement(origin: CGPoint(x: (middle.x - size.width / 2).rounded(), y: (middle.y - size.height / 2).rounded()), scale: scale)
     }
 
-    /// Where a new element goes on a screen: `ElementLayout.newElementFrame` below its visible elements. Siri no longer
-    /// calls it: it is kept only for voice's `VoiceToolbox` (lane C), whose plan 6 Task 7 moves it to
-    /// `DesignStore.newElementFrame(_:on:)`; the last lane to move deletes it (F11, F16).
-    static func frameForNewElement(_ element: DesignElement, on screen: DesignScreen) -> CGRect {
-        ElementLayout.newElementFrame(for: element.kind, on: screen.device, below: screen.elements.filter { !$0.isHidden }.map(\.frame))
-    }
-
     // MARK: Devices
 
     /// The device an action asks for (call 6): `custom`, one of the design's own by its name ignoring case and the space
@@ -298,12 +291,12 @@ enum DesignActions {
 @MainActor
 final class TakenAction {
     let name: String
-    private let before: DesignContent
-    private let after: DesignContent
+    private let before: TreeContent
+    private let after: TreeContent
     private weak var model: AppModel?
     private weak var undoManager: UndoManager?
 
-    init(name: String, before: DesignContent, after: DesignContent, model: AppModel, undoManager: UndoManager) {
+    init(name: String, before: TreeContent, after: TreeContent, model: AppModel, undoManager: UndoManager) {
         self.name = name
         self.before = before
         self.after = after
@@ -312,7 +305,7 @@ final class TakenAction {
     }
 
     /// Whether anything the action changed is still as the action left it in `content`.
-    func canTakeBack(from content: DesignContent) -> Bool {
+    func canTakeBack(from content: TreeContent) -> Bool {
         if content == after { return true }
         var taken = content
         taken.takeBack(after, to: before)
@@ -464,12 +457,6 @@ enum DesignDescriber {
     /// A leaf in a few words: its kind and its words, or a symbol's name.
     static func describe(_ node: LayerNode) -> String {
         describe(kind: node.kind, text: node.content.text, symbol: node.content.symbol)
-    }
-
-    /// The same for a flat element, which voice still hands over until plan 6's Task 7; Siri's actions no longer do. The
-    /// last lane to move deletes it.
-    static func describe(_ element: DesignElement) -> String {
-        describe(kind: element.kind, text: element.text, symbol: element.symbol)
     }
 
     private static func describe(kind: ElementKind, text: String, symbol: String?) -> String {

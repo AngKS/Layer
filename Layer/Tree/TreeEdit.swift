@@ -196,7 +196,16 @@ extension TreeContent {
     /// Changes the children of the node at `path` on `host`, or, on the canvas at [], the canvas's top
     /// level, in place. A child this build couldn't read keeps its place among the others that stay.
     mutating func changeChildren(on host: TreeIndex.Host, at path: [Int], _ body: (inout [LayerNode]) -> Void) {
-        if host == .canvas, path.isEmpty { return body(&canvas) }
+        if host == .canvas, path.isEmpty {
+            // The canvas's own nodes keep the places of those this build couldn't read as a node's children do (`give`).
+            guard !unreadCanvas.isEmpty else { return body(&canvas) }
+            let before = canvas
+            body(&canvas)
+            let staying = Set(canvas.map(\.id))
+            TreeRules.keepUnreadPlaces(&unreadCanvas, among: before.count,
+                                       removing: before.indices.filter { !staying.contains(before[$0].id) })
+            return
+        }
         changeNode(on: host, at: path) { node in
             var children = node.children
             body(&children)

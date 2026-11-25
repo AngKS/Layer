@@ -66,7 +66,7 @@ extension DesignStore {
         guard !added.isEmpty else { return [] }
         let made = added
         withLaidOutAhead(Dictionary(made.map { ($0.id, $0.root) }, uniquingKeysWith: { first, _ in first })) {
-            apply { $0.tree.screens += made }
+            apply { $0.screens += made }
         }
         #if DEBUG
         for screen in made { GenerationWork.committed(on: screen.id) }

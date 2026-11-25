@@ -381,10 +381,10 @@ extension HostedModelTests {
 struct ModelChoiceTests {
     @Test func theChoiceIsSavedInTheDesignFileAndReadBack() throws {
         var saved = DesignFile()
-        saved.content.tree.settings.model = .hosted(.anthropic, model: "claude-sonnet-test")
+        saved.content.settings.model = .hosted(.anthropic, model: "claude-sonnet-test")
         let reopened = try DesignFile(wrapper: saved.wrapper())
-        #expect(reopened.content.tree.settings.model == .hosted(.anthropic, model: "claude-sonnet-test"))
-        #expect(reopened.content.tree.settings.resolvedModel.hostedProvider == .anthropic)
+        #expect(reopened.content.settings.model == .hosted(.anthropic, model: "claude-sonnet-test"))
+        #expect(reopened.content.settings.resolvedModel.hostedProvider == .anthropic)
     }
 
     /// The default is the app's, so it is never changed here, even for a moment: other
@@ -414,8 +414,8 @@ struct ModelChoiceTests {
     }
 
     @Test func aNewDesignStartsWithTheDefaultModel() {
-        #expect(LayerDocument(model: .hosted(.anthropic, model: "claude-new")).current.content.tree.settings.model == .hosted(.anthropic, model: "claude-new"))
-        #expect(LayerDocument().current.content.tree.settings.model == ModelPreferences.defaultChoice)
+        #expect(LayerDocument(model: .hosted(.anthropic, model: "claude-new")).current.content.settings.model == .hosted(.anthropic, model: "claude-new"))
+        #expect(LayerDocument().current.content.settings.model == ModelPreferences.defaultChoice)
     }
 
     @Test func aHostedChoiceRunsItsModelWhereItCan() {

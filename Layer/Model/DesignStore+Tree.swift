@@ -517,7 +517,7 @@ extension DesignStore {
         #if DEBUG
         let version = contentVersion
         #endif
-        apply { body(&$0.tree) }
+        apply { body(&$0) }
         #if DEBUG
         if contentVersion != version { ListWork.wrote(written) }
         #endif
