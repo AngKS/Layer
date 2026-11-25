@@ -218,7 +218,8 @@ build_for_testing "$ROOT" "$DERIVED" CI
 
 run_group "$ROOT" "$DERIVED" "the store benchmark" "" StoreChangeBenchmarkTests
 require_lines "the store benchmark" "store move " "store resize " "store text " "store add " \
-  "large move " "large resize " "large text " "large add " "large look " "large token " "large titleSize " "large drag "
+  "large move " "large resize " "large text " "large add " "large look " "large token " "large titleSize " "large drag " \
+  "large dropTarget " "large siriElements "
 
 run_group "$ROOT" "$DERIVED" "the budgets and the rules" "" StoreChangeBudgetTests "TreeRulesTests/oneEditOnAHundredNodeScreenIsQuick()"
 require_lines "the budgets" "tree move " "tree resize " "tree text " "tree add " "rules edit "

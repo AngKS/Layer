@@ -8,9 +8,11 @@ import Testing
 /// frames, built on the tree. It runs only when `LAYER_BENCHMARK` is set (`TEST_RUNNER_LAYER_BENCHMARK=1` on the
 /// `xcodebuild` command line) and prints a `BENCH store <op> p50=<ms> p95=<ms>` line for each. The numbers stand beside
 /// the ones plan 2's version of this file measured on main (`scripts/measure-semantic-tree.sh --main`); the next read
-/// of the screens that version also timed is `StoreChangeBudgetTests`' `BENCH tree <op>+read` on the tree.
+/// of the screens that version also timed is `StoreChangeBudgetTests`' `BENCH tree <op>+read` on the tree. The same
+/// changes and more are timed on a large design too (`BENCH large`, the sweep's). Its tests run one at a time, so that
+/// one waiting on Siri's query doesn't time another.
 @MainActor
-@Suite("Store change benchmark", .enabled(if: ProcessInfo.processInfo.environment["LAYER_BENCHMARK"] != nil))
+@Suite("Store change benchmark", .serialized, .enabled(if: ProcessInfo.processInfo.environment["LAYER_BENCHMARK"] != nil))
 struct StoreChangeBenchmarkTests {
     private static let runs = 50
 
@@ -226,14 +228,63 @@ struct StoreChangeBenchmarkTests {
         let drag = Self.percentiles(times)
         print(String(format: "BENCH large drag p50=%.3f p95=%.3f", drag.p50, drag.p95))
 
+        // Where a large container dragged over a screen would go if let go (`TreeDrop.target`, a drag frame's look for its
+        // line): a card of 200 texts on the canvas, the finger over screen 6's rows, on the design with the card added.
+        var withCard = store.tree
+        var card = LayerNode.container(.card, layout: .stack(LayerNode.Stack(axis: .vertical, spacing: 8)),
+                                       frame: CGRect(x: 100, y: 2000, width: 300, height: 10),
+                                       children: (0..<200).map { .leaf(.text, frame: CGRect(x: 0, y: 0, width: 200, height: 20), text: "Item \($0)") })
+        card.scale = 1
+        withCard.canvas.append(card)
+        let cardIndex = TreeIndex(withCard)
+        let screenFrame = withCard.screens[5].canvasFrame(on: withCard.device(of: withCard.screens[5]))
+        let over = CGPoint(x: screenFrame.midX, y: screenFrame.midY)
+        times = []
+        var target: TreeDrop.Target?
+        for _ in 0..<Self.runs {
+            let begun = ContinuousClock.now
+            target = TreeDrop.target(for: card.id, at: over, centre: over, in: withCard, index: cardIndex)
+            times.append(Self.milliseconds(ContinuousClock.now - begun))
+        }
+        let dropTarget = Self.percentiles(times)
+        print(String(format: "BENCH large dropTarget p50=%.3f p95=%.3f", dropTarget.p50, dropTarget.p95))
+        if case .insert? = target {} else {
+            Issue.record("the card would go into screen 6's column or a row in it: \(String(describing: target))")
+        }
+
         #expect(store.node(moved)?.frame.minX == free.root.children[48].frame.minX + CGFloat(Self.runs), "the leaf moved each run")
         #expect(store.node(text)?.content.text.hasSuffix("a") == true, "the text was edited")
         #expect(added != nil, "a text was added to the row")
         #expect(store.node(row.id)?.children.count == 4, "and taken away again")
         #expect(store.node(dragged)?.frame.minX == free.root.children[49].frame.minX + CGFloat(frames), "the drag moved the leaf")
         // A sanity bound, not the budget.
-        for result in [move, resize, edit, add, look, token, titleSize, drag] {
+        for result in [move, resize, edit, add, look, token, titleSize, drag, dropTarget] {
             #expect(result.p95.isFinite && result.p95 < 1000)
         }
+    }
+
+    /// Siri's element query on the large design, open in its window: the elements behind 10 identifiers spread over the
+    /// design, as `ElementQuery.entities(for:)` finds them, 20 times. It prints `BENCH large siriElements`.
+    @Test func siriElementsOnALargeDesign() async throws {
+        let model = AppModel(document: LayerDocument(file: DesignFile(content: Self.largeDesign())))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("Large.layer")
+        try model.document.current.wrapper().write(to: file, options: .atomic, originalContentsURL: nil)
+        model.fileURL = file
+        let designID = try #require(model.designID)
+        let elements = DesignSnapshot(id: designID, name: "Large", content: model.store.tree, modified: nil).elements
+        let ids = (0..<10).map { elements[$0 * elements.count / 10].id }
+        var times: [Double] = []
+        for _ in 0..<20 {
+            let start = ContinuousClock.now
+            let found = try await ElementQuery().entities(for: ids)
+            times.append(Self.milliseconds(ContinuousClock.now - start))
+            #expect(found.map(\.id) == ids)
+        }
+        let result = Self.percentiles(times)
+        print(String(format: "BENCH large siriElements p50=%.3f p95=%.3f", result.p50, result.p95))
+        #expect(result.p95.isFinite && result.p95 < 1000)
     }
 }
