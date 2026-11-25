@@ -446,6 +446,20 @@ extension HostedModelTests {
         #expect(system == ScreenPrompt.instructions(.full, for: "a tiny screen"))
     }
 
+    /// A screen in A2UI is asked for at `A2UIPrompt.temperature`, so a slip in a line's JSON is less likely; the outline
+    /// is asked for at the model's own (2026-11-26).
+    @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
+    func anA2UIScreenIsAskedForAtItsOwnTemperature() async throws {
+        let choice = ModelChoice.hosted(.lmStudio, model: "m")
+        StubProvider.answer(with: .init(body: SSE.openAI(text: A2UIGenerationTests.signIn.map { $0 + "\n" })))
+        for try await _ in ScreenGenerator.stream(ScreenGenerator.Request(description: "a sign-in screen", choice: choice), format: .a2ui) {}
+        #expect(StubProvider.lastBody["temperature"] as? Double == A2UIPrompt.temperature)
+
+        StubProvider.answer(with: .init(body: SSE.openAI(text: ["title: Hi\n", "button: Go\n"])))
+        for try await _ in ScreenGenerator.stream(ScreenGenerator.Request(description: "a tiny screen", choice: choice), format: .outline) {}
+        #expect(StubProvider.lastBody["temperature"] == nil)
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"))
     func whatAHostedScreenLeftOutIsSaidOnceAfterItsLastScreen() async throws {
         let call = #"{"version":"1.0","callRendererFunction":{"functionCallId":"call_1","surfaceId":"screen","# +

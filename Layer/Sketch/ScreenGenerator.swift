@@ -102,11 +102,13 @@ enum ScreenGenerator {
                     let room = Self.room(for: request.choice)
                     let session = makeSession(for: request.choice, instructions: instructions(for: request.description, room: room, format: format))
                     let prompt = ScreenPrompt.request(request.description, board: request.board, room: room)
+                    // A2UI is asked for at its own temperature (`A2UIPrompt.temperature`); the outline at the model's.
+                    let options = format == .a2ui ? GenerationOptions(temperature: A2UIPrompt.temperature) : GenerationOptions()
                     var reader = ScreenReader(format, tokens: request.tokens)
                     var text = ""
                     var hasHandedOn = false
                     var hasStarted = false
-                    for try await snapshot in session.streamResponse(to: prompt) {
+                    for try await snapshot in session.streamResponse(to: prompt, options: options) {
                         text = snapshot.content
                         if !hasStarted, !text.isEmpty {
                             hasStarted = true

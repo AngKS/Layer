@@ -12,6 +12,11 @@ enum A2UIPrompt {
     /// The surface a model writes its screen on.
     static let surfaceID = "screen"
 
+    /// The temperature a screen in A2UI is asked for at (`ScreenGenerator`), where a provider takes one
+    /// (`HostedModelClient`): lower than a model's own, often 1, so a slip inside a line's JSON is less likely. Every
+    /// line in a hundred and fifty was good at it on 2026-11-26 (docs/benchmarks/screen-prompt.md).
+    static let temperature = 0.5
+
     static func instructions(for description: String) -> String {
         let shown = examples(for: description).map(\.lines).joined(separator: "\n\n---\n\n")
         // Rules last, as in the outline's prompt: a model follows best what it read most recently.
@@ -93,8 +98,8 @@ enum A2UIPrompt {
 
     /// The outline library's six screens as A2UI JSON lines, by the same names, with the same elements in the same
     /// order: a message per line and a component per message, the root first, then each section followed by what it
-    /// holds. A line holding several components broke more often: plan 6's and 2026-11-26's broken lines were all
-    /// long ones (docs/benchmarks/screen-prompt.md).
+    /// holds. Every broken line in plan 3's and 2026-11-26's runs held several components, and plan 6's were all long
+    /// (docs/benchmarks/screen-prompt.md).
     static let library: [ScreenPrompt.Example] = [
         example("settings", lines(
             #"{"id":"root","component":"Column","children":["heading","alerts","turn_off"]}"#,

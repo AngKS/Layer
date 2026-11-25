@@ -241,7 +241,9 @@ enum HostedModelClient {
             body = ["model": model, "messages": messages, "stream": true, "stream_options": ["include_usage": true]]
             // Includes any reasoning the model does, so a small limit can leave nothing for the answer.
             if let maximumTokens { body["max_completion_tokens"] = maximumTokens }
-            // Temperature isn't sent: OpenAI's reasoning models refuse any but their own.
+            // Temperature isn't sent to OpenAI: its reasoning models refuse any but their own. LM Studio's models all
+            // take one.
+            if provider == .lmStudio, let temperature { body["temperature"] = temperature }
             if let schemaObject {
                 body["response_format"] = ["type": "json_schema", "json_schema": ["name": "response", "schema": schemaObject, "strict": false]]
             } else if !conversation.tools.isEmpty {

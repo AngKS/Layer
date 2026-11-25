@@ -167,6 +167,25 @@ final class HostedModelTests {
         #expect(StubProvider.requests.last?.headers["Authorization"] == "Bearer test-key-openai")
     }
 
+    /// A temperature asked for goes to Anthropic and to LM Studio, whose models all take one; never to OpenAI, whose
+    /// reasoning models refuse any but their own (2026-11-26: until then LM Studio was sent none either).
+    @Test(arguments: HostedProvider.allCases)
+    func aTemperatureGoesToEveryProviderButOpenAI(provider: HostedProvider) throws {
+        let request = try HostedModelClient.streamingRequest(
+            HostedConversation(messages: [.init(role: .user, text: "Hi")]), schema: nil, maximumTokens: nil, temperature: 0.5,
+            provider: provider, model: "m", key: "k")
+        let data = try #require(request.httpBody)
+        let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["temperature"] as? Double == (provider == .openAI ? nil : 0.5))
+        // None asked for, none sent.
+        let plain = try HostedModelClient.streamingRequest(
+            HostedConversation(messages: [.init(role: .user, text: "Hi")]), schema: nil, maximumTokens: nil, temperature: nil,
+            provider: provider, model: "m", key: "k")
+        let plainData = try #require(plain.httpBody)
+        let plainBody = try #require(try JSONSerialization.jsonObject(with: plainData) as? [String: Any])
+        #expect(plainBody["temperature"] == nil)
+    }
+
     @Test(.enabled(if: HostedLanguageModel.isSupported, "Foundation Models runs models of the app's own from iPadOS 27.2"), arguments: [HostedProvider.anthropic, .openAI])
     func aSchemaGivesAStructuredAnswer(provider: HostedProvider) async throws {
         let json = #"{"chosen": "button", "runnerUp": "textField"}"#

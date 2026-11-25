@@ -123,7 +123,8 @@ import Foundation
     }
 
     /// A model LM Studio serves on this Mac, through `HostedModelClient`, with no key: the full prompt in `format`,
-    /// sent as the app sends it (`HostedLanguageModel`), the instructions as the system prompt.
+    /// sent as the app sends it (`HostedLanguageModel`), the instructions as the system prompt, and A2UI at its own
+    /// temperature (`A2UIPrompt.temperature`), as `ScreenGenerator` asks for it.
     private static func hosted(model: String, format: Format, runs: Int) async {
         var summary = Summary(label: "LM Studio \(model) \(format.rawValue)")
         for brief in Briefs.all {
@@ -167,7 +168,8 @@ import Foundation
             var text = ""
             var tokens: Int?
             for try await event in HostedModelClient.stream(
-                conversation, schema: nil, maximumTokens: nil, temperature: nil, provider: .lmStudio, model: model, key: nil
+                conversation, schema: nil, maximumTokens: nil, temperature: format == .a2ui ? A2UIPrompt.temperature : nil,
+                provider: .lmStudio, model: model, key: nil
             ) {
                 switch event {
                 case .text(let more):
