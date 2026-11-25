@@ -211,6 +211,70 @@ struct DesignLayoutTreeTests {
         #expect(notANumber[2] == 100)
     }
 
+    /// Both axes' sizing, as a node's `width` and `height` are saved.
+    private struct Sizes: Encodable {
+        var width: LayerNode.Sizing
+        var height: LayerNode.Sizing
+    }
+
+    /// `part` as `design.json`'s encoder writes it and JSON reads it back, written with sorted keys: an empty object when
+    /// the encoder refuses it.
+    private func asTheFileWrites(_ part: some Encodable) throws -> String {
+        let object = (try? JSONEncoder().encode(part)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? Object()
+        return String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+    }
+
+    private func sorted(_ value: Any?) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: try #require(value), options: [.sortedKeys]), as: UTF8.self)
+    }
+
+    /// A layout, padding and sizing are written as `design.json` writes them, byte for byte, at the edges too: a negative
+    /// zero reads back as 0, a number far past any layout is written as it is, and a part holding a number that isn't
+    /// finite, which the file's encoder refuses, is an empty object (the sweep, lane 2: written directly, not encoded
+    /// and parsed per node).
+    @Test func layoutPaddingAndSizingAreWrittenAsTheFileWritesThem() throws {
+        var grid = LayerNode(kind: .group)
+        grid.layout = .grid(LayerNode.Grid(columns: 3, columnSpacing: 1e20, rowSpacing: 0.1,
+                                           alignment: LayerNode.Alignment(horizontal: .start, vertical: .end)))
+        grid.padding = LayerNode.Padding(top: -0.0, leading: 1.0 / 3, bottom: 12.000000000000002, trailing: 0)
+        grid.width = LayerNode.Sizing(.fill(weight: 1.0 / 3), minimum: -0.0, maximum: 1e308)
+        grid.height = LayerNode.Sizing(.fit, minimum: 4.9e-324)
+        grid.frame = CGRect(x: 0, y: 0, width: 300, height: 200)
+        var card = LayerNode(kind: .card)
+        card.layout = .overlay(LayerNode.Alignment(horizontal: .end, vertical: .start))
+        card.padding = LayerNode.Padding(top: .nan, leading: 16, bottom: 16, trailing: 16)
+        card.width = LayerNode.Sizing(.fixed)
+        card.height = LayerNode.Sizing(.fit, maximum: .infinity)
+        card.frame = CGRect(x: 0, y: 220, width: 300, height: 100)
+        var leaf = LayerNode.leaf(.text, frame: CGRect(x: 0, y: 0, width: 100, height: 24), text: "Leaf")
+        leaf.width = LayerNode.Sizing(.fill(weight: .nan))
+        grid.children = [leaf]
+        var screen = TreeScreen(name: "Edges", origin: .zero, scale: 1, deviceID: nil)
+        screen.root.layout = .stack(LayerNode.Stack(axis: .vertical, spacing: -0.0, alignment: .fill, justify: .spaceBetween))
+        screen.root.padding = LayerNode.Padding(all: 16)
+        screen.root.children = [grid, card]
+        var content = TreeContent()
+        content.screens = [screen]
+
+        let layout = try parse(DesignLayoutWriter.json(for: DesignSnapshot(id: "design", name: "Edges", content: content, modified: nil)))
+
+        let written = try self.screen(screen.id, in: layout)
+        #expect(try sorted(written["layout"]) == (try asTheFileWrites(screen.root.layout)))
+        #expect(try sorted(written["padding"]) == (try asTheFileWrites(screen.root.padding)))
+        for node in [grid, card] {
+            let entry = try entry(node.id, in: written["containers"])
+            #expect(try sorted(entry["layout"]) == (try asTheFileWrites(node.layout)))
+            #expect(try sorted(entry["padding"]) == (try asTheFileWrites(node.padding)))
+            #expect(try sorted(entry["sizing"]) == (try asTheFileWrites(Sizes(width: node.width, height: node.height))))
+        }
+        let leafEntry = try entry(leaf.id, in: written["elements"])
+        #expect(try sorted(leafEntry["sizing"]) == (try asTheFileWrites(Sizes(width: leaf.width, height: leaf.height))))
+        // The edges are there to be written: a negative zero is 0, and what isn't finite empties its part.
+        #expect(try sorted(written["layout"]).contains(#""spacing":0,"#))
+        #expect(try sorted(try entry(card.id, in: written["containers"])["padding"]) == "{}")
+        #expect(try sorted(leafEntry["sizing"]) == "{}")
+    }
+
     @Test func theContainersGoldenHolds() throws {
         let login = TreeFixture.loginWithACardAndARow()
         let snapshot = try #require(DesignActions.snapshot(of: login.model))

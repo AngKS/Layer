@@ -91,16 +91,8 @@ private struct Writer {
         var containers: [[String: Any]] = []
     }
 
-    /// Both axes' sizing, as a node's `width` and `height` are saved.
-    private struct Sizes: Encodable {
-        var width: LayerNode.Sizing
-        var height: LayerNode.Sizing
-    }
-
     let design: String
     let index: TreeIndex
-    /// Writes a layout, padding or sizing as `design.json` does.
-    private let encoder = JSONEncoder()
 
     init(design: String, index: TreeIndex) {
         self.design = design
@@ -122,8 +114,8 @@ private struct Writer {
             "locked": screen.isLocked == true,
             "safeAreaTop": DesignLayoutWriter.number(device.safeTop),
             "safeAreaBottom": DesignLayoutWriter.number(device.safeBottom),
-            "layout": written(screen.root.layout ?? .free),
-            "padding": written(screen.root.padding),
+            "layout": Self.written(screen.root.layout ?? .free),
+            "padding": Self.written(screen.root.padding),
             "elements": contents.leaves,
             "containers": contents.containers,
         ]
@@ -164,7 +156,7 @@ private struct Writer {
             "y": DesignLayoutWriter.number(frame.minY),
             "width": DesignLayoutWriter.number(frame.width),
             "height": DesignLayoutWriter.number(frame.height),
-            "sizing": written(Sizes(width: node.width, height: node.height)),
+            "sizing": Self.written(width: node.width, height: node.height),
         ]
         if let parent { info["parent"] = id(parent, on: host) }
         if let turn = DesignLayoutWriter.turn(entry?.hostShape.degrees ?? node.rotation ?? 0) { info["rotation"] = turn }
@@ -176,8 +168,8 @@ private struct Writer {
     /// A group's or a card's entry: how it lays out what it holds, and what it holds, in order.
     private func container(_ node: LayerNode, in parent: UUID?, on host: Host) -> [String: Any] {
         var info = placed(node, in: parent, on: host)
-        info["layout"] = written(node.layout ?? .free)
-        info["padding"] = written(node.padding)
+        info["layout"] = Self.written(node.layout ?? .free)
+        info["padding"] = Self.written(node.padding)
         info["children"] = node.children.map { id($0.id, on: host) }
         return info
     }
@@ -209,11 +201,67 @@ private struct Writer {
         return info
     }
 
-    /// `part` as `design.json` writes it.
-    private func written(_ part: some Encodable) -> Any {
-        guard let data = try? encoder.encode(part), let object = try? JSONSerialization.jsonObject(with: data) else {
-            return [String: Any]()
+    // MARK: Layout, padding and sizing
+
+    // Each written with the keys and values `design.json` gives it (`LayerNode+Coding.swift`), as its encoder writes
+    // them and JSON reads them back. A part holding a number that isn't finite, which the encoder refuses, is an empty
+    // object.
+
+    private static func written(_ layout: LayerNode.Layout) -> [String: Any] {
+        switch layout {
+        case .free:
+            return ["type": "free"]
+        case .stack(let stack):
+            guard let spacing = number(stack.spacing) else { return [:] }
+            return ["type": "stack", "axis": stack.axis.rawValue, "spacing": spacing, "alignment": stack.alignment.rawValue,
+                    "justify": stack.justify.rawValue]
+        case .grid(let grid):
+            guard let columnSpacing = number(grid.columnSpacing), let rowSpacing = number(grid.rowSpacing) else { return [:] }
+            return ["type": "grid", "columns": grid.columns, "columnSpacing": columnSpacing, "rowSpacing": rowSpacing,
+                    "horizontal": grid.alignment.horizontal.rawValue, "vertical": grid.alignment.vertical.rawValue]
+        case .overlay(let alignment):
+            return ["type": "overlay", "horizontal": alignment.horizontal.rawValue, "vertical": alignment.vertical.rawValue]
         }
-        return object
+    }
+
+    private static func written(_ padding: LayerNode.Padding) -> [String: Any] {
+        guard let top = number(padding.top), let leading = number(padding.leading), let bottom = number(padding.bottom),
+              let trailing = number(padding.trailing) else { return [:] }
+        return ["top": top, "leading": leading, "bottom": bottom, "trailing": trailing]
+    }
+
+    /// Both axes' sizing, as a node's `width` and `height` are saved: empty when either can't be written.
+    private static func written(width: LayerNode.Sizing, height: LayerNode.Sizing) -> [String: Any] {
+        guard let width = written(width), let height = written(height) else { return [:] }
+        return ["width": width, "height": height]
+    }
+
+    private static func written(_ sizing: LayerNode.Sizing) -> [String: Any]? {
+        var fields: [String: Any]
+        switch sizing.mode {
+        case .fit:
+            fields = ["mode": "fit"]
+        case .fill(let weight):
+            guard let weight = number(weight) else { return nil }
+            fields = ["mode": "fill", "weight": weight]
+        case .fixed:
+            fields = ["mode": "fixed"]
+        }
+        if let minimum = sizing.minimum {
+            guard let minimum = number(minimum) else { return nil }
+            fields["min"] = minimum
+        }
+        if let maximum = sizing.maximum {
+            guard let maximum = number(maximum) else { return nil }
+            fields["max"] = maximum
+        }
+        return fields
+    }
+
+    /// A number as the encoder writes it and JSON reads it back, where a negative zero is zero. Nil when it isn't
+    /// finite, which the encoder refuses.
+    private static func number(_ value: CGFloat) -> Double? {
+        guard value.isFinite else { return nil }
+        return value == 0 ? 0 : Double(value)
     }
 }

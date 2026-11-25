@@ -20,14 +20,21 @@ struct ShareMenu: View {
                 ShareLink(item: shared.code, preview: SharePreview(shared.codeFileName)) {
                     Label("SwiftUI Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
-                ShareLink(item: shared.a2ui, preview: SharePreview(shared.a2ui.fileName)) {
+                // Written when picked, through the share sheet that says when it closes, so that its folder goes then.
+                Button {
+                    if let url = try? shared.a2ui.write() {
+                        picture = SharedPicture(urls: [url]) { ShareFolder.remove(holding: url, prefix: SharedA2UI.folderPrefix) }
+                    }
+                } label: {
                     Label("A2UI JSON", systemImage: "curlybraces")
                 }
             }
             if tree.screens.count > 1 {
                 Button("SwiftUI Files for All Screens", systemImage: "doc.on.doc") {
                     if let urls = CodeFiles.write(model.store.tree) {
-                        picture = SharedPicture(urls: urls)
+                        picture = SharedPicture(urls: urls) {
+                            for url in urls { ShareFolder.remove(holding: url, prefix: CodeFiles.folderPrefix) }
+                        }
                     }
                 }
             }
@@ -117,7 +124,7 @@ struct SharedSwiftUICode: Transferable, Sendable {
 
 /// A screen's A2UI, written when it is shared and not before, like `SharedSwiftUICode`: the menu is
 /// made again on every change to the design, and the file is as long as the screen is full.
-struct SharedA2UI: Transferable, Sendable {
+struct SharedA2UI: Sendable {
     let screen: TreeScreen
     let typeName: String
 
@@ -132,14 +139,39 @@ struct SharedA2UI: Transferable, Sendable {
     /// "<TypeName>.a2ui.json".
     var fileName: String { typeName + ".a2ui.json" }
 
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(exportedContentType: .json) { shared in
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("A2UI-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(shared.fileName)
-            try shared.data.write(to: url, options: .atomic)
-            return SentTransferredFile(url)
+    /// The start of the name of each folder a screen's A2UI is written in to share.
+    static let folderPrefix = "A2UI-"
+
+    /// Writes the file, named `fileName`, in a folder of its own in `temporary`, which goes when the share sheet closes
+    /// (`ShareFolder.remove(holding:prefix:)`). A file that can't be written leaves nothing behind.
+    func write(in temporary: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        let folder = try ShareFolder.make(Self.folderPrefix, in: temporary)
+        do {
+            let url = folder.appendingPathComponent(fileName)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
         }
+    }
+}
+
+/// A folder of its own for files made to share, in the system's temporary folder, taken away once the share sheet has
+/// closed: each share used to leave one behind.
+enum ShareFolder {
+    /// A new folder in `temporary` whose name starts with `prefix`, such as `A2UI-`.
+    static func make(_ prefix: String, in temporary: URL) throws -> URL {
+        let folder = temporary.appendingPathComponent(prefix + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    /// Takes away the folder `file` was written in, when its name starts with `prefix`: nothing else is touched.
+    static func remove(holding file: URL, prefix: String) {
+        let folder = file.deletingLastPathComponent()
+        guard folder.lastPathComponent.hasPrefix(prefix) else { return }
+        try? FileManager.default.removeItem(at: folder)
     }
 }
 
@@ -219,16 +251,21 @@ private struct SharedPicture: Identifiable {
 /// The generated SwiftUI for every screen, written out as files to share: `DesignTokens.swift`
 /// too when the views use the design's tokens.
 enum CodeFiles {
-    static func write(_ design: TreeContent) -> [URL]? {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftUI-\(UUID().uuidString)")
+    /// The start of the name of each folder the files are written in to share.
+    static let folderPrefix = "SwiftUI-"
+
+    /// The files, in a folder of their own in `temporary`, which goes when the share sheet closes
+    /// (`ShareFolder.remove(holding:prefix:)`). Nil, leaving nothing behind, when they can't be written.
+    static func write(_ design: TreeContent, in temporary: URL = FileManager.default.temporaryDirectory) -> [URL]? {
+        guard let folder = try? ShareFolder.make(folderPrefix, in: temporary) else { return nil }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             return try SwiftUICodeGenerator.files(for: design, settings: design.settings.code).map { file in
                 let url = folder.appendingPathComponent(file.name)
                 try Data(file.source.utf8).write(to: url, options: .atomic)
                 return url
             }
         } catch {
+            try? FileManager.default.removeItem(at: folder)
             return nil
         }
     }
