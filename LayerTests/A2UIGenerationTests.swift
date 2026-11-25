@@ -226,6 +226,93 @@ struct A2UIGenerationTests {
         #expect(stream.diagnostics.filter { $0.reason == .actionNotRun }.map(\.componentID) == ["go"])
     }
 
+    // MARK: - What a model writes that isn't quite A2UI (2026-11-26)
+
+    /// A model names icons as it knows them: an SF Symbol's name, Material's `arrow_back`, or a word of its own. Each
+    /// is the symbol it names, as an outline's `symbol:` line is, and nothing about it is left out.
+    @Test func anIconNamedOutsideA2UIsSetIsTheSymbolItNames() throws {
+        let lines = [
+            Self.createSurface,
+            Self.update(#"{"id":"root","component":"Column","children":["sf","material","own","known"]}"#),
+            Self.update(#"{"id":"sf","component":"Icon","name":"chevron.right"}"#),
+            Self.update(#"{"id":"material","component":"Icon","name":"arrow_back"}"#),
+            Self.update(#"{"id":"own","component":"Icon","name":"cloud-sun"}"#),
+            Self.update(#"{"id":"known","component":"Icon","name":"search"}"#),
+        ]
+        var stream = A2UIStream(tokens: .standard)
+        let taken = stream.take(lines.joined(separator: "\n"), isComplete: true)
+        let root = try #require(taken)
+        #expect(leaves(root).map(\.kind) == [.symbol, .symbol, .symbol, .symbol])
+        // An SF Symbol's name is kept as written; Material's spelling of an A2UI name is that name's symbol; a word of
+        // the model's own is kept, and drawn as Layer draws any symbol's name (`SystemSymbol`).
+        #expect(leaves(root).map(\.content.symbol) == ["chevron.right", "arrow.left", "cloud-sun", "magnifyingglass"])
+        #expect(stream.diagnostics.isEmpty, "\(stream.diagnostics)")
+    }
+
+    /// Only a model's answer is read that way: A2UI from a file or a paste is someone's own, and is told as it is.
+    @Test func anIconInAFileNamedOutsideA2UIsSetIsStillSaid() throws {
+        let lines = [
+            Self.createSurface,
+            Self.update(#"{"id":"root","component":"Column","children":["sf"]}"#),
+            Self.update(#"{"id":"sf","component":"Icon","name":"chevron.right"}"#),
+        ]
+        let imported = A2UIImporter.importJSON(Data(lines.joined(separator: "\n").utf8))
+        #expect(imported.diagnostics.contains { $0.reason == .invalidComponent && $0.componentID == "sf" }, "\(imported.diagnostics)")
+    }
+
+    /// A raw control character inside a string, such as a tab, isn't JSON; escaped, it is the same text. That is the
+    /// only mend: the line is read with the tab in its text, and nothing is said.
+    @Test func aRawControlCharacterInAStringIsReadAsWritten() throws {
+        let lines = [
+            Self.createSurface,
+            Self.update("{\"id\":\"root\",\"component\":\"Column\",\"children\":[\"hours\"]}"),
+            Self.update("{\"id\":\"hours\",\"component\":\"Text\",\"text\":\"Quiet hours\t22:00\u{1}\"}"),
+        ]
+        var stream = A2UIStream(tokens: .standard)
+        let taken = stream.take(lines.joined(separator: "\n"), isComplete: true)
+        let root = try #require(taken)
+        #expect(leaves(root).map(\.content.text) == ["Quiet hours\t22:00\u{1}"])
+        #expect(stream.diagnostics.isEmpty, "\(stream.diagnostics)")
+    }
+
+    /// A model writes a component a message, so one id given to two components, which in one message is a duplicate, is
+    /// a component written again: what it wrote first isn't on the screen, so that is said. Written again the same, it
+    /// changes nothing and nothing is said.
+    @Test func aComponentWrittenAgainDifferentlyIsSaid() throws {
+        let lines = [
+            Self.createSurface,
+            Self.update(#"{"id":"root","component":"Column","children":["row","go"]}"#),
+            Self.update(#"{"id":"row","component":"Row","children":["label"]}"#),
+            Self.update(#"{"id":"label","component":"Text","text":"Don't have an account?"}"#),
+            Self.update(#"{"id":"go","component":"Button","child":"label","variant":"primary","action":{"event":{"name":"signUp"}}}"#),
+            Self.update(#"{"id":"label","component":"Text","text":"Create account"}"#),
+            Self.update(#"{"id":"row","component":"Row","children":["label"]}"#),
+        ]
+        var stream = A2UIStream(tokens: .standard)
+        let taken = stream.take(lines.joined(separator: "\n"), isComplete: true)
+        #expect(taken != nil)
+        let again = stream.diagnostics.filter { $0.reason == .duplicateID }
+        #expect(again.map(\.componentID) == ["label"])
+        #expect(again.map(\.path) == ["line 6"])
+    }
+
+    /// Any other slip in a line's JSON is never guessed at: a missing comma or colon, or a bracket too many, and the
+    /// line is skipped and said once, as before.
+    @Test(arguments: [
+        #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"t","component":"Text""text":"Hi"}]}}"#,
+        #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"t","component":"Text","text" "Hi"}]}}"#,
+        #"{"version":"1.0","updateComponents":{"surfaceId":"screen","components":[{"id":"t","component":"Text","text":"Hi"}]}]}}"#,
+        "{\"version\":\"1.0\",\"updateComponents\":{\"surfaceId\":\"screen\",\"components\":[{\"id\":\"t\",\"component\":\"Text\",\u{1}\"text\":\"Hi\"}]}}",
+    ])
+    func anyOtherSlipInALineIsSkippedAndSaidOnce(_ broken: String) throws {
+        let lines = [Self.createSurface, Self.update(###"{"id":"root","component":"Column","children":["title","t"]},{"id":"title","component":"Text","text":"## Hi"}"###), broken]
+        var stream = A2UIStream(tokens: .standard)
+        let taken = stream.take(lines.joined(separator: "\n"), isComplete: true)
+        let root = try #require(taken)
+        #expect(leaves(root).map(\.kind) == [.title])
+        #expect(stream.diagnostics.filter { $0.reason == .parseFailed }.map(\.path) == ["line 3"])
+    }
+
     // MARK: - Which format, and what the model is told
 
     @Test func hostedModelsAndTheDeviceWriteTheOutline() {
