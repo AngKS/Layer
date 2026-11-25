@@ -265,6 +265,7 @@ struct InkCanvas: UIViewRepresentable {
                 return restingFingers.fingers(in: container)
             }
             restingFingers.onAllLifted = { [weak self] in self?.model.fingersLifted() }
+            model.lastLanding = { [weak self] in self?.restingFingers.lastLanding }
             twist.addTarget(self, action: #selector(twisted(_:)))
             twist.canTurn = { [weak self] in
                 guard let model = self?.model else { return false }
@@ -1267,6 +1268,8 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     private var down: [ObjectIdentifier: Finger] = [:]
     /// How far a finger can drift and still be resting. Further, it is dragging or scrolling.
     private let drift: CGFloat = 14
+    /// When a finger last landed: a tap's, by the time the tap is handled, as it lifts.
+    private(set) var lastLanding: ContinuousClock.Instant?
 
     init() {
         super.init(target: nil, action: nil)
@@ -1290,6 +1293,7 @@ final class RestingFingerDetector: UIGestureRecognizer, UIGestureRecognizerDeleg
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        lastLanding = .now
         for touch in touches {
             down[ObjectIdentifier(touch)] = Finger(touch: touch, start: touch.location(in: view))
         }

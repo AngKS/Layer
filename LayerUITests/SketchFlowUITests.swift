@@ -1239,8 +1239,11 @@ final class SketchFlowUITests: XCTestCase {
         control("Layers").tap()
 
         // A double-tap goes in to the note under it. Nothing is selected first, so the first
-        // tap picks the group and the second goes one level in. (XCUITest's doubleTap() reaches
-        // the canvas as a single tap on an unselected group, so two quick presses stand in.)
+        // tap picks the group and the second goes one level in. Two quick presses stand in:
+        // XCUITest's doubleTap() lands its second touch the moment its first lifts, which
+        // SwiftUI's tap doesn't take for a second tap, so it reaches the canvas as one tap on
+        // an unselected group. The presses land 290–330 ms after the first lifts, within the
+        // 350 ms that UIKit, and the app, time a double-tap by (`AppModel.isSecondTap`).
         clearSelection()
         point(centre).press(forDuration: 0.02)
         point(centre).press(forDuration: 0.02)

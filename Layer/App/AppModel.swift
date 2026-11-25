@@ -1440,10 +1440,14 @@ final class AppModel {
     /// The time now, which tells a double-tap's second tap from a tap of its own. A test
     /// sets a clock of its own.
     @ObservationIgnored var now: () -> ContinuousClock.Instant = { .now }
-    /// How soon a second tap on the same thing makes a double-tap. It stands in for the
-    /// system double-tap interval the spec names: iPadOS gives no public value for it to
-    /// read (L4).
+    /// How soon after a tap lifts a second on the same thing must land to make a double-tap: the system's
+    /// double-tap interval the spec names, which iPadOS gives no public value for (L4). It is UIKit's own,
+    /// `UITapGestureRecognizer`'s maximum interval between successive taps, 0.35 s on iPadOS 27, and it is timed
+    /// as UIKit times it, from the one lifting to the other landing (`isSecondTap(on:)`).
     static let doubleTapInterval: Duration = .milliseconds(350)
+    /// When the finger of the tap being handled landed, as the canvas saw it: the time a double-tap's second tap is
+    /// timed to. Supplied by the ink canvas, which sees every finger land. Nil where nothing is, as in a test.
+    @ObservationIgnored var lastLanding: () -> ContinuousClock.Instant? = { nil }
     /// The last tap that picked a thing: what it was on (a thing in a group, or a group's
     /// gap, before `pickTarget`), when, and the selection before and after it. A second tap
     /// on the same thing soon after, with nothing else changed meanwhile, is a double-tap.
@@ -1523,10 +1527,16 @@ final class AppModel {
     }
 
     /// Whether a tap on a thing is the second of a double-tap: the last tap was on the same
-    /// thing, not long before, and the selection is as it left it.
+    /// thing, the selection is as it left it, and this one landed soon after that one lifted.
+    /// A tap is handled as it lifts, so it is timed to where the canvas saw its finger land
+    /// (`lastLanding`), as UIKit times its own double tap: timed to its lifting, the second
+    /// press's own length counted against it, and two quick presses the system would take
+    /// for a double-tap weren't one. A tap whose landing the canvas didn't see after the
+    /// last, such as the Pencil's, is timed to now, as it lifts.
     private func isSecondTap(on thing: CanvasSelection) -> Bool {
         guard let lastTap, lastTap.thing == thing, lastTap.after == selection else { return false }
-        return now() - lastTap.at < Self.doubleTapInterval
+        let landed = lastLanding().flatMap { $0 > lastTap.at ? $0 : nil } ?? now()
+        return landed - lastTap.at < Self.doubleTapInterval
     }
 
     /// What a tap on one thing makes of a selection: the one rule for a tap, wherever it

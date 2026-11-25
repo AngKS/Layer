@@ -921,6 +921,41 @@ struct SelectingGroupsTests {
         #expect(slow.model.selection == nil)
     }
 
+    /// A double-tap is timed as UIKit times its own: from the first tap lifting, when it is handled, to the second
+    /// landing, which the canvas sees. A second that lands 340 ms after the first lifted makes one, though it is handled
+    /// 380 ms after: timed to its lifting, its own length counted against it, and it didn't. XCUITest's two quick presses
+    /// land 290–330 ms after the first lifts and are handled 350–370 ms after it (the sweep, lane 2).
+    @Test func aSecondTapIsTimedFromTheFirstLiftingToItsLanding() {
+        let board = OrderBoard()
+        let clock = TapClock(board.model)
+        var landed: ContinuousClock.Instant?
+        board.model.lastLanding = { landed }
+        let g = board.group(board.b, board.d)
+        landed = clock.now
+        clock.wait(30)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(g))
+        clock.wait(340)
+        landed = clock.now
+        clock.wait(40)
+        board.model.pick(.element(board.b))
+        #expect(board.model.selection == .element(board.b), "landed 340 ms after the first lifted")
+
+        // Landing past the interval, they are two taps however quick the second is: it takes the group out again.
+        let slow = OrderBoard()
+        let slowClock = TapClock(slow.model)
+        var slowLanded: ContinuousClock.Instant?
+        slow.model.lastLanding = { slowLanded }
+        let h = slow.group(slow.b, slow.d)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == .element(h))
+        slowClock.wait(360)
+        slowLanded = slowClock.now
+        slowClock.wait(10)
+        slow.model.pick(.element(slow.b))
+        #expect(slow.model.selection == nil, "landed 360 ms after the first lifted")
+    }
+
     @Test func aDoubleTapIsReadAgainstTheSelectionBeforeIt() {
         let board = OrderBoard()
         let clock = TapClock(board.model)
