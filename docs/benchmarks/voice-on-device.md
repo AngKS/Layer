@@ -607,6 +607,165 @@ two numbers: right, then right tool.
 **The bar still holds.** The profile with one screen is 3,290 tokens, under 3,400. The controls are 15 of 25, at or
 over the 13 the bar needs.
 
+## Structure wording (2026-11-26)
+
+Measured 2026-11-26 on the same Mac, macOS 27.2. The question was whether better wording in the rules and the tool
+descriptions sends structure commands to the right tool. The tools stayed where they were: a hosted model has all 25,
+the on-device model `VoiceTools.compact`. The hosted model is the one that had to improve; the on-device numbers are
+measured against the bars only.
+
+**The short of it.** The hosted model already picked the right tool for all eight cases, 24 of 24, before anything
+changed. What it got wrong was how it called them. It gave the spacing as a bare number, which the tool can't read, so
+"space the row out more" changed nothing. Its other misses were second calls. The wording now asks for every value as
+text and for one call a command. Hosted "right" went from **18 of 24 to 20 of 24**, and the spacing is read every time.
+One thing it didn't fix: told "more", the model sometimes raises the spacing again each time the canvas shows the last
+change (below). The on-device model is told and handed exactly what it was before, and scored the same.
+
+**The hosted measurement.** `VoiceStructureLiveTests`, in `LayerTests/VoiceAgentLiveTests.swift`, puts the harness's
+eight structure cases to LM Studio's `google/gemma-4-26b-a4b` through the app's own hosted profile: the full rules, the
+whole canvas, all 25 tools and the app's settings, which send no temperature, so LM Studio samples as it is set to.
+
+```sh
+TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b xcodebuild test \
+  -project Layer.xcodeproj -scheme Layer -skipPackagePluginValidation -testPlan CI \
+  -destination "platform=iOS Simulator,id=<simulator>" \
+  -only-testing:LayerTests/VoiceStructureLiveTests
+```
+
+- The calls are carried out by the app's own toolbox on a design built as the harness's "Account" canvas is told, with
+  the same handles and selection. A test checks that. The canvas is taken again after each tool, as a call does for a
+  hosted model. The captured canvas differs from the harness's in one look word: the toggle is "colour accent", not
+  "colour green".
+- Each case runs three times, each on a fresh design in a fresh session.
+- It is scored as the harness scores: "right" is the right tool with the right arguments and no other call; "right
+  tool" is a first call to the right tool. A call whose arguments can't be read counts as that tool picked, not right.
+- A ninth case is scored apart: "Stack the title, the button and the image into a column." over the harness's "Login"
+  screen, which the harness counts right only for `stackElements`. It checks that wording sending "put these in a
+  column" to `groupElements` doesn't take "stack" away from `stackElements`.
+- A first version answered every call from a recorder that never changed the canvas, as the harness's does. Shown the
+  same canvas after each call, the model made its change again and again: `setLayout` six times, `groupElements` ten.
+  The numbers here are all from the app's own toolbox.
+
+**What was run.** The model runs record counts, not times. None started while another lane's timed run was marked as
+going, but some were under way when one was marked; those lanes wait for the load to fall below 20 before they time
+anything. Four runs were stopped when that happened and are left out: an on-device `structure` run at 01:22; the hosted
+round 2 at 04:48, 11 of its 27 runs done; and the first tries at round 4's hosted run and the after all-tools run, at
+05:52, both run again in full. Two ran on to their end: round 2's all-tools run, started 6 s before the mark, and
+round 2's `newtools`, started 2 minutes before one.
+
+| Run | Start | Load (1, 5, 15 min) before |
+|---|---|---|
+| Before: `run.sh structure 5`, the on-device list | 02:05:29 | 521.30, 415.96, 207.04 |
+| Before: `run.sh structure 5 baseline --all-tools` | 02:08:37 | 197.20, 403.17, 252.37 |
+| Before: `run.sh newtools 5`, the on-device list | 02:12:49 | 103.69, 287.70, 243.83 |
+| Before: `VoiceAgentLiveTests` | 02:13:29 | 229.26, 296.11, 248.87 |
+| Before: `VoiceStructureLiveTests` | 02:39:00 | 4.53, 19.43, 87.18 |
+| Round 1: `VoiceStructureLiveTests` | 03:41:51 | 2.80, 3.16, 7.42 |
+| Round 2: `run.sh structure 5`, the on-device list | 03:42:16 | 39.83, 11.62, 10.34 |
+| Round 2: `run.sh structure 5 baseline --all-tools` | 03:45:56 | 144.29, 75.13, 37.01 |
+| Round 2: `run.sh newtools 5`, the on-device list | 04:40:39 | 146.04, 36.42, 16.23 |
+| Round 3: `VoiceStructureLiveTests` | 05:33:32 | 3.36, 4.63, 6.33 |
+| After: `run.sh structure 5`, the on-device list | 05:45:54 | 30.71, 66.56, 50.11 |
+| After: `run.sh structure 5 baseline --all-tools` | 05:55:55 | 20.84, 47.85, 51.49 |
+| Round 4 (after): `VoiceStructureLiveTests` | 05:56:00 | 19.33, 47.09, 51.20 |
+| After: `run.sh newtools 5`, the on-device list | 05:59:45 | 8.08, 30.09, 43.29 |
+| After: `VoiceAgentLiveTests` | 06:06:31 | 9.69, 51.44, 55.17 |
+
+**The rounds.** Rounds 1, 3 and 4 changed only what a hosted model is told, so the on-device runs were made for round
+2 and for the wording kept, not for each. The on-device model answers greedily.
+
+1. **Values as text, and where a thing taken out goes.** The full rules gained "Give every value a tool takes as text in
+   quotes, numbers too: a spacing of "24", not 24." The sentence about taking an element out of a row now says to give
+   an x and y clear of the container, such as just below it. Before, the model left them out or gave the spot the
+   toggle already had, and the app answered "Say where E7 goes" or "E7 is there already".
+2. **The shared descriptions.** The descriptions of `stackElements`, `groupElements`, `ungroup` and `placeElement`,
+   which the on-device model is handed too, each pointed at the right tool, such as `ungroup`'s "To take out just one
+   thing, use moveElement with takeOut yes." The rules gained "Do each thing asked for once". Not kept, below.
+3. **One call.** The rules' "once" line became "Carry out a command once. "More", "bigger" and "further" ask for one
+   step from how things were when the person spoke. Never call the same tool on the same element twice in one command:
+   give it everything in one call, and call it again only if its reply said it couldn't be done." The closing line now
+   says to call no more tools once the change is made, "the canvas is told again after each tool, so it shows your
+   change". Round 2's descriptions were taken out again.
+4. **`setLayout`'s own words** (a hosted model's only). Its description gained "For “space it out more” or “tighter”,
+   call it once, with a spacing one step from the one it had when the person spoke, such as "24" for 12." Its spacing
+   guide gives the example as text, "16". The take-out sentence asks for takeOut "yes" and an x and a y "of their own".
+   This is the wording kept.
+
+**The hosted model, per case.** Each cell is right, then right tool, of 3.
+
+| Command | Before | Round 1 | Round 3 | Round 4, kept |
+|---|---|---|---|---|
+| "Put these in a column" (two fields selected) | 2, 3 | 2, 3 | **3**, 3 | **3**, 3 |
+| "Make these a row" (two fields selected) | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| "Make the card a grid of two" | 3, 3 | 3, 3 | 3, 3 | 2, 3 |
+| "Space the row out more" | 0, 3 | 0, 3 | 1, 3 | **2**, 3 |
+| "Ungroup the row" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| "Move the toggle before the label" | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| Control: "Take the toggle out of the row" | 1, 3 | **3**, 3 | 1, 3 | 1, 3 |
+| Control: "Make the button half width" (in a column) | 3, 3 | 3, 3 | 3, 3 | 3, 3 |
+| **Total** | **18 of 24**, 24 | **20**, 24 | **20**, 24 | **20**, 24 |
+| Apart: "Stack the title, the button and the image into a column." | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+
+Round 2's run was stopped after 11 runs: "put these in a column" 1 of 3, "make these a row" 3 of 3, the grid 3 of 3,
+and the spacing 0 of 2.
+
+**What the misses were.**
+- **The spacing.** Before, all three gave `spacing: 24`, a number, so the call couldn't be read and nothing changed. From
+  round 1 the spacing is text every time, but the model then sometimes sets it again, each time a step past the
+  spacing the canvas now shows: 24, 40, 60, … up to 800. The runs that did this set it 7, 12 and 15 times in round 1;
+  15 and 4 times in round 3, beside one that stopped at 24; 5 times in round 4, beside two that stopped at 24. A command is one
+  step to undo, so one "undo" takes it all back.
+- **Taking the toggle out.** Each miss is a second call after a first the app turned down. Before, the first left x
+  and y out once, and once gave the toggle's own spot. In round 3 the model gave its own spot once, and once put x and
+  y in takeOut itself, "yes x112 y305", which the app doesn't read as a place; in round 4 it did that twice.
+- **"Put these in a column"**, before and in round 1: after grouping the two fields, the model grouped everything on
+  the screen, the new column too, then asked which elements were meant. From round 3, not once.
+- **The grid**, once in round 4: `layout: grid`, with no count, which the app makes a grid of 1.
+- **"Stack … into a column"** made a column with `groupElements` every time, before any change too. On the
+  on-device model the same words went to `stackElements` (2026-11-26, 01:58).
+
+**Why round 2's descriptions weren't kept.** They added 87 tokens to the on-device profile, 3,377 with one screen, and
+won it nothing: still 10 of 40 on the structure cases. "Make these a row" moved to `groupElements` but named the row's
+own children, E6 and E7. With all tools they lifted the structure cases from 15 to 20 of 40, all of it "put these in a
+column". Its older tools were unchanged. The hosted model already picked the right tool every time.
+
+**The on-device model.** With its list, every case gave the same calls before and after, in all five runs. With all
+tools, `setLayout`'s longer description changed the elements two wrong calls named, not their score.
+
+| Command | Before, on-device list | After, on-device list | Before, all tools | After, all tools |
+|---|---|---|---|---|
+| "Put these in a column" | 0 of 5: `stackElements` E8, E9 | 0 of 5: the same | 0 of 5: `stackElements` E8, E9, E11 | 0 of 5: `stackElements` E6, E7 |
+| "Make these a row" | 0 of 5: `stackElements` E6, E7 | 0 of 5: the same | 0 of 5: the same | 0 of 5: the same |
+| "Make the card a grid of two" | 0 of 5: `groupElements` E2 | 0 of 5: the same | 0 of 5: `groupElements` E2 | 0 of 5: `groupElements` E3, E4 |
+| "Space the row out more" | 0 of 5: `tidyScreen` | 0 of 5: `tidyScreen` | **5 of 5** | **5 of 5** |
+| "Ungroup the row" | **5 of 5** | **5 of 5** | **5 of 5** | **5 of 5** |
+| "Move the toggle before the label" | 0 of 5: `placeElement` | 0 of 5: `placeElement` | 0 of 5: `placeElement` | 0 of 5: `placeElement` |
+| Control: "Take the toggle out of the row" | 0 of 5: `ungroup` | 0 of 5: `ungroup` | 0 of 5: `ungroup` | 0 of 5: `ungroup` |
+| Control: "Make the button half width" | **5 of 5** | **5 of 5** | **5 of 5** | **5 of 5** |
+| **Total** | **10 of 40** | **10 of 40** | **15 of 40** | **15 of 40** |
+
+Each cell of the older tools is right, then right tool.
+
+| Commands | Before, on-device list | After, on-device list |
+|---|---|---|
+| Tidy, 11 commands | 50 of 55, 50 of 55 | 50 of 55, 50 of 55 |
+| Change device, 5 commands | 25 of 25, 25 of 25 | 25 of 25, 25 of 25 |
+| New screen, 6 commands | 20 of 30, 30 of 30 | 20 of 30, 30 of 30 |
+| Controls, 5 commands | 15 of 25, 20 of 25 | 15 of 25, 20 of 25 |
+
+**The profile's size.** The on-device profile with one screen is 3,290 tokens, as before; the pencil's is 3,231.
+With all 25 tools it is 3,635, up from 3,590, from `setLayout`'s longer description.
+
+**The live tests.** `VoiceAgentLiveTests` passed 9 of 9 before and after. After: "Put the two texts at the bottom in a
+row" called `groupElements` once, and "Move the toggle before the label" called `reorder` once.
+
+**What it led to.** The full rules and `setLayout`'s description keep rounds 1, 3 and 4's wording. Another round wasn't
+run: with three runs a case, a case moves by one either way between rounds with nothing changed for it. "Put these in
+a column" went 2, 2, 3, 3 and "take the toggle out" 1, 3, 1, 1. The one miss left that matters, "more" made again and
+again, held through three wordings, so it likely needs the app itself to stop it. Two ways it could:
+- refuse a second change to the same thing in one command;
+- not tell a hosted model the canvas again after a tool for a command that says "more".
+
 ## Not measured here
 
 - Speech, on the Mac. The commands there were typed, so mishearing is not in its numbers.

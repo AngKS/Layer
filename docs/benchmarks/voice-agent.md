@@ -23,6 +23,10 @@ TEST_RUNNER_LAYER_LMSTUDIO=google/gemma-4-26b-a4b xcodebuild test \
   -only-testing:LayerTests/VoiceAgentLiveTests
 ```
 
+`VoiceStructureLiveTests` does the same for voice's structure commands, each three times, with
+`-only-testing:LayerTests/VoiceStructureLiveTests`. Its results are in
+[voice-on-device.md](voice-on-device.md), "Structure wording (2026-11-26)".
+
 LM Studio loads a model on its first request. A run that starts with the model unloaded
 fails its first few commands with "Model is unloaded"; run it again.
 
