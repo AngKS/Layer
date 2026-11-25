@@ -369,8 +369,9 @@ apart" is two images, and the column edge 6 pt off is an existing thing 6 pt off
 and `SketchConventions`' card scores are as before, and `CardReadingTests` is untouched.
 
 Result, macOS harness and the simulator both: `structure: 32 fixtures, 32 as expected, near misses grouped 0`. Found
-structures: 8 rows, 5 columns, 6 grids and 4 cards (2 with a column applied inside), none 9 (the 8 near misses, and the
-noisy column fixture whose third field read as a button).
+structures: 8 rows, 5 columns, 6 grids and 5 cards (2 with a column applied inside, and the half-over outline's, a near
+miss whose decision is none), none 8 (the other 7 near misses, and the noisy column fixture whose third field read as a
+button).
 
 **The pass's time** over one batch, which is the whole of `StructureInference.infer` for it, measured once the machine was
 quiet (no other `xcodebuild` and no other lane running; the 1-minute load was 3.5 when the runs began, at 3:07 and 3:10 on

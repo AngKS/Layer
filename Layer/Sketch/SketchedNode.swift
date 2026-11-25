@@ -51,13 +51,15 @@ enum SketchedNode {
     }
 
     /// `node` as `kind`, laid out afresh in its current parent from `node.sketch.originalBounds` (or `fallback`, screen
-    /// points, when it has none). Its id, slot, name and lock are kept, and so are its words when both kinds show words;
+    /// points, when it has none). Its id, name and lock are kept, and so are its words when both kinds show words;
     /// everything else is as a reading of `kind` there would make it, its intent saying the person chose (`.asked`,
     /// confidence 1) over the same bounds.
     ///
-    /// A card the node is gives back what it held, where it was on screen, in front of the node's slot; a card it becomes
-    /// takes what it encloses (`Made.takes`), as `make` does. The result is put in by `replacing(_:with:in:)`. Nil when the
-    /// node isn't on a screen, or has neither bounds.
+    /// It keeps its slot, but for a card it becomes: in a free container that goes where `make` puts a card, so that
+    /// nothing seen is hidden (`behind(_:taking:among:)`), and in a row, column, grid or overlay one that takes what it
+    /// encloses takes their slot. A card the node is gives back what it held, where it was on screen, in front of the
+    /// node's slot; a card it becomes takes what it encloses (`Made.takes`), as `make` does. The result is put in by
+    /// `replacing(_:with:in:)`. Nil when the node isn't on a screen, or has neither bounds.
     static func remade(_ node: LayerNode, as kind: ElementKind, fallback: CGRect?, in content: TreeContent,
                        index: TreeIndex) -> Made? {
         guard let entry = index[node.id], case .screen(let screenID) = entry.host, let parentID = entry.parent,
@@ -301,10 +303,11 @@ enum SketchedNode {
         return !shared.isNull && shared.width > 0 && shared.height > 0
     }
 
-    /// Whether a screen shows a filled button: one not hidden, nor inside anything hidden, and not `except`.
+    /// Whether a screen shows a filled button: one not hidden, nor inside anything hidden, and not `except`. What
+    /// `except` holds counts: a card remade as a button gives it back.
     private static func hasFilledButton(_ node: LayerNode, except: UUID? = nil) -> Bool {
-        guard !node.isHidden, node.id != except else { return false }
-        if node.kind == .button, (node.content.buttonLook ?? .filled) == .filled { return true }
+        guard !node.isHidden else { return false }
+        if node.id != except, node.kind == .button, (node.content.buttonLook ?? .filled) == .filled { return true }
         return node.children.contains { hasFilledButton($0, except: except) }
     }
 

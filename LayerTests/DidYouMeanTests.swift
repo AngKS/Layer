@@ -154,6 +154,27 @@ struct DidYouMeanTests {
         #expect(model.store.placed(second.id)?.frame == second.frame)
     }
 
+    /// The filled button a card holds is given back, and is still the screen's main action: the card, a button now, is
+    /// the outlined one beside it, and the screen doesn't show two filled buttons (plan 5 Task 7, m2).
+    @Test func aCardHoldingAFilledButtonBecomesAnOutlinedOne() throws {
+        let (model, screen, _) = makeModel()
+        let filled = leaf(.button, CGRect(x: 40, y: 310, width: 300, height: 50))
+        #expect(model.store.add(filled, to: .screen(screen)))
+        let card = try #require(model.store.addSketched(.card, from: CGRect(x: 20, y: 280, width: 350, height: 120),
+                                                        confidence: 0.9, decidedBy: .rules))
+        #expect(model.store.node(card)?.children.map(\.id) == [filled.id])
+        model.offer(try suggestion(for: card, on: screen, kind: .button))
+
+        model.acceptSuggestion()
+
+        #expect(try rootChildren(model.store, screen).map(\.id) == [card, filled.id])
+        #expect(model.store.node(filled.id)?.content.buttonLook ?? .filled == .filled)
+        let remade = try #require(model.store.node(card))
+        #expect(remade.kind == .button)
+        #expect(remade.content.buttonLook == .bordered)
+        #expect(remade.content.text == "Cancel")
+    }
+
     @Test func aButtonThatBecomesACardTakesWhatItEncloses() throws {
         let (model, screen, _) = makeModel()
         let button = try #require(model.store.addSketched(.button, from: CGRect(x: 20, y: 280, width: 350, height: 120),
